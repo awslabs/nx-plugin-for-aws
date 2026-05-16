@@ -1150,6 +1150,16 @@ dev-dependencies = []
     expect(mainContent).toContain('create_strands_app');
     expect(mainContent).toContain('StrandsAgent');
 
+    // AG-UI must bind the inbound AgentCore session ID into the ContextVar
+    // so downstream MCP / A2A connection clients forward it on outbound
+    // calls. (AG-UI handles its own per-thread conversation isolation, so
+    // we don't wrap the agent in `with_session_id` here — only the
+    // downstream forwarding path matters.)
+    expect(mainContent).toContain('session_id_context');
+    expect(mainContent).toContain(
+      'x-amzn-bedrock-agentcore-runtime-session-id',
+    );
+
     // AG-UI should not generate init.py (HTTP-only)
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/init.py'),

@@ -455,12 +455,18 @@ Refer to tools as your 'spellbook'.
 ```python
 # agent/main.py
 import logging
+import uuid
 
 from ag_ui_strands import StrandsAgent, create_strands_app
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 
 logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 # Create AG-UI agent wrapper
 _agent_ctx = get_agent()
@@ -472,11 +478,22 @@ agui_agent = StrandsAgent(
     description="A Strands Agent exposed via the AG-UI protocol.",
 )
 
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
 # Create FastAPI app with AG-UI endpoint and health check
 app = create_strands_app(agui_agent, path="/invocations")
+app.add_middleware(_SessionIdMiddleware)
 ```
 
-这是代理的入口点。因为我们选择了 `--protocol=AG-UI`,生成器将我们的 Strands `Agent` 用 [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) 的 `StrandsAgent` 包装,并将其挂载到使用 [AG-UI 协议](https://docs.copilotkit.ai/aws-strands/protocol)的 FastAPI 应用上 — 这就是 CopilotKit 从 React 网站与之通信的方式。在<Link path="get_started/tutorials/dungeon-game/3">模块 3</Link> 中,我们将添加 `session_manager_provider`,使每个线程 id 获得自己的 `S3SessionManager`,对话历史在多轮对话中持久化。
+这是代理的入口点。因为我们选择了 `--protocol=AG-UI`,生成器将我们的 Strands `Agent` 用 [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) 的 `StrandsAgent` 包装,并将其挂载到使用 [AG-UI 协议](https://docs.copilotkit.ai/aws-strands/protocol)的 FastAPI 应用上 — 这就是 CopilotKit 从 React 网站与之通信的方式。`_SessionIdMiddleware` 将入站的 AgentCore 运行时会话 ID 绑定到 `ContextVar` 上,这样我们稍后连接的任何下游 MCP/A2A 客户端(例如<Link path="get_started/tutorials/dungeon-game/2">模块 2</Link> 中的库存 MCP 服务器)都会在其出站调用中自动转发该 ID。在<Link path="get_started/tutorials/dungeon-game/3">模块 3</Link> 中,我们还将添加 `session_manager_provider`,使每个线程 id 获得自己的 `S3SessionManager`,对话历史在多轮对话中持久化。
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts

@@ -458,12 +458,18 @@ Isso cria um agente Strands de exemplo e define uma ferramenta de subtração.
 ```python
 # agent/main.py
 import logging
+import uuid
 
 from ag_ui_strands import StrandsAgent, create_strands_app
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 
 logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 # Create AG-UI agent wrapper
 _agent_ctx = get_agent()
@@ -475,11 +481,22 @@ agui_agent = StrandsAgent(
     description="A Strands Agent exposed via the AG-UI protocol.",
 )
 
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
 # Create FastAPI app with AG-UI endpoint and health check
 app = create_strands_app(agui_agent, path="/invocations")
+app.add_middleware(_SessionIdMiddleware)
 ```
 
-Este é o ponto de entrada do agente. Como selecionamos `--protocol=AG-UI`, o gerador envolve nosso `Agent` Strands com `StrandsAgent` de [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) e o monta em uma aplicação FastAPI que fala o [protocolo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — é isso que o CopilotKit conversará a partir do website React. No <Link path="get_started/tutorials/dungeon-game/3">Módulo 3</Link> adicionaremos um `session_manager_provider` para que cada thread id obtenha seu próprio `S3SessionManager` e o histórico de conversação persista entre turnos.
+Este é o ponto de entrada do agente. Como selecionamos `--protocol=AG-UI`, o gerador envolve nosso `Agent` Strands com `StrandsAgent` de [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) e o monta em uma aplicação FastAPI que fala o [protocolo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — é isso que o CopilotKit conversará a partir do website React. O `_SessionIdMiddleware` vincula o session ID de runtime do AgentCore de entrada a um `ContextVar` para que qualquer cliente MCP/A2A downstream que conectarmos posteriormente (por exemplo, o servidor MCP de Inventário no <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>) o encaminhe automaticamente em suas chamadas de saída. No <Link path="get_started/tutorials/dungeon-game/3">Módulo 3</Link> também adicionaremos um `session_manager_provider` para que cada thread id obtenha seu próprio `S3SessionManager` e o histórico de conversação persista entre turnos.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts

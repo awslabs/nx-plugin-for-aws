@@ -1,10 +1,16 @@
 import logging
+import uuid
 
 from ag_ui_strands import StrandsAgent, create_strands_app
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 
 logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 # Create AG-UI agent wrapper
 _agent_ctx = get_agent()
@@ -16,5 +22,16 @@ agui_agent = StrandsAgent(
     description="A Strands Agent exposed via the AG-UI protocol.",
 )
 
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
 # Create FastAPI app with AG-UI endpoint and health check
 app = create_strands_app(agui_agent, path="/invocations")
+app.add_middleware(_SessionIdMiddleware)

@@ -455,12 +455,18 @@ Refer to tools as your 'spellbook'.
 ```python
 # agent/main.py
 import logging
+import uuid
 
 from ag_ui_strands import StrandsAgent, create_strands_app
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 
 logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 # Create AG-UI agent wrapper
 _agent_ctx = get_agent()
@@ -472,11 +478,22 @@ agui_agent = StrandsAgent(
     description="A Strands Agent exposed via the AG-UI protocol.",
 )
 
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
 # Create FastAPI app with AG-UI endpoint and health check
 app = create_strands_app(agui_agent, path="/invocations")
+app.add_middleware(_SessionIdMiddleware)
 ```
 
-이 파일은 에이전트의 진입점입니다. `--protocol=AG-UI`를 선택했기 때문에 생성기는 Strands `Agent`를 [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)의 `StrandsAgent`로 래핑하고 [AG-UI 프로토콜](https://docs.copilotkit.ai/aws-strands/protocol)을 사용하는 FastAPI 앱에 마운트합니다. 이것이 React 웹사이트에서 CopilotKit이 통신할 대상입니다. <Link path="get_started/tutorials/dungeon-game/3">모듈 3</Link>에서는 각 스레드 ID가 자체 `S3SessionManager`를 갖고 대화 기록이 턴 간에 유지되도록 `session_manager_provider`를 추가할 것입니다.
+이 파일은 에이전트의 진입점입니다. `--protocol=AG-UI`를 선택했기 때문에 생성기는 Strands `Agent`를 [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)의 `StrandsAgent`로 래핑하고 [AG-UI 프로토콜](https://docs.copilotkit.ai/aws-strands/protocol)을 사용하는 FastAPI 앱에 마운트합니다. 이것이 React 웹사이트에서 CopilotKit이 통신할 대상입니다. `_SessionIdMiddleware`는 인바운드 AgentCore 런타임 세션 ID를 `ContextVar`에 바인딩하여 나중에 연결할 다운스트림 MCP/A2A 클라이언트(예: <Link path="get_started/tutorials/dungeon-game/2">모듈 2</Link>의 인벤토리 MCP 서버)가 아웃바운드 호출 시 자동으로 이를 전달하도록 합니다. <Link path="get_started/tutorials/dungeon-game/3">모듈 3</Link>에서는 각 스레드 ID가 자체 `S3SessionManager`를 갖고 대화 기록이 턴 간에 유지되도록 `session_manager_provider`도 추가할 것입니다.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
