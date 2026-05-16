@@ -458,12 +458,18 @@ Refer to tools as your 'spellbook'.
 ```python
 # agent/main.py
 import logging
+import uuid
 
 from ag_ui_strands import StrandsAgent, create_strands_app
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 
 logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 # Create AG-UI agent wrapper
 _agent_ctx = get_agent()
@@ -475,11 +481,22 @@ agui_agent = StrandsAgent(
     description="A Strands Agent exposed via the AG-UI protocol.",
 )
 
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
 # Create FastAPI app with AG-UI endpoint and health check
 app = create_strands_app(agui_agent, path="/invocations")
+app.add_middleware(_SessionIdMiddleware)
 ```
 
-これはエージェントのエントリーポイントです。`--protocol=AG-UI`を選択したため、ジェネレーターはStrandsの`Agent`を[`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)の`StrandsAgent`でラップし、[AG-UIプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)を話すFastAPIアプリにマウントします。これがReactウェブサイトからCopilotKitが通信する相手です。<Link path="get_started/tutorials/dungeon-game/3">モジュール3</Link>では、各スレッドIDが独自の`S3SessionManager`を取得し、会話履歴がターン間で永続化されるように`session_manager_provider`を追加します。
+これはエージェントのエントリーポイントです。`--protocol=AG-UI`を選択したため、ジェネレーターはStrandsの`Agent`を[`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)の`StrandsAgent`でラップし、[AG-UIプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)を話すFastAPIアプリにマウントします。これがReactウェブサイトからCopilotKitが通信する相手です。`_SessionIdMiddleware`は、インバウンドのAgentCoreランタイムセッションIDを`ContextVar`にバインドするため、後で配線する下流のMCP/A2Aクライアント(例えば<Link path="get_started/tutorials/dungeon-game/2">モジュール2</Link>のインベントリMCPサーバー)が、アウトバウンド呼び出しで自動的にそれを転送します。<Link path="get_started/tutorials/dungeon-game/3">モジュール3</Link>では、各スレッドIDが独自の`S3SessionManager`を取得し、会話履歴がターン間で永続化されるように`session_manager_provider`も追加します。
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
