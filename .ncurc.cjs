@@ -21,6 +21,8 @@ module.exports = {
     'rolldown',
     // Pinned due to @swc/core 1.15.33 dropping @swc/helpers from optionalDependencies, which breaks @swc-node/register transpilation in nx
     '@swc/core',
+    // Pinned due to @copilotkit/react-core 1.57 removing `threadId` from `UseAgentProps` (breaking change)
+    '@copilotkit/react-core',
   ],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
