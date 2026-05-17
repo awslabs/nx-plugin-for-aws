@@ -79,13 +79,13 @@ export const addDynamoDBCdkConstructs = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'dynamodb-tables'),
+    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'dynamodb'),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
       'src',
       'app',
-      'dynamodb-tables',
+      'dynamodb',
     ),
     options,
     {
@@ -111,7 +111,7 @@ export const addDynamoDBCdkConstructs = async (
       SHARED_CONSTRUCTS_DIR,
       'src',
       'app',
-      'dynamodb-tables',
+      'dynamodb',
       'index.ts',
     ),
     `./${options.nameKebabCase}.js`,
@@ -125,7 +125,7 @@ export const addDynamoDBCdkConstructs = async (
       'app',
       'index.ts',
     ),
-    './dynamodb-tables/index.js',
+    './dynamodb/index.js',
   );
 };
 
@@ -135,13 +135,23 @@ export const addDynamoDBTerraformModules = (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'app', 'dynamodb-tables'),
+    joinPathFragments(__dirname, 'files', 'terraform', 'core'),
+    joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'terraform', 'app', 'dynamodb'),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_TERRAFORM_DIR,
       'src',
       'app',
-      'dynamodb-tables',
+      'dynamodb',
     ),
     options,
     {

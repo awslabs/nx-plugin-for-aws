@@ -40,13 +40,13 @@ describe('ts#dynamodb generator', () => {
     ).toMatchSnapshot();
     expect(
       tree.read(
-        'packages/common/constructs/src/app/dynamodb-tables/my-table.ts',
+        'packages/common/constructs/src/app/dynamodb/my-table.ts',
         'utf-8',
       ),
     ).toMatchSnapshot();
     expect(
       tree.read(
-        'packages/common/constructs/src/app/dynamodb-tables/index.ts',
+        'packages/common/constructs/src/app/dynamodb/index.ts',
         'utf-8',
       ),
     ).toMatchSnapshot();
@@ -97,8 +97,11 @@ describe('ts#dynamodb generator', () => {
       iacProvider: 'Terraform',
     });
     expect(
+      tree.read('packages/common/terraform/src/core/dynamodb.tf', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(
       tree.read(
-        'packages/common/terraform/src/app/dynamodb-tables/my-table/my-table.tf',
+        'packages/common/terraform/src/app/dynamodb/my-table.tf',
         'utf-8',
       ),
     ).toMatchSnapshot();
@@ -113,7 +116,7 @@ describe('ts#dynamodb generator', () => {
   it('should keep an existing dynamodb app construct', async () => {
     await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
     tree.write(
-      'packages/common/constructs/src/app/dynamodb-tables/my-table.ts',
+      'packages/common/constructs/src/app/dynamodb/my-table.ts',
       '// preserve custom construct',
     );
 
@@ -122,7 +125,7 @@ describe('ts#dynamodb generator', () => {
     expect(
       tree
         .read(
-          'packages/common/constructs/src/app/dynamodb-tables/my-table.ts',
+          'packages/common/constructs/src/app/dynamodb/my-table.ts',
           'utf-8',
         )
         ?.trim(),
