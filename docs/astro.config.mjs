@@ -17,6 +17,7 @@ import react from '@astrojs/react';
 import * as fs from 'fs';
 
 import remarkOptionFilter from './src/plugins/remark-option-filter.ts';
+import remarkTabFilter from './src/plugins/remark-tab-filter.ts';
 
 /**
  * Load Smithy syntax highlighting
@@ -43,7 +44,7 @@ export default defineConfig({
     shikiConfig: {
       langs: [smithySyntax()],
     },
-    remarkPlugins: [remarkOptionFilter],
+    remarkPlugins: [remarkOptionFilter, remarkTabFilter],
   },
   integrations: [
     starlight({
