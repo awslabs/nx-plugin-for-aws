@@ -36,10 +36,7 @@ describe('ts#dynamodb generator', () => {
     snapshotTreeDir(tree, 'packages/my-table/scripts');
 
     expect(
-      tree.read(
-        'packages/common/constructs/src/core/dynamodb.ts',
-        'utf-8',
-      ),
+      tree.read('packages/common/constructs/src/core/dynamodb.ts', 'utf-8'),
     ).toMatchSnapshot();
     expect(
       tree.read(
@@ -67,19 +64,14 @@ describe('ts#dynamodb generator', () => {
     });
     expect(projectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
-      options: {
-        command:
-          'tsx scripts/docker-start.ts proj-dynamodb public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest 8000',
-        cwd: '{projectRoot}',
-      },
       continuous: true,
       dependsOn: ['docker-pull'],
-    });
-    expect(projectConfig.targets['create-local-table']).toEqual({
-      executor: 'nx:run-commands',
-      dependsOn: ['serve-local'],
       options: {
-        command: 'tsx scripts/create-table.ts proj-my-table 8000',
+        commands: [
+          'tsx scripts/docker-start.ts proj-dynamodb public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest 8000',
+          'tsx scripts/create-local-table.ts proj-my-table 8000',
+        ],
+        parallel: true,
         cwd: '{projectRoot}',
       },
     });
@@ -155,11 +147,11 @@ describe('ts#dynamodb generator', () => {
       '@proj/my-table',
     );
 
-    expect(projectConfig.targets['serve-local'].options.command).toContain(
+    expect(projectConfig.targets['serve-local'].options.commands[0]).toContain(
       'proj-dynamodb',
     );
-    expect(
-      tree.read('packages/my-table/src/constants.ts', 'utf-8'),
-    ).toContain("LOCAL_TABLE_NAME = 'proj-custom-table-name'");
+    expect(tree.read('packages/my-table/src/constants.ts', 'utf-8')).toContain(
+      "LOCAL_TABLE_NAME = 'proj-custom-table-name'",
+    );
   });
 });

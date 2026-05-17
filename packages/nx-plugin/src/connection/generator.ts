@@ -26,6 +26,11 @@ import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
 import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
 import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator';
 import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
+import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator';
+import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator';
+import tsDynamoDBStrandsAgentConnectionGenerator from '../ts/dynamodb/strands-agent-connection/generator';
+import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator';
+import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator';
 
 /**
  * List of supported source and target project types for connections.
@@ -38,6 +43,7 @@ const SUPPORTED_PROJECT_TYPES = [
   'react',
   'smithy',
   'ts#rdb',
+  'ts#dynamodb',
 ] as const;
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
@@ -66,9 +72,12 @@ export interface ResolvedConnection {
  */
 const SUPPORTED_CONNECTIONS = [
   { source: 'ts#trpc-api', target: 'ts#rdb' },
+  { source: 'ts#trpc-api', target: 'ts#dynamodb' },
   { source: 'ts#agent', target: 'ts#rdb' },
   { source: 'smithy', target: 'ts#rdb' },
+  { source: 'smithy', target: 'ts#dynamodb' },
   { source: 'ts#mcp-server', target: 'ts#rdb' },
+  { source: 'ts#mcp-server', target: 'ts#dynamodb' },
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
@@ -76,6 +85,7 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'react', target: 'py#agent' },
   { source: 'ts#agent', target: 'ts#mcp-server' },
   { source: 'ts#agent', target: 'py#mcp-server' },
+  { source: 'ts#agent', target: 'ts#dynamodb' },
   { source: 'py#agent', target: 'ts#mcp-server' },
   { source: 'py#agent', target: 'py#mcp-server' },
   { source: 'ts#agent', target: 'ts#agent' },
@@ -112,6 +122,14 @@ const CONNECTION_GENERATORS = {
     tsRdbSmithyConnectionGenerator(tree, options),
   'ts#mcp-server -> ts#rdb': (tree, options) =>
     tsRdbMcpServerConnectionGenerator(tree, options),
+  'ts#trpc-api -> ts#dynamodb': (tree, options) =>
+    tsDynamoDBTrpcConnectionGenerator(tree, options),
+  'ts#agent -> ts#dynamodb': (tree, options) =>
+    tsDynamoDBStrandsAgentConnectionGenerator(tree, options),
+  'smithy -> ts#dynamodb': (tree, options) =>
+    tsDynamoDBSmithyConnectionGenerator(tree, options),
+  'ts#mcp-server -> ts#dynamodb': (tree, options) =>
+    tsDynamoDBMcpServerConnectionGenerator(tree, options),
   'react -> ts#trpc-api': (tree, options) =>
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
@@ -409,6 +427,10 @@ const determineProjectTypeFromConfig = async (
     return 'ts#rdb';
   }
 
+  if (isDynamoDB(projectConfiguration)) {
+    return 'ts#dynamodb';
+  }
+
   return undefined;
 };
 
@@ -512,5 +534,9 @@ const isSmithyApi = (
 const isRdb = (projectConfiguration: ProjectConfiguration): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===
   TS_RDB_GENERATOR_INFO.id;
+
+const isDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  TS_DYNAMODB_GENERATOR_INFO.id;
 
 export default connectionGenerator;

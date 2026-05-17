@@ -4,30 +4,56 @@ const [containerName, image, hostPort] = process.argv.slice(2);
 
 const docker = new Docker();
 
-let container: Docker.Container;
+// Multiple dynamo table packages run serve-local in parallel sharing the same
+// container. All processes attach for log streaming, but only the one that
+// created the container stops it on exit — others just detach.
+let container!: Docker.Container;
+let created = false;
 
-try {
-  const existing = docker.getContainer(containerName);
-  const info = await existing.inspect();
-  container = existing;
-  if (!info.State.Running) {
-    await container.start();
+while (!container) {
+  try {
+    const c = docker.getContainer(containerName);
+    const info = await c.inspect();
+    if (!info.State.Running) {
+      try {
+        await c.start();
+      } catch (e) {
+        // 304: another parallel process started it between our inspect and start
+        if ((e as { statusCode?: number }).statusCode !== 304) throw e;
+      }
+    }
+    container = c;
+  } catch (e) {
+    if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+    try {
+      container = await docker.createContainer({
+        name: containerName,
+        Image: image,
+        User: 'root',
+        Cmd: [
+          '-jar',
+          'DynamoDBLocal.jar',
+          '-sharedDb',
+          '-dbPath',
+          './data',
+          '-optimizeDbBeforeStartup',
+          '-delayTransientStatuses',
+        ],
+        WorkingDir: '/home/dynamodblocal',
+        ExposedPorts: { '8000/tcp': {} },
+        HostConfig: {
+          AutoRemove: true,
+          PortBindings: { '8000/tcp': [{ HostPort: hostPort }] },
+          Binds: [`${containerName}-data:/home/dynamodblocal/data`],
+        },
+      });
+      await container.start();
+      created = true;
+    } catch (e2) {
+      // 409: another parallel process created it between our inspect and createContainer — retry
+      if ((e2 as { statusCode?: number }).statusCode !== 409) throw e2;
+    }
   }
-} catch (e) {
-  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
-  container = await docker.createContainer({
-    name: containerName,
-    Image: image,
-    Cmd: ['-jar', 'DynamoDBLocal.jar', '-sharedDb', '-dbPath', './data'],
-    WorkingDir: '/home/dynamodblocal',
-    ExposedPorts: { '8000/tcp': {} },
-    HostConfig: {
-      AutoRemove: true,
-      PortBindings: { '8000/tcp': [{ HostPort: hostPort }] },
-      Binds: [`${containerName}-data:/home/dynamodblocal/data`],
-    },
-  });
-  await container.start();
 }
 
 const stream = await container.attach({
@@ -42,10 +68,12 @@ let exiting = false;
 async function cleanup() {
   if (exiting) return;
   exiting = true;
-  try {
-    await container.stop();
-  } catch (e) {
-    if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
+  if (created) {
+    try {
+      await container.stop();
+    } catch (e) {
+      if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
+    }
   }
   process.exit(0);
 }

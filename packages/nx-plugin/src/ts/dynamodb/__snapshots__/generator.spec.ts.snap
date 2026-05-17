@@ -28,11 +28,17 @@ exports[`ts#dynamodb generator > should generate terraform modules when iacProvi
 "
 `;
 
-exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/create-table.ts 1`] = `
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/create-local-table.ts 1`] = `
 "import {
+  AttributeDefinition,
   CreateTableCommand,
+  DescribeTableCommand,
   DynamoDBClient,
+  GlobalSecondaryIndexDescription,
+  KeySchemaElement,
+  Projection,
   ResourceInUseException,
+  UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
 
 const [tableName, port] = process.argv.slice(2);
@@ -41,36 +47,155 @@ const endpoint = \`http://localhost:\${port}\`;
 const client = new DynamoDBClient({
   endpoint,
   region: 'us-east-1',
-  credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
+  credentials: {
+    accessKeyId: 'accessKeyId',
+    secretAccessKey: 'secretAccessKey',
+  },
 });
 
-for (let attempt = 0; attempt < 30; attempt++) {
-  try {
-    await client.send(
-      new CreateTableCommand({
-        TableName: tableName,
-        AttributeDefinitions: [
-          { AttributeName: 'pk', AttributeType: 'S' },
-          { AttributeName: 'sk', AttributeType: 'S' },
-        ],
-        KeySchema: [
-          { AttributeName: 'pk', KeyType: 'HASH' },
-          { AttributeName: 'sk', KeyType: 'RANGE' },
-        ],
-        BillingMode: 'PAY_PER_REQUEST',
-      }),
-    );
-    console.log(\`Created table: \${tableName}\`);
-    break;
-  } catch (e) {
-    if (e instanceof ResourceInUseException) {
-      console.log(\`Table already exists: \${tableName}\`);
-      break;
+export type GSIDefinition = {
+  IndexName: string;
+  KeySchema: KeySchemaElement[];
+  Projection: Projection;
+  AttributeDefinitions: AttributeDefinition[];
+};
+
+// GSIs to synchronize on the local table at startup — indexes are added or removed to match this list.
+// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
+const GLOBAL_SECONDARY_INDEXES: GSIDefinition[] = [
+  {
+    IndexName: 'gsi1pk-gsi1sk-index',
+    KeySchema: [
+      { AttributeName: 'gsi1pk', KeyType: 'HASH' },
+      { AttributeName: 'gsi1sk', KeyType: 'RANGE' },
+    ],
+    Projection: { ProjectionType: 'ALL' },
+    AttributeDefinitions: [
+      { AttributeName: 'gsi1pk', AttributeType: 'S' },
+      { AttributeName: 'gsi1sk', AttributeType: 'S' },
+    ],
+  },
+  {
+    IndexName: 'gsi2pk-gsi2sk-index',
+    KeySchema: [
+      { AttributeName: 'gsi2pk', KeyType: 'HASH' },
+      { AttributeName: 'gsi2sk', KeyType: 'RANGE' },
+    ],
+    Projection: { ProjectionType: 'ALL' },
+    AttributeDefinitions: [
+      { AttributeName: 'gsi2pk', AttributeType: 'S' },
+      { AttributeName: 'gsi2sk', AttributeType: 'S' },
+    ],
+  },
+];
+
+const ensureTable = async (
+  tblClient: DynamoDBClient,
+  tblName: string,
+): Promise<void> => {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      await tblClient.send(
+        new CreateTableCommand({
+          TableName: tblName,
+          AttributeDefinitions: [
+            { AttributeName: 'pk', AttributeType: 'S' },
+            { AttributeName: 'sk', AttributeType: 'S' },
+          ],
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' },
+          ],
+          BillingMode: 'PAY_PER_REQUEST',
+        }),
+      );
+      console.log(\`Created table: \${tblName}\`);
+      return;
+    } catch (e) {
+      if (e instanceof ResourceInUseException) {
+        console.log(\`Table already exists: \${tblName}\`);
+        return;
+      }
+      if (attempt === 29) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    if (attempt === 29) throw e;
-    await new Promise((resolve) => setTimeout(resolve, 200));
   }
-}
+};
+
+const ensureGlobalSecondaryIndexes = async (
+  gsiClient: DynamoDBClient,
+  gsiTableName: string,
+  desiredGSIs: GSIDefinition[],
+): Promise<void> => {
+  const { Table } = await gsiClient.send(
+    new DescribeTableCommand({ TableName: gsiTableName }),
+  );
+  const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
+  const existingNames = new Set(
+    existingGSIs.map((g: GlobalSecondaryIndexDescription) => g.IndexName!),
+  );
+  const desiredNames = new Set(desiredGSIs.map((g) => g.IndexName));
+
+  for (const existing of existingGSIs) {
+    if (!desiredNames.has(existing.IndexName!)) {
+      await gsiClient.send(
+        new UpdateTableCommand({
+          TableName: gsiTableName,
+          GlobalSecondaryIndexUpdates: [
+            { Delete: { IndexName: existing.IndexName! } },
+          ],
+        }),
+      );
+      console.log(\`Deleted GSI: \${existing.IndexName}\`);
+      await waitForTableActive(gsiClient, gsiTableName);
+    }
+  }
+
+  for (const desired of desiredGSIs) {
+    if (existingNames.has(desired.IndexName)) {
+      console.log(\`GSI already exists: \${desired.IndexName}\`);
+    } else {
+      await gsiClient.send(
+        new UpdateTableCommand({
+          TableName: gsiTableName,
+          AttributeDefinitions: desired.AttributeDefinitions,
+          GlobalSecondaryIndexUpdates: [
+            {
+              Create: {
+                IndexName: desired.IndexName,
+                KeySchema: desired.KeySchema,
+                Projection: desired.Projection,
+              },
+            },
+          ],
+        }),
+      );
+      console.log(\`Created GSI: \${desired.IndexName}\`);
+      await waitForTableActive(gsiClient, gsiTableName);
+    }
+  }
+};
+
+const waitForTableActive = async (
+  waitClient: DynamoDBClient,
+  waitTableName: string,
+): Promise<void> => {
+  for (;;) {
+    const { Table } = await waitClient.send(
+      new DescribeTableCommand({ TableName: waitTableName }),
+    );
+    const allActive =
+      Table?.TableStatus === 'ACTIVE' &&
+      (Table?.GlobalSecondaryIndexes ?? []).every(
+        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === 'ACTIVE',
+      );
+    if (allActive) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+};
+
+await ensureTable(client, tableName);
+await ensureGlobalSecondaryIndexes(client, tableName, GLOBAL_SECONDARY_INDEXES);
 "
 `;
 
@@ -100,30 +225,56 @@ const [containerName, image, hostPort] = process.argv.slice(2);
 
 const docker = new Docker();
 
-let container: Docker.Container;
+// Multiple dynamo table packages run serve-local in parallel sharing the same
+// container. All processes attach for log streaming, but only the one that
+// created the container stops it on exit — others just detach.
+let container!: Docker.Container;
+let created = false;
 
-try {
-  const existing = docker.getContainer(containerName);
-  const info = await existing.inspect();
-  container = existing;
-  if (!info.State.Running) {
-    await container.start();
+while (!container) {
+  try {
+    const c = docker.getContainer(containerName);
+    const info = await c.inspect();
+    if (!info.State.Running) {
+      try {
+        await c.start();
+      } catch (e) {
+        // 304: another parallel process started it between our inspect and start
+        if ((e as { statusCode?: number }).statusCode !== 304) throw e;
+      }
+    }
+    container = c;
+  } catch (e) {
+    if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+    try {
+      container = await docker.createContainer({
+        name: containerName,
+        Image: image,
+        User: 'root',
+        Cmd: [
+          '-jar',
+          'DynamoDBLocal.jar',
+          '-sharedDb',
+          '-dbPath',
+          './data',
+          '-optimizeDbBeforeStartup',
+          '-delayTransientStatuses',
+        ],
+        WorkingDir: '/home/dynamodblocal',
+        ExposedPorts: { '8000/tcp': {} },
+        HostConfig: {
+          AutoRemove: true,
+          PortBindings: { '8000/tcp': [{ HostPort: hostPort }] },
+          Binds: [\`\${containerName}-data:/home/dynamodblocal/data\`],
+        },
+      });
+      await container.start();
+      created = true;
+    } catch (e2) {
+      // 409: another parallel process created it between our inspect and createContainer — retry
+      if ((e2 as { statusCode?: number }).statusCode !== 409) throw e2;
+    }
   }
-} catch (e) {
-  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
-  container = await docker.createContainer({
-    name: containerName,
-    Image: image,
-    Cmd: ['-jar', 'DynamoDBLocal.jar', '-sharedDb', '-dbPath', './data'],
-    WorkingDir: '/home/dynamodblocal',
-    ExposedPorts: { '8000/tcp': {} },
-    HostConfig: {
-      AutoRemove: true,
-      PortBindings: { '8000/tcp': [{ HostPort: hostPort }] },
-      Binds: [\`\${containerName}-data:/home/dynamodblocal/data\`],
-    },
-  });
-  await container.start();
 }
 
 const stream = await container.attach({
@@ -138,10 +289,12 @@ let exiting = false;
 async function cleanup() {
   if (exiting) return;
   exiting = true;
-  try {
-    await container.stop();
-  } catch (e) {
-    if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
+  if (created) {
+    try {
+      await container.stop();
+    } catch (e) {
+      if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
+    }
   }
   process.exit(0);
 }
@@ -195,24 +348,18 @@ export const resolveTableName = async (): Promise<string> => {
     return LOCAL_TABLE_NAME;
   }
   if (_tableName === undefined) {
-    const appId = process.env.RUNTIME_CONFIG_APP_ID;
-    if (!appId) {
-      throw new Error(
-        'Missing required environment variable RUNTIME_CONFIG_APP_ID.',
-      );
-    }
     const config = await getAppConfig<{
       [key: string]: DynamoDBConfig | undefined;
     }>('dynamodb', {
-      application: appId,
+      application: process.env.RUNTIME_CONFIG_APP_ID,
       environment: 'default',
       transform: 'json',
     });
-    const tableConfig = config?.[PACKAGE_NAME];
-    if (!tableConfig) {
-      throw new Error(\`RuntimeConfig is missing dynamodb.\${PACKAGE_NAME}.\`);
+    const tableName = config?.[PACKAGE_NAME]?.tableName;
+    if (!tableName) {
+      throw new Error('Could not resolve table name from runtime config');
     }
-    _tableName = tableConfig.tableName;
+    _tableName = tableName;
   }
   return _tableName!;
 };
@@ -225,8 +372,8 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
 // Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
 export const LOCAL_PORT = 8000;
 export const LOCAL_REGION = 'us-east-1';
-export const LOCAL_ACCESS_KEY_ID = 'access-key-id';
-export const LOCAL_SECRET_ACCESS_KEY = 'secret-access-key';
+export const LOCAL_ACCESS_KEY_ID = 'accessKeyId';
+export const LOCAL_SECRET_ACCESS_KEY = 'secretAccessKey';
 export const LOCAL_ENDPOINT = \`http://localhost:\${LOCAL_PORT}\`;
 export const LOCAL_TABLE_NAME = 'proj-my-table';
 "

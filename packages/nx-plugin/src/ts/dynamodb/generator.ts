@@ -13,7 +13,11 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsDynamoDBGeneratorSchema } from './schema';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  addGeneratorMetadata,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -80,23 +84,20 @@ export const tsDynamoDBGenerator = async (
   };
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
-    options: {
-      command: `tsx scripts/docker-start.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${DYNAMODB_LOCAL_START_PORT}`,
-      cwd: '{projectRoot}',
-    },
     continuous: true,
     dependsOn: ['docker-pull'],
-  };
-  projectConfig.targets['create-local-table'] = {
-    executor: 'nx:run-commands',
-    dependsOn: ['serve-local'],
     options: {
-      command: `tsx scripts/create-table.ts ${localTableName} ${DYNAMODB_LOCAL_START_PORT}`,
+      commands: [
+        `tsx scripts/docker-start.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${DYNAMODB_LOCAL_START_PORT}`,
+        `tsx scripts/create-local-table.ts ${localTableName} ${DYNAMODB_LOCAL_START_PORT}`,
+      ],
+      parallel: true,
       cwd: '{projectRoot}',
     },
   };
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
+  addGeneratorMetadata(tree, fullyQualifiedName, TS_DYNAMODB_GENERATOR_INFO);
 
   await sharedConstructsGenerator(tree, { iacProvider });
   await addDynamoDBInfra(tree, {
@@ -110,7 +111,11 @@ export const tsDynamoDBGenerator = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions(['@aws-sdk/client-dynamodb', 'electrodb', '@aws-lambda-powertools/parameters']),
+    withVersions([
+      '@aws-sdk/client-dynamodb',
+      'electrodb',
+      '@aws-lambda-powertools/parameters',
+    ]),
     withVersions(['tsx', 'dockerode', '@types/dockerode', '@types/aws-lambda']),
   );
 
