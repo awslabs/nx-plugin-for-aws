@@ -1,0 +1,398 @@
+---
+title: DynamoDB
+description: Create a DynamoDB project
+generator: ts#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+This generator creates a new TypeScript project backed by [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), using [ElectroDB](https://electrodb.dev/) for type-safe entity modelling. It generates the application code and infrastructure needed to provision and manage a DynamoDB table using AWS CDK or Terraform, with single-table design support and built-in local development via DynamoDB Local.
+
+## Usage
+
+### Generate a DynamoDB Project
+
+<RunGenerator generator="ts#dynamodb" />
+
+### Options
+
+<GeneratorParameters generator="ts#dynamodb" />
+
+## Generator Output
+
+The generator creates the following project structure in the `<directory>/<name>` directory:
+
+<FileTree>
+  - scripts
+    - create-local-table.ts Creates the DynamoDB table in the local DynamoDB Local instance
+    - docker-pull.ts Pulls the DynamoDB Local Docker image
+    - docker-start.ts Starts the DynamoDB Local Docker container
+  - src
+    - index.ts Project entry point and exports
+    - constants.ts Local development constants and runtime config key
+    - client.ts DynamoDB client singleton and table name resolution
+    - entities
+      - example.ts Example ElectroDB entity definition
+      - index.ts Entity exports
+  - project.json Project configuration and build targets
+</FileTree>
+
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dynamodb
+            - \<name>.ts Infrastructure specific to your table
+        - core
+          - dynamodb.ts Generic DynamoDB table construct
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dynamodb
+            - \<name>.tf Module specific to your table
+        - core
+          - dynamodb.tf Generic DynamoDB module
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## Local Development
+
+### Starting Local DynamoDB
+
+The generator configures a `serve-local` target that starts a [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) instance via Docker and creates the table:
+
+<NxCommands commands={['run <project-name>:serve-local']} />
+
+This automatically:
+1. Pulls the DynamoDB Local Docker image (`docker-pull` target)
+2. Starts a Docker container on port 8000
+3. Creates a local table matching the deployed table schema
+
+Set the `SERVE_LOCAL=true` environment variable in your consuming application to connect to the local instance instead of AWS.
+
+### Data Modelling
+
+The generated project uses [ElectroDB](https://electrodb.dev/) for type-safe entity modelling on a single DynamoDB table. Add or update entity files under `src/entities/`, using the generated example entity as a starting point.
+
+Example entity definition:
+
+```ts title="packages/my-table/src/entities/user.ts"
+import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+export const createUserEntity = async () =>
+  new Entity(
+    {
+      model: {
+        entity: 'user',
+        version: '1',
+        service: 'MyTable',
+      },
+      attributes: {
+        id: { type: 'string', required: true },
+        email: { type: 'string', required: true },
+        createdAt: {
+          type: 'string',
+          default: () => new Date().toISOString(),
+          readOnly: true,
+        },
+        updatedAt: {
+          type: 'string',
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: { field: 'pk', composite: ['id'] },
+          sk: { field: 'sk', composite: [] },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+```
+
+For more details, see the [ElectroDB entity documentation](https://electrodb.dev/en/modeling/entities/).
+
+### Using the DynamoDB Client
+
+The generated `src/client.ts` exports two key utilities:
+
+- `getDynamoDBClient()` — returns a cached singleton `DynamoDBClient`. When `SERVE_LOCAL=true`, connects to the local DynamoDB Local instance on port 8000; otherwise creates an AWS client using the default credential chain.
+- `resolveTableName()` — returns the DynamoDB table name. When `SERVE_LOCAL=true`, returns the local table name constant; otherwise fetches the name from AWS AppConfig using the `RUNTIME_CONFIG_APP_ID` environment variable and caches it for subsequent calls.
+
+## Connecting to the Table
+
+In any TypeScript project, import utilities from your DynamoDB package and use them to create ElectroDB entities:
+
+```ts
+import { getDynamoDBClient, resolveTableName } from ':my-scope/my-table';
+import { Entity } from 'electrodb';
+
+const client = getDynamoDBClient();
+const tableName = await resolveTableName();
+
+const UserEntity = new Entity(
+  { /* entity definition */ },
+  { client, table: tableName },
+);
+
+const result = await UserEntity.query.primary({ id: '123' }).go();
+```
+
+`getDynamoDBClient()` returns a lazily-initialised, cached client. `resolveTableName()` caches the resolved table name after the first call, so both are efficient to call across warm Lambda invocations.
+
+### Connection Generators
+
+For specific project types, use the `connection` generator to automatically wire up local development dependencies so DynamoDB Local starts automatically alongside your project:
+
+- <Link path="guides/connection/trpc-dynamodb">tRPC API → DynamoDB</Link>
+- <Link path="guides/connection/smithy-dynamodb">Smithy API → DynamoDB</Link>
+- <Link path="guides/connection/ts-strands-agent-dynamodb">TypeScript Strands Agent → DynamoDB</Link>
+- <Link path="guides/connection/ts-mcp-server-dynamodb">MCP Server → DynamoDB</Link>
+
+## Deploying your Table
+
+The DynamoDB generator creates CDK or Terraform infrastructure based on your selected `iacProvider`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+The CDK construct is created in `common/constructs`. Example usage:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+This provisions a DynamoDB table with:
+- `pk` (partition key) and `sk` (sort key), both `String` type
+- On-demand (`PAY_PER_REQUEST`) billing
+- Customer-managed KMS encryption with automatic key rotation
+- Point-in-time recovery enabled
+- Deletion protection enabled
+- Table name registered in Runtime Config under the `dynamodb` namespace in AWS AppConfig
+</Fragment>
+<Fragment slot="terraform">
+The Terraform module is created in `common/terraform`. Example usage:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+This provisions a DynamoDB table with:
+- `pk` (partition key) and `sk` (sort key), both `String` type
+- On-demand (`PAY_PER_REQUEST`) billing
+- Customer-managed KMS encryption with automatic key rotation
+- Point-in-time recovery enabled
+- Deletion protection enabled
+- Table name registered in Runtime Config
+</Fragment>
+</Infrastructure>
+
+### Granting Access
+
+To allow a Lambda function or other compute resource to read from and write to the table, grant the necessary permissions in your infrastructure.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Call `grantReadWriteData` on the table construct. This grants both the DynamoDB and KMS permissions required by the Lambda execution role:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this).build(),
+});
+
+Object.entries(api.integrations).forEach(([, integration]) => {
+  table.table.grantReadWriteData(integration.handler);
+});
+```
+
+:::note
+This example grants every handler in your API access. If only some handlers need access, configure them individually.
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+Grant the Lambda execution role permission to access the DynamoDB table:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_api.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Ensure your Lambda functions have the `RUNTIME_CONFIG_APP_ID` environment variable set so `resolveTableName()` can look up the table name at runtime.
+
+### Deletion Protection
+
+Deletion protection is enabled by default to prevent accidental table deletion.
+
+#### Disable Deletion Protection
+
+Disable it for environments where table deletion is expected, such as short-lived development or preview stacks.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Billing Mode
+
+The table defaults to on-demand (`PAY_PER_REQUEST`) billing. Switch to provisioned capacity for predictable, high-throughput workloads.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Point-in-time Recovery
+
+Point-in-time recovery is enabled by default, allowing you to restore the table to any point in the last 35 days.
+
+#### Disable Point-in-time Recovery
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Encryption Key Rotation
+
+The KMS key used to encrypt the table has automatic key rotation enabled by default. Disable it if your security policy manages rotation externally.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

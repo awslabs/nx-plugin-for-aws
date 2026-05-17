@@ -1,0 +1,134 @@
+---
+title: MCP Server to DynamoDB
+description: Connect a TypeScript MCP Server to a DynamoDB table
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator wires a <Link path="guides/ts-mcp-server">TypeScript MCP Server</Link> to a <Link path="guides/ts-dynamodb">DynamoDB</Link> project, configuring local development so both start together automatically.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> project
+2. A <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your MCP server project as the source and your DynamoDB project as the target. If the project contains multiple MCP server components, specify `sourceComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator updates the MCP server's `<mcp-server-name>-serve-local` target in `project.json` to depend on the DynamoDB project's `serve-local` target. No source files are modified.
+
+## Using DynamoDB in Tools
+
+Import `getDynamoDBClient`, `resolveTableName`, and your entity factories from the DynamoDB package and use them inside `createServer`:
+
+```ts title="packages/my-service/src/my-mcp/server.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+
+  server.tool('list_examples', 'List all example items', {}, async () => {
+    const entity = await createExampleEntity();
+    const result = await entity.scan.go();
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result.data) }],
+    };
+  });
+
+  return server;
+};
+```
+
+`getDynamoDBClient()` returns a cached singleton and `resolveTableName()` caches the table name after the first call, so both are efficient across invocations.
+
+## Multiple Tables
+
+Running the generator again with a different target adds the second table alongside the first. Import from both packages inside `createServer`:
+
+```ts title="packages/my-service/src/my-mcp/server.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+import { createOtherEntity } from ':my-scope/other-table';
+
+export const createServer = async () => {
+  const server = new McpServer({ ... });
+  // register tools using both entity factories
+  return server;
+};
+```
+
+## Infrastructure
+
+To allow the MCP server to access the DynamoDB table, grant the necessary permissions in your infrastructure.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { ... });
+
+table.table.grantReadWriteData(myMcpServer);
+```
+
+`grantReadWriteData` grants both the DynamoDB and KMS permissions to the MCP server's execution role.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_mcp_server.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+Ensure the MCP server has the `RUNTIME_CONFIG_APP_ID` environment variable set so `resolveTableName()` can look up the table name at runtime.
+
+## Local Development
+
+<NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
+
+This starts the MCP server and the local DynamoDB instance together. The `SERVE_LOCAL=true` environment variable is set automatically, so `getDynamoDBClient()` and `resolveTableName()` connect to the local DynamoDB Local instance instead of AWS.
