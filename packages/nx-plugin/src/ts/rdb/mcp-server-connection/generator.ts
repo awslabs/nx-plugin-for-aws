@@ -20,6 +20,7 @@ import { pascalCase } from '../../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { toScopeAlias } from '../../../utils/npm-scope';
 import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
+import { injectRdsCaBundleIntoDockerfile } from '../utils';
 
 export const TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -68,27 +69,7 @@ export const tsRdbMcpServerConnectionGenerator = async (
     mcpServerName,
     'Dockerfile',
   );
-
-  if (tree.exists(dockerfilePath)) {
-    const dockerfileContent = tree.read(dockerfilePath, 'utf-8')!;
-    const rdsCaRun = [
-      'RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \\',
-      '    rm -rf /var/lib/apt/lists/* && \\',
-      '    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\',
-      '    -o /usr/local/share/ca-certificates/rds-bundle.crt && \\',
-      '    update-ca-certificates',
-    ].join('\n');
-    const exposeLine = 'EXPOSE 8000';
-    if (
-      dockerfileContent.includes(exposeLine) &&
-      !dockerfileContent.includes('rds-bundle.crt')
-    ) {
-      tree.write(
-        dockerfilePath,
-        dockerfileContent.replace(exposeLine, `${rdsCaRun}\n\n${exposeLine}`),
-      );
-    }
-  }
+  injectRdsCaBundleIntoDockerfile(tree, dockerfilePath);
 
   // server.ts: inject db inside createServer body
   if (tree.exists(serverPath)) {
