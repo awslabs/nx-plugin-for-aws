@@ -61,6 +61,35 @@ export const tsRdbMcpServerConnectionGenerator = async (
     'server.ts',
   );
 
+  // Dockerfile: install RDS CA bundle for direct Aurora SSL connections
+  const dockerfilePath = joinPathFragments(
+    sourceProject.root,
+    'src',
+    mcpServerName,
+    'Dockerfile',
+  );
+
+  if (tree.exists(dockerfilePath)) {
+    const dockerfileContent = tree.read(dockerfilePath, 'utf-8')!;
+    const rdsCaRun = [
+      'RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \\',
+      '    rm -rf /var/lib/apt/lists/* && \\',
+      '    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\',
+      '    -o /usr/local/share/ca-certificates/rds-bundle.crt && \\',
+      '    update-ca-certificates',
+    ].join('\n');
+    const exposeLine = 'EXPOSE 8000';
+    if (
+      dockerfileContent.includes(exposeLine) &&
+      !dockerfileContent.includes('rds-bundle.crt')
+    ) {
+      tree.write(
+        dockerfilePath,
+        dockerfileContent.replace(exposeLine, `${rdsCaRun}\n\n${exposeLine}`),
+      );
+    }
+  }
+
   // server.ts: inject db inside createServer body
   if (tree.exists(serverPath)) {
     await addDestructuredImport(

@@ -1,0 +1,40 @@
+---
+title: 不使用 RDS Proxy 连接时的 SSL 要求
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+对于从 Node.js 20 或更高版本的 Lambda 运行时直接连接 Aurora 集群，需要通过设置 `NODE_EXTRA_CA_CERTS` 来加载 Amazon RDS CA 证书包：
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "..."
+  ...
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+有关更多详细信息，请参阅 AWS Lambda [Amazon RDS 连接的 SSL/TLS 要求](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls)和 Amazon RDS Proxy [TLS 文档](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls)。使用 RDS Proxy 时，您无需在 Lambda 函数中配置 RDS CA 证书包。

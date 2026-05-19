@@ -11,8 +11,9 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-`connection` 生成器将 <Link path="guides/ts-mcp-server">TypeScript MCP 服务器</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，使 Prisma 客户端在 `createServer` 及其传输入口点内可用。
+`connection` 生成器将 <Link path="guides/ts-mcp-server">TypeScript MCP 服务器</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，使 Prisma 客户端可供 `createServer` 内注册的所有工具使用。
 
 ## 前置条件
 
@@ -35,14 +36,13 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ## 生成器输出
 
-生成器会修改 MCP 服务器源目录中的三个文件：
+生成器会修改 MCP 服务器源目录中的两个文件：
 
 <FileTree>
 
 - packages/my-service/src/my-mcp
-  - server.ts `createServer` 更新为接受 `{ db }` 参数
-  - http.ts 在 `const server = createServer({ db })` 上方创建 Prisma 客户端
-  - stdio.ts 在 `await createServer({ db }).connect(transport)` 之前创建 Prisma 客户端
+  - server.ts Prisma 客户端在 `createServer` 内获取并可供所有注册的工具使用
+  - Dockerfile 安装 RDS CA 证书包以支持与 Aurora 的 SSL 连接
 
 </FileTree>
 
@@ -50,62 +50,31 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ## 工作原理
 
-### 服务器定义
+Prisma 客户端在 `createServer` 内获取，并可供在其中注册的所有工具和资源使用：
 
-`createServer` 接收 Prisma 客户端作为参数，因此它保持同步并可以将客户端传递给工具和资源：
-
-```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
-export const createServer = ({
-  myDb,
-}: {
-  myDb: Awaited<ReturnType<typeof getMyDb>>;
-}) => {
+export const createServer = async () => {
+  const myDb = await getMyDb();
   const server = new McpServer({ name: 'my-service', version: '1.0.0' });
   // register tools/resources that use myDb
   return server;
 };
 ```
 
-### HTTP 传输
-
-Prisma 客户端在请求处理程序内创建，位于 `createServer` 调用上方：
-
-```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-app.post('/mcp', async (req, res) => {
-  try {
-    const myDb = await getMyDb();
-    const server = createServer({ myDb });
-    // ...
-  }
-});
-```
-
-### Stdio 传输
-
-相同的模式适用于 stdio 传输入口点：
-
-```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-export const startMcpServer = async () => {
-  const transport = new StdioServerTransport();
-  const myDb = await getMyDb();
-  await createServer({ myDb }).connect(transport);
-};
-```
-
 ## 多个数据库
 
-使用不同的目标再次运行生成器会将第二个数据库添加到第一个数据库旁边。两者一起传递给 `createServer`：
+使用不同的目标再次运行生成器会将第二个数据库添加到第一个数据库旁边。两者都在 `createServer` 内获取：
 
-```ts title="packages/my-service/src/my-mcp/http.ts"
-const postgresDb = await getPostgresDb();
-const mySqlDb = await getMySqlDb();
-const server = createServer({ postgresDb, mysqlDb });
+```ts title="packages/my-service/src/my-mcp/server.ts" {2,3}
+export const createServer = async () => {
+  const postgresDb = await getPostgresDb();
+  const mysqlDb = await getMysqlDb();
+  const server = new McpServer({ ... });
+  // register tools using both clients
+  return server;
+};
 ```
 
 ## 基础设施
@@ -155,8 +124,13 @@ module "my_mcp_server" {
 </Fragment>
 </Infrastructure>
 
+### 不使用 RDS Proxy 连接时的 SSL 要求
+
+<Snippet name="connection/mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+
 ## 本地开发
 
 <NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
 
 这会启动 MCP 服务器和所有连接的数据库。`SERVE_LOCAL=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。
+

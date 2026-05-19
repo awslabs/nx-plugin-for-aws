@@ -11,8 +11,9 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-O gerador `connection` conecta um <Link path="guides/ts-mcp-server">Servidor MCP TypeScript</Link> a um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>, disponibilizando um cliente Prisma dentro de `createServer` e seus pontos de entrada de transporte.
+O gerador `connection` conecta um <Link path="guides/ts-mcp-server">Servidor MCP TypeScript</Link> a um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>, disponibilizando um cliente Prisma para todas as ferramentas registradas dentro de `createServer`.
 
 ## Pré-requisitos
 
@@ -35,14 +36,13 @@ Selecione seu projeto de servidor MCP como origem e seu projeto de banco de dado
 
 ## Saída do Gerador
 
-O gerador modifica três arquivos no diretório de origem do seu servidor MCP:
+O gerador modifica dois arquivos no diretório de origem do seu servidor MCP:
 
 <FileTree>
 
 - packages/my-service/src/my-mcp
-  - server.ts `createServer` atualizado para aceitar o parâmetro `{ db }`
-  - http.ts Cliente Prisma criado acima de `const server = createServer({ db })`
-  - stdio.ts Cliente Prisma criado antes de `await createServer({ db }).connect(transport)`
+  - server.ts Cliente Prisma buscado e disponível para todas as ferramentas registradas dentro de `createServer`
+  - Dockerfile Pacote CA do RDS instalado para conexões SSL com Aurora
 
 </FileTree>
 
@@ -50,62 +50,31 @@ Além disso, o target `<mcp-server-name>-serve-local` é atualizado para depende
 
 ## Como Funciona
 
-### Definição do Servidor
+O cliente Prisma é buscado dentro de `createServer` e disponível para todas as ferramentas e recursos registrados lá:
 
-`createServer` recebe o cliente Prisma como parâmetro para que permaneça síncrono e possa passar o cliente para ferramentas e recursos:
-
-```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
-export const createServer = ({
-  myDb,
-}: {
-  myDb: Awaited<ReturnType<typeof getMyDb>>;
-}) => {
+export const createServer = async () => {
+  const myDb = await getMyDb();
   const server = new McpServer({ name: 'my-service', version: '1.0.0' });
   // register tools/resources that use myDb
   return server;
 };
 ```
 
-### Transporte HTTP
-
-O cliente Prisma é criado dentro do manipulador de requisição, acima da chamada `createServer`:
-
-```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-app.post('/mcp', async (req, res) => {
-  try {
-    const myDb = await getMyDb();
-    const server = createServer({ myDb });
-    // ...
-  }
-});
-```
-
-### Transporte Stdio
-
-O mesmo padrão se aplica ao ponto de entrada do transporte stdio:
-
-```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-export const startMcpServer = async () => {
-  const transport = new StdioServerTransport();
-  const myDb = await getMyDb();
-  await createServer({ myDb }).connect(transport);
-};
-```
-
 ## Múltiplos Bancos de Dados
 
-Executar o gerador novamente com um destino diferente adiciona o segundo banco de dados junto ao primeiro. Ambos são passados para `createServer` juntos:
+Executar o gerador novamente com um destino diferente adiciona o segundo banco de dados junto ao primeiro. Ambos são buscados dentro de `createServer`:
 
-```ts title="packages/my-service/src/my-mcp/http.ts"
-const postgresDb = await getPostgresDb();
-const mySqlDb = await getMySqlDb();
-const server = createServer({ postgresDb, mysqlDb });
+```ts title="packages/my-service/src/my-mcp/server.ts" {2,3}
+export const createServer = async () => {
+  const postgresDb = await getPostgresDb();
+  const mysqlDb = await getMysqlDb();
+  const server = new McpServer({ ... });
+  // register tools using both clients
+  return server;
+};
 ```
 
 ## Infraestrutura
@@ -155,9 +124,12 @@ Certifique-se de que o papel de execução do servidor MCP tenha a permissão `r
 </Fragment>
 </Infrastructure>
 
+### Requisitos SSL ao Conectar Sem RDS Proxy
+
+<Snippet name="connection/mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+
 ## Desenvolvimento Local
 
 <NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
 
 Isso inicia o servidor MCP e todos os bancos de dados conectados. A variável de ambiente `SERVE_LOCAL=true` faz com que cada cliente Prisma se conecte ao seu banco de dados Docker local em vez do Aurora.
-

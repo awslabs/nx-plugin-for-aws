@@ -11,8 +11,9 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-Generator `connection` kết nối một <Link path="guides/ts-mcp-server">TypeScript MCP Server</Link> với dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu Quan hệ</Link>, làm cho Prisma client khả dụng bên trong `createServer` và các điểm vào transport của nó.
+Generator `connection` kết nối một <Link path="guides/ts-mcp-server">TypeScript MCP Server</Link> với dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu Quan hệ</Link>, làm cho Prisma client khả dụng cho tất cả các công cụ được đăng ký bên trong `createServer`.
 
 ## Điều kiện tiên quyết
 
@@ -35,14 +36,13 @@ Chọn dự án MCP server của bạn làm nguồn và dự án cơ sở dữ l
 
 ## Kết quả của Generator
 
-Generator sửa đổi ba tệp trong thư mục nguồn của MCP server của bạn:
+Generator sửa đổi hai tệp trong thư mục nguồn của MCP server của bạn:
 
 <FileTree>
 
 - packages/my-service/src/my-mcp
-  - server.ts `createServer` được cập nhật để chấp nhận tham số `{ db }`
-  - http.ts Prisma client được tạo phía trên `const server = createServer({ db })`
-  - stdio.ts Prisma client được tạo trước `await createServer({ db }).connect(transport)`
+  - server.ts Prisma client được lấy và khả dụng cho tất cả các công cụ được đăng ký bên trong `createServer`
+  - Dockerfile RDS CA bundle được cài đặt cho kết nối SSL đến Aurora
 
 </FileTree>
 
@@ -50,62 +50,31 @@ Ngoài ra, target `<mcp-server-name>-serve-local` được cập nhật để ph
 
 ## Cách hoạt động
 
-### Định nghĩa Server
+Prisma client được lấy bên trong `createServer` và khả dụng cho tất cả các công cụ và tài nguyên được đăng ký ở đó:
 
-`createServer` nhận Prisma client như một tham số để nó vẫn đồng bộ và có thể truyền client cho các công cụ và tài nguyên:
-
-```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
-export const createServer = ({
-  myDb,
-}: {
-  myDb: Awaited<ReturnType<typeof getMyDb>>;
-}) => {
+export const createServer = async () => {
+  const myDb = await getMyDb();
   const server = new McpServer({ name: 'my-service', version: '1.0.0' });
   // register tools/resources that use myDb
   return server;
 };
 ```
 
-### HTTP Transport
-
-Prisma client được tạo bên trong request handler, phía trên lời gọi `createServer`:
-
-```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-app.post('/mcp', async (req, res) => {
-  try {
-    const myDb = await getMyDb();
-    const server = createServer({ myDb });
-    // ...
-  }
-});
-```
-
-### Stdio Transport
-
-Cùng một mẫu được áp dụng cho điểm vào stdio transport:
-
-```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-export const startMcpServer = async () => {
-  const transport = new StdioServerTransport();
-  const myDb = await getMyDb();
-  await createServer({ myDb }).connect(transport);
-};
-```
-
 ## Nhiều Cơ sở dữ liệu
 
-Chạy generator lại với một đích khác sẽ thêm cơ sở dữ liệu thứ hai bên cạnh cơ sở dữ liệu đầu tiên. Cả hai đều được truyền cho `createServer` cùng nhau:
+Chạy generator lại với một đích khác sẽ thêm cơ sở dữ liệu thứ hai bên cạnh cơ sở dữ liệu đầu tiên. Cả hai đều được lấy bên trong `createServer`:
 
-```ts title="packages/my-service/src/my-mcp/http.ts"
-const postgresDb = await getPostgresDb();
-const mySqlDb = await getMySqlDb();
-const server = createServer({ postgresDb, mysqlDb });
+```ts title="packages/my-service/src/my-mcp/server.ts" {2,3}
+export const createServer = async () => {
+  const postgresDb = await getPostgresDb();
+  const mysqlDb = await getMysqlDb();
+  const server = new McpServer({ ... });
+  // register tools using both clients
+  return server;
+};
 ```
 
 ## Cơ sở hạ tầng
@@ -154,6 +123,10 @@ module "my_mcp_server" {
 
 </Fragment>
 </Infrastructure>
+
+### Yêu cầu SSL Khi Kết nối Không qua RDS Proxy
+
+<Snippet name="connection/mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
 
 ## Phát triển Cục bộ
 

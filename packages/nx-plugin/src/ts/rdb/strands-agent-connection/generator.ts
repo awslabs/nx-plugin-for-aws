@@ -61,6 +61,25 @@ export const tsRdbStrandsAgentConnectionGenerator = async (
   );
   const agentPath = joinPathFragments(agentSourceDir, 'agent.ts');
 
+  // Dockerfile: install RDS CA bundle for direct Aurora SSL connections
+  const dockerfilePath = joinPathFragments(agentSourceDir, 'Dockerfile');
+  if (tree.exists(dockerfilePath)) {
+    const dockerfileContent = tree.read(dockerfilePath, 'utf-8')!;
+    const rdsCaRun = [
+      'RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \\',
+      '    rm -rf /var/lib/apt/lists/* && \\',
+      '    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\',
+      '    -o /usr/local/share/ca-certificates/rds-bundle.crt && \\',
+      '    update-ca-certificates',
+    ].join('\n');
+    if (!dockerfileContent.includes('rds-bundle.crt')) {
+      tree.write(
+        dockerfilePath,
+        dockerfileContent.replace(/^(EXPOSE \d+)/m, `${rdsCaRun}\n\n$1`),
+      );
+    }
+  }
+
   if (tree.exists(agentPath)) {
     await addDestructuredImport(
       tree,
