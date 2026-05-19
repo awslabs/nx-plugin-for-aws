@@ -11,6 +11,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 `connection` ジェネレーターは、<Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> を <Link path="guides/ts-rdb">Relational Database</Link> プロジェクトに接続し、エージェントファクトリー内で Prisma クライアントを利用可能にします。
 
@@ -35,12 +36,13 @@ Strands Agent プロジェクトをソースとして、リレーショナルデ
 
 ## ジェネレーターの出力
 
-ジェネレーターは単一のファイルを変更します：
+ジェネレーターは、エージェントのソースディレクトリ内の2つのファイルを変更します：
 
 <FileTree>
 
 - packages/my-service/src/my-agent
   - agent.ts `getAgent` 内で取得され、ツールで利用可能な Prisma クライアント
+  - Dockerfile Aurora への SSL 接続用に RDS CA バンドルがインストールされる
 
 </FileTree>
 
@@ -48,17 +50,18 @@ Strands Agent プロジェクトをソースとして、リレーショナルデ
 
 ## 仕組み
 
-Prisma クライアントは、関数パラメーターを通じて渡されるのではなく、`getAgent()` 内で直接取得されます。これは、strands-agent ランタイムがセッションコンテキストを伝播する方法と一致しています — `withSessionId` が `getAgent` をラップし、セッションごとに1つの `Agent` インスタンスをキャッシュするため、`getPrisma()` はセッションごとに最大1回だけ呼び出されます。
+Prisma クライアントは `getAgent()` 内でインスタンス化されます。`ts#strands-agent` ジェネレーターはセッションごとに単一の Agent を設定するため、クライアントもセッションの存続期間中再利用されます。
 
 ### エージェント定義
 
 `getAgent` は、本体の先頭で Prisma ゲッターをインポートして呼び出すように更新されます：
 
-```ts title="packages/my-service/src/my-agent/agent.ts" {1,5}
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
+  // ...
   return new Agent({ /* use myDb in tools */ });
 };
 ```
@@ -68,13 +71,14 @@ export const getAgent = async () => {
 
 異なるターゲットで再度ジェネレーターを実行すると、最初のデータベースと並んで2番目のデータベースが追加されます：
 
-```ts title="packages/my-service/src/my-agent/agent.ts"
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 import { getPrisma as getOtherDb } from ':my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
   const otherDb = await getOtherDb();
+  // ...
   return new Agent({ /* use both clients in tools */ });
 };
 ```
@@ -125,6 +129,10 @@ module "my_agent" {
 
 </Fragment>
 </Infrastructure>
+
+### RDS Proxy を使用せずに接続する場合の SSL 要件
+
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
 
 ## ローカル開発
 

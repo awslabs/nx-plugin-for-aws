@@ -20,6 +20,7 @@ import { pascalCase } from '../../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { toScopeAlias } from '../../../utils/npm-scope';
 import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
+import { injectRdsCaBundleIntoDockerfile } from '../utils';
 
 export const TS_RDB_STRANDS_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -60,6 +61,10 @@ export const tsRdbStrandsAgentConnectionGenerator = async (
     agentName,
   );
   const agentPath = joinPathFragments(agentSourceDir, 'agent.ts');
+
+  // Dockerfile: install RDS CA bundle for direct Aurora SSL connections
+  const dockerfilePath = joinPathFragments(agentSourceDir, 'Dockerfile');
+  injectRdsCaBundleIntoDockerfile(tree, dockerfilePath);
 
   if (tree.exists(agentPath)) {
     await addDestructuredImport(

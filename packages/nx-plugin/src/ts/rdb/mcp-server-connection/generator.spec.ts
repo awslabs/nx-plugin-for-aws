@@ -63,6 +63,21 @@ export const createServer = async () => {
 };
 `,
     );
+    tree.write(
+      `packages/${name}/src/${mcpServerName}/Dockerfile`,
+      `FROM public.ecr.aws/docker/library/node:lts-jod
+
+WORKDIR /app
+
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.7.0
+
+COPY index.js /app
+
+EXPOSE 8000
+
+CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentation/register", "index.js" ]
+`,
+    );
   };
 
   beforeEach(() => {
@@ -149,6 +164,41 @@ export const createServer = async () => {
     });
 
     expect(readProjectConfiguration(tree, 'my-service')).toMatchSnapshot();
+  });
+
+  it('should add RDS CA bundle to Dockerfile', async () => {
+    setupMcpServerProject('my-service', 'my-mcp');
+    setupRdbProject();
+
+    await tsRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#mcp-server', name: 'my-mcp' },
+    });
+
+    expect(
+      tree.read('packages/my-service/src/my-mcp/Dockerfile', 'utf-8'),
+    ).toMatchSnapshot();
+  });
+
+  it('should be idempotent for Dockerfile', async () => {
+    setupMcpServerProject('my-service', 'my-mcp');
+    setupRdbProject();
+
+    await tsRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#mcp-server', name: 'my-mcp' },
+    });
+    await tsRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#mcp-server', name: 'my-mcp' },
+    });
+
+    expect(
+      tree.read('packages/my-service/src/my-mcp/Dockerfile', 'utf-8'),
+    ).toMatchSnapshot();
   });
 
   it('should not add dependency when mcp-server serve-local target does not exist', async () => {

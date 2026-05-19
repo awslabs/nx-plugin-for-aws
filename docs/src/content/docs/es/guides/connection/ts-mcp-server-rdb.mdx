@@ -11,8 +11,9 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-El generador `connection` conecta un <Link path="guides/ts-mcp-server">Servidor MCP de TypeScript</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, haciendo que un cliente Prisma esté disponible dentro de `createServer` y sus puntos de entrada de transporte.
+El generador `connection` conecta un <Link path="guides/ts-mcp-server">Servidor MCP de TypeScript</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, haciendo que un cliente Prisma esté disponible para todas las herramientas registradas dentro de `createServer`.
 
 ## Requisitos Previos
 
@@ -35,14 +36,13 @@ Selecciona tu proyecto de servidor MCP como origen y tu proyecto de base de dato
 
 ## Salida del Generador
 
-El generador modifica tres archivos en el directorio de origen de tu servidor MCP:
+El generador modifica dos archivos en el directorio de origen de tu servidor MCP:
 
 <FileTree>
 
 - packages/my-service/src/my-mcp
-  - server.ts `createServer` actualizado para aceptar el parámetro `{ db }`
-  - http.ts Cliente Prisma creado antes de `const server = createServer({ db })`
-  - stdio.ts Cliente Prisma creado antes de `await createServer({ db }).connect(transport)`
+  - server.ts Cliente Prisma obtenido y disponible para todas las herramientas registradas dentro de `createServer`
+  - Dockerfile Paquete CA de RDS instalado para conexiones SSL a Aurora
 
 </FileTree>
 
@@ -50,62 +50,31 @@ Además, el objetivo `<mcp-server-name>-serve-local` se actualiza para depender 
 
 ## Cómo Funciona
 
-### Definición del Servidor
+El cliente Prisma se obtiene dentro de `createServer` y está disponible para todas las herramientas y recursos registrados allí:
 
-`createServer` recibe el cliente Prisma como parámetro para que permanezca síncrono y pueda pasar el cliente a herramientas y recursos:
-
-```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
-export const createServer = ({
-  myDb,
-}: {
-  myDb: Awaited<ReturnType<typeof getMyDb>>;
-}) => {
+export const createServer = async () => {
+  const myDb = await getMyDb();
   const server = new McpServer({ name: 'my-service', version: '1.0.0' });
   // register tools/resources that use myDb
   return server;
 };
 ```
 
-### Transporte HTTP
-
-El cliente Prisma se crea dentro del manejador de solicitudes, antes de la llamada a `createServer`:
-
-```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-app.post('/mcp', async (req, res) => {
-  try {
-    const myDb = await getMyDb();
-    const server = createServer({ myDb });
-    // ...
-  }
-});
-```
-
-### Transporte Stdio
-
-El mismo patrón se aplica al punto de entrada del transporte stdio:
-
-```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-export const startMcpServer = async () => {
-  const transport = new StdioServerTransport();
-  const myDb = await getMyDb();
-  await createServer({ myDb }).connect(transport);
-};
-```
-
 ## Múltiples Bases de Datos
 
-Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera. Ambas se pasan a `createServer` juntas:
+Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera. Ambas se obtienen dentro de `createServer`:
 
-```ts title="packages/my-service/src/my-mcp/http.ts"
-const postgresDb = await getPostgresDb();
-const mySqlDb = await getMySqlDb();
-const server = createServer({ postgresDb, mysqlDb });
+```ts title="packages/my-service/src/my-mcp/server.ts" {2,3}
+export const createServer = async () => {
+  const postgresDb = await getPostgresDb();
+  const mysqlDb = await getMysqlDb();
+  const server = new McpServer({ ... });
+  // register tools using both clients
+  return server;
+};
 ```
 
 ## Infraestructura
@@ -154,6 +123,10 @@ Asegúrate de que el rol de ejecución del servidor MCP tenga el permiso `rds-db
 
 </Fragment>
 </Infrastructure>
+
+### Requisitos de SSL al Conectar sin RDS Proxy
+
+<Snippet name="connection/mcp-server-rdb-ssl-requirements" parentHeading="Requisitos de SSL al Conectar sin RDS Proxy" />
 
 ## Desarrollo Local
 

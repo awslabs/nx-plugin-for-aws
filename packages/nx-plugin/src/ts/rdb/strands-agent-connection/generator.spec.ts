@@ -52,6 +52,22 @@ describe('ts#rdb strands-agent-connection generator', () => {
       }),
     );
 
+    const exposePort = protocol === 'A2A' ? 9000 : 8080;
+    tree.write(
+      `packages/${name}/src/${agentName}/Dockerfile`,
+      `FROM public.ecr.aws/docker/library/node:lts-jod
+
+WORKDIR /app
+
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.7.0
+
+COPY index.js /app
+
+EXPOSE ${exposePort}
+
+CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentation/register", "index.js" ]
+`,
+    );
     tree.write(
       `packages/${name}/src/${agentName}/agent.ts`,
       `import { Agent, tool } from '@strands-agents/sdk';
@@ -192,6 +208,56 @@ export const getAgent = async () => {
 
     expect(
       tree.read('packages/my-service/src/my-agent/agent.ts', 'utf-8'),
+    ).toMatchSnapshot();
+  });
+
+  it('should add RDS CA bundle to Dockerfile (HTTP)', async () => {
+    setupAgentProject('my-service', 'my-agent', 'HTTP');
+    setupRdbProject();
+
+    await tsRdbStrandsAgentConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#strands-agent', name: 'my-agent' },
+    });
+
+    expect(
+      tree.read('packages/my-service/src/my-agent/Dockerfile', 'utf-8'),
+    ).toMatchSnapshot();
+  });
+
+  it('should add RDS CA bundle to Dockerfile (A2A)', async () => {
+    setupAgentProject('my-service', 'my-agent', 'A2A');
+    setupRdbProject();
+
+    await tsRdbStrandsAgentConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#strands-agent', name: 'my-agent' },
+    });
+
+    expect(
+      tree.read('packages/my-service/src/my-agent/Dockerfile', 'utf-8'),
+    ).toMatchSnapshot();
+  });
+
+  it('should be idempotent for Dockerfile', async () => {
+    setupAgentProject('my-service', 'my-agent', 'HTTP');
+    setupRdbProject();
+
+    await tsRdbStrandsAgentConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#strands-agent', name: 'my-agent' },
+    });
+    await tsRdbStrandsAgentConnectionGenerator(tree, {
+      sourceProject: 'my-service',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#strands-agent', name: 'my-agent' },
+    });
+
+    expect(
+      tree.read('packages/my-service/src/my-agent/Dockerfile', 'utf-8'),
     ).toMatchSnapshot();
   });
 

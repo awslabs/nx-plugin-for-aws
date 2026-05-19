@@ -11,6 +11,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 O gerador `connection` conecta um <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> a um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>, disponibilizando um cliente Prisma dentro da sua fábrica de agente.
 
@@ -35,12 +36,13 @@ Selecione seu projeto Strands Agent como origem e seu projeto de banco de dados 
 
 ## Saída do Gerador
 
-O gerador modifica um único arquivo:
+O gerador modifica dois arquivos no diretório de origem do seu agente:
 
 <FileTree>
 
 - packages/my-service/src/my-agent
   - agent.ts Cliente Prisma buscado dentro de `getAgent` e disponível para ferramentas
+  - Dockerfile Pacote CA do RDS instalado para conexões SSL ao Aurora
 
 </FileTree>
 
@@ -48,17 +50,18 @@ Além disso, o alvo `<agent-name>-serve-local` do agente é atualizado para depe
 
 ## Como Funciona
 
-O cliente Prisma é buscado diretamente dentro de `getAgent()` em vez de ser passado através de parâmetros de função. Isso se alinha com a forma como o runtime strands-agent propaga o contexto de sessão — `withSessionId` envolve `getAgent` e armazena em cache uma instância de `Agent` por sessão, então `getPrisma()` é chamado no máximo uma vez por sessão.
+O cliente Prisma é instanciado dentro de `getAgent()`. Como o gerador `ts#strands-agent` configura um único Agent por sessão, o cliente também é reutilizado durante o tempo de vida da sessão.
 
 ### Definição do Agente
 
 `getAgent` é atualizado para importar e chamar o getter do Prisma no início de seu corpo:
 
-```ts title="packages/my-service/src/my-agent/agent.ts" {1,5}
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
+  // ...
   return new Agent({ /* use myDb in tools */ });
 };
 ```
@@ -68,13 +71,14 @@ export const getAgent = async () => {
 
 Executar o gerador novamente com um destino diferente adiciona o segundo banco de dados junto com o primeiro:
 
-```ts title="packages/my-service/src/my-agent/agent.ts"
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 import { getPrisma as getOtherDb } from ':my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
   const otherDb = await getOtherDb();
+  // ...
   return new Agent({ /* use both clients in tools */ });
 };
 ```
@@ -125,6 +129,10 @@ Certifique-se de que a função de execução do agente tenha permissão `rds-db
 
 </Fragment>
 </Infrastructure>
+
+### Requisitos SSL ao Conectar Sem RDS Proxy
+
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
 
 ## Desenvolvimento Local
 

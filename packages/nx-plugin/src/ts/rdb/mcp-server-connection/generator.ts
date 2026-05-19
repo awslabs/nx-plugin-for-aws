@@ -20,6 +20,7 @@ import { pascalCase } from '../../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { toScopeAlias } from '../../../utils/npm-scope';
 import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
+import { injectRdsCaBundleIntoDockerfile } from '../utils';
 
 export const TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -60,6 +61,15 @@ export const tsRdbMcpServerConnectionGenerator = async (
     mcpServerName,
     'server.ts',
   );
+
+  // Dockerfile: install RDS CA bundle for direct Aurora SSL connections
+  const dockerfilePath = joinPathFragments(
+    sourceProject.root,
+    'src',
+    mcpServerName,
+    'Dockerfile',
+  );
+  injectRdsCaBundleIntoDockerfile(tree, dockerfilePath);
 
   // server.ts: inject db inside createServer body
   if (tree.exists(serverPath)) {
