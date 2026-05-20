@@ -926,6 +926,17 @@ export function Main() {
         'apps/frontend/src/components/copilot/ShadcnAssistantMessage.tsx',
       ),
     ).toBeFalsy();
+    // copilot.css is vended (carrying the pointer-events fix) and imported
+    expect(
+      tree.exists('apps/frontend/src/components/copilot/copilot.css'),
+    ).toBeTruthy();
+    expect(themeIndex).toContain(`import './copilot.css'`);
+    const css = tree.read(
+      'apps/frontend/src/components/copilot/copilot.css',
+      'utf-8',
+    ) as string;
+    expect(css).toContain(`.copilotKitChat > .cpk\\:pointer-events-none > * {`);
+    expect(css).toContain('pointer-events: auto;');
   });
 
   it('should vend the cloudscape-themed copilot components when uxProvider is Cloudscape', async () => {
@@ -962,6 +973,14 @@ export function Main() {
       'utf-8',
     ) as string;
     expect(assistant).toContain('@cloudscape-design');
+
+    // copilot.css carries the pointer-events fix
+    const css = tree.read(
+      'apps/frontend/src/components/copilot/copilot.css',
+      'utf-8',
+    ) as string;
+    expect(css).toContain(`.copilotKitChat > .cpk\\:pointer-events-none > * {`);
+    expect(css).toContain('pointer-events: auto;');
   });
 
   it('should vend the shadcn-themed copilot components and shared shadcn primitives when uxProvider is Shadcn', async () => {
@@ -999,6 +1018,14 @@ export function Main() {
     ) as string;
     expect(themeIndex).toMatchSnapshot('shadcn-theme-index.tsx');
     expect(themeIndex).toContain('ShadcnAssistantMessage');
+
+    // copilot.css carries the pointer-events fix
+    const css = tree.read(
+      'apps/frontend/src/components/copilot/copilot.css',
+      'utf-8',
+    ) as string;
+    expect(css).toContain(`.copilotKitChat > .cpk\\:pointer-events-none > * {`);
+    expect(css).toContain('pointer-events: auto;');
 
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     expect(packageJson.dependencies['lucide-react']).toBeDefined();
