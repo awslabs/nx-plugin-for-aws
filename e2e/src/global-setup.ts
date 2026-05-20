@@ -99,7 +99,6 @@ export default async function () {
       { encoding: 'utf-8' },
     );
 
-    // Yarn berry can't set object-valued config (npmScopes) via env vars.
     backupIfExists(USER_YARNRC_PATH);
     writeFileSync(
       USER_YARNRC_PATH,
@@ -107,6 +106,8 @@ export default async function () {
         `npmRegistryServer: "${PUBLIC_REGISTRY}"`,
         `unsafeHttpWhitelist:`,
         `  - "localhost"`,
+        `npmPreapprovedPackages:`,
+        `  - "@aws/*"`,
         `npmScopes:`,
         `  aws:`,
         `    npmRegistryServer: "${localRegistry}"`,
