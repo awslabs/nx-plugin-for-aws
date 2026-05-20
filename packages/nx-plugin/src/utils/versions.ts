@@ -14,6 +14,7 @@ export const TS_VERSIONS = {
   '@aws-sdk/client-s3': '3.1048.0',
   '@aws-sdk/client-sts': '3.1048.0',
   '@aws-sdk/credential-providers': '3.1048.0',
+  '@aws-sdk/credential-provider-cognito-identity': '3.972.35',
   '@aws-sdk/client-secrets-manager': '3.1048.0',
   '@aws-sdk/rds-signer': '3.1048.0',
   '@aws-smithy/server-apigateway': '1.0.0-alpha.10',
