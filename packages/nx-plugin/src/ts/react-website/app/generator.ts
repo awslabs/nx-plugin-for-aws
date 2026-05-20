@@ -483,6 +483,14 @@ export async function tsReactWebsiteGenerator(
     withVersions(devDependencies),
   );
 
+  updateJson(tree, 'package.json', (pkgJson) => {
+    pkgJson.scripts ??= {};
+    if (!pkgJson.scripts.dev) {
+      pkgJson.scripts.dev = `nx serve-local ${fullyQualifiedName}`;
+    }
+    return pkgJson;
+  });
+
   await addGeneratorMetricsIfApplicable(tree, [
     REACT_WEBSITE_APP_GENERATOR_INFO,
   ]);

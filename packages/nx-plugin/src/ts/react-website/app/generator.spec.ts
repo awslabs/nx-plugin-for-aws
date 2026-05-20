@@ -143,6 +143,24 @@ describe('react-website generator', () => {
     expect(tsConfig).toMatchSnapshot('tsconfig.json');
   });
 
+  it('should add a dev script to root package.json when one does not exist', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+    const packageJson = JSON.parse(tree.read('package.json').toString());
+    expect(packageJson.scripts?.dev).toBe('nx serve-local @proj/test-app');
+  });
+
+  it('should not overwrite an existing dev script in root package.json', async () => {
+    const rootPackageJson = JSON.parse(tree.read('package.json').toString());
+    rootPackageJson.scripts = {
+      ...(rootPackageJson.scripts ?? {}),
+      dev: 'echo existing',
+    };
+    tree.write('package.json', JSON.stringify(rootPackageJson));
+    await tsReactWebsiteGenerator(tree, options);
+    const packageJson = JSON.parse(tree.read('package.json').toString());
+    expect(packageJson.scripts.dev).toBe('echo existing');
+  });
+
   it('should handle custom directory option', async () => {
     await tsReactWebsiteGenerator(tree, {
       ...options,
