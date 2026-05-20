@@ -182,7 +182,7 @@ export async function tsStrandsAgentReactConnectionGenerator(
         ? [
             'oidc-client-ts',
             'aws4fetch',
-            '@aws-sdk/credential-providers',
+            '@aws-sdk/credential-provider-cognito-identity',
             'react-oidc-context',
           ]
         : []) as any),
