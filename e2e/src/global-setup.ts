@@ -100,6 +100,10 @@ export default async function () {
     );
 
     // Yarn berry can't set object-valued config (npmScopes) via env vars.
+    // npmMinimalAgeGate: 0 disables yarn 4.15's typosquat quarantine —
+    // verdaccio doesn't return publish times, so without this every
+    // package on the local registry is treated as "newly published" and
+    // rejected with YN0016 ("version is quarantined").
     backupIfExists(USER_YARNRC_PATH);
     writeFileSync(
       USER_YARNRC_PATH,
@@ -107,6 +111,7 @@ export default async function () {
         `npmRegistryServer: "${PUBLIC_REGISTRY}"`,
         `unsafeHttpWhitelist:`,
         `  - "localhost"`,
+        `npmMinimalAgeGate: 0`,
         `npmScopes:`,
         `  aws:`,
         `    npmRegistryServer: "${localRegistry}"`,
