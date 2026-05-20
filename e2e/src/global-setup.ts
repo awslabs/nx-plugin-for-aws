@@ -99,13 +99,6 @@ export default async function () {
       { encoding: 'utf-8' },
     );
 
-    // Yarn berry can't set object-valued config (npmScopes) via env vars.
-    // npmPreapprovedPackages exempts our local @aws/* scope from yarn
-    // 4.15's typosquat quarantine — verdaccio doesn't return publish
-    // times, so without this every package on the local registry is
-    // treated as "newly published" and rejected with YN0016 ("version
-    // is quarantined"). The default 1d gate stays in effect for
-    // everything else (npmMinimalAgeGate is global-only in yarn).
     backupIfExists(USER_YARNRC_PATH);
     writeFileSync(
       USER_YARNRC_PATH,
