@@ -49,11 +49,11 @@ The end to end tests run our generators and check that generated projects functi
 
 First ensure you have at least compiled the Nx Plugin (`pnpm nx compile nx-plugin`)
 
-You can run them using `pnpm nx test nx-plugin-e2e -- -t 'smoke test - xxx'` (replacing xxx with the test to run). The `--` separator forwards the `-t` flag to Vitest (Nx consumes a bare `-t` as its own `--target` option).
+You can run them using `pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=xxx` (replacing xxx with the test to run, e.g. `pnpm-10`, `dungeon-adventure`). The `smoke-test` target wraps Vitest with the correct `-t` pattern so the same invocation works on Windows (where shell quoting via `--args` is unreliable).
 
 Note that we have a test which runs through our main tutorial (the Dungeon Adventure Game). If you have updated generators which affect files which we show the contents of in the tutorial, you will need to update this test. You can update the "before" files automatically by running:
 
-`pnpm nx test nx-plugin-e2e -- -t 'dungeon-adventure' -u`
+`pnpm nx run @aws/nx-plugin-e2e:smoke-test:update-snapshot --name=dungeon-adventure`
 
 However you will still need to make changes to any "after" files manually to ensure the tutorial works end to end. You can also use `pnpm nx start docs` to run the docs site locally and follow the tutorial yourself.
 
