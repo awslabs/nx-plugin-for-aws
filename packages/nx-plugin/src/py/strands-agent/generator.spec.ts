@@ -720,9 +720,7 @@ dev-dependencies = []
 
     // Check root package.json dependencies
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(
-      rootPackageJson.devDependencies['@aws-cdk/aws-bedrock-agentcore-alpha'],
-    ).toBeDefined();
+    expect(rootPackageJson.dependencies['aws-cdk-lib']).toBeDefined();
   });
 
   it('should generate strands agent with Terraform provider and default name', async () => {
