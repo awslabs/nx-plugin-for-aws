@@ -71,7 +71,7 @@ export const TS_VERSIONS = {
   astro: '6.3.3',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1124.1',
-  'aws-cdk-lib': '2.257.0',
+  'aws-cdk-lib': '2.256.1',
   'aws-xray-sdk-core': '3.12.0',
   constructs: '10.6.0',
   cors: '2.8.6',
