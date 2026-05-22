@@ -8,6 +8,6 @@ import { IacProviderOption } from '../../../utils/iac';
 export interface TsReactWebsiteAuthGeneratorSchema {
   project: string;
   allowSignup: boolean;
-  cognitoDomain: string;
+  cognitoDomain?: string;
   iacProvider: IacProviderOption;
 }
