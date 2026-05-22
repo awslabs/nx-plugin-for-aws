@@ -23,7 +23,6 @@ export default defineConfig({
     env: {
       NX_DAEMON: 'false',
       NX_NATIVE_LOGGING: 'error',
-      GRIT_GLOBAL_DIR: '/tmp/.grit',
     },
     watch: false,
     globals: true,

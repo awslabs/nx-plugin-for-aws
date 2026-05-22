@@ -170,12 +170,12 @@ describe('ast utils', () => {
   describe('hasExportDeclaration', () => {
     it('should return true for exported type alias declarations', async () => {
       const source = `export type MyType = string;`;
-      expect(await hasExportDeclaration(source, 'MyType')).toBe(true);
+      expect(await hasExportDeclaration(tree, source, 'MyType')).toBe(true);
     });
 
     it('should return false for non-exported type alias declarations', async () => {
       const source = `type MyType = string;`;
-      expect(await hasExportDeclaration(source, 'MyType')).toBe(false);
+      expect(await hasExportDeclaration(tree, source, 'MyType')).toBe(false);
     });
 
     it('should return true for export declarations', async () => {
@@ -183,17 +183,17 @@ describe('ast utils', () => {
         type MyType = string;
         export { MyType };
       `;
-      expect(await hasExportDeclaration(source, 'MyType')).toBe(true);
+      expect(await hasExportDeclaration(tree, source, 'MyType')).toBe(true);
     });
 
     it('should return false when type alias does not exist', async () => {
       const source = `type OtherType = string;`;
-      expect(await hasExportDeclaration(source, 'MyType')).toBe(false);
+      expect(await hasExportDeclaration(tree, source, 'MyType')).toBe(false);
     });
 
     it('should return true for re-exported types', async () => {
       const source = `export type { AppRouter } from "./router";`;
-      expect(await hasExportDeclaration(source, 'AppRouter')).toBe(true);
+      expect(await hasExportDeclaration(tree, source, 'AppRouter')).toBe(true);
     });
   });
 
