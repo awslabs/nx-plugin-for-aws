@@ -435,7 +435,7 @@ const isTrpcApi = async (
   }
 
   // If the index file exports an AppRouter, it's a trpc api
-  if (await hasExportDeclaration(indexTs, 'AppRouter')) {
+  if (await hasExportDeclaration(tree, indexTs, 'AppRouter')) {
     return true;
   }
 
@@ -458,7 +458,7 @@ const isTrpcApi = async (
     return false;
   }
 
-  if (await hasExportDeclaration(trpcRouter, 'AppRouter')) {
+  if (await hasExportDeclaration(tree, trpcRouter, 'AppRouter')) {
     return true;
   }
 
