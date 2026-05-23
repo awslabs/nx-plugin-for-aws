@@ -4,6 +4,8 @@
  */
 import { Tree } from '@nx/devkit';
 import { QueryBuilder } from '@getgrit/gritql';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { updateGitIgnore } from './git';
 
@@ -14,13 +16,19 @@ const GRIT_DIR = '.grit';
 // the path from the running node binary (e.g. `/usr/local/.grit` for system-
 // installed node), which is typically not writable and causes generators to
 // fail or pollute system directories. Pin it to a `.grit` directory at the
-// workspace root and ensure it is gitignored. Respect any explicit override
-// by the user.
+// workspace root and ensure it is gitignored. For virtual test trees whose
+// root does not exist on disk, fall back to a path under the OS tempdir
+// so the native fetcher has somewhere writable. Respect any explicit
+// override by the user.
 const ensureGritGlobalDir = (tree: Tree) => {
   if (!process.env.GRIT_GLOBAL_DIR) {
-    process.env.GRIT_GLOBAL_DIR = path.join(tree.root, GRIT_DIR);
+    process.env.GRIT_GLOBAL_DIR = fs.existsSync(tree.root)
+      ? path.join(tree.root, GRIT_DIR)
+      : path.join(os.tmpdir(), '.aws-nx-plugin-grit');
   }
-  updateGitIgnore(tree, '.', (patterns) => [...patterns, GRIT_DIR]);
+  if (fs.existsSync(tree.root)) {
+    updateGitIgnore(tree, '.', (patterns) => [...patterns, GRIT_DIR]);
+  }
 };
 
 const assertFilePath = (tree: Tree, filePath: string) => {
