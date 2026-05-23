@@ -4,31 +4,15 @@
  */
 import { Tree } from '@nx/devkit';
 import { QueryBuilder } from '@getgrit/gritql';
-import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { updateGitIgnore } from './git';
 
 const GRIT_DIR = '.grit';
 
-// The native gritql library unconditionally initializes a "global" .grit
-// directory the first time a QueryBuilder is used. By default it derives
-// the path from the running node binary (e.g. `/usr/local/.grit` for system-
-// installed node), which is typically not writable and causes generators to
-// fail or pollute system directories. Pin it to a `.grit` directory at the
-// workspace root and ensure it is gitignored. For virtual test trees whose
-// root does not exist on disk, fall back to a path under the OS tempdir
-// so the native fetcher has somewhere writable. Respect any explicit
-// override by the user.
-const ensureGritGlobalDir = (tree: Tree) => {
-  if (!process.env.GRIT_GLOBAL_DIR) {
-    process.env.GRIT_GLOBAL_DIR = fs.existsSync(tree.root)
-      ? path.join(tree.root, GRIT_DIR)
-      : path.join(os.tmpdir(), '.aws-nx-plugin-grit');
-  }
-  if (fs.existsSync(tree.root)) {
-    updateGitIgnore(tree, '.', (patterns) => [...patterns, GRIT_DIR]);
-  }
+// Pin the gritql native library's "global" stdlib directory to <workspace>/.grit so it doesn't try to write to /usr/local/.grit (or wherever node's grandparent resolves to).
+const ensureGritDir = (tree: Tree) => {
+  process.env.GRIT_GLOBAL_DIR ??= path.join(tree.root, GRIT_DIR);
+  updateGitIgnore(tree, '.', (patterns) => [...patterns, GRIT_DIR]);
 };
 
 const assertFilePath = (tree: Tree, filePath: string) => {
@@ -212,7 +196,7 @@ export const hasExportDeclaration = async (
   source: string,
   identifierName: string,
 ): Promise<boolean> => {
-  ensureGritGlobalDir(tree);
+  ensureGritDir(tree);
   const patterns = [
     `\`export type ${identifierName} = $_\``,
     `\`export { ${identifierName} }\``,
@@ -244,7 +228,7 @@ export const applyGritQL = async (
   pattern: string,
 ): Promise<boolean> => {
   if (!tree.exists(filePath)) throw new Error(`No file at ${filePath}`);
-  ensureGritGlobalDir(tree);
+  ensureGritDir(tree);
   const source = tree.read(filePath)!.toString();
   const query = new QueryBuilder(pattern);
   const result = await query.applyToFile({ path: filePath, content: source });
@@ -269,7 +253,7 @@ export const matchGritQL = async (
   pattern: string,
 ): Promise<boolean> => {
   if (!tree.exists(filePath)) return false;
-  ensureGritGlobalDir(tree);
+  ensureGritDir(tree);
   const source = tree.read(filePath)!.toString();
   let matched = false;
   try {
