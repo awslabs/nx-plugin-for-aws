@@ -30,13 +30,13 @@ import tsProjectGenerator from '../lib/generator';
 import { resolveIacProvider } from '../../utils/iac';
 import { getNpmScope } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
+import { assignPort } from '../../utils/port';
 
 export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
 const DYNAMODB_LOCAL_IMAGE =
   'public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest';
-const DYNAMODB_LOCAL_START_PORT = 8000;
 
 export const tsDynamoDBGenerator = async (
   tree: Tree,
@@ -59,10 +59,12 @@ export const tsDynamoDBGenerator = async (
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
+  const localDynamoPort = assignPort(tree, projectConfig, 8000);
+
   const templateOptions = {
     runtimeConfigKey: nameClassName,
     dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
-    localDynamoPort: DYNAMODB_LOCAL_START_PORT,
+    localDynamoPort,
     localTableName,
   };
 
@@ -88,8 +90,8 @@ export const tsDynamoDBGenerator = async (
     dependsOn: ['docker-pull'],
     options: {
       commands: [
-        `tsx scripts/docker-start.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${DYNAMODB_LOCAL_START_PORT}`,
-        `tsx scripts/create-local-table.ts ${localTableName} ${DYNAMODB_LOCAL_START_PORT}`,
+        `tsx scripts/docker-start.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${localDynamoPort}`,
+        `tsx scripts/create-local-table.ts ${localTableName} ${localDynamoPort}`,
       ],
       parallel: true,
       cwd: '{projectRoot}',

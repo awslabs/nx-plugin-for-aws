@@ -39,6 +39,23 @@ variable "enable_key_rotation" {
   default     = true
 }
 
+variable "global_secondary_indexes" {
+  description = "Global secondary indexes to create on the table. All key attributes must be of type string."
+  type = list(object({
+    name            = string
+    hash_key        = string
+    range_key       = string
+    projection_type = string
+  }))
+  default = []
+}
+
+locals {
+  gsi_attribute_names = distinct(flatten([
+    for gsi in var.global_secondary_indexes : [gsi.hash_key, gsi.range_key]
+  ]))
+}
+
 # Data sources
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
@@ -94,6 +111,24 @@ resource "aws_dynamodb_table" "table" {
   attribute {
     name = "sk"
     type = "S"
+  }
+
+  dynamic "attribute" {
+    for_each = toset(local.gsi_attribute_names)
+    content {
+      name = attribute.value
+      type = "S"
+    }
+  }
+
+  dynamic "global_secondary_index" {
+    for_each = var.global_secondary_indexes
+    content {
+      name            = global_secondary_index.value.name
+      hash_key        = global_secondary_index.value.hash_key
+      range_key       = global_secondary_index.value.range_key
+      projection_type = global_secondary_index.value.projection_type
+    }
   }
 
   point_in_time_recovery {

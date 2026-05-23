@@ -80,10 +80,12 @@ The generator configures a `serve-local` target that starts a [DynamoDB Local](h
 
 This automatically:
 1. Pulls the DynamoDB Local Docker image (`docker-pull` target)
-2. Starts a Docker container on port 8000
-3. Creates a local table matching the deployed table schema
+2. Starts a Docker container
+3. Creates a local table with pre-defined indexes
 
-Set the `SERVE_LOCAL=true` environment variable in your consuming application to connect to the local instance instead of AWS.
+### Keeping Local GSIs in Sync
+
+When you add or remove a Global Secondary Index in your deployment construct, update `GLOBAL_SECONDARY_INDEXES` in `scripts/create-local-table.ts` to match. On the next `serve-local` run, the script will automatically add or remove indexes on the local table to reflect the new list.
 
 ### Data Modelling
 
@@ -135,29 +137,19 @@ For more details, see the [ElectroDB entity documentation](https://electrodb.dev
 
 The generated `src/client.ts` exports two key utilities:
 
-- `getDynamoDBClient()` — returns a cached singleton `DynamoDBClient`. When `SERVE_LOCAL=true`, connects to the local DynamoDB Local instance on port 8000; otherwise creates an AWS client using the default credential chain.
+- `getDynamoDBClient()` — returns a cached singleton `DynamoDBClient`. When `SERVE_LOCAL=true`, connects to the local DynamoDB Local instance; otherwise creates an AWS client using the default credential chain.
 - `resolveTableName()` — returns the DynamoDB table name. When `SERVE_LOCAL=true`, returns the local table name constant; otherwise fetches the name from AWS AppConfig using the `RUNTIME_CONFIG_APP_ID` environment variable and caches it for subsequent calls.
 
 ## Connecting to the Table
 
-In any TypeScript project, import utilities from your DynamoDB package and use them to create ElectroDB entities:
+In any TypeScript project, import entity factories from your DynamoDB package and use them directly:
 
 ```ts
-import { getDynamoDBClient, resolveTableName } from ':my-scope/my-table';
-import { Entity } from 'electrodb';
+import { createExampleEntity } from ':my-scope/my-table';
 
-const client = getDynamoDBClient();
-const tableName = await resolveTableName();
-
-const UserEntity = new Entity(
-  { /* entity definition */ },
-  { client, table: tableName },
-);
-
-const result = await UserEntity.query.primary({ id: '123' }).go();
+const entity = await createExampleEntity();
+const result = await entity.query.primary({ id: '123' }).go();
 ```
-
-`getDynamoDBClient()` returns a lazily-initialised, cached client. `resolveTableName()` caches the resolved table name after the first call, so both are efficient to call across warm Lambda invocations.
 
 ### Connection Generators
 
@@ -217,72 +209,9 @@ This provisions a DynamoDB table with:
 
 ### Granting Access
 
-To allow a Lambda function or other compute resource to read from and write to the table, grant the necessary permissions in your infrastructure.
+<Snippet name="connection/lambda-dynamodb-access" />
 
-<Infrastructure>
-<Fragment slot="cdk">
-
-Call `grantReadWriteData` on the table construct. This grants both the DynamoDB and KMS permissions required by the Lambda execution role:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this).build(),
-});
-
-Object.entries(api.integrations).forEach(([, integration]) => {
-  table.table.grantReadWriteData(integration.handler);
-});
-```
-
-:::note
-This example grants every handler in your API access. If only some handlers need access, configure them individually.
-:::
-</Fragment>
-<Fragment slot="terraform">
-
-Grant the Lambda execution role permission to access the DynamoDB table:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source = "../../common/terraform/src/app/dynamodb/my-table"
-}
-
-resource "aws_iam_role_policy" "dynamodb_access" {
-  role = module.my_api.lambda_role_name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem",
-          "dynamodb:Query",
-          "dynamodb:Scan",
-          "dynamodb:BatchGetItem",
-          "dynamodb:BatchWriteItem",
-        ]
-        Resource = [
-          module.my_table.table_arn,
-          "${module.my_table.table_arn}/index/*",
-        ]
-      },
-    ]
-  })
-}
-```
-
-</Fragment>
-</Infrastructure>
-
-Ensure your Lambda functions have the `RUNTIME_CONFIG_APP_ID` environment variable set so `resolveTableName()` can look up the table name at runtime.
+Ensure your Lambda functions have the RUNTIME_CONFIG_APP_ID environment variable set so resolveTableName() can look up the table name at runtime.
 
 ### Deletion Protection
 
@@ -374,6 +303,8 @@ module "my_table" {
 ### Encryption Key Rotation
 
 The KMS key used to encrypt the table has automatic key rotation enabled by default. Disable it if your security policy manages rotation externally.
+
+#### Disable Encryption Key Rotation
 
 <Infrastructure>
 <Fragment slot="cdk">

@@ -42,6 +42,23 @@ variable "enable_key_rotation" {
   default     = true
 }
 
+variable "global_secondary_indexes" {
+  description = "Global secondary indexes to create on the table. All key attributes must be of type string."
+  type = list(object({
+    name            = string
+    hash_key        = string
+    range_key       = string
+    projection_type = string
+  }))
+  default = []
+}
+
+locals {
+  gsi_attribute_names = distinct(flatten([
+    for gsi in var.global_secondary_indexes : [gsi.hash_key, gsi.range_key]
+  ]))
+}
+
 # Data sources
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
@@ -97,6 +114,24 @@ resource "aws_dynamodb_table" "table" {
   attribute {
     name = "sk"
     type = "S"
+  }
+
+  dynamic "attribute" {
+    for_each = toset(local.gsi_attribute_names)
+    content {
+      name = attribute.value
+      type = "S"
+    }
+  }
+
+  dynamic "global_secondary_index" {
+    for_each = var.global_secondary_indexes
+    content {
+      name            = global_secondary_index.value.name
+      hash_key        = global_secondary_index.value.hash_key
+      range_key       = global_secondary_index.value.range_key
+      projection_type = global_secondary_index.value.projection_type
+    }
   }
 
   point_in_time_recovery {
@@ -163,6 +198,20 @@ module "dynamodb" {
   point_in_time_recovery_enabled = var.point_in_time_recovery_enabled
   deletion_protection_enabled    = var.deletion_protection_enabled
   enable_key_rotation            = var.enable_key_rotation
+  global_secondary_indexes = [
+    {
+      name            = "gsi1pk-gsi1sk-index"
+      hash_key        = "gsi1pk"
+      range_key       = "gsi1sk"
+      projection_type = "ALL"
+    },
+    {
+      name            = "gsi2pk-gsi2sk-index"
+      hash_key        = "gsi2pk"
+      range_key       = "gsi2sk"
+      projection_type = "ALL"
+    },
+  ]
 }
 
 module "add_dynamodb_to_runtime_config" {
@@ -680,6 +729,7 @@ export abstract class DynamoDBTable extends Construct {
 exports[`ts#dynamodb generator > should generate the dynamodb project 2`] = `
 "import { Construct } from 'constructs';
 import { PACKAGE_NAME } from ':proj/my-table';
+import { AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import { DynamoDBTable, DynamoDBTableProps } from '../../core/dynamodb.js';
 
 export type MyTableProps = Omit<DynamoDBTableProps, 'runtimeConfigKey'>;
@@ -689,6 +739,20 @@ export class MyTable extends DynamoDBTable {
     super(scope, id, {
       ...props,
       runtimeConfigKey: PACKAGE_NAME,
+    });
+
+    this.table.addGlobalSecondaryIndex({
+      indexName: 'gsi1pk-gsi1sk-index',
+      partitionKey: { name: 'gsi1pk', type: AttributeType.STRING },
+      sortKey: { name: 'gsi1sk', type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
+    });
+
+    this.table.addGlobalSecondaryIndex({
+      indexName: 'gsi2pk-gsi2sk-index',
+      partitionKey: { name: 'gsi2pk', type: AttributeType.STRING },
+      sortKey: { name: 'gsi2sk', type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
     });
   }
 }
