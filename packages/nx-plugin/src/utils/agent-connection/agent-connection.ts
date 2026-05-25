@@ -109,7 +109,7 @@ export async function ensureTypeScriptAgentConnectionProject(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Re-export session-context helpers so strands-agent server entry points
+  // Re-export session-context helpers so agent server entry points
   // can set the current session on each inbound request without pulling in
   // the agent-connection internals.
   await addStarExport(
@@ -187,7 +187,7 @@ export async function ensurePythonAgentConnectionProject(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Re-export session-context helpers so strands-agent server entry points
+  // Re-export session-context helpers so agent server entry points
   // can set the current session on each inbound request without importing
   // the agent-connection internals directly.
   const moduleInitPath = joinPathFragments(moduleDir, '__init__.py');

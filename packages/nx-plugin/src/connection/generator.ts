@@ -15,15 +15,15 @@ import {
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
-import tsStrandsAgentMcpConnectionGenerator from '../ts/strands-agent/mcp-connection/generator';
-import tsStrandsAgentReactConnectionGenerator from '../ts/strands-agent/react-connection/generator';
-import tsStrandsAgentA2aConnectionGenerator from '../ts/strands-agent/a2a-connection/generator';
-import pyStrandsAgentMcpConnectionGenerator from '../py/strands-agent/mcp-connection/generator';
-import pyStrandsAgentReactConnectionGenerator from '../py/strands-agent/react-connection/generator';
-import pyStrandsAgentA2aConnectionGenerator from '../py/strands-agent/a2a-connection/generator';
+import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator';
+import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator';
+import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator';
+import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator';
+import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator';
+import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
 import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
 import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
-import tsRdbStrandsAgentConnectionGenerator from '../ts/rdb/strands-agent-connection/generator';
+import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
 import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator';
 import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
 
@@ -66,22 +66,22 @@ export interface ResolvedConnection {
  */
 const SUPPORTED_CONNECTIONS = [
   { source: 'ts#trpc-api', target: 'ts#rdb' },
-  { source: 'ts#strands-agent', target: 'ts#rdb' },
+  { source: 'ts#agent', target: 'ts#rdb' },
   { source: 'smithy', target: 'ts#rdb' },
   { source: 'ts#mcp-server', target: 'ts#rdb' },
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
-  { source: 'react', target: 'ts#strands-agent' },
-  { source: 'react', target: 'py#strands-agent' },
-  { source: 'ts#strands-agent', target: 'ts#mcp-server' },
-  { source: 'ts#strands-agent', target: 'py#mcp-server' },
-  { source: 'py#strands-agent', target: 'ts#mcp-server' },
-  { source: 'py#strands-agent', target: 'py#mcp-server' },
-  { source: 'ts#strands-agent', target: 'ts#strands-agent' },
-  { source: 'ts#strands-agent', target: 'py#strands-agent' },
-  { source: 'py#strands-agent', target: 'ts#strands-agent' },
-  { source: 'py#strands-agent', target: 'py#strands-agent' },
+  { source: 'react', target: 'ts#agent' },
+  { source: 'react', target: 'py#agent' },
+  { source: 'ts#agent', target: 'ts#mcp-server' },
+  { source: 'ts#agent', target: 'py#mcp-server' },
+  { source: 'py#agent', target: 'ts#mcp-server' },
+  { source: 'py#agent', target: 'py#mcp-server' },
+  { source: 'ts#agent', target: 'ts#agent' },
+  { source: 'ts#agent', target: 'py#agent' },
+  { source: 'py#agent', target: 'ts#agent' },
+  { source: 'py#agent', target: 'py#agent' },
 ] as const satisfies readonly Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -106,8 +106,8 @@ export interface ResolvedConnectionOptions {
 const CONNECTION_GENERATORS = {
   'ts#trpc-api -> ts#rdb': (tree, options) =>
     tsRdbTrpcConnectionGenerator(tree, options),
-  'ts#strands-agent -> ts#rdb': (tree, options) =>
-    tsRdbStrandsAgentConnectionGenerator(tree, options),
+  'ts#agent -> ts#rdb': (tree, options) =>
+    tsRdbAgentConnectionGenerator(tree, options),
   'smithy -> ts#rdb': (tree, options) =>
     tsRdbSmithyConnectionGenerator(tree, options),
   'ts#mcp-server -> ts#rdb': (tree, options) =>
@@ -127,26 +127,26 @@ const CONNECTION_GENERATORS = {
       frontendProjectName: options.sourceProject,
       smithyModelOrBackendProjectName: options.targetProject,
     }),
-  'react -> ts#strands-agent': (tree, options) =>
-    tsStrandsAgentReactConnectionGenerator(tree, options),
-  'react -> py#strands-agent': (tree, options) =>
-    pyStrandsAgentReactConnectionGenerator(tree, options),
-  'ts#strands-agent -> ts#mcp-server': (tree, options) =>
-    tsStrandsAgentMcpConnectionGenerator(tree, options),
-  'ts#strands-agent -> py#mcp-server': (tree, options) =>
-    tsStrandsAgentMcpConnectionGenerator(tree, options),
-  'py#strands-agent -> ts#mcp-server': (tree, options) =>
-    pyStrandsAgentMcpConnectionGenerator(tree, options),
-  'py#strands-agent -> py#mcp-server': (tree, options) =>
-    pyStrandsAgentMcpConnectionGenerator(tree, options),
-  'ts#strands-agent -> ts#strands-agent': (tree, options) =>
-    tsStrandsAgentA2aConnectionGenerator(tree, options),
-  'ts#strands-agent -> py#strands-agent': (tree, options) =>
-    tsStrandsAgentA2aConnectionGenerator(tree, options),
-  'py#strands-agent -> ts#strands-agent': (tree, options) =>
-    pyStrandsAgentA2aConnectionGenerator(tree, options),
-  'py#strands-agent -> py#strands-agent': (tree, options) =>
-    pyStrandsAgentA2aConnectionGenerator(tree, options),
+  'react -> ts#agent': (tree, options) =>
+    tsAgentReactConnectionGenerator(tree, options),
+  'react -> py#agent': (tree, options) =>
+    pyAgentReactConnectionGenerator(tree, options),
+  'ts#agent -> ts#mcp-server': (tree, options) =>
+    tsAgentMcpConnectionGenerator(tree, options),
+  'ts#agent -> py#mcp-server': (tree, options) =>
+    tsAgentMcpConnectionGenerator(tree, options),
+  'py#agent -> ts#mcp-server': (tree, options) =>
+    pyAgentMcpConnectionGenerator(tree, options),
+  'py#agent -> py#mcp-server': (tree, options) =>
+    pyAgentMcpConnectionGenerator(tree, options),
+  'ts#agent -> ts#agent': (tree, options) =>
+    tsAgentA2aConnectionGenerator(tree, options),
+  'ts#agent -> py#agent': (tree, options) =>
+    tsAgentA2aConnectionGenerator(tree, options),
+  'py#agent -> ts#agent': (tree, options) =>
+    pyAgentA2aConnectionGenerator(tree, options),
+  'py#agent -> py#agent': (tree, options) =>
+    pyAgentA2aConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>

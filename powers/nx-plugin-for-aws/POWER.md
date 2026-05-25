@@ -114,7 +114,7 @@ Add capabilities to existing projects:
 
 - `ts#lambda-function` / `py#lambda-function` — Add Lambda functions
 - `ts#mcp-server` / `py#mcp-server` — Add MCP servers
-- `ts#strands-agent` / `py#strands-agent` — Add Strands AI agents
+- `ts#agent` / `py#agent` — Add AI agents
 - `ts#nx-generator` — Add custom Nx generators
 
 ## Available Generators
@@ -127,7 +127,7 @@ Add capabilities to existing projects:
 | `py#lambda-function`    | Adds a lambda function to a python project                                                                                            |
 | `py#mcp-server`         | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models                                  |
 | `py#project`            | Generates a Python project                                                                                                            |
-| `py#strands-agent`      | Add a Strands Agent to a Python project                                                                                               |
+| `py#agent`              | Add an AI Agent to a Python project                                                                                                   |
 | `terraform#project`     | Generates a Terraform project                                                                                                         |
 | `ts#astro-docs`         | Generates an Astro + Starlight documentation site with localisation, snippets, blog, and optional automated documentation translation |
 | `ts#infra`              | Generates a cdk application                                                                                                           |
@@ -139,7 +139,7 @@ Add capabilities to existing projects:
 | `ts#react-website`      | Generates a React static website                                                                                                      |
 | `ts#react-website#auth` | Adds auth to an existing React website                                                                                                |
 | `ts#smithy-api`         | Create an API using Smithy and the Smithy TypeScript Server SDK                                                                       |
-| `ts#strands-agent`      | Add a Strands Agent to a TypeScript project                                                                                           |
+| `ts#agent`              | Add an AI Agent to a TypeScript project                                                                                               |
 | `ts#trpc-api`           | creates a trpc backend                                                                                                                |
 | `ts#rdb`                | Create a relational database project                                                                                                  |
 

@@ -1,0 +1,484 @@
+---
+title: "Agent de Strands Python"
+description: "Générer un Agent de Strands Python pour construire des agents IA avec des outils et déployer sur Amazon Bedrock AgentCore Runtime"
+generator: py#agent
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+
+Générer un agent [Agent](https://strandsagents.com/) en Python pour créer des agents IA avec des outils, et optionnellement le déployer sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Par défaut, le générateur utilise [FastAPI](https://fastapi.tiangolo.com/) pour exposer un serveur HTTP. Alternativement, vous pouvez choisir le protocole [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) pour l'interopérabilité avec d'autres agents compatibles A2A, ou le protocole [AG-UI](https://docs.ag-ui.com/) pour une intégration frontend directe via [CopilotKit](https://docs.copilotkit.ai/aws-strands).
+
+## Qu'est-ce que Strands ?
+
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) est un framework Python léger et prêt pour la production permettant de créer des agents IA. Principales fonctionnalités :
+
+- **Léger et personnalisable** : Boucle d'agent simple qui reste discrète
+- **Prêt pour la production** : Observabilité complète, traçage et options de déploiement évolutives
+- **Agnostique aux modèles et fournisseurs** : Supporte de nombreux modèles de différents fournisseurs
+- **Outils communautaires** : Ensemble puissant d'outils contribués par la communauté
+- **Support multi-agents** : Techniques avancées comme les équipes d'agents et agents autonomes
+- **Modes d'interaction flexibles** : Support conversationnel, streaming et non-streaming
+
+## Utilisation
+
+### Générer un agent Strands
+
+Vous pouvez générer un agent Strands en Python de deux manières :
+
+<RunGenerator generator="py#agent" />
+
+:::tip[Prérequis du projet]
+Utilisez d'abord le générateur <Link path="/guides/python-project">`py#project`</Link> pour créer un projet auquel ajouter votre agent Strands.
+:::
+
+### Options
+
+<GeneratorParameters generator="py#agent" />
+
+## Résultat du générateur
+
+Le générateur ajoutera les fichiers suivants à votre projet Python existant. Les fichiers générés dépendent du `protocol` choisi :
+
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP server layout">
+### Protocole HTTP (par défaut)
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (ou nom personnalisé si spécifié)
+        - \_\_init\_\_.py Initialisation du package Python
+        - init.py Configuration de l'application FastAPI avec middleware CORS et gestion des erreurs
+        - agent.py Définition principale de l'agent avec des outils exemples
+        - main.py Point d'entrée FastAPI pour Bedrock AgentCore Runtime
+        - Dockerfile Point d'entrée pour héberger votre agent (exclu si `computeType` est `None`)
+    - pyproject.toml Mis à jour avec les dépendances Strands
+    - project.json Mis à jour avec les cibles de service de l'agent
+</FileTree>
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'A2A' }} description="Strands A2A server layout">
+### Protocole A2A
+
+Le point d'entrée utilise le [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) au lieu de FastAPI :
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (ou nom personnalisé si spécifié)
+        - \_\_init\_\_.py Initialisation du package Python
+        - agent.py Définition principale de l'agent avec des outils exemples
+        - main.py Point d'entrée du serveur A2A
+        - Dockerfile Point d'entrée pour héberger votre agent (exclu si `computeType` est `None`)
+    - pyproject.toml Mis à jour avec les dépendances Strands
+    - project.json Mis à jour avec les cibles de service de l'agent
+</FileTree>
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / CopilotKit server layout">
+### Protocole AG-UI
+
+Le point d'entrée utilise l'intégration [ag-ui-strands](https://docs.ag-ui.com/), qui expose votre agent via le protocole AG-UI pour une intégration frontend directe avec [CopilotKit](https://docs.copilotkit.ai/aws-strands) :
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (ou nom personnalisé si spécifié)
+        - \_\_init\_\_.py Initialisation du package Python
+        - agent.py Définition principale de l'agent avec des outils exemples
+        - main.py Point d'entrée du serveur AG-UI utilisant ag-ui-strands
+        - Dockerfile Point d'entrée pour héberger votre agent (exclu si `computeType` est `None`)
+    - pyproject.toml Mis à jour avec les dépendances Strands et AG-UI
+    - project.json Mis à jour avec les cibles de service de l'agent
+</FileTree>
+
+:::tip[Connexion à un site web React]
+Les agents AG-UI peuvent être connectés à un frontend React en utilisant le <Link path="/guides/connection/react-agui">générateur `connection`</Link>, qui configurera les composants [CopilotKit](https://docs.copilotkit.ai/aws-strands) pour une expérience de chat enrichie.
+:::
+</OptionFilter>
+
+### Infrastructure
+
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="shared-constructs" />
+
+Pour le déploiement de votre agent Strands, les fichiers suivants sont générés :
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.ts Construct CDK pour déployer votre agent
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.tf Module pour déployer votre agent
+    - core
+      - agent-core
+        - runtime.tf Module générique pour le déploiement sur Bedrock AgentCore Runtime
+</FileTree>
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ computeType: 'None' }} description="No infrastructure is vended for computeType=None">
+Si vous avez sélectionné `None` pour `computeType`, aucun construct CDK ou module Terraform n'est généré — l'agent Strands ne peut être exécuté que localement.
+</OptionFilter>
+
+#### Architecture
+
+<Snippet name="agent/architecture" />
+
+## Utilisation de votre agent Strands
+
+### Ajout d'outils
+
+Les outils sont des fonctions que l'agent IA peut appeler pour effectuer des actions. Le framework Strands utilise une approche basée sur des décorateurs pour définir les outils.
+
+Vous pouvez ajouter de nouveaux outils dans le fichier `agent.py` :
+
+```python
+from strands import Agent, tool
+
+@tool
+def calculate_sum(numbers: list[int]) -> int:
+    """Calcule la somme d'une liste de nombres"""
+    return sum(numbers)
+
+@tool
+def get_weather(city: str) -> str:
+    """Obtient les informations météo d'une ville"""
+    # Votre intégration d'API météo ici
+    return f"Weather in {city}: Sunny, 25°C"
+
+# Ajoutez les outils à votre agent
+agent = Agent(
+    system_prompt="You are a helpful assistant with access to various tools.",
+    tools=[calculate_sum, get_weather],
+)
+```
+
+Le framework Strands gère automatiquement :
+- La validation des types via les annotations de type
+- La génération de schémas JSON pour l'appel d'outils
+- La gestion des erreurs et le formatage des réponses
+
+### Utilisation d'outils pré-définis
+
+Strands fournit une collection d'outils prêts à l'emploi via le package `strands-tools` :
+
+```python
+from strands_tools import current_time, http_request, file_read
+
+agent = Agent(
+    system_prompt="You are a helpful assistant.",
+    tools=[current_time, http_request, file_read],
+)
+```
+
+### Configuration du modèle
+
+Par défaut, les agents Strands utilisent Claude 4 Sonnet, mais vous pouvez personnaliser le fournisseur de modèle. Consultez la [documentation Strands sur les fournisseurs de modèles](https://strandsagents.com/docs/user-guide/concepts/model-providers/) pour les options de configuration :
+
+```python
+from strands import Agent
+from strands.models import BedrockModel
+
+# Créez un BedrockModel
+bedrock_model = BedrockModel(
+    model_id="anthropic.claude-sonnet-4-20250514-v1:0",
+    region_name="us-west-2",
+    temperature=0.3,
+)
+
+agent = Agent(model=bedrock_model)
+```
+
+### Utilisation des serveurs MCP
+
+Vous pouvez [ajouter des outils depuis des serveurs MCP](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) à votre agent Strands.
+
+Pour utiliser des serveurs MCP créés avec les générateurs <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, vous pouvez utiliser le <Link path="/guides/connection/py-agent-mcp">générateur `connection`</Link>.
+
+<RunGenerator generator="connection" />
+
+Consultez le <Link path="/guides/connection/py-agent-mcp">guide du générateur `connection`</Link> pour plus de détails sur la configuration de la connexion.
+
+Pour d'autres serveurs MCP, veuillez consulter la [documentation Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/).
+
+### Pour aller plus loin
+
+Pour un guide plus détaillé sur l'écriture d'agents Strands, consultez la [documentation Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/).
+
+## Protocole
+
+Le protocole serveur de votre agent détermine comment il communique. Toutes les options sont servies par [FastAPI](https://fastapi.tiangolo.com/) — le point d'entrée diffère :
+
+- **HTTP** (par défaut) : Un serveur FastAPI standard avec un point de terminaison `/invocations` personnalisé, CORS et streaming. Idéal pour les intégrations client personnalisées.
+- **A2A** : Le [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) monté sur une application FastAPI. Idéal lorsque votre agent doit être découvrable et invocable par d'autres agents compatibles A2A.
+- **AG-UI** : L'intégration [ag-ui-strands](https://docs.ag-ui.com/), qui expose le [protocole AG-UI](https://docs.ag-ui.com/) via SSE. Idéal pour une intégration frontend directe avec [CopilotKit](https://docs.copilotkit.ai/aws-strands) dans un site web React.
+
+Tous les protocoles exposent `/ping` pour le contrat de vérification de santé du runtime AgentCore. Les agents A2A écoutent sur le port `9000` ; les agents HTTP et AG-UI écoutent sur le port `8080`. Le Dockerfile et l'infrastructure générés sont configurés pour vous.
+
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP server details">
+## Serveur FastAPI (protocole HTTP)
+
+Le serveur HTTP généré inclut :
+- Configuration de l'application FastAPI avec middleware CORS
+- Middleware de gestion des erreurs
+- Génération du schéma OpenAPI
+- Point de terminaison de vérification de santé (`/ping`)
+- Point de terminaison d'invocation de l'agent (`/invocations`)
+
+### Personnalisation des entrées et sorties d'invocation avec Pydantic
+
+Le point de terminaison d'invocation de l'agent utilise des modèles [Pydantic](https://docs.pydantic.dev/) pour définir et valider les schémas de requête et de réponse. Vous pouvez personnaliser ces modèles dans `main.py` pour correspondre aux besoins de votre agent.
+
+#### Définition des modèles d'entrée
+
+Le modèle `InvokeInput` par défaut accepte un message.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    message: str
+```
+
+Vous pouvez étendre ce modèle pour inclure tous les champs supplémentaires dont votre agent a besoin.
+
+L'ID de session est extrait de l'en-tête HTTP `x-amzn-bedrock-agentcore-runtime-session-id`, conformément au [contrat de session Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html). Si l'en-tête n'est pas fourni, un UUID aléatoire est généré par défaut.
+
+:::caution[Organisation du code]
+Vous voudrez probablement abstraire tout ou partie de l'ID de session de l'appelant si les utilisateurs doivent invoquer votre agent directement. Par exemple, vous pouvez utiliser l'ID utilisateur authentifié comme partie de l'ID de session.
+
+Il est également à noter que selon votre cas d'usage, vous devrez peut-être implémenter une autorisation pour les sessions, par exemple en vous assurant que les utilisateurs ne peuvent accéder qu'à leurs propres sessions et non à celles d'autres utilisateurs.
+:::
+
+#### Définition des modèles de sortie
+
+Pour les réponses en streaming, le générateur fournit `JsonStreamingResponse` qui sérialise automatiquement les modèles Pydantic au format JSON Lines (`application/jsonl`). Ce format est compatible avec la spécification de streaming d'OpenAPI 3.2 et fonctionne parfaitement avec le client TypeScript généré.
+
+Par défaut, l'agent génère des objets `StreamChunk` contenant le texte de réponse de l'agent :
+
+```python
+class StreamChunk(BaseModel):
+    content: str
+```
+
+Vous pouvez personnaliser le modèle `StreamChunk` selon vos besoins :
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+```
+
+:::note[Limitation de streaming FastAPI]
+Notez que puisque FastAPI ne supporte pas actuellement la génération d'une spécification OpenAPI pour les réponses en streaming, nous devons explicitement définir le modèle de réponse pour chaque opération de streaming, c'est-à-dire :
+
+```python
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk)},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    return JsonStreamingResponse(handle_invoke(input))
+```
+:::
+
+Il existe une [demande de fonctionnalité ouverte pour un support natif dans FastAPI](https://github.com/fastapi/fastapi/discussions/14362).
+</OptionFilter>
+
+## SDK Python Bedrock AgentCore
+
+Le générateur inclut une dépendance au [SDK Python Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) pour les constantes `PingStatus`. Si vous le souhaitez, il est simple d'utiliser `BedrockAgentCoreApp` au lieu de FastAPI, mais notez que la sécurité des types est perdue.
+
+Vous trouverez plus de détails sur les capacités du SDK dans la [documentation ici](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
+
+:::note[Infrastructure as Code]
+Le générateur fournissant une infrastructure CDK ou Terraform pour déployer votre agent, vous n'avez pas besoin d'utiliser le `bedrock-agentcore-starter-toolkit` mentionné dans la documentation.
+:::
+
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A server details">
+## Serveur A2A (protocole A2A)
+
+Le fichier `main.py` généré monte `A2AServer.to_fastapi_app()` sur une application FastAPI parente qui expose également `/ping`. Lorsqu'il est déployé sur AgentCore, le point d'entrée résout l'ARN public du runtime depuis AppConfig et l'annonce dans la carte d'agent.
+
+La plupart des utilisateurs n'auront pas besoin de modifier ce fichier — éditez `agent.py` pour changer les outils ou le prompt système. Le serveur A2A remplit la carte d'agent (`/.well-known/agent-card.json`) à partir du `name` et de la `description` du constructeur `Agent`.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / CopilotKit server details">
+## Serveur AG-UI (protocole AG-UI)
+
+Le fichier `main.py` généré enveloppe votre `Agent` Strands dans un `ag_ui_strands.StrandsAgent` et crée une application FastAPI via `create_strands_app()`. L'application résultante expose un seul point de terminaison POST qui diffuse des événements [AG-UI](https://docs.ag-ui.com/) via Server-Sent Events (SSE), ainsi que `/ping` pour la vérification de santé du runtime AgentCore.
+
+La plupart des utilisateurs n'auront pas besoin de modifier ce fichier — éditez `agent.py` pour changer les outils ou le prompt système.
+
+:::tip[Connexion à un site web React]
+Les agents AG-UI sont conçus pour être consommés directement par un frontend. Utilisez le <Link path="/guides/connection/react-agui">générateur `connection`</Link> pour connecter votre site web React à l'agent avec un fournisseur [CopilotKit](https://docs.copilotkit.ai/aws-strands) et un client [AG-UI HttpAgent](https://docs.ag-ui.com/).
+:::
+</OptionFilter>
+
+## Exécution de votre agent Strands
+
+### Développement local
+
+Le générateur configure une cible nommée `<your-agent-name>-serve` qui démarre votre agent Strands localement pour le développement et les tests.
+
+<NxCommands commands={['agent-serve your-project']} />
+
+Cette commande utilise `uv run` pour exécuter votre agent Strands via le [SDK Python Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python).
+
+### Discuter avec votre agent
+
+Le générateur configure une cible Nx `<your-agent-name>-chat` qui dépend de `<your-agent-name>-serve-local`. Son exécution démarre l'agent localement et vous place dans un chat terminal interactif :
+
+<NxCommands commands={['run your-project:agent-chat']} />
+
+Pour les agents **HTTP**, le générateur émet également :
+
+- `scripts/<your-agent-name>_openapi.py` — un petit script qui exporte la spécification OpenAPI de l'agent
+- Une cible Nx `<your-agent-name>-openapi` qui l'exécute
+- Une cible Nx `<your-agent-name>-generate-client` qui produit un client TypeScript type-safe sous `scripts/<your-agent-name>/generated/`
+- `scripts/<your-agent-name>/chat.ts` — un wrapper léger autour du client généré
+
+Lorsque vous personnalisez la forme d'entrée de l'agent (par exemple, ajoutez de nouveaux champs à `InvokeInput`), mettez à jour `chat.ts` pour passer les nouveaux champs lors de l'invocation de l'agent et le reste fonctionne automatiquement.
+
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
+## Déploiement de votre agent Strands sur Bedrock AgentCore Runtime
+
+<Snippet name="agent/bedrock-deployment" parentHeading="Déploiement de votre agent Strands sur Bedrock AgentCore Runtime" />
+
+### Cibles Bundle et Docker
+
+Pour construire votre agent Strands pour Bedrock AgentCore Runtime, une cible `bundle` est ajoutée à votre projet, qui :
+
+- Exporte vos dépendances Python dans un fichier `requirements.txt` via `uv export`
+- Installe les dépendances pour la plateforme cible (`aarch64-manylinux_2_28`) via `uv pip install`
+
+Une cible `docker` spécifique à votre agent Strands est également ajoutée, qui copie le `Dockerfile` et les artefacts bundlés dans un répertoire de contexte Docker. Cela co-localise le `Dockerfile` avec la sortie construite, permettant à CDK de construire l'image Docker directement en utilisant `AgentRuntimeArtifact.fromAsset`.
+
+### Observabilité
+
+Votre agent est automatiquement configuré avec l'observabilité via [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), via l'auto-instrumentation dans votre `Dockerfile`.
+
+Vous pouvez trouver les traces dans la console CloudWatch en sélectionnant "GenAI Observability" dans le menu. Notez que pour voir les traces, vous devez activer [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+
+Pour plus de détails, consultez la [documentation AgentCore sur l'observabilité](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+</OptionFilter>
+
+## Invocation de votre agent Strands
+
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP invocation details">
+### Invoquer le serveur local
+
+Pour invoquer un agent exécuté localement via la cible `<your-agent-name>-serve`, vous pouvez envoyer une simple requête POST à `/invocations` sur le port où votre agent local s'exécute. Par exemple, avec `curl` :
+
+```bash
+curl -N -X POST http://localhost:8081/invocations \
+  -d '{"message": "what is 3 + 5?"}' \
+  -H "Content-Type: application/json"
+```
+
+:::note[Flag de streaming Curl]
+L'argument `-N` donné à `curl` désactive la mise en mémoire tampon du flux de sortie, vous permettant de voir la réponse en streaming en temps réel.
+:::
+
+### Invoquer l'agent déployé
+
+<Snippet name="agent/runtime-arn" parentHeading="Invoquer l'agent déployé" />
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'IAM' }}>
+#### Authentification IAM
+
+Pour l'authentification IAM, la requête doit être signée avec AWS Signature Version 4 (SigV4).
+
+```bash
+acurl <region> bedrock-agentcore -N -X POST \
+'https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+-d '{"message": "what is 3 + 5?"}' \
+-H 'Content-Type: application/json'
+```
+
+<Drawer title="curl avec Sigv4 activé" trigger="Cliquez ici pour plus de détails sur la configuration de la commande acurl ci-dessus">
+<Snippet name="tools/acurl" />
+</Drawer>
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'Cognito' }}>
+#### Authentification JWT / Cognito
+
+Pour l'authentification Cognito, passez le jeton d'accès Cognito dans l'en-tête `Authorization` :
+
+```bash
+curl -N -X POST 'https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+  -d '{"message": "what is 3 + 5?"}' \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access-token>"
+```
+
+Vous pouvez obtenir le jeton d'accès en utilisant la commande `cognito-idp admin-initiate-auth` de l'AWS CLI, par exemple :
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --region <region> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+
+#### Navigateur / Site web React
+
+Pour invoquer votre agent Strands depuis un site web React, vous pouvez utiliser le <Link path="/guides/connection/react-py-agent">générateur `connection`</Link>, qui configure automatiquement un client avec l'authentification appropriée (IAM ou Cognito).
+
+<RunGenerator generator="connection" />
+
+Consultez le <Link path="/guides/connection/react-py-agent">guide du générateur `connection`</Link> pour plus de détails sur la configuration de la connexion.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A delegation details">
+### Invocation d'un agent A2A en tant qu'outil
+
+Pour déléguer du travail de cet agent vers un agent A2A distant (soit <Link path="/guides/ts-agent">TypeScript</Link> soit <Link path="/guides/py-agent">Python</Link>), utilisez le <Link path="/guides/connection/py-agent-a2a">générateur `connection`</Link>. Il fournit un client authentifié SigV4 pour l'agent cible et transforme le `agent.py` de cet agent par AST pour enregistrer l'agent A2A distant en tant que délégué décoré avec `@tool`.
+
+<RunGenerator generator="connection" />
+
+Consultez le <Link path="/guides/connection/py-agent-a2a">guide du générateur `connection`</Link> pour plus de détails sur la configuration de la connexion.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / React connection details">
+### Invocation d'un agent AG-UI
+
+Pour invoquer votre agent AG-UI depuis un site web React, utilisez le <Link path="/guides/connection/react-agui">générateur `connection`</Link>, qui configure un client [CopilotKit](https://docs.copilotkit.ai/aws-strands) pour votre agent déployé avec l'authentification appropriée (IAM ou Cognito).
+
+<RunGenerator generator="connection" />
+
+Consultez le <Link path="/guides/connection/react-agui">guide du générateur `connection`</Link> pour plus de détails sur la configuration de la connexion.
+</OptionFilter>

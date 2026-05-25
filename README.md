@@ -140,7 +140,7 @@ cd my-project
 pnpm nx g @aws/nx-plugin:ts#trpc-api
 
 # Add a Strands AI agent (Python)
-pnpm nx g @aws/nx-plugin:py#strands-agent
+pnpm nx g @aws/nx-plugin:py#agent
 
 # Add a React website
 pnpm nx g @aws/nx-plugin:ts#react-website
@@ -169,13 +169,13 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `ts#infra`              | AWS CDK infrastructure project                                                                                    |
 | `ts#lambda-function`    | TypeScript Lambda with type-safe event sources                                                                    |
 | `ts#mcp-server`         | MCP server (TypeScript)                                                                                           |
-| `ts#strands-agent`      | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
+| `ts#agent`              | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
 | `ts#nx-generator`       | Nx generator scaffold                                                                                             |
 | `py#project`            | Python project (uv)                                                                                               |
 | `py#fast-api`           | FastAPI with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
 | `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |
 | `py#mcp-server`         | MCP server (Python)                                                                                               |
-| `py#strands-agent`      | [Strands Agent](https://strandsagents.com/) (Python)                                                              |
+| `py#agent`              | [Strands Agent](https://strandsagents.com/) (Python)                                                              |
 | `connection`            | Connect projects together (e.g. frontend to API)                                                                  |
 | `terraform#project`     | Terraform project                                                                                                 |
 | `license`               | Manage LICENSE files and source headers                                                                           |

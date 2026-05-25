@@ -151,13 +151,10 @@ describe('smoke test - cdk-deploy', () => {
       );
 
       // Agent
-      await invokeAgentCoreAgent(
-        findOutput('StrandsAgentArn'),
-        'Strands Agent',
-      );
+      await invokeAgentCoreAgent(findOutput('PyAgentArn'), 'Python Agent');
       await invokeTrpcAgentCoreAgent(
-        findOutput('TsStrandsAgentArn'),
-        'TypeScript Strands Agent',
+        findOutput('TsAgentArn'),
+        'TypeScript Agent',
       );
 
       // A2A agents — invoke via the A2A JSON-RPC message/send method over
@@ -176,22 +173,22 @@ describe('smoke test - cdk-deploy', () => {
       // Tool names follow the generator's convention: `ask<TargetClassName>`
       // for TS, `ask_<target_snake_case>` for Python.
       await invokeTrpcAgentCoreAgent(
-        findOutput('TsStrandsAgentArn'),
+        findOutput('TsAgentArn'),
         'TS Agent -> TS A2A (via askMyTsA2aAgent)',
         'Use the askMyTsA2aAgent tool to ask the remote agent what 5 * 4 is. Return just the answer.',
       );
       await invokeTrpcAgentCoreAgent(
-        findOutput('TsStrandsAgentArn'),
+        findOutput('TsAgentArn'),
         'TS Agent -> PY A2A (via askMyPyA2aAgent)',
         'Use the askMyPyA2aAgent tool to ask the remote agent what 11 + 2 is. Return just the answer.',
       );
       await invokeAgentCoreAgent(
-        findOutput('StrandsAgentArn'),
+        findOutput('PyAgentArn'),
         'PY Agent -> TS A2A (via ask_my_ts_a2a_agent)',
         'Use the ask_my_ts_a2a_agent tool to ask the remote agent what 9 - 3 is. Return just the answer.',
       );
       await invokeAgentCoreAgent(
-        findOutput('StrandsAgentArn'),
+        findOutput('PyAgentArn'),
         'PY Agent -> PY A2A (via ask_my_py_a2a_agent)',
         'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
       );

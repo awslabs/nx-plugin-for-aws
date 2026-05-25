@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // @ts-expect-error no types for virtual module
-import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/strands-agent/files/http/agent-core-trpc-client';
+import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/agent/files/http/agent-core-trpc-client';
 
 /**
  * Shared assertion helpers that the `cdk-deploy` and `terraform-deploy`

@@ -475,15 +475,15 @@ REACT_FASTAPI_BODY`,
 title: React to AG-UI Agent
 when:
   sourceType: react
-  targetType: py#strands-agent
+  targetType: py#agent
   protocol: AG-UI
 ---
 REACT_AGUI_BODY`,
-      'connection/react-py-strands-agent.mdx': `---
+      'connection/react-py-agent.mdx': `---
 title: React to Python Strands Agent
 when:
   sourceType: react
-  targetType: py#strands-agent
+  targetType: py#agent
   protocol:
     - HTTP
     - A2A
@@ -502,7 +502,7 @@ REACT_PY_STRANDS_BODY`,
         'connection/react-trpc',
         'connection/react-fastapi',
         'connection/react-agui',
-        'connection/react-py-strands-agent',
+        'connection/react-py-agent',
       ],
     };
 
@@ -552,7 +552,7 @@ REACT_PY_STRANDS_BODY`,
         undefined,
         {
           sourceType: 'react',
-          targetType: 'py#strands-agent',
+          targetType: 'py#agent',
           protocol: 'AG-UI',
         },
       );
@@ -566,7 +566,7 @@ REACT_PY_STRANDS_BODY`,
         undefined,
         {
           sourceType: 'react',
-          targetType: 'py#strands-agent',
+          targetType: 'py#agent',
           protocol: 'HTTP',
         },
       );
@@ -608,7 +608,7 @@ REACT_PY_STRANDS_BODY`,
         [connectionInfo],
         undefined,
         undefined,
-        { sourceType: 'react', targetType: 'py#strands-agent' },
+        { sourceType: 'react', targetType: 'py#agent' },
       );
       // With a partial selection we don't emit an Unsupported warning.
       expect(result.kind).toBe('ok');

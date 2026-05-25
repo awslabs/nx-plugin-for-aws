@@ -18,7 +18,7 @@ import fastApiReactGenerator from '../py/fast-api/react/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
 import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
-import tsRdbStrandsAgentConnectionGenerator from '../ts/rdb/strands-agent-connection/generator';
+import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
 
 // Mock the generators
 vi.mock('../trpc/react/generator', () => ({
@@ -41,7 +41,7 @@ vi.mock('../ts/rdb/trpc-connection/generator', () => ({
   default: vi.fn(),
 }));
 
-vi.mock('../ts/rdb/strands-agent-connection/generator', () => ({
+vi.mock('../ts/rdb/agent-connection/generator', () => ({
   default: vi.fn(),
 }));
 
@@ -1091,7 +1091,7 @@ describe('connection generator', () => {
     it('should disambiguate when sourceComponent and targetComponent are specified with multiple same-type components', async () => {
       // Reproduces the smoke test scenario: project has 2 agents and 2 MCP servers
       const connections: Connection[] = [
-        { source: 'ts#strands-agent', target: 'ts#mcp-server' },
+        { source: 'ts#agent', target: 'ts#mcp-server' },
       ];
 
       setupUnknownProject('ts-project', [
@@ -1106,11 +1106,11 @@ describe('connection generator', () => {
           name: 'hosted-mcp-server',
         },
         {
-          generator: 'ts#strands-agent',
+          generator: 'ts#agent',
           path: 'src/my-ts-agent',
           name: 'my-ts-agent',
         },
-        { generator: 'ts#strands-agent', path: 'src/agent', name: 'agent' },
+        { generator: 'ts#agent', path: 'src/agent', name: 'agent' },
       ]);
 
       // Without specifying components: ambiguous (2 agents × 2 MCP servers = 4 matches)
@@ -1134,7 +1134,7 @@ describe('connection generator', () => {
         connections,
       );
       expect(result.connection).toEqual({
-        source: 'ts#strands-agent',
+        source: 'ts#agent',
         target: 'ts#mcp-server',
       });
       expect(result.sourceComponent?.name).toBe('agent');
@@ -1692,10 +1692,10 @@ describe('connection generator', () => {
       expect(result.targetComponent).toBeUndefined();
     });
 
-    it('should resolve ts#strands-agent -> ts#rdb', async () => {
+    it('should resolve ts#agent -> ts#rdb', async () => {
       setupUnknownProject('agent-project', [
         {
-          generator: 'ts#strands-agent',
+          generator: 'ts#agent',
           path: 'src/my-agent',
           name: 'my-agent',
         },
@@ -1707,7 +1707,7 @@ describe('connection generator', () => {
         sourceComponent: 'my-agent',
       });
       expect(result.connection).toEqual({
-        source: 'ts#strands-agent',
+        source: 'ts#agent',
         target: 'ts#rdb',
       });
       expect(result.sourceComponent?.name).toBe('my-agent');

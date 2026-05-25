@@ -57,11 +57,11 @@ describe('smoke test - rdb', () => {
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#strands-agent --project=agents --name=http-agent --computeType=None --no-interactive`,
+          `generate @aws/nx-plugin:ts#agent --project=agents --name=http-agent --computeType=None --no-interactive`,
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#strands-agent --project=agents --name=a2a-agent --protocol=A2A --computeType=None --no-interactive`,
+          `generate @aws/nx-plugin:ts#agent --project=agents --name=a2a-agent --protocol=A2A --computeType=None --no-interactive`,
           opts,
         );
         await runCLI(

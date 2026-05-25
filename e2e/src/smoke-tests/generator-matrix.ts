@@ -84,7 +84,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-agent --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-agent --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
 
@@ -110,37 +110,37 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // TypeScript Strands agents — uninfra'd (None) and hosted (HTTP + A2A).
   await runCLI(
-    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --name=my-ts-agent --computeType=None --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agent --computeType=None --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
 
   // A2A protocol agents (TypeScript + Python).
   await runCLI(
-    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --name=my-ts-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
 
   // Cognito-auth variants to cover the A2A + Cognito permutation.
   await runCLI(
-    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
 
   // AG-UI protocol agent (Python only — TypeScript AG-UI is not yet supported).
   await runCLI(
-    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
 

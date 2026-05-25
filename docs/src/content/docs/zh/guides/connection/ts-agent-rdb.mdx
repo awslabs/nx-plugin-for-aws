@@ -1,0 +1,141 @@
+---
+title: TypeScript Agent 连接到关系数据库
+description: 将 TypeScript Agent 连接到关系数据库
+when:
+  sourceType: ts#agent
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` 生成器将 <Link path="guides/ts-agent">TypeScript Agent</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，使 Prisma 客户端在您的 agent 工厂内可用。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/ts-agent">`ts#agent`</Link> 项目
+2. 一个 <Link path="guides/ts-rdb">`ts#rdb`</Link> 项目
+
+## 用法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 Agent 项目作为源，选择您的关系数据库项目作为目标。如果项目包含多个 agent 组件，请指定 `sourceComponent` 以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器修改 agent 源目录中的两个文件：
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - agent.ts 在 `getAgent` 内获取 Prisma 客户端并可用于工具
+  - Dockerfile 安装 RDS CA 捆绑包以实现与 Aurora 的 SSL 连接
+
+</FileTree>
+
+此外，agent 的 `<agent-name>-serve-local` 目标会更新为依赖于数据库的 `serve-local` 目标。
+
+## 工作原理
+
+Prisma 客户端在 `getAgent()` 内实例化。由于 `ts#agent` 生成器为每个会话配置一个 Agent，因此客户端也会在会话的生命周期内重用。
+
+### Agent 定义
+
+`getAgent` 被更新为在其主体顶部导入并调用 Prisma getter：
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  // ...
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+
+## 多个数据库
+
+使用不同的目标再次运行生成器会将第二个数据库添加到第一个数据库旁边：
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getOtherDb } from ':my-scope/other-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  const otherDb = await getOtherDb();
+  // ...
+  return new Agent({ /* use both clients in tools */ });
+};
+```
+
+## 基础设施
+
+生成的 agent 构造实现了 `IGrantable` 和 `IConnectable`，因此您可以直接在构造上授予对数据库的网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` 打开安全组规则，以便 agent 运行时可以访问数据库端口。`grantConnect` 向 agent 的执行角色授予 IAM `rds-db:connect` 权限。
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的 agent 模块中，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+确保 agent 的执行角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>
+
+### 不使用 RDS Proxy 连接时的 SSL 要求
+
+<Snippet name="connection/agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+
+## 本地开发
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+这将启动 agent 和所有连接的数据库。`SERVE_LOCAL=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。
