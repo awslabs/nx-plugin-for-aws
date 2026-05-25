@@ -1,0 +1,141 @@
+---
+title: TypeScript Strands Agent a Database Relazionale
+description: Connetti un TypeScript Strands Agent a un Database Relazionale
+when:
+  sourceType: ts#agent
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Il generatore `connection` collega un <Link path="guides/ts-agent">TypeScript Strands Agent</Link> a un progetto <Link path="guides/ts-rdb">Relational Database</Link>, rendendo disponibile un client Prisma all'interno della tua agent factory.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati di avere:
+
+1. Un progetto <Link path="guides/ts-agent">`ts#agent`</Link>
+2. Un progetto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Utilizzo
+
+### Eseguire il Generatore
+
+<RunGenerator generator="connection" />
+
+Seleziona il tuo progetto Strands Agent come sorgente e il tuo progetto di database relazionale come destinazione. Se il progetto contiene più componenti agent, specifica `sourceComponent` per disambiguare.
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del Generatore
+
+Il generatore modifica due file nella directory sorgente del tuo agent:
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - agent.ts Client Prisma recuperato all'interno di `getAgent` e disponibile per i tools
+  - Dockerfile Bundle CA RDS installato per connessioni SSL ad Aurora
+
+</FileTree>
+
+Inoltre, il target `<agent-name>-serve-local` dell'agent viene aggiornato per dipendere dal target `serve-local` del database.
+
+## Come Funziona
+
+Il client Prisma viene istanziato all'interno di `getAgent()`. Poiché il generatore `ts#agent` configura un singolo Agent per sessione, il client viene anche riutilizzato per la durata della sessione.
+
+### Definizione dell'Agent
+
+`getAgent` viene aggiornato per importare e chiamare il getter Prisma all'inizio del suo corpo:
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  // ...
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+
+## Database Multipli
+
+Eseguire nuovamente il generatore con una destinazione diversa aggiunge il secondo database accanto al primo:
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getOtherDb } from ':my-scope/other-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  const otherDb = await getOtherDb();
+  // ...
+  return new Agent({ /* use both clients in tools */ });
+};
+```
+
+## Infrastruttura
+
+Il costrutto agent generato implementa `IGrantable` e `IConnectable`, quindi puoi concedere l'accesso di rete e IAM al database direttamente sul costrutto.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` apre la regola del security group in modo che il runtime dell'agent possa raggiungere la porta del database. `grantConnect` concede il permesso IAM `rds-db:connect` al ruolo di esecuzione dell'agent.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Passa gli output del modulo database nel tuo modulo agent in modo che possa raggiungere il database e leggere la sua configurazione di runtime:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Assicurati che il ruolo di esecuzione dell'agent abbia il permesso `rds-db:connect` e che il suo security group possa raggiungere il security group del database sulla porta del database.
+
+</Fragment>
+</Infrastructure>
+
+### Requisiti SSL per la Connessione Senza RDS Proxy
+
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+
+## Sviluppo Locale
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Questo avvia l'agent e tutti i database connessi. La variabile d'ambiente `SERVE_LOCAL=true` fa sì che ogni client Prisma si connetta al suo database Docker locale invece che ad Aurora.

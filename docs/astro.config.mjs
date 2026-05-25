@@ -328,7 +328,7 @@ export default defineConfig({
             { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },
             { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
-            { label: 'ts#strands-agent', link: '/guides/ts-strands-agent' },
+            { label: 'ts#agent', link: '/guides/ts-agent' },
             { label: 'py#project', link: '/guides/python-project' },
             { label: 'py#fast-api', link: '/guides/fastapi' },
             {
@@ -336,7 +336,7 @@ export default defineConfig({
               link: '/guides/python-lambda-function',
             },
             { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
-            { label: 'py#strands-agent', link: '/guides/py-strands-agent' },
+            { label: 'py#agent', link: '/guides/py-agent' },
             { label: 'terraform#project', link: '/guides/terraform-project' },
             {
               label: 'connection',
@@ -372,32 +372,32 @@ export default defineConfig({
                   link: '/guides/connection/react-smithy',
                 },
                 {
-                  label: 'React → Python Strands Agent',
-                  link: '/guides/connection/react-py-strands-agent',
+                  label: 'React → Python Agent',
+                  link: '/guides/connection/react-py-agent',
                 },
                 {
-                  label: 'React → TypeScript Strands Agent',
-                  link: '/guides/connection/react-ts-strands-agent',
+                  label: 'React → TypeScript Agent',
+                  link: '/guides/connection/react-ts-agent',
                 },
                 {
                   label: 'React → AG-UI Agent',
                   link: '/guides/connection/react-agui',
                 },
                 {
-                  label: 'Python Strands Agent → MCP Server',
-                  link: '/guides/connection/py-strands-agent-mcp',
+                  label: 'Python Agent → MCP Server',
+                  link: '/guides/connection/py-agent-mcp',
                 },
                 {
-                  label: 'TypeScript Strands Agent → MCP Server',
-                  link: '/guides/connection/ts-strands-agent-mcp',
+                  label: 'TypeScript Agent → MCP Server',
+                  link: '/guides/connection/ts-agent-mcp',
                 },
                 {
-                  label: 'Python Strands Agent → A2A Agent',
-                  link: '/guides/connection/py-strands-agent-a2a',
+                  label: 'Python Agent → A2A Agent',
+                  link: '/guides/connection/py-agent-a2a',
                 },
                 {
-                  label: 'TypeScript Strands Agent → A2A Agent',
-                  link: '/guides/connection/ts-strands-agent-a2a',
+                  label: 'TypeScript Agent → A2A Agent',
+                  link: '/guides/connection/ts-agent-a2a',
                 },
                 {
                   label: 'tRPC API → Relational Database',
@@ -408,8 +408,8 @@ export default defineConfig({
                   link: '/guides/connection/smithy-rdb',
                 },
                 {
-                  label: 'TypeScript Strands Agent → Relational Database',
-                  link: '/guides/connection/ts-strands-agent-rdb',
+                  label: 'TypeScript Agent → Relational Database',
+                  link: '/guides/connection/ts-agent-rdb',
                 },
                 {
                   label: 'MCP Server → Relational Database',

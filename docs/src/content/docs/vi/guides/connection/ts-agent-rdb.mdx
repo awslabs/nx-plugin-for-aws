@@ -1,0 +1,141 @@
+---
+title: TypeScript Strands Agent tới Cơ sở dữ liệu quan hệ
+description: Kết nối TypeScript Strands Agent với Cơ sở dữ liệu quan hệ
+when:
+  sourceType: ts#agent
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator `connection` kết nối một <Link path="guides/ts-agent">TypeScript Strands Agent</Link> với dự án <Link path="guides/ts-rdb">Relational Database</Link>, làm cho Prisma client có sẵn bên trong agent factory của bạn.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/ts-agent">`ts#agent`</Link>
+2. Một dự án <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án Strands Agent của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích. Nếu dự án chứa nhiều agent component, hãy chỉ định `sourceComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator sửa đổi hai file trong thư mục nguồn của agent của bạn:
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - agent.ts Prisma client được lấy bên trong `getAgent` và có sẵn cho các công cụ
+  - Dockerfile RDS CA bundle được cài đặt cho kết nối SSL tới Aurora
+
+</FileTree>
+
+Ngoài ra, target `<agent-name>-serve-local` của agent được cập nhật để phụ thuộc vào target `serve-local` của cơ sở dữ liệu.
+
+## Cách hoạt động
+
+Prisma client được khởi tạo bên trong `getAgent()`. Vì generator `ts#agent` cấu hình một Agent duy nhất cho mỗi phiên, client cũng được tái sử dụng trong suốt vòng đời của phiên.
+
+### Định nghĩa Agent
+
+`getAgent` được cập nhật để import và gọi Prisma getter ở đầu phần thân của nó:
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  // ...
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+
+## Nhiều cơ sở dữ liệu
+
+Chạy generator lần nữa với một đích khác sẽ thêm cơ sở dữ liệu thứ hai bên cạnh cơ sở dữ liệu đầu tiên:
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getOtherDb } from ':my-scope/other-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  const otherDb = await getOtherDb();
+  // ...
+  return new Agent({ /* use both clients in tools */ });
+};
+```
+
+## Cơ sở hạ tầng
+
+Construct agent được tạo ra triển khai `IGrantable` và `IConnectable`, vì vậy bạn có thể cấp quyền truy cập mạng và IAM cho cơ sở dữ liệu trực tiếp trên construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` mở quy tắc security group để agent runtime có thể truy cập cổng cơ sở dữ liệu. `grantConnect` cấp quyền IAM `rds-db:connect` cho execution role của agent.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền các output của database module vào agent module của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Đảm bảo execution role của agent có quyền `rds-db:connect` và security group của nó có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+
+</Fragment>
+</Infrastructure>
+
+### Yêu cầu SSL khi kết nối không qua RDS Proxy
+
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+
+## Phát triển cục bộ
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Lệnh này khởi động agent và tất cả các cơ sở dữ liệu được kết nối. Biến môi trường `SERVE_LOCAL=true` khiến mỗi Prisma client kết nối với cơ sở dữ liệu Docker cục bộ của nó thay vì Aurora.

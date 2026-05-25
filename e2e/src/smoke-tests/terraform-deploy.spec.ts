@@ -147,15 +147,12 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             'Python MCP Server',
           );
 
-          // Strands agents — direct invocation. The TypeScript strands agent
+          // Agents — direct invocation. The TypeScript agent
           // serves tRPC on AgentCore, so invoke it via the tRPC helper.
-          await invokeAgentCoreAgent(
-            outputs.strands_agent_arn,
-            'Strands Agent',
-          );
+          await invokeAgentCoreAgent(outputs.py_agent_arn, 'Python Agent');
           await invokeTrpcAgentCoreAgent(
-            outputs.ts_strands_agent_arn,
-            'TypeScript Strands Agent',
+            outputs.ts_agent_arn,
+            'TypeScript Agent',
           );
 
           // A2A (direct)
@@ -170,22 +167,22 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
 
           // A2A via delegate tool (host agent -> A2A target)
           await invokeTrpcAgentCoreAgent(
-            outputs.ts_strands_agent_arn,
+            outputs.ts_agent_arn,
             'TS Agent -> TS A2A (via askMyTsA2aAgent)',
             'Use the askMyTsA2aAgent tool to ask the remote agent what 5 * 4 is. Return just the answer.',
           );
           await invokeTrpcAgentCoreAgent(
-            outputs.ts_strands_agent_arn,
+            outputs.ts_agent_arn,
             'TS Agent -> PY A2A (via askMyPyA2aAgent)',
             'Use the askMyPyA2aAgent tool to ask the remote agent what 11 + 2 is. Return just the answer.',
           );
           await invokeAgentCoreAgent(
-            outputs.strands_agent_arn,
+            outputs.py_agent_arn,
             'PY Agent -> TS A2A (via ask_my_ts_a2a_agent)',
             'Use the ask_my_ts_a2a_agent tool to ask the remote agent what 9 - 3 is. Return just the answer.',
           );
           await invokeAgentCoreAgent(
-            outputs.strands_agent_arn,
+            outputs.py_agent_arn,
             'PY Agent -> PY A2A (via ask_my_py_a2a_agent)',
             'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
           );

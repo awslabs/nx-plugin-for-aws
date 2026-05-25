@@ -1,0 +1,191 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import {
+  generateFiles,
+  installPackagesTask,
+  joinPathFragments,
+  OverwriteStrategy,
+  Tree,
+  updateProjectConfiguration,
+} from '@nx/devkit';
+import { formatFilesInSubtree } from '../../../utils/format';
+import {
+  ComponentMetadata,
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
+import { ResolvedConnectionOptions } from '../../../connection/generator';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
+import { sortObjectKeys } from '../../../utils/object';
+import {
+  addPyAgentTargetToServeLocal,
+  openApiClientServeLocalDeps,
+} from './serve-local';
+import {
+  addAgUiReactConnection,
+  AgUiAuth,
+} from '../../../ts/react-website/agui/generator';
+
+export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
+
+export const pyAgentReactConnectionGenerator = async (
+  tree: Tree,
+  options: ResolvedConnectionOptions,
+) => {
+  const frontendProjectConfig = readProjectConfigurationUnqualified(
+    tree,
+    options.sourceProject,
+  );
+  const agentProjectConfig = readProjectConfigurationUnqualified(
+    tree,
+    options.targetProject,
+  );
+
+  const targetComponent: ComponentMetadata | undefined =
+    options.targetComponent;
+
+  // Extract agent metadata from the target component or project metadata
+  const metadata = agentProjectConfig.metadata as any;
+  const agentName = targetComponent?.name ?? 'agent';
+  const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
+  const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
+  const auth = targetComponent?.auth ?? metadata?.auth ?? 'IAM';
+  const protocol = targetComponent?.protocol ?? 'HTTP';
+
+  if (protocol === 'A2A') {
+    throw new Error(
+      `Cannot connect a React website to an A2A agent. ` +
+        `Consider generating an agent with the HTTP or AG-UI protocol instead.`,
+    );
+  }
+
+  let additionalServeLocalDeps: string[] = [];
+
+  if (protocol === 'AG-UI') {
+    await addAgUiReactConnection(tree, {
+      frontendProjectConfig,
+      agentName,
+      agentNameClassName,
+      auth: auth as AgUiAuth,
+    });
+  } else {
+    const moduleName = getModuleName(agentProjectConfig);
+    const agentNameSnakeCase = toSnakeCase(agentName);
+    const agentTargetPrefix = targetComponent?.name ? agentName : 'agent';
+
+    // Add OpenAPI spec generation script scoped to this agent
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files/agent'),
+      agentProjectConfig.root,
+      {
+        moduleName,
+        agentNameSnakeCase,
+      },
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
+
+    // Instrument the OpenAPI spec generation as a target on the agent project
+    const openApiTargetName = `${agentTargetPrefix}-openapi`;
+    const openApiDist = joinPathFragments(
+      'dist',
+      agentProjectConfig.root,
+      'openapi',
+      agentNameSnakeCase,
+    );
+    const specPath = joinPathFragments(openApiDist, 'openapi.json');
+
+    updateProjectConfiguration(tree, agentProjectConfig.name, {
+      ...agentProjectConfig,
+      targets: sortObjectKeys({
+        ...agentProjectConfig.targets,
+        [openApiTargetName]: {
+          cache: true,
+          executor: 'nx:run-commands',
+          outputs: [
+            `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,
+          ],
+          options: {
+            commands: [
+              `uv run python {projectRoot}/scripts/${agentNameSnakeCase}_openapi.py "dist/{projectRoot}/openapi/${agentNameSnakeCase}/openapi.json"`,
+            ],
+          },
+        },
+      }),
+    });
+
+    // Use the shared OpenAPI react client utility for hooks, providers, and build targets.
+    // Serve-local is handled separately below using the agent-specific serve-local target.
+    await addOpenApiReactClient(tree, {
+      apiName: agentNameClassName,
+      frontendProjectConfig,
+      backendProjectConfig: agentProjectConfig,
+      specBuildProject: agentProjectConfig,
+      specPath,
+      specBuildTargetName: `${agentProjectConfig.name}:${openApiTargetName}`,
+      auth,
+      port: agentPort,
+      isAgentRuntime: true,
+      skipServeLocal: true,
+    });
+
+    additionalServeLocalDeps = openApiClientServeLocalDeps(agentNameClassName);
+
+    // HTTP only — the AG-UI branch handles this inside addAgUiReactConnection.
+    // Agent constructs publish their runtime ARN to the 'agentcore' namespace
+    // by default, which isn't exposed to the website; patch them to also
+    // publish under 'connection' so the browser can read it.
+    await addAgentRuntimeToConnectionNamespace(tree, {
+      agentNameKebabCase: kebabCase(agentNameClassName),
+      agentNameClassName,
+    });
+  }
+
+  await addPyAgentTargetToServeLocal(
+    tree,
+    frontendProjectConfig.name,
+    agentProjectConfig.name,
+    {
+      agentName,
+      agentNameClassName,
+      port: agentPort,
+      targetComponent,
+      additionalDependencyTargets: additionalServeLocalDeps,
+    },
+  );
+
+  await addGeneratorMetricsIfApplicable(tree, [
+    PY_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+  ]);
+
+  await formatFilesInSubtree(tree);
+  return () => {
+    installPackagesTask(tree);
+  };
+};
+
+/**
+ * Determine the Python module name from the project configuration
+ */
+const getModuleName = (
+  projectConfig: ReturnType<typeof readProjectConfigurationUnqualified>,
+): string => {
+  if (projectConfig.sourceRoot) {
+    const sourceRootParts = projectConfig.sourceRoot.split('/');
+    return sourceRootParts[sourceRootParts.length - 1];
+  }
+  throw new Error(
+    `Could not determine sourceRoot for project ${projectConfig.name}`,
+  );
+};
+
+export default pyAgentReactConnectionGenerator;
