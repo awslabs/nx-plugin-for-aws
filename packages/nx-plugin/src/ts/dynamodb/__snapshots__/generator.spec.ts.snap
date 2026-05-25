@@ -228,16 +228,14 @@ module "add_dynamodb_to_runtime_config" {
 
 exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/create-local-table.ts 1`] = `
 "import {
-  AttributeDefinition,
   CreateTableCommand,
   DescribeTableCommand,
   DynamoDBClient,
   GlobalSecondaryIndexDescription,
-  KeySchemaElement,
-  Projection,
   ResourceInUseException,
   UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
+import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
 
 const [tableName, port] = process.argv.slice(2);
 const endpoint = \`http://localhost:\${port}\`;
@@ -250,42 +248,6 @@ const client = new DynamoDBClient({
     secretAccessKey: 'secretAccessKey',
   },
 });
-
-export type GSIDefinition = {
-  IndexName: string;
-  KeySchema: KeySchemaElement[];
-  Projection: Projection;
-  AttributeDefinitions: AttributeDefinition[];
-};
-
-// GSIs to synchronize on the local table at startup — indexes are added or removed to match this list.
-// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
-const GLOBAL_SECONDARY_INDEXES: GSIDefinition[] = [
-  {
-    IndexName: 'gsi1pk-gsi1sk-index',
-    KeySchema: [
-      { AttributeName: 'gsi1pk', KeyType: 'HASH' },
-      { AttributeName: 'gsi1sk', KeyType: 'RANGE' },
-    ],
-    Projection: { ProjectionType: 'ALL' },
-    AttributeDefinitions: [
-      { AttributeName: 'gsi1pk', AttributeType: 'S' },
-      { AttributeName: 'gsi1sk', AttributeType: 'S' },
-    ],
-  },
-  {
-    IndexName: 'gsi2pk-gsi2sk-index',
-    KeySchema: [
-      { AttributeName: 'gsi2pk', KeyType: 'HASH' },
-      { AttributeName: 'gsi2sk', KeyType: 'RANGE' },
-    ],
-    Projection: { ProjectionType: 'ALL' },
-    AttributeDefinitions: [
-      { AttributeName: 'gsi2pk', AttributeType: 'S' },
-      { AttributeName: 'gsi2sk', AttributeType: 'S' },
-    ],
-  },
-];
 
 const ensureTable = async (
   tblClient: DynamoDBClient,
@@ -323,7 +285,7 @@ const ensureTable = async (
 const ensureGlobalSecondaryIndexes = async (
   gsiClient: DynamoDBClient,
   gsiTableName: string,
-  desiredGSIs: GSIDefinition[],
+  desiredGSIs: { indexName: string; partitionKey: string; sortKey: string }[],
 ): Promise<void> => {
   const { Table } = await gsiClient.send(
     new DescribeTableCommand({ TableName: gsiTableName }),
@@ -332,7 +294,7 @@ const ensureGlobalSecondaryIndexes = async (
   const existingNames = new Set(
     existingGSIs.map((g: GlobalSecondaryIndexDescription) => g.IndexName!),
   );
-  const desiredNames = new Set(desiredGSIs.map((g) => g.IndexName));
+  const desiredNames = new Set(desiredGSIs.map((g) => g.indexName));
 
   for (const existing of existingGSIs) {
     if (!desiredNames.has(existing.IndexName!)) {
@@ -350,25 +312,31 @@ const ensureGlobalSecondaryIndexes = async (
   }
 
   for (const desired of desiredGSIs) {
-    if (existingNames.has(desired.IndexName)) {
-      console.log(\`GSI already exists: \${desired.IndexName}\`);
+    if (existingNames.has(desired.indexName)) {
+      console.log(\`GSI already exists: \${desired.indexName}\`);
     } else {
       await gsiClient.send(
         new UpdateTableCommand({
           TableName: gsiTableName,
-          AttributeDefinitions: desired.AttributeDefinitions,
+          AttributeDefinitions: [
+            { AttributeName: desired.partitionKey, AttributeType: 'S' },
+            { AttributeName: desired.sortKey, AttributeType: 'S' },
+          ],
           GlobalSecondaryIndexUpdates: [
             {
               Create: {
-                IndexName: desired.IndexName,
-                KeySchema: desired.KeySchema,
-                Projection: desired.Projection,
+                IndexName: desired.indexName,
+                KeySchema: [
+                  { AttributeName: desired.partitionKey, KeyType: 'HASH' },
+                  { AttributeName: desired.sortKey, KeyType: 'RANGE' },
+                ],
+                Projection: { ProjectionType: 'ALL' },
               },
             },
           ],
         }),
       );
-      console.log(\`Created GSI: \${desired.IndexName}\`);
+      console.log(\`Created GSI: \${desired.indexName}\`);
       await waitForTableActive(gsiClient, gsiTableName);
     }
   }
@@ -634,6 +602,30 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
 "
 `;
 
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/gsi.ts 1`] = `
+"export type GSI = {
+  indexName: string;
+  partitionKey: string;
+  sortKey: string;
+};
+
+// GSIs to synchronize on the local table at startup and provision in infrastructure.
+// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
+export const GLOBAL_SECONDARY_INDEXES: GSI[] = [
+  {
+    indexName: 'gsi1pk-gsi1sk-index',
+    partitionKey: 'gsi1pk',
+    sortKey: 'gsi1sk',
+  },
+  {
+    indexName: 'gsi2pk-gsi2sk-index',
+    partitionKey: 'gsi2pk',
+    sortKey: 'gsi2sk',
+  },
+];
+"
+`;
+
 exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/index.ts 1`] = `
 "export {
   PACKAGE_NAME,
@@ -644,6 +636,7 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
   LOCAL_TABLE_NAME,
 } from './constants.js';
 export { getDynamoDBClient, resolveTableName } from './client.js';
+export { GSI, GLOBAL_SECONDARY_INDEXES } from './gsi.js';
 export * from './entities/index.js';
 "
 `;
@@ -762,7 +755,7 @@ export abstract class DynamoDBTable extends Construct {
 
 exports[`ts#dynamodb generator > should generate the dynamodb project 2`] = `
 "import { Construct } from 'constructs';
-import { PACKAGE_NAME } from ':proj/my-table';
+import { PACKAGE_NAME, GLOBAL_SECONDARY_INDEXES } from ':proj/my-table';
 import { AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import { DynamoDBTable, DynamoDBTableProps } from '../../core/dynamodb.js';
 
@@ -775,19 +768,14 @@ export class MyTable extends DynamoDBTable {
       runtimeConfigKey: PACKAGE_NAME,
     });
 
-    this.table.addGlobalSecondaryIndex({
-      indexName: 'gsi1pk-gsi1sk-index',
-      partitionKey: { name: 'gsi1pk', type: AttributeType.STRING },
-      sortKey: { name: 'gsi1sk', type: AttributeType.STRING },
-      projectionType: ProjectionType.ALL,
-    });
-
-    this.table.addGlobalSecondaryIndex({
-      indexName: 'gsi2pk-gsi2sk-index',
-      partitionKey: { name: 'gsi2pk', type: AttributeType.STRING },
-      sortKey: { name: 'gsi2sk', type: AttributeType.STRING },
-      projectionType: ProjectionType.ALL,
-    });
+    for (const gsi of GLOBAL_SECONDARY_INDEXES) {
+      this.table.addGlobalSecondaryIndex({
+        indexName: gsi.indexName,
+        partitionKey: { name: gsi.partitionKey, type: AttributeType.STRING },
+        sortKey: { name: gsi.sortKey, type: AttributeType.STRING },
+        projectionType: ProjectionType.ALL,
+      });
+    }
   }
 }
 "
