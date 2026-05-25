@@ -69,10 +69,10 @@ const getUpdatedTypeScriptVersions = (
   const tsNcurcPath = join(tsDir, '.ncurc.cjs');
   cpSync(rootNcurcPath, tsNcurcPath);
 
-  // Run npx -y npm-check-updates --configFileName .ncurc.cjs inside ts dir
+  // Run pnpm dlx npm-check-updates --configFileName .ncurc.cjs inside ts dir
   console.log('Running npm-check-updates for TypeScript dependencies...');
   execSync(
-    `npx -y npm-check-updates@${TS_VERSIONS['npm-check-updates']} --configFileName .ncurc.cjs`,
+    `pnpm dlx npm-check-updates@${TS_VERSIONS['npm-check-updates']} --configFileName .ncurc.cjs`,
     {
       cwd: tsDir,
       stdio: 'inherit',
