@@ -36,8 +36,10 @@ import {
   addCloudscapeAuthMenu,
   addNoneAuthMenu,
   addShadcnAuthMenu,
+  deriveCognitoDomainPrefix,
 } from './utils';
 import { toProjectRelativePath } from '../../../utils/paths';
+import { getNpmScope } from '../../../utils/npm-scope';
 
 const readGritPattern = (name: string): string =>
   readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
@@ -62,9 +64,10 @@ export async function tsReactWebsiteAuthGenerator(
     );
   }
 
-  if (!options.cognitoDomain) {
-    throw new Error('A Cognito domain must be specified!');
-  }
+  const cognitoDomain =
+    options.cognitoDomain && options.cognitoDomain.length > 0
+      ? options.cognitoDomain
+      : deriveCognitoDomainPrefix(getNpmScope(tree), projectConfig.name!);
 
   await runtimeConfigGenerator(tree, {
     project: options.project,
@@ -79,7 +82,7 @@ export async function tsReactWebsiteAuthGenerator(
   await addIdentityInfra(tree, {
     iacProvider,
     allowSignup: options.allowSignup,
-    cognitoDomain: options.cognitoDomain,
+    cognitoDomain,
   });
 
   generateFiles(

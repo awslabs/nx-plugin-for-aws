@@ -425,7 +425,7 @@ describe('cognito-auth generator', () => {
     });
   });
 
-  it('should throw when cognito domain is empty', async () => {
+  it('should derive a cognito domain from the scope and project name when not provided', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
       'packages/test-project/src/main.tsx',
@@ -446,12 +446,117 @@ describe('cognito-auth generator', () => {
     `,
     );
 
-    await expect(() =>
-      tsReactWebsiteAuthGenerator(tree, {
-        ...options,
-        cognitoDomain: '',
+    // Use a scoped workspace and a fully-qualified project name
+    updateJson(tree, 'package.json', (packageJson) => ({
+      ...packageJson,
+      name: '@my-scope/source',
+    }));
+    tree.write(
+      'packages/test-project/project.json',
+      JSON.stringify({
+        name: '@my-scope/test-project',
+        sourceRoot: 'packages/test-project/src',
+        metadata: { uxProvider },
       }),
-    ).rejects.toThrow(/A Cognito domain must be specified/);
+    );
+
+    await tsReactWebsiteAuthGenerator(tree, {
+      ...options,
+      project: '@my-scope/test-project',
+      cognitoDomain: undefined,
+    });
+
+    const userIdentity = tree
+      .read('packages/common/constructs/src/core/user-identity.ts', 'utf-8')
+      ?.toString();
+    expect(userIdentity).toContain('my-scope-test-project');
+  });
+
+  it('should strip reserved words from a derived cognito domain', async () => {
+    // Setup main.tsx with RuntimeConfigProvider
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+
+        const App = () => <RouterProvider router={router} />;
+
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    // Use a scope that contains the reserved word "cognito" and a project name with "aws"
+    updateJson(tree, 'package.json', (packageJson) => ({
+      ...packageJson,
+      name: '@cognito-test/source',
+    }));
+    tree.write(
+      'packages/test-project/project.json',
+      JSON.stringify({
+        name: '@cognito-test/aws-project',
+        sourceRoot: 'packages/test-project/src',
+        metadata: { uxProvider },
+      }),
+    );
+
+    await tsReactWebsiteAuthGenerator(tree, {
+      ...options,
+      project: '@cognito-test/aws-project',
+      cognitoDomain: undefined,
+    });
+
+    const userIdentity = tree
+      .read('packages/common/constructs/src/core/user-identity.ts', 'utf-8')
+      ?.toString();
+    // Reserved words "cognito" and "aws" should be stripped, leaving collapsed hyphens
+    expect(userIdentity).not.toMatch(/domain: `[^`]*cognito[^`]*`/i);
+    expect(userIdentity).not.toMatch(/domain: `[^`]*aws[^`]*`/i);
+    expect(userIdentity).not.toMatch(/domain: `[^`]*amazon[^`]*`/i);
+    // The remaining derived prefix should still match the Cognito pattern.
+    const match = userIdentity?.match(/domain: `([^`$]+?)-\$\{/);
+    expect(match).toBeTruthy();
+    expect(match![1]).toMatch(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
+  });
+
+  it('should treat an empty cognito domain as not provided and derive a value', async () => {
+    // Setup main.tsx with RuntimeConfigProvider
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+
+        const App = () => <RouterProvider router={router} />;
+
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    await tsReactWebsiteAuthGenerator(tree, {
+      ...options,
+      cognitoDomain: '',
+    });
+
+    const userIdentity = tree
+      .read('packages/common/constructs/src/core/user-identity.ts', 'utf-8')
+      ?.toString();
+    // The default empty workspace uses scope "@proj/source"
+    expect(userIdentity).toContain('proj-test-project');
   });
 
   it('should add generator metric to app.ts', async () => {
