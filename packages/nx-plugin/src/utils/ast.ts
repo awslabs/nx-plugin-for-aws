@@ -4,6 +4,16 @@
  */
 import { Tree } from '@nx/devkit';
 import { QueryBuilder } from '@getgrit/gritql';
+import * as path from 'path';
+import { updateGitIgnore } from './git';
+
+const GRIT_DIR = '.grit';
+
+// Pin the gritql native library's "global" stdlib directory to <workspace>/.grit so it doesn't try to write to /usr/local/.grit (or wherever node's grandparent resolves to).
+const ensureGritDir = (tree: Tree) => {
+  process.env.GRIT_GLOBAL_DIR ??= path.join(tree.root, GRIT_DIR);
+  updateGitIgnore(tree, '.', (patterns) => [...patterns, GRIT_DIR]);
+};
 
 const assertFilePath = (tree: Tree, filePath: string) => {
   if (!tree.exists(filePath)) {
@@ -182,9 +192,11 @@ export const addStarExport = async (
  * Checks for both `export { Identifier }` and `export type Identifier = ...`.
  */
 export const hasExportDeclaration = async (
+  tree: Tree,
   source: string,
   identifierName: string,
 ): Promise<boolean> => {
+  ensureGritDir(tree);
   const patterns = [
     `\`export type ${identifierName} = $_\``,
     `\`export { ${identifierName} }\``,
@@ -216,6 +228,7 @@ export const applyGritQL = async (
   pattern: string,
 ): Promise<boolean> => {
   if (!tree.exists(filePath)) throw new Error(`No file at ${filePath}`);
+  ensureGritDir(tree);
   const source = tree.read(filePath)!.toString();
   const query = new QueryBuilder(pattern);
   const result = await query.applyToFile({ path: filePath, content: source });
@@ -240,6 +253,7 @@ export const matchGritQL = async (
   pattern: string,
 ): Promise<boolean> => {
   if (!tree.exists(filePath)) return false;
+  ensureGritDir(tree);
   const source = tree.read(filePath)!.toString();
   let matched = false;
   try {
