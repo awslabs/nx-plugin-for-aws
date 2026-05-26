@@ -14,7 +14,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Genera un TypeScript [Agent](https://strandsagents.com/) para construir agentes de IA con herramientas, y opcionalmente despliégalo en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Por defecto, el generador utiliza [tRPC](https://trpc.io/) sobre WebSocket para aprovechar el [soporte de streaming bidireccional de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) para comunicación en tiempo real y con seguridad de tipos. Alternativamente, puedes elegir el protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidad con otros agentes compatibles con A2A.
+Genera un TypeScript [Agent](https://strandsagents.com/) para construir agentes de IA con herramientas, y opcionalmente despliégalo en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Por defecto, el generador utiliza [tRPC](https://trpc.io/) sobre WebSocket para aprovechar el [soporte de streaming bidireccional de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) para comunicación en tiempo real y con seguridad de tipos. Alternativamente, puedes elegir el protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidad con otros agentes compatibles con A2A, o el protocolo [AG-UI](https://docs.ag-ui.com/) para integración directa con el frontend a través de [CopilotKit](https://docs.copilotkit.ai/aws-strands).
 
 ## ¿Qué es Strands?
 
@@ -83,6 +83,23 @@ El punto de entrada usa el [Strands A2A Express Server](https://strandsagents.co
 </FileTree>
 </OptionFilter>
 
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI SSE-over-POST server layout">
+### Protocolo AG-UI
+
+El punto de entrada usa [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) para exponer el agente a través del [protocolo AG-UI](https://docs.ag-ui.com/) (SSE sobre POST), compatible con [CopilotKit](https://docs.copilotkit.ai/aws-strands):
+
+<FileTree>
+  - your-project/
+    - src/
+      - agent/ (o nombre personalizado si se especifica)
+        - index.ts Punto de entrada del servidor AG-UI (Express + SSE)
+        - agent.ts Definición principal del agente con herramientas de ejemplo
+        - Dockerfile Punto de entrada para alojar tu agente (excluido cuando `computeType` está establecido en `None`)
+    - package.json Actualizado con dependencias de Strands y AG-UI
+    - project.json Actualizado con targets de servicio del agente
+</FileTree>
+</OptionFilter>
+
 ### Infraestructura
 
 <OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment">
@@ -131,6 +148,7 @@ El protocolo del servidor de tu agente determina cómo se comunica. Puedes elegi
 
 - **HTTP** (predeterminado): Usa [tRPC](https://trpc.io/) sobre WebSocket para comunicación en tiempo real y con seguridad de tipos. Mejor para integraciones de clientes personalizadas y control fino sobre la API del agente.
 - **A2A**: Usa el protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para comunicación estandarizada entre agentes. Mejor cuando tu agente necesita ser descubrible e invocable por otros agentes compatibles con A2A.
+- **AG-UI**: Usa el [protocolo AG-UI](https://docs.ag-ui.com/) (SSE sobre POST) a través de [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) para integración directa con el frontend con [CopilotKit](https://docs.copilotkit.ai/aws-strands). Mejor cuando deseas una interfaz de chat rica con streaming, visualización de llamadas a herramientas y gestión de estado.
 
 El protocolo se establece en la infraestructura CDK/Terraform, y el código de la aplicación se genera en consecuencia.
 
@@ -147,7 +165,7 @@ Dado que tRPC soporta procedimientos Query, Mutation y Subscription sobre WebSoc
 Las herramientas son funciones que el agente de IA puede llamar para realizar acciones. Puedes agregar nuevas herramientas en el archivo `agent.ts`:
 
 ```typescript
-import { Agent, tool } from '@agents/sdk';
+import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
 
 const letterCounter = tool({
@@ -183,9 +201,9 @@ El framework Strands maneja automáticamente:
 Por defecto, los agentes Strands usan Claude 4 Sonnet, pero puedes cambiar fácilmente entre proveedores de modelos:
 
 ```typescript
-import { Agent } from '@agents/sdk';
-import { BedrockModel } from '@agents/sdk/models/bedrock';
-import { OpenAIModel } from '@agents/sdk/models/openai';
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+import { OpenAIModel } from '@strands-agents/sdk/models/openai';
 
 // Use Bedrock
 const bedrockModel = new BedrockModel({
@@ -227,6 +245,16 @@ Para una guía más profunda sobre cómo escribir agentes Strands, consulta la [
 El `index.ts` generado monta el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en una aplicación Express para que el agente generado exponga los endpoints del protocolo A2A junto con un health check `/ping`. Cuando se despliega en AgentCore, el punto de entrada resuelve el ARN público del runtime desde AppConfig y lo anuncia en la tarjeta del agente.
 
 La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes A2A escuchan en el puerto `9000` (vs `8080` para HTTP), para lo cual el Dockerfile y la infraestructura generados ya están configurados.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI server details">
+## Servidor AG-UI (protocolo AG-UI)
+
+El `index.ts` generado envuelve tu `Agent` de Strands en un `StrandsAgent` de [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) y crea una aplicación Express a través de `createStrandsApp()`. La aplicación resultante expone un único endpoint POST que transmite eventos de [AG-UI](https://docs.ag-ui.com/) sobre Server-Sent Events (SSE), así como `/ping` para el health check del runtime de AgentCore y `/capabilities` anunciando los tipos de eventos soportados.
+
+Los agentes AG-UI están diseñados para ser consumidos directamente por un frontend. Usa el <Link path="/guides/connection/react-agui">generador `connection`</Link> para conectar tu sitio web React al agente con un proveedor de [CopilotKit](https://docs.copilotkit.ai/aws-strands) y un cliente [AG-UI HttpAgent](https://docs.ag-ui.com/).
+
+La mayoría de los usuarios no necesitarán modificar `index.ts` — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes AG-UI escuchan en el puerto `8080` (igual que HTTP), para lo cual el Dockerfile y la infraestructura generados ya están configurados.
 </OptionFilter>
 
 ## Ejecutar tu Agent
@@ -395,4 +423,14 @@ Para delegar trabajo desde este agente a un agente A2A remoto (ya sea <Link path
 <RunGenerator generator="connection" />
 
 Consulta la <Link path="/guides/connection/ts-agent-a2a">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / React connection details">
+### Invocar un Agente AG-UI
+
+Para invocar tu agente AG-UI desde un sitio web React, usa el <Link path="/guides/connection/react-agui">generador `connection`</Link>, que configura un cliente de [CopilotKit](https://docs.copilotkit.ai/aws-strands) configurado para tu agente desplegado con la autenticación correcta (IAM o Cognito).
+
+<RunGenerator generator="connection" />
+
+Consulta la <Link path="/guides/connection/react-agui">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.
 </OptionFilter>
