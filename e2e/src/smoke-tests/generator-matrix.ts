@@ -138,7 +138,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // AG-UI protocol agent (Python only — TypeScript AG-UI is not yet supported).
+  // AG-UI protocol agents (TypeScript and Python).
+  await runCLI(
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
@@ -163,6 +167,10 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   // Strands agent <-> MCP server connections.
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-ts-agui-agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive`,
     opts,
   );
   await runCLI(
@@ -192,9 +200,13 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // Website -> strands agent connections (TypeScript, Python HTTP, Python AG-UI/CopilotKit)
+  // Website -> strands agent connections (TypeScript HTTP, TypeScript AG-UI, Python HTTP, Python AG-UI/CopilotKit)
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=agent --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=my-ts-agui-agent --no-interactive`,
     opts,
   );
   await runCLI(

@@ -941,15 +941,87 @@ describe('ts#agent generator', () => {
     expect(projectConfig.metadata.components[0].name).toBe('agent');
   });
 
-  it('should throw for AG-UI protocol (not yet supported for TypeScript)', async () => {
-    await expect(
-      tsAgentGenerator(tree, {
-        project: 'test-project',
-        protocol: 'AG-UI',
-        computeType: 'None',
-        iacProvider: 'CDK',
-      }),
-    ).rejects.toThrow(/AG-UI protocol is not yet supported/);
+  it('should generate AG-UI agent with protocol option', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const indexContent = tree.read(
+      'apps/test-project/src/agent/index.ts',
+      'utf-8',
+    );
+    expect(indexContent).toContain('StrandsAgent');
+    expect(indexContent).toContain('createStrandsApp');
+    expect(indexContent).toContain('/invocations');
+    expect(indexContent).not.toContain('tRPC');
+    expect(indexContent).not.toContain('A2AExpressServer');
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.dependencies['@ag-ui/aws-strands']).toBeDefined();
+    expect(rootPackageJson.dependencies['@ag-ui/core']).toBeDefined();
+    expect(rootPackageJson.dependencies['@ag-ui/encoder']).toBeDefined();
+    expect(rootPackageJson.dependencies['express']).toBeDefined();
+    expect(rootPackageJson.dependencies['cors']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@types/cors']).toBeDefined();
+
+    // HTTP-only deps should not be present
+    expect(rootPackageJson.dependencies['@trpc/server']).toBeUndefined();
+    expect(rootPackageJson.dependencies['ws']).toBeUndefined();
+  });
+
+  it('should include protocol in component metadata for AG-UI', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.metadata.components[0].protocol).toBe('AG-UI');
+  });
+
+  it('should not vend a chat script for AG-UI — runs agent-chat-cli directly', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const chatTarget = projectConfig.targets['agent-chat'];
+    expect(chatTarget).toBeDefined();
+    expect(chatTarget.options.commands[0]).toMatch(
+      /^agent-chat-cli agui http:\/\/localhost:\d+\/invocations$/,
+    );
+    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+  });
+
+  it('should pass HTTP protocol to CDK infrastructure for AG-UI', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    const agentConstruct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstruct).toContain('ProtocolType.HTTP');
+    expect(agentConstruct).not.toContain('ProtocolType.A2A');
   });
 
   it('should generate HTTP chat CLI script and wire up the chat target', async () => {

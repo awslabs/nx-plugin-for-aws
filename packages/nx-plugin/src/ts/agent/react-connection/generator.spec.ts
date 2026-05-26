@@ -304,6 +304,50 @@ export function Main() {
       }),
     ).rejects.toThrow(/A2A/);
   });
+
+  it('should generate AG-UI connection with CopilotKit when protocol is AG-UI', async () => {
+    await tsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'ts#agent',
+        name: 'my-agui-agent',
+        path: 'src/my-agui-agent',
+        port: 8081,
+        rc: 'MyAguiAgent',
+        auth: 'IAM',
+        protocol: 'AG-UI',
+      },
+    });
+
+    // Should generate the AG-UI hook
+    expect(
+      tree.exists('apps/frontend/src/hooks/useAguiMyAguiAgent.tsx'),
+    ).toBeTruthy();
+
+    // Should generate the AguiProvider component
+    expect(
+      tree.exists('apps/frontend/src/components/AguiProvider.tsx'),
+    ).toBeTruthy();
+
+    // Should NOT generate the HTTP/tRPC client provider
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/MyAguiAgentAgentClientProvider.tsx',
+      ),
+    ).toBeFalsy();
+
+    // Should add AG-UI/CopilotKit dependencies
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
+    expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
+
+    // Should NOT add tRPC dependencies
+    expect(packageJson.dependencies['@trpc/client']).toBeUndefined();
+    expect(
+      packageJson.dependencies['@trpc/tanstack-react-query'],
+    ).toBeUndefined();
+  });
 });
 
 describe('ts strands agent react connection with real projects', () => {
@@ -372,5 +416,43 @@ describe('ts strands agent react connection with real projects', () => {
       'runtimeConfig.agentRuntimes.AgentProject',
     );
     expect(runtimeConfigContent).toContain('ws://localhost:8081/ws');
+  });
+
+  it('should use AG-UI local URL in serve-local for AG-UI agents', async () => {
+    // Generate a ts project for the agent
+    await tsProjectGenerator(tree, {
+      name: 'agent-project',
+      projectType: 'application',
+    });
+
+    // Generate an AG-UI agent
+    await tsAgentGenerator(tree, {
+      project: 'agent-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+    });
+
+    // Connect react to AG-UI agent
+    await tsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'ts#agent',
+        name: 'agent',
+        path: 'src/agent',
+        port: 8081,
+        rc: 'AgentProject',
+        protocol: 'AG-UI',
+      },
+    });
+
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    // AG-UI serve-local should use http://localhost:PORT/invocations
+    expect(runtimeConfigContent).toContain('http://localhost:8081/invocations');
+    expect(runtimeConfigContent).not.toContain('ws://localhost:8081/ws');
   });
 });

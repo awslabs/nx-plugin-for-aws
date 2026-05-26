@@ -68,14 +68,6 @@ export const tsAgentGenerator = async (
   const auth = options.auth ?? 'IAM';
   const protocol = options.protocol ?? 'HTTP';
 
-  if (protocol === 'AG-UI') {
-    throw new Error(
-      `The AG-UI protocol is not yet supported for TypeScript agents. ` +
-        `Use a Python agent with protocol='AG-UI' instead, or choose 'HTTP' or 'A2A' for TypeScript. ` +
-        `Track TypeScript support at https://github.com/strands-agents/sdk-typescript/issues/347`,
-    );
-  }
-
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `runWithSessionId` and propagate the AgentCore session
   // ID to any downstream MCP / A2A clients a later connection generator
@@ -165,6 +157,10 @@ export const tsAgentGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
+    // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
+    const infraProtocol: 'HTTP' | 'A2A' =
+      protocol === 'AG-UI' ? 'HTTP' : (protocol as 'HTTP' | 'A2A');
+
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
@@ -173,7 +169,7 @@ export const tsAgentGenerator = async (
       dockerOutputDir,
       iacProvider,
       auth,
-      serverProtocol: protocol,
+      serverProtocol: infraProtocol,
     });
   }
 
@@ -189,26 +185,34 @@ export const tsAgentGenerator = async (
       '@modelcontextprotocol/sdk',
       ...(protocol === 'A2A'
         ? (['express', '@a2a-js/sdk'] as const)
-        : ([
-            '@trpc/server',
-            '@trpc/client',
-            'ws',
-            'cors',
-            'aws4fetch',
-          ] as const)),
+        : protocol === 'AG-UI'
+          ? ([
+              '@ag-ui/aws-strands',
+              '@ag-ui/core',
+              '@ag-ui/encoder',
+              'express',
+              'cors',
+            ] as const)
+          : ([
+              '@trpc/server',
+              '@trpc/client',
+              'ws',
+              'cors',
+              'aws4fetch',
+            ] as const)),
     ]),
     withVersions([
       'tsx',
       '@types/node',
       'agent-chat-cli',
-      ...(protocol === 'A2A'
-        ? (['@types/express'] as const)
+      ...(protocol === 'A2A' || protocol === 'AG-UI'
+        ? (['@types/express', '@types/cors'] as const)
         : (['@types/ws', '@types/cors'] as const)),
     ]),
   );
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
-  // HTTP agents use port 8081+ to avoid conflict with VS Code server on 8080.
+  // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
@@ -239,11 +243,15 @@ export const tsAgentGenerator = async (
   const chatUrl =
     protocol === 'HTTP'
       ? `ws://localhost:${localDevPort}/ws`
-      : `http://localhost:${localDevPort}`;
+      : protocol === 'AG-UI'
+        ? `http://localhost:${localDevPort}/invocations`
+        : `http://localhost:${localDevPort}`;
   const chatCommand =
     protocol === 'HTTP'
       ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : `agent-chat-cli a2a ${chatUrl}`;
+      : protocol === 'AG-UI'
+        ? `agent-chat-cli agui ${chatUrl}`
+        : `agent-chat-cli a2a ${chatUrl}`;
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

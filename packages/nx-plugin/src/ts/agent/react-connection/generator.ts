@@ -27,6 +27,10 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addTsAgentTargetToServeLocal } from './serve-local';
 import { ResolvedConnectionOptions } from '../../../connection/generator';
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import {
+  addAgUiReactConnection,
+  AgUiAuth,
+} from '../../react-website/agui/generator';
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -59,8 +63,38 @@ export async function tsAgentReactConnectionGenerator(
   if (targetComponent?.protocol === 'A2A') {
     throw new Error(
       `Cannot connect a React website to an A2A agent. ` +
-        `Consider generating an agent with the HTTP protocol instead.`,
+        `Consider generating an agent with the HTTP or AG-UI protocol instead.`,
     );
+  }
+
+  if (targetComponent?.protocol === 'AG-UI') {
+    await addAgUiReactConnection(tree, {
+      frontendProjectConfig,
+      agentName,
+      agentNameClassName,
+      auth: auth as AgUiAuth,
+    });
+
+    await addTsAgentTargetToServeLocal(
+      tree,
+      frontendProjectConfig.name,
+      agentProjectConfig.name,
+      {
+        agentName,
+        agentNameClassName,
+        port: agentPort,
+        targetComponent,
+      },
+    );
+
+    await addGeneratorMetricsIfApplicable(tree, [
+      TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+    ]);
+
+    await formatFilesInSubtree(tree);
+    return () => {
+      installPackagesTask(tree);
+    };
   }
 
   // Ensure the agent project has a wildcard path entry in tsconfig.base.json
