@@ -4,10 +4,10 @@
  */
 import { Tree, readProjectConfiguration } from '@nx/devkit';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { tsDynamoDBStrandsAgentConnectionGenerator } from './generator';
+import { tsDynamoDBAgentConnectionGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 
-describe('ts#dynamodb strands-agent-connection generator', () => {
+describe('ts#dynamodb agent-connection generator', () => {
   let tree: Tree;
 
   const setupDynamoDBProject = (name = 'db') => {
@@ -47,7 +47,7 @@ describe('ts#dynamodb strands-agent-connection generator', () => {
     setupAgentProject();
     setupDynamoDBProject();
 
-    await tsDynamoDBStrandsAgentConnectionGenerator(tree, {
+    await tsDynamoDBAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
     });
@@ -59,7 +59,7 @@ describe('ts#dynamodb strands-agent-connection generator', () => {
     setupAgentProject('my-agent', 'custom-agent');
     setupDynamoDBProject();
 
-    await tsDynamoDBStrandsAgentConnectionGenerator(tree, {
+    await tsDynamoDBAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
       sourceComponent: { name: 'custom-agent' },
@@ -79,7 +79,7 @@ describe('ts#dynamodb strands-agent-connection generator', () => {
     );
     setupDynamoDBProject();
 
-    await tsDynamoDBStrandsAgentConnectionGenerator(tree, {
+    await tsDynamoDBAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
     });
@@ -92,11 +92,11 @@ describe('ts#dynamodb strands-agent-connection generator', () => {
     setupAgentProject();
     setupDynamoDBProject();
 
-    await tsDynamoDBStrandsAgentConnectionGenerator(tree, {
+    await tsDynamoDBAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
     });
-    await tsDynamoDBStrandsAgentConnectionGenerator(tree, {
+    await tsDynamoDBAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
     });

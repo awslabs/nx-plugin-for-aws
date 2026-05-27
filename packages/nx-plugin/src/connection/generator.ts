@@ -28,7 +28,7 @@ import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/g
 import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
 import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator';
 import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator';
-import tsDynamoDBStrandsAgentConnectionGenerator from '../ts/dynamodb/strands-agent-connection/generator';
+import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator';
 import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator';
 import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator';
 
@@ -125,7 +125,7 @@ const CONNECTION_GENERATORS = {
   'ts#trpc-api -> ts#dynamodb': (tree, options) =>
     tsDynamoDBTrpcConnectionGenerator(tree, options),
   'ts#agent -> ts#dynamodb': (tree, options) =>
-    tsDynamoDBStrandsAgentConnectionGenerator(tree, options),
+    tsDynamoDBAgentConnectionGenerator(tree, options),
   'smithy -> ts#dynamodb': (tree, options) =>
     tsDynamoDBSmithyConnectionGenerator(tree, options),
   'ts#mcp-server -> ts#dynamodb': (tree, options) =>

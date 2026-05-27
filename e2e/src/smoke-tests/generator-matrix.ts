@@ -238,7 +238,13 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iac inherited.
+  // DynamoDB table — iacProvider inherited.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#dynamodb --name=my-table --no-interactive`,
+    opts,
+  );
+
+  // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iacProvider inherited.
   await runCLI(
     `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
     opts,

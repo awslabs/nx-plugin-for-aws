@@ -1,0 +1,334 @@
+---
+title: DynamoDB
+description: Tạo một dự án DynamoDB
+generator: ts#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+Generator này tạo một dự án TypeScript mới được hỗ trợ bởi [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), sử dụng [ElectroDB](https://electrodb.dev/) để mô hình hóa thực thể an toàn kiểu. Nó tạo ra mã ứng dụng và cơ sở hạ tầng cần thiết để cung cấp và quản lý bảng DynamoDB bằng AWS CDK hoặc Terraform, với hỗ trợ thiết kế bảng đơn và phát triển cục bộ tích hợp sẵn thông qua DynamoDB Local.
+
+## Cách sử dụng
+
+### Tạo một dự án DynamoDB
+
+<RunGenerator generator="ts#dynamodb" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#dynamodb" />
+
+## Kết quả của Generator
+
+Generator tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+  - scripts
+    - create-local-table.ts Tạo bảng DynamoDB trong phiên bản DynamoDB Local cục bộ
+    - docker-pull.ts Tải image Docker của DynamoDB Local
+    - docker-start.ts Khởi động container Docker của DynamoDB Local
+  - src
+    - index.ts Điểm vào dự án và exports
+    - constants.ts Các hằng số phát triển cục bộ và khóa cấu hình runtime
+    - client.ts Singleton client DynamoDB và phân giải tên bảng
+    - entities
+      - example.ts Định nghĩa thực thể ElectroDB mẫu
+      - index.ts Exports thực thể
+  - project.json Cấu hình dự án và các target build
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dynamodb
+            - \<name>.ts Cơ sở hạ tầng cụ thể cho bảng của bạn
+        - core
+          - dynamodb.ts Construct bảng DynamoDB chung
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dynamodb
+            - \<name>.tf Module cụ thể cho bảng của bạn
+        - core
+          - dynamodb.tf Module DynamoDB chung
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+### Khởi động DynamoDB cục bộ
+
+Generator cấu hình một target `serve-local` để khởi động một phiên bản [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) thông qua Docker và tạo bảng:
+
+<NxCommands commands={['run <project-name>:serve-local']} />
+
+Điều này tự động:
+1. Tải image Docker của DynamoDB Local (target `docker-pull`)
+2. Khởi động một container Docker
+3. Tạo một bảng cục bộ với các chỉ mục được định nghĩa trước
+
+### Mô hình hóa dữ liệu
+
+Dự án được tạo sử dụng [ElectroDB](https://electrodb.dev/) để mô hình hóa thực thể an toàn kiểu trên một bảng DynamoDB đơn. Thêm hoặc cập nhật các tệp thực thể trong `src/entities/`, sử dụng thực thể mẫu được tạo làm điểm khởi đầu.
+
+Ví dụ định nghĩa thực thể:
+
+```ts title="packages/my-table/src/entities/user.ts"
+import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+export const createUserEntity = async () =>
+  new Entity(
+    {
+      model: {
+        entity: 'user',
+        version: '1',
+        service: 'MyTable',
+      },
+      attributes: {
+        id: { type: 'string', required: true },
+        email: { type: 'string', required: true },
+        createdAt: {
+          type: 'string',
+          default: () => new Date().toISOString(),
+          readOnly: true,
+        },
+        updatedAt: {
+          type: 'string',
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: { field: 'pk', composite: ['id'] },
+          sk: { field: 'sk', composite: [] },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+```
+
+Để biết thêm chi tiết, xem [tài liệu thực thể ElectroDB](https://electrodb.dev/en/modeling/entities/).
+
+### Sử dụng DynamoDB Client
+
+Tệp `src/client.ts` được tạo xuất hai tiện ích chính:
+
+- `getDynamoDBClient()` — trả về một singleton `DynamoDBClient` được lưu trong bộ nhớ cache. Khi `SERVE_LOCAL=true`, kết nối đến phiên bản DynamoDB Local cục bộ; nếu không, tạo một client AWS sử dụng chuỗi thông tin xác thực mặc định.
+- `resolveTableName()` — trả về tên bảng DynamoDB. Khi `SERVE_LOCAL=true`, trả về hằng số tên bảng cục bộ; nếu không, lấy tên từ AWS AppConfig sử dụng biến môi trường `RUNTIME_CONFIG_APP_ID` và lưu vào bộ nhớ cache cho các lần gọi tiếp theo.
+
+## Thêm/Xóa Global Secondary Indexes
+
+Bắt đầu bằng cách cập nhật `GLOBAL_SECONDARY_INDEXES` trong `src/gsi.ts` — đây là nguồn chân lý cho các định nghĩa GSI của bạn, và trong lần chạy `serve-local` tiếp theo, script sẽ tự động thêm hoặc xóa các chỉ mục trên bảng cục bộ để phản ánh danh sách mới. Khi sử dụng CDK, những thay đổi này cũng được tự động phản ánh trong bảng AWS của bạn trong lần triển khai tiếp theo.
+
+<OptionFilter when={{ iacProvider: 'Terraform' }}>
+  Không giống như CDK, các thay đổi đối với `src/gsi.ts` không được tự động phản ánh trong module Terraform của bạn. Bạn cũng phải cập nhật thủ công module Terraform của mình để thêm hoặc xóa các định nghĩa GSI tương ứng trước khi triển khai.
+</OptionFilter>
+
+## Kết nối đến bảng
+
+Trong bất kỳ dự án TypeScript nào, import các factory thực thể từ package DynamoDB của bạn và sử dụng chúng trực tiếp:
+
+```ts
+import { createExampleEntity } from ':my-scope/my-table';
+
+const entity = await createExampleEntity();
+const result = await entity.query.primary({ id: '123' }).go();
+```
+
+### Generators kết nối
+
+Đối với các loại dự án cụ thể, sử dụng generator `connection` để tự động kết nối các phụ thuộc phát triển cục bộ để DynamoDB Local khởi động tự động cùng với dự án của bạn:
+
+- <Link path="guides/connection/trpc-dynamodb">tRPC API → DynamoDB</Link>
+- <Link path="guides/connection/smithy-dynamodb">Smithy API → DynamoDB</Link>
+- <Link path="guides/connection/ts-agent-dynamodb">TypeScript Agent → DynamoDB</Link>
+- <Link path="guides/connection/ts-mcp-server-dynamodb">MCP Server → DynamoDB</Link>
+
+## Triển khai bảng của bạn
+
+Generator DynamoDB tạo cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Construct CDK được tạo trong `common/constructs`. Ví dụ sử dụng:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+Điều này cung cấp một bảng DynamoDB với:
+- `pk` (partition key) và `sk` (sort key), cả hai đều là kiểu `String`
+- Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
+- Mã hóa KMS do khách hàng quản lý với tự động xoay khóa
+- Khôi phục theo thời điểm được bật
+- Bảo vệ xóa được bật
+- Tên bảng được đăng ký trong Runtime Config dưới namespace `dynamodb` trong AWS AppConfig
+</Fragment>
+<Fragment slot="terraform">
+Module Terraform được tạo trong `common/terraform`. Ví dụ sử dụng:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+Điều này cung cấp một bảng DynamoDB với:
+- `pk` (partition key) và `sk` (sort key), cả hai đều là kiểu `String`
+- Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
+- Mã hóa KMS do khách hàng quản lý với tự động xoay khóa
+- Khôi phục theo thời điểm được bật
+- Bảo vệ xóa được bật
+- Tên bảng được đăng ký trong Runtime Config
+</Fragment>
+</Infrastructure>
+
+### Cấp quyền truy cập
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+Đảm bảo các hàm Lambda của bạn có biến môi trường RUNTIME_CONFIG_APP_ID được đặt để resolveTableName() có thể tra cứu tên bảng tại runtime.
+
+### Bảo vệ xóa
+
+Bảo vệ xóa được bật theo mặc định để ngăn chặn việc xóa bảng vô tình.
+
+#### Tắt bảo vệ xóa
+
+Tắt nó cho các môi trường mà việc xóa bảng được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước ngắn hạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Chế độ thanh toán
+
+Bảng mặc định sử dụng thanh toán theo yêu cầu (`PAY_PER_REQUEST`). Chuyển sang dung lượng được cung cấp cho các khối lượng công việc có thông lượng cao, có thể dự đoán.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Khôi phục theo thời điểm
+
+Khôi phục theo thời điểm được bật theo mặc định, cho phép bạn khôi phục bảng về bất kỳ thời điểm nào trong 35 ngày qua.
+
+#### Tắt khôi phục theo thời điểm
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Xoay khóa mã hóa
+
+Khóa KMS được sử dụng để mã hóa bảng có tự động xoay khóa được bật theo mặc định. Tắt nó nếu chính sách bảo mật của bạn quản lý việc xoay khóa bên ngoài.
+
+#### Tắt xoay khóa mã hóa
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

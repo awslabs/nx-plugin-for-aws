@@ -1,0 +1,69 @@
+---
+title: Lambda DynamoDB アクセス
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Lambda 関数が DynamoDB テーブルにアクセスできるようにするには、インフラストラクチャで必要な権限を付与します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+テーブルコンストラクトで `grantReadWriteData` を呼び出します。これにより、Lambda 実行ロールに必要な DynamoDB と KMS の両方の権限が付与されます：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this).build(),
+});
+
+Object.entries(api.integrations).forEach(([, integration]) => {
+  table.grantReadWriteData(integration.handler);
+});
+```
+
+:::note
+この例では、API 内のすべてのハンドラーにアクセス権を付与しています。一部のハンドラーのみがアクセスを必要とする場合は、個別に設定してください。
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+Lambda 実行ロールに DynamoDB テーブルへのアクセス権限を付与します：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_api.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>

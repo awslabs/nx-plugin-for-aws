@@ -490,8 +490,8 @@ export default defineConfig({
                   link: '/guides/connection/smithy-dynamodb',
                 },
                 {
-                  label: 'TypeScript Strands Agent → DynamoDB',
-                  link: '/guides/connection/ts-strands-agent-dynamodb',
+                  label: 'TypeScript Agent → DynamoDB',
+                  link: '/guides/connection/ts-agent-dynamodb',
                 },
                 {
                   label: 'MCP Server → DynamoDB',

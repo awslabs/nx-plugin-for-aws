@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree, updateProjectConfiguration } from '@nx/devkit';
-import { TsDynamoDBStrandsAgentConnectionGeneratorSchema } from './schema';
+import { TsDynamoDBAgentConnectionGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
   addDependencyToTargetIfNotPresent,
@@ -12,12 +12,12 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 
-export const TS_DYNAMODB_STRANDS_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
+export const TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export const tsDynamoDBStrandsAgentConnectionGenerator = async (
+export const tsDynamoDBAgentConnectionGenerator = async (
   tree: Tree,
-  options: TsDynamoDBStrandsAgentConnectionGeneratorSchema,
+  options: TsDynamoDBAgentConnectionGeneratorSchema,
 ): Promise<void> => {
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
@@ -40,8 +40,8 @@ export const tsDynamoDBStrandsAgentConnectionGenerator = async (
   }
 
   await addGeneratorMetricsIfApplicable(tree, [
-    TS_DYNAMODB_STRANDS_AGENT_CONNECTION_GENERATOR_INFO,
+    TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO,
   ]);
 };
 
-export default tsDynamoDBStrandsAgentConnectionGenerator;
+export default tsDynamoDBAgentConnectionGenerator;

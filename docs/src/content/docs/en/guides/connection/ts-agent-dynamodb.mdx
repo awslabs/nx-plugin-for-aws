@@ -1,0 +1,119 @@
+---
+title: TypeScript Agent to DynamoDB
+description: Connect a TypeScript Agent to a DynamoDB table
+when:
+  sourceType: ts#agent
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+The `connection` generator wires a <Link path="guides/ts-agent">TypeScript Agent</Link> to a <Link path="guides/ts-dynamodb">DynamoDB</Link> project, configuring local development so both start together automatically.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/ts-agent">`ts#agent`</Link> project
+2. A <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your Agent project as the source and your DynamoDB project as the target. If the project contains multiple agent components, specify `sourceComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator updates the agent's `<agent-name>-serve-local` target in `project.json` to depend on the DynamoDB project's `serve-local` target. No source files are modified.
+
+## Using DynamoDB in Agents
+
+Import entity factories from the DynamoDB package and use them inside your agent definition:
+
+```ts title="packages/my-service/src/my-agent/agent.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+
+export const getAgent = async () => {
+  // ...
+  return new Agent({
+    tools: [
+      tool({
+        name: 'list_examples',
+        description: 'List all example items',
+        func: async () => {
+          const entity = await createExampleEntity();
+          const result = await entity.scan.go();
+          return result.data;
+        },
+      }),
+    ],
+  });
+};
+```
+
+## Infrastructure
+
+To allow the agent's Lambda function to access the DynamoDB table, grant the necessary permissions in your infrastructure.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+table.grantReadWriteData(myAgent);
+```
+
+`grantReadWriteData` grants both the DynamoDB and KMS permissions to the agent's execution role.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_agent.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+Ensure the agent has the `RUNTIME_CONFIG_APP_ID` environment variable set so `resolveTableName()` can look up the table name at runtime.
+
+## Local Development
+
+<Snippet name="connection/dynamodb-local-development" />

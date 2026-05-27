@@ -1,0 +1,72 @@
+---
+title: Smithy API đến DynamoDB
+description: Kết nối Smithy API với bảng DynamoDB
+when:
+  sourceType: smithy
+  targetType: ts#dynamodb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Trình tạo `connection` kết nối một <Link path="guides/ts-smithy-api">Smithy API</Link> với dự án <Link path="guides/ts-dynamodb">DynamoDB</Link>, cấu hình phát triển cục bộ để cả hai khởi động cùng nhau một cách tự động.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> (backend TypeScript)
+2. Một dự án <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án backend Smithy API của bạn làm nguồn và dự án DynamoDB của bạn làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của trình tạo
+
+Trình tạo cập nhật `project.json` của Smithy API để thêm phụ thuộc từ target `serve-local` của nó đến target `serve-local` của dự án DynamoDB. Không có tệp nguồn nào bị sửa đổi.
+
+## Sử dụng DynamoDB trong các thao tác
+
+Import các factory entity từ gói DynamoDB và sử dụng chúng bên trong các triển khai thao tác của bạn:
+
+```ts title="packages/api/src/operations/list-examples.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+import {
+  ListExamplesOperationInput,
+  ListExamplesOperationOutput,
+} from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listExamples = async (
+  _input: ListExamplesOperationInput,
+  _ctx: ServiceContext,
+): Promise<ListExamplesOperationOutput> => {
+  const entity = await createExampleEntity();
+  const result = await entity.scan.go();
+  return { items: result.data };
+};
+```
+
+## Cơ sở hạ tầng
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+## Phát triển cục bộ
+
+Trình tạo cấu hình target `serve-local` của Smithy API để phụ thuộc vào target `serve-local` của dự án DynamoDB. Khi chạy:
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+sẽ tự động khởi động instance DynamoDB cục bộ cùng với API của bạn. Biến môi trường `SERVE_LOCAL=true` được đặt tự động, do đó `getDynamoDBClient()` và `resolveTableName()` kết nối đến instance DynamoDB Local cục bộ thay vì AWS.

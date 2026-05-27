@@ -7,7 +7,7 @@ import { ComponentMetadata } from '../../../utils/nx';
 /**
  * TypeScript types for options defined in schema.json
  */
-export interface TsDynamoDBStrandsAgentConnectionGeneratorSchema {
+export interface TsDynamoDBAgentConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   sourceComponent?: ComponentMetadata;

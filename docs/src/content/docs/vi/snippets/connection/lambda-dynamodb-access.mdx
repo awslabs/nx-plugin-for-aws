@@ -1,0 +1,69 @@
+---
+title: Truy cập Lambda DynamoDB
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Để cho phép các hàm Lambda truy cập bảng DynamoDB, hãy cấp các quyền cần thiết trong cơ sở hạ tầng của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Gọi `grantReadWriteData` trên table construct. Điều này cấp cả quyền DynamoDB và KMS cần thiết cho vai trò thực thi Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this).build(),
+});
+
+Object.entries(api.integrations).forEach(([, integration]) => {
+  table.table.grantReadWriteData(integration.handler);
+});
+```
+
+:::note
+Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn. Nếu chỉ một số handler cần quyền truy cập, hãy cấu hình chúng riêng lẻ.
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+Cấp quyền cho vai trò thực thi Lambda để truy cập bảng DynamoDB:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_api.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>

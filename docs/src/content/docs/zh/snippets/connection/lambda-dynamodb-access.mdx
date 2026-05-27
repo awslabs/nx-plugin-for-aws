@@ -1,0 +1,69 @@
+---
+title: Lambda DynamoDB 访问
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+要允许 Lambda 函数访问 DynamoDB 表，请在您的基础设施中授予必要的权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在表构造上调用 `grantReadWriteData`。这将授予 Lambda 执行角色所需的 DynamoDB 和 KMS 权限：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this).build(),
+});
+
+Object.entries(api.integrations).forEach(([, integration]) => {
+  table.grantReadWriteData(integration.handler);
+});
+```
+
+:::note
+此示例授予 API 中的每个处理程序访问权限。如果只有某些处理程序需要访问权限，请单独配置它们。
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+授予 Lambda 执行角色访问 DynamoDB 表的权限：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_api.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
