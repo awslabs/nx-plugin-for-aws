@@ -108,6 +108,7 @@ export default async function () {
         `  - "localhost"`,
         `npmPreapprovedPackages:`,
         `  - "@aws/*"`,
+        `  - "@ag-ui/*"`,
         `npmScopes:`,
         `  aws:`,
         `    npmRegistryServer: "${localRegistry}"`,
