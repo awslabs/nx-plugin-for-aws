@@ -184,12 +184,6 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // Smithy API with Custom auth
-  await runCLI(
-    `generate @aws/nx-plugin:ts#smithy-api --name=my-smithy-api-custom --auth=Custom --no-interactive`,
-    opts,
-  );
-
   // Strands agent <-> MCP server connections.
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive`,

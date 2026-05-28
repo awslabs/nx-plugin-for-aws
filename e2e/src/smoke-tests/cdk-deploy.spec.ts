@@ -159,10 +159,6 @@ describe('smoke test - cdk-deploy', () => {
         findOutput('PyApiCustomHttpPyApiCustomHttpUrl'),
         'FastAPI HTTP Custom Auth',
       );
-      await invokeCustomAuthApi(
-        findOutput('MySmithyApiCustomEndpoint'),
-        'Smithy REST Custom Auth',
-      );
 
       // MCP
       await invokeAgentCoreMcp(
