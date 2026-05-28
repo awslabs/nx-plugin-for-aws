@@ -4,7 +4,7 @@
  */
 import { runCLI, RunCmdOpts } from '../utils';
 
-const AUTH_TYPES = ['IAM', 'Cognito', 'None'] as const;
+const AUTH_TYPES = ['IAM', 'Cognito', 'Custom'] as const;
 const COMPUTE_TYPES = [
   'ServerlessApiGatewayRestApi',
   'ServerlessApiGatewayHttpApi',
