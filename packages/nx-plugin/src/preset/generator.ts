@@ -26,6 +26,7 @@ import { getNpmScope } from '../utils/npm-scope';
 import GeneratorsJson from '../../generators.json';
 import { PresetGeneratorSchema } from './schema';
 import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
 import * as enquirer from 'enquirer';
 import {
   ensureAwsNxPluginConfig,
@@ -123,12 +124,24 @@ export function isAmazonian(): boolean {
 }
 
 const setUpGitSecrets = (tree: Tree) => {
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'git-secrets-files'),
-    '.',
-    {},
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  const gitSecretsDir = joinPathFragments(
+    __dirname,
+    'git-secrets-files',
+    '.git-secrets',
+  );
+  const huskyDir = joinPathFragments(__dirname, 'git-secrets-files', '.husky');
+
+  tree.write(
+    '.git-secrets/git-secrets',
+    readFileSync(joinPathFragments(gitSecretsDir, 'git-secrets'), 'utf-8'),
+  );
+  tree.write(
+    '.git-secrets/setup.sh',
+    readFileSync(joinPathFragments(gitSecretsDir, 'setup.sh'), 'utf-8'),
+  );
+  tree.write(
+    '.husky/pre-commit',
+    readFileSync(joinPathFragments(huskyDir, 'pre-commit'), 'utf-8'),
   );
 
   updateJson(tree, 'package.json', (json) => ({
