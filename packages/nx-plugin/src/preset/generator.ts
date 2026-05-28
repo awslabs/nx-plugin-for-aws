@@ -122,9 +122,29 @@ export function isAmazonian(): boolean {
   }
 }
 
+const setUpGitSecrets = (tree: Tree) => {
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'git-secrets-files'),
+    '.',
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  updateJson(tree, 'package.json', (json) => ({
+    ...json,
+    scripts: {
+      ...json.scripts,
+      prepare: 'husky && bash .git-secrets/setup.sh || true',
+    },
+  }));
+
+  addDependenciesToPackageJson(tree, {}, withVersions(['husky']));
+};
+
 export const presetGenerator = async (
   tree: Tree,
-  { addTsPlugin, iacProvider }: PresetGeneratorSchema,
+  { addTsPlugin, iacProvider, gitSecrets }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   if (
     isAmazonian() &&
@@ -230,6 +250,10 @@ export const presetGenerator = async (
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
+
+  if (gitSecrets !== false) {
+    setUpGitSecrets(tree);
+  }
 
   await formatFilesInSubtree(tree);
   return () => {

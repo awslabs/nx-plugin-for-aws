@@ -421,6 +421,10 @@ export default defineConfig({
               label: 'license',
               link: '/guides/license',
             },
+            {
+              label: 'git-secrets',
+              link: '/guides/git-secrets',
+            },
           ],
         },
         {
