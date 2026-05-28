@@ -69,9 +69,6 @@ describe('smoke test - git-secrets', () => {
     // Run the prepare script to register AWS patterns and set up husky
     execSync('bash .git-secrets/setup.sh', { cwd: projectRoot });
 
-    // Make the git-secrets script executable
-    execSync('chmod +x .git-secrets/git-secrets', { cwd: projectRoot });
-
     // Write a file containing a fake AWS access key
     const secretFile = join(projectRoot, 'secret.ts');
     writeFileSync(secretFile, `export const KEY = "AKIAIOSFODNN7EXAMPLA";\n`);
@@ -112,9 +109,6 @@ describe('smoke test - git-secrets', () => {
     // Run the prepare script to register AWS patterns and set up husky
     execSync('bash .git-secrets/setup.sh', { cwd: projectRoot });
 
-    // Make the git-secrets script executable
-    execSync('chmod +x .git-secrets/git-secrets', { cwd: projectRoot });
-
     // Write a safe file
     const safeFile = join(projectRoot, 'safe.ts');
     writeFileSync(safeFile, `export const greeting = 'hello world';\n`);
@@ -147,7 +141,6 @@ describe('smoke test - git-secrets', () => {
     execSync('git config user.name "Test"', { cwd: projectRoot });
 
     execSync('bash .git-secrets/setup.sh', { cwd: projectRoot });
-    execSync('chmod +x .git-secrets/git-secrets', { cwd: projectRoot });
 
     // Write a file containing the well-known AWS example key (should be allowed)
     const exampleFile = join(projectRoot, 'example.ts');
