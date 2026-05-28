@@ -1,0 +1,144 @@
+---
+title: 工作空间
+description: 工作空间预设生成器的参考文档
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+当您使用 `@aws/nx-plugin` 创建新工作空间时，预设生成器会设置一个 [Nx monorepo](https://nx.dev)，其中包含在 AWS 上构建的合理默认配置——包括 TypeScript、Prettier、工作空间布局和安全工具。
+
+## 创建工作空间
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### 选项
+
+| 参数 | 类型 | 默认值 | 描述 |
+|-----------|------|---------|-------------|
+| `iacProvider` | `CDK` \| `Terraform` | — | 基础设施即代码提供商偏好 |
+| `gitSecrets` | `boolean` | `true` | 配置 git-secrets 预提交钩子以防止提交 AWS 凭证 |
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+
+要选择退出 git-secrets 扫描：
+
+```sh
+pnpm create @aws/nx-workspace my-project --no-gitSecrets
+```
+
+## 工作空间结构
+
+<FileTree>
+  - packages/ 您的项目存放在这里
+  - .git-secrets/
+    - git-secrets 用于凭证扫描的内置 git-secrets bash 脚本
+    - setup.sh 在本地 git 配置中注册 AWS 凭证模式
+  - .husky/
+    - pre-commit 在每次提交前运行 git-secrets 扫描
+  - nx.json Nx 配置（目标、同步生成器、分析）
+  - package.json 脚本、devDependencies 和 prepare 钩子
+  - tsconfig.json 根 TypeScript 配置
+  - aws-nx-plugin.config.mts 插件配置（IaC 提供商、许可证等）
+</FileTree>
+
+## 常用命令
+
+### 构建
+
+构建工作空间中的所有项目：
+
+<PackageManagerShortCommand commands={["build"]} />
+
+构建单个项目：
+
+<NxCommands commands={['build <project-name>']} />
+
+### 代码检查
+
+检查并自动修复所有项目：
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### 测试
+
+在所有项目中运行测试：
+
+<NxCommands commands={['run-many --target test --all']} />
+
+### 开发服务器
+
+如果您有 React 网站，在本地启动它：
+
+<NxCommands commands={['serve <website-project>']} />
+
+启动所有本地开发服务器（网站 + 连接的 API）：
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### 同步
+
+同步 TypeScript 项目引用和其他生成的文件：
+
+<NxCommands commands={['sync']} />
+
+## Git Secrets
+
+新工作空间包含 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，在每次提交前扫描暂存文件中的 AWS 凭证模式。这可以防止意外提交访问密钥、秘密密钥和其他敏感值。
+
+### 工作原理
+
+<Steps>
+1. `prepare` 脚本在包安装后运行，它会初始化 husky git 钩子并在本地 git 配置中注册 AWS 凭证模式。
+
+2. 在每次 `git commit` 时，husky 预提交钩子会调用 git-secrets 来扫描暂存文件。
+
+3. 如果检测到与 AWS 凭证匹配的模式，提交将被阻止。
+</Steps>
+
+### 检测的模式
+
+- **AWS Access Key IDs** — `AKIA...`、`ASIA...` 和其他 IAM 密钥前缀
+- **AWS Secret Access Keys** — 带有 `SECRET_ACCESS_KEY` 标签的 40 字符 base64 字符串
+- **AWS Account IDs** — 带有 `ACCOUNT_ID` 标签的 12 位数字
+- **Bedrock API Keys** — 长期（`ABSK...`）和短期密钥
+- **Credentials file values** — 来自 `~/.aws/credentials` 的字面密钥值
+
+众所周知的示例密钥（例如 `AKIAIOSFODNN7EXAMPLE`）会自动加入白名单。
+
+### 允许误报
+
+```sh
+# 允许特定模式
+git config --add secrets.allowed 'my-pattern-here'
+```
+
+或者在仓库根目录添加一个 `.gitallowed` 文件（每行一个正则表达式）。
+
+一次性覆盖：
+
+```sh
+git commit --no-verify
+```
+
+### 要求
+
+- **Git** 必须在工作空间中初始化（`git init`）
+- **Bash** 必须在 PATH 中可用（在 Windows 上随 Git for Windows 一起提供）
+- 模式在 `prepare` 运行时注册——克隆后运行包管理器的安装命令以重新注册
+
+## 了解更多
+
+- [Nx 文档](https://nx.dev)
+- <Link path="get_started/quick-start">快速入门指南</Link>
+- <Link path="get_started/tutorials/dungeon-game/overview">地牢冒险教程</Link>

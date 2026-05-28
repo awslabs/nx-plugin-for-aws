@@ -1,0 +1,144 @@
+---
+title: Workspace
+description: Documentação de referência para o gerador de preset de workspace
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Quando você cria um novo workspace com `@aws/nx-plugin`, o gerador de preset configura um [monorepo Nx](https://nx.dev) com padrões sensatos para construir na AWS — incluindo TypeScript, Prettier, layout de workspace e ferramentas de segurança.
+
+## Criando um Workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### Opções
+
+| Parâmetro | Tipo | Padrão | Descrição |
+|-----------|------|---------|-------------|
+| `iacProvider` | `CDK` \| `Terraform` | — | Preferência de provedor de Infraestrutura como Código |
+| `gitSecrets` | `boolean` | `true` | Configurar hooks de pré-commit do git-secrets para prevenir o commit de credenciais AWS |
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+
+Para desativar a verificação do git-secrets:
+
+```sh
+pnpm create @aws/nx-workspace my-project --no-gitSecrets
+```
+
+## Estrutura do Workspace
+
+<FileTree>
+  - packages/ Seus projetos ficam aqui
+  - .git-secrets/
+    - git-secrets Script bash do git-secrets vendorizado para verificação de credenciais
+    - setup.sh Registra padrões de credenciais AWS na configuração local do git
+  - .husky/
+    - pre-commit Executa verificação do git-secrets antes de cada commit
+  - nx.json Configuração do Nx (targets, geradores de sincronização, analytics)
+  - package.json Scripts, devDependencies e hook prepare
+  - tsconfig.json Configuração raiz do TypeScript
+  - aws-nx-plugin.config.mts Configuração do plugin (provedor IaC, licença, etc.)
+</FileTree>
+
+## Comandos Comuns
+
+### Build
+
+Construir todos os projetos no workspace:
+
+<PackageManagerShortCommand commands={["build"]} />
+
+Construir um único projeto:
+
+<NxCommands commands={['build <project-name>']} />
+
+### Lint
+
+Fazer lint e corrigir automaticamente todos os projetos:
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### Test
+
+Executar testes em todos os projetos:
+
+<NxCommands commands={['run-many --target test --all']} />
+
+### Dev Server
+
+Se você tem um website React, inicie-o localmente:
+
+<NxCommands commands={['serve <website-project>']} />
+
+Para iniciar todos os servidores de desenvolvimento locais (website + APIs conectadas):
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### Sync
+
+Sincronizar referências de projeto TypeScript e outros arquivos gerados:
+
+<NxCommands commands={['sync']} />
+
+## Git Secrets
+
+Novos workspaces incluem hooks de pré-commit do [git-secrets](https://github.com/awslabs/git-secrets) que verificam arquivos preparados em busca de padrões de credenciais AWS antes de cada commit. Isso previne o commit acidental de chaves de acesso, chaves secretas e outros valores sensíveis.
+
+### Como Funciona
+
+<Steps>
+1. O script `prepare` é executado após a instalação do pacote, que inicializa os hooks git do husky e registra padrões de credenciais AWS na sua configuração local do git.
+
+2. A cada `git commit`, o hook de pré-commit do husky invoca o git-secrets para verificar os arquivos preparados.
+
+3. Se um padrão correspondente a uma credencial AWS for detectado, o commit é bloqueado.
+</Steps>
+
+### Padrões Detectados
+
+- **AWS Access Key IDs** — `AKIA...`, `ASIA...` e outros prefixos de chave IAM
+- **AWS Secret Access Keys** — strings base64 de 40 caracteres com rótulo `SECRET_ACCESS_KEY`
+- **AWS Account IDs** — números de 12 dígitos com rótulo `ACCOUNT_ID`
+- **Bedrock API Keys** — chaves de longa duração (`ABSK...`) e de curta duração
+- **Valores de arquivo de credenciais** — valores literais de chave de `~/.aws/credentials`
+
+Chaves de exemplo conhecidas (por exemplo, `AKIAIOSFODNN7EXAMPLE`) são automaticamente permitidas.
+
+### Permitindo Falsos Positivos
+
+```sh
+# Permitir um padrão específico
+git config --add secrets.allowed 'my-pattern-here'
+```
+
+Ou adicione padrões a um arquivo `.gitallowed` na raiz do repositório (uma regex por linha).
+
+Para uma substituição única:
+
+```sh
+git commit --no-verify
+```
+
+### Requisitos
+
+- **Git** deve estar inicializado no workspace (`git init`)
+- **Bash** deve estar disponível no PATH (vem com Git for Windows no Windows)
+- Padrões são registrados quando `prepare` é executado — execute o comando de instalação do seu gerenciador de pacotes após clonar para re-registrar
+
+## Saiba Mais
+
+- [Documentação do Nx](https://nx.dev)
+- <Link path="get_started/quick-start">Guia de Início Rápido</Link>
+- <Link path="get_started/tutorials/dungeon-game/overview">Tutorial Dungeon Adventure</Link>

@@ -1,0 +1,144 @@
+---
+title: Workspace
+description: Tài liệu tham khảo cho trình tạo preset workspace
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Khi bạn tạo một workspace mới với `@aws/nx-plugin`, trình tạo preset sẽ thiết lập một [Nx monorepo](https://nx.dev) với các cấu hình mặc định hợp lý để xây dựng trên AWS — bao gồm TypeScript, Prettier, bố cục workspace và các công cụ bảo mật.
+
+## Tạo Workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### Tùy chọn
+
+| Tham số | Kiểu | Mặc định | Mô tả |
+|-----------|------|---------|-------------|
+| `iacProvider` | `CDK` \| `Terraform` | — | Tùy chọn nhà cung cấp Infrastructure as Code |
+| `gitSecrets` | `boolean` | `true` | Cấu hình git-secrets pre-commit hooks để ngăn chặn commit thông tin xác thực AWS |
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+
+Để tắt quét git-secrets:
+
+```sh
+pnpm create @aws/nx-workspace my-project --no-gitSecrets
+```
+
+## Cấu trúc Workspace
+
+<FileTree>
+  - packages/ Các dự án của bạn nằm ở đây
+  - .git-secrets/
+    - git-secrets Script bash git-secrets được đóng gói để quét thông tin xác thực
+    - setup.sh Đăng ký các mẫu thông tin xác thực AWS trong cấu hình git cục bộ
+  - .husky/
+    - pre-commit Chạy quét git-secrets trước mỗi commit
+  - nx.json Cấu hình Nx (targets, sync generators, analytics)
+  - package.json Scripts, devDependencies và prepare hook
+  - tsconfig.json Cấu hình TypeScript gốc
+  - aws-nx-plugin.config.mts Cấu hình plugin (nhà cung cấp IaC, giấy phép, v.v.)
+</FileTree>
+
+## Các Lệnh Thông Dụng
+
+### Build
+
+Build tất cả các dự án trong workspace:
+
+<PackageManagerShortCommand commands={["build"]} />
+
+Build một dự án đơn lẻ:
+
+<NxCommands commands={['build <project-name>']} />
+
+### Lint
+
+Lint và tự động sửa tất cả các dự án:
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### Test
+
+Chạy test trên tất cả các dự án:
+
+<NxCommands commands={['run-many --target test --all']} />
+
+### Dev Server
+
+Nếu bạn có một website React, khởi động nó cục bộ:
+
+<NxCommands commands={['serve <website-project>']} />
+
+Để khởi động tất cả các dev server cục bộ (website + các API được kết nối):
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### Sync
+
+Đồng bộ hóa các tham chiếu dự án TypeScript và các tệp được tạo khác:
+
+<NxCommands commands={['sync']} />
+
+## Git Secrets
+
+Các workspace mới bao gồm [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks để quét các tệp đã staged tìm các mẫu thông tin xác thực AWS trước mỗi commit. Điều này ngăn chặn việc vô tình commit các access key, secret key và các giá trị nhạy cảm khác.
+
+### Cách Hoạt Động
+
+<Steps>
+1. Script `prepare` chạy sau khi cài đặt package, khởi tạo các husky git hooks và đăng ký các mẫu thông tin xác thực AWS trong cấu hình git cục bộ của bạn.
+
+2. Ở mỗi `git commit`, husky pre-commit hook gọi git-secrets để quét các tệp đã staged.
+
+3. Nếu phát hiện một mẫu khớp với thông tin xác thực AWS, commit sẽ bị chặn.
+</Steps>
+
+### Các Mẫu Được Phát Hiện
+
+- **AWS Access Key IDs** — `AKIA...`, `ASIA...`, và các tiền tố IAM key khác
+- **AWS Secret Access Keys** — Chuỗi base64 40 ký tự với nhãn `SECRET_ACCESS_KEY`
+- **AWS Account IDs** — Số 12 chữ số với nhãn `ACCOUNT_ID`
+- **Bedrock API Keys** — Key tồn tại lâu dài (`ABSK...`) và key tồn tại ngắn hạn
+- **Credentials file values** — Giá trị key theo nghĩa đen từ `~/.aws/credentials`
+
+Các key ví dụ nổi tiếng (ví dụ: `AKIAIOSFODNN7EXAMPLE`) được tự động đưa vào danh sách cho phép.
+
+### Cho Phép False Positives
+
+```sh
+# Cho phép một mẫu cụ thể
+git config --add secrets.allowed 'my-pattern-here'
+```
+
+Hoặc thêm các mẫu vào tệp `.gitallowed` ở thư mục gốc của repository (một regex mỗi dòng).
+
+Để ghi đè một lần:
+
+```sh
+git commit --no-verify
+```
+
+### Yêu Cầu
+
+- **Git** phải được khởi tạo trong workspace (`git init`)
+- **Bash** phải có sẵn trên PATH (đi kèm với Git for Windows trên Windows)
+- Các mẫu được đăng ký khi `prepare` chạy — chạy lệnh cài đặt của trình quản lý package sau khi clone để đăng ký lại
+
+## Tìm Hiểu Thêm
+
+- [Tài liệu Nx](https://nx.dev)
+- <Link path="get_started/quick-start">Hướng Dẫn Bắt Đầu Nhanh</Link>
+- <Link path="get_started/tutorials/dungeon-game/overview">Hướng Dẫn Dungeon Adventure</Link>

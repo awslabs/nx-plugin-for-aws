@@ -1,0 +1,144 @@
+---
+title: ワークスペース
+description: ワークスペースプリセットジェネレーターのリファレンスドキュメント
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`@aws/nx-plugin`で新しいワークスペースを作成すると、プリセットジェネレーターがAWS上での構築に適した合理的なデフォルト設定で[Nx monorepo](https://nx.dev)をセットアップします。TypeScript、Prettier、ワークスペースレイアウト、セキュリティツールなどが含まれます。
+
+## ワークスペースの作成
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### オプション
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|------|---------|-------------|
+| `iacProvider` | `CDK` \| `Terraform` | — | Infrastructure as Codeプロバイダーの選択 |
+| `gitSecrets` | `boolean` | `true` | AWSクレデンシャルのコミットを防ぐためのgit-secretsプリコミットフックを設定 |
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+
+git-secretsスキャンをオプトアウトするには：
+
+```sh
+pnpm create @aws/nx-workspace my-project --no-gitSecrets
+```
+
+## ワークスペース構造
+
+<FileTree>
+  - packages/ プロジェクトはここに配置されます
+  - .git-secrets/
+    - git-secrets クレデンシャルスキャン用のベンダー化されたgit-secrets bashスクリプト
+    - setup.sh ローカルgit設定にAWSクレデンシャルパターンを登録
+  - .husky/
+    - pre-commit 各コミット前にgit-secretsスキャンを実行
+  - nx.json Nx設定（ターゲット、同期ジェネレーター、アナリティクス）
+  - package.json スクリプト、devDependencies、prepareフック
+  - tsconfig.json ルートTypeScript設定
+  - aws-nx-plugin.config.mts プラグイン設定（IaCプロバイダー、ライセンスなど）
+</FileTree>
+
+## 一般的なコマンド
+
+### ビルド
+
+ワークスペース内のすべてのプロジェクトをビルド：
+
+<PackageManagerShortCommand commands={["build"]} />
+
+単一のプロジェクトをビルド：
+
+<NxCommands commands={['build <project-name>']} />
+
+### Lint
+
+すべてのプロジェクトをLintして自動修正：
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### テスト
+
+すべてのプロジェクトでテストを実行：
+
+<NxCommands commands={['run-many --target test --all']} />
+
+### 開発サーバー
+
+Reactウェブサイトがある場合、ローカルで起動：
+
+<NxCommands commands={['serve <website-project>']} />
+
+すべてのローカル開発サーバー（ウェブサイト + 接続されたAPI）を起動：
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### 同期
+
+TypeScriptプロジェクト参照やその他の生成ファイルを同期：
+
+<NxCommands commands={['sync']} />
+
+## Git Secrets
+
+新しいワークスペースには、各コミット前にステージングされたファイルをAWSクレデンシャルパターンでスキャンする[git-secrets](https://github.com/awslabs/git-secrets)プリコミットフックが含まれています。これにより、アクセスキー、シークレットキー、その他の機密情報を誤ってコミットすることを防ぎます。
+
+### 仕組み
+
+<Steps>
+1. `prepare`スクリプトはパッケージインストール後に実行され、huskyのgitフックを初期化し、ローカルgit設定にAWSクレデンシャルパターンを登録します。
+
+2. 各`git commit`時に、huskyのプリコミットフックがgit-secretsを呼び出してステージングされたファイルをスキャンします。
+
+3. AWSクレデンシャルに一致するパターンが検出された場合、コミットはブロックされます。
+</Steps>
+
+### 検出されるパターン
+
+- **AWS Access Key IDs** — `AKIA...`、`ASIA...`、その他のIAMキープレフィックス
+- **AWS Secret Access Keys** — `SECRET_ACCESS_KEY`ラベル付きの40文字のbase64文字列
+- **AWS Account IDs** — `ACCOUNT_ID`ラベル付きの12桁の数字
+- **Bedrock API Keys** — 長期間有効（`ABSK...`）および短期間有効なキー
+- **Credentials file values** — `~/.aws/credentials`からのリテラルキー値
+
+よく知られたサンプルキー（例：`AKIAIOSFODNN7EXAMPLE`）は自動的に許可リストに登録されます。
+
+### 誤検知の許可
+
+```sh
+# 特定のパターンを許可
+git config --add secrets.allowed 'my-pattern-here'
+```
+
+または、リポジトリルートに`.gitallowed`ファイルを追加してパターンを記述します（1行に1つの正規表現）。
+
+1回限りのオーバーライドの場合：
+
+```sh
+git commit --no-verify
+```
+
+### 要件
+
+- ワークスペースで**Git**が初期化されている必要があります（`git init`）
+- **Bash**がPATHで利用可能である必要があります（WindowsではGit for Windowsに同梱）
+- パターンは`prepare`実行時に登録されます — クローン後にパッケージマネージャーのインストールコマンドを実行して再登録してください
+
+## さらに詳しく
+
+- [Nxドキュメント](https://nx.dev)
+- <Link path="get_started/quick-start">クイックスタートガイド</Link>
+- <Link path="get_started/tutorials/dungeon-game/overview">ダンジョンアドベンチャーチュートリアル</Link>
