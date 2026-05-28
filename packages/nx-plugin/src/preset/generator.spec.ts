@@ -36,7 +36,11 @@ describe('preset generator', () => {
   });
 
   it('should run successfully', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      gitSecrets: false,
+    });
 
     snapshotTreeDir(tree, '.');
   });

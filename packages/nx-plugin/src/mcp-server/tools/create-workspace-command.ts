@@ -40,6 +40,11 @@ ${buildCreateNxWorkspaceCommand(packageManager, '.')} --no-interactive
 
 Note that this will prompt for an Infrastructure as Code provider (${IAC_PROVIDERS.join(', ')}).
 If you know the preferred option, pass ${IAC_PROVIDERS.map((iac) => `\`--iacProvider=${iac}\``).join(' or ')} to the above command to skip the prompt.
+
+Additional options:
+- \`--no-gitSecrets\`: Opt out of the default git-secrets pre-commit hook (prevents committing AWS credentials)
+
+For full details on workspace structure, common commands, and configuration, see: https://awslabs.github.io/nx-plugin-for-aws/en/guides/workspace/
   `,
         },
       ],

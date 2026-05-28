@@ -5,6 +5,7 @@
 import {
   TS_VERSIONS,
   PY_VERSIONS,
+  VENDORED_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
 import {
   mkdtempSync,
@@ -240,6 +241,56 @@ const writeReport = (changeGroups: ChangeGroup[]): void => {
   console.log('\n' + reportContent);
 };
 
+/**
+ * Fetches the latest git-secrets release tag from GitHub and updates
+ * the vendored script if a newer version is available.
+ */
+const updateGitSecrets = async (
+  tree: FsTree,
+): Promise<VersionChange | undefined> => {
+  const currentVersion = VENDORED_VERSIONS['git-secrets'];
+
+  // Get latest tag from GitHub API
+  const response = await fetch(
+    'https://api.github.com/repos/awslabs/git-secrets/tags?per_page=1',
+  );
+  const tags = (await response.json()) as { name: string }[];
+  const latestVersion = tags[0]?.name;
+
+  if (!latestVersion || latestVersion === currentVersion) {
+    console.log(`git-secrets is up to date (${currentVersion})`);
+    return undefined;
+  }
+
+  console.log(
+    `Updating git-secrets from ${currentVersion} to ${latestVersion}`,
+  );
+
+  // Fetch the script at the new tag
+  const scriptResponse = await fetch(
+    `https://raw.githubusercontent.com/awslabs/git-secrets/${latestVersion}/git-secrets`,
+  );
+  const scriptContent = await scriptResponse.text();
+
+  // Update the vendored script
+  const vendoredPath =
+    'packages/nx-plugin/src/preset/git-secrets-files/.git-secrets/git-secrets';
+  tree.write(vendoredPath, scriptContent);
+
+  // Update the version in versions.ts using GritQL
+  await applyGritQL(
+    tree,
+    'packages/nx-plugin/src/utils/versions.ts',
+    `\`'git-secrets': '${currentVersion}'\` => \`'git-secrets': '${latestVersion}'\``,
+  );
+
+  return {
+    name: 'git-secrets',
+    oldVersion: currentVersion,
+    newVersion: latestVersion,
+  };
+};
+
 const main = async () => {
   // Parse command line arguments
   const isDryRun = process.argv.includes('--dry-run');
@@ -280,6 +331,12 @@ const main = async () => {
       'PY_VERSIONS',
     );
 
+    // Update vendored git-secrets
+    const gitSecretsChange = await updateGitSecrets(tree);
+    const vendoredChanges: VersionChange[] = gitSecretsChange
+      ? [gitSecretsChange]
+      : [];
+
     const updatedShadcnTemplateFiles = refreshShadcnTemplates(tree, tmpDir);
 
     // Only apply changes if not a dry run
@@ -291,6 +348,9 @@ const main = async () => {
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
+      ...(vendoredChanges.length > 0
+        ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
+        : []),
       ...(updatedShadcnTemplateFiles.length > 0
         ? [
             {

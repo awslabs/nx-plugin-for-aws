@@ -168,3 +168,10 @@ export type IPyDepVersion = keyof typeof PY_VERSIONS;
  */
 export const withPyVersions = (deps: IPyDepVersion[]) =>
   deps.map((dep) => `${dep}${PY_VERSIONS[dep]}`);
+
+/**
+ * Versions for vendored tools
+ */
+export const VENDORED_VERSIONS = {
+  'git-secrets': '1.3.0',
+} as const;

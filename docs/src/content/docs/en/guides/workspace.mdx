@@ -1,0 +1,144 @@
+---
+title: Workspace
+description: Reference documentation for the workspace preset generator
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+When you create a new workspace with `@aws/nx-plugin`, the preset generator sets up an [Nx monorepo](https://nx.dev) with sensible defaults for building on AWS — including TypeScript, Prettier, workspace layout, and security tooling.
+
+## Creating a Workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `iacProvider` | `CDK` \| `Terraform` | — | Infrastructure as Code provider preference |
+| `gitSecrets` | `boolean` | `true` | Configure git-secrets pre-commit hooks to prevent committing AWS credentials |
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+
+To opt out of git-secrets scanning:
+
+```sh
+pnpm create @aws/nx-workspace my-project --no-gitSecrets
+```
+
+## Workspace Structure
+
+<FileTree>
+  - packages/ Your projects live here
+  - .git-secrets/
+    - git-secrets Vendored git-secrets bash script for credential scanning
+    - setup.sh Registers AWS credential patterns in local git config
+  - .husky/
+    - pre-commit Runs git-secrets scan before each commit
+  - nx.json Nx configuration (targets, sync generators, analytics)
+  - package.json Scripts, devDependencies, and prepare hook
+  - tsconfig.json Root TypeScript configuration
+  - aws-nx-plugin.config.mts Plugin configuration (IaC provider, license, etc.)
+</FileTree>
+
+## Common Commands
+
+### Build
+
+Build all projects in the workspace:
+
+<PackageManagerShortCommand commands={["build"]} />
+
+Build a single project:
+
+<NxCommands commands={['build <project-name>']} />
+
+### Lint
+
+Lint and auto-fix all projects:
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### Test
+
+Run tests across all projects:
+
+<NxCommands commands={['run-many --target test --all']} />
+
+### Dev Server
+
+If you have a React website, start it locally:
+
+<NxCommands commands={['serve <website-project>']} />
+
+To start all local dev servers (website + connected APIs):
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### Sync
+
+Synchronize TypeScript project references and other generated files:
+
+<NxCommands commands={['sync']} />
+
+## Git Secrets
+
+New workspaces include [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
+
+### How It Works
+
+<Steps>
+1. The `prepare` script runs after package install, which initializes husky git hooks and registers AWS credential patterns in your local git config.
+
+2. On each `git commit`, the husky pre-commit hook invokes git-secrets to scan staged files.
+
+3. If a pattern matching an AWS credential is detected, the commit is blocked.
+</Steps>
+
+### Detected Patterns
+
+- **AWS Access Key IDs** — `AKIA...`, `ASIA...`, and other IAM key prefixes
+- **AWS Secret Access Keys** — 40-character base64 strings with `SECRET_ACCESS_KEY` label
+- **AWS Account IDs** — 12-digit numbers with `ACCOUNT_ID` label
+- **Bedrock API Keys** — Long-lived (`ABSK...`) and short-lived keys
+- **Credentials file values** — Literal key values from `~/.aws/credentials`
+
+Well-known example keys (e.g., `AKIAIOSFODNN7EXAMPLE`) are automatically allowlisted.
+
+### Allowing False Positives
+
+```sh
+# Allow a specific pattern
+git config --add secrets.allowed 'my-pattern-here'
+```
+
+Or add patterns to a `.gitallowed` file at the repository root (one regex per line).
+
+For a one-time override:
+
+```sh
+git commit --no-verify
+```
+
+### Requirements
+
+- **Git** must be initialized in the workspace (`git init`)
+- **Bash** must be available on PATH (ships with Git for Windows on Windows)
+- Patterns are registered when `prepare` runs — run your package manager's install command after cloning to re-register
+
+## Learn More
+
+- [Nx documentation](https://nx.dev)
+- <Link path="get_started/quick-start">Quick Start Guide</Link>
+- <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link>

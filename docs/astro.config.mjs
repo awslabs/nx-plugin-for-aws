@@ -422,8 +422,8 @@ export default defineConfig({
               link: '/guides/license',
             },
             {
-              label: 'git-secrets',
-              link: '/guides/git-secrets',
+              label: 'workspace',
+              link: '/guides/workspace',
             },
           ],
         },
