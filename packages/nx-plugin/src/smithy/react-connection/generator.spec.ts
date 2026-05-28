@@ -375,7 +375,7 @@ export function Main() {
         ...config,
         metadata: {
           ...config.metadata,
-          auth: 'None',
+          auth: 'Custom',
         },
       }));
 
@@ -988,7 +988,7 @@ export function Main() {
       // Generate a smithy API using the real generator (creates both model and backend projects)
       await tsSmithyApiGenerator(tree, {
         name: 'TestApi',
-        auth: 'None',
+        auth: 'Custom',
         computeType: 'ServerlessApiGatewayRestApi',
         iacProvider: 'CDK',
       });

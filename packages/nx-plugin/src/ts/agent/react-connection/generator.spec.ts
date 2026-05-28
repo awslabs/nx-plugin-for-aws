@@ -209,7 +209,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'None',
+        auth: 'Custom',
       },
     });
 

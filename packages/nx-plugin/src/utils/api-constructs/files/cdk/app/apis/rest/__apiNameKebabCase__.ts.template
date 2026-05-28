@@ -22,6 +22,9 @@ import {
   <%_ if (auth === 'Cognito') { _%>
   CognitoUserPoolsAuthorizer,
   <%_ } _%>
+  <%_ if (auth === 'Custom') { _%>
+  TokenAuthorizer,
+  <%_ } _%>
 } from 'aws-cdk-lib/aws-apigateway';
 import { Aspects, Duration<%_ if (backend.type === 'fastapi') { _%>, Stack<%_ } _%> } from 'aws-cdk-lib';
 import {
@@ -75,6 +78,12 @@ export interface <%= apiNameClassName %>Props<
   identity: {
     userPool: IUserPool;
   };
+  <%_ } _%>
+  <%_ if (auth === 'Custom') { _%>
+  /**
+   * The Lambda function to use as the custom authorizer
+   */
+  authorizer: Function;
   <%_ } _%>
   /**
    * Whether to enable AWS WAFv2 with the default managed ruleset on the API's default stage.
@@ -186,6 +195,44 @@ export class <%= apiNameClassName %><
       },
     });
   };
+  <%_ if (auth === 'Custom') { _%>
+
+  /**
+   * Creates the default Lambda Authorizer function for this API.
+   *
+   * @param scope - The CDK construct scope
+   * @returns The authorizer Lambda function
+   */
+  public static defaultAuthorizer = (scope: Construct): Function => {
+    return new Function(scope, '<%= apiNameClassName %>Authorizer', {
+      <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.authorizerBundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      runtime: Runtime.PYTHON_3_14,
+      handler: '<%- backend.moduleName %>.authorizer.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      <%_ } _%>
+      timeout: Duration.seconds(10),
+      tracing: Tracing.ACTIVE,
+    });
+  };
+  <%_ } _%>
 
   constructor(
     scope: Construct,
@@ -202,8 +249,11 @@ export class <%= apiNameClassName %><
         authorizer: new CognitoUserPoolsAuthorizer(scope, '<%= apiNameClassName %>Authorizer', {
           cognitoUserPools: [props.identity.userPool],
         }),
-        <%_ } else if (auth === 'None') { _%>
-        authorizationType: AuthorizationType.NONE,
+        <%_ } else if (auth === 'Custom') { _%>
+        authorizationType: AuthorizationType.CUSTOM,
+        authorizer: new TokenAuthorizer(scope, '<%= apiNameClassName %>TokenAuthorizer', {
+          handler: props.authorizer,
+        }),
         <%_ } _%>
       },
       deployOptions: {
@@ -220,7 +270,7 @@ export class <%= apiNameClassName %><
             resources: ['execute-api:/*/OPTIONS/*'],
           }),
           <%_ } else { _%>
-          // Allow all callers to invoke the API in the resource policy<% if (auth === 'Cognito') { %>, since auth is handled by Cognito<% } %>
+          // Allow all callers to invoke the API in the resource policy<% if (auth === 'Cognito') { %>, since auth is handled by Cognito<% } else if (auth === 'Custom') { %>, since auth is handled by the Lambda Authorizer<% } %>
           new PolicyStatement({
             effect: Effect.ALLOW,
             principals: [new AnyPrincipal()],

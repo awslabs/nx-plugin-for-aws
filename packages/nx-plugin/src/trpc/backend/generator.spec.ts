@@ -402,12 +402,12 @@ describe('trpc backend generator', () => {
     ).toContain('HttpUserPoolAuthorizer');
   });
 
-  it('should generate with no auth for a REST API', async () => {
+  it('should generate with custom auth for a REST API', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
@@ -416,15 +416,16 @@ describe('trpc backend generator', () => {
 
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
-    ).toContain('AuthorizationType.NONE');
+    ).toContain('AuthorizationType.CUSTOM');
+    expect(tree.exists('apps/test-api/src/authorizer.ts')).toBe(true);
   });
 
-  it('should generate with no auth for an HTTP API', async () => {
+  it('should generate with custom auth for an HTTP API', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'None',
+      auth: 'Custom',
       integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
@@ -433,7 +434,8 @@ describe('trpc backend generator', () => {
 
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
-    ).toContain('HttpNoneAuthorizer');
+    ).toContain('HttpLambdaAuthorizer');
+    expect(tree.exists('apps/test-api/src/authorizer.ts')).toBe(true);
   });
 
   it('should generate a single router lambda for REST APIs when using the shared integration pattern', async () => {
@@ -662,12 +664,12 @@ describe('trpc backend generator', () => {
       );
     });
 
-    it('should generate terraform files for HTTP API with None auth and snapshot them', async () => {
+    it('should generate terraform files for HTTP API with Custom auth and snapshot them', async () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
         computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'None',
+        auth: 'Custom',
         iacProvider: 'Terraform',
       });
 
@@ -691,8 +693,8 @@ describe('trpc backend generator', () => {
       const coreApiContent = tree.read(coreApiFile!, 'utf-8');
       const appApiContent = tree.read(appApiFile!, 'utf-8');
 
-      // Verify None auth configuration
-      expect(appApiContent).toContain('authorization_type = "NONE"');
+      // Verify Custom auth configuration
+      expect(appApiContent).toContain('authorization_type = "CUSTOM"');
       expect(appApiContent).not.toContain('variable "user_pool_id"');
 
       // Verify tRPC-specific handler configuration
@@ -706,7 +708,7 @@ describe('trpc backend generator', () => {
       };
 
       expect(terraformFileContents).toMatchSnapshot(
-        'terraform-http-none-files',
+        'terraform-http-custom-files',
       );
     });
 
@@ -810,7 +812,7 @@ describe('trpc backend generator', () => {
         name: 'TestApi',
         directory: 'apps',
         computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'None',
+        auth: 'Custom',
         iacProvider: 'Terraform',
       });
 

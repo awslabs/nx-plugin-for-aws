@@ -296,7 +296,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'None',
+        auth: 'Custom',
       },
     });
 

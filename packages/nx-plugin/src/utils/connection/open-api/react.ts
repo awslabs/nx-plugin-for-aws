@@ -47,7 +47,7 @@ export interface AddOpenApiReactClientOptions {
   /**
    * Authentication method
    */
-  auth: 'IAM' | 'Cognito' | 'None';
+  auth: 'IAM' | 'Cognito' | 'Custom';
   /**
    * Port on which the backend project's local server listens
    */

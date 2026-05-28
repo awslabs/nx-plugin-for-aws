@@ -38,7 +38,7 @@ describe('fastapi react generator', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'None',
+          auth: 'Custom',
         },
       }),
     );
@@ -370,7 +370,7 @@ describe('fastapi react generator with unqualified names', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'None',
+          auth: 'Custom',
         },
       }),
     );
@@ -476,7 +476,7 @@ describe(
       // Generate a fastapi
       await pyFastApiProjectGenerator(tree, {
         name: 'TestApi',
-        auth: 'None',
+        auth: 'Custom',
         computeType: 'ServerlessApiGatewayHttpApi',
         iacProvider: 'CDK',
       });
@@ -524,7 +524,7 @@ describe(
       // Generate first API
       await pyFastApiProjectGenerator(tree, {
         name: 'FirstApi',
-        auth: 'None',
+        auth: 'Custom',
         computeType: 'ServerlessApiGatewayHttpApi',
         iacProvider: 'CDK',
       });
@@ -532,7 +532,7 @@ describe(
       // Generate second API
       await pyFastApiProjectGenerator(tree, {
         name: 'SecondApi',
-        auth: 'None',
+        auth: 'Custom',
         computeType: 'ServerlessApiGatewayHttpApi',
         iacProvider: 'CDK',
       });

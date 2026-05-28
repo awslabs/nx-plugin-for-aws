@@ -28,6 +28,7 @@ export interface TrpcBackendOptions extends BackendOptions {
   type: 'trpc';
   projectAlias: string;
   bundleOutputDir: string;
+  authorizerBundleOutputDir?: string;
 }
 
 export interface FastApiBackendOptions extends BackendOptions {
@@ -39,6 +40,7 @@ export interface FastApiBackendOptions extends BackendOptions {
 export interface SmithyBackendOptions extends BackendOptions {
   type: 'smithy';
   bundleOutputDir: string;
+  authorizerBundleOutputDir?: string;
 }
 
 export interface AddApiGatewayConstructOptions {
@@ -47,7 +49,7 @@ export interface AddApiGatewayConstructOptions {
   apiNameKebabCase: string;
   constructType: 'http' | 'rest';
   backend: TrpcBackendOptions | FastApiBackendOptions | SmithyBackendOptions;
-  auth: 'IAM' | 'Cognito' | 'None';
+  auth: 'IAM' | 'Cognito' | 'Custom';
 }
 
 export const addApiGatewayInfra = async (

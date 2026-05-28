@@ -99,6 +99,14 @@ export async function tsTrpcApiGenerator(
       projectAlias: enhancedOptions.backendProjectAlias,
       bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
       integrationPattern: getIntegrationPattern(options),
+      ...(options.auth === 'Custom' && {
+        authorizerBundleOutputDir: joinPathFragments(
+          'dist',
+          backendRoot,
+          'bundle',
+          'authorizer',
+        ),
+      }),
     },
     auth: options.auth,
     iacProvider,
@@ -137,6 +145,14 @@ export async function tsTrpcApiGenerator(
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
+  if (options.auth === 'Custom') {
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: 'src/authorizer.ts',
+      bundleOutputDir: 'authorizer',
+      external: [/@aws-sdk\/.*/],
+    });
+  }
+
   addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
@@ -154,6 +170,11 @@ export async function tsTrpcApiGenerator(
   );
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
+
+  // Remove authorizer file if auth is not Custom
+  if (options.auth !== 'Custom') {
+    tree.delete(joinPathFragments(backendRoot, 'src', 'authorizer.ts'));
+  }
 
   // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
   if (options.computeType !== 'ServerlessApiGatewayRestApi') {

@@ -260,6 +260,112 @@ resource "aws_api_gateway_authorizer" "cognito_authorizer" {
   provider_arns         = ["arn:aws:cognito-idp:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:userpool/${var.user_pool_id}"]
   identity_source       = "method.request.header.Authorization"
 }
+<%_ } else if (auth === 'Custom') { _%>
+# Custom Lambda Authorizer
+resource "aws_lambda_function" "authorizer_lambda" {
+  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for authorizer
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  s3_bucket         = aws_s3_object.authorizer_zip.bucket
+  s3_key            = aws_s3_object.authorizer_zip.key
+  s3_object_version = aws_s3_object.authorizer_zip.version_id
+  function_name    = "<%- apiNameClassName %>Authorizer-${random_string.suffix.result}"
+  role            = aws_iam_role.authorizer_execution_role.arn
+  <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
+  handler         = "index.handler"
+  runtime         = "nodejs22.x"
+  <%_ } else if (backend.type === 'fastapi') { _%>
+  handler         = "<%- backend.moduleName %>.authorizer.handler"
+  runtime         = "python3.14"
+  <%_ } _%>
+  timeout         = 10
+  memory_size     = 128
+
+  source_code_hash = data.archive_file.authorizer_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  tags = var.tags
+}
+
+resource "aws_iam_role" "authorizer_execution_role" {
+  name = "<%- apiNameClassName %>Authorizer-role-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "authorizer_basic_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.authorizer_execution_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "authorizer_xray_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  role       = aws_iam_role.authorizer_execution_role.name
+}
+
+resource "aws_cloudwatch_log_group" "authorizer_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/<%- apiNameClassName %>Authorizer-${random_string.suffix.result}"
+  tags = var.tags
+}
+
+<%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
+data "archive_file" "authorizer_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../../../../../<%- backend.authorizerBundleOutputDir %>"
+  output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/apis/<%- apiNameKebabCase %>/authorizer.zip"
+}
+<%_ } else if (backend.type === 'fastapi') { _%>
+data "archive_file" "authorizer_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../../../../../<%- backend.bundleOutputDir %>"
+  output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/apis/<%- apiNameKebabCase %>/authorizer.zip"
+}
+<%_ } _%>
+
+resource "aws_s3_object" "authorizer_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "apis/<%- apiNameKebabCase %>/authorizer-${data.archive_file.authorizer_zip.output_sha256}.zip"
+  source      = data.archive_file.authorizer_zip.output_path
+  source_hash = data.archive_file.authorizer_zip.output_base64sha256
+  etag        = data.archive_file.authorizer_zip.output_md5
+}
+
+resource "aws_api_gateway_authorizer" "custom_authorizer" {
+  name                   = "<%- apiNameClassName %>Authorizer-${random_string.suffix.result}"
+  rest_api_id           = module.rest_api.api_id
+  type                  = "TOKEN"
+  authorizer_uri        = aws_lambda_function.authorizer_lambda.invoke_arn
+  identity_source       = "method.request.header.Authorization"
+}
+
+resource "aws_lambda_permission" "authorizer_invoke" {
+  statement_id  = "AllowAPIGatewayInvokeAuthorizer"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.authorizer_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.rest_api.api_execution_arn}/authorizers/${aws_api_gateway_authorizer.custom_authorizer.id}"
+}
 <%_ } _%>
 
 # Create proxy resource (captures all paths)
@@ -307,17 +413,16 @@ resource "aws_api_gateway_method" "proxy_method" {
   <%_ } else if (auth === 'Cognito') { _%>
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito_authorizer.id
-  <%_ } else if (auth === 'None') { _%>
-  # Note: you may wish to suppress the checkov rule CKV_AWS_59 if you are absolutely sure you
-  # need a public API without authentication
-  authorization = "NONE"
+  <%_ } else if (auth === 'Custom') { _%>
+  authorization = "CUSTOM"
+  authorizer_id = aws_api_gateway_authorizer.custom_authorizer.id
   <%_ } _%>
 
   request_parameters = {
     "method.request.path.proxy" = true
   }
 
-  depends_on = [<% if (auth === 'Cognito') { %>aws_api_gateway_authorizer.cognito_authorizer<% } %>]
+  depends_on = [<% if (auth === 'Cognito') { %>aws_api_gateway_authorizer.cognito_authorizer<% } else if (auth === 'Custom') { %>aws_api_gateway_authorizer.custom_authorizer<% } %>]
 }
 
 # OPTIONS method for CORS preflight
@@ -395,6 +500,9 @@ resource "aws_api_gateway_deployment" "api_deployment" {
     aws_api_gateway_integration.options_integration,
     aws_api_gateway_method_response.options_response,
     aws_api_gateway_integration_response.options_integration_response,
+    <%_ if (auth === 'Custom') { _%>
+    aws_api_gateway_authorizer.custom_authorizer,
+    <%_ } _%>
   ]
 }
 
@@ -443,7 +551,7 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
       }
       <%_ } else { _%>
       {
-        # Allow all callers to invoke the API in the resource policy<% if (auth === 'Cognito') { %>, since auth is handled by Cognito<% } %>
+        # Allow all callers to invoke the API in the resource policy<% if (auth === 'Cognito') { %>, since auth is handled by Cognito<% } else if (auth === 'Custom') { %>, since auth is handled by the Lambda Authorizer<% } %>
         Effect = "Allow"
         Principal = "*"
         Action   = "execute-api:Invoke"

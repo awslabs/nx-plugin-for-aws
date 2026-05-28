@@ -127,6 +127,9 @@ export const pyFastApiProjectGenerator = async (
   [
     joinPathFragments(dir, normalizedModuleName, 'hello.py'),
     joinPathFragments(dir, 'tests', 'test_hello.py'),
+    ...(schema.auth !== 'Custom'
+      ? [joinPathFragments(dir, normalizedModuleName, 'authorizer.py')]
+      : []),
   ].forEach((f) => tree.delete(f));
 
   generateFiles(

@@ -551,7 +551,7 @@ The tRPC API generator creates CDK or Terraform infrastructure as code based on 
 <Fragment slot="cdk">
 The CDK construct for deploying your API lives in the `common/constructs` folder. You can consume this in a CDK application, for example:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="CDK usage for IAM or no authentication">
+<OptionFilter when={{ auth: 'IAM' }} description="CDK usage for IAM authentication">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -564,6 +564,24 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Custom' }} description="CDK usage with Custom Lambda Authorizer">
+```ts {6-9}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the api to your stack
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      authorizer: MyApi.defaultAuthorizer(this),
+    });
+  }
+}
+```
+
+The `defaultAuthorizer` creates a Lambda function from the generated `src/authorizer.ts` file, which denies all requests by default. Implement your custom authorization logic in that file.
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
@@ -595,7 +613,7 @@ The Terraform modules for deploying your API are in the `common/terraform` folde
 
 The API module stages its Lambda deployment zip in a shared S3 asset bucket — see the <Link path="/guides/terraform-project">Terraform infrastructure guide</Link> for details. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output into every API / Lambda module via the `asset_bucket_name` input:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="Terraform usage for IAM or no authentication">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="Terraform usage for IAM or Custom authentication">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -705,26 +723,9 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'None' }} description="Checkov failures you may see when auth is None">
-:::caution[No Authentication]
-You may see Checkov check failures such as:
-
-<Tabs syncKey="http-rest">
-<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
-```
-Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
- FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
-```
-</TabItem>
-<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
-```
-Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
- FAILED for resource: aws_api_gateway_method.proxy_method
-```
-</TabItem>
-</Tabs>
-
-You can [add a suppression comment](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) if you are sure you wish for your API to be public.
+<OptionFilter when={{ auth: 'Custom' }} description="Custom Lambda Authorizer usage with Terraform">
+:::tip[Custom Lambda Authorizer]
+When using `Custom` auth, your API is protected by a Lambda Authorizer that denies all requests by default. Implement your authorization logic in the generated `src/authorizer.ts` file. The authorizer receives the request and must return an IAM policy document allowing or denying access.
 :::
 </OptionFilter>
 </Fragment>
