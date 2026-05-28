@@ -274,7 +274,7 @@ const updateGitSecrets = async (
 
   // Update the vendored script
   const vendoredPath =
-    'packages/nx-plugin/src/preset/git-secrets-files/.git-secrets/git-secrets';
+    'packages/nx-plugin/src/preset/git-secrets-files/git-secrets-dir/git-secrets';
   tree.write(vendoredPath, scriptContent);
 
   // Update the version in versions.ts using GritQL

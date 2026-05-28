@@ -127,9 +127,13 @@ const setUpGitSecrets = (tree: Tree) => {
   const gitSecretsDir = joinPathFragments(
     __dirname,
     'git-secrets-files',
-    '.git-secrets',
+    'git-secrets-dir',
   );
-  const huskyDir = joinPathFragments(__dirname, 'git-secrets-files', '.husky');
+  const huskyDir = joinPathFragments(
+    __dirname,
+    'git-secrets-files',
+    'husky-dir',
+  );
 
   tree.write(
     '.git-secrets/git-secrets',

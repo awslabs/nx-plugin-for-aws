@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Registers AWS secret patterns in the local git config.
-# Run automatically via the "prepare" npm script after install.
+# 
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+# 
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SCRIPT_DIR}/git-secrets" --register-aws 2>/dev/null
