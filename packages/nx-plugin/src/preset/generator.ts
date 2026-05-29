@@ -144,6 +144,7 @@ const setUpGitSecrets = (tree: Tree) => {
     '.husky/pre-commit',
     readFileSync(joinPathFragments(huskyDir, 'pre-commit'), 'utf-8'),
   );
+  tree.write('.gitallowed', '\\.git-secrets/git-secrets:\n');
 
   updateJson(tree, 'package.json', (json) => ({
     ...json,

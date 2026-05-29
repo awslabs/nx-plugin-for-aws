@@ -18,7 +18,6 @@ describe('smoke test - git-secrets', () => {
       rmSync(targetDir, { force: true, recursive: true });
     }
     ensureDirSync(targetDir);
-    // Git user config needed for Nx's initial commit and test commits
     execSync('git config --global user.email "test@example.com"', {
       stdio: 'pipe',
     });
@@ -27,7 +26,7 @@ describe('smoke test - git-secrets', () => {
 
   it('should block commits containing AWS access keys', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'gs-test', 'CDK')} --interactive=false --skipGit=false`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'gs-test', 'CDK')} --interactive=false`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -42,14 +41,6 @@ describe('smoke test - git-secrets', () => {
       true,
     );
     expect(existsSync(join(projectRoot, '.husky/pre-commit'))).toBe(true);
-
-    // Simulate cloning: delete node_modules and reinstall. This triggers
-    // prepare -> husky which sets up hooks now that .git exists.
-    rmSync(join(projectRoot, 'node_modules'), { recursive: true, force: true });
-    execSync('pnpm install --no-frozen-lockfile', {
-      cwd: projectRoot,
-      stdio: 'pipe',
-    });
 
     // git commit should fail — the pre-commit hook blocks the secret
     writeFileSync(
