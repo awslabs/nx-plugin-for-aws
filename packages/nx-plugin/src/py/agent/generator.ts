@@ -90,8 +90,15 @@ export const pyAgentGenerator = async (
   );
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
-  const auth = options.auth ?? 'IAM';
   const protocol = options.protocol ?? 'HTTP';
+
+  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+    console.warn(
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+    );
+  }
+
+  const auth = options.auth ?? 'IAM';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `session_id_context` and propagate the AgentCore

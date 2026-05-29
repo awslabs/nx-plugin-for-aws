@@ -78,6 +78,13 @@ export const pyMcpServerGenerator = async (
   );
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+
+  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+    console.warn(
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+    );
+  }
+
   const auth = options.auth ?? 'IAM';
 
   // Generate example server
