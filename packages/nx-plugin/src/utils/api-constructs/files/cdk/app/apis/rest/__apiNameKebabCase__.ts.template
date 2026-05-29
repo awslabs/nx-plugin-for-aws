@@ -79,12 +79,6 @@ export interface <%= apiNameClassName %>Props<
     userPool: IUserPool;
   };
   <%_ } _%>
-  <%_ if (auth === 'Custom') { _%>
-  /**
-   * The Lambda function to use as the custom authorizer
-   */
-  authorizer: Function;
-  <%_ } _%>
   /**
    * Whether to enable AWS WAFv2 with the default managed ruleset on the API's default stage.
    *
@@ -195,16 +189,14 @@ export class <%= apiNameClassName %><
       },
     });
   };
-  <%_ if (auth === 'Custom') { _%>
 
-  /**
-   * Creates the default Lambda Authorizer function for this API.
-   *
-   * @param scope - The CDK construct scope
-   * @returns The authorizer Lambda function
-   */
-  public static defaultAuthorizer = (scope: Construct): Function => {
-    return new Function(scope, '<%= apiNameClassName %>Authorizer', {
+  constructor(
+    scope: Construct,
+    id: string,
+    props: <%= apiNameClassName %>Props<TIntegrations>,
+  ) {
+    <%_ if (auth === 'Custom') { _%>
+    const authorizerFunction = new Function(scope, '<%= apiNameClassName %>AuthorizerFunction', {
       <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
       runtime: Runtime.NODEJS_LATEST,
       handler: 'index.handler',
@@ -231,14 +223,8 @@ export class <%= apiNameClassName %><
       timeout: Duration.seconds(10),
       tracing: Tracing.ACTIVE,
     });
-  };
-  <%_ } _%>
+    <%_ } _%>
 
-  constructor(
-    scope: Construct,
-    id: string,
-    props: <%= apiNameClassName %>Props<TIntegrations>,
-  ) {
     super(scope, id, {
       apiName: '<%= apiNameClassName %>',
       defaultMethodOptions: {
@@ -252,7 +238,7 @@ export class <%= apiNameClassName %><
         <%_ } else if (auth === 'Custom') { _%>
         authorizationType: AuthorizationType.CUSTOM,
         authorizer: new TokenAuthorizer(scope, '<%= apiNameClassName %>TokenAuthorizer', {
-          handler: props.authorizer,
+          handler: authorizerFunction,
         }),
         <%_ } _%>
       },

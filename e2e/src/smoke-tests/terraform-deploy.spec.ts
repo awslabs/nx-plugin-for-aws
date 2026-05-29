@@ -14,6 +14,8 @@ import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
   invokeAgentCoreMcp,
+  invokeCustomAuthApi,
+  invokeCustomAuthTrpcApi,
   invokeLambda,
   invokeRestApi,
   invokeTrpcAgentCoreAgent,
@@ -136,6 +138,24 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
 
           // Smithy
           await invokeRestApi(outputs.my_smithy_api_endpoint, 'Smithy REST');
+
+          // Custom auth APIs — should deny unauthenticated requests
+          await invokeCustomAuthTrpcApi(
+            outputs.my_api_custom_endpoint,
+            'tRPC REST Custom Auth',
+          );
+          await invokeCustomAuthTrpcApi(
+            outputs.my_api_custom_http_endpoint,
+            'tRPC HTTP Custom Auth',
+          );
+          await invokeCustomAuthApi(
+            outputs.py_api_custom_endpoint,
+            'FastAPI REST Custom Auth',
+          );
+          await invokeCustomAuthApi(
+            outputs.py_api_custom_http_endpoint,
+            'FastAPI HTTP Custom Auth',
+          );
 
           // MCP
           await invokeAgentCoreMcp(

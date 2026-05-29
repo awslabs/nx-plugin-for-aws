@@ -4,6 +4,7 @@
  */
 import {
   GeneratorCallback,
+  OverwriteStrategy,
   Tree,
   addDependenciesToPackageJson,
   generateFiles,
@@ -108,10 +109,25 @@ export const tsSmithyApiGenerator = async (
     },
   );
 
-  // Remove authorizer file if auth is not Custom
-  if (options.auth !== 'Custom') {
-    tree.delete(
-      joinPathFragments(backendProjectConfig.sourceRoot, 'authorizer.ts'),
+  if (options.auth === 'Custom') {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'utils',
+        'api-constructs',
+        'files',
+        'cdk',
+        'authorizer',
+      ),
+      backendProjectConfig.sourceRoot,
+      {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
     );
   }
 

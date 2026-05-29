@@ -171,9 +171,25 @@ export async function tsTrpcApiGenerator(
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
 
-  // Remove authorizer file if auth is not Custom
-  if (options.auth !== 'Custom') {
-    tree.delete(joinPathFragments(backendRoot, 'src', 'authorizer.ts'));
+  if (options.auth === 'Custom') {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '..',
+        '..',
+        'utils',
+        'api-constructs',
+        'files',
+        'cdk',
+        'authorizer',
+      ),
+      joinPathFragments(backendRoot, 'src'),
+      {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
   }
 
   // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
