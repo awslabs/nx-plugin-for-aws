@@ -69,6 +69,13 @@ export const tsMcpServerGenerator = async (
   const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+
+  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+    console.warn(
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+    );
+  }
+
   const auth = options.auth ?? 'IAM';
 
   // Create a package.json if one doesn't exist, since we want to add the server as a bin target

@@ -1095,4 +1095,37 @@ describe('ts#agent generator', () => {
       'my-custom-agent-serve-local',
     ]);
   });
+
+  it('should warn when auth is explicitly set with computeType=None', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      auth: 'Cognito',
+      iacProvider: 'CDK',
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when auth is IAM with computeType=None', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'no-warn-agent',
+      computeType: 'None',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
 });
