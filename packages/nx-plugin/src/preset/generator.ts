@@ -148,7 +148,7 @@ const setUpGitSecrets = (tree: Tree) => {
     ...json,
     scripts: {
       ...json.scripts,
-      prepare: 'husky || true',
+      prepare: 'husky',
     },
   }));
 
