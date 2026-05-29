@@ -279,6 +279,9 @@ export const tsSmithyApiGenerator = async (
       '@aws-lambda-powertools/tracer',
       '@aws-lambda-powertools/metrics',
       '@aws-sdk/client-appconfigdata',
+      ...(options.auth === 'Custom'
+        ? (['@aws-lambda-powertools/parser'] as const)
+        : []),
     ]),
     withVersions(['@types/aws-lambda']),
   );

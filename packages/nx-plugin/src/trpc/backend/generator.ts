@@ -213,6 +213,9 @@ export async function tsTrpcApiGenerator(
       '@trpc/client',
       'aws4fetch',
       '@aws-sdk/credential-providers',
+      ...(options.auth === 'Custom'
+        ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
+        : []),
     ]),
     withVersions(['@types/aws-lambda', 'tsx', 'cors', '@types/cors']),
   );

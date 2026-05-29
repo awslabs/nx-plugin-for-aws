@@ -215,9 +215,9 @@ export function Main() {
         ),
       ).toMatchSnapshot('TestApiClientProvider-REST-Custom.tsx');
 
-      // Custom auth does not need EventSourcePolyfill since auth is handled by the user
+      // Custom auth still uses EventSourcePolyfill for subscription support
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
+      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
     });
 
     it('should generate REST API client provider with splitLink for IAM auth', async () => {

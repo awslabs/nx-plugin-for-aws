@@ -147,9 +147,7 @@ export async function reactGenerator(
       '@trpc/tanstack-react-query',
       '@tanstack/react-query',
       '@tanstack/react-query-devtools',
-      ...((isRestApi && auth !== 'Custom'
-        ? ['event-source-polyfill']
-        : []) as any),
+      ...((isRestApi ? ['event-source-polyfill'] : []) as any),
       ...((auth === 'IAM'
         ? [
             'oidc-client-ts',
@@ -162,9 +160,7 @@ export async function reactGenerator(
     ]),
     withVersions([
       '@smithy/types',
-      ...((isRestApi && auth !== 'Custom'
-        ? ['@types/event-source-polyfill']
-        : []) as any),
+      ...((isRestApi ? ['@types/event-source-polyfill'] : []) as any),
     ]),
   );
 
