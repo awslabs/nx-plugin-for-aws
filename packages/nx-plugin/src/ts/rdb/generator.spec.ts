@@ -159,8 +159,6 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies.mariadb).toBeUndefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
     expect(packageJson.devDependencies['tsx']).toBeDefined();
-    expect(packageJson.devDependencies['dockerode']).toBeDefined();
-    expect(packageJson.devDependencies['@types/dockerode']).toBeDefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
     expect(packageJson.devDependencies['@types/pg']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();

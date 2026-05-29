@@ -17,6 +17,7 @@ import {
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
+import { ContainerEngine } from '../containers';
 
 type IACProvider = { iacProvider: IacProvider };
 
@@ -31,6 +32,7 @@ export interface AddAgentCoreInfraProps {
   appDirectory: string;
   serverProtocol: 'MCP' | 'HTTP' | 'A2A';
   auth: AgentCoreAuth;
+  containerEngine: ContainerEngine;
 }
 
 const addAgentCoreInfra = async (
@@ -136,7 +138,7 @@ const addAgentCoreTerraformInfra = (
       'core',
       'agent-core',
     ),
-    {},
+    { containerEngine: options.containerEngine },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -167,6 +169,7 @@ export interface AddMcpServerInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   auth: AgentCoreAuth;
+  containerEngine: ContainerEngine;
 }
 
 /**
@@ -186,6 +189,7 @@ export const addMcpServerInfra = async (
     serverProtocol: 'MCP',
     iacProvider: options.iacProvider,
     auth: options.auth,
+    containerEngine: options.containerEngine,
   });
 };
 
@@ -197,6 +201,7 @@ export interface AddAgentInfraProps {
   dockerOutputDir: string;
   auth: AgentCoreAuth;
   serverProtocol?: 'HTTP' | 'A2A';
+  containerEngine: ContainerEngine;
 }
 
 /**
@@ -216,5 +221,6 @@ export const addAgentInfra = async (
     serverProtocol: options.serverProtocol ?? 'HTTP',
     iacProvider: options.iacProvider,
     auth: options.auth,
+    containerEngine: options.containerEngine,
   });
 };

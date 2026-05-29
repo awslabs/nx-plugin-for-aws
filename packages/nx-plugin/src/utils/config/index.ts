@@ -4,9 +4,11 @@
  */
 import { LicenseConfig } from '../../license/config-types';
 import { IacConfig } from '../iac';
+import { ContainersConfig } from '../containers';
 
 export * from '../../license/config-types';
 export { IacConfig, IacProvider } from '../iac';
+export { ContainersConfig, ContainerEngine } from '../containers';
 
 /**
  * Configuration for the nx plugin
@@ -21,6 +23,11 @@ export interface AwsNxPluginConfig {
    * Configuration for infrastructure as code
    */
   iac?: IacConfig;
+
+  /**
+   * Configuration for container tooling (build/push/login)
+   */
+  containers?: ContainersConfig;
 
   /**
    * List of tags

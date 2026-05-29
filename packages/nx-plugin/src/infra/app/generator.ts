@@ -39,6 +39,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { uvxCommand } from '../../utils/py';
+import { resolveContainerEngine } from '../../utils/containers';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -49,6 +50,18 @@ export async function tsInfraGenerator(
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
   await tsProjectGenerator(tree, schema);
+
+  // CDK shells out to a container engine to build image assets. Default
+  // (docker) needs no env override; finch is set via CDK_DOCKER per
+  // https://docs.aws.amazon.com/cdk/v2/guide/build-containers.html#build-container-replace.
+  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  const cdkEnv: Record<string, string> | undefined =
+    containerEngine === 'docker' ? undefined : { CDK_DOCKER: containerEngine };
+  const withCdkEnv = <T extends Record<string, unknown>>(opts: T): T => {
+    if (!cdkEnv) return opts;
+    const existingEnv = (opts.env as Record<string, string> | undefined) ?? {};
+    return { ...opts, env: { ...existingEnv, ...cdkEnv } } as T;
+  };
 
   addGeneratorMetadata(tree, lib.fullyQualifiedName, INFRA_APP_GENERATOR_INFO);
 
@@ -117,10 +130,10 @@ export async function tsInfraGenerator(
         inputs: ['default'],
         outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
         dependsOn: ['^build', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
-        options: {
+        options: withCdkEnv({
           cwd: '{projectRoot}',
           command: 'cdk synth',
-        },
+        }),
       };
       config.targets.checkov = {
         cache: true,
@@ -139,53 +152,53 @@ export async function tsInfraGenerator(
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: enableStageConfig
-          ? {
+          ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra-deploy.ts ${libraryRoot}`,
-            }
-          : {
+            })
+          : withCdkEnv({
               cwd: '{projectRoot}',
               command: 'cdk deploy --require-approval=never',
-            },
+            }),
       };
       config.targets['deploy-ci'] = {
         executor: 'nx:run-commands',
-        options: {
+        options: withCdkEnv({
           cwd: '{projectRoot}',
           command: `cdk deploy --require-approval=never --app ${distDirFromProjectRoot}`,
-        },
+        }),
       };
       config.targets.destroy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: enableStageConfig
-          ? {
+          ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra-destroy.ts ${libraryRoot}`,
-            }
-          : {
+            })
+          : withCdkEnv({
               cwd: '{projectRoot}',
               command: 'cdk destroy --require-approval=never',
-            },
+            }),
       };
       config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
-        options: {
+        options: withCdkEnv({
           cwd: '{projectRoot}',
           command: `cdk destroy --require-approval=never --app ${distDirFromProjectRoot}`,
-        },
+        }),
       };
       config.targets.cdk = {
         executor: 'nx:run-commands',
-        options: {
+        options: withCdkEnv({
           cwd: '{projectRoot}',
           command: 'cdk',
-        },
+        }),
       };
       config.targets.bootstrap = {
         executor: 'nx:run-commands',
-        options: {
+        options: withCdkEnv({
           cwd: '{projectRoot}',
           command: 'cdk bootstrap',
-        },
+        }),
       };
       config.targets = sortObjectKeys(config.targets);
       return config;
