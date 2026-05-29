@@ -144,7 +144,7 @@ describe('smoke test - cdk-deploy', () => {
 
       // Custom auth APIs — should deny unauthenticated requests
       await invokeCustomAuthTrpcApi(
-        findOutput('MyApiCustomEndpoint'),
+        findOutput('MyApiCustomApiEndpoint'),
         'tRPC REST Custom Auth',
       );
       await invokeCustomAuthTrpcApi(
@@ -152,7 +152,7 @@ describe('smoke test - cdk-deploy', () => {
         'tRPC HTTP Custom Auth',
       );
       await invokeCustomAuthApi(
-        findOutput('PyApiCustomEndpoint'),
+        findOutput('PyApiCustomApiEndpoint'),
         'FastAPI REST Custom Auth',
       );
       await invokeCustomAuthApi(
