@@ -7,6 +7,7 @@ import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
 `@aws/nx-plugin`で新しいワークスペースを作成すると、プリセットジェネレーターがAWS上での構築に適した合理的なデフォルト設定で[Nx monorepo](https://nx.dev)をセットアップします。TypeScript、Prettier、ワークスペースレイアウト、セキュリティツールなどが含まれます。
@@ -17,40 +18,56 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### オプション
 
-| パラメータ | 型 | デフォルト | 説明 |
-|-----------|------|---------|-------------|
-| `iacProvider` | `CDK` \| `Terraform` | — | Infrastructure as Codeプロバイダーの選択 |
-| `gitSecrets` | `boolean` | `true` | AWSクレデンシャルのコミットを防ぐためのgit-secretsプリコミットフックを設定 |
+<GeneratorParameters generator="preset" />
 
-<Infrastructure>
-<Fragment slot="cdk">
-<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
-</Fragment>
-<Fragment slot="terraform">
-<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
-</Fragment>
-</Infrastructure>
+## Nx
 
-git-secretsスキャンをオプトアウトするには：
+Nxは、モノレポ向けの言語に依存しないビルドシステムで、任意のプログラミング言語で書かれたプロジェクト間の依存関係と、それらをビルドするためのタスクを管理します。詳細は[Nxウェブサイト](https://nx.dev/getting-started/intro)で確認できます。
 
-```sh
-pnpm create @aws/nx-workspace my-project --no-gitSecrets
+### プロジェクト
+
+Nxモノレポは1つ以上のプロジェクトで構成され、それぞれに`project.json`ファイルがあります。`project.json`は、プロジェクトのタスク（_ターゲット_と呼ばれます）を定義し、プロジェクトのビルド方法、ローカル実行方法、テスト方法などを指定します。また、プロジェクト内またはプロジェクト間のターゲット間の依存関係も定義します。
+
+例えば、`project.json`は、すべての上流プロジェクトが最初にビルドされることに依存する`build`ターゲットを定義する場合があります：
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
 ```
 
-## ワークスペース構造
+:::tip
+Nx Plugin for AWSで直接サポートされていない言語のプロジェクトについては、[Nx Plugin Registry](https://nx.dev/plugin-registry)でジェネレーターを見つけることができます。ただし、任意の言語のプロジェクトをモノレポに追加するのは簡単です — `project.json`ファイルを追加し、その言語のプロジェクト用の特定のビルドコマンドを実行する`build`ターゲットを定義するだけです。
+:::
 
-<FileTree>
-  - packages/ プロジェクトはここに配置されます
-  - .git-secrets/
-    - git-secrets クレデンシャルスキャン用のベンダー化されたgit-secrets bashスクリプト
-    - setup.sh ローカルgit設定にAWSクレデンシャルパターンを登録
-  - .husky/
-    - pre-commit 各コミット前にgit-secretsスキャンを実行
-  - nx.json Nx設定（ターゲット、同期ジェネレーター、アナリティクス）
-  - package.json スクリプト、devDependencies、prepareフック
-  - tsconfig.json ルートTypeScript設定
-  - aws-nx-plugin.config.mts プラグイン設定（IaCプロバイダー、ライセンスなど）
-</FileTree>
+TypeScriptおよびPythonプロジェクトのセットアップ方法の詳細については、<Link path="guides/typescript-project">ts#project</Link>および<Link path="guides/python-project">py#project</Link>ジェネレーターガイドを参照してください。
+
+### キャッシング
+
+Nxは、以前に実行されたターゲットの出力をキャッシュし、入力が変更されていない場合はそれらを再生します。これにより、特にCIにおいて、ビルド、テスト、リントが劇的に高速化されます。古い動作や予期しない動作が発生した場合は、次のコマンドでキャッシュをリセットしてください：
+
+<NxCommands commands={['reset']} />
+
+詳細については、[Nxキャッシングドキュメント](https://nx.dev/features/cache-task-results)を参照してください。
+
+## シングルバージョンポリシー
+
+デフォルトのモノレポセットアップは、NodeおよびPythonベースのプロジェクトの両方に対して[シングルバージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)を使用します。
+
+これは、モノレポ内のすべてのプロジェクトがデフォルトで同じバージョンの依存関係を使用することを意味し、同じモノレポ内のパッケージがバージョンの不一致の問題に遭遇することを減らします。
+
+Nodeの観点からは、これはルートに単一のロックファイルがあり、すべての依存関係を含む単一の`node_modules`があることを意味します。新しい依存関係を追加する必要がある場合は、ルートの`package.json`に追加してください。
+
+Pythonの観点からは、これはモノレポのルートに単一の`.venv`があり、すべての依存関係がそこにインストールされることを意味します。各Pythonプロジェクトには独自の`pyproject.toml`がありますが、それらの依存関係のバージョンはUVワークスペースによって管理され、その後ルートの`uv.lock`ファイルに書き出されます。
 
 ## 一般的なコマンド
 
@@ -59,10 +76,6 @@ pnpm create @aws/nx-workspace my-project --no-gitSecrets
 ワークスペース内のすべてのプロジェクトをビルド：
 
 <PackageManagerShortCommand commands={["build"]} />
-
-単一のプロジェクトをビルド：
-
-<NxCommands commands={['build <project-name>']} />
 
 ### Lint
 
@@ -74,39 +87,53 @@ pnpm create @aws/nx-workspace my-project --no-gitSecrets
 
 すべてのプロジェクトでテストを実行：
 
-<NxCommands commands={['run-many --target test --all']} />
+<PackageManagerShortCommand commands={["test"]} />
 
-### 開発サーバー
+### Dev
 
-Reactウェブサイトがある場合、ローカルで起動：
-
-<NxCommands commands={['serve <website-project>']} />
-
-すべてのローカル開発サーバー（ウェブサイト + 接続されたAPI）を起動：
+<Link path="guides/react-website">ウェブサイト</Link>がある場合、それと接続されたすべてのコンポーネントをローカルで起動：
 
 <PackageManagerShortCommand commands={["dev"]} />
 
 ### 同期
 
-TypeScriptプロジェクト参照やその他の生成ファイルを同期：
+[同期ジェネレーター](https://nx.dev/concepts/sync-generators)を実行します。これは例えばTypeScriptプロジェクト参照を同期します（詳細については<Link path="guides/typescript-project">ts#project</Link>ジェネレーターガイドを参照してください）：
 
 <NxCommands commands={['sync']} />
 
-## Git Secrets
+### 特定のターゲットの実行
+
+特定のプロジェクトの特定のターゲットを実行するには：
+
+<NxCommands commands={['<target> <project>']} />
+
+例えば：
+
+<NxCommands commands={['build website']} />
+
+これにより、依存するターゲットも追加で実行されます。
+
+## 含まれるもの
+
+### Linting
+
+新しいワークスペースは、静的解析用の[ESLint](https://eslint.org/)とコードフォーマット用の[Prettier](https://prettier.io/)で設定されています。`lint`を実行すると、両方がすべてのプロジェクトに適用されます。
+
+### Git Secrets
 
 新しいワークスペースには、各コミット前にステージングされたファイルをAWSクレデンシャルパターンでスキャンする[git-secrets](https://github.com/awslabs/git-secrets)プリコミットフックが含まれています。これにより、アクセスキー、シークレットキー、その他の機密情報を誤ってコミットすることを防ぎます。
 
-### 仕組み
+#### 仕組み
 
 <Steps>
-1. `prepare`スクリプトはパッケージインストール後に実行され、huskyのgitフックを初期化し、ローカルgit設定にAWSクレデンシャルパターンを登録します。
+1. `git commit`が実行されると、[husky](https://typicode.github.io/husky/)プリコミットフックがgit-secretsを呼び出します。
 
-2. 各`git commit`時に、huskyのプリコミットフックがgit-secretsを呼び出してステージングされたファイルをスキャンします。
+2. 最初のコミット時に、git-secretsがローカルgit設定にAWSクレデンシャルパターンを登録します。
 
-3. AWSクレデンシャルに一致するパターンが検出された場合、コミットはブロックされます。
+3. ステージングされたファイルがパターンに対してスキャンされます。一致が見つかった場合、コミットはブロックされます。
 </Steps>
 
-### 検出されるパターン
+#### 検出されるパターン
 
 - **AWS Access Key IDs** — `AKIA...`、`ASIA...`、その他のIAMキープレフィックス
 - **AWS Secret Access Keys** — `SECRET_ACCESS_KEY`ラベル付きの40文字のbase64文字列
@@ -116,28 +143,26 @@ TypeScriptプロジェクト参照やその他の生成ファイルを同期：
 
 よく知られたサンプルキー（例：`AKIAIOSFODNN7EXAMPLE`）は自動的に許可リストに登録されます。
 
-### 誤検知の抑制
+#### 誤検知の抑制
 
-git-secretsが実際のクレデンシャルを含まないコミットをブロックした場合、いくつかの方法で検出を抑制できます：
-
-**特定のパターンをグローバルに許可（今後のすべてのコミットに対して）：**
+git-secretsのパターンは[egrep互換の正規表現](https://github.com/awslabs/git-secrets#options-for-add)を使用します。git-secretsが実際のクレデンシャルを含まないコミットをブロックした場合：
 
 ```sh
-git config --add secrets.allowed 'my-pattern-here'
+# 特定の正規表現パターンを許可
+git secrets --add --allowed 'my-regex-pattern'
+
+# リテラル文字列を許可（特殊文字はエスケープされます）
+git secrets --add --allowed --literal 'my-literal+string'
 ```
 
-**`.gitallowed`ファイルを使用（バージョン管理を通じてチームと共有）：**
-
-リポジトリルートに`.gitallowed`ファイルを作成し、1行に1つの正規表現を記述します：
+リポジトリルートに`.gitallowed`ファイルを作成し、1行に1つの正規表現を記述することもできます（バージョン管理を通じてチームと共有）：
 
 ```text title=".gitallowed"
-# Allow test fixtures containing fake key patterns
+# Allow test fixtures
 tests/fixtures/.*
 # Allow a specific string
-my-safe-pattern-here
+EXAMPLE[A-Z]{16}
 ```
-
-**単一のコミットでスキャンをスキップ：**
 
 1回限りのオーバーライドの場合：
 
@@ -145,14 +170,18 @@ my-safe-pattern-here
 git commit --no-verify
 ```
 
-### 要件
+パターン管理の詳細については、[git-secretsドキュメント](https://github.com/awslabs/git-secrets#readme)を参照してください。
 
-- ワークスペースで**Git**が初期化されている必要があります（`git init`）
-- **Bash**がPATHで利用可能である必要があります（WindowsではGit for Windowsに同梱）
-- パターンは`prepare`実行時に登録されます — クローン後にパッケージマネージャーのインストールコマンドを実行して再登録してください
+## ワークスペース構造
 
-## さらに詳しく
-
-- [Nxドキュメント](https://nx.dev)
-- <Link path="get_started/quick-start">クイックスタートガイド</Link>
-- <Link path="get_started/tutorials/dungeon-game/overview">ダンジョンアドベンチャーチュートリアル</Link>
+<FileTree>
+  - packages/ プロジェクトはここに配置されます
+  - .git-secrets/
+    - git-secrets クレデンシャルスキャン用のベンダー化されたgit-secrets bashスクリプト
+  - .husky/
+    - pre-commit 各コミット前にgit-secretsスキャンを実行
+  - nx.json Nx設定（ターゲット、同期ジェネレーター、キャッシング）
+  - package.json スクリプト、devDependencies、prepareフック
+  - tsconfig.json ルートTypeScript設定
+  - aws-nx-plugin.config.mts プラグイン設定（IaCプロバイダー、ライセンスなど）
+</FileTree>

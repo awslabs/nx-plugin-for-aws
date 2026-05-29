@@ -7,6 +7,7 @@ import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
 当您使用 `@aws/nx-plugin` 创建新工作空间时，预设生成器会设置一个 [Nx monorepo](https://nx.dev)，其中包含在 AWS 上构建的合理默认配置——包括 TypeScript、Prettier、工作空间布局和安全工具。
@@ -17,40 +18,56 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### 选项
 
-| 参数 | 类型 | 默认值 | 描述 |
-|-----------|------|---------|-------------|
-| `iacProvider` | `CDK` \| `Terraform` | — | 基础设施即代码提供商偏好 |
-| `gitSecrets` | `boolean` | `true` | 配置 git-secrets 预提交钩子以防止提交 AWS 凭证 |
+<GeneratorParameters generator="preset" />
 
-<Infrastructure>
-<Fragment slot="cdk">
-<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
-</Fragment>
-<Fragment slot="terraform">
-<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
-</Fragment>
-</Infrastructure>
+## Nx
 
-要选择退出 git-secrets 扫描：
+Nx 是一个语言无关的 monorepo 构建系统，管理用任何编程语言编写的项目之间的依赖关系以及构建它们的任务。您可以在 [Nx 网站](https://nx.dev/getting-started/intro)上了解更多信息。
 
-```sh
-pnpm create @aws/nx-workspace my-project --no-gitSecrets
+### 项目
+
+Nx monorepo 由一个或多个项目组成，每个项目都有一个 `project.json` 文件。`project.json` 定义了项目的任务，称为 _targets_，它们定义了如何构建项目、在本地运行、测试等。它还定义了项目内部或跨项目的目标之间的依赖关系。
+
+例如，`project.json` 可能定义一个 `build` 目标，该目标依赖于所有上游项目首先被构建：
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
 ```
 
-## 工作空间结构
+:::tip
+对于 Nx Plugin for AWS 不直接支持的语言的项目，您通常可以在 [Nx Plugin Registry](https://nx.dev/plugin-registry) 中找到一个生成器来帮助。然而，将任何语言的项目添加到您的 monorepo 中都很简单——只需添加一个 `project.json` 文件并定义其 `build` 目标来运行该语言项目的特定构建命令。
+:::
 
-<FileTree>
-  - packages/ 您的项目存放在这里
-  - .git-secrets/
-    - git-secrets 用于凭证扫描的内置 git-secrets bash 脚本
-    - setup.sh 在本地 git 配置中注册 AWS 凭证模式
-  - .husky/
-    - pre-commit 在每次提交前运行 git-secrets 扫描
-  - nx.json Nx 配置（目标、同步生成器、分析）
-  - package.json 脚本、devDependencies 和 prepare 钩子
-  - tsconfig.json 根 TypeScript 配置
-  - aws-nx-plugin.config.mts 插件配置（IaC 提供商、许可证等）
-</FileTree>
+有关如何设置 TypeScript 和 Python 项目的详细信息，请参阅 <Link path="guides/typescript-project">ts#project</Link> 和 <Link path="guides/python-project">py#project</Link> 生成器指南。
+
+### 缓存
+
+Nx 缓存先前执行的目标的输出，并在输入未更改时重放它们。这大大加快了构建、测试和代码检查的速度——尤其是在 CI 中。如果您遇到过时或意外的行为，请使用以下命令重置缓存：
+
+<NxCommands commands={['reset']} />
+
+有关更多详细信息，请参阅 [Nx 缓存文档](https://nx.dev/features/cache-task-results)。
+
+## 单一版本策略
+
+默认的 monorepo 设置对基于 Node 和 Python 的项目都使用[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)。
+
+这意味着默认情况下，monorepo 中的所有项目都使用相同版本的依赖项，从而减少同一 monorepo 中的包遇到版本不匹配问题的情况。
+
+从 Node 的角度来看，这意味着在根目录有一个单一的锁文件，其中包含一个包含所有依赖项的 `node_modules`。如果您需要添加新的依赖项，请在根目录的 `package.json` 中添加。
+
+从 Python 的角度来看，这意味着在 monorepo 的根目录有一个单一的 `.venv`，所有依赖项都安装到其中。每个 Python 项目都有自己的 `pyproject.toml`，但这些依赖项的版本由 UV 工作空间管理，并随后写入根目录的 `uv.lock` 文件。
 
 ## 常用命令
 
@@ -59,10 +76,6 @@ pnpm create @aws/nx-workspace my-project --no-gitSecrets
 构建工作空间中的所有项目：
 
 <PackageManagerShortCommand commands={["build"]} />
-
-构建单个项目：
-
-<NxCommands commands={['build <project-name>']} />
 
 ### 代码检查
 
@@ -74,39 +87,53 @@ pnpm create @aws/nx-workspace my-project --no-gitSecrets
 
 在所有项目中运行测试：
 
-<NxCommands commands={['run-many --target test --all']} />
+<PackageManagerShortCommand commands={["test"]} />
 
-### 开发服务器
+### 开发
 
-如果您有 React 网站，在本地启动它：
-
-<NxCommands commands={['serve <website-project>']} />
-
-启动所有本地开发服务器（网站 + 连接的 API）：
+如果您有一个<Link path="guides/react-website">网站</Link>，在本地启动它和所有连接的组件：
 
 <PackageManagerShortCommand commands={["dev"]} />
 
 ### 同步
 
-同步 TypeScript 项目引用和其他生成的文件：
+运行任何[同步生成器](https://nx.dev/concepts/sync-generators)，例如同步 TypeScript 项目引用（有关更多详细信息，请参阅 <Link path="guides/typescript-project">ts#project</Link> 生成器指南）：
 
 <NxCommands commands={['sync']} />
 
-## Git Secrets
+### 运行特定目标
+
+您可以使用以下命令为特定项目运行特定目标：
+
+<NxCommands commands={['<target> <project>']} />
+
+例如：
+
+<NxCommands commands={['build website']} />
+
+这还将运行它所依赖的任何目标。
+
+## 包含的内容
+
+### 代码检查
+
+新工作空间配置了 [ESLint](https://eslint.org/) 用于静态分析，[Prettier](https://prettier.io/) 用于代码格式化。运行 `lint` 会将两者应用于所有项目。
+
+### Git Secrets
 
 新工作空间包含 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，在每次提交前扫描暂存文件中的 AWS 凭证模式。这可以防止意外提交访问密钥、秘密密钥和其他敏感值。
 
-### 工作原理
+#### 工作原理
 
 <Steps>
-1. `prepare` 脚本在包安装后运行，它会初始化 husky git 钩子并在本地 git 配置中注册 AWS 凭证模式。
+1. 当 `git commit` 运行时，[husky](https://typicode.github.io/husky/) 预提交钩子会调用 git-secrets。
 
-2. 在每次 `git commit` 时，husky 预提交钩子会调用 git-secrets 来扫描暂存文件。
+2. 在第一次提交时，git-secrets 会在本地 git 配置中注册 AWS 凭证模式。
 
-3. 如果检测到与 AWS 凭证匹配的模式，提交将被阻止。
+3. 暂存文件会根据模式进行扫描。如果找到匹配项，提交将被阻止。
 </Steps>
 
-### 检测的模式
+#### 检测的模式
 
 - **AWS Access Key IDs** — `AKIA...`、`ASIA...` 和其他 IAM 密钥前缀
 - **AWS Secret Access Keys** — 带有 `SECRET_ACCESS_KEY` 标签的 40 字符 base64 字符串
@@ -116,28 +143,26 @@ pnpm create @aws/nx-workspace my-project --no-gitSecrets
 
 众所周知的示例密钥（例如 `AKIAIOSFODNN7EXAMPLE`）会自动加入白名单。
 
-### 抑制误报
+#### 抑制误报
 
-如果 git-secrets 阻止了不包含真实凭证的提交，您可以通过以下几种方式抑制该发现：
-
-**全局允许特定模式（用于所有未来的提交）：**
+git-secrets 中的模式使用 [egrep 兼容的正则表达式](https://github.com/awslabs/git-secrets#options-for-add)。如果 git-secrets 阻止了不包含真实凭证的提交：
 
 ```sh
-git config --add secrets.allowed 'my-pattern-here'
+# 允许特定的正则表达式模式
+git secrets --add --allowed 'my-regex-pattern'
+
+# 允许字面字符串（特殊字符会被转义）
+git secrets --add --allowed --literal 'my-literal+string'
 ```
 
-**使用 `.gitallowed` 文件（通过版本控制与您的团队共享）：**
-
-在仓库根目录创建一个 `.gitallowed` 文件，每行一个正则表达式：
+您还可以在仓库根目录创建一个 `.gitallowed` 文件，每行一个正则表达式（通过版本控制与您的团队共享）：
 
 ```text title=".gitallowed"
-# Allow test fixtures containing fake key patterns
+# Allow test fixtures
 tests/fixtures/.*
 # Allow a specific string
-my-safe-pattern-here
+EXAMPLE[A-Z]{16}
 ```
-
-**跳过单次提交的扫描：**
 
 一次性覆盖：
 
@@ -145,14 +170,18 @@ my-safe-pattern-here
 git commit --no-verify
 ```
 
-### 要求
+有关管理模式的完整详细信息，请参阅 [git-secrets 文档](https://github.com/awslabs/git-secrets#readme)。
 
-- **Git** 必须在工作空间中初始化（`git init`）
-- **Bash** 必须在 PATH 中可用（在 Windows 上随 Git for Windows 一起提供）
-- 模式在 `prepare` 运行时注册——克隆后运行包管理器的安装命令以重新注册
+## 工作空间结构
 
-## 了解更多
-
-- [Nx 文档](https://nx.dev)
-- <Link path="get_started/quick-start">快速入门指南</Link>
-- <Link path="get_started/tutorials/dungeon-game/overview">地牢冒险教程</Link>
+<FileTree>
+  - packages/ 您的项目存放在这里
+  - .git-secrets/
+    - git-secrets 用于凭证扫描的内置 git-secrets bash 脚本
+  - .husky/
+    - pre-commit 在每次提交前运行 git-secrets 扫描
+  - nx.json Nx 配置（目标、同步生成器、缓存）
+  - package.json 脚本、devDependencies 和 prepare 钩子
+  - tsconfig.json 根 TypeScript 配置
+  - aws-nx-plugin.config.mts 插件配置（IaC 提供商、许可证等）
+</FileTree>
