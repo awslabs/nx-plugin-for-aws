@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { spawnSync } from 'child_process';
+import { resolve } from 'path';
 // eslint-disable-next-line @nx/enforce-module-boundaries
 import { TS_VERSIONS } from '../../nx-plugin/src/utils/versions';
 
@@ -24,41 +25,51 @@ export const detectPackageManager = (): string | undefined => {
   return undefined;
 };
 
-const isNonInteractive = (flagArgs: string[]): boolean =>
-  flagArgs.some((a) => a === '--no-interactive' || a === '--interactive=false');
-
-const hasSkipGitFlag = (flagArgs: string[]): boolean =>
-  flagArgs.some((a) => a === '--skipGit' || a.startsWith('--skipGit='));
-
-const hasCiOverride = (flagArgs: string[]): boolean =>
-  flagArgs.some((a) => a.startsWith('--ci') || a.startsWith('--nxCloud'));
+export const shouldSkipGit = (flagArgs: string[]): boolean =>
+  flagArgs.some((a) => a === '--skipGit' || a === '--skipGit=true');
 
 export const buildArgs = (args: string[]): string[] => {
   const positionalArgs = args.filter((a) => !a.startsWith('-'));
   const flagArgs = args.filter((a) => a.startsWith('-'));
 
-  const defaultFlags = [...DEFAULT_FLAGS];
+  const defaultFlags = [...DEFAULT_FLAGS, '--skipGit'];
 
   if (!flagArgs.some((a) => a.startsWith('--pm'))) {
     const pm = detectPackageManager();
     if (pm) defaultFlags.push(`--pm=${pm}`);
   }
 
-  // Under `--no-interactive` with our default `--ci=skip`, nx still hits
-  // GitHub prompts that aren't gated on the interactive flag.
-  if (
-    isNonInteractive(flagArgs) &&
-    !hasCiOverride(flagArgs) &&
-    !hasSkipGitFlag(flagArgs)
-  ) {
-    defaultFlags.push('--skipGit');
-  }
-
-  const flagsToAdd = defaultFlags.filter(
-    (flag) => !flagArgs.some((a) => a.startsWith(flag.split('=')[0])),
+  const userFlagsWithoutSkipGit = flagArgs.filter(
+    (a) => !a.startsWith('--skipGit'),
   );
 
-  return [...positionalArgs, `--preset=${PRESET}`, ...flagsToAdd, ...flagArgs];
+  const flagsToAdd = defaultFlags.filter(
+    (flag) =>
+      !userFlagsWithoutSkipGit.some((a) => a.startsWith(flag.split('=')[0])),
+  );
+
+  return [
+    ...positionalArgs,
+    `--preset=${PRESET}`,
+    ...flagsToAdd,
+    ...userFlagsWithoutSkipGit,
+  ];
+};
+
+const initGitRepo = (dir: string): void => {
+  const shell = process.platform === 'win32';
+
+  spawnSync('git', ['init'], { cwd: dir, stdio: 'pipe' });
+
+  // Run the prepare script (husky) to configure git hooks now that .git exists
+  const pm = detectPackageManager() ?? 'npm';
+  spawnSync(pm, ['run', 'prepare'], { cwd: dir, stdio: 'pipe', shell });
+
+  spawnSync('git', ['add', '.'], { cwd: dir, stdio: 'pipe' });
+  spawnSync('git', ['commit', '-m', 'Initial commit'], {
+    cwd: dir,
+    stdio: 'pipe',
+  });
 };
 
 /**
@@ -76,6 +87,9 @@ export const createNxWorkspace = (args: string[]): number => {
     );
     return 1;
   }
+
+  const flagArgs = args.filter((a) => a.startsWith('-'));
+  const skipGit = shouldSkipGit(flagArgs);
 
   const allArgs = buildArgs(args);
 
@@ -100,5 +114,17 @@ export const createNxWorkspace = (args: string[]): number => {
     },
   );
 
-  return result.status ?? 1;
+  if (result.status !== 0) {
+    return result.status ?? 1;
+  }
+
+  if (!skipGit) {
+    const positionalArgs = args.filter((a) => !a.startsWith('-'));
+    const workspaceName = positionalArgs[0];
+    if (workspaceName) {
+      initGitRepo(resolve(workspaceName));
+    }
+  }
+
+  return 0;
 };

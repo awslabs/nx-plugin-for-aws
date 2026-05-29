@@ -85,6 +85,7 @@ describe('preset generator', () => {
 
     expect(tree.exists('.git-secrets/git-secrets')).toBe(false);
     expect(tree.exists('.husky/pre-commit')).toBe(false);
+    expect(tree.exists('.gitallowed')).toBe(false);
     const packageJson = readJson(tree, 'package.json');
     expect(packageJson.scripts?.prepare).toBeUndefined();
     expect(packageJson.devDependencies?.husky).toBeUndefined();
@@ -95,6 +96,9 @@ describe('preset generator', () => {
 
     expect(tree.exists('.git-secrets/git-secrets')).toBe(true);
     expect(tree.exists('.husky/pre-commit')).toBe(true);
+    expect(tree.exists('.gitallowed')).toBe(true);
+    const gitallowed = tree.read('.gitallowed', 'utf-8');
+    expect(gitallowed).toContain('.git-secrets/git-secrets:');
     const preCommit = tree.read('.husky/pre-commit', 'utf-8');
     expect(preCommit).toContain('--register-aws');
     expect(preCommit).toContain('--pre_commit_hook');

@@ -7,6 +7,7 @@ import {
   buildArgs,
   createNxWorkspace,
   detectPackageManager,
+  shouldSkipGit,
 } from './create-nx-workspace';
 
 describe('create-nx-workspace', () => {
@@ -54,13 +55,32 @@ describe('create-nx-workspace', () => {
     });
   });
 
+  describe('shouldSkipGit', () => {
+    it('should return true for bare --skipGit', () => {
+      expect(shouldSkipGit(['--skipGit'])).toBe(true);
+    });
+
+    it('should return true for --skipGit=true', () => {
+      expect(shouldSkipGit(['--skipGit=true'])).toBe(true);
+    });
+
+    it('should return false for --skipGit=false', () => {
+      expect(shouldSkipGit(['--skipGit=false'])).toBe(false);
+    });
+
+    it('should return false when --skipGit is not present', () => {
+      expect(shouldSkipGit(['--no-interactive'])).toBe(false);
+    });
+  });
+
   describe('buildArgs', () => {
-    it('should add --preset and default flags for a simple workspace name', () => {
+    it('should add --preset, default flags, and --skipGit for a simple workspace name', () => {
       expect(buildArgs(['my-project'])).toEqual([
         'my-project',
         '--preset=@aws/nx-plugin',
         '--ci=skip',
         '--analytics=false',
+        '--skipGit',
       ]);
     });
 
@@ -129,6 +149,7 @@ describe('create-nx-workspace', () => {
         '--preset=@aws/nx-plugin',
         '--ci=skip',
         '--analytics=false',
+        '--skipGit',
       ]);
     });
 
@@ -139,68 +160,38 @@ describe('create-nx-workspace', () => {
       expect(result[2]).toBe('--preset=@aws/nx-plugin');
     });
 
-    it('should preserve all user flags', () => {
+    it('should always pass --skipGit to nx regardless of user flags', () => {
+      const result = buildArgs(['my-project', '--no-interactive']);
+      expect(result).toContain('--skipGit');
+    });
+
+    it('should strip user --skipGit flag and still include our --skipGit', () => {
+      const result = buildArgs(['my-project', '--skipGit']);
+      expect(result.filter((a) => a === '--skipGit')).toHaveLength(1);
+    });
+
+    it('should strip user --skipGit=true flag', () => {
+      const result = buildArgs(['my-project', '--skipGit=true']);
+      expect(result).not.toContain('--skipGit=true');
+      expect(result).toContain('--skipGit');
+    });
+
+    it('should strip user --skipGit=false flag', () => {
+      const result = buildArgs(['my-project', '--skipGit=false']);
+      expect(result).not.toContain('--skipGit=false');
+      expect(result).toContain('--skipGit');
+    });
+
+    it('should preserve other user flags', () => {
       const result = buildArgs([
         'my-project',
         '--iacProvider=CDK',
         '--interactive=false',
-        '--skipGit',
         '--pm=pnpm',
       ]);
       expect(result).toContain('--iacProvider=CDK');
       expect(result).toContain('--interactive=false');
-      expect(result).toContain('--skipGit');
       expect(result).toContain('--pm=pnpm');
-    });
-
-    it('should auto-add --skipGit with --no-interactive on the default path', () => {
-      const result = buildArgs(['my-project', '--no-interactive']);
-      expect(result).toContain('--no-interactive');
-      expect(result).toContain('--skipGit');
-    });
-
-    it('should auto-add --skipGit with --interactive=false on the default path', () => {
-      const result = buildArgs(['my-project', '--interactive=false']);
-      expect(result).toContain('--interactive=false');
-      expect(result).toContain('--skipGit');
-    });
-
-    it('should not auto-add --skipGit when running interactively', () => {
-      const result = buildArgs(['my-project']);
-      expect(result).not.toContain('--skipGit');
-    });
-
-    it('should NOT auto-add --skipGit when the user overrides --ci', () => {
-      const result = buildArgs([
-        'my-project',
-        '--no-interactive',
-        '--ci=github',
-      ]);
-      expect(result).not.toContain('--skipGit');
-    });
-
-    it('should NOT auto-add --skipGit when the user overrides --nxCloud', () => {
-      const result = buildArgs([
-        'my-project',
-        '--no-interactive',
-        '--nxCloud=yes',
-      ]);
-      expect(result).not.toContain('--skipGit');
-    });
-
-    it('should not duplicate --skipGit if the user already passed it', () => {
-      const result = buildArgs(['my-project', '--no-interactive', '--skipGit']);
-      expect(result.filter((a) => a.startsWith('--skipGit'))).toHaveLength(1);
-    });
-
-    it('should respect explicit --skipGit=false even with --no-interactive', () => {
-      const result = buildArgs([
-        'my-project',
-        '--no-interactive',
-        '--skipGit=false',
-      ]);
-      expect(result).toContain('--skipGit=false');
-      expect(result).not.toContain('--skipGit');
     });
 
     it('should match the expected e2e arg order', () => {
