@@ -175,6 +175,9 @@ export const pyFastApiProjectGenerator = async (
     'uvicorn',
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
+    ...(schema.auth === 'Custom'
+      ? (['aws-lambda-powertools[parser]'] as const)
+      : []),
   ]);
   addDependenciesToDependencyGroupInPyProjectToml(tree, dir, 'dev', [
     'fastapi[standard]',
