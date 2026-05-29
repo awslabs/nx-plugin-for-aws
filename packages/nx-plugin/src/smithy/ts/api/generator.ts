@@ -122,6 +122,7 @@ export const tsSmithyApiGenerator = async (
         'files',
         'cdk',
         'authorizer',
+        'rest',
       ),
       backendProjectConfig.sourceRoot,
       {},

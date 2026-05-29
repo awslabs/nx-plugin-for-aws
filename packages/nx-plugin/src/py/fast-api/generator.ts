@@ -127,9 +127,6 @@ export const pyFastApiProjectGenerator = async (
   [
     joinPathFragments(dir, normalizedModuleName, 'hello.py'),
     joinPathFragments(dir, 'tests', 'test_hello.py'),
-    ...(schema.auth !== 'Custom'
-      ? [joinPathFragments(dir, normalizedModuleName, 'authorizer.py')]
-      : []),
   ].forEach((f) => tree.delete(f));
 
   generateFiles(
@@ -145,6 +142,29 @@ export const pyFastApiProjectGenerator = async (
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
+
+  if (schema.auth === 'Custom') {
+    const authorizerType =
+      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest';
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '..',
+        '..',
+        'utils',
+        'api-constructs',
+        'files',
+        'py-authorizer',
+        authorizerType,
+      ),
+      joinPathFragments(dir, normalizedModuleName),
+      {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
+  }
 
   // Add the CDK construct to deploy the FastAPI to shared constructs
   await addApiGatewayInfra(tree, {

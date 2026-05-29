@@ -172,6 +172,8 @@ export async function tsTrpcApiGenerator(
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
 
   if (options.auth === 'Custom') {
+    const authorizerType =
+      options.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest';
     generateFiles(
       tree,
       joinPathFragments(
@@ -183,6 +185,7 @@ export async function tsTrpcApiGenerator(
         'files',
         'cdk',
         'authorizer',
+        authorizerType,
       ),
       joinPathFragments(backendRoot, 'src'),
       {},

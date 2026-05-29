@@ -149,7 +149,7 @@ export const echo = publicProcedure
 
 새 프로시저를 추가할 경우 `src/router.ts`의 라우터에 등록해야 합니다.
 
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="스트리밍 구독 — REST API 전용, SSE 사용">
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only, uses SSE">
 ### 구독 (스트리밍)
 
 tRPC 구독을 사용하면 [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)를 사용하여 서버에서 클라이언트로 데이터를 스트리밍할 수 있습니다. `computeType`으로 `ServerlessApiGatewayRestApi`를 선택하면 생성기가 스트리밍에 필요한 인프라와 스트리밍 Lambda 핸들러 및 `ZodAsyncIterable` 스키마 헬퍼를 자동으로 구성합니다.
@@ -288,7 +288,7 @@ export const echo = publicProcedure
 
 예를 들어, API 호출 사용자에 대한 세부 정보를 추출하는 미들웨어를 `src/middleware/identity.ts`에 구현해 보겠습니다.
 
-<OptionFilter when={{ auth: 'IAM' }} description="IAM 인증 API를 위한 Identity 미들웨어 예제">
+<OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
 이 예제는 `IAM` 인증을 위한 identity 미들웨어를 설명합니다. 여기서는 API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다.
 
 먼저 컨텍스트에 추가할 내용을 정의합니다:
@@ -459,7 +459,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증 API를 위한 Identity 미들웨어 예제">
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
 `auth: 'Cognito'`로 배포하면 API Gateway Cognito User Pools 인증자가 호출자가 `Authorization` 헤더에 제공한 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 Lambda 이벤트에 배치합니다. 우리의 미들웨어는 단순히 해당 클레임을 읽기만 하면 됩니다 — 추가 AWS SDK 호출이나 수동 JWT 검증이 필요하지 않습니다.
 
 먼저 컨텍스트에 추가할 내용을 정의합니다:
@@ -551,7 +551,7 @@ tRPC API 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인
 <Fragment slot="cdk">
 `common/constructs` 폴더에 API 배포를 위한 CDK 구성이 있습니다. CDK 애플리케이션에서 이를 사용할 수 있습니다. 예를 들어:
 
-<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="IAM 또는 인증 없음을 위한 CDK 사용">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="CDK usage for IAM or Custom authentication">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -564,9 +564,13 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::caution[Custom Lambda Authorizer]
+When using `Custom` auth, the construct creates a Lambda Authorizer internally from the generated `src/authorizer.ts` file, which **denies all requests by default**. You must implement your authorization logic in that file before your API will accept any traffic.
+:::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증을 사용한 CDK 사용 — identity 구성 전달">
+<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -595,7 +599,7 @@ export class ExampleStack extends Stack {
 
 API 모듈은 공유 S3 자산 버킷에 Lambda 배포 zip을 스테이징합니다 — 자세한 내용은 <Link path="/guides/terraform-project">Terraform 인프라 가이드</Link>를 참조하세요. 배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하고 `asset_bucket_name` 입력을 통해 모든 API / Lambda 모듈에 `bucket_name` 출력을 전달하세요:
 
-<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="IAM 또는 인증 없음을 위한 Terraform 사용">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="Terraform usage for IAM or Custom authentication">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -622,7 +626,7 @@ module "my_api" {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증을 사용한 Terraform 사용 — 사용자 풀 및 클라이언트 제공">
+<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
 ```hcl {1-3, 8-9}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -705,32 +709,15 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'Custom' }} description="인증이 None일 때 발생할 수 있는 Checkov 실패">
-:::caution[인증 없음]
-다음과 같은 Checkov 검사 실패가 발생할 수 있습니다:
-
-<Tabs syncKey="http-rest">
-<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
-```
-Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
- FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
-```
-</TabItem>
-<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
-```
-Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
- FAILED for resource: aws_api_gateway_method.proxy_method
-```
-</TabItem>
-</Tabs>
-
-API를 공개로 유지하려는 경우 [suppression comment 추가](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)를 고려할 수 있습니다.
+<OptionFilter when={{ auth: 'Custom' }} description="Custom Lambda Authorizer usage with Terraform">
+:::caution[Custom Lambda Authorizer]
+When using `Custom` auth, your API is protected by a Lambda Authorizer that **denies all requests by default**. You must implement your authorization logic in the generated `src/authorizer.ts` file before your API will accept any traffic.
 :::
 </OptionFilter>
 </Fragment>
 </Infrastructure>
 
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST API는 기본적으로 WAF Web ACL을 가짐">
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST APIs get a WAF Web ACL by default">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
@@ -744,7 +731,7 @@ API를 공개로 유지하려는 경우 [suppression comment 추가](https://www
 `iacProvider`로 CDK를 선택한 경우, tRPC API에서 프로시저를 추가하거나 제거할 때 재빌드 없이 CDK 구성에 즉시 반영됩니다.
 :::
 
-<OptionFilter when={{ auth: 'IAM' }} description="API 호출 접근 권한 부여 — IAM 인증 API 전용">
+<OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
 ### 접근 권한 부여 (IAM 전용)
 
 다음과 같이 API에 대한 접근 권한을 부여할 수 있습니다:
