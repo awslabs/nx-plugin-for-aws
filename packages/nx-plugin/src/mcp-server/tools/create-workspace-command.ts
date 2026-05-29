@@ -44,7 +44,7 @@ If you know the preferred option, pass ${IAC_PROVIDERS.map((iac) => `\`--iacProv
 Additional options:
 - \`--no-gitSecrets\`: Opt out of the default git-secrets pre-commit hook (prevents committing AWS credentials)
 
-For full details on workspace structure, common commands, and configuration, see: https://awslabs.github.io/nx-plugin-for-aws/en/guides/workspace/
+Refer to the \`general-guidance\` tool for full workspace documentation including structure, common commands, and configuration.
   `,
         },
       ],

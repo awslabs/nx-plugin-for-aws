@@ -7,6 +7,7 @@ import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
 When you create a new workspace with `@aws/nx-plugin`, the preset generator sets up an [Nx monorepo](https://nx.dev) with sensible defaults for building on AWS — including TypeScript, Prettier, workspace layout, and security tooling.
@@ -17,40 +18,56 @@ When you create a new workspace with `@aws/nx-plugin`, the preset generator sets
 
 ### Options
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `iacProvider` | `CDK` \| `Terraform` | — | Infrastructure as Code provider preference |
-| `gitSecrets` | `boolean` | `true` | Configure git-secrets pre-commit hooks to prevent committing AWS credentials |
+<GeneratorParameters generator="preset" />
 
-<Infrastructure>
-<Fragment slot="cdk">
-<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
-</Fragment>
-<Fragment slot="terraform">
-<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
-</Fragment>
-</Infrastructure>
+## Nx
 
-To opt out of git-secrets scanning:
+Nx is a language-agnostic build system for monorepos, managing dependencies between projects written in any programming language and the tasks to build them. You can learn more on the [Nx website](https://nx.dev/getting-started/intro).
 
-```sh
-pnpm create @aws/nx-workspace my-project --no-gitSecrets
+### Projects
+
+An Nx monorepo is made up of one or more projects, each with a `project.json` file. The `project.json` defines a project's tasks, known as _targets_, which define how a project is built, run locally, tested, etc. It also defines dependencies between targets within or across projects.
+
+For example, a `project.json` might define a `build` target that depends on all upstream projects being built first:
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
 ```
 
-## Workspace Structure
+:::tip
+For projects in languages not directly supported by the Nx Plugin for AWS, you can often find a generator in the [Nx Plugin Registry](https://nx.dev/plugin-registry) to help. It's simple to add a project of any language into your monorepo however — just add a `project.json` file and define its `build` target to run the specific build command for a project of that language.
+:::
 
-<FileTree>
-  - packages/ Your projects live here
-  - .git-secrets/
-    - git-secrets Vendored git-secrets bash script for credential scanning
-    - setup.sh Registers AWS credential patterns in local git config
-  - .husky/
-    - pre-commit Runs git-secrets scan before each commit
-  - nx.json Nx configuration (targets, sync generators, analytics)
-  - package.json Scripts, devDependencies, and prepare hook
-  - tsconfig.json Root TypeScript configuration
-  - aws-nx-plugin.config.mts Plugin configuration (IaC provider, license, etc.)
-</FileTree>
+For details on how TypeScript and Python projects are set up, refer to the <Link path="guides/typescript-project">ts#project</Link> and <Link path="guides/python-project">py#project</Link> generator guides.
+
+### Caching
+
+Nx caches the output of previously executed targets and replays them when the inputs haven't changed. This dramatically speeds up builds, tests, and linting — especially in CI. If you encounter stale or unexpected behaviour, reset the cache with:
+
+<NxCommands commands={['reset']} />
+
+For more details, see the [Nx caching documentation](https://nx.dev/features/cache-task-results).
+
+## Single Version Policy
+
+The default monorepo setup uses a [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) for both Node and Python based projects.
+
+This means that all projects within your monorepo use the same version of dependencies by default, reducing issues related to packages in the same monorepo running into version mismatch issues.
+
+From a Node perspective this means a single lockfile at the root with a single `node_modules` containing all dependencies. If you need to add a new dependency, add it in the root `package.json`.
+
+From a Python perspective, this means a single `.venv` in the root of the monorepo with all dependencies installed into it. Each Python project has its own `pyproject.toml`, but the versions of those dependencies are managed by the UV workspace and subsequently written out to the `uv.lock` file in the root.
 
 ## Common Commands
 
@@ -59,10 +76,6 @@ pnpm create @aws/nx-workspace my-project --no-gitSecrets
 Build all projects in the workspace:
 
 <PackageManagerShortCommand commands={["build"]} />
-
-Build a single project:
-
-<NxCommands commands={['build <project-name>']} />
 
 ### Lint
 
@@ -74,39 +87,53 @@ Lint and auto-fix all projects:
 
 Run tests across all projects:
 
-<NxCommands commands={['run-many --target test --all']} />
+<PackageManagerShortCommand commands={["test"]} />
 
-### Dev Server
+### Dev
 
-If you have a React website, start it locally:
-
-<NxCommands commands={['serve <website-project>']} />
-
-To start all local dev servers (website + connected APIs):
+If you have a <Link path="guides/react-website">website</Link>, start it and all connected components locally:
 
 <PackageManagerShortCommand commands={["dev"]} />
 
 ### Sync
 
-Synchronize TypeScript project references and other generated files:
+Run any [sync generators](https://nx.dev/concepts/sync-generators), which for example synchronise TypeScript project references (refer to the <Link path="guides/typescript-project">ts#project</Link> generator guide for more details):
 
 <NxCommands commands={['sync']} />
 
-## Git Secrets
+### Run Specific Targets
+
+You can run specific targets for specific projects with:
+
+<NxCommands commands={['<target> <project>']} />
+
+For example:
+
+<NxCommands commands={['build website']} />
+
+This will additionally run any targets that it depends on.
+
+## What's Included
+
+### Linting
+
+New workspaces are configured with [ESLint](https://eslint.org/) for static analysis and [Prettier](https://prettier.io/) for code formatting. Running `lint` applies both to all projects.
+
+### Git Secrets
 
 New workspaces include [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
 
-### How It Works
+#### How It Works
 
 <Steps>
-1. The `prepare` script runs after package install, which initializes husky git hooks and registers AWS credential patterns in your local git config.
+1. When `git commit` runs, the [husky](https://typicode.github.io/husky/) pre-commit hook invokes git-secrets.
 
-2. On each `git commit`, the husky pre-commit hook invokes git-secrets to scan staged files.
+2. On the first commit, git-secrets registers AWS credential patterns in your local git config.
 
-3. If a pattern matching an AWS credential is detected, the commit is blocked.
+3. Staged files are scanned against the patterns. If a match is found, the commit is blocked.
 </Steps>
 
-### Detected Patterns
+#### Detected Patterns
 
 - **AWS Access Key IDs** — `AKIA...`, `ASIA...`, and other IAM key prefixes
 - **AWS Secret Access Keys** — 40-character base64 strings with `SECRET_ACCESS_KEY` label
@@ -116,28 +143,26 @@ New workspaces include [git-secrets](https://github.com/awslabs/git-secrets) pre
 
 Well-known example keys (e.g., `AKIAIOSFODNN7EXAMPLE`) are automatically allowlisted.
 
-### Suppressing False Positives
+#### Suppressing False Positives
 
-If git-secrets blocks a commit that does not contain real credentials, you can suppress the finding in several ways:
-
-**Allow a specific pattern globally (for all future commits):**
+Patterns in git-secrets use [egrep-compatible regular expressions](https://github.com/awslabs/git-secrets#options-for-add). If git-secrets blocks a commit that does not contain real credentials:
 
 ```sh
-git config --add secrets.allowed 'my-pattern-here'
+# Allow a specific regex pattern
+git secrets --add --allowed 'my-regex-pattern'
+
+# Allow a literal string (special characters are escaped)
+git secrets --add --allowed --literal 'my-literal+string'
 ```
 
-**Use a `.gitallowed` file (shared with your team via version control):**
-
-Create a `.gitallowed` file at the repository root with one regex per line:
+You can also create a `.gitallowed` file at the repository root with one regex per line (shared with your team via version control):
 
 ```text title=".gitallowed"
-# Allow test fixtures containing fake key patterns
+# Allow test fixtures
 tests/fixtures/.*
 # Allow a specific string
-my-safe-pattern-here
+EXAMPLE[A-Z]{16}
 ```
-
-**Skip scanning for a single commit:**
 
 For a one-time override:
 
@@ -145,14 +170,18 @@ For a one-time override:
 git commit --no-verify
 ```
 
-### Requirements
+For full details on managing patterns, see the [git-secrets documentation](https://github.com/awslabs/git-secrets#readme).
 
-- **Git** must be initialized in the workspace (`git init`)
-- **Bash** must be available on PATH (ships with Git for Windows on Windows)
-- Patterns are registered when `prepare` runs — run your package manager's install command after cloning to re-register
+## Workspace Structure
 
-## Learn More
-
-- [Nx documentation](https://nx.dev)
-- <Link path="get_started/quick-start">Quick Start Guide</Link>
-- <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link>
+<FileTree>
+  - packages/ Your projects live here
+  - .git-secrets/
+    - git-secrets Vendored git-secrets bash script for credential scanning
+  - .husky/
+    - pre-commit Runs git-secrets scan before each commit
+  - nx.json Nx configuration (targets, sync generators, caching)
+  - package.json Scripts, devDependencies, and prepare hook
+  - tsconfig.json Root TypeScript configuration
+  - aws-nx-plugin.config.mts Plugin configuration (IaC provider, license, etc.)
+</FileTree>

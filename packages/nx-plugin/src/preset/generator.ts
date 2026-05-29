@@ -140,10 +140,6 @@ const setUpGitSecrets = (tree: Tree) => {
     readFileSync(joinPathFragments(gitSecretsDir, 'git-secrets'), 'utf-8'),
   );
   tree.write(
-    '.git-secrets/setup.sh',
-    readFileSync(joinPathFragments(gitSecretsDir, 'setup.sh'), 'utf-8'),
-  );
-  tree.write(
     '.husky/pre-commit',
     readFileSync(joinPathFragments(huskyDir, 'pre-commit'), 'utf-8'),
   );
@@ -152,7 +148,7 @@ const setUpGitSecrets = (tree: Tree) => {
     ...json,
     scripts: {
       ...json.scripts,
-      prepare: 'husky && bash .git-secrets/setup.sh || true',
+      prepare: 'husky || true',
     },
   }));
 
@@ -229,6 +225,7 @@ export const presetGenerator = async (
       ...packageJson.scripts,
       build: 'nx run-many --target build',
       lint: 'nx run-many --target lint --configuration=fix',
+      test: 'nx run-many --target test --all',
       'build:skip-lint': 'nx run-many --target build --configuration=skip-lint',
       'build:all': 'nx run-many --target build --all',
       'affected:all': 'nx affected --target build',

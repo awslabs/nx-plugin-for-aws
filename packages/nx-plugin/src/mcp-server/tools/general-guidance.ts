@@ -77,11 +77,11 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 - After making changes to your projects, fix linting issues, then run a full build
 - When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load:runtime-config target after a deployment to point a local website at a sandbox stack.
 
-## Language Specific Guidance
+## Detailed Guides
 
-Please refer to the below documentation for important details regarding working with any TypeScript or Python projects.
+Please refer to the below documentation for important details regarding workspaces and working with TypeScript or Python projects.
 
-${await fetchGuidePages(['typescript-project', 'python-project'], generators)}
+${await fetchGuidePages(['workspace', 'typescript-project', 'python-project'], generators)}
 
     `,
         },

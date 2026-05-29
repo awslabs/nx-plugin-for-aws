@@ -295,6 +295,20 @@ export default defineConfig({
                 vi: 'Xây dựng với AI',
               },
             },
+            {
+              label: 'Workspaces',
+              link: '/guides/workspace',
+              translations: {
+                jp: 'ワークスペース',
+                ko: '워크스페이스',
+                fr: 'Espaces de travail',
+                it: 'Workspace',
+                es: 'Espacios de trabajo',
+                pt: 'Espaços de trabalho',
+                zh: '工作区',
+                vi: 'Không gian làm việc',
+              },
+            },
           ],
         },
         {
@@ -420,10 +434,6 @@ export default defineConfig({
             {
               label: 'license',
               link: '/guides/license',
-            },
-            {
-              label: 'workspace',
-              link: '/guides/workspace',
             },
           ],
         },
