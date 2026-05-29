@@ -13,6 +13,8 @@ import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
   invokeAgentCoreMcp,
+  invokeCustomAuthApi,
+  invokeCustomAuthTrpcApi,
   invokeLambda,
   invokeRestApi,
   invokeTrpcAgentCoreAgent,
@@ -139,6 +141,24 @@ describe('smoke test - cdk-deploy', () => {
 
       // Smithy
       await invokeRestApi(findOutput('MySmithyApiEndpoint'), 'Smithy REST');
+
+      // Custom auth APIs — should deny unauthenticated requests
+      await invokeCustomAuthTrpcApi(
+        findOutput('MyApiCustomEndpoint'),
+        'tRPC REST Custom Auth',
+      );
+      await invokeCustomAuthTrpcApi(
+        findOutput('MyApiCustomHttpMyApiCustomHttpUrl'),
+        'tRPC HTTP Custom Auth',
+      );
+      await invokeCustomAuthApi(
+        findOutput('PyApiCustomEndpoint'),
+        'FastAPI REST Custom Auth',
+      );
+      await invokeCustomAuthApi(
+        findOutput('PyApiCustomHttpPyApiCustomHttpUrl'),
+        'FastAPI HTTP Custom Auth',
+      );
 
       // MCP
       await invokeAgentCoreMcp(

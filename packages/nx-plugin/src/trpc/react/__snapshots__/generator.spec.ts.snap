@@ -77,6 +77,76 @@ export default TestApiClientProvider;
 "
 `;
 
+exports[`trpc react generator > REST API (ServerlessApiGatewayRestApi) > should generate REST API client provider with splitLink for Custom auth > TestApiClientProvider-REST-Custom.tsx 1`] = `
+"import { AppRouter } from 'backend';
+import { useQueryClient } from '@tanstack/react-query';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import {
+  TRPCClient,
+  createTRPCClient,
+  httpLink,
+  httpSubscriptionLink,
+  splitLink,
+} from '@trpc/client';
+import { EventSourcePolyfill } from 'event-source-polyfill';
+
+export interface TestApiTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestApiTRPCContext = createContext<TestApiTRPCContextValue | null>(
+  null,
+);
+
+export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestApi;
+
+  const container = useMemo<TestApiTRPCContextValue>(() => {
+    const client = createTRPCClient<AppRouter>({
+      links: [
+        splitLink({
+          condition: (op) => op.type === 'subscription',
+          true: httpSubscriptionLink({
+            url: apiUrl,
+            EventSource: EventSourcePolyfill,
+            eventSourceOptions: async ({ op }) => {
+              // TODO: Add headers required by your custom authorizer
+              return { headers: {} };
+            },
+          }),
+          false: httpLink({
+            url: apiUrl,
+            // TODO: Add headers required by your custom authorizer
+            headers: {},
+          }),
+        }),
+      ],
+    });
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [apiUrl, queryClient]);
+
+  return (
+    <TestApiTRPCContext.Provider value={container}>
+      {children}
+    </TestApiTRPCContext.Provider>
+  );
+};
+
+export default TestApiClientProvider;
+"
+`;
+
 exports[`trpc react generator > REST API (ServerlessApiGatewayRestApi) > should generate REST API client provider with splitLink for IAM auth > TestApiClientProvider-REST-IAM.tsx 1`] = `
 "import { AppRouter } from 'backend';
 import { useQueryClient } from '@tanstack/react-query';
@@ -157,68 +227,6 @@ export default TestApiClientProvider;
 "
 `;
 
-exports[`trpc react generator > REST API (ServerlessApiGatewayRestApi) > should generate REST API client provider with splitLink for None auth > TestApiClientProvider-REST-None.tsx 1`] = `
-"import { AppRouter } from 'backend';
-import { useQueryClient } from '@tanstack/react-query';
-import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
-import { createContext, FC, PropsWithChildren, useMemo } from 'react';
-import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-import {
-  TRPCClient,
-  createTRPCClient,
-  httpLink,
-  httpSubscriptionLink,
-  splitLink,
-} from '@trpc/client';
-
-export interface TestApiTRPCContextValue {
-  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
-  client: TRPCClient<AppRouter>;
-}
-
-export const TestApiTRPCContext = createContext<TestApiTRPCContextValue | null>(
-  null,
-);
-
-export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
-  const queryClient = useQueryClient();
-  const runtimeConfig = useRuntimeConfig();
-  const apiUrl = runtimeConfig.apis.TestApi;
-
-  const container = useMemo<TestApiTRPCContextValue>(() => {
-    const client = createTRPCClient<AppRouter>({
-      links: [
-        splitLink({
-          condition: (op) => op.type === 'subscription',
-          true: httpSubscriptionLink({
-            url: apiUrl,
-          }),
-          false: httpLink({
-            url: apiUrl,
-          }),
-        }),
-      ],
-    });
-
-    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
-      client,
-      queryClient,
-    });
-
-    return { optionsProxy, client };
-  }, [apiUrl, queryClient]);
-
-  return (
-    <TestApiTRPCContext.Provider value={container}>
-      {children}
-    </TestApiTRPCContext.Provider>
-  );
-};
-
-export default TestApiClientProvider;
-"
-`;
-
 exports[`trpc react generator > should generate trpc react files > TestApiClientProvider.tsx 1`] = `
 "import { AppRouter } from 'backend';
 import { useQueryClient } from '@tanstack/react-query';
@@ -249,6 +257,8 @@ export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
   const container = useMemo<TestApiTRPCContextValue>(() => {
     const linkOptions: HTTPLinkOptions<any> = {
       url: apiUrl,
+      // TODO: Add headers required by your custom authorizer
+      headers: {},
     };
 
     const client = createTRPCClient<AppRouter>({

@@ -17,16 +17,16 @@ import { RuntimeConfig } from '../../core/runtime-config.js';
 import {
   CorsHttpMethod,
   CfnApi,
-  <%_ if (auth === 'None') { _%>
-  HttpNoneAuthorizer,
-  <%_ } _%>
 } from 'aws-cdk-lib/aws-apigatewayv2';
-<%_ if (['IAM', 'Cognito'].includes(auth)) { _%>
+<%_ if (['IAM', 'Cognito', 'Custom'].includes(auth)) { _%>
 import {
   <%_ if (auth === 'IAM') { _%>
   HttpIamAuthorizer,
   <%_ } else if (auth === 'Cognito') { _%>
   HttpUserPoolAuthorizer,
+  <%_ } else if (auth === 'Custom') { _%>
+  HttpLambdaAuthorizer,
+  HttpLambdaResponseType,
   <%_ } _%>
 } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 <%_ } _%>
@@ -175,6 +175,36 @@ export class <%= apiNameClassName %><
     id: string,
     props: <%= apiNameClassName %>Props<TIntegrations>,
   ) {
+    <%_ if (auth === 'Custom') { _%>
+    const authorizerFunction = new Function(scope, '<%= apiNameClassName %>AuthorizerFunction', {
+      <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.authorizerBundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      runtime: Runtime.PYTHON_3_14,
+      handler: '<%- backend.moduleName %>.authorizer.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      <%_ } _%>
+      timeout: Duration.seconds(10),
+      tracing: Tracing.ACTIVE,
+    });
+    <%_ } _%>
+
     super(scope, id, {
       apiName: '<%= apiNameClassName %>',
       corsPreflight: {
@@ -194,8 +224,10 @@ export class <%= apiNameClassName %><
       defaultAuthorizer: new HttpUserPoolAuthorizer('<%= apiNameClassName %>Authorizer', props.identity.userPool, {
         userPoolClients: [props.identity.userPoolClient]
       }),
-      <%_ } else if (auth === 'None') { _%>
-      defaultAuthorizer: new HttpNoneAuthorizer(),
+      <%_ } else if (auth === 'Custom') { _%>
+      defaultAuthorizer: new HttpLambdaAuthorizer('<%= apiNameClassName %>LambdaAuthorizer', authorizerFunction, {
+        responseTypes: [HttpLambdaResponseType.SIMPLE],
+      }),
       <%_ } _%>
       <%_ if (backend.type === 'trpc') { _%>
       operations: routerToOperations(appRouter),

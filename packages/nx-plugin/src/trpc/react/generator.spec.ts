@@ -33,7 +33,7 @@ describe('trpc react generator', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'None',
+          auth: 'Custom',
         },
       }),
     );
@@ -202,7 +202,7 @@ export function Main() {
       }));
     });
 
-    it('should generate REST API client provider with splitLink for None auth', async () => {
+    it('should generate REST API client provider with splitLink for Custom auth', async () => {
       await reactGenerator(tree, {
         frontendProjectName: 'frontend',
         backendProjectName: 'backend',
@@ -213,11 +213,11 @@ export function Main() {
           'apps/frontend/src/components/TestApiClientProvider.tsx',
           'utf-8',
         ),
-      ).toMatchSnapshot('TestApiClientProvider-REST-None.tsx');
+      ).toMatchSnapshot('TestApiClientProvider-REST-Custom.tsx');
 
-      // None auth does not need EventSourcePolyfill since no auth headers are required
+      // Custom auth still uses EventSourcePolyfill for subscription support
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
+      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
     });
 
     it('should generate REST API client provider with splitLink for IAM auth', async () => {
@@ -335,7 +335,7 @@ describe('trpc react generator with unqualified names', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'None',
+          auth: 'Custom',
         },
       }),
     );
@@ -413,7 +413,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     // Generate a trpc backend
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
-      auth: 'None',
+      auth: 'Custom',
       computeType: 'ServerlessApiGatewayHttpApi',
       iacProvider: 'CDK',
     });
@@ -453,7 +453,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     // Generate first API
     await tsTrpcApiGenerator(tree, {
       name: 'FirstApi',
-      auth: 'None',
+      auth: 'Custom',
       computeType: 'ServerlessApiGatewayHttpApi',
       iacProvider: 'CDK',
     });
@@ -461,7 +461,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     // Generate second API
     await tsTrpcApiGenerator(tree, {
       name: 'SecondApi',
-      auth: 'None',
+      auth: 'Custom',
       computeType: 'ServerlessApiGatewayHttpApi',
       iacProvider: 'CDK',
     });

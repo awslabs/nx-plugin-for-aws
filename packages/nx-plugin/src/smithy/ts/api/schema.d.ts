@@ -12,7 +12,7 @@ export interface TsSmithyApiGeneratorSchema {
   // https://smithy.io/2.0/languages/typescript/ts-ssdk/supported-endpoints.html#amazon-api-gateway-rest-apis-and-aws-lambda
   computeType: 'ServerlessApiGatewayRestApi';
   integrationPattern?: 'isolated' | 'shared';
-  auth: 'IAM' | 'Cognito' | 'None';
+  auth: 'IAM' | 'Cognito' | 'Custom';
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
   iacProvider: IacProviderOption;

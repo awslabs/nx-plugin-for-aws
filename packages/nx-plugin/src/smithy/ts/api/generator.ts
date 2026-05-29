@@ -4,6 +4,7 @@
  */
 import {
   GeneratorCallback,
+  OverwriteStrategy,
   Tree,
   addDependenciesToPackageJson,
   generateFiles,
@@ -108,6 +109,29 @@ export const tsSmithyApiGenerator = async (
     },
   );
 
+  if (options.auth === 'Custom') {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'utils',
+        'api-constructs',
+        'files',
+        'cdk',
+        'authorizer',
+        'rest',
+      ),
+      backendProjectConfig.sourceRoot,
+      {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
+  }
+
   // Add infrastructure
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
   await sharedConstructsGenerator(tree, {
@@ -128,6 +152,14 @@ export const tsSmithyApiGenerator = async (
         'bundle',
       ),
       integrationPattern,
+      ...(options.auth === 'Custom' && {
+        authorizerBundleOutputDir: joinPathFragments(
+          'dist',
+          backendProjectConfig.root,
+          'bundle',
+          'authorizer',
+        ),
+      }),
     },
   });
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
@@ -148,6 +180,14 @@ export const tsSmithyApiGenerator = async (
     targetFilePath: 'src/handler.ts',
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
+
+  if (options.auth === 'Custom') {
+    await addTypeScriptBundleTarget(tree, backendProjectConfig, {
+      targetFilePath: 'src/authorizer.ts',
+      bundleOutputDir: 'authorizer',
+      external: [/@aws-sdk\/.*/],
+    });
+  }
 
   const cmd = new FsCommands(tree);
   const generatedSrcDirFromRoot = '{projectRoot}/src/generated';
@@ -240,6 +280,9 @@ export const tsSmithyApiGenerator = async (
       '@aws-lambda-powertools/tracer',
       '@aws-lambda-powertools/metrics',
       '@aws-sdk/client-appconfigdata',
+      ...(options.auth === 'Custom'
+        ? (['@aws-lambda-powertools/parser'] as const)
+        : []),
     ]),
     withVersions(['@types/aws-lambda']),
   );

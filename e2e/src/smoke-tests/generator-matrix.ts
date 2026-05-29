@@ -48,6 +48,16 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
+  // tRPC APIs with Custom auth — REST + HTTP variants.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#trpc-api --name=my-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#trpc-api --name=my-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
+    opts,
+  );
+
   // Website -> tRPC API connections
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
@@ -65,6 +75,16 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   await runCLI(
     `generate @aws/nx-plugin:py#fast-api --name=py-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+    opts,
+  );
+
+  // Python FastAPI with Custom auth — REST + HTTP variants.
+  await runCLI(
+    `generate @aws/nx-plugin:py#fast-api --name=py-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#fast-api --name=py-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
     opts,
   );
 

@@ -2586,6 +2586,749 @@ output "api_log_group_arn" {
 }
 `;
 
+exports[`fastapi project generator > terraform iacProvider > should generate terraform files for HTTP API with Custom auth and snapshot them > terraform-http-custom-files 1`] = `
+{
+  "http-api.tf": "# Core HTTP API Gateway module
+# This module creates the API Gateway HTTP API, stage, and logging resources
+
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+# Core HTTP API Gateway Variables
+
+variable "api_name" {
+  description = "Name of the HTTP API Gateway"
+  type        = string
+}
+
+variable "api_description" {
+  description = "Description of the HTTP API Gateway"
+  type        = string
+  default     = "HTTP API Gateway"
+}
+
+variable "stage_name" {
+  description = "Name of the API Gateway stage"
+  type        = string
+  default     = "prod"
+}
+
+variable "stage_auto_deploy" {
+  description = "Whether to automatically deploy the API stage"
+  type        = bool
+  default     = true
+}
+
+# CORS Configuration
+
+variable "cors_allow_credentials" {
+  description = "Whether to allow credentials in CORS requests"
+  type        = bool
+  default     = false
+}
+
+variable "cors_allow_headers" {
+  description = "List of allowed headers for CORS"
+  type        = list(string)
+  default     = ["authorization", "content-type", "x-amz-content-sha256", "x-amz-date", "x-amz-security-token"]
+}
+
+variable "cors_allow_methods" {
+  description = "List of allowed HTTP methods for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_allow_origins" {
+  description = "List of allowed origins for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_expose_headers" {
+  description = "List of headers to expose in CORS responses"
+  type        = list(string)
+  default     = []
+}
+
+variable "cors_max_age" {
+  description = "Maximum age for CORS preflight requests in seconds"
+  type        = number
+  default     = 86400
+}
+
+# Tags
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Data sources
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+# Resources
+
+# KMS key for CloudWatch log group encryption
+resource "aws_kms_key" "logs_key" {
+  description             = "KMS key for CloudWatch log group encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.\${data.aws_region.current.region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/\${var.api_name}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_kms_alias" "logs_key_alias" {
+  name          = "alias/\${var.api_name}-api-logs-encryption"
+  target_key_id = aws_kms_key.logs_key.key_id
+}
+
+# HTTP API Gateway
+resource "aws_apigatewayv2_api" "http_api" {
+  name          = var.api_name
+  protocol_type = "HTTP"
+  description   = var.api_description
+
+  cors_configuration {
+    allow_credentials = var.cors_allow_credentials
+    allow_headers     = var.cors_allow_headers
+    allow_methods     = var.cors_allow_methods
+    allow_origins     = var.cors_allow_origins
+    expose_headers    = var.cors_expose_headers
+    max_age          = var.cors_max_age
+  }
+
+  tags = var.tags
+}
+
+# API Gateway stage
+resource "aws_apigatewayv2_stage" "api_stage" {
+  api_id      = aws_apigatewayv2_api.http_api.id
+  name        = var.stage_name
+  auto_deploy = var.stage_auto_deploy
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip            = "$context.identity.sourceIp"
+      requestTime   = "$context.requestTime"
+      httpMethod    = "$context.httpMethod"
+      routeKey      = "$context.routeKey"
+      status        = "$context.status"
+      protocol      = "$context.protocol"
+      responseLength = "$context.responseLength"
+      error         = "$context.error.message"
+      integrationError = "$context.integrationErrorMessage"
+    })
+  }
+
+  default_route_settings {
+    throttling_burst_limit = 5000
+    throttling_rate_limit = 10000
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.api_logs]
+}
+
+# CloudWatch Log Group for API Gateway
+resource "aws_cloudwatch_log_group" "api_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name         = "/aws/apigateway/\${var.api_name}"
+  kms_key_id   = aws_kms_key.logs_key.arn
+  tags         = var.tags
+}
+
+# Outputs
+
+output "api_id" {
+  description = "ID of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.id
+}
+
+output "api_arn" {
+  description = "ARN of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.arn
+}
+
+output "api_endpoint" {
+  description = "Base URL of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.api_endpoint
+}
+
+output "api_execution_arn" {
+  description = "Execution ARN of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.execution_arn
+}
+
+output "stage_id" {
+  description = "ID of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.id
+}
+
+output "stage_arn" {
+  description = "ARN of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.arn
+}
+
+output "stage_execution_arn" {
+  description = "Execution ARN of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.execution_arn
+}
+
+output "stage_invoke_url" {
+  description = "Invoke URL of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.invoke_url
+}
+
+output "api_log_group_name" {
+  description = "Name of the API Gateway CloudWatch log group"
+  value       = aws_cloudwatch_log_group.api_logs.name
+}
+
+output "api_log_group_arn" {
+  description = "ARN of the API Gateway CloudWatch log group"
+  value       = aws_cloudwatch_log_group.api_logs.arn
+}",
+  "test-api.tf": "terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+
+variable "env" {
+  description = "Environment variables for the Lambda function"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements for the Lambda function"
+  type        = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
+# CORS Configuration (passed to core module)
+variable "cors_allow_credentials" {
+  description = "Whether to allow credentials in CORS requests"
+  type        = bool
+  default     = false
+}
+
+variable "cors_allow_headers" {
+  description = "List of allowed headers for CORS"
+  type        = list(string)
+  default     = ["authorization", "content-type", "x-amz-content-sha256", "x-amz-date", "x-amz-security-token"]
+}
+
+variable "cors_allow_methods" {
+  description = "List of allowed HTTP methods for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_allow_origins" {
+  description = "List of allowed origins for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_expose_headers" {
+  description = "List of headers to expose in CORS responses"
+  type        = list(string)
+  default     = []
+}
+
+variable "cors_max_age" {
+  description = "Maximum age for CORS preflight requests in seconds"
+  type        = number
+  default     = 0
+}
+
+# Tags
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Get current AWS region and account ID
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# Resources
+
+# Create Lambda ZIP file from the bundle directory
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_dir  = "\${path.module}/../../../../../../../dist/apps/test_api/bundle-x86"
+  output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
+}
+
+resource "aws_s3_object" "lambda_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_sha256}.zip"
+  source      = data.archive_file.lambda_zip.output_path
+  source_hash = data.archive_file.lambda_zip.output_base64sha256
+  etag        = data.archive_file.lambda_zip.output_md5
+}
+
+
+# Use the core HTTP API module
+module "http_api" {
+  source = "../../../core/api/http-api"
+
+  api_name        = "TestApi-\${random_string.suffix.result}"
+  api_description = "TestApi HTTP API"
+  stage_name      = "$default"
+  stage_auto_deploy = true
+
+  # CORS Configuration
+  cors_allow_credentials = var.cors_allow_credentials
+  cors_allow_headers     = var.cors_allow_headers
+  cors_allow_methods     = var.cors_allow_methods
+  cors_allow_origins     = var.cors_allow_origins
+  cors_expose_headers    = var.cors_expose_headers
+  cors_max_age           = var.cors_max_age
+
+  # Tags
+  tags = var.tags
+}
+
+# Lambda function
+# This configures a single "router" lambda to serve all requests
+resource "aws_lambda_function" "api_lambda" {
+  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
+  s3_key            = aws_s3_object.lambda_zip.key
+  s3_object_version = aws_s3_object.lambda_zip.version_id
+  function_name    = "TestApiHandler-\${random_string.suffix.result}"
+  role            = aws_iam_role.lambda_execution_role.arn
+  handler         = "run.sh"
+  runtime         = "python3.14"
+  layers          = ["arn:aws:lambda:\${data.aws_region.current.region}:753240598075:layer:LambdaAdapterLayerX86:24"]
+  timeout         = 30
+  memory_size     = 128
+  publish         = true
+
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+
+  # Enable X-Ray tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  # Enable SnapStart for faster cold starts
+  snap_start {
+    apply_on = "PublishedVersions"
+  }
+
+  environment {
+    variables = merge({
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE         = "buffered"
+      AWS_LAMBDA_EXEC_WRAPPER     = "/opt/bootstrap"
+    }, var.env)
+  }
+
+  tags = var.tags
+}
+
+# IAM role for Lambda execution
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# Attach basic execution policy to Lambda role
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
+# Attach X-Ray tracing policy to Lambda role
+resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
+# Additional IAM policies for Lambda (if provided)
+resource "aws_iam_role_policy" "lambda_additional_policies" {
+  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
+  role  = aws_iam_role.lambda_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = var.additional_iam_policy_statements
+  })
+}
+
+# CloudWatch Log Group for Lambda
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
+  tags              = var.tags
+}
+
+# Lambda alias pointing to the latest published version for SnapStart
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  function_name    = aws_lambda_function.api_lambda.function_name
+  function_version = aws_lambda_function.api_lambda.version
+
+  depends_on = [aws_lambda_function.api_lambda]
+}
+
+# Custom Lambda Authorizer
+resource "aws_lambda_function" "authorizer_lambda" {
+  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for authorizer
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  s3_bucket         = aws_s3_object.authorizer_zip.bucket
+  s3_key            = aws_s3_object.authorizer_zip.key
+  s3_object_version = aws_s3_object.authorizer_zip.version_id
+  function_name    = "TestApiAuthorizer-\${random_string.suffix.result}"
+  role            = aws_iam_role.authorizer_execution_role.arn
+  handler         = "proj_test_api.authorizer.handler"
+  runtime         = "python3.14"
+  timeout         = 10
+  memory_size     = 128
+
+  source_code_hash = data.archive_file.authorizer_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  tags = var.tags
+}
+
+resource "aws_iam_role" "authorizer_execution_role" {
+  name = "TestApiAuthorizer-role-\${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "authorizer_basic_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.authorizer_execution_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "authorizer_xray_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  role       = aws_iam_role.authorizer_execution_role.name
+}
+
+resource "aws_cloudwatch_log_group" "authorizer_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/TestApiAuthorizer-\${random_string.suffix.result}"
+  tags = var.tags
+}
+
+data "archive_file" "authorizer_zip" {
+  type        = "zip"
+  source_dir  = "\${path.module}/../../../../../../../dist/apps/test_api/bundle-x86"
+  output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/authorizer.zip"
+}
+
+resource "aws_s3_object" "authorizer_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/authorizer-\${data.archive_file.authorizer_zip.output_sha256}.zip"
+  source      = data.archive_file.authorizer_zip.output_path
+  source_hash = data.archive_file.authorizer_zip.output_base64sha256
+  etag        = data.archive_file.authorizer_zip.output_md5
+}
+
+resource "aws_apigatewayv2_authorizer" "custom_authorizer" {
+  api_id                            = module.http_api.api_id
+  authorizer_type                   = "REQUEST"
+  authorizer_uri                    = aws_lambda_function.authorizer_lambda.invoke_arn
+  authorizer_payload_format_version = "2.0"
+  authorizer_result_ttl_in_seconds  = 0
+  enable_simple_responses           = true
+  name                              = "TestApiAuthorizer-\${random_string.suffix.result}"
+}
+
+resource "aws_lambda_permission" "authorizer_invoke" {
+  statement_id  = "AllowAPIGatewayInvokeAuthorizer"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.authorizer_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "\${module.http_api.api_execution_arn}/authorizers/\${aws_apigatewayv2_authorizer.custom_authorizer.id}"
+}
+
+# Lambda integration for HTTP API
+resource "aws_apigatewayv2_integration" "lambda_integration" {
+  api_id           = module.http_api.api_id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_alias.live.invoke_arn
+
+  payload_format_version = "2.0"
+  timeout_milliseconds   = 30000
+
+  depends_on = [aws_lambda_alias.live]
+}
+
+# Route for proxy integration (catches all requests)
+resource "aws_apigatewayv2_route" "proxy_routes" {
+  # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
+  # when cors settings are configured
+  for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+
+  api_id    = module.http_api.api_id
+  route_key = "\${each.key} /{proxy+}"
+  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration.id}"
+
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.custom_authorizer.id
+
+  depends_on = [aws_apigatewayv2_integration.lambda_integration, aws_apigatewayv2_authorizer.custom_authorizer]
+}
+
+# Add API url to runtime config
+module "add_url_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = module.http_api.stage_invoke_url }
+
+  depends_on = [module.http_api]
+}
+
+# Lambda permission for API Gateway to invoke the function via alias
+resource "aws_lambda_permission" "api_gateway_invoke" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api_lambda.function_name
+  qualifier     = aws_lambda_alias.live.name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "\${module.http_api.api_execution_arn}/*/*"
+
+  depends_on = [module.http_api, aws_lambda_alias.live]
+}
+
+# Outputs
+
+# API Gateway Outputs (from core module)
+output "api_id" {
+  description = "ID of the HTTP API Gateway"
+  value       = module.http_api.api_id
+}
+
+output "api_arn" {
+  description = "ARN of the HTTP API Gateway"
+  value       = module.http_api.api_arn
+}
+
+output "api_endpoint" {
+  description = "Base URL of the HTTP API Gateway"
+  value       = module.http_api.api_endpoint
+}
+
+output "api_execution_arn" {
+  description = "Execution ARN of the HTTP API Gateway"
+  value       = module.http_api.api_execution_arn
+}
+
+output "stage_invoke_url" {
+  description = "Invoke URL of the API Gateway stage"
+  value       = module.http_api.stage_invoke_url
+}
+
+output "stage_arn" {
+  description = "ARN of the API Gateway stage"
+  value       = module.http_api.stage_arn
+}
+
+output "stage_execution_arn" {
+  description = "Execution ARN of the API Gateway stage"
+  value       = module.http_api.stage_execution_arn
+}
+
+# Lambda Function Outputs
+output "lambda_function_name" {
+  description = "Name of the Lambda function"
+  value       = aws_lambda_function.api_lambda.function_name
+}
+
+output "lambda_function_arn" {
+  description = "ARN of the Lambda function"
+  value       = aws_lambda_function.api_lambda.arn
+}
+
+output "lambda_invoke_arn" {
+  description = "Invoke ARN of the Lambda function"
+  value       = aws_lambda_function.api_lambda.invoke_arn
+}
+
+output "lambda_qualified_arn" {
+  description = "Qualified ARN of the Lambda function"
+  value       = aws_lambda_function.api_lambda.qualified_arn
+}
+
+output "lambda_version" {
+  description = "Version of the Lambda function"
+  value       = aws_lambda_function.api_lambda.version
+}
+
+output "lambda_source_code_hash" {
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
+  value       = aws_lambda_function.api_lambda.source_code_hash
+}
+
+output "lambda_source_code_size" {
+  description = "Size of the Lambda deployment package in bytes"
+  value       = aws_lambda_function.api_lambda.source_code_size
+}
+
+# IAM Role Outputs
+output "lambda_execution_role_arn" {
+  description = "ARN of the Lambda execution role"
+  value       = aws_iam_role.lambda_execution_role.arn
+}
+
+output "lambda_execution_role_name" {
+  description = "Name of the Lambda execution role"
+  value       = aws_iam_role.lambda_execution_role.name
+}
+
+# Integration Outputs
+output "integration_id" {
+  description = "ID of the Lambda integration"
+  value       = aws_apigatewayv2_integration.lambda_integration.id
+}
+
+# CloudWatch Log Groups
+output "lambda_log_group_name" {
+  description = "Name of the Lambda CloudWatch log group"
+  value       = aws_cloudwatch_log_group.lambda_logs.name
+}
+
+output "lambda_log_group_arn" {
+  description = "ARN of the Lambda CloudWatch log group"
+  value       = aws_cloudwatch_log_group.lambda_logs.arn
+}
+
+output "api_log_group_name" {
+  description = "Name of the API Gateway CloudWatch log group"
+  value       = module.http_api.api_log_group_name
+}
+
+output "api_log_group_arn" {
+  description = "ARN of the API Gateway CloudWatch log group"
+  value       = module.http_api.api_log_group_arn
+}",
+}
+`;
+
 exports[`fastapi project generator > terraform iacProvider > should generate terraform files for HTTP API with IAM auth and snapshot them > terraform-http-iam-files 1`] = `
 {
   "http-api.tf": "# Core HTTP API Gateway module
@@ -3093,656 +3836,6 @@ resource "aws_apigatewayv2_route" "proxy_routes" {
   target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration.id}"
 
   authorization_type = "AWS_IAM"
-
-  depends_on = [aws_apigatewayv2_integration.lambda_integration]
-}
-
-# Add API url to runtime config
-module "add_url_to_runtime_config" {
-  source = "../../../core/runtime-config/entry"
-
-  namespace = "connection"
-  key       = "apis"
-  value     = { "TestApi" = module.http_api.stage_invoke_url }
-
-  depends_on = [module.http_api]
-}
-
-# Lambda permission for API Gateway to invoke the function via alias
-resource "aws_lambda_permission" "api_gateway_invoke" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
-  qualifier     = aws_lambda_alias.live.name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.http_api.api_execution_arn}/*/*"
-
-  depends_on = [module.http_api, aws_lambda_alias.live]
-}
-
-# Outputs
-
-# API Gateway Outputs (from core module)
-output "api_id" {
-  description = "ID of the HTTP API Gateway"
-  value       = module.http_api.api_id
-}
-
-output "api_arn" {
-  description = "ARN of the HTTP API Gateway"
-  value       = module.http_api.api_arn
-}
-
-output "api_endpoint" {
-  description = "Base URL of the HTTP API Gateway"
-  value       = module.http_api.api_endpoint
-}
-
-output "api_execution_arn" {
-  description = "Execution ARN of the HTTP API Gateway"
-  value       = module.http_api.api_execution_arn
-}
-
-output "stage_invoke_url" {
-  description = "Invoke URL of the API Gateway stage"
-  value       = module.http_api.stage_invoke_url
-}
-
-output "stage_arn" {
-  description = "ARN of the API Gateway stage"
-  value       = module.http_api.stage_arn
-}
-
-output "stage_execution_arn" {
-  description = "Execution ARN of the API Gateway stage"
-  value       = module.http_api.stage_execution_arn
-}
-
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
-}
-
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
-}
-
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
-}
-
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
-}
-
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
-}
-
-output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
-}
-
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
-}
-
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
-}
-
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_apigatewayv2_integration.lambda_integration.id
-}
-
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
-}
-
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
-}
-
-output "api_log_group_name" {
-  description = "Name of the API Gateway CloudWatch log group"
-  value       = module.http_api.api_log_group_name
-}
-
-output "api_log_group_arn" {
-  description = "ARN of the API Gateway CloudWatch log group"
-  value       = module.http_api.api_log_group_arn
-}",
-}
-`;
-
-exports[`fastapi project generator > terraform iacProvider > should generate terraform files for HTTP API with None auth and snapshot them > terraform-http-none-files 1`] = `
-{
-  "http-api.tf": "# Core HTTP API Gateway module
-# This module creates the API Gateway HTTP API, stage, and logging resources
-
-terraform {
-  required_version = ">= 1.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
-    }
-  }
-}
-
-# Core HTTP API Gateway Variables
-
-variable "api_name" {
-  description = "Name of the HTTP API Gateway"
-  type        = string
-}
-
-variable "api_description" {
-  description = "Description of the HTTP API Gateway"
-  type        = string
-  default     = "HTTP API Gateway"
-}
-
-variable "stage_name" {
-  description = "Name of the API Gateway stage"
-  type        = string
-  default     = "prod"
-}
-
-variable "stage_auto_deploy" {
-  description = "Whether to automatically deploy the API stage"
-  type        = bool
-  default     = true
-}
-
-# CORS Configuration
-
-variable "cors_allow_credentials" {
-  description = "Whether to allow credentials in CORS requests"
-  type        = bool
-  default     = false
-}
-
-variable "cors_allow_headers" {
-  description = "List of allowed headers for CORS"
-  type        = list(string)
-  default     = ["authorization", "content-type", "x-amz-content-sha256", "x-amz-date", "x-amz-security-token"]
-}
-
-variable "cors_allow_methods" {
-  description = "List of allowed HTTP methods for CORS"
-  type        = list(string)
-  default     = ["*"]
-}
-
-variable "cors_allow_origins" {
-  description = "List of allowed origins for CORS"
-  type        = list(string)
-  default     = ["*"]
-}
-
-variable "cors_expose_headers" {
-  description = "List of headers to expose in CORS responses"
-  type        = list(string)
-  default     = []
-}
-
-variable "cors_max_age" {
-  description = "Maximum age for CORS preflight requests in seconds"
-  type        = number
-  default     = 86400
-}
-
-# Tags
-
-variable "tags" {
-  description = "Tags to apply to all resources"
-  type        = map(string)
-  default     = {}
-}
-
-# Data sources
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}
-
-# Resources
-
-# KMS key for CloudWatch log group encryption
-resource "aws_kms_key" "logs_key" {
-  description             = "KMS key for CloudWatch log group encryption"
-  deletion_window_in_days = 7
-  enable_key_rotation     = true
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "Enable IAM User Permissions"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action   = "kms:*"
-        Resource = "*"
-      },
-      {
-        Sid    = "Allow CloudWatch Logs"
-        Effect = "Allow"
-        Principal = {
-          Service = "logs.\${data.aws_region.current.region}.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-        Condition = {
-          ArnEquals = {
-            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/\${var.api_name}"
-          }
-        }
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-
-resource "aws_kms_alias" "logs_key_alias" {
-  name          = "alias/\${var.api_name}-api-logs-encryption"
-  target_key_id = aws_kms_key.logs_key.key_id
-}
-
-# HTTP API Gateway
-resource "aws_apigatewayv2_api" "http_api" {
-  name          = var.api_name
-  protocol_type = "HTTP"
-  description   = var.api_description
-
-  cors_configuration {
-    allow_credentials = var.cors_allow_credentials
-    allow_headers     = var.cors_allow_headers
-    allow_methods     = var.cors_allow_methods
-    allow_origins     = var.cors_allow_origins
-    expose_headers    = var.cors_expose_headers
-    max_age          = var.cors_max_age
-  }
-
-  tags = var.tags
-}
-
-# API Gateway stage
-resource "aws_apigatewayv2_stage" "api_stage" {
-  api_id      = aws_apigatewayv2_api.http_api.id
-  name        = var.stage_name
-  auto_deploy = var.stage_auto_deploy
-
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api_logs.arn
-    format = jsonencode({
-      requestId      = "$context.requestId"
-      ip            = "$context.identity.sourceIp"
-      requestTime   = "$context.requestTime"
-      httpMethod    = "$context.httpMethod"
-      routeKey      = "$context.routeKey"
-      status        = "$context.status"
-      protocol      = "$context.protocol"
-      responseLength = "$context.responseLength"
-      error         = "$context.error.message"
-      integrationError = "$context.integrationErrorMessage"
-    })
-  }
-
-  default_route_settings {
-    throttling_burst_limit = 5000
-    throttling_rate_limit = 10000
-  }
-
-  tags = var.tags
-
-  depends_on = [aws_cloudwatch_log_group.api_logs]
-}
-
-# CloudWatch Log Group for API Gateway
-resource "aws_cloudwatch_log_group" "api_logs" {
-  #checkov:skip=CKV_AWS_338:Log retention set to forever
-  #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name         = "/aws/apigateway/\${var.api_name}"
-  kms_key_id   = aws_kms_key.logs_key.arn
-  tags         = var.tags
-}
-
-# Outputs
-
-output "api_id" {
-  description = "ID of the HTTP API Gateway"
-  value       = aws_apigatewayv2_api.http_api.id
-}
-
-output "api_arn" {
-  description = "ARN of the HTTP API Gateway"
-  value       = aws_apigatewayv2_api.http_api.arn
-}
-
-output "api_endpoint" {
-  description = "Base URL of the HTTP API Gateway"
-  value       = aws_apigatewayv2_api.http_api.api_endpoint
-}
-
-output "api_execution_arn" {
-  description = "Execution ARN of the HTTP API Gateway"
-  value       = aws_apigatewayv2_api.http_api.execution_arn
-}
-
-output "stage_id" {
-  description = "ID of the API Gateway stage"
-  value       = aws_apigatewayv2_stage.api_stage.id
-}
-
-output "stage_arn" {
-  description = "ARN of the API Gateway stage"
-  value       = aws_apigatewayv2_stage.api_stage.arn
-}
-
-output "stage_execution_arn" {
-  description = "Execution ARN of the API Gateway stage"
-  value       = aws_apigatewayv2_stage.api_stage.execution_arn
-}
-
-output "stage_invoke_url" {
-  description = "Invoke URL of the API Gateway stage"
-  value       = aws_apigatewayv2_stage.api_stage.invoke_url
-}
-
-output "api_log_group_name" {
-  description = "Name of the API Gateway CloudWatch log group"
-  value       = aws_cloudwatch_log_group.api_logs.name
-}
-
-output "api_log_group_arn" {
-  description = "ARN of the API Gateway CloudWatch log group"
-  value       = aws_cloudwatch_log_group.api_logs.arn
-}",
-  "test-api.tf": "terraform {
-  required_version = ">= 1.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
-    }
-  }
-}
-
-
-variable "env" {
-  description = "Environment variables for the Lambda function"
-  type        = map(string)
-  default     = {}
-}
-
-variable "additional_iam_policy_statements" {
-  description = "Additional IAM policy statements for the Lambda function"
-  type        = list(object({
-    Effect   = string
-    Action   = list(string)
-    Resource = list(string)
-  }))
-  default = []
-}
-
-variable "asset_bucket_name" {
-  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
-  type        = string
-}
-
-# CORS Configuration (passed to core module)
-variable "cors_allow_credentials" {
-  description = "Whether to allow credentials in CORS requests"
-  type        = bool
-  default     = false
-}
-
-variable "cors_allow_headers" {
-  description = "List of allowed headers for CORS"
-  type        = list(string)
-  default     = ["authorization", "content-type", "x-amz-content-sha256", "x-amz-date", "x-amz-security-token"]
-}
-
-variable "cors_allow_methods" {
-  description = "List of allowed HTTP methods for CORS"
-  type        = list(string)
-  default     = ["*"]
-}
-
-variable "cors_allow_origins" {
-  description = "List of allowed origins for CORS"
-  type        = list(string)
-  default     = ["*"]
-}
-
-variable "cors_expose_headers" {
-  description = "List of headers to expose in CORS responses"
-  type        = list(string)
-  default     = []
-}
-
-variable "cors_max_age" {
-  description = "Maximum age for CORS preflight requests in seconds"
-  type        = number
-  default     = 0
-}
-
-# Tags
-variable "tags" {
-  description = "Tags to apply to all resources"
-  type        = map(string)
-  default     = {}
-}
-
-# Get current AWS region and account ID
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}
-
-resource "random_string" "suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
-# Resources
-
-# Create Lambda ZIP file from the bundle directory
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_dir  = "\${path.module}/../../../../../../../dist/apps/test_api/bundle-x86"
-  output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
-}
-
-resource "aws_s3_object" "lambda_zip" {
-  bucket      = var.asset_bucket_name
-  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_sha256}.zip"
-  source      = data.archive_file.lambda_zip.output_path
-  source_hash = data.archive_file.lambda_zip.output_base64sha256
-  etag        = data.archive_file.lambda_zip.output_md5
-}
-
-
-# Use the core HTTP API module
-module "http_api" {
-  source = "../../../core/api/http-api"
-
-  api_name        = "TestApi-\${random_string.suffix.result}"
-  api_description = "TestApi HTTP API"
-  stage_name      = "$default"
-  stage_auto_deploy = true
-
-  # CORS Configuration
-  cors_allow_credentials = var.cors_allow_credentials
-  cors_allow_headers     = var.cors_allow_headers
-  cors_allow_methods     = var.cors_allow_methods
-  cors_allow_origins     = var.cors_allow_origins
-  cors_expose_headers    = var.cors_expose_headers
-  cors_max_age           = var.cors_max_age
-
-  # Tags
-  tags = var.tags
-}
-
-# Lambda function
-# This configures a single "router" lambda to serve all requests
-resource "aws_lambda_function" "api_lambda" {
-  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
-  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
-  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
-  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
-  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_object.lambda_zip.bucket
-  s3_key            = aws_s3_object.lambda_zip.key
-  s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
-  handler         = "run.sh"
-  runtime         = "python3.14"
-  layers          = ["arn:aws:lambda:\${data.aws_region.current.region}:753240598075:layer:LambdaAdapterLayerX86:24"]
-  timeout         = 30
-  memory_size     = 128
-  publish         = true
-
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-
-  # Enable X-Ray tracing
-  tracing_config {
-    mode = "Active"
-  }
-
-  # Enable SnapStart for faster cold starts
-  snap_start {
-    apply_on = "PublishedVersions"
-  }
-
-  environment {
-    variables = merge({
-      PORT                        = "8000"
-      AWS_LWA_INVOKE_MODE         = "buffered"
-      AWS_LAMBDA_EXEC_WRAPPER     = "/opt/bootstrap"
-    }, var.env)
-  }
-
-  tags = var.tags
-}
-
-# IAM role for Lambda execution
-resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-
-# Attach basic execution policy to Lambda role
-resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
-}
-
-# Attach X-Ray tracing policy to Lambda role
-resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
-}
-
-# Additional IAM policies for Lambda (if provided)
-resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = var.additional_iam_policy_statements
-  })
-}
-
-# CloudWatch Log Group for Lambda
-resource "aws_cloudwatch_log_group" "lambda_logs" {
-  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
-  #checkov:skip=CKV_AWS_338:Log retention set to forever
-  #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
-}
-
-# Lambda alias pointing to the latest published version for SnapStart
-resource "aws_lambda_alias" "live" {
-  name             = "live"
-  function_name    = aws_lambda_function.api_lambda.function_name
-  function_version = aws_lambda_function.api_lambda.version
-
-  depends_on = [aws_lambda_function.api_lambda]
-}
-
-
-# Lambda integration for HTTP API
-resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id           = module.http_api.api_id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_alias.live.invoke_arn
-
-  payload_format_version = "2.0"
-  timeout_milliseconds   = 30000
-
-  depends_on = [aws_lambda_alias.live]
-}
-
-# Route for proxy integration (catches all requests)
-resource "aws_apigatewayv2_route" "proxy_routes" {
-  # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
-  # when cors settings are configured
-  for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
-
-  api_id    = module.http_api.api_id
-  route_key = "\${each.key} /{proxy+}"
-  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration.id}"
-
-  # Note: you may wish to suppress the checkov rule CKV_AWS_309 if you are absolutely sure you
-  # need a public API without authentication
-  authorization_type = "NONE"
 
   depends_on = [aws_apigatewayv2_integration.lambda_integration]
 }
@@ -6023,6 +6116,98 @@ resource "aws_lambda_alias" "live" {
   depends_on = [aws_lambda_function.api_lambda]
 }
 
+# Custom Lambda Authorizer
+resource "aws_lambda_function" "authorizer_lambda" {
+  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for authorizer
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  s3_bucket         = aws_s3_object.authorizer_zip.bucket
+  s3_key            = aws_s3_object.authorizer_zip.key
+  s3_object_version = aws_s3_object.authorizer_zip.version_id
+  function_name    = "TestApiAuthorizer-\${random_string.suffix.result}"
+  role            = aws_iam_role.authorizer_execution_role.arn
+  handler         = "proj_test_api.authorizer.handler"
+  runtime         = "python3.14"
+  timeout         = 10
+  memory_size     = 128
+
+  source_code_hash = data.archive_file.authorizer_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  tags = var.tags
+}
+
+resource "aws_iam_role" "authorizer_execution_role" {
+  name = "TestApiAuthorizer-role-\${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "authorizer_basic_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.authorizer_execution_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "authorizer_xray_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  role       = aws_iam_role.authorizer_execution_role.name
+}
+
+resource "aws_cloudwatch_log_group" "authorizer_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/TestApiAuthorizer-\${random_string.suffix.result}"
+  tags = var.tags
+}
+
+data "archive_file" "authorizer_zip" {
+  type        = "zip"
+  source_dir  = "\${path.module}/../../../../../../../dist/apps/test_api/bundle-x86"
+  output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/authorizer.zip"
+}
+
+resource "aws_s3_object" "authorizer_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/authorizer-\${data.archive_file.authorizer_zip.output_sha256}.zip"
+  source      = data.archive_file.authorizer_zip.output_path
+  source_hash = data.archive_file.authorizer_zip.output_base64sha256
+  etag        = data.archive_file.authorizer_zip.output_md5
+}
+
+resource "aws_api_gateway_authorizer" "custom_authorizer" {
+  name                   = "TestApiAuthorizer-\${random_string.suffix.result}"
+  rest_api_id           = module.rest_api.api_id
+  type                  = "TOKEN"
+  authorizer_uri        = aws_lambda_function.authorizer_lambda.invoke_arn
+  identity_source       = "method.request.header.Authorization"
+}
+
+resource "aws_lambda_permission" "authorizer_invoke" {
+  statement_id  = "AllowAPIGatewayInvokeAuthorizer"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.authorizer_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "\${module.rest_api.api_execution_arn}/authorizers/\${aws_api_gateway_authorizer.custom_authorizer.id}"
+}
 
 # Create proxy resource (captures all paths)
 resource "aws_api_gateway_resource" "proxy_resource" {
@@ -6053,15 +6238,14 @@ resource "aws_api_gateway_method" "proxy_method" {
   resource_id   = aws_api_gateway_resource.proxy_resource.id
   http_method   = "ANY"
 
-  # Note: you may wish to suppress the checkov rule CKV_AWS_59 if you are absolutely sure you
-  # need a public API without authentication
-  authorization = "NONE"
+  authorization = "CUSTOM"
+  authorizer_id = aws_api_gateway_authorizer.custom_authorizer.id
 
   request_parameters = {
     "method.request.path.proxy" = true
   }
 
-  depends_on = []
+  depends_on = [aws_api_gateway_authorizer.custom_authorizer]
 }
 
 # OPTIONS method for CORS preflight
@@ -6139,6 +6323,7 @@ resource "aws_api_gateway_deployment" "api_deployment" {
     aws_api_gateway_integration.options_integration,
     aws_api_gateway_method_response.options_response,
     aws_api_gateway_integration_response.options_integration_response,
+    aws_api_gateway_authorizer.custom_authorizer,
   ]
 }
 
@@ -6167,7 +6352,7 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        # Allow all callers to invoke the API in the resource policy
+        # Allow all callers to invoke the API in the resource policy, since auth is handled by the Lambda Authorizer
         Effect = "Allow"
         Principal = "*"
         Action   = "execute-api:Invoke"

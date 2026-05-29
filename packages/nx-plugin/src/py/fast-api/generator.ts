@@ -143,6 +143,29 @@ export const pyFastApiProjectGenerator = async (
     },
   );
 
+  if (schema.auth === 'Custom') {
+    const authorizerType =
+      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest';
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '..',
+        '..',
+        'utils',
+        'api-constructs',
+        'files',
+        'py-authorizer',
+        authorizerType,
+      ),
+      joinPathFragments(dir, normalizedModuleName),
+      {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
+  }
+
   // Add the CDK construct to deploy the FastAPI to shared constructs
   await addApiGatewayInfra(tree, {
     apiProjectName: projectConfig.name,
@@ -172,6 +195,9 @@ export const pyFastApiProjectGenerator = async (
     'uvicorn',
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
+    ...(schema.auth === 'Custom'
+      ? (['aws-lambda-powertools[parser]'] as const)
+      : []),
   ]);
   addDependenciesToDependencyGroupInPyProjectToml(tree, dir, 'dev', [
     'fastapi[standard]',

@@ -26,7 +26,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -104,7 +104,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       directory: 'apis',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -206,7 +206,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'Terraform',
     });
 
@@ -235,7 +235,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'Terraform',
     });
 
@@ -257,7 +257,7 @@ describe('tsSmithyApiGenerator', () => {
       tree,
       'test-api/backend/project.json',
     );
-    expect(backendProjectConfig.metadata.auth).toBe('None');
+    expect(backendProjectConfig.metadata.auth).toBe('Custom');
 
     expect(
       tree.read(
@@ -272,7 +272,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       namespace: 'com.example.custom',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -285,7 +285,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -330,7 +330,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -361,7 +361,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -393,7 +393,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -416,7 +416,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -478,7 +478,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -491,7 +491,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'api-one',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -499,7 +499,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'api-two',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -518,7 +518,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -543,7 +543,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'my-test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
     });
 
@@ -781,7 +781,7 @@ describe('tsSmithyApiGenerator', () => {
         name: 'custom-api',
         namespace: 'com.example.custom',
         computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'None',
+        auth: 'Custom',
         iacProvider: 'Terraform',
       });
 
@@ -810,7 +810,7 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'None',
+      auth: 'Custom',
       iacProvider: 'CDK',
       directory: 'packages',
       subDirectory: 'apis',

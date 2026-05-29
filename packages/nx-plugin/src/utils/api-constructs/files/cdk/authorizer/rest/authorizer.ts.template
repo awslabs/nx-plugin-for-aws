@@ -1,0 +1,52 @@
+import middy from '@middy/core';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { parser } from '@aws-lambda-powertools/parser/middleware';
+import { APIGatewayRequestAuthorizerEventSchema } from '@aws-lambda-powertools/parser/schemas';
+import { z } from 'zod';
+import type { APIGatewayAuthorizerResult } from 'aws-lambda';
+
+const tracer = new Tracer();
+const logger = new Logger();
+
+type AuthorizerEvent = z.infer<typeof APIGatewayRequestAuthorizerEventSchema>;
+
+const authorize = async (
+  event: AuthorizerEvent,
+): Promise<APIGatewayAuthorizerResult> => {
+  // TODO: Implement your custom authorization logic here.
+  // Example: validate a bearer token, check an API key, verify a JWT, etc.
+  //
+  // const token = event.headers?.['authorization'];
+  // if (isValid(token)) {
+  //   return generatePolicy('user', 'Allow', event.methodArn);
+  // }
+
+  return generatePolicy('user', 'Deny', event.methodArn);
+};
+
+const generatePolicy = (
+  principalId: string,
+  effect: 'Allow' | 'Deny',
+  resource: string,
+): APIGatewayAuthorizerResult => ({
+  principalId,
+  policyDocument: {
+    Version: '2012-10-17',
+    Statement: [
+      {
+        Action: 'execute-api:Invoke',
+        Effect: effect,
+        Resource: resource,
+      },
+    ],
+  },
+});
+
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(parser({ schema: APIGatewayRequestAuthorizerEventSchema }))
+  .handler(authorize);

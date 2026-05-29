@@ -554,12 +554,12 @@ describe('fastapi project generator', () => {
       );
     });
 
-    it('should generate terraform files for HTTP API with None auth and snapshot them', async () => {
+    it('should generate terraform files for HTTP API with Custom auth and snapshot them', async () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
         computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'None',
+        auth: 'Custom',
         iacProvider: 'Terraform',
       });
 
@@ -583,8 +583,8 @@ describe('fastapi project generator', () => {
       const coreApiContent = tree.read(coreApiFile!, 'utf-8');
       const appApiContent = tree.read(appApiFile!, 'utf-8');
 
-      // Verify None auth configuration
-      expect(appApiContent).toContain('authorization_type = "NONE"');
+      // Verify Custom auth configuration
+      expect(appApiContent).toContain('authorization_type = "CUSTOM"');
       expect(appApiContent).not.toContain('variable "user_pool_id"');
 
       // Verify FastAPI-specific handler configuration
@@ -598,7 +598,7 @@ describe('fastapi project generator', () => {
       };
 
       expect(terraformFileContents).toMatchSnapshot(
-        'terraform-http-none-files',
+        'terraform-http-custom-files',
       );
     });
 
@@ -702,7 +702,7 @@ describe('fastapi project generator', () => {
         name: 'test-api',
         directory: 'apps',
         computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'None',
+        auth: 'Custom',
         iacProvider: 'Terraform',
       });
 

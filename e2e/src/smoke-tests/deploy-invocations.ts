@@ -299,6 +299,31 @@ export async function invokeLambda(
   console.log(`Successfully invoked ${lambdaName}`);
 }
 
+export async function invokeCustomAuthApi(
+  apiUrl: string,
+  apiName: string,
+): Promise<void> {
+  console.log(`Testing ${apiName} Custom Auth (deny) at ${apiUrl}`);
+  // Requests without valid auth should be denied (401/403)
+  const response = await fetch(`${normalizeApiUrl(apiUrl)}/echo?message=test`);
+  console.log(`${apiName} response status (no auth):`, response.status);
+  expect([401, 403]).toContain(response.status);
+}
+
+export async function invokeCustomAuthTrpcApi(
+  apiUrl: string,
+  apiName: string,
+): Promise<void> {
+  console.log(`Testing ${apiName} Custom Auth (deny) at ${apiUrl}`);
+  const input = encodeURIComponent(JSON.stringify({ message: 'test' }));
+  // Requests without valid auth should be denied (401/403)
+  const response = await fetch(
+    `${normalizeApiUrl(apiUrl)}/echo?input=${input}`,
+  );
+  console.log(`${apiName} response status (no auth):`, response.status);
+  expect([401, 403]).toContain(response.status);
+}
+
 export async function pingWebsite(domain: string): Promise<void> {
   console.log('Testing website with domain', domain);
   const status = (await fetch(`https://${domain}/`)).status;
