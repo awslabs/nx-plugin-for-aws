@@ -17,6 +17,7 @@ import {
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
+import { ContainerEngine } from '../containers';
 
 export interface AddRdbConstructOptions {
   projectName: string;
@@ -29,6 +30,7 @@ export interface AddRdbConstructOptions {
   migrationBundleDir: string;
   createDbUserBundleDir: string;
   dockerImageTag: string;
+  containerEngine: ContainerEngine;
 }
 
 export const addRdbInfra = async (

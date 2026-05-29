@@ -32,6 +32,7 @@ import { FsCommands } from '../../utils/fs';
 import { withVersions } from '../../utils/versions';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
 
@@ -102,6 +103,7 @@ export const pyMcpServerGenerator = async (
   ]);
 
   if (computeType === 'BedrockAgentCoreRuntime') {
+    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -146,7 +148,7 @@ export const pyMcpServerGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -186,6 +188,7 @@ export const pyMcpServerGenerator = async (
       dockerOutputDir,
       iacProvider,
       auth,
+      containerEngine,
     });
   }
 

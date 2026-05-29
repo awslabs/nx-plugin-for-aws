@@ -32,6 +32,7 @@ import { addIgnoresToEslintConfig } from '../lib/eslint';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import { updateGitIgnore } from '../../utils/git';
 import { assignPort } from '../../utils/port';
@@ -49,6 +50,7 @@ export const tsRdbGenerator = async (
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -97,6 +99,7 @@ export const tsRdbGenerator = async (
     localDbName: databaseName,
     localDbUser,
     localDbPassword,
+    containerEngine,
   };
 
   generateFiles(
@@ -202,7 +205,7 @@ export const tsRdbGenerator = async (
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `docker build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+        command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
       },
       dependsOn: ['bundle'],
     };
@@ -232,6 +235,7 @@ export const tsRdbGenerator = async (
       'create-db-user',
     ),
     dockerImageTag,
+    containerEngine,
   });
 
   addDependenciesToPackageJson(
@@ -249,8 +253,6 @@ export const tsRdbGenerator = async (
     withVersions([
       'prisma',
       'tsx',
-      'dockerode',
-      '@types/dockerode',
       '@types/aws-lambda',
       ...(options.engine === 'MySQL'
         ? ([] as const)
@@ -261,9 +263,6 @@ export const tsRdbGenerator = async (
   registerPnpmBuiltDependencies(tree, {
     '@prisma/engines': false,
     prisma: false,
-    ssh2: false,
-    'cpu-features': false,
-    protobufjs: false,
   });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_RDB_GENERATOR_INFO]);

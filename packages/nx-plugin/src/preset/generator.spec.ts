@@ -40,6 +40,7 @@ describe('preset generator', () => {
       addTsPlugin: false,
       iacProvider: 'CDK',
       gitSecrets: false,
+      containerEngine: 'docker',
     });
 
     snapshotTreeDir(tree, '.');
@@ -49,13 +50,28 @@ describe('preset generator', () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
       iacProvider: 'Terraform',
+      containerEngine: 'docker',
     });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('Terraform');
   });
 
+  it('should store container engine in config', async () => {
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      containerEngine: 'finch',
+    });
+
+    expect((await readAwsNxPluginConfig(tree)).containers.engine).toBe('finch');
+  });
+
   it('should store Terraform iac provider in config', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      containerEngine: 'docker',
+    });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
   });
@@ -88,13 +104,21 @@ describe('preset generator', () => {
   });
 
   it('should disable analytics in nx.json', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      containerEngine: 'docker',
+    });
 
     expect(readNxJson(tree).analytics).toBe(false);
   });
 
   it('should register the TypeScript sync generators for compile targets', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      containerEngine: 'docker',
+    });
 
     const syncGenerators =
       readNxJson(tree).targetDefaults?.compile?.syncGenerators;

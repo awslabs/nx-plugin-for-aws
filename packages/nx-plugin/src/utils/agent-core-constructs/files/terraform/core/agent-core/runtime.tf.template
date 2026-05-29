@@ -265,12 +265,12 @@ resource "aws_iam_role_policy_attachment" "agent_core_policy" {
   policy_arn = aws_iam_policy.agent_core_runtime_policy.arn
 }
 
-# Data source to get Docker image digest
+# Data source to get container image digest
 data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containerEngine %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
 }
 
-# Null resource for Docker publish
+# Null resource for container image publish
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
@@ -281,13 +281,13 @@ resource "null_resource" "docker_publish" {
   provisioner "local-exec" {
     command = <<-EOT
       # Get ECR login token
-      aws ecr get-login-password --region ${local.aws_region} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      aws ecr get-login-password --region ${local.aws_region} | <%= containerEngine %> login --username AWS --password-stdin ${self.triggers.repository_url}
 
       # Tag the image
-      docker tag ${self.triggers.docker_image_tag} ${self.triggers.repository_url}:latest
+      <%= containerEngine %> tag ${self.triggers.docker_image_tag} ${self.triggers.repository_url}:latest
 
       # Push the image
-      docker push ${self.triggers.repository_url}:latest
+      <%= containerEngine %> push ${self.triggers.repository_url}:latest
     EOT
   }
 

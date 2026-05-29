@@ -27,6 +27,7 @@ import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
@@ -100,6 +101,7 @@ export const tsAgentGenerator = async (
   );
 
   if (computeType === 'BedrockAgentCoreRuntime') {
+    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -143,7 +145,7 @@ export const tsAgentGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -170,6 +172,7 @@ export const tsAgentGenerator = async (
       iacProvider,
       auth,
       serverProtocol: infraProtocol,
+      containerEngine,
     });
   }
 

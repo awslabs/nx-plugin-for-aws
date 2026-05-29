@@ -33,6 +33,7 @@ import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-
 
 import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
 import { FsCommands } from '../../utils/fs';
@@ -128,6 +129,7 @@ export const tsMcpServerGenerator = async (
 
   // Add hosting based on compute type
   if (computeType === 'BedrockAgentCoreRuntime') {
+    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -156,7 +158,7 @@ export const tsMcpServerGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -179,6 +181,7 @@ export const tsMcpServerGenerator = async (
       dockerOutputDir,
       iacProvider,
       auth,
+      containerEngine,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP
