@@ -1,0 +1,158 @@
+---
+title: Espace de travail
+description: Documentation de référence pour les espaces de travail
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Lorsque vous créez un nouvel espace de travail avec `@aws/nx-plugin`, le générateur de preset configure un [monorepo Nx](https://nx.dev) avec des valeurs par défaut sensées pour construire sur AWS.
+
+## Création d'un espace de travail
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### Options
+
+<GeneratorParameters generator="preset" />
+
+### Structure de l'espace de travail
+
+<FileTree>
+  - packages/ Vos projets se trouvent ici
+  - package.json package.json racine pour votre monorepo
+  - nx.json Configuration Nx (cibles communes, générateurs de synchronisation, mise en cache)
+  - tsconfig.base.json Configuration TypeScript racine
+  - aws-nx-plugin.config.mts Configuration Nx Plugin for AWS
+  - .git-secrets/ Script bash git-secrets intégré pour l'analyse des identifiants
+  - .husky/ Hooks Git
+</FileTree>
+
+## Nx
+
+Nx est un système de build agnostique au langage pour les monorepos, gérant les dépendances entre les projets écrits dans n'importe quel langage de programmation et les tâches pour les construire. Vous pouvez en apprendre plus sur le [site web Nx](https://nx.dev/getting-started/intro).
+
+### Projets
+
+Un monorepo Nx est composé d'un ou plusieurs projets, chacun avec un fichier `project.json`. Le `project.json` définit les tâches d'un projet, appelées _targets_, qui définissent comment un projet est construit, exécuté localement, testé, etc. Il définit également les dépendances entre les targets au sein ou entre les projets.
+
+Par exemple, un `project.json` peut définir un target `build` qui dépend de la construction préalable de tous les projets en amont :
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
+```
+
+:::tip
+Pour les projets dans des langages non directement pris en charge par le Nx Plugin for AWS, vous pouvez souvent trouver un générateur dans le [Nx Plugin Registry](https://nx.dev/plugin-registry) pour vous aider. Il est cependant simple d'ajouter un projet de n'importe quel langage dans votre monorepo — ajoutez simplement un fichier `project.json` et définissez son target `build` pour exécuter la commande de build spécifique pour un projet de ce langage.
+:::
+
+Pour plus de détails sur la configuration des projets TypeScript et Python, consultez les guides des générateurs <Link path="guides/typescript-project">ts#project</Link> et <Link path="guides/python-project">py#project</Link>.
+
+### Mise en cache
+
+Nx met en cache la sortie des targets précédemment exécutés et les rejoue lorsque les entrées n'ont pas changé. Cela accélère considérablement les builds, les tests et le linting — en particulier en CI. Si vous rencontrez un comportement obsolète ou inattendu, réinitialisez le cache avec :
+
+<NxCommands commands={['reset']} />
+
+Pour plus de détails, consultez la [documentation sur la mise en cache Nx](https://nx.dev/features/cache-task-results).
+
+## Politique de version unique
+
+La configuration par défaut du monorepo utilise une [politique de version unique](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) pour les projets basés sur Node et Python.
+
+Cela signifie que tous les projets de votre monorepo utilisent par défaut la même version des dépendances, réduisant les problèmes liés aux packages dans le même monorepo rencontrant des problèmes de non-concordance de version.
+
+Du point de vue de Node, cela signifie un seul fichier de verrouillage à la racine avec un seul `node_modules` contenant toutes les dépendances. Si vous devez ajouter une nouvelle dépendance, ajoutez-la dans le `package.json` racine.
+
+Du point de vue de Python, cela signifie un seul `.venv` à la racine du monorepo avec toutes les dépendances installées dedans. Chaque projet Python a son propre `pyproject.toml`, mais les versions de ces dépendances sont gérées par l'espace de travail UV et ensuite écrites dans le fichier `uv.lock` à la racine.
+
+## Commandes courantes
+
+### Build
+
+Construire tous les projets de l'espace de travail :
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Lint
+
+Linter et corriger automatiquement tous les projets :
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### Test
+
+Exécuter les tests sur tous les projets :
+
+<PackageManagerShortCommand commands={["test"]} />
+
+### Dev
+
+Si vous avez un <Link path="guides/react-website">site web</Link>, démarrez-le ainsi que tous les composants connectés localement :
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### Sync
+
+Exécuter tous les [générateurs de synchronisation](https://nx.dev/concepts/sync-generators), qui par exemple synchronisent les références de projet TypeScript (consultez le guide du générateur <Link path="guides/typescript-project">ts#project</Link> pour plus de détails) :
+
+<NxCommands commands={['sync']} />
+
+### Exécuter des targets spécifiques
+
+Vous pouvez exécuter des targets spécifiques pour des projets spécifiques avec :
+
+<NxCommands commands={['<target> <project>']} />
+
+Par exemple :
+
+<NxCommands commands={['build website']} />
+
+Cela exécutera le target choisi ainsi que les targets dont il dépend.
+
+## Ce qui est inclus
+
+### Linting
+
+Les nouveaux espaces de travail sont configurés avec [ESLint](https://eslint.org/) pour l'analyse statique et [Prettier](https://prettier.io/) pour le formatage du code. L'exécution de `lint` applique les deux à tous les projets.
+
+### Git Secrets
+
+Les nouveaux espaces de travail incluent des hooks pre-commit [git-secrets](https://github.com/awslabs/git-secrets) qui analysent les fichiers indexés à la recherche de modèles d'identifiants AWS avant chaque commit. Cela empêche la validation accidentelle de clés d'accès, de clés secrètes et d'autres valeurs sensibles.
+
+#### Suppression des faux positifs
+
+Les modèles dans git-secrets utilisent des [expressions régulières compatibles egrep](https://github.com/awslabs/git-secrets#options-for-add). Si git-secrets bloque un commit qui ne contient pas de véritables identifiants :
+
+```sh
+# Autoriser un modèle regex spécifique
+git secrets --add --allowed 'my-regex-pattern'
+
+# Autoriser une chaîne littérale (les caractères spéciaux sont échappés)
+git secrets --add --allowed --literal 'my-literal+string'
+```
+
+Vous pouvez également créer un fichier `.gitallowed` à la racine du dépôt avec une regex compatible egrep par ligne (partagé avec votre équipe via le contrôle de version) :
+
+```text title=".gitallowed"
+# Allow test fixtures
+tests/fixtures/.*
+# Allow a specific string
+EXAMPLE[A-Z]{16}
+```
+
+Pour tous les détails sur la gestion des modèles, consultez la [documentation git-secrets](https://github.com/awslabs/git-secrets#readme).

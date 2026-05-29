@@ -36,7 +36,11 @@ describe('preset generator', () => {
   });
 
   it('should run successfully', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      gitSecrets: false,
+    });
 
     snapshotTreeDir(tree, '.');
   });
@@ -54,6 +58,33 @@ describe('preset generator', () => {
     await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
+  });
+
+  it('should not generate git-secrets files when gitSecrets is false', async () => {
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'CDK',
+      gitSecrets: false,
+    });
+
+    expect(tree.exists('.git-secrets/git-secrets')).toBe(false);
+    expect(tree.exists('.husky/pre-commit')).toBe(false);
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.scripts?.prepare).toBeUndefined();
+    expect(packageJson.devDependencies?.husky).toBeUndefined();
+  });
+
+  it('should generate git-secrets files by default', async () => {
+    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+
+    expect(tree.exists('.git-secrets/git-secrets')).toBe(true);
+    expect(tree.exists('.husky/pre-commit')).toBe(true);
+    const preCommit = tree.read('.husky/pre-commit', 'utf-8');
+    expect(preCommit).toContain('--register-aws');
+    expect(preCommit).toContain('--pre_commit_hook');
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.scripts.prepare).toContain('husky');
+    expect(packageJson.devDependencies.husky).toBeDefined();
   });
 
   it('should disable analytics in nx.json', async () => {

@@ -1,0 +1,158 @@
+---
+title: 工作空间
+description: 工作空间的参考文档
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+当您使用 `@aws/nx-plugin` 创建新工作空间时，预设生成器会设置一个 [Nx monorepo](https://nx.dev)，其中包含在 AWS 上构建的合理默认配置。
+
+## 创建工作空间
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### 选项
+
+<GeneratorParameters generator="preset" />
+
+### 工作空间结构
+
+<FileTree>
+  - packages/ 您的项目存放在这里
+  - package.json Root package.json for your monorepo
+  - nx.json Nx configuration (common targets, sync generators, caching)
+  - tsconfig.base.json Root TypeScript configuration
+  - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
+  - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .husky/ Git hooks
+</FileTree>
+
+## Nx
+
+Nx 是一个语言无关的 monorepo 构建系统，管理用任何编程语言编写的项目之间的依赖关系以及构建它们的任务。您可以在 [Nx 网站](https://nx.dev/getting-started/intro)上了解更多信息。
+
+### 项目
+
+Nx monorepo 由一个或多个项目组成，每个项目都有一个 `project.json` 文件。`project.json` 定义了项目的任务，称为 _targets_，它们定义了如何构建项目、在本地运行、测试等。它还定义了项目内部或跨项目的目标之间的依赖关系。
+
+例如，`project.json` 可能定义一个 `build` 目标，该目标依赖于所有上游项目首先被构建：
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
+```
+
+:::tip
+对于 Nx Plugin for AWS 不直接支持的语言的项目，您通常可以在 [Nx Plugin Registry](https://nx.dev/plugin-registry) 中找到一个生成器来帮助。然而，将任何语言的项目添加到您的 monorepo 中都很简单——只需添加一个 `project.json` 文件并定义其 `build` 目标来运行该语言项目的特定构建命令。
+:::
+
+有关如何设置 TypeScript 和 Python 项目的详细信息，请参阅 <Link path="guides/typescript-project">ts#project</Link> 和 <Link path="guides/python-project">py#project</Link> 生成器指南。
+
+### 缓存
+
+Nx 缓存先前执行的目标的输出，并在输入未更改时重放它们。这大大加快了构建、测试和代码检查的速度——尤其是在 CI 中。如果您遇到过时或意外的行为，请使用以下命令重置缓存：
+
+<NxCommands commands={['reset']} />
+
+有关更多详细信息，请参阅 [Nx 缓存文档](https://nx.dev/features/cache-task-results)。
+
+## 单一版本策略
+
+默认的 monorepo 设置对基于 Node 和 Python 的项目都使用[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)。
+
+这意味着默认情况下，monorepo 中的所有项目都使用相同版本的依赖项，从而减少同一 monorepo 中的包遇到版本不匹配问题的情况。
+
+从 Node 的角度来看，这意味着在根目录有一个单一的锁文件，其中包含一个包含所有依赖项的 `node_modules`。如果您需要添加新的依赖项，请在根目录的 `package.json` 中添加。
+
+从 Python 的角度来看，这意味着在 monorepo 的根目录有一个单一的 `.venv`，所有依赖项都安装到其中。每个 Python 项目都有自己的 `pyproject.toml`，但这些依赖项的版本由 UV 工作空间管理，并随后写入根目录的 `uv.lock` 文件。
+
+## 常用命令
+
+### 构建
+
+构建工作空间中的所有项目：
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### 代码检查
+
+检查并自动修复所有项目：
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### 测试
+
+在所有项目中运行测试：
+
+<PackageManagerShortCommand commands={["test"]} />
+
+### 开发
+
+如果您有一个<Link path="guides/react-website">网站</Link>，在本地启动它和所有连接的组件：
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### 同步
+
+运行任何[同步生成器](https://nx.dev/concepts/sync-generators)，例如同步 TypeScript 项目引用（有关更多详细信息，请参阅 <Link path="guides/typescript-project">ts#project</Link> 生成器指南）：
+
+<NxCommands commands={['sync']} />
+
+### 运行特定目标
+
+您可以使用以下命令为特定项目运行特定目标：
+
+<NxCommands commands={['<target> <project>']} />
+
+例如：
+
+<NxCommands commands={['build website']} />
+
+这将运行所选目标以及它所依赖的目标。
+
+## 包含的内容
+
+### 代码检查
+
+新工作空间配置了 [ESLint](https://eslint.org/) 用于静态分析，[Prettier](https://prettier.io/) 用于代码格式化。运行 `lint` 会将两者应用于所有项目。
+
+### Git Secrets
+
+新工作空间包含 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，在每次提交前扫描暂存文件中的 AWS 凭证模式。这可以防止意外提交访问密钥、秘密密钥和其他敏感值。
+
+#### 抑制误报
+
+git-secrets 中的模式使用 [egrep 兼容的正则表达式](https://github.com/awslabs/git-secrets#options-for-add)。如果 git-secrets 阻止了不包含真实凭证的提交：
+
+```sh
+# 允许特定的正则表达式模式
+git secrets --add --allowed 'my-regex-pattern'
+
+# 允许字面字符串（特殊字符会被转义）
+git secrets --add --allowed --literal 'my-literal+string'
+```
+
+您还可以在仓库根目录创建一个 `.gitallowed` 文件，每行一个 egrep 兼容的正则表达式（通过版本控制与您的团队共享）：
+
+```text title=".gitallowed"
+# Allow test fixtures
+tests/fixtures/.*
+# Allow a specific string
+EXAMPLE[A-Z]{16}
+```
+
+有关管理模式的完整详细信息，请参阅 [git-secrets 文档](https://github.com/awslabs/git-secrets#readme)。

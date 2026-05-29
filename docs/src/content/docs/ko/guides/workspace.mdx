@@ -1,0 +1,158 @@
+---
+title: 워크스페이스
+description: 워크스페이스에 대한 참조 문서
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+`@aws/nx-plugin`으로 새 워크스페이스를 생성하면, 프리셋 생성기가 AWS에서 빌드하기 위한 합리적인 기본값으로 [Nx monorepo](https://nx.dev)를 설정합니다.
+
+## 워크스페이스 생성
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### 옵션
+
+<GeneratorParameters generator="preset" />
+
+### 워크스페이스 구조
+
+<FileTree>
+  - packages/ 프로젝트가 여기에 위치합니다
+  - package.json 모노레포를 위한 루트 package.json
+  - nx.json Nx 구성 (공통 타겟, 동기화 생성기, 캐싱)
+  - tsconfig.base.json 루트 TypeScript 구성
+  - aws-nx-plugin.config.mts Nx Plugin for AWS 구성
+  - .git-secrets/ 자격 증명 스캔을 위한 벤더링된 git-secrets bash 스크립트
+  - .husky/ Git 훅
+</FileTree>
+
+## Nx
+
+Nx는 모노레포를 위한 언어 독립적인 빌드 시스템으로, 모든 프로그래밍 언어로 작성된 프로젝트 간의 종속성과 이를 빌드하는 작업을 관리합니다. 자세한 내용은 [Nx 웹사이트](https://nx.dev/getting-started/intro)에서 확인할 수 있습니다.
+
+### 프로젝트
+
+Nx 모노레포는 하나 이상의 프로젝트로 구성되며, 각 프로젝트에는 `project.json` 파일이 있습니다. `project.json`은 프로젝트의 작업(_타겟_이라고 함)을 정의하며, 이는 프로젝트가 어떻게 빌드되고, 로컬에서 실행되고, 테스트되는지 등을 정의합니다. 또한 프로젝트 내부 또는 프로젝트 간의 타겟 간 종속성을 정의합니다.
+
+예를 들어, `project.json`은 모든 업스트림 프로젝트가 먼저 빌드되어야 하는 `build` 타겟을 정의할 수 있습니다:
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
+```
+
+:::tip
+Nx Plugin for AWS에서 직접 지원하지 않는 언어의 프로젝트의 경우, [Nx Plugin Registry](https://nx.dev/plugin-registry)에서 도움이 되는 생성기를 찾을 수 있습니다. 그러나 모노레포에 모든 언어의 프로젝트를 추가하는 것은 간단합니다 — `project.json` 파일을 추가하고 해당 언어의 프로젝트에 대한 특정 빌드 명령을 실행하도록 `build` 타겟을 정의하기만 하면 됩니다.
+:::
+
+TypeScript 및 Python 프로젝트가 어떻게 설정되는지에 대한 자세한 내용은 <Link path="guides/typescript-project">ts#project</Link> 및 <Link path="guides/python-project">py#project</Link> 생성기 가이드를 참조하세요.
+
+### 캐싱
+
+Nx는 이전에 실행된 타겟의 출력을 캐시하고 입력이 변경되지 않았을 때 이를 재생합니다. 이는 특히 CI에서 빌드, 테스트 및 린팅 속도를 크게 향상시킵니다. 오래되거나 예상치 못한 동작이 발생하면 다음 명령으로 캐시를 재설정하세요:
+
+<NxCommands commands={['reset']} />
+
+자세한 내용은 [Nx 캐싱 문서](https://nx.dev/features/cache-task-results)를 참조하세요.
+
+## 단일 버전 정책
+
+기본 모노레포 설정은 Node 및 Python 기반 프로젝트 모두에 대해 [단일 버전 정책](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)을 사용합니다.
+
+즉, 모노레포 내의 모든 프로젝트가 기본적으로 동일한 버전의 종속성을 사용하므로 동일한 모노레포의 패키지가 버전 불일치 문제에 직면하는 것과 관련된 문제를 줄입니다.
+
+Node 관점에서 이는 모든 종속성을 포함하는 단일 `node_modules`가 있는 루트의 단일 lockfile을 의미합니다. 새 종속성을 추가해야 하는 경우 루트 `package.json`에 추가하세요.
+
+Python 관점에서 이는 모든 종속성이 설치된 모노레포 루트의 단일 `.venv`를 의미합니다. 각 Python 프로젝트에는 자체 `pyproject.toml`이 있지만, 이러한 종속성의 버전은 UV 워크스페이스에서 관리되며 이후 루트의 `uv.lock` 파일에 기록됩니다.
+
+## 일반 명령어
+
+### 빌드
+
+워크스페이스의 모든 프로젝트 빌드:
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### 린트
+
+모든 프로젝트 린트 및 자동 수정:
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### 테스트
+
+모든 프로젝트에서 테스트 실행:
+
+<PackageManagerShortCommand commands={["test"]} />
+
+### 개발
+
+<Link path="guides/react-website">웹사이트</Link>가 있는 경우, 웹사이트와 연결된 모든 구성 요소를 로컬에서 시작:
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### 동기화
+
+[동기화 생성기](https://nx.dev/concepts/sync-generators)를 실행합니다. 예를 들어 TypeScript 프로젝트 참조를 동기화합니다(자세한 내용은 <Link path="guides/typescript-project">ts#project</Link> 생성기 가이드 참조):
+
+<NxCommands commands={['sync']} />
+
+### 특정 타겟 실행
+
+다음을 사용하여 특정 프로젝트에 대한 특정 타겟을 실행할 수 있습니다:
+
+<NxCommands commands={['<target> <project>']} />
+
+예를 들어:
+
+<NxCommands commands={['build website']} />
+
+이렇게 하면 선택한 타겟과 종속된 타겟이 실행됩니다.
+
+## 포함된 내용
+
+### 린팅
+
+새 워크스페이스는 정적 분석을 위한 [ESLint](https://eslint.org/)와 코드 포맷팅을 위한 [Prettier](https://prettier.io/)로 구성됩니다. `lint`를 실행하면 모든 프로젝트에 두 가지가 모두 적용됩니다.
+
+### Git Secrets
+
+새 워크스페이스에는 각 커밋 전에 스테이징된 파일에서 AWS 자격 증명 패턴을 스캔하는 [git-secrets](https://github.com/awslabs/git-secrets) pre-commit 훅이 포함되어 있습니다. 이는 액세스 키, 시크릿 키 및 기타 민감한 값을 실수로 커밋하는 것을 방지합니다.
+
+#### 오탐 억제
+
+git-secrets의 패턴은 [egrep 호환 정규 표현식](https://github.com/awslabs/git-secrets#options-for-add)을 사용합니다. git-secrets가 실제 자격 증명을 포함하지 않는 커밋을 차단하는 경우:
+
+```sh
+# 특정 정규식 패턴 허용
+git secrets --add --allowed 'my-regex-pattern'
+
+# 리터럴 문자열 허용 (특수 문자는 이스케이프됨)
+git secrets --add --allowed --literal 'my-literal+string'
+```
+
+저장소 루트에 `.gitallowed` 파일을 생성하여 한 줄에 하나의 egrep 호환 정규식을 작성할 수도 있습니다(버전 관리를 통해 팀과 공유):
+
+```text title=".gitallowed"
+# Allow test fixtures
+tests/fixtures/.*
+# Allow a specific string
+EXAMPLE[A-Z]{16}
+```
+
+패턴 관리에 대한 전체 세부 정보는 [git-secrets 문서](https://github.com/awslabs/git-secrets#readme)를 참조하세요.

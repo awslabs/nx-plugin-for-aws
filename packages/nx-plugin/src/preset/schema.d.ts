@@ -7,4 +7,5 @@ import { IacProvider } from '../utils/iac';
 export interface PresetGeneratorSchema {
   readonly addTsPlugin?: boolean;
   readonly iacProvider: IacProvider;
+  readonly gitSecrets?: boolean;
 }

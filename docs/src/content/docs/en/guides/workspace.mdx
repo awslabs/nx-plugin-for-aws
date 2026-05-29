@@ -1,0 +1,158 @@
+---
+title: Workspace
+description: Reference documentation for workspaces
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+When you create a new workspace with `@aws/nx-plugin`, the preset generator sets up an [Nx monorepo](https://nx.dev) with sensible defaults for building on AWS.
+
+## Creating a Workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### Options
+
+<GeneratorParameters generator="preset" />
+
+### Workspace Structure
+
+<FileTree>
+  - packages/ Your projects live here
+  - package.json Root package.json for your monorepo
+  - nx.json Nx configuration (common targets, sync generators, caching)
+  - tsconfig.base.json Root TypeScript configuration
+  - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
+  - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .husky/ Git hooks
+</FileTree>
+
+## Nx
+
+Nx is a language-agnostic build system for monorepos, managing dependencies between projects written in any programming language and the tasks to build them. You can learn more on the [Nx website](https://nx.dev/getting-started/intro).
+
+### Projects
+
+An Nx monorepo is made up of one or more projects, each with a `project.json` file. The `project.json` defines a project's tasks, known as _targets_, which define how a project is built, run locally, tested, etc. It also defines dependencies between targets within or across projects.
+
+For example, a `project.json` might define a `build` target that depends on all upstream projects being built first:
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
+```
+
+:::tip
+For projects in languages not directly supported by the Nx Plugin for AWS, you can often find a generator in the [Nx Plugin Registry](https://nx.dev/plugin-registry) to help. It's simple to add a project of any language into your monorepo however — just add a `project.json` file and define its `build` target to run the specific build command for a project of that language.
+:::
+
+For details on how TypeScript and Python projects are set up, refer to the <Link path="guides/typescript-project">ts#project</Link> and <Link path="guides/python-project">py#project</Link> generator guides.
+
+### Caching
+
+Nx caches the output of previously executed targets and replays them when the inputs haven't changed. This dramatically speeds up builds, tests, and linting — especially in CI. If you encounter stale or unexpected behaviour, reset the cache with:
+
+<NxCommands commands={['reset']} />
+
+For more details, see the [Nx caching documentation](https://nx.dev/features/cache-task-results).
+
+## Single Version Policy
+
+The default monorepo setup uses a [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) for both Node and Python based projects.
+
+This means that all projects within your monorepo use the same version of dependencies by default, reducing issues related to packages in the same monorepo running into version mismatch issues.
+
+From a Node perspective this means a single lockfile at the root with a single `node_modules` containing all dependencies. If you need to add a new dependency, add it in the root `package.json`.
+
+From a Python perspective, this means a single `.venv` in the root of the monorepo with all dependencies installed into it. Each Python project has its own `pyproject.toml`, but the versions of those dependencies are managed by the UV workspace and subsequently written out to the `uv.lock` file in the root.
+
+## Common Commands
+
+### Build
+
+Build all projects in the workspace:
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Lint
+
+Lint and auto-fix all projects:
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### Test
+
+Run tests across all projects:
+
+<PackageManagerShortCommand commands={["test"]} />
+
+### Dev
+
+If you have a <Link path="guides/react-website">website</Link>, start it and all connected components locally:
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### Sync
+
+Run any [sync generators](https://nx.dev/concepts/sync-generators), which for example synchronise TypeScript project references (refer to the <Link path="guides/typescript-project">ts#project</Link> generator guide for more details):
+
+<NxCommands commands={['sync']} />
+
+### Run Specific Targets
+
+You can run specific targets for specific projects with:
+
+<NxCommands commands={['<target> <project>']} />
+
+For example:
+
+<NxCommands commands={['build website']} />
+
+This will run the chosen target as well as the targets it depends on.
+
+## What's Included
+
+### Linting
+
+New workspaces are configured with [ESLint](https://eslint.org/) for static analysis and [Prettier](https://prettier.io/) for code formatting. Running `lint` applies both to all projects.
+
+### Git Secrets
+
+New workspaces include [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
+
+#### Suppressing False Positives
+
+Patterns in git-secrets use [egrep-compatible regular expressions](https://github.com/awslabs/git-secrets#options-for-add). If git-secrets blocks a commit that does not contain real credentials:
+
+```sh
+# Allow a specific regex pattern
+git secrets --add --allowed 'my-regex-pattern'
+
+# Allow a literal string (special characters are escaped)
+git secrets --add --allowed --literal 'my-literal+string'
+```
+
+You can also create a `.gitallowed` file at the repository root with one egrep-compatible regex per line (shared with your team via version control):
+
+```text title=".gitallowed"
+# Allow test fixtures
+tests/fixtures/.*
+# Allow a specific string
+EXAMPLE[A-Z]{16}
+```
+
+For full details on managing patterns, see the [git-secrets documentation](https://github.com/awslabs/git-secrets#readme).

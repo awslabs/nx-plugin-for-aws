@@ -94,6 +94,7 @@ export const TS_VERSIONS = {
   'eslint-plugin-prettier': '5.5.5',
   express: '5.2.1',
   'fast-glob': '3.3.3',
+  husky: '9.1.7',
   'fs-extra': '11.3.5',
   '@types/fs-extra': '11.0.4',
   'jsonc-eslint-parser': '3.1.0',
@@ -167,3 +168,10 @@ export type IPyDepVersion = keyof typeof PY_VERSIONS;
  */
 export const withPyVersions = (deps: IPyDepVersion[]) =>
   deps.map((dep) => `${dep}${PY_VERSIONS[dep]}`);
+
+/**
+ * Versions for vendored tools
+ */
+export const VENDORED_VERSIONS = {
+  'git-secrets': '1.3.0',
+} as const;

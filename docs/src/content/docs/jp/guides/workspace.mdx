@@ -1,0 +1,158 @@
+---
+title: ワークスペース
+description: ワークスペースのリファレンスドキュメント
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+`@aws/nx-plugin`で新しいワークスペースを作成すると、プリセットジェネレーターがAWS上での構築に適した合理的なデフォルト設定で[Nx monorepo](https://nx.dev)をセットアップします。
+
+## ワークスペースの作成
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### オプション
+
+<GeneratorParameters generator="preset" />
+
+### ワークスペース構造
+
+<FileTree>
+  - packages/ プロジェクトはここに配置されます
+  - package.json モノレポのルートpackage.json
+  - nx.json Nx設定（共通ターゲット、同期ジェネレーター、キャッシング）
+  - tsconfig.base.json ルートTypeScript設定
+  - aws-nx-plugin.config.mts Nx Plugin for AWS設定
+  - .git-secrets/ クレデンシャルスキャン用のベンダー化されたgit-secrets bashスクリプト
+  - .husky/ Gitフック
+</FileTree>
+
+## Nx
+
+Nxは、モノレポ向けの言語に依存しないビルドシステムで、任意のプログラミング言語で書かれたプロジェクト間の依存関係と、それらをビルドするためのタスクを管理します。詳細は[Nxウェブサイト](https://nx.dev/getting-started/intro)で確認できます。
+
+### プロジェクト
+
+Nxモノレポは1つ以上のプロジェクトで構成され、それぞれに`project.json`ファイルがあります。`project.json`は、プロジェクトのタスク（_ターゲット_と呼ばれます）を定義し、プロジェクトのビルド方法、ローカル実行方法、テスト方法などを指定します。また、プロジェクト内またはプロジェクト間のターゲット間の依存関係も定義します。
+
+例えば、`project.json`は、すべての上流プロジェクトが最初にビルドされることに依存する`build`ターゲットを定義する場合があります：
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
+```
+
+:::tip
+Nx Plugin for AWSで直接サポートされていない言語のプロジェクトについては、[Nx Plugin Registry](https://nx.dev/plugin-registry)でジェネレーターを見つけることができます。ただし、任意の言語のプロジェクトをモノレポに追加するのは簡単です — `project.json`ファイルを追加し、その言語のプロジェクト用の特定のビルドコマンドを実行する`build`ターゲットを定義するだけです。
+:::
+
+TypeScriptおよびPythonプロジェクトのセットアップ方法の詳細については、<Link path="guides/typescript-project">ts#project</Link>および<Link path="guides/python-project">py#project</Link>ジェネレーターガイドを参照してください。
+
+### キャッシング
+
+Nxは、以前に実行されたターゲットの出力をキャッシュし、入力が変更されていない場合はそれらを再生します。これにより、特にCIにおいて、ビルド、テスト、リントが劇的に高速化されます。古い動作や予期しない動作が発生した場合は、次のコマンドでキャッシュをリセットしてください：
+
+<NxCommands commands={['reset']} />
+
+詳細については、[Nxキャッシングドキュメント](https://nx.dev/features/cache-task-results)を参照してください。
+
+## シングルバージョンポリシー
+
+デフォルトのモノレポセットアップは、NodeおよびPythonベースのプロジェクトの両方に対して[シングルバージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)を使用します。
+
+これは、モノレポ内のすべてのプロジェクトがデフォルトで同じバージョンの依存関係を使用することを意味し、同じモノレポ内のパッケージがバージョンの不一致の問題に遭遇することを減らします。
+
+Nodeの観点からは、これはルートに単一のロックファイルがあり、すべての依存関係を含む単一の`node_modules`があることを意味します。新しい依存関係を追加する必要がある場合は、ルートの`package.json`に追加してください。
+
+Pythonの観点からは、これはモノレポのルートに単一の`.venv`があり、すべての依存関係がそこにインストールされることを意味します。各Pythonプロジェクトには独自の`pyproject.toml`がありますが、それらの依存関係のバージョンはUVワークスペースによって管理され、その後ルートの`uv.lock`ファイルに書き出されます。
+
+## 一般的なコマンド
+
+### ビルド
+
+ワークスペース内のすべてのプロジェクトをビルド：
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Lint
+
+すべてのプロジェクトをLintして自動修正：
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### テスト
+
+すべてのプロジェクトでテストを実行：
+
+<PackageManagerShortCommand commands={["test"]} />
+
+### Dev
+
+<Link path="guides/react-website">ウェブサイト</Link>がある場合、それと接続されたすべてのコンポーネントをローカルで起動：
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### 同期
+
+[同期ジェネレーター](https://nx.dev/concepts/sync-generators)を実行します。これは例えばTypeScriptプロジェクト参照を同期します（詳細については<Link path="guides/typescript-project">ts#project</Link>ジェネレーターガイドを参照してください）：
+
+<NxCommands commands={['sync']} />
+
+### 特定のターゲットの実行
+
+特定のプロジェクトの特定のターゲットを実行するには：
+
+<NxCommands commands={['<target> <project>']} />
+
+例えば：
+
+<NxCommands commands={['build website']} />
+
+これにより、選択したターゲットと、それが依存するターゲットが実行されます。
+
+## 含まれるもの
+
+### Linting
+
+新しいワークスペースは、静的解析用の[ESLint](https://eslint.org/)とコードフォーマット用の[Prettier](https://prettier.io/)で設定されています。`lint`を実行すると、両方がすべてのプロジェクトに適用されます。
+
+### Git Secrets
+
+新しいワークスペースには、各コミット前にステージングされたファイルをAWSクレデンシャルパターンでスキャンする[git-secrets](https://github.com/awslabs/git-secrets)プリコミットフックが含まれています。これにより、アクセスキー、シークレットキー、その他の機密情報を誤ってコミットすることを防ぎます。
+
+#### 誤検知の抑制
+
+git-secretsのパターンは[egrep互換の正規表現](https://github.com/awslabs/git-secrets#options-for-add)を使用します。git-secretsが実際のクレデンシャルを含まないコミットをブロックした場合：
+
+```sh
+# 特定の正規表現パターンを許可
+git secrets --add --allowed 'my-regex-pattern'
+
+# リテラル文字列を許可（特殊文字はエスケープされます）
+git secrets --add --allowed --literal 'my-literal+string'
+```
+
+リポジトリルートに`.gitallowed`ファイルを作成し、1行に1つのegrep互換の正規表現を記述することもできます（バージョン管理を通じてチームと共有）：
+
+```text title=".gitallowed"
+# Allow test fixtures
+tests/fixtures/.*
+# Allow a specific string
+EXAMPLE[A-Z]{16}
+```
+
+パターン管理の詳細については、[git-secretsドキュメント](https://github.com/awslabs/git-secrets#readme)を参照してください。

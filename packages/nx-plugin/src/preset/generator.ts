@@ -26,6 +26,7 @@ import { getNpmScope } from '../utils/npm-scope';
 import GeneratorsJson from '../../generators.json';
 import { PresetGeneratorSchema } from './schema';
 import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
 import * as enquirer from 'enquirer';
 import {
   ensureAwsNxPluginConfig,
@@ -122,9 +123,41 @@ export function isAmazonian(): boolean {
   }
 }
 
+const setUpGitSecrets = (tree: Tree) => {
+  const gitSecretsDir = joinPathFragments(
+    __dirname,
+    'git-secrets-files',
+    'git-secrets-dir',
+  );
+  const huskyDir = joinPathFragments(
+    __dirname,
+    'git-secrets-files',
+    'husky-dir',
+  );
+
+  tree.write(
+    '.git-secrets/git-secrets',
+    readFileSync(joinPathFragments(gitSecretsDir, 'git-secrets'), 'utf-8'),
+  );
+  tree.write(
+    '.husky/pre-commit',
+    readFileSync(joinPathFragments(huskyDir, 'pre-commit'), 'utf-8'),
+  );
+
+  updateJson(tree, 'package.json', (json) => ({
+    ...json,
+    scripts: {
+      ...json.scripts,
+      prepare: 'husky',
+    },
+  }));
+
+  addDependenciesToPackageJson(tree, {}, withVersions(['husky']));
+};
+
 export const presetGenerator = async (
   tree: Tree,
-  { addTsPlugin, iacProvider }: PresetGeneratorSchema,
+  { addTsPlugin, iacProvider, gitSecrets }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   if (
     isAmazonian() &&
@@ -192,6 +225,7 @@ export const presetGenerator = async (
       ...packageJson.scripts,
       build: 'nx run-many --target build',
       lint: 'nx run-many --target lint --configuration=fix',
+      test: 'nx run-many --target test --all',
       'build:skip-lint': 'nx run-many --target build --configuration=skip-lint',
       'build:all': 'nx run-many --target build --all',
       'affected:all': 'nx affected --target build',
@@ -230,6 +264,10 @@ export const presetGenerator = async (
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
+
+  if (gitSecrets !== false) {
+    setUpGitSecrets(tree);
+  }
 
   await formatFilesInSubtree(tree);
   return () => {

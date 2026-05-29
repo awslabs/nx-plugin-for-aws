@@ -1,0 +1,158 @@
+---
+title: Workspace
+description: Tài liệu tham khảo cho workspace
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Khi bạn tạo một workspace mới với `@aws/nx-plugin`, trình tạo preset sẽ thiết lập một [Nx monorepo](https://nx.dev) với các cấu hình mặc định hợp lý để xây dựng trên AWS.
+
+## Tạo Workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="preset" />
+
+### Cấu trúc Workspace
+
+<FileTree>
+  - packages/ Các dự án của bạn nằm ở đây
+  - package.json Root package.json cho monorepo của bạn
+  - nx.json Cấu hình Nx (common targets, sync generators, caching)
+  - tsconfig.base.json Cấu hình TypeScript gốc
+  - aws-nx-plugin.config.mts Cấu hình Nx Plugin for AWS
+  - .git-secrets/ Script bash git-secrets được đóng gói để quét thông tin xác thực
+  - .husky/ Git hooks
+</FileTree>
+
+## Nx
+
+Nx là một hệ thống build không phụ thuộc ngôn ngữ cho monorepo, quản lý các phụ thuộc giữa các dự án được viết bằng bất kỳ ngôn ngữ lập trình nào và các tác vụ để build chúng. Bạn có thể tìm hiểu thêm trên [trang web Nx](https://nx.dev/getting-started/intro).
+
+### Projects
+
+Một Nx monorepo được tạo thành từ một hoặc nhiều dự án, mỗi dự án có một tệp `project.json`. Tệp `project.json` định nghĩa các tác vụ của dự án, được gọi là _targets_, xác định cách một dự án được build, chạy cục bộ, test, v.v. Nó cũng định nghĩa các phụ thuộc giữa các target trong hoặc giữa các dự án.
+
+Ví dụ, một `project.json` có thể định nghĩa một target `build` phụ thuộc vào tất cả các dự án upstream được build trước:
+
+```json title="packages/my-project/project.json"
+{
+  "name": "@my-workspace/my-project",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "command": "vitest run"
+    }
+  }
+}
+```
+
+:::tip
+Đối với các dự án bằng ngôn ngữ không được hỗ trợ trực tiếp bởi Nx Plugin for AWS, bạn thường có thể tìm thấy một trình tạo trong [Nx Plugin Registry](https://nx.dev/plugin-registry) để hỗ trợ. Tuy nhiên, việc thêm một dự án bằng bất kỳ ngôn ngữ nào vào monorepo của bạn rất đơn giản — chỉ cần thêm một tệp `project.json` và định nghĩa target `build` của nó để chạy lệnh build cụ thể cho dự án của ngôn ngữ đó.
+:::
+
+Để biết chi tiết về cách thiết lập các dự án TypeScript và Python, hãy tham khảo hướng dẫn trình tạo <Link path="guides/typescript-project">ts#project</Link> và <Link path="guides/python-project">py#project</Link>.
+
+### Caching
+
+Nx lưu cache đầu ra của các target đã thực thi trước đó và phát lại chúng khi các đầu vào không thay đổi. Điều này tăng tốc đáng kể việc build, test và linting — đặc biệt trong CI. Nếu bạn gặp phải hành vi cũ hoặc không mong đợi, hãy đặt lại cache với:
+
+<NxCommands commands={['reset']} />
+
+Để biết thêm chi tiết, xem [tài liệu caching của Nx](https://nx.dev/features/cache-task-results).
+
+## Single Version Policy
+
+Thiết lập monorepo mặc định sử dụng [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) cho cả các dự án dựa trên Node và Python.
+
+Điều này có nghĩa là tất cả các dự án trong monorepo của bạn sử dụng cùng một phiên bản của các phụ thuộc theo mặc định, giảm các vấn đề liên quan đến các package trong cùng một monorepo gặp phải vấn đề không khớp phiên bản.
+
+Từ góc độ Node, điều này có nghĩa là một lockfile duy nhất ở thư mục gốc với một `node_modules` duy nhất chứa tất cả các phụ thuộc. Nếu bạn cần thêm một phụ thuộc mới, hãy thêm nó vào `package.json` ở thư mục gốc.
+
+Từ góc độ Python, điều này có nghĩa là một `.venv` duy nhất ở thư mục gốc của monorepo với tất cả các phụ thuộc được cài đặt vào đó. Mỗi dự án Python có `pyproject.toml` riêng, nhưng các phiên bản của các phụ thuộc đó được quản lý bởi UV workspace và sau đó được ghi ra tệp `uv.lock` ở thư mục gốc.
+
+## Các Lệnh Thông Dụng
+
+### Build
+
+Build tất cả các dự án trong workspace:
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Lint
+
+Lint và tự động sửa tất cả các dự án:
+
+<PackageManagerShortCommand commands={["lint"]} />
+
+### Test
+
+Chạy test trên tất cả các dự án:
+
+<PackageManagerShortCommand commands={["test"]} />
+
+### Dev
+
+Nếu bạn có một <Link path="guides/react-website">website</Link>, khởi động nó và tất cả các component được kết nối cục bộ:
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+### Sync
+
+Chạy bất kỳ [sync generators](https://nx.dev/concepts/sync-generators) nào, ví dụ như đồng bộ hóa các tham chiếu dự án TypeScript (tham khảo hướng dẫn trình tạo <Link path="guides/typescript-project">ts#project</Link> để biết thêm chi tiết):
+
+<NxCommands commands={['sync']} />
+
+### Chạy Các Target Cụ Thể
+
+Bạn có thể chạy các target cụ thể cho các dự án cụ thể với:
+
+<NxCommands commands={['<target> <project>']} />
+
+Ví dụ:
+
+<NxCommands commands={['build website']} />
+
+Điều này sẽ chạy target đã chọn cũng như các target mà nó phụ thuộc vào.
+
+## Những Gì Được Bao Gồm
+
+### Linting
+
+Các workspace mới được cấu hình với [ESLint](https://eslint.org/) để phân tích tĩnh và [Prettier](https://prettier.io/) để định dạng code. Chạy `lint` áp dụng cả hai cho tất cả các dự án.
+
+### Git Secrets
+
+Các workspace mới bao gồm [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks để quét các tệp đã staged tìm các mẫu thông tin xác thực AWS trước mỗi commit. Điều này ngăn chặn việc vô tình commit các access key, secret key và các giá trị nhạy cảm khác.
+
+#### Loại Bỏ False Positives
+
+Các mẫu trong git-secrets sử dụng [biểu thức chính quy tương thích egrep](https://github.com/awslabs/git-secrets#options-for-add). Nếu git-secrets chặn một commit không chứa thông tin xác thực thực sự:
+
+```sh
+# Cho phép một mẫu regex cụ thể
+git secrets --add --allowed 'my-regex-pattern'
+
+# Cho phép một chuỗi theo nghĩa đen (các ký tự đặc biệt được escape)
+git secrets --add --allowed --literal 'my-literal+string'
+```
+
+Bạn cũng có thể tạo một tệp `.gitallowed` ở thư mục gốc của repository với một regex tương thích egrep mỗi dòng (chia sẻ với nhóm của bạn qua version control):
+
+```text title=".gitallowed"
+# Allow test fixtures
+tests/fixtures/.*
+# Allow a specific string
+EXAMPLE[A-Z]{16}
+```
+
+Để biết đầy đủ chi tiết về quản lý các mẫu, xem [tài liệu git-secrets](https://github.com/awslabs/git-secrets#readme).
