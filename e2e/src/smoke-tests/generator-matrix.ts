@@ -16,13 +16,13 @@ interface RunCliOpts {
  * and both the `cdk-deploy` and `terraform-deploy` e2e pipelines exercise it.
  */
 export const runGeneratorMatrix = async (opts: RunCliOpts) => {
-  // React websites (with and without TanStack Router), plus auth on each.
+  // Websites (with and without TanStack Router), plus auth on each.
   await runCLI(
-    `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
+    `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#react-website --name=website-no-router --enableTanstackRouter=false --no-interactive`,
+    `generate @aws/nx-plugin:ts#website --name=website-no-router --enableTanstackRouter=false --no-interactive`,
     opts,
   );
   await runCLI(
@@ -30,11 +30,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
+    `generate @aws/nx-plugin:ts#website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website-no-router --cognitoDomain=test-no-router --no-interactive`,
+    `generate @aws/nx-plugin:ts#website#auth --project=@e2e-test/website-no-router --cognitoDomain=test-no-router --no-interactive`,
     opts,
   );
 

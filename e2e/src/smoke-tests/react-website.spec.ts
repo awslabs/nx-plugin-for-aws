@@ -56,7 +56,7 @@ describe('smoke test - react-website', () => {
 
     for (const { name, uxProvider, enableTanstackRouter } of permutations) {
       const args = [
-        `generate @aws/nx-plugin:ts#react-website`,
+        `generate @aws/nx-plugin:ts#website`,
         `--name=${name}`,
         `--uxProvider=${uxProvider}`,
         `--enableTanstackRouter=${enableTanstackRouter}`,
@@ -66,7 +66,7 @@ describe('smoke test - react-website', () => {
       await runCLI(args.join(' '), opts);
 
       await runCLI(
-        `generate @aws/nx-plugin:ts#react-website#auth --project=${name} --cognitoDomain=${name} --no-interactive --allowSignup=false`,
+        `generate @aws/nx-plugin:ts#website#auth --project=${name} --cognitoDomain=${name} --no-interactive --allowSignup=false`,
         opts,
       );
 
