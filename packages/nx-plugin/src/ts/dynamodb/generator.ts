@@ -7,6 +7,7 @@ import {
   GeneratorCallback,
   Tree,
   generateFiles,
+  getProjects,
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
@@ -28,6 +29,7 @@ import { getTsLibDetails } from '../lib/generator';
 import tsProjectGenerator from '../lib/generator';
 
 import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { getNpmScope } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { assignPort } from '../../utils/port';
@@ -46,6 +48,7 @@ export const tsDynamoDBGenerator = async (
   const nameClassName = toClassName(options.name);
   const localTableName = `${getNpmScope(tree)}-${kebabCase(options.tableName ?? options.name)}`;
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -59,13 +62,28 @@ export const tsDynamoDBGenerator = async (
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
-  const localDynamoPort = assignPort(tree, projectConfig, 8000);
+  const existingDynamoPort = [...getProjects(tree).values()].find(
+    (p) => (p.metadata as any)?.generator === TS_DYNAMODB_GENERATOR_INFO.id,
+  )?.metadata as any;
+
+  let localDynamoPort: number;
+  if (existingDynamoPort?.ports?.[0] !== undefined) {
+    localDynamoPort = existingDynamoPort.ports[0] as number;
+    projectConfig.metadata ??= {};
+    (projectConfig.metadata as any).ports = [
+      ...((projectConfig.metadata as any).ports ?? []),
+      localDynamoPort,
+    ];
+  } else {
+    localDynamoPort = assignPort(tree, projectConfig, 8000);
+  }
 
   const templateOptions = {
     runtimeConfigKey: nameClassName,
     dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
     localDynamoPort,
     localTableName,
+    containerEngine,
   };
 
   generateFiles(
@@ -77,20 +95,20 @@ export const tsDynamoDBGenerator = async (
 
   const containerName = `${getNpmScope(tree)}-dynamodb`;
 
-  projectConfig.targets['docker-pull'] = {
+  projectConfig.targets['pull-image'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/docker-pull.ts ${DYNAMODB_LOCAL_IMAGE}`,
+      command: `tsx scripts/pull-image.ts ${DYNAMODB_LOCAL_IMAGE}`,
       cwd: '{projectRoot}',
     },
   };
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     continuous: true,
-    dependsOn: ['docker-pull'],
+    dependsOn: ['pull-image'],
     options: {
       commands: [
-        `tsx scripts/docker-start.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${localDynamoPort}`,
+        `tsx scripts/start-container.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${localDynamoPort}`,
         `tsx scripts/create-local-table.ts ${localTableName} ${localDynamoPort}`,
       ],
       parallel: true,
@@ -118,7 +136,7 @@ export const tsDynamoDBGenerator = async (
       'electrodb',
       '@aws-lambda-powertools/parameters',
     ]),
-    withVersions(['tsx', 'dockerode', '@types/dockerode', '@types/aws-lambda']),
+    withVersions(['tsx', '@types/aws-lambda']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);

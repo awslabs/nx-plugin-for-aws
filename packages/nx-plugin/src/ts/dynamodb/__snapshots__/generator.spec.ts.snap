@@ -249,99 +249,6 @@ const client = new DynamoDBClient({
   },
 });
 
-const ensureTable = async (
-  tblClient: DynamoDBClient,
-  tblName: string,
-): Promise<void> => {
-  for (let attempt = 0; attempt < 30; attempt++) {
-    try {
-      await tblClient.send(
-        new CreateTableCommand({
-          TableName: tblName,
-          AttributeDefinitions: [
-            { AttributeName: 'pk', AttributeType: 'S' },
-            { AttributeName: 'sk', AttributeType: 'S' },
-          ],
-          KeySchema: [
-            { AttributeName: 'pk', KeyType: 'HASH' },
-            { AttributeName: 'sk', KeyType: 'RANGE' },
-          ],
-          BillingMode: 'PAY_PER_REQUEST',
-        }),
-      );
-      console.log(\`Created table: \${tblName}\`);
-      return;
-    } catch (e) {
-      if (e instanceof ResourceInUseException) {
-        console.log(\`Table already exists: \${tblName}\`);
-        return;
-      }
-      if (attempt === 29) throw e;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  }
-};
-
-const ensureGlobalSecondaryIndexes = async (
-  gsiClient: DynamoDBClient,
-  gsiTableName: string,
-  desiredGSIs: { indexName: string; partitionKey: string; sortKey: string }[],
-): Promise<void> => {
-  const { Table } = await gsiClient.send(
-    new DescribeTableCommand({ TableName: gsiTableName }),
-  );
-  const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
-  const existingNames = new Set(
-    existingGSIs.map((g: GlobalSecondaryIndexDescription) => g.IndexName!),
-  );
-  const desiredNames = new Set(desiredGSIs.map((g) => g.indexName));
-
-  for (const existing of existingGSIs) {
-    if (!desiredNames.has(existing.IndexName!)) {
-      await gsiClient.send(
-        new UpdateTableCommand({
-          TableName: gsiTableName,
-          GlobalSecondaryIndexUpdates: [
-            { Delete: { IndexName: existing.IndexName! } },
-          ],
-        }),
-      );
-      console.log(\`Deleted GSI: \${existing.IndexName}\`);
-      await waitForTableActive(gsiClient, gsiTableName);
-    }
-  }
-
-  for (const desired of desiredGSIs) {
-    if (existingNames.has(desired.indexName)) {
-      console.log(\`GSI already exists: \${desired.indexName}\`);
-    } else {
-      await gsiClient.send(
-        new UpdateTableCommand({
-          TableName: gsiTableName,
-          AttributeDefinitions: [
-            { AttributeName: desired.partitionKey, AttributeType: 'S' },
-            { AttributeName: desired.sortKey, AttributeType: 'S' },
-          ],
-          GlobalSecondaryIndexUpdates: [
-            {
-              Create: {
-                IndexName: desired.indexName,
-                KeySchema: [
-                  { AttributeName: desired.partitionKey, KeyType: 'HASH' },
-                  { AttributeName: desired.sortKey, KeyType: 'RANGE' },
-                ],
-                Projection: { ProjectionType: 'ALL' },
-              },
-            },
-          ],
-        }),
-      );
-      console.log(\`Created GSI: \${desired.indexName}\`);
-      await waitForTableActive(gsiClient, gsiTableName);
-    }
-  }
-};
-
 const waitForTableActive = async (
   waitClient: DynamoDBClient,
   waitTableName: string,
@@ -360,118 +267,216 @@ const waitForTableActive = async (
   }
 };
 
-await ensureTable(client, tableName);
-await ensureGlobalSecondaryIndexes(client, tableName, GLOBAL_SECONDARY_INDEXES);
+const ensureTable = async (
+  tblClient: DynamoDBClient,
+  tblName: string,
+  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+): Promise<void> => {
+  const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
+    { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
+    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+  ]);
+  const attributeDefinitions = [
+    { AttributeName: 'pk', AttributeType: 'S' as const },
+    { AttributeName: 'sk', AttributeType: 'S' as const },
+    ...gsiAttributeDefinitions.filter(
+      (a, i, arr) =>
+        arr.findIndex((b) => b.AttributeName === a.AttributeName) === i,
+    ),
+  ];
+  const globalSecondaryIndexes = gsIs.map((gsi) => ({
+    IndexName: gsi.indexName,
+    KeySchema: [
+      { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
+      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+    ],
+    Projection: { ProjectionType: 'ALL' as const },
+  }));
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      // New table: create with all GSIs in one shot.
+      await tblClient.send(
+        new CreateTableCommand({
+          TableName: tblName,
+          AttributeDefinitions: attributeDefinitions,
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' },
+          ],
+          BillingMode: 'PAY_PER_REQUEST',
+          ...(globalSecondaryIndexes.length > 0 && {
+            GlobalSecondaryIndexes: globalSecondaryIndexes,
+          }),
+        }),
+      );
+      console.log(\`Created table: \${tblName}\`);
+      return;
+    } catch (e) {
+      // Table already exists: sync GSIs to match desired state.
+      if (e instanceof ResourceInUseException) {
+        const { Table } = await tblClient.send(
+          new DescribeTableCommand({ TableName: tblName }),
+        );
+        const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
+        const existingNames = new Set(
+          existingGSIs.map(
+            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? '',
+          ),
+        );
+        const desiredNames = new Set(gsIs.map((g) => g.indexName));
+
+        // DynamoDB Local only allows one GSI to be created or deleted at a time.
+        for (const existing of existingGSIs) {
+          if (!existing.IndexName || desiredNames.has(existing.IndexName))
+            continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              GlobalSecondaryIndexUpdates: [
+                { Delete: { IndexName: existing.IndexName } },
+              ],
+            }),
+          );
+          console.log(\`Deleted GSI: \${existing.IndexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+
+        for (const gsi of gsIs) {
+          if (existingNames.has(gsi.indexName)) continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              AttributeDefinitions: [
+                { AttributeName: gsi.partitionKey, AttributeType: 'S' },
+                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+              ],
+              GlobalSecondaryIndexUpdates: [
+                {
+                  Create: {
+                    IndexName: gsi.indexName,
+                    KeySchema: [
+                      { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
+                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                    ],
+                    Projection: { ProjectionType: 'ALL' },
+                  },
+                },
+              ],
+            }),
+          );
+          console.log(\`Created GSI: \${gsi.indexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+        return;
+      }
+      if (attempt === 29) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+};
+
+await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
 "
 `;
 
-exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/docker-pull.ts 1`] = `
-"import Docker from 'dockerode';
-import { promisify } from 'util';
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/pull-image.ts 1`] = `
+"import { spawnSync } from 'child_process';
 
-const docker = new Docker();
+const ENGINE = 'docker';
 const image = process.argv[2];
 
-try {
-  await docker.getImage(image).inspect();
-} catch (e) {
-  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
-  const stream = (await promisify(docker.pull.bind(docker))(
-    image,
-  )) as NodeJS.ReadableStream;
-  await promisify(docker.modem.followProgress.bind(docker.modem))(stream);
+const inspect = spawnSync(ENGINE, ['image', 'inspect', image], {
+  stdio: 'ignore',
+});
+
+if (inspect.status !== 0) {
+  const pull = spawnSync(ENGINE, ['pull', image], { stdio: 'inherit' });
+  if (pull.status !== 0) {
+    process.exit(pull.status ?? 1);
+  }
 }
 "
 `;
 
-exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/docker-start.ts 1`] = `
-"import Docker from 'dockerode';
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/start-container.ts 1`] = `
+"import { spawn, spawnSync } from 'child_process';
+
+const ENGINE = 'docker';
 
 const [containerName, image, hostPort] = process.argv.slice(2);
 
-const docker = new Docker();
+const containerExists = (): boolean =>
+  spawnSync(ENGINE, ['container', 'inspect', containerName], {
+    stdio: 'ignore',
+  }).status === 0;
+
+const isRunning = (): boolean => {
+  const result = spawnSync(
+    ENGINE,
+    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
+    { encoding: 'utf-8' },
+  );
+  return result.status === 0 && result.stdout.trim() === 'true';
+};
 
 // Multiple dynamo table packages run serve-local in parallel sharing the same
-// container. All processes attach for log streaming, but only the one that
-// created the container stops it on exit — others just detach.
-let container!: Docker.Container;
+// container. All processes stream logs, but only the one that created the
+// container stops it on exit — others just detach.
 let created = false;
+let runRetries = 0;
 
-while (!container) {
-  try {
-    const c = docker.getContainer(containerName);
-    const info = await c.inspect();
-    if (!info.State.Running) {
-      try {
-        await c.start();
-      } catch (e) {
-        // 304: another parallel process started it between our inspect and start
-        if ((e as { statusCode?: number }).statusCode !== 304) throw e;
-      }
-    }
-    container = c;
-  } catch (e) {
-    if ((e as { statusCode?: number }).statusCode !== 404) throw e;
-    try {
-      container = await docker.createContainer({
-        name: containerName,
-        Image: image,
-        User: 'root',
-        Cmd: [
-          '-jar',
-          'DynamoDBLocal.jar',
-          '-sharedDb',
-          '-dbPath',
-          './data',
-          '-port',
-          hostPort,
-          '-optimizeDbBeforeStartup',
-        ],
-        WorkingDir: '/home/dynamodblocal',
-        ExposedPorts: { [\`\${hostPort}/tcp\`]: {} },
-        HostConfig: {
-          AutoRemove: true,
-          PortBindings: { [\`\${hostPort}/tcp\`]: [{ HostPort: hostPort }] },
-          Binds: [\`\${containerName}-data:/home/dynamodblocal/data\`],
-        },
+for (;;) {
+  if (containerExists()) {
+    if (!isRunning()) {
+      // Another process may have started it between our inspect and start — docker start
+      // exits 0 even if the container is already running, so no special-casing needed.
+      const start = spawnSync(ENGINE, ['start', containerName], {
+        stdio: 'inherit',
       });
-      await container.start();
-      created = true;
-    } catch (e2) {
-      // 409: another parallel process created it between our inspect and createContainer — retry
-      if ((e2 as { statusCode?: number }).statusCode !== 409) throw e2;
+      if (start.status !== 0) process.exit(start.status ?? 1);
     }
+    break;
+  }
+  const runArgs = (
+    \`run --rm --name \${containerName} -u root -w /home/dynamodblocal\` +
+    \` -p \${hostPort}:\${hostPort} -v \${containerName}-data:/home/dynamodblocal/data\` +
+    \` -d \${image} -jar DynamoDBLocal.jar -sharedDb -dbPath ./data -port \${hostPort} -optimizeDbBeforeStartup\`
+  ).split(' ');
+  const create = spawnSync(ENGINE, runArgs, { stdio: 'pipe' });
+  if (create.status === 0) {
+    created = true;
+    break;
+  }
+  if (!containerExists() && ++runRetries > 3) {
+    process.stderr.write(create.stderr);
+    process.exit(create.status ?? 1);
   }
 }
 
-const stream = await container.attach({
-  stream: true,
-  stdout: true,
-  stderr: true,
+const logs = spawn(ENGINE, ['logs', '-f', containerName], {
+  stdio: ['ignore', 'inherit', 'inherit'],
 });
-container.modem.demuxStream(stream, process.stdout, process.stderr);
 
 let exiting = false;
 
-async function cleanup() {
+const cleanup = () => {
   if (exiting) return;
   exiting = true;
   if (created) {
-    try {
-      await container.stop();
-    } catch (e) {
-      if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
-    }
+    spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
   }
+  logs.kill();
   process.exit(0);
-}
+};
 
-process.on('SIGTERM', () => void cleanup());
-process.on('SIGINT', () => void cleanup());
-process.on('SIGHUP', () => void cleanup());
+process.on('SIGTERM', cleanup);
+process.on('SIGINT', cleanup);
+process.on('SIGHUP', cleanup);
 
-const { StatusCode } = await container.wait();
-if (!exiting) process.exit(StatusCode);
+logs.on('exit', (code) => {
+  if (!exiting) process.exit(code ?? 0);
+});
 "
 `;
 

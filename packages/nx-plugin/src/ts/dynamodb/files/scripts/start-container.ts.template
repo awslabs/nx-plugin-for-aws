@@ -1,0 +1,77 @@
+import { spawn, spawnSync } from 'child_process';
+
+const ENGINE = 'docker';
+
+const [containerName, image, hostPort] = process.argv.slice(2);
+
+const containerExists = (): boolean =>
+  spawnSync(ENGINE, ['container', 'inspect', containerName], {
+    stdio: 'ignore',
+  }).status === 0;
+
+const isRunning = (): boolean => {
+  const result = spawnSync(
+    ENGINE,
+    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
+    { encoding: 'utf-8' },
+  );
+  return result.status === 0 && result.stdout.trim() === 'true';
+};
+
+// Multiple dynamo table packages run serve-local in parallel sharing the same
+// container. All processes stream logs, but only the one that created the
+// container stops it on exit — others just detach.
+let created = false;
+let runRetries = 0;
+
+for (;;) {
+  if (containerExists()) {
+    if (!isRunning()) {
+      // Another process may have started it between our inspect and start — docker start
+      // exits 0 even if the container is already running, so no special-casing needed.
+      const start = spawnSync(ENGINE, ['start', containerName], {
+        stdio: 'inherit',
+      });
+      if (start.status !== 0) process.exit(start.status ?? 1);
+    }
+    break;
+  }
+  const runArgs = (
+    `run --rm --name ${containerName} -u root -w /home/dynamodblocal` +
+    ` -p ${hostPort}:${hostPort} -v ${containerName}-data:/home/dynamodblocal/data` +
+    ` -d ${image} -jar DynamoDBLocal.jar -sharedDb -dbPath ./data -port ${hostPort} -optimizeDbBeforeStartup`
+  ).split(' ');
+  const create = spawnSync(ENGINE, runArgs, { stdio: 'pipe' });
+  if (create.status === 0) {
+    created = true;
+    break;
+  }
+  if (!containerExists() && ++runRetries > 3) {
+    process.stderr.write(create.stderr);
+    process.exit(create.status ?? 1);
+  }
+}
+
+const logs = spawn(ENGINE, ['logs', '-f', containerName], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+});
+
+let exiting = false;
+
+const cleanup = () => {
+  if (exiting) return;
+  exiting = true;
+  if (created) {
+    spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
+  }
+  logs.kill();
+  process.exit(0);
+};
+
+process.on('SIGTERM', cleanup);
+process.on('SIGINT', cleanup);
+process.on('SIGHUP', cleanup);
+
+logs.on('exit', (code) => {
+  if (!exiting) process.exit(code ?? 0);
+});

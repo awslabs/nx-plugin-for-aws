@@ -54,21 +54,21 @@ describe('ts#dynamodb generator', () => {
       tree.read('packages/common/constructs/src/app/index.ts', 'utf-8'),
     ).toMatchSnapshot();
 
-    expect(projectConfig.targets['docker-pull']).toEqual({
+    expect(projectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-pull.ts public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest',
+          'tsx scripts/pull-image.ts public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest',
         cwd: '{projectRoot}',
       },
     });
     expect(projectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       continuous: true,
-      dependsOn: ['docker-pull'],
+      dependsOn: ['pull-image'],
       options: {
         commands: [
-          'tsx scripts/docker-start.ts proj-dynamodb public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest 8000',
+          'tsx scripts/start-container.ts proj-dynamodb public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest 8000',
           'tsx scripts/create-local-table.ts proj-my-table 8000',
         ],
         parallel: true,
@@ -86,8 +86,6 @@ describe('ts#dynamodb generator', () => {
     expect(packageJson.dependencies['@aws-sdk/client-dynamodb']).toBeDefined();
     expect(packageJson.dependencies['electrodb']).toBeDefined();
     expect(packageJson.devDependencies['tsx']).toBeDefined();
-    expect(packageJson.devDependencies['dockerode']).toBeDefined();
-    expect(packageJson.devDependencies['@types/dockerode']).toBeDefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
   });
 
@@ -138,6 +136,28 @@ describe('ts#dynamodb generator', () => {
     await tsDynamoDBGenerator(tree, defaultOptions);
 
     expectHasMetricTags(tree, TS_DYNAMODB_GENERATOR_INFO.metric);
+  });
+
+  it('should reuse port from existing ts#dynamodb project', async () => {
+    await tsDynamoDBGenerator(tree, defaultOptions);
+    await tsDynamoDBGenerator(tree, { ...defaultOptions, name: 'OtherTable' });
+
+    const firstConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/my-table',
+    );
+    const secondConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/other-table',
+    );
+
+    const portOf = (cfg: typeof firstConfig) =>
+      (cfg.metadata as any)?.ports?.[0] as number | undefined;
+
+    expect(portOf(secondConfig)).toBe(portOf(firstConfig));
+    expect(secondConfig.targets['serve-local'].options.commands[0]).toContain(
+      `${portOf(firstConfig)}`,
+    );
   });
 
   it('should use custom tableName when provided', async () => {
