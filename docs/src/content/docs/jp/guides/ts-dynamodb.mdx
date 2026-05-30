@@ -32,8 +32,8 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - scripts
     - create-local-table.ts ローカルのDynamoDB Localインスタンスにテーブルを作成する
-    - docker-pull.ts DynamoDB LocalのDockerイメージをプルする
-    - docker-start.ts DynamoDB LocalのDockerコンテナを起動する
+    - pull-image.ts DynamoDB Localイメージをプルする
+    - start-container.ts DynamoDB Localコンテナを起動する
   - src
     - index.ts プロジェクトのエントリーポイントとエクスポート
     - constants.ts ローカル開発用の定数とランタイム設定キー
@@ -75,13 +75,13 @@ import OptionFilter from '@components/option-filter.astro';
 
 ### ローカルDynamoDBの起動
 
-ジェネレーターは、Dockerを介して[DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)インスタンスを起動し、テーブルを作成する`serve-local`ターゲットを設定します：
+ジェネレーターは、[DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)インスタンスを起動し、テーブルを作成する`serve-local`ターゲットを設定します：
 
 <NxCommands commands={['run <project-name>:serve-local']} />
 
 これにより自動的に以下が実行されます：
-1. DynamoDB LocalのDockerイメージをプルする（`docker-pull`ターゲット）
-2. Dockerコンテナを起動する
+1. DynamoDB Localイメージをプルする（`pull-image`ターゲット）
+2. コンテナを起動する
 3. 事前定義されたインデックスを持つローカルテーブルを作成する
 
 ### データモデリング
@@ -90,28 +90,32 @@ import OptionFilter from '@components/option-filter.astro';
 
 エンティティ定義の例：
 
-```ts title="packages/my-table/src/entities/user.ts"
+```ts title="packages/my-table/src/entities/example.ts"
 import { Entity } from 'electrodb';
 import { getDynamoDBClient, resolveTableName } from '../client.js';
 
-export const createUserEntity = async () =>
+export const createExampleEntity = async () =>
   new Entity(
     {
       model: {
-        entity: 'user',
+        entity: 'example',
         version: '1',
         service: 'MyTable',
       },
       attributes: {
-        id: { type: 'string', required: true },
-        email: { type: 'string', required: true },
+        id: {
+          type: 'string',
+          required: true,
+        },
         createdAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           readOnly: true,
         },
         updatedAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           watch: '*',
           set: () => new Date().toISOString(),
@@ -119,8 +123,14 @@ export const createUserEntity = async () =>
       },
       indexes: {
         primary: {
-          pk: { field: 'pk', composite: ['id'] },
-          sk: { field: 'sk', composite: [] },
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
         },
       },
     },
@@ -187,6 +197,7 @@ export class ApplicationStack extends Stack {
 
 これにより、以下の設定でDynamoDBテーブルがプロビジョニングされます：
 - `pk`（パーティションキー）と`sk`（ソートキー）、両方とも`String`型
+- デフォルトで2つのグローバルセカンダリインデックス（`src/gsi.ts`で定義）
 - オンデマンド（`PAY_PER_REQUEST`）課金
 - 自動キーローテーション付きのカスタマー管理KMS暗号化
 - ポイントインタイムリカバリが有効
@@ -204,6 +215,7 @@ module "my_table" {
 
 これにより、以下の設定でDynamoDBテーブルがプロビジョニングされます：
 - `pk`（パーティションキー）と`sk`（ソートキー）、両方とも`String`型
+- デフォルトで2つのグローバルセカンダリインデックス（`src/gsi.ts`で定義）
 - オンデマンド（`PAY_PER_REQUEST`）課金
 - 自動キーローテーション付きのカスタマー管理KMS暗号化
 - ポイントインタイムリカバリが有効
@@ -332,3 +344,4 @@ module "my_table" {
 ```
 </Fragment>
 </Infrastructure>
+

@@ -32,8 +32,8 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - scripts
     - create-local-table.ts 로컬 DynamoDB Local 인스턴스에 DynamoDB 테이블 생성
-    - docker-pull.ts DynamoDB Local Docker 이미지 가져오기
-    - docker-start.ts DynamoDB Local Docker 컨테이너 시작
+    - pull-image.ts DynamoDB Local 이미지 가져오기
+    - start-container.ts DynamoDB Local 컨테이너 시작
   - src
     - index.ts 프로젝트 진입점 및 내보내기
     - constants.ts 로컬 개발 상수 및 런타임 구성 키
@@ -75,13 +75,13 @@ import OptionFilter from '@components/option-filter.astro';
 
 ### 로컬 DynamoDB 시작
 
-생성기는 Docker를 통해 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 인스턴스를 시작하고 테이블을 생성하는 `serve-local` 타겟을 구성합니다:
+생성기는 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 인스턴스를 시작하고 테이블을 생성하는 `serve-local` 타겟을 구성합니다:
 
 <NxCommands commands={['run <project-name>:serve-local']} />
 
 이 명령은 자동으로:
-1. DynamoDB Local Docker 이미지를 가져옵니다 (`docker-pull` 타겟)
-2. Docker 컨테이너를 시작합니다
+1. DynamoDB Local 이미지를 가져옵니다 (`pull-image` 타겟)
+2. 컨테이너를 시작합니다
 3. 사전 정의된 인덱스로 로컬 테이블을 생성합니다
 
 ### 데이터 모델링
@@ -90,28 +90,32 @@ import OptionFilter from '@components/option-filter.astro';
 
 엔티티 정의 예제:
 
-```ts title="packages/my-table/src/entities/user.ts"
+```ts title="packages/my-table/src/entities/example.ts"
 import { Entity } from 'electrodb';
 import { getDynamoDBClient, resolveTableName } from '../client.js';
 
-export const createUserEntity = async () =>
+export const createExampleEntity = async () =>
   new Entity(
     {
       model: {
-        entity: 'user',
+        entity: 'example',
         version: '1',
         service: 'MyTable',
       },
       attributes: {
-        id: { type: 'string', required: true },
-        email: { type: 'string', required: true },
+        id: {
+          type: 'string',
+          required: true,
+        },
         createdAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           readOnly: true,
         },
         updatedAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           watch: '*',
           set: () => new Date().toISOString(),
@@ -119,8 +123,14 @@ export const createUserEntity = async () =>
       },
       indexes: {
         primary: {
-          pk: { field: 'pk', composite: ['id'] },
-          sk: { field: 'sk', composite: [] },
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
         },
       },
     },
@@ -187,6 +197,7 @@ export class ApplicationStack extends Stack {
 
 다음과 같은 DynamoDB 테이블을 프로비저닝합니다:
 - `pk` (파티션 키) 및 `sk` (정렬 키), 둘 다 `String` 타입
+- 기본적으로 2개의 글로벌 보조 인덱스, `src/gsi.ts`에 정의된 대로
 - 온디맨드 (`PAY_PER_REQUEST`) 요금 청구
 - 자동 키 교체가 활성화된 고객 관리형 KMS 암호화
 - 특정 시점 복구 활성화
@@ -204,6 +215,7 @@ module "my_table" {
 
 다음과 같은 DynamoDB 테이블을 프로비저닝합니다:
 - `pk` (파티션 키) 및 `sk` (정렬 키), 둘 다 `String` 타입
+- 기본적으로 2개의 글로벌 보조 인덱스, `src/gsi.ts`에 정의된 대로
 - 온디맨드 (`PAY_PER_REQUEST`) 요금 청구
 - 자동 키 교체가 활성화된 고객 관리형 KMS 암호화
 - 특정 시점 복구 활성화

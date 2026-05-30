@@ -32,8 +32,8 @@ Il generatore crea la seguente struttura di progetto nella directory `<directory
 <FileTree>
   - scripts
     - create-local-table.ts Crea la tabella DynamoDB nell'istanza locale di DynamoDB Local
-    - docker-pull.ts Scarica l'immagine Docker di DynamoDB Local
-    - docker-start.ts Avvia il container Docker di DynamoDB Local
+    - pull-image.ts Scarica l'immagine di DynamoDB Local
+    - start-container.ts Avvia il container di DynamoDB Local
   - src
     - index.ts Punto di ingresso del progetto ed esportazioni
     - constants.ts Costanti per lo sviluppo locale e chiave di configurazione runtime
@@ -75,13 +75,13 @@ Il generatore crea la seguente struttura di progetto nella directory `<directory
 
 ### Avvio di DynamoDB Locale
 
-Il generatore configura un target `serve-local` che avvia un'istanza di [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) tramite Docker e crea la tabella:
+Il generatore configura un target `serve-local` che avvia un'istanza di [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) e crea la tabella:
 
 <NxCommands commands={['run <project-name>:serve-local']} />
 
 Questo automaticamente:
-1. Scarica l'immagine Docker di DynamoDB Local (target `docker-pull`)
-2. Avvia un container Docker
+1. Scarica l'immagine di DynamoDB Local (target `pull-image`)
+2. Avvia un container
 3. Crea una tabella locale con indici predefiniti
 
 ### Modellazione dei Dati
@@ -90,28 +90,32 @@ Il progetto generato utilizza [ElectroDB](https://electrodb.dev/) per la modella
 
 Esempio di definizione di entità:
 
-```ts title="packages/my-table/src/entities/user.ts"
+```ts title="packages/my-table/src/entities/example.ts"
 import { Entity } from 'electrodb';
 import { getDynamoDBClient, resolveTableName } from '../client.js';
 
-export const createUserEntity = async () =>
+export const createExampleEntity = async () =>
   new Entity(
     {
       model: {
-        entity: 'user',
+        entity: 'example',
         version: '1',
         service: 'MyTable',
       },
       attributes: {
-        id: { type: 'string', required: true },
-        email: { type: 'string', required: true },
+        id: {
+          type: 'string',
+          required: true,
+        },
         createdAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           readOnly: true,
         },
         updatedAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           watch: '*',
           set: () => new Date().toISOString(),
@@ -119,8 +123,14 @@ export const createUserEntity = async () =>
       },
       indexes: {
         primary: {
-          pk: { field: 'pk', composite: ['id'] },
-          sk: { field: 'sk', composite: [] },
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
         },
       },
     },
@@ -187,6 +197,7 @@ export class ApplicationStack extends Stack {
 
 Questo effettua il provisioning di una tabella DynamoDB con:
 - `pk` (partition key) e `sk` (sort key), entrambe di tipo `String`
+- 2 Global Secondary Index per impostazione predefinita, come definito in `src/gsi.ts`
 - Fatturazione on-demand (`PAY_PER_REQUEST`)
 - Crittografia KMS gestita dal cliente con rotazione automatica delle chiavi
 - Point-in-time recovery abilitato
@@ -204,6 +215,7 @@ module "my_table" {
 
 Questo effettua il provisioning di una tabella DynamoDB con:
 - `pk` (partition key) e `sk` (sort key), entrambe di tipo `String`
+- 2 Global Secondary Index per impostazione predefinita, come definito in `src/gsi.ts`
 - Fatturazione on-demand (`PAY_PER_REQUEST`)
 - Crittografia KMS gestita dal cliente con rotazione automatica delle chiavi
 - Point-in-time recovery abilitato

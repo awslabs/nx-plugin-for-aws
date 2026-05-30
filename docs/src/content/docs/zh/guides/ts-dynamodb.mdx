@@ -32,8 +32,8 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - scripts
     - create-local-table.ts 在本地 DynamoDB Local 实例中创建 DynamoDB 表
-    - docker-pull.ts 拉取 DynamoDB Local Docker 镜像
-    - docker-start.ts 启动 DynamoDB Local Docker 容器
+    - pull-image.ts 拉取 DynamoDB Local 镜像
+    - start-container.ts 启动 DynamoDB Local 容器
   - src
     - index.ts 项目入口点和导出
     - constants.ts 本地开发常量和运行时配置键
@@ -75,13 +75,13 @@ import OptionFilter from '@components/option-filter.astro';
 
 ### 启动本地 DynamoDB
 
-生成器配置了一个 `serve-local` 目标，通过 Docker 启动 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 实例并创建表：
+生成器配置了一个 `serve-local` 目标，启动 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 实例并创建表：
 
 <NxCommands commands={['run <project-name>:serve-local']} />
 
 这会自动：
-1. 拉取 DynamoDB Local Docker 镜像（`docker-pull` 目标）
-2. 启动 Docker 容器
+1. 拉取 DynamoDB Local 镜像（`pull-image` 目标）
+2. 启动容器
 3. 创建带有预定义索引的本地表
 
 ### 数据建模
@@ -90,28 +90,32 @@ import OptionFilter from '@components/option-filter.astro';
 
 示例实体定义：
 
-```ts title="packages/my-table/src/entities/user.ts"
+```ts title="packages/my-table/src/entities/example.ts"
 import { Entity } from 'electrodb';
 import { getDynamoDBClient, resolveTableName } from '../client.js';
 
-export const createUserEntity = async () =>
+export const createExampleEntity = async () =>
   new Entity(
     {
       model: {
-        entity: 'user',
+        entity: 'example',
         version: '1',
         service: 'MyTable',
       },
       attributes: {
-        id: { type: 'string', required: true },
-        email: { type: 'string', required: true },
+        id: {
+          type: 'string',
+          required: true,
+        },
         createdAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           readOnly: true,
         },
         updatedAt: {
           type: 'string',
+          required: true,
           default: () => new Date().toISOString(),
           watch: '*',
           set: () => new Date().toISOString(),
@@ -119,8 +123,14 @@ export const createUserEntity = async () =>
       },
       indexes: {
         primary: {
-          pk: { field: 'pk', composite: ['id'] },
-          sk: { field: 'sk', composite: [] },
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
         },
       },
     },
@@ -187,6 +197,7 @@ export class ApplicationStack extends Stack {
 
 这将配置一个具有以下特性的 DynamoDB 表：
 - `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
+- 默认 2 个全局二级索引，如 `src/gsi.ts` 中定义
 - 按需（`PAY_PER_REQUEST`）计费
 - 客户管理的 KMS 加密，具有自动密钥轮换
 - 启用时间点恢复
@@ -204,6 +215,7 @@ module "my_table" {
 
 这将配置一个具有以下特性的 DynamoDB 表：
 - `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
+- 默认 2 个全局二级索引，如 `src/gsi.ts` 中定义
 - 按需（`PAY_PER_REQUEST`）计费
 - 客户管理的 KMS 加密，具有自动密钥轮换
 - 启用时间点恢复
