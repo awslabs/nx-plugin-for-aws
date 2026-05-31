@@ -45,7 +45,7 @@ Install the [Kiro Power](https://kiro.dev/docs/powers/) for the best experience 
 
 1. Open the Kiro Powers panel from the sidebar
 2. Click `+` to add a custom power
-3. Paste: `https://github.com/awslabs/nx-plugin-for-aws/tree/main/powers/nx-plugin-for-aws`
+3. Paste: `https://github.com/awslabs/nx-plugin-for-aws/tree/release/0.x/powers/nx-plugin-for-aws`
 4. Click install
 
 Or add the MCP server manually in `.kiro/mcp.json`:
