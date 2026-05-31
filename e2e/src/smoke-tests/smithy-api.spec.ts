@@ -40,12 +40,12 @@ describe('smoke test - smithy-api', () => {
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
+      `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,
       opts,
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
       opts,
     );
 
