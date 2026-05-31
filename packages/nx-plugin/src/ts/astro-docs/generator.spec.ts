@@ -194,6 +194,7 @@ describe('ts#astro-docs generator', () => {
       'generator',
       TS_ASTRO_DOCS_GENERATOR_INFO.id,
     );
+    expect(projectConfig.metadata).toHaveProperty('framework', 'astro');
     expect(projectConfig.metadata).toHaveProperty('includeTranslation', true);
     expect(projectConfig.metadata).toHaveProperty('includeBlog', true);
   });
