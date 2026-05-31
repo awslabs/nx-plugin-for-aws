@@ -327,9 +327,23 @@ export default defineConfig({
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#rdb', link: '/guides/ts-rdb' },
-            { label: 'ts#api', link: '/guides/ts-api' },
-            { label: 'ts#api (tRPC)', link: '/guides/trpc' },
-            { label: 'ts#api (Smithy)', link: '/guides/ts-smithy-api' },
+            {
+              label: 'ts#api',
+              items: [
+                {
+                  label: 'TypeScript APIs',
+                  link: '/guides/ts-api',
+                },
+                {
+                  label: 'tRPC',
+                  link: '/guides/trpc',
+                },
+                {
+                  label: 'Smithy',
+                  link: '/guides/ts-smithy-api',
+                },
+              ],
+            },
             { label: 'ts#website', link: '/guides/react-website' },
             {
               label: 'ts#website#auth',
@@ -342,8 +356,19 @@ export default defineConfig({
             { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
             { label: 'ts#agent', link: '/guides/ts-agent' },
             { label: 'py#project', link: '/guides/python-project' },
-            { label: 'py#api', link: '/guides/py-api' },
-            { label: 'py#api (FastAPI)', link: '/guides/fastapi' },
+            {
+              label: 'py#api',
+              items: [
+                {
+                  label: 'Python APIs',
+                  link: '/guides/py-api',
+                },
+                {
+                  label: 'FastAPI',
+                  link: '/guides/fastapi',
+                },
+              ],
+            },
             {
               label: 'py#lambda-function',
               link: '/guides/python-lambda-function',
