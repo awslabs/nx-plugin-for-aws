@@ -138,6 +138,7 @@ export const tsAstroDocsGenerator = async (
   }
 
   addGeneratorMetadata(tree, fullyQualifiedName, TS_ASTRO_DOCS_GENERATOR_INFO, {
+    framework: 'astro',
     includeTranslation,
     includeBlog,
   });

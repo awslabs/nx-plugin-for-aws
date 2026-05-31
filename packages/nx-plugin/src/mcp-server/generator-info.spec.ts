@@ -644,6 +644,91 @@ REACT_PY_STRANDS_BODY`,
     });
   });
 
+  describe('ts#docs framework filtering', () => {
+    const variants: Record<string, string> = {
+      'docs.mdx': `---
+title: Documentation Site
+---
+DOCS_OVERVIEW`,
+      'astro-docs.mdx': `---
+title: Astro Docs
+when:
+  framework:
+    - astro
+---
+ASTRO_DOCS_BODY`,
+    };
+
+    const docsInfo: NxGeneratorInfo = {
+      id: 'ts#docs',
+      description: 'Generates a documentation site',
+      resolvedSchemaPath: '/fake/schema.json',
+      resolvedFactoryPath: '/fake/factory',
+      metric: 'g43',
+      guidePages: ['docs', 'astro-docs'],
+    };
+
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      vi.spyOn(fs, 'existsSync').mockImplementation(
+        (p) =>
+          typeof p === 'string' &&
+          (p.endsWith('/docs.mdx') || p.endsWith('/astro-docs.mdx')),
+      );
+      vi.spyOn(fs, 'readFileSync').mockImplementation(
+        (p: any, ...rest: any[]) => {
+          if (typeof p === 'string' && p.endsWith('/docs.mdx')) {
+            return variants['docs.mdx'];
+          }
+          if (typeof p === 'string' && p.endsWith('/astro-docs.mdx')) {
+            return variants['astro-docs.mdx'];
+          }
+          const realReadFileSync =
+            (fs.readFileSync as any).wrappedMethod ?? fs.readFileSync;
+          return realReadFileSync.call(fs, p, ...rest);
+        },
+      );
+    });
+
+    it('returns both pages when no options supplied', async () => {
+      const result = await fetchGuidePagesForGenerator(docsInfo, [docsInfo]);
+      expect(result.kind).toBe('ok');
+      expect(result.content).toMatch(/DOCS\\?_OVERVIEW/);
+      expect(result.content).toMatch(/ASTRO\\?_DOCS\\?_BODY/);
+    });
+
+    it('narrows to astro page when framework=astro', async () => {
+      const result = await fetchGuidePagesForGenerator(
+        docsInfo,
+        [docsInfo],
+        undefined,
+        undefined,
+        { framework: 'astro' },
+      );
+      expect(result.kind).toBe('ok');
+      expect(result.content).toMatch(/DOCS\\?_OVERVIEW/);
+      expect(result.content).toMatch(/ASTRO\\?_DOCS\\?_BODY/);
+    });
+
+    it('returns unsupported for unknown framework', async () => {
+      const result = await fetchGuidePagesForGenerator(
+        docsInfo,
+        [docsInfo],
+        undefined,
+        undefined,
+        { framework: 'docusaurus' },
+      );
+      expect(result.kind).toBe('unsupported');
+      expect(result.content).toContain('Unsupported combination');
+    });
+
+    it('surfaces framework in filterable options', async () => {
+      const rendered = await renderFilterableOptionsAsync(docsInfo);
+      expect(rendered).toContain('framework:');
+      expect(rendered).toContain('astro');
+    });
+  });
+
   describe('local-file fallback for guide pages', () => {
     const info: NxGeneratorInfo = {
       id: 'ts#trpc-api',
