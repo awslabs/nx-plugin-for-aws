@@ -123,7 +123,7 @@ Add capabilities to existing projects:
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `connection`         | Integrates a source project with a target project                                                                  |
 | `license`            | Add LICENSE files and configure source code licence headers                                                        |
-| `py#fast-api`        | Generates a FastAPI Python project                                                                                 |
+| `py#api`             | Create a Python API                                                                                                |
 | `py#lambda-function` | Adds a lambda function to a python project                                                                         |
 | `py#mcp-server`      | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
 | `py#project`         | Generates a Python project                                                                                         |
@@ -138,9 +138,8 @@ Add capabilities to existing projects:
 | `ts#project`         | Generates a TypeScript project                                                                                     |
 | `ts#website`         | Generates a website application                                                                                    |
 | `ts#website#auth`    | Adds auth to an existing website                                                                                   |
-| `ts#smithy-api`      | Create an API using Smithy and the Smithy TypeScript Server SDK                                                    |
 | `ts#agent`           | Add an AI Agent to a TypeScript project                                                                            |
-| `ts#trpc-api`        | creates a trpc backend                                                                                             |
+| `ts#api`             | Create a TypeScript API                                                                                            |
 | `ts#rdb`             | Create a relational database project                                                                               |
 
 ## Best Practices

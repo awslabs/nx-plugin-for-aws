@@ -344,12 +344,36 @@ export default defineConfig({
                 },
               ],
             },
-            { label: 'ts#website', link: '/guides/react-website' },
             {
-              label: 'ts#website#auth',
-              link: '/guides/react-website-auth',
+              label: 'ts#website',
+              items: [
+                {
+                  label: 'Websites',
+                  link: '/guides/website',
+                },
+                {
+                  label: 'React',
+                  link: '/guides/react-website',
+                },
+                {
+                  label: 'Authentication',
+                  link: '/guides/react-website-auth',
+                },
+              ],
             },
-            { label: 'ts#docs', link: '/guides/astro-docs' },
+            {
+              label: 'ts#docs',
+              items: [
+                {
+                  label: 'Documentation',
+                  link: '/guides/docs',
+                },
+                {
+                  label: 'Astro',
+                  link: '/guides/astro-docs',
+                },
+              ],
+            },
             { label: 'ts#lambda-function', link: '/guides/ts-lambda-function' },
             { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },
