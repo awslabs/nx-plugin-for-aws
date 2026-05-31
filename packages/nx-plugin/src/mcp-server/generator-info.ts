@@ -331,15 +331,12 @@ export const fetchGuideFrontmatters = async (
 };
 
 /**
- * Read a guide's raw MDX, local filesystem first, GitHub fallback.
+ * Read a guide's raw MDX from the local filesystem (bundled or monorepo).
  */
 const fetchGuideRaw = async (page: string): Promise<string> => {
   const local = fetchLocalGuide(page);
   if (local !== undefined) return local;
-  const response = await fetch(
-    `https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/guides/${page}.mdx`,
-  );
-  return await response.text();
+  return '';
 };
 
 /**
@@ -373,15 +370,10 @@ const parseGuide = async (
 };
 
 /**
- * Search the monorepo-relative guides directory for a page before falling
- * back to GitHub. This is the common case during local development
- * (`pnpm nx mcp-inspect @aws/nx-plugin`), and it also means test workspaces
- * that link the built plugin read the guides they're actually iterating on
- * instead of whatever is currently on `main`.
- *
- * When running as the published `@aws/nx-plugin-mcp` package, `__dirname`
- * resolves somewhere inside `node_modules/@aws/nx-plugin-mcp`, the local
- * probe misses, and we fall back to GitHub.
+ * Probe paths for finding guide MDX files locally. Checked in order:
+ * 1. Bundled docs in the published @aws/nx-plugin-mcp package
+ * 2. Source checkout when running from the monorepo (dev/test)
+ * 3. Rolldown-bundled binary in dist/ (monorepo layout)
  */
 const GUIDES_RELATIVE_PROBES = [
   // Bundled docs inside published @aws/nx-plugin-mcp package (bin/ → ../docs/guides)
@@ -407,9 +399,7 @@ const fetchLocalGuide = (guide: string): string | undefined => {
 };
 
 /**
- * Fetch markdown guide pages. Prefers local files (see `fetchLocalGuide`)
- * and falls back to fetching from the repo on `main` when no local copy
- * is available.
+ * Fetch markdown guide pages from the local filesystem (bundled or monorepo).
  */
 export const fetchGuidePages = async (
   guidePages: string[],
@@ -418,21 +408,13 @@ export const fetchGuidePages = async (
   snippetContentProvider?: SnippetContentProvider,
   options?: Record<string, string>,
 ): Promise<string> => {
-  const guides = await Promise.allSettled(
-    guidePages.map(async (guide) => {
-      const local = fetchLocalGuide(guide);
-      if (local !== undefined) return local;
-      const response = await fetch(
-        `https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/guides/${guide}.mdx`,
-      );
-      return await response.text();
-    }),
-  );
-  const fulfilled = guides.filter((result) => result.status === 'fulfilled');
+  const guides = guidePages
+    .map((guide) => fetchLocalGuide(guide))
+    .filter((content): content is string => content !== undefined);
   const processed = await Promise.all(
-    fulfilled.map((result) =>
+    guides.map((content) =>
       postProcessGuide(
-        result.value,
+        content,
         generators,
         packageManager,
         snippetContentProvider,
@@ -457,13 +439,8 @@ const SNIPPETS_RELATIVE_PROBES = [
   '../../../../docs/src/content/docs/en/snippets',
 ];
 
-const SNIPPET_BASE_URL =
-  'https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/snippets';
-
 /**
- * Fetch a snippet's content. Tries the local repo checkout first (when
- * running under `mcp-inspect` or a linked test workspace) before falling
- * back to the copy on `main`.
+ * Fetch a snippet's content from the local filesystem (bundled or monorepo).
  */
 export const fetchSnippet: SnippetContentProvider = async (
   snippetName: string,
@@ -475,18 +452,10 @@ export const fetchSnippet: SnippetContentProvider = async (
         return fs.readFileSync(candidate, 'utf-8');
       }
     } catch {
-      // Probe failure — try next fallback.
+      // Probe failure — try next path.
     }
   }
-  try {
-    const response = await fetch(`${SNIPPET_BASE_URL}/${snippetName}.mdx`);
-    if (!response.ok) {
-      return '';
-    }
-    return await response.text();
-  } catch {
-    return '';
-  }
+  return '';
 };
 
 /**
