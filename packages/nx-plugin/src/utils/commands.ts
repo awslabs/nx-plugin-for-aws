@@ -83,11 +83,13 @@ export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
   iacProvider?: 'CDK' | 'Terraform',
+  tag?: string,
 ) => {
   const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;
+  const pkgName = tag ? `@aws/nx-workspace@${tag}` : '@aws/nx-workspace';
   const parts = [
     createPrefix,
-    '@aws/nx-workspace',
+    pkgName,
     // npm requires '--' to stop interpreting subsequent flags as npm config
     ...(pm === 'npm' ? ['--'] : []),
     workspace,
