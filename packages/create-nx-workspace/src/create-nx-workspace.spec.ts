@@ -3,12 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import {
   buildArgs,
   createNxWorkspace,
   detectPackageManager,
   shouldSkipGit,
 } from './create-nx-workspace';
+
+const OWN_VERSION: string = JSON.parse(
+  readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'),
+).version;
 
 describe('create-nx-workspace', () => {
   let originalUserAgent: string | undefined;
@@ -77,7 +83,7 @@ describe('create-nx-workspace', () => {
     it('should add --preset, default flags, and --skipGit for a simple workspace name', () => {
       expect(buildArgs(['my-project'])).toEqual([
         'my-project',
-        '--preset=@aws/nx-plugin',
+        `--preset=@aws/nx-plugin@${OWN_VERSION}`,
         '--ci=skip',
         '--analytics=false',
         '--skipGit',
@@ -104,7 +110,7 @@ describe('create-nx-workspace', () => {
         '--interactive=false',
       ]);
       expect(result[0]).toBe('my-project');
-      expect(result[1]).toBe('--preset=@aws/nx-plugin');
+      expect(result[1]).toBe(`--preset=@aws/nx-plugin@${OWN_VERSION}`);
     });
 
     it('should place --preset before user flags', () => {
@@ -113,7 +119,9 @@ describe('create-nx-workspace', () => {
         '--iacProvider=CDK',
         '--interactive=false',
       ]);
-      const presetIndex = result.indexOf('--preset=@aws/nx-plugin');
+      const presetIndex = result.indexOf(
+        `--preset=@aws/nx-plugin@${OWN_VERSION}`,
+      );
       const iacIndex = result.indexOf('--iacProvider=CDK');
       expect(presetIndex).toBeLessThan(iacIndex);
     });
@@ -146,7 +154,7 @@ describe('create-nx-workspace', () => {
 
     it('should handle no args', () => {
       expect(buildArgs([])).toEqual([
-        '--preset=@aws/nx-plugin',
+        `--preset=@aws/nx-plugin@${OWN_VERSION}`,
         '--ci=skip',
         '--analytics=false',
         '--skipGit',
@@ -157,7 +165,7 @@ describe('create-nx-workspace', () => {
       const result = buildArgs(['my-project', 'extra-arg']);
       expect(result[0]).toBe('my-project');
       expect(result[1]).toBe('extra-arg');
-      expect(result[2]).toBe('--preset=@aws/nx-plugin');
+      expect(result[2]).toBe(`--preset=@aws/nx-plugin@${OWN_VERSION}`);
     });
 
     it('should always pass --skipGit to nx regardless of user flags', () => {
@@ -202,7 +210,7 @@ describe('create-nx-workspace', () => {
       ]);
       expect(result).toEqual([
         'e2e-test',
-        '--preset=@aws/nx-plugin',
+        `--preset=@aws/nx-plugin@${OWN_VERSION}`,
         '--ci=skip',
         '--analytics=false',
         '--skipGit',
