@@ -34,7 +34,7 @@ describe('smoke test - trpc-api', () => {
     const projectRoot = `${targetDir}/trpc`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-    await generateApiProjectPermutations('ts#trpc-api', 'trpc', '-', opts);
+    await generateApiProjectPermutations('ts#api', 'trpc', '-', opts);
 
     await runCLI(
       `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,

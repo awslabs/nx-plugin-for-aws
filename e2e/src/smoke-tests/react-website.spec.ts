@@ -31,7 +31,7 @@ describe('smoke test - react-website', () => {
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+      `generate @aws/nx-plugin:ts#api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
       opts,
     );
 

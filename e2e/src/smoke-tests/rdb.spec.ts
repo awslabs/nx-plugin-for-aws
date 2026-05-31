@@ -45,11 +45,11 @@ describe('smoke test - rdb', () => {
 
         // Source projects for connection testing
         await runCLI(
-          `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+          `generate @aws/nx-plugin:ts#api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#smithy-api --name=my-smithy-api --no-interactive`,
+          `generate @aws/nx-plugin:ts#api --name=my-smithy-api --framework=smithy --no-interactive`,
           opts,
         );
         await runCLI(
