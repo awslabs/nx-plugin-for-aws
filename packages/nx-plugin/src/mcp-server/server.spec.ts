@@ -35,12 +35,6 @@ describe('MCP Server', () => {
       client.connect(clientTransport),
       server.connect(serverTransport),
     ]);
-
-    global.fetch = vi.fn().mockImplementation(() =>
-      Promise.resolve({
-        text: () => Promise.resolve('Mocked guide content'),
-      }),
-    );
   });
 
   it('should initialize with the correct server information', async () => {
@@ -116,7 +110,6 @@ describe('MCP Server', () => {
   });
 
   it('should execute generator-guide tool with valid generator', async () => {
-    // Call the tool using client
     const result = await client.callTool({
       name: 'generator-guide',
       arguments: {
@@ -125,25 +118,13 @@ describe('MCP Server', () => {
       },
     });
 
-    // Verify result
     expect(result.content).toHaveLength(1);
     expect(result.content[0].type).toBe('text');
-    expect(result.content[0].text).toContain('Guide');
-    expect(result.content[0].text).toContain('Mocked guide content');
-
-    expect(global.fetch).toHaveBeenCalledWith(
-      `https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/guides/typescript-project.mdx`,
-    );
+    expect(result.content[0].text).toContain('ts#project');
+    expect(result.content[0].text).toContain('Description:');
   });
 
   it('should post process guide pages fetched by the generator-guide tool', async () => {
-    global.fetch = vi.fn().mockImplementation(() =>
-      Promise.resolve({
-        text: () => Promise.resolve('<NxCommands commands={["foo"]} />'),
-      }),
-    );
-
-    // Call the tool using client
     const result = await client.callTool({
       name: 'generator-guide',
       arguments: {
@@ -152,10 +133,10 @@ describe('MCP Server', () => {
       },
     });
 
-    // Verify result
     expect(result.content).toHaveLength(1);
     expect(result.content[0].type).toBe('text');
-    expect(result.content[0].text).toContain('pnpm nx foo');
+    // Verify NxCommands are post-processed into code blocks with the package manager prefix
+    expect(result.content[0].text).toContain('pnpm nx');
   });
 
   it('should throw an error when generator-guide is called with an invalid generator', async () => {

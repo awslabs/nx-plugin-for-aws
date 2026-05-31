@@ -246,11 +246,10 @@ Here are the parameters for the generator:
   });
 
   it('should replace Snippet tags with fetched snippet content', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('This is shared content about constructs.', {
-        status: 200,
-      }),
-    );
+    const snippetProvider = async (name: string) =>
+      name === 'shared-constructs'
+        ? 'This is shared content about constructs.'
+        : '';
 
     const input = `
 # Test Guide
@@ -261,67 +260,75 @@ Some intro text.
 More text after.
 `;
 
-    const result = await postProcessGuide(input, generators);
+    const result = await postProcessGuide(
+      input,
+      generators,
+      undefined,
+      snippetProvider,
+    );
     expect(result).toContain('<Snippet name="shared-constructs">');
     expect(result).toContain('This is shared content about constructs.');
     expect(result).toContain('</Snippet>');
     expect(result).toContain('More text after.');
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/snippets/shared-constructs.mdx'),
-    );
   });
 
   it('should replace Snippet tags with nested path names', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('Consider your API choice carefully.', { status: 200 }),
-    );
+    const snippetProvider = async (name: string) =>
+      name === 'api/api-choice-note'
+        ? 'Consider your API choice carefully.'
+        : '';
 
     const input = `
 # Test Guide
 <Snippet name="api/api-choice-note" />
 `;
 
-    const result = await postProcessGuide(input, generators);
+    const result = await postProcessGuide(
+      input,
+      generators,
+      undefined,
+      snippetProvider,
+    );
     expect(result).toContain('<Snippet name="api/api-choice-note">');
     expect(result).toContain('Consider your API choice carefully.');
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/snippets/api/api-choice-note.mdx'),
-    );
   });
 
-  it('should leave Snippet tags unchanged when fetch fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('', { status: 404 }),
-    );
+  it('should leave Snippet tags unchanged when snippet not found', async () => {
+    const snippetProvider = async () => '';
 
     const input = `
 # Test Guide
 <Snippet name="non-existent-snippet" />
 `;
 
-    const result = await postProcessGuide(input, generators);
+    const result = await postProcessGuide(
+      input,
+      generators,
+      undefined,
+      snippetProvider,
+    );
     expect(result).toContain('<Snippet name="non-existent-snippet"');
   });
 
   it('should post-process NxCommands within fetched snippet content', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        `The generator configures a bundle target:
-
-<NxCommands commands={['run <project-name>:bundle']} />`,
-        { status: 200 },
-      ),
-    );
+    const snippetProvider = async (name: string) =>
+      name === 'ts-bundle'
+        ? `The generator configures a bundle target:\n\n<NxCommands commands={['run <project-name>:bundle']} />`
+        : '';
 
     const input = `
 # Test Guide
 <Snippet name="ts-bundle" />
 `;
 
-    const result = await postProcessGuide(input, generators, 'pnpm');
+    const result = await postProcessGuide(
+      input,
+      generators,
+      'pnpm',
+      snippetProvider,
+    );
     expect(result).toContain('<Snippet name="ts-bundle">');
     expect(result).toContain('The generator configures a bundle target:');
-    // remark-stringify indents nested fenced-code blocks inside JSX children.
     expect(result).toMatch(
       /```bash\n\s*pnpm nx run <project-name>:bundle\n\s*```/,
     );
@@ -329,14 +336,11 @@ More text after.
   });
 
   it('should handle multiple Snippet tags in a single guide', async () => {
-    let callCount = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return new Response('Shared constructs content.', { status: 200 });
-      }
-      return new Response('Bundle content.', { status: 200 });
-    });
+    const snippetProvider = async (name: string) => {
+      if (name === 'shared-constructs') return 'Shared constructs content.';
+      if (name === 'ts-bundle') return 'Bundle content.';
+      return '';
+    };
 
     const input = `
 # Test Guide
@@ -348,7 +352,12 @@ Some middle text.
 <Snippet name="ts-bundle" />
 `;
 
-    const result = await postProcessGuide(input, generators);
+    const result = await postProcessGuide(
+      input,
+      generators,
+      undefined,
+      snippetProvider,
+    );
     expect(result).toContain('<Snippet name="shared-constructs">');
     expect(result).toContain('Shared constructs content.');
     expect(result).toContain('<Snippet name="ts-bundle">');
@@ -357,25 +366,26 @@ Some middle text.
   });
 
   it('should handle Snippet tags with parentHeading attribute', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('Deploy instructions here.', { status: 200 }),
-    );
+    const snippetProvider = async (name: string) =>
+      name === 'lambda-function/deploying-your-function'
+        ? 'Deploy instructions here.'
+        : '';
 
     const input = `
 # Test Guide
 <Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />
 `;
 
-    const result = await postProcessGuide(input, generators);
+    const result = await postProcessGuide(
+      input,
+      generators,
+      undefined,
+      snippetProvider,
+    );
     expect(result).toContain(
       '<Snippet name="lambda-function/deploying-your-function">',
     );
     expect(result).toContain('Deploy instructions here.');
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining(
-        '/snippets/lambda-function/deploying-your-function.mdx',
-      ),
-    );
   });
 
   describe('option filtering', () => {
@@ -508,19 +518,25 @@ REACT_PY_STRANDS_BODY`,
 
     beforeEach(() => {
       vi.restoreAllMocks();
-      // Force fetchLocalGuide to miss so we exercise the fetch() fallback,
-      // then return per-URL content from the `variants` table.
-      vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-      vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
-        const match = /\/guides\/(.+)\.mdx/.exec(String(url));
-        if (!match) return Promise.resolve(new Response('', { status: 404 }));
-        const key = `${match[1]}.mdx`;
-        const body = variants[key];
-        if (body === undefined) {
-          return Promise.resolve(new Response('', { status: 404 }));
-        }
-        return Promise.resolve(new Response(body));
+      // Mock local file resolution to return variant content from the table.
+      vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
+        const s = String(p);
+        if (s.endsWith('schema.json')) return true;
+        const match = /\/guides\/(.+)\.mdx/.exec(s);
+        if (match) return variants[`${match[1]}.mdx`] !== undefined;
+        return false;
       });
+      const realReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation(
+        (p: any, ...rest: any[]) => {
+          const s = String(p);
+          const match = /\/guides\/(.+)\.mdx/.exec(s);
+          if (match && variants[`${match[1]}.mdx`] !== undefined) {
+            return variants[`${match[1]}.mdx`];
+          }
+          return (realReadFileSync as any)(p, ...rest);
+        },
+      );
     });
 
     // remark-stringify escapes `_` in plain text, so these tests match
@@ -675,17 +691,12 @@ REACT_PY_STRANDS_BODY`,
       fetchSpy.mockRestore();
     });
 
-    it('falls back to the GitHub fetch when no local copy exists', async () => {
+    it('returns empty content when no local copy exists', async () => {
       vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-      const fetchSpy = vi
-        .spyOn(globalThis, 'fetch')
-        .mockImplementation(() =>
-          Promise.resolve(new Response('REMOTE CONTENT')),
-        );
 
       const result = await fetchGuidePagesForGenerator(info, [info]);
-      expect(result.content).toContain('REMOTE CONTENT');
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.kind).toBe('ok');
+      expect(result.content).toBe('');
     });
   });
 });

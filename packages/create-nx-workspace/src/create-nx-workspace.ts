@@ -3,12 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 // eslint-disable-next-line @nx/enforce-module-boundaries
 import { TS_VERSIONS } from '../../nx-plugin/src/utils/versions';
 
 const NX_VERSION = TS_VERSIONS['create-nx-workspace'];
-const PRESET = '@aws/nx-plugin';
+const OWN_VERSION: string = JSON.parse(
+  readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'),
+).version;
+const PRESET = `@aws/nx-plugin@${OWN_VERSION}`;
 const DEFAULT_FLAGS = ['--ci=skip', '--analytics=false'];
 
 /**
@@ -81,7 +85,7 @@ export const createNxWorkspace = (args: string[]): number => {
   if (hasPreset) {
     console.error(
       `Error: --preset cannot be used with @aws/create-nx-workspace.\n` +
-        `This package always creates a workspace with the ${PRESET} preset.\n` +
+        `This package always creates a workspace with the @aws/nx-plugin preset.\n` +
         `To use a different preset, run create-nx-workspace directly:\n\n` +
         `  npx create-nx-workspace <name> --preset=<your-preset>\n`,
     );
