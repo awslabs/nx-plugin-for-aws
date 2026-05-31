@@ -11,7 +11,7 @@ This repository uses a dual-branch release strategy to support parallel developm
 
 ## How It Works
 
-- **`main`** CI passes `--preid rc` to `nx release`, so conventional-commit-driven bumps produce prerelease versions (e.g., a `feat:` becomes `0.121.0-rc.0` instead of `0.121.0`). These publish to the `next` dist-tag.
+- **`main`** CI uses `--specifier premajor --preid rc` for the first RC (producing `1.0.0-rc.0`), then `--preid rc` for subsequent RCs (auto-incrementing to `1.0.0-rc.1`, `1.0.0-rc.2`, etc.). These publish to the `next` dist-tag.
 - **`release/0.x`** CI runs `nx release` without `--preid`, producing normal semver bumps. These publish to the `latest` dist-tag.
 - **Docs** deploy only from `release/0.x`, keeping the public site on stable content.
 - **Slack notifications** skip prerelease versions.
@@ -74,10 +74,17 @@ The default `npm install @aws/nx-plugin` always resolves to the stable 0.x versi
 
 ### Manual release (if needed)
 
-On `main` (prerelease):
+On `main` (first prerelease):
 
 ```bash
-pnpm nx release --yes
+pnpm nx release --yes --specifier premajor --preid rc
+# Publishes 1.0.0-rc.0 to "next" dist-tag
+```
+
+On `main` (subsequent prereleases, after v1.0.0-rc.0 tag exists):
+
+```bash
+pnpm nx release --yes --preid rc
 # Publishes 1.0.0-rc.N to "next" dist-tag
 ```
 
@@ -92,7 +99,7 @@ pnpm nx release --yes
 
 When all v1.0 workstreams are complete (see #718):
 
-1. Remove the `--preid rc` flag from the `main` branch release step in `ci.yml`
+1. Remove the `--specifier premajor --preid rc` logic from the `main` branch release step in `ci.yml`
 2. Change `NPM_DIST_TAG` condition in `ci.yml` back to unconditional `latest`
 3. Remove the `release/0.x` branch condition from `deploy_docs`
 4. Publish `1.0.0` to `latest`
