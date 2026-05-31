@@ -384,9 +384,11 @@ const parseGuide = async (
  * probe misses, and we fall back to GitHub.
  */
 const GUIDES_RELATIVE_PROBES = [
+  // Bundled docs inside published @aws/nx-plugin-mcp package (bin/ → ../docs/guides)
+  '../docs/guides',
   // nx-plugin package compiled from source (src/mcp-server/…)
   '../../../docs/src/content/docs/en/guides',
-  // rolldown-bundled `@aws/nx-plugin-mcp` binary in dist
+  // rolldown-bundled `@aws/nx-plugin-mcp` binary in dist (monorepo layout)
   '../../../../docs/src/content/docs/en/guides',
 ];
 
@@ -449,6 +451,8 @@ export type SnippetContentProvider = (
 ) => Promise<string> | string;
 
 const SNIPPETS_RELATIVE_PROBES = [
+  // Bundled docs inside published @aws/nx-plugin-mcp package (bin/ → ../docs/snippets)
+  '../docs/snippets',
   '../../../docs/src/content/docs/en/snippets',
   '../../../../docs/src/content/docs/en/snippets',
 ];
