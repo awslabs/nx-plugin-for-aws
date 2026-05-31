@@ -1,11 +1,11 @@
 name: CI
 
 concurrency:
-  group: 'ci'
+  group: ci-${{ github.ref }}
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/0.x']
   workflow_dispatch:
 
 env:
@@ -163,15 +163,24 @@ jobs:
         env:
           # NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_DIST_TAG: latest
+          NPM_DIST_TAG: ${{ github.ref == 'refs/heads/release/0.x' && 'latest' || 'next' }}
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           HUSKY: '0'
         run: |
-          pnpm nx release --yes
+          if [ "${{ github.ref }}" = "refs/heads/release/0.x" ]; then
+            pnpm nx release --yes
+          else
+            CURRENT_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
+            if echo "$CURRENT_VERSION" | grep -q "rc"; then
+              pnpm nx release --yes --preid rc
+            else
+              pnpm nx release --yes --specifier premajor --preid rc
+            fi
+          fi
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
+    if: ${{ github.ref == 'refs/heads/release/0.x' && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
     needs: [release]
     steps:
       - name: Download docs artifact
