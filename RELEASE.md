@@ -11,8 +11,8 @@ This repository uses a dual-branch release strategy to support parallel developm
 
 ## How It Works
 
-- **`main`** has `"preid": "rc"` in `nx.json`, so conventional-commit-driven bumps produce prerelease versions (e.g., a `feat:` becomes `1.0.0-rc.1` instead of `0.121.0`). These publish to the `next` dist-tag.
-- **`release/0.x`** uses the original `nx.json` without `preid`, producing normal semver bumps. These publish to the `latest` dist-tag.
+- **`main`** CI passes `--preid rc` to `nx release`, so conventional-commit-driven bumps produce prerelease versions (e.g., a `feat:` becomes `0.121.0-rc.0` instead of `0.121.0`). These publish to the `next` dist-tag.
+- **`release/0.x`** CI runs `nx release` without `--preid`, producing normal semver bumps. These publish to the `latest` dist-tag.
 - **Docs** deploy only from `release/0.x`, keeping the public site on stable content.
 - **Slack notifications** skip prerelease versions.
 
@@ -92,7 +92,7 @@ pnpm nx release --yes
 
 When all v1.0 workstreams are complete (see #718):
 
-1. Remove `"preid": "rc"` from `nx.json` on `main`
+1. Remove the `--preid rc` flag from the `main` branch release step in `ci.yml`
 2. Change `NPM_DIST_TAG` condition in `ci.yml` back to unconditional `latest`
 3. Remove the `release/0.x` branch condition from `deploy_docs`
 4. Publish `1.0.0` to `latest`
