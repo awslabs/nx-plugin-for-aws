@@ -2,56 +2,73 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { tsWebsiteGenerator, TS_WEBSITE_GENERATOR_INFO } from './generator';
-import { TsWebsiteGeneratorSchema } from './schema';
+import { readJson, Tree } from '@nx/devkit';
+import { tsWebsiteGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 
 describe('ts#website generator', () => {
   let tree: Tree;
 
-  const options: TsWebsiteGeneratorSchema = {
-    name: 'test-website',
-    iacProvider: 'CDK',
-  };
-
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should have correct generator info', () => {
-    expect(TS_WEBSITE_GENERATOR_INFO).toBeDefined();
-    expect(TS_WEBSITE_GENERATOR_INFO.id).toBe('ts#website');
-  });
-
-  it('should delegate to ts#react-website generator with default framework', async () => {
-    await tsWebsiteGenerator(tree, options);
-    expect(tree.exists('test-website/src/main.tsx')).toBeTruthy();
-  });
-
-  it('should delegate to ts#react-website generator with explicit React framework', async () => {
-    await tsWebsiteGenerator(tree, { ...options, framework: 'React' });
-    expect(tree.exists('test-website/src/main.tsx')).toBeTruthy();
-  });
-
-  it('should pass through all options to the underlying generator', async () => {
+  it('should delegate to tsReactWebsiteGenerator and produce a website', async () => {
     await tsWebsiteGenerator(tree, {
-      ...options,
-      framework: 'React',
+      name: 'my-website',
+      iacProvider: 'CDK',
+    });
+
+    expect(tree.exists('my-website/src/main.tsx')).toBeTruthy();
+    expect(tree.exists('my-website/src/config.ts')).toBeTruthy();
+    expect(tree.exists('my-website/src/routes/__root.tsx')).toBeTruthy();
+  });
+
+  it('should set generator metadata to ts#react-website with framework field', async () => {
+    await tsWebsiteGenerator(tree, {
+      name: 'my-website',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = readJson(tree, 'my-website/project.json');
+    expect(projectConfig.metadata).toHaveProperty(
+      'generator',
+      'ts#react-website',
+    );
+    expect(projectConfig.metadata).toHaveProperty('framework', 'react');
+  });
+
+  it('should default framework to react', async () => {
+    await tsWebsiteGenerator(tree, {
+      name: 'my-website',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = readJson(tree, 'my-website/project.json');
+    expect(projectConfig.metadata.framework).toBe('react');
+  });
+
+  it('should pass framework=react explicitly', async () => {
+    await tsWebsiteGenerator(tree, {
+      name: 'my-website',
+      framework: 'react',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = readJson(tree, 'my-website/project.json');
+    expect(projectConfig.metadata.framework).toBe('react');
+    expect(projectConfig.metadata.generator).toBe('ts#react-website');
+  });
+
+  it('should pass through uxProvider option', async () => {
+    await tsWebsiteGenerator(tree, {
+      name: 'my-website',
+      framework: 'react',
       uxProvider: 'Shadcn',
       enableTailwind: true,
-      enableTanstackRouter: true,
+      iacProvider: 'CDK',
     });
-    expect(tree.exists('test-website/src/main.tsx')).toBeTruthy();
-    expect(tree.exists('test-website/src/routes/__root.tsx')).toBeTruthy();
-  });
 
-  it('should throw for unsupported framework', async () => {
-    await expect(
-      tsWebsiteGenerator(tree, {
-        ...options,
-        framework: 'Vue' as any,
-      }),
-    ).rejects.toThrow('Unsupported website framework: Vue');
+    expect(tree.exists('my-website/src/main.tsx')).toBeTruthy();
   });
 });

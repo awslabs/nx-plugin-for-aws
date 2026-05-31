@@ -5,7 +5,7 @@
 import { IacProviderOption } from '../../../utils/iac';
 import { UxProviderOption } from '../../react-website/app/generator';
 
-export type WebsiteFramework = 'React';
+export type WebsiteFramework = 'react';
 
 export interface TsWebsiteGeneratorSchema {
   name: string;

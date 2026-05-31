@@ -193,6 +193,7 @@ export async function tsReactWebsiteGenerator(
     REACT_WEBSITE_APP_GENERATOR_INFO,
     {
       uxProvider,
+      framework: 'react',
     },
   );
 

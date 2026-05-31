@@ -329,7 +329,7 @@ export default defineConfig({
             { label: 'ts#rdb', link: '/guides/ts-rdb' },
             { label: 'ts#trpc-api', link: '/guides/trpc' },
             { label: 'ts#smithy-api', link: '/guides/ts-smithy-api' },
-            { label: 'ts#website', link: '/guides/website' },
+            { label: 'ts#website', link: '/guides/react-website' },
             {
               label: 'ts#website#auth',
               link: '/guides/react-website-auth',
