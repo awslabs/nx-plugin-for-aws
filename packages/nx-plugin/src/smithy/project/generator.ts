@@ -22,7 +22,7 @@ import { getTsLibDetails } from '../../ts/lib/generator';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import { FsCommands } from '../../utils/fs';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveContainers } from '../../utils/containers';
 
 export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -32,7 +32,7 @@ export const smithyProjectGenerator = async (
   options: SmithyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const cmd = new FsCommands(tree);
-  const containerEngine = await resolveContainerEngine(tree, 'inherit');
+  const containers = await resolveContainers(tree, 'inherit');
 
   // Create project.json
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);
@@ -53,7 +53,7 @@ export const smithyProjectGenerator = async (
           commands: [
             cmd.rm('dist/{projectRoot}/build'),
             cmd.mkdir('dist/{projectRoot}/build'),
-            `${containerEngine} build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
+            `${containers} build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
           ],
           parallel: false,
           cwd: '{workspaceRoot}',

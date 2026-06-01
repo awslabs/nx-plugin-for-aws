@@ -221,7 +221,7 @@ dependencies = ["strands-agents"]
 
   it('should add generator metric', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     await pyAgentA2aConnectionGenerator(tree, {
       sourceProject: 'test.py_host',
       targetProject: 'test.py_remote',

@@ -5,6 +5,6 @@
 
 export const IAC_PROVIDERS = ['cdk', 'terraform'] as const;
 
-export type IacProvider = (typeof IAC_PROVIDERS)[number];
+export type Iac = (typeof IAC_PROVIDERS)[number];
 
-export type IacProviderOption = IacProvider | 'inherit';
+export type IacOption = Iac | 'inherit';

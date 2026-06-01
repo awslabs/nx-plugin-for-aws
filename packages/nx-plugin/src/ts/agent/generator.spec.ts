@@ -46,7 +46,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added to the existing project
@@ -74,7 +74,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'custom-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added with custom name
@@ -96,7 +96,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check root package.json dependencies
@@ -124,7 +124,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'My_Special#Agent!',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Name should be converted to kebab-case
@@ -149,7 +149,7 @@ describe('ts#agent generator', () => {
       tsAgentGenerator(tree, {
         project: 'non-ts-project',
         infra: 'none',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       }),
     ).rejects.toThrow(
       'Unsupported project non-ts-project. Expected a TypeScript project (with a tsconfig.json)',
@@ -173,7 +173,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: '@org/nested-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should use the last part of the project name for default agent name
@@ -202,7 +202,7 @@ describe('ts#agent generator', () => {
       project: 'no-source-root',
       name: 'default-src-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should default to {projectRoot}/src
@@ -216,7 +216,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'snapshot-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot all generated agent files
@@ -271,7 +271,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added to the existing project
@@ -312,7 +312,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'custom-bedrock-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added with custom name
@@ -342,7 +342,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs setup
@@ -370,7 +370,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -392,7 +392,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'my-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that the docker image tag is correctly generated in the agent construct
@@ -408,7 +408,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'snapshot-bedrock-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated agent construct
@@ -448,12 +448,12 @@ describe('ts#agent generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expectHasMetricTags(tree, TS_AGENT_GENERATOR_INFO.metric);
@@ -463,7 +463,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that agent files were added to the existing project
@@ -496,7 +496,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'custom-terraform-agent',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that agent files were added with custom name
@@ -525,7 +525,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'terraform-snapshot-agent',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Snapshot the generated Terraform core runtime file
@@ -555,7 +555,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'terraform-agent',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that the docker image tag is correctly generated in the Terraform file
@@ -570,7 +570,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that agent files were added
@@ -590,7 +590,7 @@ describe('ts#agent generator', () => {
     ).toBeFalsy();
   });
 
-  it('should inherit iacProvider from config when set to Inherit', async () => {
+  it('should inherit iac from config when set to Inherit', async () => {
     // Set up config with Terraform provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
@@ -602,7 +602,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'inherit',
+      iac: 'inherit',
     });
 
     // Verify Terraform files are created (not CDK constructs)
@@ -617,7 +617,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check rolldown config file was created
@@ -639,7 +639,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'path-test-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check Dockerfile COPY path
@@ -665,7 +665,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'first-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Generate second agent
@@ -673,7 +673,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'second-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check both agent directories exist
@@ -734,7 +734,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -757,7 +757,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'custom-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -778,7 +778,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       // No computeType specified, should default to BedrockAgentCoreRuntime
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should include Dockerfile by default
@@ -797,14 +797,14 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'first-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'second-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -831,7 +831,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'A2A',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that A2A-specific index.ts was generated (overwrites the HTTP one)
@@ -862,7 +862,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'A2A',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -876,7 +876,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -891,7 +891,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'A2A',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const agentConstruct = tree.read(
@@ -906,7 +906,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const agentConstruct = tree.read(
@@ -921,7 +921,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: '',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added with default name
@@ -946,7 +946,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const indexContent = tree.read(
@@ -978,7 +978,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -992,7 +992,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
@@ -1013,7 +1013,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const agentConstruct = tree.read(
@@ -1028,7 +1028,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
@@ -1056,7 +1056,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       protocol: 'A2A',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
@@ -1077,7 +1077,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       name: 'my-custom-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(
@@ -1103,7 +1103,7 @@ describe('ts#agent generator', () => {
       project: 'test-project',
       infra: 'none',
       auth: 'cognito',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
@@ -1121,7 +1121,7 @@ describe('ts#agent generator', () => {
       name: 'no-warn-agent',
       infra: 'none',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(warnSpy).not.toHaveBeenCalled();

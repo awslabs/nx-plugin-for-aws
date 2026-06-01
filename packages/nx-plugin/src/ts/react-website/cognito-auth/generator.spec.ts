@@ -19,9 +19,9 @@ describe('cognito-auth generator', () => {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
-    iacProvider: 'cdk',
+    iac: 'cdk',
   };
-  const uxProvider = 'Cloudscape';
+  const ux = 'Cloudscape';
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
@@ -32,7 +32,7 @@ describe('cognito-auth generator', () => {
         name: 'test-project',
         sourceRoot: 'packages/test-project/src',
         metadata: {
-          uxProvider,
+          ux,
         },
       }),
     );
@@ -415,7 +415,7 @@ describe('cognito-auth generator', () => {
       JSON.stringify({
         name: '@scope/test-project',
         sourceRoot: 'packages/test-project/src',
-        uxProvider,
+        ux,
       }),
     );
 
@@ -456,7 +456,7 @@ describe('cognito-auth generator', () => {
       JSON.stringify({
         name: '@my-scope/test-project',
         sourceRoot: 'packages/test-project/src',
-        metadata: { uxProvider },
+        metadata: { ux },
       }),
     );
 
@@ -503,7 +503,7 @@ describe('cognito-auth generator', () => {
       JSON.stringify({
         name: '@cognito-test/aws-project',
         sourceRoot: 'packages/test-project/src',
-        metadata: { uxProvider },
+        metadata: { ux },
       }),
     );
 
@@ -561,7 +561,7 @@ describe('cognito-auth generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(

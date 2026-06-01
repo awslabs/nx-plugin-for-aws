@@ -27,7 +27,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify model project structure
@@ -105,7 +105,7 @@ describe('tsSmithyApiGenerator', () => {
       directory: 'apis',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify directory structure
@@ -118,7 +118,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify infrastructure files for IAM auth
@@ -152,7 +152,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'cognito',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify infrastructure files for Cognito auth
@@ -187,7 +187,7 @@ describe('tsSmithyApiGenerator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'shared',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const appApiContent = tree.read(
@@ -207,7 +207,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Verify Terraform infrastructure files
@@ -236,7 +236,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Verify Terraform infrastructure files
@@ -273,7 +273,7 @@ describe('tsSmithyApiGenerator', () => {
       namespace: 'com.example.custom',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const mainSmithy = tree.read('test-api/model/src/main.smithy', 'utf-8');
@@ -286,7 +286,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -331,7 +331,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -362,7 +362,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const packageJson = readJson(tree, 'package.json');
@@ -394,7 +394,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify .gitignore
@@ -417,7 +417,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -451,7 +451,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -472,14 +472,14 @@ describe('tsSmithyApiGenerator', () => {
 
   it('should add generator metric to app.ts when shared constructs exist', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Call the generator function
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify the metric was added to app.ts
@@ -492,7 +492,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'api-one',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Generate second API
@@ -500,7 +500,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'api-two',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check metadata ports instead of parsing files
@@ -519,7 +519,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs has OpenAPI metadata target
@@ -544,7 +544,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'my-test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify model project name
@@ -566,13 +566,13 @@ describe('tsSmithyApiGenerator', () => {
     expect(handler).toMatchSnapshot('kebab-case-handler.ts');
   });
 
-  describe('terraform iacProvider', () => {
+  describe('terraform iac', () => {
     it('should generate terraform files for REST API with IAM auth and snapshot them', async () => {
       await tsSmithyApiGenerator(tree, {
         name: 'test-api',
         infra: 'rest-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -617,7 +617,7 @@ describe('tsSmithyApiGenerator', () => {
         name: 'test-api',
         infra: 'rest-lambda',
         auth: 'cognito',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -665,7 +665,7 @@ describe('tsSmithyApiGenerator', () => {
         name: 'test-api',
         infra: 'rest-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Check that shared terraform project has build dependency on the API project
@@ -697,7 +697,7 @@ describe('tsSmithyApiGenerator', () => {
         name: 'test-api',
         infra: 'rest-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify CDK files are NOT created
@@ -709,18 +709,18 @@ describe('tsSmithyApiGenerator', () => {
       ).toBeFalsy();
     });
 
-    it('should throw error for invalid iacProvider', async () => {
+    it('should throw error for invalid iac', async () => {
       await expect(
         tsSmithyApiGenerator(tree, {
           name: 'test-api',
           infra: 'rest-lambda',
           auth: 'iam',
-          iacProvider: 'InvalidProvider' as any,
+          iac: 'InvalidProvider' as any,
         }),
-      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
+      ).rejects.toThrow('Unsupported iac InvalidProvider');
     });
 
-    it('should inherit iacProvider from config when set to Inherit', async () => {
+    it('should inherit iac from config when set to Inherit', async () => {
       // Set up config with CDK provider using utility methods
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
@@ -733,7 +733,7 @@ describe('tsSmithyApiGenerator', () => {
         name: 'test-api',
         infra: 'rest-lambda',
         auth: 'iam',
-        iacProvider: 'inherit',
+        iac: 'inherit',
       });
 
       // Verify CDK constructs are created (not terraform)
@@ -750,7 +750,7 @@ describe('tsSmithyApiGenerator', () => {
         directory: 'apps/nested/path',
         infra: 'rest-lambda',
         auth: 'cognito',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify terraform files are created
@@ -782,7 +782,7 @@ describe('tsSmithyApiGenerator', () => {
         namespace: 'com.example.custom',
         infra: 'rest-lambda',
         auth: 'custom',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify terraform files are created
@@ -811,7 +811,7 @@ describe('tsSmithyApiGenerator', () => {
       name: 'test-api',
       infra: 'rest-lambda',
       auth: 'custom',
-      iacProvider: 'cdk',
+      iac: 'cdk',
       directory: 'packages',
       subDirectory: 'apis',
     });

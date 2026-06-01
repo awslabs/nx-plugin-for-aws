@@ -16,7 +16,7 @@ describe('ts#website generator', () => {
   it('should delegate to tsReactWebsiteGenerator and produce a website', async () => {
     await tsWebsiteGenerator(tree, {
       name: 'my-website',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('my-website/src/main.tsx')).toBeTruthy();
@@ -27,7 +27,7 @@ describe('ts#website generator', () => {
   it('should set generator metadata to ts#react-website with framework field', async () => {
     await tsWebsiteGenerator(tree, {
       name: 'my-website',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = readJson(tree, 'my-website/project.json');
@@ -41,7 +41,7 @@ describe('ts#website generator', () => {
   it('should default framework to react', async () => {
     await tsWebsiteGenerator(tree, {
       name: 'my-website',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = readJson(tree, 'my-website/project.json');
@@ -52,7 +52,7 @@ describe('ts#website generator', () => {
     await tsWebsiteGenerator(tree, {
       name: 'my-website',
       framework: 'react',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = readJson(tree, 'my-website/project.json');
@@ -60,13 +60,13 @@ describe('ts#website generator', () => {
     expect(projectConfig.metadata.generator).toBe('ts#react-website');
   });
 
-  it('should pass through uxProvider option', async () => {
+  it('should pass through ux option', async () => {
     await tsWebsiteGenerator(tree, {
       name: 'my-website',
       framework: 'react',
-      uxProvider: 'shadcn',
+      ux: 'shadcn',
       enableTailwind: true,
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('my-website/src/main.tsx')).toBeTruthy();

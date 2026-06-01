@@ -892,7 +892,7 @@ export function Main() {
 
   describe('metrics', () => {
     it('should add generator metric to app.ts', async () => {
-      await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
       // Setup a React project with proper main.tsx structure
       tree.write(
@@ -980,7 +980,7 @@ export function Main() {
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
         skipInstall: true,
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
     });
 
@@ -990,7 +990,7 @@ export function Main() {
         name: 'TestApi',
         auth: 'custom',
         infra: 'rest-lambda',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       // Connect the frontend to the smithy API using the model project name
@@ -1090,7 +1090,7 @@ export function Main() {
         name: 'SecureApi',
         auth: 'iam',
         infra: 'rest-lambda',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       // Connect the frontend to the smithy API using the model project name

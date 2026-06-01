@@ -439,7 +439,7 @@ dependencies = ["strands-agents"]
 
   it('should add generator metric to app.ts', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await pyAgentMcpConnectionGenerator(tree, {
       sourceProject: 'my_scope.my_agent',

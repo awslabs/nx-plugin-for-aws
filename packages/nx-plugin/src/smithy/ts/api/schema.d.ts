@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { TsProjectGeneratorSchema } from '../../../ts/lib/schema';
-import { IacProviderOption } from '../../../utils/iac';
+import { IacOption } from '../../../utils/iac';
 
 export interface TsSmithyApiGeneratorSchema {
   name: string;
@@ -13,5 +13,5 @@ export interface TsSmithyApiGeneratorSchema {
   auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

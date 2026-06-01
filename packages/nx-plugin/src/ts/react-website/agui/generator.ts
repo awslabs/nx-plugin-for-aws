@@ -48,7 +48,7 @@ export interface AgUiReactConnectionOptions {
  * generator multiple times is idempotent and additive.
  *
  * Also vends a `src/components/copilot` theme module picked from the
- * website's `metadata.uxProvider` (cloudscape / shadcn / default).
+ * website's `metadata.ux` (cloudscape / shadcn / default).
  */
 export const addAgUiReactConnection = async (
   tree: Tree,
@@ -164,10 +164,8 @@ export const addAgUiReactConnection = async (
 const resolveAgUiTheme = (
   frontendProjectConfig: ProjectConfiguration,
 ): AgUiTheme => {
-  const uxProvider = (frontendProjectConfig.metadata as any)?.uxProvider as
-    | string
-    | undefined;
-  switch (uxProvider) {
+  const ux = (frontendProjectConfig.metadata as any)?.ux as string | undefined;
+  switch (ux) {
     case 'cloudscape':
       return 'cloudscape';
     case 'shadcn':

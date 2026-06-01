@@ -348,7 +348,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await pyAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',
@@ -398,7 +398,7 @@ describe(
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
         skipInstall: true,
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
     });
 
@@ -840,14 +840,14 @@ export function Main() {
 });
 
 describe('py strands agent react connection generator - AG-UI themed CopilotKit', () => {
-  const writeFrontend = (tree: Tree, uxProvider?: string) => {
+  const writeFrontend = (tree: Tree, ux?: string) => {
     tree.write(
       'apps/frontend/project.json',
       JSON.stringify({
         name: 'frontend',
         root: 'apps/frontend',
         sourceRoot: 'apps/frontend/src',
-        ...(uxProvider ? { metadata: { uxProvider } } : {}),
+        ...(ux ? { metadata: { ux } } : {}),
       }),
     );
     tree.write(
@@ -901,7 +901,7 @@ export function Main() {
     });
   };
 
-  it('should vend the default (unstyled) copilot theme when uxProvider is None', async () => {
+  it('should vend the default (unstyled) copilot theme when ux is None', async () => {
     const tree = createTreeUsingTsSolutionSetup();
     writeFrontend(tree, 'none');
     await runAgui(tree);
@@ -936,7 +936,7 @@ export function Main() {
     expect(css).toContain('pointer-events: auto;');
   });
 
-  it('should vend the cloudscape-themed copilot components when uxProvider is Cloudscape', async () => {
+  it('should vend the cloudscape-themed copilot components when ux is Cloudscape', async () => {
     const tree = createTreeUsingTsSolutionSetup();
     writeFrontend(tree, 'cloudscape');
     await runAgui(tree);
@@ -980,7 +980,7 @@ export function Main() {
     expect(css).toContain('pointer-events: auto;');
   });
 
-  it('should vend the shadcn-themed copilot components and shared shadcn primitives when uxProvider is Shadcn', async () => {
+  it('should vend the shadcn-themed copilot components and shared shadcn primitives when ux is Shadcn', async () => {
     const tree = createTreeUsingTsSolutionSetup();
     writeFrontend(tree, 'shadcn');
     await runAgui(tree);

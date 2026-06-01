@@ -4,7 +4,7 @@
  */
 import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from './test';
-import { resolveIacProvider } from './iac';
+import { resolveIac } from './iac';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -18,18 +18,18 @@ describe('iac utils', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  describe('resolveIacProvider', () => {
-    it('should return CDK when iacProviderOption is CDK', async () => {
-      const result = await resolveIacProvider(tree, 'cdk');
+  describe('resolveIac', () => {
+    it('should return CDK when iacOption is CDK', async () => {
+      const result = await resolveIac(tree, 'cdk');
       expect(result).toBe('cdk');
     });
 
-    it('should return Terraform when iacProviderOption is Terraform', async () => {
-      const result = await resolveIacProvider(tree, 'terraform');
+    it('should return Terraform when iacOption is Terraform', async () => {
+      const result = await resolveIac(tree, 'terraform');
       expect(result).toBe('terraform');
     });
 
-    it('should resolve to CDK when iacProviderOption is Inherit and config has CDK provider', async () => {
+    it('should resolve to CDK when iacOption is Inherit and config has CDK provider', async () => {
       // Set up config with CDK provider
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
@@ -38,11 +38,11 @@ describe('iac utils', () => {
         },
       });
 
-      const result = await resolveIacProvider(tree, 'inherit');
+      const result = await resolveIac(tree, 'inherit');
       expect(result).toBe('cdk');
     });
 
-    it('should resolve to Terraform when iacProviderOption is Inherit and config has Terraform provider', async () => {
+    it('should resolve to Terraform when iacOption is Inherit and config has Terraform provider', async () => {
       // Set up config with Terraform provider
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
@@ -51,26 +51,26 @@ describe('iac utils', () => {
         },
       });
 
-      const result = await resolveIacProvider(tree, 'inherit');
+      const result = await resolveIac(tree, 'inherit');
       expect(result).toBe('terraform');
     });
 
-    it('should throw error when iacProviderOption is Inherit but no config exists', async () => {
-      await expect(resolveIacProvider(tree, 'inherit')).rejects.toThrow(
+    it('should throw error when iacOption is Inherit but no config exists', async () => {
+      await expect(resolveIac(tree, 'inherit')).rejects.toThrow(
         `IaC provider "inherit" requires iac.provider to be set in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
       );
     });
 
-    it('should throw error when iacProviderOption is Inherit but config has no iac.provider', async () => {
+    it('should throw error when iacOption is Inherit but config has no iac.provider', async () => {
       // Set up config without iac.provider
       await ensureAwsNxPluginConfig(tree);
 
-      await expect(resolveIacProvider(tree, 'inherit')).rejects.toThrow(
+      await expect(resolveIac(tree, 'inherit')).rejects.toThrow(
         `IaC provider "inherit" requires iac.provider to be set in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
       );
     });
 
-    it('should throw error when iacProviderOption is Inherit but config has invalid iac.provider', async () => {
+    it('should throw error when iacOption is Inherit but config has invalid iac.provider', async () => {
       // Set up config with invalid provider
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
@@ -79,19 +79,19 @@ describe('iac utils', () => {
         },
       });
 
-      await expect(resolveIacProvider(tree, 'inherit')).rejects.toThrow(
+      await expect(resolveIac(tree, 'inherit')).rejects.toThrow(
         `iac.provider in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} must be one of cdk, terraform`,
       );
     });
 
-    it('should throw error when iacProviderOption is Inherit but config has empty iac section', async () => {
+    it('should throw error when iacOption is Inherit but config has empty iac section', async () => {
       // Set up config with empty iac section
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
         iac: {} as any,
       });
 
-      await expect(resolveIacProvider(tree, 'inherit')).rejects.toThrow(
+      await expect(resolveIac(tree, 'inherit')).rejects.toThrow(
         `IaC provider "inherit" requires iac.provider to be set in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
       );
     });

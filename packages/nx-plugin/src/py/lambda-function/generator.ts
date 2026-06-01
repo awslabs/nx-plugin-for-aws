@@ -34,7 +34,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { toProjectRelativePath } from '../../utils/paths';
-import { resolveIacProvider } from '../../utils/iac';
+import { resolveIac } from '../../utils/iac';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -131,10 +131,10 @@ export const pyLambdaFunctionGenerator = async (
     );
   }
 
-  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+  const iac = await resolveIac(tree, schema.iac);
 
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
 
   // Check if the project has a bundle target and if not add it
@@ -147,7 +147,7 @@ export const pyLambdaFunctionGenerator = async (
     handler: normalizedFunctionPath,
     bundlePathFromRoot: bundleOutputDir,
     runtime: 'python',
-    iacProvider,
+    iac,
   });
 
   const enhancedOptions = {

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
 export type TsMcpServerInfra = 'none' | 'agentcore';
 
@@ -14,5 +14,5 @@ export interface TsMcpServerGeneratorSchema {
   name?: string;
   infra?: TsMcpServerInfra;
   auth?: TsMcpServerAuth;
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

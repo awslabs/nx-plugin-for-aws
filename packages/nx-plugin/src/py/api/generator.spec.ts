@@ -22,7 +22,7 @@ describe('py#api generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'isolated',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test_api')).toBeTruthy();
@@ -40,7 +40,7 @@ describe('py#api generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'isolated',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test_api')).toBeTruthy();

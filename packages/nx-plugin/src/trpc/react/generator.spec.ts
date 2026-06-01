@@ -180,7 +180,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Call the generator function
     await reactGenerator(tree, {
@@ -405,7 +405,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
   });
 
@@ -415,7 +415,7 @@ describe('trpc react generator with real react and trpc projects', () => {
       name: 'TestApi',
       auth: 'custom',
       infra: 'http-lambda',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     await reactGenerator(tree, {
@@ -455,7 +455,7 @@ describe('trpc react generator with real react and trpc projects', () => {
       name: 'FirstApi',
       auth: 'custom',
       infra: 'http-lambda',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Generate second API
@@ -463,7 +463,7 @@ describe('trpc react generator with real react and trpc projects', () => {
       name: 'SecondApi',
       auth: 'custom',
       infra: 'http-lambda',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Connect first API to frontend

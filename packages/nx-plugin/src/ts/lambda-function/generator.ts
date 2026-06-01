@@ -28,7 +28,7 @@ import { withVersions } from '../../utils/versions';
 import camelCase from 'lodash.camelcase';
 import { TS_HANDLER_RETURN_TYPES } from './io';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
-import { resolveIacProvider } from '../../utils/iac';
+import { resolveIac } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -91,10 +91,10 @@ export const tsLambdaFunctionGenerator = async (
     );
   }
 
-  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+  const iac = await resolveIac(tree, schema.iac);
 
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
 
   const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
@@ -111,7 +111,7 @@ export const tsLambdaFunctionGenerator = async (
       'bundle',
       bundleOutputDir,
     ),
-    iacProvider,
+    iac,
   });
 
   const enhancedOptions = {

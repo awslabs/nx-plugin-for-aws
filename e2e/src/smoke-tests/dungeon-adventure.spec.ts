@@ -58,7 +58,7 @@ describe('smoke test - dungeon-adventure', () => {
     // 1. Monorepo Setup
 
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', 'CDK')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', 'cdk')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -77,7 +77,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#agent --project=story --auth=Cognito --protocol=AG-UI --no-interactive`,
+      `generate @aws/nx-plugin:py#agent --project=story --auth=cognito --protocol=AG-UI --no-interactive`,
       opts,
     );
     await runCLI(
@@ -89,7 +89,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=GameUI --uxProvider=Shadcn --no-interactive`,
+      `generate @aws/nx-plugin:ts#website --name=GameUI --ux=shadcn --no-interactive`,
       opts,
     );
     // No need to allow signup for the e2e tests

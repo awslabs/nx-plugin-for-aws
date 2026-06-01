@@ -35,7 +35,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify project structure
@@ -56,7 +56,7 @@ describe('fastapi project generator', () => {
       infra: 'http-lambda',
       auth: 'iam',
       moduleName: 'my_module',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify project structure
@@ -71,7 +71,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -123,7 +123,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const pyprojectToml = parse(
@@ -154,7 +154,7 @@ describe('fastapi project generator', () => {
       directory: 'apps/nested/path',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs setup
@@ -201,7 +201,7 @@ describe('fastapi project generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'shared',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const appApiContent = tree.read(
@@ -224,7 +224,7 @@ describe('fastapi project generator', () => {
       infra: 'http-lambda',
       integrationPattern: 'shared',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const appApiContent = tree.read(
@@ -244,7 +244,7 @@ describe('fastapi project generator', () => {
       directory: 'apps/nested/path',
       infra: 'rest-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs setup
@@ -290,7 +290,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -314,7 +314,7 @@ describe('fastapi project generator', () => {
       directory: 'apps/nested/path',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
@@ -329,7 +329,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const config = JSON.parse(tree.read('apps/test_api/project.json', 'utf-8'));
@@ -349,7 +349,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const appChanges = sortObjectKeys(
@@ -372,7 +372,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify the metric was added to app.ts
@@ -387,7 +387,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra,
         auth: 'iam',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       // Read the generated init.py file
@@ -410,7 +410,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Generate second API
@@ -419,7 +419,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Generate third API
@@ -428,7 +428,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check metadata ports
@@ -458,14 +458,14 @@ describe('fastapi project generator', () => {
     );
   });
 
-  describe('terraform iacProvider', () => {
+  describe('terraform iac', () => {
     it('should generate terraform files for HTTP API with IAM auth and snapshot them', async () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
         infra: 'http-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -511,7 +511,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'http-lambda',
         auth: 'cognito',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -560,7 +560,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'http-lambda',
         auth: 'custom',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -608,7 +608,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'rest-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -654,7 +654,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'rest-lambda',
         auth: 'cognito',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -703,7 +703,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'rest-lambda',
         auth: 'custom',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -751,7 +751,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'http-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Check that shared terraform project has build dependency on the API project
@@ -786,7 +786,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'http-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify CDK files are NOT created
@@ -798,16 +798,16 @@ describe('fastapi project generator', () => {
       ).toBeFalsy();
     });
 
-    it('should throw error for invalid iacProvider', async () => {
+    it('should throw error for invalid iac', async () => {
       await expect(
         pyFastApiProjectGenerator(tree, {
           name: 'test-api',
           directory: 'apps',
           infra: 'http-lambda',
           auth: 'iam',
-          iacProvider: 'InvalidProvider' as any,
+          iac: 'InvalidProvider' as any,
         }),
-      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
+      ).rejects.toThrow('Unsupported iac InvalidProvider');
     });
 
     it('should generate correct FastAPI handler configuration with custom module name', async () => {
@@ -816,7 +816,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         infra: 'http-lambda',
         auth: 'iam',
-        iacProvider: 'terraform',
+        iac: 'terraform',
         moduleName: 'custom_module',
       });
 
@@ -844,7 +844,7 @@ describe('fastapi project generator', () => {
         directory: 'apps/nested/path',
         infra: 'rest-lambda',
         auth: 'cognito',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify terraform files are created
@@ -871,7 +871,7 @@ describe('fastapi project generator', () => {
     });
   });
 
-  it('should inherit iacProvider from config when set to Inherit', async () => {
+  it('should inherit iac from config when set to Inherit', async () => {
     // Set up config with CDK provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
@@ -885,7 +885,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'inherit',
+      iac: 'inherit',
     });
 
     // Verify CDK constructs are created (not terraform)
@@ -903,7 +903,7 @@ describe('fastapi project generator', () => {
       subDirectory: 'apis',
       infra: 'http-lambda',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
     expect(tree.exists('packages/apis')).toBeTruthy();
     expect(tree.exists('packages/apis/pyproject.toml')).toBeTruthy();

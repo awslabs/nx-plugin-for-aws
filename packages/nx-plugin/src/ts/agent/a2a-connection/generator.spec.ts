@@ -201,7 +201,7 @@ export const getAgent = async (sessionId: string) =>
 
   it('should add generator metric', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     await tsAgentA2aConnectionGenerator(tree, {
       sourceProject: '@test/ts-host',
       targetProject: '@test/ts-remote',

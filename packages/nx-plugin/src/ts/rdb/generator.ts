@@ -31,8 +31,8 @@ import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import { addIgnoresToEslintConfig } from '../lib/eslint';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import { updateGitIgnore } from '../../utils/git';
 import { assignPort } from '../../utils/port';
@@ -49,8 +49,8 @@ export const tsRdbGenerator = async (
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);
-  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-  const containerEngine = await resolveContainerEngine(tree, 'inherit');
+  const iac = await resolveIac(tree, options.iac);
+  const containers = await resolveContainers(tree, 'inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -99,7 +99,7 @@ export const tsRdbGenerator = async (
     localDbName: databaseName,
     localDbUser,
     localDbPassword,
-    containerEngine,
+    containers,
   };
 
   generateFiles(
@@ -200,12 +200,12 @@ export const tsRdbGenerator = async (
     'migration',
   );
   const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
-  if (iacProvider === 'terraform') {
+  if (iac === 'terraform') {
     projectConfig.targets['docker'] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+        command: `${containers} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
       },
       dependsOn: ['bundle'],
     };
@@ -217,9 +217,9 @@ export const tsRdbGenerator = async (
     engine: options.engine,
   });
 
-  await sharedConstructsGenerator(tree, { iacProvider });
+  await sharedConstructsGenerator(tree, { iac });
   await addRdbInfra(tree, {
-    iacProvider,
+    iac,
     projectName: fullyQualifiedName,
     nameClassName,
     nameKebabCase,
@@ -235,7 +235,7 @@ export const tsRdbGenerator = async (
       'create-db-user',
     ),
     dockerImageTag,
-    containerEngine,
+    containers,
   });
 
   addDependenciesToPackageJson(

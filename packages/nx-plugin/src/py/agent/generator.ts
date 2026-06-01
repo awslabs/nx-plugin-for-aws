@@ -43,8 +43,8 @@ import { FsCommands } from '../../utils/fs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
 
@@ -159,7 +159,7 @@ export const pyAgentGenerator = async (
   ]);
 
   if (infra === 'agentcore') {
-    const containerEngine = await resolveContainerEngine(tree, 'inherit');
+    const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -206,7 +206,7 @@ export const pyAgentGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -217,8 +217,8 @@ export const pyAgentGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
 
     // Add the construct to deploy the agent.
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
@@ -229,11 +229,11 @@ export const pyAgentGenerator = async (
       agentNameClassName,
       dockerImageTag,
       dockerOutputDir,
-      iacProvider,
+      iac,
       projectName: project.name,
       auth,
       serverProtocol: infraProtocol,
-      containerEngine,
+      containers,
     });
   }
 

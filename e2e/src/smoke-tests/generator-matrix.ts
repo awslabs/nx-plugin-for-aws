@@ -11,7 +11,7 @@ interface RunCliOpts {
 
 /**
  * Runs the generator matrix that both the CDK and Terraform smoke tests
- * must cover. Generators inherit the `iacProvider` selected when the
+ * must cover. Generators inherit the `iac` selected when the
  * workspace was created, so there's a single place to add a new generator
  * and both the `cdk-deploy` and `terraform-deploy` e2e pipelines exercise it.
  */
@@ -40,21 +40,21 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // tRPC APIs — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:ts#api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api --infra=rest-lambda --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#api --name=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api-http --infra=http-lambda --no-interactive`,
     opts,
   );
 
   // tRPC APIs with Custom auth — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:ts#api --name=my-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api-custom --infra=rest-lambda --auth=custom --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#api --name=my-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api-custom-http --infra=http-lambda --auth=custom --no-interactive`,
     opts,
   );
 
@@ -70,21 +70,21 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // Python FastAPI — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:py#api --name=py-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api --infra=rest-lambda --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#api --name=py-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api-http --infra=http-lambda --no-interactive`,
     opts,
   );
 
   // Python FastAPI with Custom auth — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:py#api --name=py-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api-custom --infra=rest-lambda --auth=custom --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#api --name=py-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api-custom-http --infra=http-lambda --auth=custom --no-interactive`,
     opts,
   );
 
@@ -100,11 +100,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // Python MCP + Strands agent (hosted on AgentCore).
   await runCLI(
-    `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-mcp-server --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-mcp-server --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-agent --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-agent --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -120,51 +120,51 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // TypeScript MCP servers — uninfra'd (None) and hosted on AgentCore.
   await runCLI(
-    `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --computeType=None --no-interactive`,
+    `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --infra=none --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=hosted-mcp-server --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=hosted-mcp-server --infra=agentcore --no-interactive`,
     opts,
   );
 
   // TypeScript Strands agents — uninfra'd (None) and hosted (HTTP + A2A).
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agent --computeType=None --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agent --infra=none --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --infra=agentcore --no-interactive`,
     opts,
   );
 
   // A2A protocol agents (TypeScript + Python).
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent --protocol=A2A --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent --protocol=A2A --infra=agentcore --no-interactive`,
     opts,
   );
 
   // Cognito-auth variants to cover the A2A + Cognito permutation.
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=A2A --auth=cognito --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=cognito --infra=agentcore --no-interactive`,
     opts,
   );
 
   // AG-UI protocol agents (TypeScript and Python).
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=AG-UI --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -238,7 +238,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iacProvider inherited.
+  // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iac inherited.
   await runCLI(
     `generate @aws/nx-plugin:ts#rdb --name=postgres-db --service=Aurora --engine=PostgreSQL --ormFramework=Prisma --no-interactive`,
     opts,

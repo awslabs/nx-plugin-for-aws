@@ -26,7 +26,7 @@ export async function tsApiGenerator(
         auth: options.auth,
         directory: options.directory,
         subDirectory: options.subDirectory,
-        iacProvider: options.iacProvider,
+        iac: options.iac,
       });
     case 'smithy':
       return tsSmithyApiGenerator(tree, {
@@ -37,7 +37,7 @@ export async function tsApiGenerator(
         auth: options.auth,
         directory: options.directory,
         subDirectory: options.subDirectory,
-        iacProvider: options.iacProvider,
+        iac: options.iac,
       });
   }
 }

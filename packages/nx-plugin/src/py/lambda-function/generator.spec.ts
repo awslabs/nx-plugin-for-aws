@@ -53,7 +53,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(
@@ -93,7 +93,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -163,7 +163,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs files
@@ -232,7 +232,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -277,7 +277,7 @@ describe('lambda-handler project generator', () => {
       functionName: 'test-function',
       functionPath: 'nested/path',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(
@@ -316,7 +316,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const lambdaFunctionPath = joinPathFragments(
@@ -363,7 +363,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'APIGatewayProxyEventModel',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const lambdaFunctionContent = tree.read(
@@ -414,7 +414,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const appChanges = sortObjectKeys(
@@ -463,7 +463,7 @@ describe('lambda-handler project generator', () => {
       project: 'test_project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -505,7 +505,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify the metric was added to app.ts
@@ -538,13 +538,13 @@ dev = []
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const deps =
@@ -562,7 +562,7 @@ dev = []
     ).toBe(true);
   });
 
-  describe('terraform iacProvider', () => {
+  describe('terraform iac', () => {
     it('should generate terraform files for python lambda function and snapshot them', async () => {
       tree.write(
         'apps/test_project/project.json',
@@ -592,7 +592,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find all terraform files
@@ -661,7 +661,7 @@ dev = []
         functionName: 'test-function',
         functionPath: 'lambda-functions',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find terraform files
@@ -713,7 +713,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'APIGatewayProxyEventModel',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find terraform files
@@ -768,7 +768,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Check that shared terraform project has build dependency on the lambda function project
@@ -819,7 +819,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify CDK files are NOT created
@@ -830,7 +830,7 @@ dev = []
       ).toBeFalsy();
     });
 
-    it('should throw error for invalid iacProvider', async () => {
+    it('should throw error for invalid iac', async () => {
       tree.write(
         'apps/test_project/project.json',
         JSON.stringify({
@@ -853,9 +853,9 @@ dev = []
           project: 'test-project',
           functionName: 'test-function',
           eventSource: 'Any',
-          iacProvider: 'InvalidProvider' as any,
+          iac: 'InvalidProvider' as any,
         }),
-      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
+      ).rejects.toThrow('Unsupported iac InvalidProvider');
     });
 
     it('should handle terraform with scoped project names', async () => {
@@ -892,7 +892,7 @@ dev = []
         project: 'scoped_project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify terraform files are created
@@ -945,7 +945,7 @@ dev = []
         functionName: 'My Complex Function Name!',
         functionPath: 'nested/path',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Verify terraform files are created
@@ -997,7 +997,7 @@ dev = []
         project: 'test-project',
         functionName: 'SnapshotFunction',
         eventSource: 'APIGatewayProxyEventModel',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       // Find terraform files
@@ -1049,7 +1049,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'terraform',
+        iac: 'terraform',
       });
 
       const projectConfig = JSON.parse(
@@ -1072,7 +1072,7 @@ dev = []
       expect(projectConfig.targets.build.dependsOn).toContain('bundle');
     });
 
-    it('should inherit iacProvider from config when set to Inherit', async () => {
+    it('should inherit iac from config when set to Inherit', async () => {
       // Set up config with CDK provider using utility methods
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
@@ -1102,7 +1102,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'inherit',
+        iac: 'inherit',
       });
 
       // Verify CDK constructs are created (not terraform)
@@ -1137,7 +1137,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       const projectConfig = JSON.parse(

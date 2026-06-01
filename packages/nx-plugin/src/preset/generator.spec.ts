@@ -38,9 +38,9 @@ describe('preset generator', () => {
   it('should run successfully', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'cdk',
+      iac: 'cdk',
       gitSecrets: false,
-      containerEngine: 'docker',
+      containers: 'docker',
     });
 
     snapshotTreeDir(tree, '.');
@@ -49,8 +49,8 @@ describe('preset generator', () => {
   it('should store CDK iac provider in config', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'terraform',
-      containerEngine: 'docker',
+      iac: 'terraform',
+      containers: 'docker',
     });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('terraform');
@@ -59,8 +59,8 @@ describe('preset generator', () => {
   it('should store container engine in config', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'cdk',
-      containerEngine: 'finch',
+      iac: 'cdk',
+      containers: 'finch',
     });
 
     expect((await readAwsNxPluginConfig(tree)).containers.engine).toBe('finch');
@@ -69,8 +69,8 @@ describe('preset generator', () => {
   it('should store Terraform iac provider in config', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'cdk',
-      containerEngine: 'docker',
+      iac: 'cdk',
+      containers: 'docker',
     });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('cdk');
@@ -79,7 +79,7 @@ describe('preset generator', () => {
   it('should not generate git-secrets files when gitSecrets is false', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'cdk',
+      iac: 'cdk',
       gitSecrets: false,
     });
 
@@ -92,7 +92,7 @@ describe('preset generator', () => {
   });
 
   it('should generate git-secrets files by default', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'cdk' });
+    await presetGenerator(tree, { addTsPlugin: false, iac: 'cdk' });
 
     expect(tree.exists('.git-secrets/git-secrets')).toBe(true);
     expect(tree.exists('.husky/pre-commit')).toBe(true);
@@ -110,8 +110,8 @@ describe('preset generator', () => {
   it('should disable analytics in nx.json', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'cdk',
-      containerEngine: 'docker',
+      iac: 'cdk',
+      containers: 'docker',
     });
 
     expect(readNxJson(tree).analytics).toBe(false);
@@ -120,8 +120,8 @@ describe('preset generator', () => {
   it('should register the TypeScript sync generators for compile targets', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,
-      iacProvider: 'cdk',
-      containerEngine: 'docker',
+      iac: 'cdk',
+      containers: 'docker',
     });
 
     const syncGenerators =

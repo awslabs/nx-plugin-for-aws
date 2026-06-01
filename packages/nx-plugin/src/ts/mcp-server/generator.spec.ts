@@ -51,7 +51,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added to the existing project
@@ -116,7 +116,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'custom-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added with custom name
@@ -165,7 +165,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'esm-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that files were generated (ESM flag should be passed to templates)
@@ -187,7 +187,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'cjs-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that files were generated
@@ -212,7 +212,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'new-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that package.json was created
@@ -230,7 +230,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check root package.json dependencies
@@ -284,7 +284,7 @@ describe('ts#mcp-server generator', () => {
       project: 'no-source-root',
       name: 'default-src-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should default to {projectRoot}/src
@@ -298,7 +298,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'My_Special#Server!',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Name should be converted to kebab-case
@@ -323,7 +323,7 @@ describe('ts#mcp-server generator', () => {
       tsMcpServerGenerator(tree, {
         project: 'non-ts-project',
         infra: 'none',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       }),
     ).rejects.toThrow(
       'Unsupported project non-ts-project. Expected a TypeScript project (with a tsconfig.json)',
@@ -347,7 +347,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: '@org/nested-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should use the last part of the project name for default server name
@@ -366,7 +366,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'snapshot-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated MCP server files
@@ -401,7 +401,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added to the existing project
@@ -471,7 +471,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'custom-bedrock-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added with custom name
@@ -521,7 +521,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check root package.json dependencies
@@ -559,7 +559,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs setup
@@ -592,7 +592,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -614,7 +614,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'my-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that the MCP server construct uses findWorkspaceRoot to locate the bundle
@@ -630,7 +630,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated MCP server construct
@@ -663,12 +663,12 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expectHasMetricTags(tree, TS_MCP_SERVER_GENERATOR_INFO.metric);
@@ -678,7 +678,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that MCP server files were added to the existing project
@@ -724,7 +724,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'custom-terraform-server',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that MCP server files were added with custom name
@@ -762,7 +762,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'terraform-snapshot-server',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Snapshot the generated Terraform core runtime file
@@ -794,7 +794,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'terraform-server',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that the docker image tag is correctly generated in the Terraform file
@@ -811,7 +811,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that MCP server files were added
@@ -835,7 +835,7 @@ describe('ts#mcp-server generator', () => {
     ).toBeFalsy();
   });
 
-  it('should inherit iacProvider from config when set to Inherit', async () => {
+  it('should inherit iac from config when set to Inherit', async () => {
     // Set up config with Terraform provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
@@ -847,7 +847,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'inherit',
+      iac: 'inherit',
     });
 
     // Verify Terraform files are created (not CDK constructs)
@@ -862,7 +862,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check rolldown config file was created
@@ -884,7 +884,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'path-test-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check Dockerfile COPY path
@@ -910,7 +910,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'first-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Generate second MCP server
@@ -918,7 +918,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'second-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check both MCP server directories exist
@@ -988,7 +988,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -1011,7 +1011,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'custom-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -1034,7 +1034,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -1051,7 +1051,7 @@ describe('ts#mcp-server generator', () => {
       await tsMcpServerGenerator(tree, {
         project: 'test-project',
         infra: 'none',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -1064,7 +1064,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: '',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added with default name

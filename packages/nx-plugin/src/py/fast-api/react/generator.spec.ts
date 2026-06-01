@@ -323,7 +323,7 @@ export function Main() {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Call the generator function
     await fastApiReactGenerator(tree, {
@@ -468,7 +468,7 @@ describe(
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
         skipInstall: true,
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
     });
 
@@ -478,7 +478,7 @@ describe(
         name: 'TestApi',
         auth: 'custom',
         infra: 'http-lambda',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       await fastApiReactGenerator(tree, {
@@ -526,7 +526,7 @@ describe(
         name: 'FirstApi',
         auth: 'custom',
         infra: 'http-lambda',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       // Generate second API
@@ -534,7 +534,7 @@ describe(
         name: 'SecondApi',
         auth: 'custom',
         infra: 'http-lambda',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       });
 
       // Connect first API to frontend

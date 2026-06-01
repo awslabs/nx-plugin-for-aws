@@ -8,17 +8,17 @@ import { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { SUPPORTED_UX_PROVIDERS } from '../app/generator';
 
-describe('cognito-auth generator uxProvider tests', () => {
+describe('cognito-auth generator ux tests', () => {
   let tree: Tree;
 
   const options: TsReactWebsiteAuthGeneratorSchema = {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
-    iacProvider: 'cdk',
+    iac: 'cdk',
   };
 
-  const setupTree = (uxProvider: string) => {
+  const setupTree = (ux: string) => {
     tree = createTreeUsingTsSolutionSetup();
 
     // Set up a mock project structure
@@ -28,7 +28,7 @@ describe('cognito-auth generator uxProvider tests', () => {
         name: 'test-project',
         sourceRoot: 'packages/test-project/src',
         metadata: {
-          uxProvider,
+          ux,
         },
       }),
     );
@@ -60,9 +60,9 @@ describe('cognito-auth generator uxProvider tests', () => {
   });
 
   it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
-    'should run generator without error for uxProvider=%s',
-    async (uxProvider) => {
-      setupTree(uxProvider);
+    'should run generator without error for ux=%s',
+    async (ux) => {
+      setupTree(ux);
 
       // If this test fails, you need to implement support for this ux provider in this generator!
       await tsReactWebsiteAuthGenerator(tree, options);

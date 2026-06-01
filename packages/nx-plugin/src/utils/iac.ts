@@ -8,11 +8,7 @@ import {
   readAwsNxPluginConfig,
 } from './config/utils';
 
-export {
-  IAC_PROVIDERS,
-  type IacProvider,
-  type IacProviderOption,
-} from './iac-providers';
+export { IAC_PROVIDERS, type Iac, type IacOption } from './iac-providers';
 import { IAC_PROVIDERS } from './iac-providers';
 
 /**
@@ -28,11 +24,11 @@ export interface IacConfig {
 /**
  * Given an iac provider option, resolve the actual iac provider to use
  */
-export const resolveIacProvider = async (
+export const resolveIac = async (
   tree: Tree,
-  iacProviderOption: 'cdk' | 'terraform' | 'inherit',
+  iacOption: 'cdk' | 'terraform' | 'inherit',
 ): Promise<(typeof IAC_PROVIDERS)[number]> => {
-  if (iacProviderOption === 'inherit') {
+  if (iacOption === 'inherit') {
     const pluginConfig = await readAwsNxPluginConfig(tree);
 
     if (!pluginConfig?.iac?.provider) {
@@ -48,5 +44,5 @@ export const resolveIacProvider = async (
 
     return pluginConfig.iac.provider;
   }
-  return iacProviderOption;
+  return iacOption;
 };

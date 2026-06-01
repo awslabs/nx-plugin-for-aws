@@ -32,8 +32,8 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
 import { getNpmScope } from '../../utils/npm-scope';
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
 import { FsCommands } from '../../utils/fs';
@@ -136,7 +136,7 @@ export const tsMcpServerGenerator = async (
 
   // Add hosting based on infra
   if (infra === 'agentcore') {
-    const containerEngine = await resolveContainerEngine(tree, 'inherit');
+    const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -165,7 +165,7 @@ export const tsMcpServerGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -176,8 +176,8 @@ export const tsMcpServerGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -186,9 +186,9 @@ export const tsMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       dockerOutputDir,
-      iacProvider,
+      iac,
       auth,
-      containerEngine,
+      containers,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP

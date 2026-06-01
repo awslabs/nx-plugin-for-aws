@@ -420,7 +420,7 @@ common content
       expect(result).toMatch(/\[!NOTE]\s+Only when infra = rest-lambda/);
     });
 
-    it('filters Infrastructure to CDK slot when iacProvider is CDK', async () => {
+    it('filters Infrastructure to CDK slot when iac is CDK', async () => {
       const page = `
 # Deploy
 <Infrastructure>
@@ -437,13 +437,13 @@ terraform instructions
         generators,
         undefined,
         undefined,
-        { iacProvider: 'cdk' },
+        { iac: 'cdk' },
       );
       expect(result).toContain('cdk instructions');
       expect(result).not.toContain('terraform instructions');
     });
 
-    it('leaves Infrastructure blocks untouched when iacProvider omitted', async () => {
+    it('leaves Infrastructure blocks untouched when iac omitted', async () => {
       const page = `
 <Infrastructure>
 <Fragment slot="cdk">cdk here</Fragment>

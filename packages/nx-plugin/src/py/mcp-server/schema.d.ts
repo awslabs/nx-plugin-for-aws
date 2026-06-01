@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
 export type PyMcpServerInfra = 'none' | 'agentcore';
 
@@ -14,5 +14,5 @@ export interface PyMcpServerGeneratorSchema {
   name?: string;
   infra?: PyMcpServerInfra;
   auth?: PyMcpServerAuth;
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

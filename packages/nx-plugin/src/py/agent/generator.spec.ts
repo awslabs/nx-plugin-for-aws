@@ -59,7 +59,7 @@ dev-dependencies = []
   it('should add strands agent to existing Python project with default name', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added to the existing project
@@ -114,7 +114,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-agent',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added with custom name
@@ -151,7 +151,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'My_Special#Agent!',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Name should be converted to snake_case for Python modules
@@ -177,7 +177,7 @@ dev-dependencies = []
     await expect(
       pyAgentGenerator(tree, {
         project: 'non-py-project',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       }),
     ).rejects.toThrow();
   });
@@ -199,7 +199,7 @@ dev-dependencies = []
     await expect(
       pyAgentGenerator(tree, {
         project: 'no-source-root',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       }),
     ).rejects.toThrow(
       'This project does not have a source root. Please add a source root to the project configuration before running this generator.',
@@ -230,7 +230,7 @@ dev-dependencies = []
 
     await pyAgentGenerator(tree, {
       project: 'proj.nested-project',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should use the last part of the project name for default agent name
@@ -248,7 +248,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added to the existing project
@@ -304,7 +304,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-bedrock-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added with custom name
@@ -345,7 +345,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added to the existing project
@@ -399,7 +399,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs setup
@@ -427,7 +427,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -452,7 +452,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'my-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that the docker image tag is correctly generated in the agent construct
@@ -467,7 +467,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -518,7 +518,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'complex-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that the module name is extracted correctly from the source root
@@ -534,7 +534,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -561,7 +561,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'snapshot-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated agent files
@@ -595,7 +595,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'snapshot-bedrock-agent',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated agent construct
@@ -635,11 +635,11 @@ dev-dependencies = []
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expectHasMetricTags(tree, PY_AGENT_GENERATOR_INFO.metric);
@@ -649,7 +649,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       // No computeType specified, should default to BedrockAgentCoreRuntime
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should include Dockerfile by default
@@ -695,7 +695,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'my.dotted.project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -712,7 +712,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check root package.json dependencies
@@ -724,7 +724,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that agent files were added to the existing project
@@ -767,7 +767,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-terraform-agent',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that agent files were added with custom name
@@ -810,7 +810,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'terraform-snapshot-agent',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Snapshot the generated Terraform core runtime file
@@ -840,7 +840,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'terraform-agent',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that the docker image tag is correctly generated in the Terraform file
@@ -855,7 +855,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that agent files were added
@@ -883,7 +883,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     const projectConfig = JSON.parse(
@@ -914,7 +914,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       // No computeType specified, should default to BedrockAgentCoreRuntime
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Should include Dockerfile by default
@@ -940,7 +940,7 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-docker']).toBeDefined();
   });
 
-  it('should inherit iacProvider from config when set to Inherit', async () => {
+  it('should inherit iac from config when set to Inherit', async () => {
     // Set up config with Terraform provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
@@ -952,7 +952,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'inherit',
+      iac: 'inherit',
     });
 
     // Verify Terraform files are created (not CDK constructs)
@@ -967,7 +967,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -990,7 +990,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -1012,7 +1012,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'A2A',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that A2A-specific main.py was generated
@@ -1044,7 +1044,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'A2A',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -1058,7 +1058,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -1073,7 +1073,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'A2A',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const agentConstruct = tree.read(
@@ -1088,7 +1088,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const agentConstruct = tree.read(
@@ -1103,7 +1103,7 @@ dev-dependencies = []
       project: 'test-project',
       name: '',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that agent files were added with default name
@@ -1133,7 +1133,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that AG-UI-specific main.py was generated
@@ -1174,7 +1174,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -1189,7 +1189,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE)
@@ -1206,7 +1206,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const pyProjectToml = tree.read(
@@ -1222,7 +1222,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // The HTTP chat CLI script uses the generated type-safe client
@@ -1277,7 +1277,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'A2A',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
@@ -1305,7 +1305,7 @@ dev-dependencies = []
       project: 'test-project',
       protocol: 'AG-UI',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
@@ -1326,7 +1326,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'my-custom-agent',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(

@@ -26,8 +26,8 @@ import { kebabCase, toClassName } from '../../utils/names';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
@@ -108,7 +108,7 @@ export const tsAgentGenerator = async (
   );
 
   if (infra === 'agentcore') {
-    const containerEngine = await resolveContainerEngine(tree, 'inherit');
+    const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -152,7 +152,7 @@ export const tsAgentGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -163,8 +163,8 @@ export const tsAgentGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
 
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
     const infraProtocol: 'HTTP' | 'A2A' =
@@ -176,10 +176,10 @@ export const tsAgentGenerator = async (
       projectName: project.name,
       dockerImageTag,
       dockerOutputDir,
-      iacProvider,
+      iac,
       auth,
       serverProtocol: infraProtocol,
-      containerEngine,
+      containers,
     });
   }
 

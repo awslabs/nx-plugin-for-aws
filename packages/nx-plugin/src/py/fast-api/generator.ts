@@ -35,7 +35,7 @@ import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
-import { resolveIacProvider } from '../../utils/iac';
+import { resolveIac } from '../../utils/iac';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
@@ -49,10 +49,10 @@ export const pyFastApiProjectGenerator = async (
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const integrationPattern = getIntegrationPattern(schema);
-  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+  const iac = await resolveIac(tree, schema.iac);
 
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
@@ -178,11 +178,11 @@ export const pyFastApiProjectGenerator = async (
       integrationPattern,
     },
     auth: schema.auth,
-    iacProvider,
+    iac,
   });
 
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
-    iacProvider,
+    iac,
     apiNameKebabCase,
     specPath,
     specBuildTargetName: `${projectConfig.name}:openapi`,

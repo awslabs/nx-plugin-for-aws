@@ -30,7 +30,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { assignPort } from '../../utils/port';
-import { resolveIacProvider } from '../../utils/iac';
+import { resolveIac } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
@@ -49,10 +49,10 @@ export async function tsTrpcApiGenerator(
 ) {
   validateTrpcInfraAndIntegrationPatternCombination(options);
 
-  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+  const iac = await resolveIac(tree, options.iac);
 
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
 
   const apiNamespace = getNpmScopePrefix(tree);
@@ -108,7 +108,7 @@ export async function tsTrpcApiGenerator(
       }),
     },
     auth: options.auth,
-    iacProvider,
+    iac,
   });
 
   projectConfig.metadata = {

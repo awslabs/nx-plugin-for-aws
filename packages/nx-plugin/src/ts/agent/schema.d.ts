@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
 export type TsAgentSdk = 'strands';
 export type TsAgentInfra = 'agentcore' | 'none';
@@ -18,5 +18,5 @@ export interface TsAgentGeneratorSchema {
   infra?: TsAgentInfra;
   auth?: TsAgentAuth;
   protocol?: AgentProtocol;
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

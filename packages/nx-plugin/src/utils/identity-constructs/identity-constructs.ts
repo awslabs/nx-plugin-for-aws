@@ -14,7 +14,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { IacProvider } from '../iac';
+import { Iac } from '../iac';
 
 export interface AddIdentityInfraOptions {
   cognitoDomain: string;
@@ -26,14 +26,14 @@ export interface AddIdentityInfraOptions {
  */
 export const addIdentityInfra = async (
   tree: Tree,
-  options: AddIdentityInfraOptions & { iacProvider: IacProvider },
+  options: AddIdentityInfraOptions & { iac: Iac },
 ) => {
-  if (options.iacProvider === 'cdk') {
+  if (options.iac === 'cdk') {
     await addIdentityCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'terraform') {
+  } else if (options.iac === 'terraform') {
     addIdentityTerraformModules(tree, options);
   } else {
-    throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
+    throw new Error(`Unsupported iac ${options.iac}`);
   }
 };
 

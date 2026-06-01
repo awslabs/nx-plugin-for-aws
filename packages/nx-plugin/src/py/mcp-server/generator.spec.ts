@@ -63,7 +63,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added to the existing project
@@ -135,7 +135,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added with custom name
@@ -178,7 +178,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'My_Special#Server!',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Name should be converted to snake_case for Python modules
@@ -207,7 +207,7 @@ dev-dependencies = []
       pyMcpServerGenerator(tree, {
         project: 'non-py-project',
         infra: 'none',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       }),
     ).rejects.toThrow();
   });
@@ -230,7 +230,7 @@ dev-dependencies = []
       pyMcpServerGenerator(tree, {
         project: 'no-source-root',
         infra: 'none',
-        iacProvider: 'cdk',
+        iac: 'cdk',
       }),
     ).rejects.toThrow(
       'This project does not have a source root. Please add a source root to the project configuration before running this generator.',
@@ -262,7 +262,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'proj.nested-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Should use the last part of the project name for default server name
@@ -283,7 +283,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'snapshot-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated MCP server files
@@ -321,7 +321,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added to the existing project
@@ -393,7 +393,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-bedrock-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added with custom name
@@ -442,7 +442,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check root package.json dependencies
@@ -464,7 +464,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Verify shared constructs setup
@@ -497,7 +497,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -522,7 +522,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'my-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that the MCP server construct uses findWorkspaceRoot to locate the bundle
@@ -538,7 +538,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'snapshot-bedrock-server',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Snapshot the generated MCP server construct
@@ -574,7 +574,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -625,7 +625,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'complex-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that the module name is extracted correctly from the source root
@@ -638,12 +638,12 @@ dev-dependencies = []
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expectHasMetricTags(tree, PY_MCP_SERVER_GENERATOR_INFO.metric);
@@ -653,7 +653,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -679,7 +679,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that MCP server files were added to the existing project
@@ -725,7 +725,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-terraform-server',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that MCP server files were added with custom name
@@ -773,7 +773,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'terraform-snapshot-server',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Snapshot the generated Terraform core runtime file
@@ -805,7 +805,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'terraform-server',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that the docker image tag is correctly generated in the Terraform file
@@ -822,7 +822,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     // Check that MCP server files were added
@@ -850,7 +850,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'terraform',
+      iac: 'terraform',
     });
 
     const projectConfig = JSON.parse(
@@ -877,7 +877,7 @@ dev-dependencies = []
     );
   });
 
-  it('should inherit iacProvider from config when set to Inherit', async () => {
+  it('should inherit iac from config when set to Inherit', async () => {
     // Set up config with CDK provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
@@ -889,7 +889,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'agentcore',
-      iacProvider: 'inherit',
+      iac: 'inherit',
     });
 
     // Verify CDK constructs are created (not terraform)
@@ -901,7 +901,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -924,7 +924,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-server',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -946,7 +946,7 @@ dev-dependencies = []
       project: 'test-project',
       name: '',
       infra: 'none',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     // Check that MCP server files were added with default name

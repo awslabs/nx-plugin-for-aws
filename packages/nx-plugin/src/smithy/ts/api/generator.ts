@@ -22,7 +22,7 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { resolveIacProvider } from '../../../utils/iac';
+import { resolveIac } from '../../../utils/iac';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { toClassName, toKebabCase } from '../../../utils/names';
 import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
@@ -133,12 +133,12 @@ export const tsSmithyApiGenerator = async (
   }
 
   // Add infrastructure
-  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+  const iac = await resolveIac(tree, options.iac);
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
   await addApiGatewayInfra(tree, {
-    iacProvider,
+    iac,
     apiProjectName: backendFullyQualifiedName,
     apiNameClassName,
     apiNameKebabCase,
@@ -163,7 +163,7 @@ export const tsSmithyApiGenerator = async (
     },
   });
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
-    iacProvider,
+    iac,
     apiNameKebabCase,
     specPath: joinPathFragments(
       'dist',

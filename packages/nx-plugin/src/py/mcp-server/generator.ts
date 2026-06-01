@@ -31,8 +31,8 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { FsCommands } from '../../utils/fs';
 import { withVersions } from '../../utils/versions';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
 
@@ -110,7 +110,7 @@ export const pyMcpServerGenerator = async (
   ]);
 
   if (infra === 'agentcore') {
-    const containerEngine = await resolveContainerEngine(tree, 'inherit');
+    const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -155,7 +155,7 @@ export const pyMcpServerGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -183,8 +183,8 @@ export const pyMcpServerGenerator = async (
     };
 
     // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -193,9 +193,9 @@ export const pyMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       dockerOutputDir,
-      iacProvider,
+      iac,
       auth,
-      containerEngine,
+      containers,
     });
   }
 

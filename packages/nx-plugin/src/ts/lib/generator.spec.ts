@@ -225,7 +225,7 @@ describe('ts lib generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Call the generator function
     await tsProjectGenerator(tree, {

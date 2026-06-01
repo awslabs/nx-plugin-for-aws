@@ -398,7 +398,7 @@ export const getAgent = async (sessionId: string) => {
 
   it('should add generator metric to app.ts', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await tsAgentMcpConnectionGenerator(tree, {
       sourceProject: '@test/my-api',

@@ -22,7 +22,7 @@ describe('ts#api generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'isolated',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api')).toBeTruthy();
@@ -41,7 +41,7 @@ describe('ts#api generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'isolated',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api')).toBeTruthy();
@@ -60,7 +60,7 @@ describe('ts#api generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'isolated',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api/backend')).toBeTruthy();
@@ -81,7 +81,7 @@ describe('ts#api generator', () => {
       infra: 'rest-lambda',
       integrationPattern: 'isolated',
       auth: 'iam',
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api/backend')).toBeTruthy();

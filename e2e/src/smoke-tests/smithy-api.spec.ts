@@ -20,7 +20,7 @@ describe('smoke test - smithy-api', () => {
 
   it('should generate and build', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'smithy', 'CDK')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'smithy', 'cdk')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,

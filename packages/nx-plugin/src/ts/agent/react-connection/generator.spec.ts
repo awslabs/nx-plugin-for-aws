@@ -269,7 +269,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await tsAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',
@@ -360,7 +360,7 @@ describe('ts strands agent react connection with real projects', () => {
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
-      iacProvider: 'cdk',
+      iac: 'cdk',
     });
   });
 
