@@ -8,10 +8,10 @@ export interface TsRdbGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  service: 'Aurora';
-  engine: 'PostgreSQL' | 'MySQL';
+  infra: 'aurora';
+  engine: 'postgres' | 'mysql';
   databaseUser?: string;
   databaseName?: string;
-  ormFramework: 'Prisma';
+  framework: 'prisma';
   iac: IacOption;
 }

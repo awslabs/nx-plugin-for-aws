@@ -21,7 +21,7 @@ describe('ts#agent#a2a-connection generator', () => {
     port: 8081,
     rc: 'Host',
     auth: 'iam' as const,
-    protocol: 'HTTP' as const,
+    protocol: 'http' as const,
   };
 
   const REMOTE = {
@@ -31,7 +31,7 @@ describe('ts#agent#a2a-connection generator', () => {
     port: 9000,
     rc: 'Remote',
     auth: 'iam' as const,
-    protocol: 'A2A' as const,
+    protocol: 'a2a' as const,
   };
 
   const setupProjects = () => {
@@ -182,7 +182,7 @@ export const getAgent = async (sessionId: string) =>
         sourceProject: '@test/ts-host',
         targetProject: '@test/ts-remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, protocol: 'HTTP' },
+        targetComponent: { ...REMOTE, protocol: 'http' },
       }),
     ).rejects.toThrow(/A2A/);
   });

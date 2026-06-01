@@ -77,7 +77,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#agent --project=story --auth=cognito --protocol=AG-UI --no-interactive`,
+      `generate @aws/nx-plugin:py#agent --project=story --auth=cognito --protocol=ag-ui --no-interactive`,
       opts,
     );
     await runCLI(

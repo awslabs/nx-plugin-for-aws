@@ -10,8 +10,8 @@ export interface TsReactWebsiteGeneratorSchema {
   directory?: string;
   subDirectory?: string;
   skipInstall?: boolean;
-  enableTanstackRouter?: boolean;
-  enableTailwind?: boolean;
+  tanstackRouter?: boolean;
+  tailwind?: boolean;
   ux?: UxOption;
   iac: IacOption;
 }

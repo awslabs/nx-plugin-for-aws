@@ -56,10 +56,10 @@ export interface LambdaFunctionDetails {
 
 const getLambdaFunctionDetails = (
   tree: Tree,
-  schema: { moduleName: string; functionName: string; functionPath?: string },
+  schema: { moduleName: string; name: string; functionPath?: string },
 ): LambdaFunctionDetails => {
   const scope = toSnakeCase(getNpmScope(tree));
-  const normalizedFunctionName = toSnakeCase(schema.functionName);
+  const normalizedFunctionName = toSnakeCase(schema.name);
   const fullyQualifiedFunctionName = `${scope}.${normalizedFunctionName}`;
   const normalizedFunctionPath = `${schema.moduleName}.${schema.functionPath ? `${toDotNotation(schema.functionPath)}.` : ''}${normalizedFunctionName}.lambda_handler`;
 
@@ -108,15 +108,15 @@ export const pyLambdaFunctionGenerator = async (
   const { normalizedFunctionName, normalizedFunctionPath } =
     getLambdaFunctionDetails(tree, {
       moduleName,
-      functionName: schema.functionName,
+      name: schema.name,
       functionPath: schema.functionPath,
     });
 
   const constructFunctionName = `${normalizedProjectName}_${normalizedFunctionName}`;
   const constructFunctionClassName = toClassName(constructFunctionName);
   const constructFunctionKebabCase = toKebabCase(constructFunctionName);
-  const lambdaFunctionClassName = toClassName(schema.functionName);
-  const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
+  const lambdaFunctionClassName = toClassName(schema.name);
+  const lambdaFunctionKebabCase = toKebabCase(schema.name);
 
   const functionPath = joinPathFragments(
     projectConfig.sourceRoot,
@@ -142,8 +142,8 @@ export const pyLambdaFunctionGenerator = async (
 
   await addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
-    functionNameClassName: constructFunctionClassName,
-    functionNameKebabCase: constructFunctionKebabCase,
+    nameClassName: constructFunctionClassName,
+    nameKebabCase: constructFunctionKebabCase,
     handler: normalizedFunctionPath,
     bundlePathFromRoot: bundleOutputDir,
     runtime: 'python',

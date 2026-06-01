@@ -76,24 +76,24 @@ export const tsRdbGenerator = async (
   const localDbPort = assignPort(
     tree,
     projectConfig,
-    options.engine === 'MySQL' ? 3306 : 5432,
+    options.engine === 'mysql' ? 3306 : 5432,
   );
   const localDbHost = 'localhost';
-  const localDbUser = options.engine === 'MySQL' ? 'root' : 'dbadmin';
+  const localDbUser = options.engine === 'mysql' ? 'root' : 'dbadmin';
   const localDbPassword = 'password';
 
   const templateOptions = {
     engine: options.engine,
     runtimeConfigKey: nameClassName,
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
-    databaseProvider: options.engine === 'MySQL' ? 'mysql' : 'postgresql',
+    databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
     prismaAdapterPackage:
-      options.engine === 'MySQL'
+      options.engine === 'mysql'
         ? '@prisma/adapter-mariadb'
         : '@prisma/adapter-pg',
     prismaAdapterClassName:
-      options.engine === 'MySQL' ? 'PrismaMariaDb' : 'PrismaPg',
+      options.engine === 'mysql' ? 'PrismaMariaDb' : 'PrismaPg',
     localDbPort,
     localDbHost,
     localDbName: databaseName,
@@ -155,7 +155,7 @@ export const tsRdbGenerator = async (
   };
   const containerName = `${getNpmScope(tree)}-${databaseName}`;
   const dockerImage =
-    options.engine === 'MySQL'
+    options.engine === 'mysql'
       ? 'public.ecr.aws/docker/library/mysql:8.0.44'
       : 'public.ecr.aws/docker/library/postgres:17.7';
   projectConfig.targets['docker-pull'] = {
@@ -168,7 +168,7 @@ export const tsRdbGenerator = async (
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/docker-start.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'MySQL' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
+      command: `tsx scripts/docker-start.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'mysql' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
       cwd: '{projectRoot}',
     },
     continuous: true,
@@ -226,7 +226,7 @@ export const tsRdbGenerator = async (
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
     databaseName,
     adminUser: databaseUser,
-    engine: options.engine === 'MySQL' ? 'mysql' : 'postgres',
+    engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
     migrationBundleDir,
     createDbUserBundleDir: joinPathFragments(
       'dist',
@@ -246,7 +246,7 @@ export const tsRdbGenerator = async (
       '@aws-sdk/client-secrets-manager',
       '@aws-sdk/rds-signer',
       '@prisma/client',
-      ...(options.engine === 'MySQL'
+      ...(options.engine === 'mysql'
         ? (['@prisma/adapter-mariadb', 'mariadb'] as const)
         : (['@prisma/adapter-pg', 'pg'] as const)),
     ]),
@@ -254,7 +254,7 @@ export const tsRdbGenerator = async (
       'prisma',
       'tsx',
       '@types/aws-lambda',
-      ...(options.engine === 'MySQL'
+      ...(options.engine === 'mysql'
         ? ([] as const)
         : (['@types/pg'] as const)),
     ]),

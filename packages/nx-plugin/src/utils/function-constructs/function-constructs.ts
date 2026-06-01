@@ -21,8 +21,8 @@ import { addDependencyToTargetIfNotPresent } from '../nx';
 
 export interface AddLambdaFunctionConstructOptions {
   functionProjectName: string;
-  functionNameClassName: string;
-  functionNameKebabCase: string;
+  nameClassName: string;
+  nameKebabCase: string;
   bundlePathFromRoot: string;
   handler: string;
   runtime: 'node' | 'python';
@@ -98,7 +98,7 @@ const addLambdaFunctionCdkConstructs = async (
       'lambda-functions',
       'index.ts',
     ),
-    `./${options.functionNameKebabCase}.js`,
+    `./${options.nameKebabCase}.js`,
   );
   await addStarExport(
     tree,

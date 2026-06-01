@@ -36,30 +36,30 @@ describe('smoke test - react-website', () => {
     );
 
     const permutations = [
-      { name: 'website-none', ux: 'none', enableTanstackRouter: true },
+      { name: 'website-none', ux: 'none', tanstackRouter: true },
       {
         name: 'website-shadcn',
         ux: 'shadcn',
-        enableTanstackRouter: true,
+        tanstackRouter: true,
       },
       {
         name: 'website-none-no-router',
         ux: 'none',
-        enableTanstackRouter: false,
+        tanstackRouter: false,
       },
       {
         name: 'website-shadcn-no-router',
         ux: 'shadcn',
-        enableTanstackRouter: false,
+        tanstackRouter: false,
       },
     ] as const;
 
-    for (const { name, ux, enableTanstackRouter } of permutations) {
+    for (const { name, ux, tanstackRouter } of permutations) {
       const args = [
         `generate @aws/nx-plugin:ts#website`,
         `--name=${name}`,
         `--ux=${ux}`,
-        `--enableTanstackRouter=${enableTanstackRouter}`,
+        `--tanstackRouter=${tanstackRouter}`,
         `--no-interactive`,
       ];
 

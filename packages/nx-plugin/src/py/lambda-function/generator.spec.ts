@@ -51,8 +51,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -91,8 +91,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -161,8 +161,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -230,8 +230,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -274,9 +274,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
+      name: 'test-function',
       functionPath: 'nested/path',
-      eventSource: 'Any',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -314,8 +314,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -361,8 +361,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'APIGatewayProxyEventModel',
+      name: 'test-function',
+      event: 'APIGatewayProxyEventModel',
       iac: 'cdk',
     });
 
@@ -412,8 +412,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -461,8 +461,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test_project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -503,8 +503,8 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -536,8 +536,8 @@ dev = []
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      functionName: 'test-function',
-      eventSource: 'Any',
+      name: 'test-function',
+      event: 'Any',
       iac: 'cdk',
     });
 
@@ -590,8 +590,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -658,9 +658,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
+        name: 'test-function',
         functionPath: 'lambda-functions',
-        eventSource: 'Any',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -711,8 +711,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'APIGatewayProxyEventModel',
+        name: 'test-function',
+        event: 'APIGatewayProxyEventModel',
         iac: 'terraform',
       });
 
@@ -766,8 +766,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -817,8 +817,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -851,8 +851,8 @@ dev = []
       await expect(
         pyLambdaFunctionGenerator(tree, {
           project: 'test-project',
-          functionName: 'test-function',
-          eventSource: 'Any',
+          name: 'test-function',
+          event: 'Any',
           iac: 'InvalidProvider' as any,
         }),
       ).rejects.toThrow('Unsupported iac InvalidProvider');
@@ -890,8 +890,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'scoped_project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -942,9 +942,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'My Complex Function Name!',
+        name: 'My Complex Function Name!',
         functionPath: 'nested/path',
-        eventSource: 'Any',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -995,8 +995,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'SnapshotFunction',
-        eventSource: 'APIGatewayProxyEventModel',
+        name: 'SnapshotFunction',
+        event: 'APIGatewayProxyEventModel',
         iac: 'terraform',
       });
 
@@ -1047,8 +1047,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'terraform',
       });
 
@@ -1100,8 +1100,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'inherit',
       });
 
@@ -1135,8 +1135,8 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        functionName: 'test-function',
-        eventSource: 'Any',
+        name: 'test-function',
+        event: 'Any',
         iac: 'cdk',
       });
 

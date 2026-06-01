@@ -90,7 +90,7 @@ export const pyAgentGenerator = async (
   );
 
   const infra = options.infra ?? 'agentcore';
-  const protocol = options.protocol ?? 'HTTP';
+  const protocol = options.protocol ?? 'http';
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -146,9 +146,9 @@ export const pyAgentGenerator = async (
     'boto3',
     'fastapi',
     'mcp',
-    ...(protocol === 'A2A'
+    ...(protocol === 'a2a'
       ? (['strands-agents[a2a]'] as const)
-      : protocol === 'AG-UI'
+      : protocol === 'ag-ui'
         ? (['strands-agents', 'ag-ui-protocol', 'ag-ui-strands'] as const)
         : (['strands-agents'] as const)),
     'strands-agents-tools',
@@ -223,7 +223,7 @@ export const pyAgentGenerator = async (
     // Add the construct to deploy the agent.
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
     const infraProtocol =
-      protocol === 'AG-UI' ? ('HTTP' as const) : (protocol as 'HTTP' | 'A2A');
+      protocol === 'ag-ui' ? ('http' as const) : (protocol as 'http' | 'a2a');
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
@@ -239,7 +239,7 @@ export const pyAgentGenerator = async (
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
-  const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
+  const localDevPortStart = protocol === 'a2a' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
   // All protocols use fastapi dev for hot reload:
@@ -255,7 +255,7 @@ export const pyAgentGenerator = async (
   const openApiTargetName = `${agentTargetPrefix}-openapi`;
   const clientGenTargetName = `${agentTargetPrefix}-generate-client`;
 
-  if (protocol === 'HTTP') {
+  if (protocol === 'http') {
     // Emit the OpenAPI spec generator script (shared with react-connection)
     generateFiles(
       tree,
@@ -302,25 +302,25 @@ export const pyAgentGenerator = async (
     {},
     withVersions([
       'agent-chat-cli',
-      ...(protocol === 'HTTP'
+      ...(protocol === 'http'
         ? (['tsx', '@types/node'] as const)
         : ([] as const)),
     ]),
   );
 
   const chatUrl =
-    protocol === 'AG-UI'
+    protocol === 'ag-ui'
       ? `http://localhost:${localDevPort}/invocations`
       : `http://localhost:${localDevPort}`;
   const chatCommand =
-    protocol === 'HTTP'
+    protocol === 'http'
       ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : protocol === 'AG-UI'
+      : protocol === 'ag-ui'
         ? `agent-chat-cli agui ${chatUrl}`
         : `agent-chat-cli a2a ${chatUrl}`;
 
   const httpOnlyTargets =
-    protocol === 'HTTP'
+    protocol === 'http'
       ? {
           [openApiTargetName]: {
             cache: true,
@@ -391,7 +391,7 @@ export const pyAgentGenerator = async (
           },
         },
         dependsOn: [
-          ...(protocol === 'HTTP' ? [clientGenTargetName] : []),
+          ...(protocol === 'http' ? [clientGenTargetName] : []),
           `${agentTargetPrefix}-serve-local`,
         ],
       },

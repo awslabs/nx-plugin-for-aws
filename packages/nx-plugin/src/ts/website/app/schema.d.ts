@@ -13,8 +13,8 @@ export interface TsWebsiteGeneratorSchema {
   directory?: string;
   subDirectory?: string;
   skipInstall?: boolean;
-  enableTanstackRouter?: boolean;
-  enableTailwind?: boolean;
+  tanstackRouter?: boolean;
+  tailwind?: boolean;
   ux?: UxOption;
   iac: IacOption;
 }

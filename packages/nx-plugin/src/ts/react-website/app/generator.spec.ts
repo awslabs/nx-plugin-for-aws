@@ -30,7 +30,7 @@ describe('react-website generator', () => {
 
   const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
-    enableTailwind: false,
+    tailwind: false,
     iac: 'cdk',
     ux: 'cloudscape',
   };
@@ -221,7 +221,7 @@ describe('react-website generator', () => {
     it('should generate website with no router correctly', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        enableTanstackRouter: false,
+        tanstackRouter: false,
       });
 
       tree
@@ -307,8 +307,8 @@ describe('react-website generator', () => {
       expect(stylesContent).toMatchSnapshot('styles.css-without-tailwind');
     });
 
-    it('should handle enableTailwind explicitly set to true', async () => {
-      await tsReactWebsiteGenerator(tree, { ...options, enableTailwind: true });
+    it('should handle tailwind explicitly set to true', async () => {
+      await tsReactWebsiteGenerator(tree, { ...options, tailwind: true });
       const packageJson = JSON.parse(tree.read('package.json').toString());
       const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
       const stylesContent = tree.read('test-app/src/styles.css')?.toString();
@@ -490,10 +490,10 @@ describe('react-website generator', () => {
         expect(terraformContent).toContain('dist/custom-dir/test-app');
       });
 
-      it('should handle enableTailwind option correctly in terraform', async () => {
+      it('should handle tailwind option correctly in terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          enableTailwind: false,
+          tailwind: false,
           iac: 'terraform',
         });
 
@@ -514,10 +514,10 @@ describe('react-website generator', () => {
         expect(terraformContent).toContain('website_name      = "test-app"');
       });
 
-      it('should handle enableTanstackRouter option correctly in terraform', async () => {
+      it('should handle tanstackRouter option correctly in terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          enableTanstackRouter: false,
+          tanstackRouter: false,
           iac: 'terraform',
         });
 

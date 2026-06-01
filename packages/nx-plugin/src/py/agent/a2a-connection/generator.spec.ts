@@ -21,7 +21,7 @@ describe('py#agent#a2a-connection generator', () => {
     port: 8082,
     rc: 'Host',
     auth: 'iam' as const,
-    protocol: 'HTTP' as const,
+    protocol: 'http' as const,
   };
 
   const REMOTE = {
@@ -31,7 +31,7 @@ describe('py#agent#a2a-connection generator', () => {
     port: 9001,
     rc: 'Remote',
     auth: 'iam' as const,
-    protocol: 'A2A' as const,
+    protocol: 'a2a' as const,
   };
 
   const setupProjects = () => {
@@ -202,7 +202,7 @@ dependencies = ["strands-agents"]
         sourceProject: 'test.py_host',
         targetProject: 'test.py_remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, protocol: 'HTTP' },
+        targetComponent: { ...REMOTE, protocol: 'http' },
       }),
     ).rejects.toThrow(/A2A/);
   });

@@ -67,9 +67,9 @@ export const pyAgentA2aConnectionGenerator = async (
     );
   }
 
-  if (targetAgentComponent.protocol !== 'A2A') {
+  if (targetAgentComponent.protocol !== 'a2a') {
     throw new Error(
-      `Target agent '${targetAgentComponent.name}' uses the ${targetAgentComponent.protocol ?? 'HTTP'} protocol — only A2A agents can be connected as tools.`,
+      `Target agent '${targetAgentComponent.name}' uses the ${targetAgentComponent.protocol ?? 'http'} protocol — only A2A agents can be connected as tools.`,
     );
   }
 

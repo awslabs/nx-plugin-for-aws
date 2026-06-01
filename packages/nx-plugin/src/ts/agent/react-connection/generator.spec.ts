@@ -299,7 +299,7 @@ export function Main() {
           port: 9000,
           rc: 'TestAgent',
           auth: 'iam',
-          protocol: 'A2A',
+          protocol: 'a2a',
         },
       }),
     ).rejects.toThrow(/A2A/);
@@ -316,7 +316,7 @@ export function Main() {
         port: 8081,
         rc: 'MyAguiAgent',
         auth: 'iam',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -428,7 +428,7 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate an AG-UI agent
     await tsAgentGenerator(tree, {
       project: 'agent-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
     });
 
@@ -442,7 +442,7 @@ describe('ts strands agent react connection with real projects', () => {
         path: 'src/agent',
         port: 8081,
         rc: 'AgentProject',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 

@@ -21,11 +21,11 @@ describe('ts#rdb generator', () => {
   const defaultOptions = {
     name: 'db',
     directory: 'packages',
-    service: 'Aurora' as const,
-    engine: 'PostgreSQL' as const,
+    infra: 'aurora' as const,
+    engine: 'postgres' as const,
     databaseUser: 'databaseUser',
     databaseName: 'databaseName',
-    ormFramework: 'Prisma' as const,
+    framework: 'prisma' as const,
     iac: 'cdk' as const,
   };
 
@@ -170,7 +170,7 @@ describe('ts#rdb generator', () => {
   it('should add mysql prisma dependencies when engine is MySQL', async () => {
     await tsRdbGenerator(tree, {
       ...defaultOptions,
-      engine: 'MySQL',
+      engine: 'mysql',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
 
@@ -271,7 +271,7 @@ describe('ts#rdb generator', () => {
     await tsRdbGenerator(tree, {
       ...defaultOptions,
       iac: 'terraform',
-      engine: 'MySQL',
+      engine: 'mysql',
     });
     expect(
       tree.read(

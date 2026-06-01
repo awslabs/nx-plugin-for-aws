@@ -51,8 +51,8 @@ export type EventSource =
 
 export interface TsLambdaFunctionGeneratorSchema {
   readonly project: string;
-  readonly functionName: string;
+  readonly name: string;
   readonly functionPath?: string;
-  readonly eventSource?: EventSource;
+  readonly event?: EventSource;
   readonly iac: IacOption;
 }

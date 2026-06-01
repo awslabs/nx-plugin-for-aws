@@ -829,7 +829,7 @@ describe('ts#agent generator', () => {
   it('should generate A2A agent with protocol option', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'none',
       iac: 'cdk',
     });
@@ -860,7 +860,7 @@ describe('ts#agent generator', () => {
   it('should include protocol in component metadata for A2A', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'none',
       iac: 'cdk',
     });
@@ -869,7 +869,7 @@ describe('ts#agent generator', () => {
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
 
-    expect(projectConfig.metadata.components[0].protocol).toBe('A2A');
+    expect(projectConfig.metadata.components[0].protocol).toBe('a2a');
   });
 
   it('should include protocol in component metadata for HTTP (default)', async () => {
@@ -883,13 +883,13 @@ describe('ts#agent generator', () => {
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
 
-    expect(projectConfig.metadata.components[0].protocol).toBe('HTTP');
+    expect(projectConfig.metadata.components[0].protocol).toBe('http');
   });
 
   it('should pass A2A protocol to CDK infrastructure', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'agentcore',
       iac: 'cdk',
     });
@@ -944,7 +944,7 @@ describe('ts#agent generator', () => {
   it('should generate AG-UI agent with protocol option', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });
@@ -976,7 +976,7 @@ describe('ts#agent generator', () => {
   it('should include protocol in component metadata for AG-UI', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });
@@ -984,13 +984,13 @@ describe('ts#agent generator', () => {
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.metadata.components[0].protocol).toBe('AG-UI');
+    expect(projectConfig.metadata.components[0].protocol).toBe('ag-ui');
   });
 
   it('should not vend a chat script for AG-UI — runs agent-chat-cli directly', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1011,7 +1011,7 @@ describe('ts#agent generator', () => {
   it('should pass HTTP protocol to CDK infrastructure for AG-UI', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'agentcore',
       iac: 'cdk',
     });
@@ -1054,7 +1054,7 @@ describe('ts#agent generator', () => {
   it('should not vend a chat script for A2A — runs agent-chat-cli directly', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'none',
       iac: 'cdk',
     });

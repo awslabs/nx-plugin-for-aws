@@ -378,7 +378,7 @@ export function Main() {
           port: 9000,
           rc: 'TestAgent',
           auth: 'iam',
-          protocol: 'A2A',
+          protocol: 'a2a',
         },
       }),
     ).rejects.toThrow(/A2A/);
@@ -478,7 +478,7 @@ describe(
       await pyAgentGenerator(tree, {
         project: 'agent_project',
         infra: 'none',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       });
 
       const agentProjectConfig = readProjectConfiguration(
@@ -573,7 +573,7 @@ describe('py strands agent react connection generator - AG-UI protocol', () => {
               port: 8081,
               rc: 'TestAgent',
               auth: 'iam',
-              protocol: 'AG-UI',
+              protocol: 'ag-ui',
             },
           ],
         },
@@ -604,7 +604,7 @@ export function Main() {
         port: 8081,
         rc: 'TestAgent',
         auth: 'iam',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -651,7 +651,7 @@ export function Main() {
         port: 8081,
         rc: 'TestAgent',
         auth: 'iam',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -675,7 +675,7 @@ export function Main() {
         port: 8081,
         rc: 'TestAgent',
         auth: 'cognito',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -697,7 +697,7 @@ export function Main() {
         port: 8081,
         rc: 'TestAgent',
         auth: 'iam',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -721,7 +721,7 @@ export function Main() {
               port: 8082,
               rc: 'ResearchAgent',
               auth: 'cognito',
-              protocol: 'AG-UI',
+              protocol: 'ag-ui',
             },
           ],
         },
@@ -739,7 +739,7 @@ export function Main() {
         port: 8081,
         rc: 'TestAgent',
         auth: 'iam',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -754,7 +754,7 @@ export function Main() {
         port: 8082,
         rc: 'ResearchAgent',
         auth: 'cognito',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
 
@@ -795,7 +795,7 @@ export function Main() {
           port: 8081,
           rc: 'TestAgent',
           auth: 'iam',
-          protocol: 'AG-UI',
+          protocol: 'ag-ui',
         },
       });
 
@@ -865,7 +865,7 @@ describe('py strands agent react connection generator - AG-UI themed CopilotKit'
               port: 8081,
               rc: 'TestAgent',
               auth: 'iam',
-              protocol: 'AG-UI',
+              protocol: 'ag-ui',
             },
           ],
         },
@@ -896,7 +896,7 @@ export function Main() {
         port: 8081,
         rc: 'TestAgent',
         auth: 'iam',
-        protocol: 'AG-UI',
+        protocol: 'ag-ui',
       },
     });
   };

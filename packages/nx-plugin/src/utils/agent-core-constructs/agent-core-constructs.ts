@@ -30,7 +30,7 @@ export interface AddAgentCoreInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   appDirectory: string;
-  serverProtocol: 'MCP' | 'HTTP' | 'A2A';
+  serverProtocol: 'mcp' | 'http' | 'a2a';
   auth: AgentCoreAuth;
   containers: Containers;
 }
@@ -184,7 +184,7 @@ export const addMcpServerInfra = async (
     dockerOutputDir: options.dockerOutputDir,
     projectName: options.projectName,
     appDirectory: 'mcp-servers',
-    serverProtocol: 'MCP',
+    serverProtocol: 'mcp',
     iac: options.iac,
     auth: options.auth,
     containers: options.containers,
@@ -198,7 +198,7 @@ export interface AddAgentInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   auth: AgentCoreAuth;
-  serverProtocol?: 'HTTP' | 'A2A';
+  serverProtocol?: 'http' | 'a2a';
   containers: Containers;
 }
 
@@ -216,7 +216,7 @@ export const addAgentInfra = async (
     dockerImageTag: options.dockerImageTag,
     dockerOutputDir: options.dockerOutputDir,
     appDirectory: 'agents',
-    serverProtocol: options.serverProtocol ?? 'HTTP',
+    serverProtocol: options.serverProtocol ?? 'http',
     iac: options.iac,
     auth: options.auth,
     containers: options.containers,

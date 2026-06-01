@@ -22,7 +22,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#website --name=website-no-router --enableTanstackRouter=false --no-interactive`,
+    `generate @aws/nx-plugin:ts#website --name=website-no-router --tanstackRouter=false --no-interactive`,
     opts,
   );
   await runCLI(
@@ -94,7 +94,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#lambda-function --project=e2e_test.py_project --functionName=my-function --eventSource=Any --no-interactive`,
+    `generate @aws/nx-plugin:py#lambda-function --project=e2e_test.py_project --name=my-function --event=Any --no-interactive`,
     opts,
   );
 
@@ -114,7 +114,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#lambda-function --project=ts-project --functionName=my-function --eventSource=Any --no-interactive`,
+    `generate @aws/nx-plugin:ts#lambda-function --project=ts-project --name=my-function --event=Any --no-interactive`,
     opts,
   );
 
@@ -140,31 +140,31 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // A2A protocol agents (TypeScript + Python).
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent --protocol=A2A --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent --protocol=a2a --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent --protocol=A2A --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent --protocol=a2a --infra=agentcore --no-interactive`,
     opts,
   );
 
   // Cognito-auth variants to cover the A2A + Cognito permutation.
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=A2A --auth=cognito --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=a2a --auth=cognito --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=cognito --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=a2a --auth=cognito --infra=agentcore --no-interactive`,
     opts,
   );
 
   // AG-UI protocol agents (TypeScript and Python).
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=AG-UI --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -240,11 +240,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iac inherited.
   await runCLI(
-    `generate @aws/nx-plugin:ts#rdb --name=postgres-db --service=Aurora --engine=PostgreSQL --ormFramework=Prisma --no-interactive`,
+    `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#rdb --name=my-sql-db --service=Aurora --engine=MySQL --ormFramework=Prisma --no-interactive`,
+    `generate @aws/nx-plugin:ts#rdb --name=my-sql-db --infra=aurora --engine=mysql --framework=prisma --no-interactive`,
     opts,
   );
 

@@ -89,7 +89,7 @@ describe('ts#rdb trpc-connection generator', () => {
 
   it('should generate middleware file with try/finally for MySQL engine', async () => {
     setupTrpcProject();
-    setupRdbProject('db', { engine: 'MySQL' });
+    setupRdbProject('db', { engine: 'mysql' });
 
     await tsRdbTrpcConnectionGenerator(tree, {
       sourceProject: 'api',

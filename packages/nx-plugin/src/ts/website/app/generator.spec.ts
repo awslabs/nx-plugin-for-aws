@@ -65,7 +65,7 @@ describe('ts#website generator', () => {
       name: 'my-website',
       framework: 'react',
       ux: 'shadcn',
-      enableTailwind: true,
+      tailwind: true,
       iac: 'cdk',
     });
 

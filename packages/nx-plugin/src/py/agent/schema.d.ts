@@ -5,15 +5,15 @@
 
 import { IacOption } from '../../utils/iac';
 
-export type PyAgentSdk = 'strands';
+export type PyAgentFramework = 'strands';
 export type PyAgentInfra = 'agentcore' | 'none';
-export type AgentProtocol = 'HTTP' | 'A2A' | 'AG-UI';
+export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
 export type PyAgentAuth = 'iam' | 'cognito';
 
 export interface PyAgentGeneratorSchema {
   project: string;
-  sdk?: PyAgentSdk;
+  framework?: PyAgentFramework;
   name?: string;
   infra?: PyAgentInfra;
   auth?: PyAgentAuth;

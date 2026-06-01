@@ -1010,7 +1010,7 @@ dev-dependencies = []
   it('should generate A2A agent with protocol option', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1042,7 +1042,7 @@ dev-dependencies = []
   it('should include protocol in component metadata for A2A', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1051,7 +1051,7 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
 
-    expect(projectConfig.metadata.components[0].protocol).toBe('A2A');
+    expect(projectConfig.metadata.components[0].protocol).toBe('a2a');
   });
 
   it('should include protocol in component metadata for HTTP (default)', async () => {
@@ -1065,13 +1065,13 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
 
-    expect(projectConfig.metadata.components[0].protocol).toBe('HTTP');
+    expect(projectConfig.metadata.components[0].protocol).toBe('http');
   });
 
   it('should pass A2A protocol to CDK infrastructure', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'agentcore',
       iac: 'cdk',
     });
@@ -1131,7 +1131,7 @@ dev-dependencies = []
   it('should generate AG-UI agent with protocol option', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1172,7 +1172,7 @@ dev-dependencies = []
   it('should include protocol in component metadata for AG-UI', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1181,13 +1181,13 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
 
-    expect(projectConfig.metadata.components[0].protocol).toBe('AG-UI');
+    expect(projectConfig.metadata.components[0].protocol).toBe('ag-ui');
   });
 
   it('should pass HTTP protocol to CDK infrastructure for AG-UI agents', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'agentcore',
       iac: 'cdk',
     });
@@ -1204,7 +1204,7 @@ dev-dependencies = []
   it('should add ag-ui dependencies for AG-UI protocol', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1275,7 +1275,7 @@ dev-dependencies = []
   it('should not vend a chat script for A2A — runs agent-chat-cli directly', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'A2A',
+      protocol: 'a2a',
       infra: 'none',
       iac: 'cdk',
     });
@@ -1303,7 +1303,7 @@ dev-dependencies = []
   it('should not vend a chat script for AG-UI — runs agent-chat-cli directly', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      protocol: 'AG-UI',
+      protocol: 'ag-ui',
       infra: 'none',
       iac: 'cdk',
     });

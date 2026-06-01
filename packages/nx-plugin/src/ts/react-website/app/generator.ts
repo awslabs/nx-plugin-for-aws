@@ -59,10 +59,10 @@ export async function tsReactWebsiteGenerator(
   tree: Tree,
   schema: TsReactWebsiteGeneratorSchema,
 ) {
-  const enableTailwind = schema.enableTailwind ?? true;
-  const enableTanstackRouter = schema.enableTanstackRouter ?? true;
+  const tailwind = schema.tailwind ?? true;
+  const tanstackRouter = schema.tanstackRouter ?? true;
   const ux: Ux = schema.ux ?? 'cloudscape';
-  if (ux === 'shadcn' && !enableTailwind) {
+  if (ux === 'shadcn' && !tailwind) {
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -248,8 +248,8 @@ export async function tsReactWebsiteGenerator(
     ...schema,
     fullyQualifiedName,
     pkgMgrCmd: getPackageManagerDisplayCommands().exec,
-    enableTailwind,
-    enableTanstackRouter,
+    tailwind,
+    tanstackRouter,
     scopeAlias,
     sharedShadcnStylesImport,
   };
@@ -283,7 +283,7 @@ export async function tsReactWebsiteGenerator(
     },
   );
 
-  if (enableTanstackRouter) {
+  if (tanstackRouter) {
     const routerCommonTemplatePath = joinPathFragments(
       __dirname,
       './files/tanstack-router/common',
@@ -336,7 +336,7 @@ export async function tsReactWebsiteGenerator(
 
   if (tree.exists(viteConfigPath)) {
     // Add Tanstack Router import if enabled
-    if (enableTanstackRouter) {
+    if (tanstackRouter) {
       await addDestructuredImport(
         tree,
         viteConfigPath,
@@ -348,7 +348,7 @@ export async function tsReactWebsiteGenerator(
     }
 
     // Add TailwindCSS import if enabled
-    if (enableTailwind) {
+    if (tailwind) {
       await addSingleImport(
         tree,
         viteConfigPath,
@@ -370,7 +370,7 @@ export async function tsReactWebsiteGenerator(
     );
 
     // Add plugins to the plugins array
-    if (enableTanstackRouter) {
+    if (tanstackRouter) {
       // Prepend tanstackRouter (must be first plugin) — rewrite works for both single/multi-element
       await applyGritQL(
         tree,
@@ -379,7 +379,7 @@ export async function tsReactWebsiteGenerator(
       );
     }
 
-    if (enableTailwind) {
+    if (tailwind) {
       await applyGritQL(
         tree,
         viteConfigPath,
@@ -464,11 +464,11 @@ export async function tsReactWebsiteGenerator(
   }
 
   // Add TailwindCSS dependencies if enabled
-  if (enableTailwind) {
+  if (tailwind) {
     dependencies.push('tailwindcss');
     devDependencies.push('@tailwindcss/vite');
   }
-  if (enableTanstackRouter) {
+  if (tanstackRouter) {
     dependencies.push('@tanstack/react-router');
     devDependencies.push(
       '@tanstack/router-plugin',

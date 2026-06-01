@@ -49,8 +49,8 @@ type EventSource =
 
 export interface PyLambdaFunctionGeneratorSchema {
   readonly project: string;
-  readonly functionName: string;
+  readonly name: string;
   readonly functionPath?: string;
-  readonly eventSource?: EventSource;
+  readonly event?: EventSource;
   readonly iac: IacOption;
 }

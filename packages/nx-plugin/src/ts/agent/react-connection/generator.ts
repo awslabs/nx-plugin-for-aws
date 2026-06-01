@@ -60,14 +60,14 @@ export async function tsAgentReactConnectionGenerator(
   const agentProjectAlias = toScopeAlias(agentProjectConfig.name);
   const agentPath = targetComponent?.path ?? 'src/agent';
 
-  if (targetComponent?.protocol === 'A2A') {
+  if (targetComponent?.protocol === 'a2a') {
     throw new Error(
       `Cannot connect a React website to an A2A agent. ` +
         `Consider generating an agent with the HTTP or AG-UI protocol instead.`,
     );
   }
 
-  if (targetComponent?.protocol === 'AG-UI') {
+  if (targetComponent?.protocol === 'ag-ui') {
     await addAgUiReactConnection(tree, {
       frontendProjectConfig,
       agentName,

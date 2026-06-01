@@ -21,8 +21,8 @@ describe('ts-lambda-function generator', () => {
   let tree: Tree;
   const options: TsLambdaFunctionGeneratorSchema = {
     project: 'test-project',
-    functionName: 'TestFunction',
-    eventSource: 'EventBridgeSchema',
+    name: 'TestFunction',
+    event: 'EventBridgeSchema',
     iac: 'cdk',
   };
   const verifier = new TypeScriptVerifier([
@@ -80,7 +80,7 @@ describe('ts-lambda-function generator', () => {
   });
 
   it('should create lambda function file with Any event source', async () => {
-    const anyOptions = { ...options, eventSource: 'Any' as const };
+    const anyOptions = { ...options, event: 'Any' as const };
     await tsLambdaFunctionGenerator(tree, anyOptions);
 
     const lambdaFile = tree.read(
@@ -92,7 +92,7 @@ describe('ts-lambda-function generator', () => {
   });
 
   it('should create lambda function file with SQS schema', async () => {
-    const sqsOptions = { ...options, eventSource: 'SqsSchema' as const };
+    const sqsOptions = { ...options, event: 'SqsSchema' as const };
     await tsLambdaFunctionGenerator(tree, sqsOptions);
 
     const lambdaFile = tree.read(
@@ -373,7 +373,7 @@ describe('ts-lambda-function generator', () => {
   it('should handle complex function names with special characters', async () => {
     const complexOptions = {
       ...options,
-      functionName: 'My Complex Function Name!',
+      name: 'My Complex Function Name!',
       functionPath: 'nested/path',
     };
 
@@ -393,11 +393,11 @@ describe('ts-lambda-function generator', () => {
   });
 
   it.each(Object.keys(TS_HANDLER_RETURN_TYPES))(
-    'should generate a lambda function which compiles with eventSource %s',
-    async (eventSource: EventSource) => {
+    'should generate a lambda function which compiles with event %s',
+    async (event: EventSource) => {
       await tsLambdaFunctionGenerator(tree, {
         ...options,
-        eventSource,
+        event,
       });
 
       validateTypeScript(['packages/test-project/src/test-function.ts']);
@@ -478,7 +478,7 @@ describe('ts-lambda-function generator', () => {
       const sqsTerraformOptions = {
         ...options,
         iac: 'terraform' as const,
-        eventSource: 'SqsSchema' as const,
+        event: 'SqsSchema' as const,
       };
       await tsLambdaFunctionGenerator(tree, sqsTerraformOptions);
 
@@ -596,7 +596,7 @@ describe('ts-lambda-function generator', () => {
     it('should handle terraform with complex function names', async () => {
       const complexTerraformOptions = {
         ...options,
-        functionName: 'My Complex Function Name!',
+        name: 'My Complex Function Name!',
         functionPath: 'nested/path',
         iac: 'terraform' as const,
       };
@@ -628,8 +628,8 @@ describe('ts-lambda-function generator', () => {
     it('should match snapshot for terraform generated files with different configurations', async () => {
       const terraformOptions = {
         ...options,
-        functionName: 'SnapshotFunction',
-        eventSource: 'Any' as const,
+        name: 'SnapshotFunction',
+        event: 'Any' as const,
         iac: 'terraform' as const,
       };
       await tsLambdaFunctionGenerator(tree, terraformOptions);
@@ -685,7 +685,7 @@ describe('ts-lambda-function generator', () => {
       // Generate second lambda function with different name
       const secondOptions = {
         ...options,
-        functionName: 'SecondFunction',
+        name: 'SecondFunction',
       };
       await tsLambdaFunctionGenerator(tree, secondOptions);
 

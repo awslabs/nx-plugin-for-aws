@@ -64,15 +64,15 @@ export const tsLambdaFunctionGenerator = async (
   const dir = projectConfig.root;
   const projectNameWithOutScope = projectConfig.name.split('/').pop();
   const projectNameKebabCase = toKebabCase(projectNameWithOutScope);
-  const functionNameKebabCase = toKebabCase(schema.functionName);
+  const nameKebabCase = toKebabCase(schema.name);
 
-  const constructFunctionNameKebabCase = `${projectNameKebabCase}-${functionNameKebabCase}`;
+  const constructFunctionNameKebabCase = `${projectNameKebabCase}-${nameKebabCase}`;
   const constructFunctionClassName = toClassName(
     constructFunctionNameKebabCase,
   );
-  const lambdaFunctionCamelCase = camelCase(schema.functionName);
-  const lambdaFunctionClassName = pascalCase(schema.functionName);
-  const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
+  const lambdaFunctionCamelCase = camelCase(schema.name);
+  const lambdaFunctionClassName = pascalCase(schema.name);
+  const lambdaFunctionKebabCase = toKebabCase(schema.name);
 
   const functionPathFromProjectRoot = joinPathFragments(
     'src',
@@ -87,7 +87,7 @@ export const tsLambdaFunctionGenerator = async (
   // Check that the project does not already have a lambda handler
   if (tree.exists(functionPath)) {
     throw new Error(
-      `This project already has a lambda function with the name ${functionNameKebabCase}. Please remove the lambda function before running this generator or use a different name.`,
+      `This project already has a lambda function with the name ${nameKebabCase}. Please remove the lambda function before running this generator or use a different name.`,
     );
   }
 
@@ -101,8 +101,8 @@ export const tsLambdaFunctionGenerator = async (
 
   await addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
-    functionNameClassName: constructFunctionClassName,
-    functionNameKebabCase: constructFunctionNameKebabCase,
+    nameClassName: constructFunctionClassName,
+    nameKebabCase: constructFunctionNameKebabCase,
     handler: 'index.handler',
     runtime: 'node',
     bundlePathFromRoot: joinPathFragments(
@@ -119,7 +119,7 @@ export const tsLambdaFunctionGenerator = async (
     lambdaFunctionCamelCase,
     lambdaFunctionClassName,
     lambdaFunctionKebabCase,
-    returnType: TS_HANDLER_RETURN_TYPES[schema.eventSource],
+    returnType: TS_HANDLER_RETURN_TYPES[schema.event],
   };
 
   // Add a bundle target for the function

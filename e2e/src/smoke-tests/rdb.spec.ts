@@ -10,8 +10,8 @@ describe('smoke test - rdb', () => {
   const pkgMgr = 'pnpm';
 
   (['cdk', 'terraform'] as const).forEach((iac) => {
-    (['PostgreSQL', 'MySQL'] as const).forEach((engine) => {
-      const targetDir = `${tmpProjPath()}/rdb-${iac.toLowerCase()}-${engine.toLowerCase()}-${pkgMgr}`;
+    (['postgres', 'mysql'] as const).forEach((engine) => {
+      const targetDir = `${tmpProjPath()}/rdb-${iac}-${engine}-${pkgMgr}`;
 
       beforeEach(() => {
         console.log(`Cleaning target directory ${targetDir}`);
@@ -33,13 +33,12 @@ describe('smoke test - rdb', () => {
         const projectRoot = `${targetDir}/e2e-test`;
         const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-        // RDB project name follows kebab-case: PostgreSQLDb → postgre-sqldb, MySQLDb → my-sqldb
         const rdbProjectName =
-          engine === 'PostgreSQL' ? 'postgre-sqldb' : 'my-sqldb';
+          engine === 'postgres' ? 'postgres-db' : 'mysql-db';
         const rdbProject = `@e2e-test/${rdbProjectName}`;
 
         await runCLI(
-          `generate @aws/nx-plugin:ts#rdb --name=${engine}Db --service=Aurora --engine=${engine} --ormFramework=Prisma --iac=${iac} --no-interactive`,
+          `generate @aws/nx-plugin:ts#rdb --name=${engine}-db --infra=aurora --engine=${engine} --framework=prisma --iac=${iac} --no-interactive`,
           opts,
         );
 
@@ -61,7 +60,7 @@ describe('smoke test - rdb', () => {
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#agent --project=agents --name=a2a-agent --protocol=A2A --infra=none --no-interactive`,
+          `generate @aws/nx-plugin:ts#agent --project=agents --name=a2a-agent --protocol=a2a --infra=none --no-interactive`,
           opts,
         );
         await runCLI(

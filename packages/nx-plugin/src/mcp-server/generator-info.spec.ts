@@ -484,7 +484,7 @@ title: React to AG-UI Agent
 when:
   sourceType: react
   targetType: py#agent
-  protocol: AG-UI
+  protocol: ag-ui
 ---
 REACT_AGUI_BODY`,
       'connection/react-py-agent.mdx': `---
@@ -493,8 +493,8 @@ when:
   sourceType: react
   targetType: py#agent
   protocol:
-    - HTTP
-    - A2A
+    - http
+    - a2a
 ---
 REACT_PY_STRANDS_BODY`,
     };
@@ -567,7 +567,7 @@ REACT_PY_STRANDS_BODY`,
         {
           sourceType: 'react',
           targetType: 'py#agent',
-          protocol: 'AG-UI',
+          protocol: 'ag-ui',
         },
       );
       expect(agui.content).toMatch(bodyMatcher('REACT_AGUI_BODY'));
@@ -581,7 +581,7 @@ REACT_PY_STRANDS_BODY`,
         {
           sourceType: 'react',
           targetType: 'py#agent',
-          protocol: 'HTTP',
+          protocol: 'http',
         },
       );
       expect(http.content).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
@@ -605,7 +605,7 @@ REACT_PY_STRANDS_BODY`,
         [connectionInfo],
         undefined,
         undefined,
-        { sourceType: 'ts#trpc-api', targetType: 'smithy', protocol: 'HTTP' },
+        { sourceType: 'ts#trpc-api', targetType: 'smithy', protocol: 'http' },
       );
       expect(result.kind).toBe('unsupported');
       expect(result.content).toContain('Unsupported combination');
@@ -638,7 +638,7 @@ REACT_PY_STRANDS_BODY`,
       // The enums come from the union of frontmatter values, sorted into
       // some stable order — just make sure the expected values appear.
       expect(rendered).toMatch(/sourceType: react\b/);
-      expect(rendered).toMatch(/protocol: .*AG-UI/);
+      expect(rendered).toMatch(/protocol: .*ag-ui/);
     });
   });
 
