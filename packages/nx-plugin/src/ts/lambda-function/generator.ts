@@ -84,14 +84,14 @@ export const tsLambdaFunctionGenerator = async (
     functionPathFromProjectRoot,
   );
 
-  // Check that the project does not already have a lambda handler
-  if (tree.exists(functionPath)) {
+  const infra = schema.infra ?? 'lambda';
+  const handlerAlreadyExists = tree.exists(functionPath);
+
+  if (handlerAlreadyExists && infra === 'none') {
     throw new Error(
       `This project already has a lambda function with the name ${nameKebabCase}. Please remove the lambda function before running this generator or use a different name.`,
     );
   }
-
-  const infra = schema.infra ?? 'lambda';
 
   const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
 

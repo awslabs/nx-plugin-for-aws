@@ -60,11 +60,21 @@ export async function tsTrpcApiGenerator(
   const backendName = apiNameKebabCase;
   const backendProjectName = `${apiNamespace}${backendName}`;
 
-  await tsProjectGenerator(tree, {
-    name: backendName,
-    directory: options.directory,
-    subDirectory: options.subDirectory,
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfigurationUnqualified(tree, backendProjectName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await tsProjectGenerator(tree, {
+      name: backendName,
+      directory: options.directory,
+      subDirectory: options.subDirectory,
+    });
+  }
 
   const projectConfig = readProjectConfigurationUnqualified(
     tree,

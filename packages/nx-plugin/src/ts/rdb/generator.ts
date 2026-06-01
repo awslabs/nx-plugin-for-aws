@@ -56,10 +56,20 @@ export const tsRdbGenerator = async (
     subDirectory: options.subDirectory,
   });
 
-  await tsProjectGenerator(tree, {
-    name: options.name,
-    directory: options.directory,
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await tsProjectGenerator(tree, {
+      name: options.name,
+      directory: options.directory,
+    });
+  }
 
   updateJson(tree, joinPathFragments(dir, 'tsconfig.lib.json'), (tsConfig) => ({
     ...tsConfig,

@@ -62,13 +62,23 @@ export const pyFastApiProjectGenerator = async (
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
 
-  await pyProjectGenerator(tree, {
-    name: schema.name,
-    directory: schema.directory,
-    subDirectory: schema.subDirectory,
-    moduleName: normalizedModuleName,
-    type: 'application',
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await pyProjectGenerator(tree, {
+      name: schema.name,
+      directory: schema.directory,
+      subDirectory: schema.subDirectory,
+      moduleName: normalizedModuleName,
+      type: 'application',
+    });
+  }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const port = assignPort(tree, projectConfig, 8000);

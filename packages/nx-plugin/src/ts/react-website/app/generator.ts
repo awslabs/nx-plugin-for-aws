@@ -75,23 +75,31 @@ export async function tsReactWebsiteGenerator(
     schema.directory || '.',
     schema.subDirectory || websiteNameKebabCase,
   );
+
+  const projectAlreadyExists = tree.exists(
+    joinPathFragments(websiteContentPath, 'project.json'),
+  );
+
   // TODO: consider exposing and supporting e2e tests
   const e2eTestRunner = 'none';
-  await applicationGenerator(tree, {
-    ...schema,
-    name: fullyQualifiedName,
-    directory: websiteContentPath,
-    routing: false,
-    e2eTestRunner,
-    linter: 'eslint',
-    bundler: 'vite',
-    unitTestRunner: 'vitest',
-    useProjectJson: true,
-    style: 'css',
-  });
 
-  // Replace with simpler sample source code
-  tree.delete(joinPathFragments(websiteContentPath, 'src'));
+  if (!projectAlreadyExists) {
+    await applicationGenerator(tree, {
+      ...schema,
+      name: fullyQualifiedName,
+      directory: websiteContentPath,
+      routing: false,
+      e2eTestRunner,
+      linter: 'eslint',
+      bundler: 'vite',
+      unitTestRunner: 'vitest',
+      useProjectJson: true,
+      style: 'css',
+    });
+
+    // Replace with simpler sample source code
+    tree.delete(joinPathFragments(websiteContentPath, 'src'));
+  }
 
   const projectConfiguration = readProjectConfiguration(
     tree,

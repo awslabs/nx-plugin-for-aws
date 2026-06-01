@@ -124,14 +124,14 @@ export const pyLambdaFunctionGenerator = async (
     `${normalizedFunctionName}.py`,
   );
 
-  // Check that the project does not already have a lambda handler
-  if (tree.exists(functionPath)) {
+  const infra = schema.infra ?? 'lambda';
+  const handlerAlreadyExists = tree.exists(functionPath);
+
+  if (handlerAlreadyExists && infra === 'none') {
     throw new Error(
-      `This project already has a a lambda function with the name ${normalizedFunctionName}. Please remove the lambda function before running this generator or use a different name.`,
+      `This project already has a lambda function with the name ${normalizedFunctionName}. Please remove the lambda function before running this generator or use a different name.`,
     );
   }
-
-  const infra = schema.infra ?? 'lambda';
 
   // Check if the project has a bundle target and if not add it
   const { bundleOutputDir } = addPythonBundleTarget(projectConfig);

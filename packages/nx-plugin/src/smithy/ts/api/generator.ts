@@ -57,14 +57,31 @@ export const tsSmithyApiGenerator = async (
     getTsLibDetails(tree, options);
   const modelProjectName = `${apiNameKebabCase}-model`;
 
-  // Generate the model project
-  await smithyProjectGenerator(tree, {
-    name: modelProjectName,
-    serviceName: apiNameClassName,
-    namespace: options.namespace,
-    directory: dir,
-    subDirectory: 'model',
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfigurationUnqualified(tree, backendFullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    // Generate the model project
+    await smithyProjectGenerator(tree, {
+      name: modelProjectName,
+      serviceName: apiNameClassName,
+      namespace: options.namespace,
+      directory: dir,
+      subDirectory: 'model',
+    });
+
+    // Generate the backend project
+    await tsProjectGenerator(tree, {
+      name: options.name,
+      directory: dir,
+      subDirectory: 'backend',
+    });
+  }
 
   // Add metadata to associate backend project with model project
   const modelProjectConfig = readProjectConfigurationUnqualified(
@@ -77,13 +94,6 @@ export const tsSmithyApiGenerator = async (
       ...modelProjectConfig.metadata,
       backendProject: backendFullyQualifiedName,
     } as any,
-  });
-
-  // Generate the backend project
-  await tsProjectGenerator(tree, {
-    name: options.name,
-    directory: dir,
-    subDirectory: 'backend',
   });
 
   addGeneratorMetadata(
