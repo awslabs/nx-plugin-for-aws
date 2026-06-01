@@ -24,15 +24,15 @@ describe('react-website generator', () => {
 
   const options: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
-    iac: 'cdk',
-    ux: 'cloudscape',
+    iacProvider: 'CDK',
+    uxProvider: 'Cloudscape',
   };
 
   const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
-    tailwind: false,
-    iac: 'cdk',
-    ux: 'cloudscape',
+    enableTailwind: false,
+    iacProvider: 'CDK',
+    uxProvider: 'Cloudscape',
   };
 
   beforeEach(() => {
@@ -221,7 +221,7 @@ describe('react-website generator', () => {
     it('should generate website with no router correctly', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        tanstackRouter: false,
+        enableTanstackRouter: false,
       });
 
       tree
@@ -307,8 +307,8 @@ describe('react-website generator', () => {
       expect(stylesContent).toMatchSnapshot('styles.css-without-tailwind');
     });
 
-    it('should handle tailwind explicitly set to true', async () => {
-      await tsReactWebsiteGenerator(tree, { ...options, tailwind: true });
+    it('should handle enableTailwind explicitly set to true', async () => {
+      await tsReactWebsiteGenerator(tree, { ...options, enableTailwind: true });
       const packageJson = JSON.parse(tree.read('package.json').toString());
       const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
       const stylesContent = tree.read('test-app/src/styles.css')?.toString();
@@ -320,11 +320,11 @@ describe('react-website generator', () => {
       expect(stylesContent).toContain("@import 'tailwindcss'");
     });
 
-    describe('terraform iac', () => {
+    describe('terraform iacProvider', () => {
       it('should generate terraform files for static website and snapshot them', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          iac: 'terraform',
+          iacProvider: 'Terraform',
         });
 
         // Find all terraform files
@@ -375,7 +375,7 @@ describe('react-website generator', () => {
       it('should configure project targets and dependencies correctly for terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          iac: 'terraform',
+          iacProvider: 'Terraform',
         });
 
         // Check that shared terraform project has build dependency on the website project
@@ -404,7 +404,7 @@ describe('react-website generator', () => {
       it('should not create CDK constructs when using terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          iac: 'terraform',
+          iacProvider: 'Terraform',
         });
 
         // Verify CDK files are NOT created
@@ -418,14 +418,14 @@ describe('react-website generator', () => {
         ).toBeFalsy();
       });
 
-      it('should throw error for invalid iac', async () => {
+      it('should throw error for invalid iacProvider', async () => {
         await expect(
           tsReactWebsiteGenerator(tree, {
             ...options,
-            iac: 'InvalidProvider' as any,
+            iacProvider: 'InvalidProvider' as any,
           }),
         ).rejects.toThrow(
-          'Unknown iac: InvalidProvider. Supported providers are: cdk, terraform',
+          'Unknown iacProvider: InvalidProvider. Supported providers are: CDK, Terraform',
         );
       });
 
@@ -434,7 +434,7 @@ describe('react-website generator', () => {
           ...options,
           name: 'nested-website',
           directory: 'apps/nested/path',
-          iac: 'terraform',
+          iacProvider: 'Terraform',
         });
 
         // Verify terraform files are created
@@ -466,7 +466,7 @@ describe('react-website generator', () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
           directory: 'custom-dir',
-          iac: 'terraform',
+          iacProvider: 'Terraform',
         });
 
         // Find all terraform files
@@ -490,11 +490,11 @@ describe('react-website generator', () => {
         expect(terraformContent).toContain('dist/custom-dir/test-app');
       });
 
-      it('should handle tailwind option correctly in terraform', async () => {
+      it('should handle enableTailwind option correctly in terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          tailwind: false,
-          iac: 'terraform',
+          enableTailwind: false,
+          iacProvider: 'Terraform',
         });
 
         // Find the app-specific terraform file
@@ -514,11 +514,11 @@ describe('react-website generator', () => {
         expect(terraformContent).toContain('website_name      = "test-app"');
       });
 
-      it('should handle tanstackRouter option correctly in terraform', async () => {
+      it('should handle enableTanstackRouter option correctly in terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          tanstackRouter: false,
-          iac: 'terraform',
+          enableTanstackRouter: false,
+          iacProvider: 'Terraform',
         });
 
         // Find the app-specific terraform file
@@ -544,7 +544,7 @@ describe('react-website generator', () => {
     it('should configure load:runtime-config target for CDK provider', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        iac: 'cdk',
+        iacProvider: 'CDK',
       });
 
       const projectConfig = readJson(tree, 'test-app/project.json');
@@ -568,7 +568,7 @@ describe('react-website generator', () => {
     it('should configure load:runtime-config target for Terraform provider', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        iac: 'terraform',
+        iacProvider: 'Terraform',
       });
 
       const projectConfig = readJson(tree, 'test-app/project.json');
@@ -588,14 +588,14 @@ describe('react-website generator', () => {
       });
     });
 
-    it('should throw error for unknown iac', async () => {
+    it('should throw error for unknown iacProvider', async () => {
       await expect(
         tsReactWebsiteGenerator(tree, {
           ...options,
-          iac: 'UnknownProvider' as any,
+          iacProvider: 'UnknownProvider' as any,
         }),
       ).rejects.toThrow(
-        'Unknown iac: UnknownProvider. Supported providers are: cdk, terraform',
+        'Unknown iacProvider: UnknownProvider. Supported providers are: CDK, Terraform',
       );
     });
 
@@ -603,7 +603,7 @@ describe('react-website generator', () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
         directory: 'custom-dir',
-        iac: 'terraform',
+        iacProvider: 'Terraform',
       });
 
       const projectConfig = readJson(tree, 'custom-dir/test-app/project.json');
@@ -634,7 +634,7 @@ describe('react-website generator', () => {
 
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        iac: 'cdk',
+        iacProvider: 'CDK',
       });
 
       const projectConfig = readJson(tree, 'test-app/project.json');
@@ -648,18 +648,18 @@ describe('react-website generator', () => {
     });
   });
 
-  it('should inherit iac from config when set to Inherit', async () => {
+  it('should inherit iacProvider from config when set to Inherit', async () => {
     // Set up config with CDK provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
       iac: {
-        provider: 'cdk',
+        provider: 'CDK',
       },
     });
 
     await tsReactWebsiteGenerator(tree, {
       ...options,
-      iac: 'inherit',
+      iacProvider: 'Inherit',
     });
 
     // Verify CDK constructs are created (not terraform)
@@ -684,7 +684,7 @@ describe('react-website generator', () => {
   });
 });
 
-describe('react-website generator ux tests', () => {
+describe('react-website generator uxProvider tests', () => {
   let tree: Tree;
 
   beforeEach(() => {
@@ -692,12 +692,12 @@ describe('react-website generator ux tests', () => {
   });
 
   it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
-    'should add ux metadata (ux=%s)',
-    async (ux) => {
+    'should add uxProvider metadata (uxProvider=%s)',
+    async (uxProvider) => {
       const options: TsReactWebsiteGeneratorSchema = {
         name: 'test-app',
-        iac: 'cdk',
-        ux: ux,
+        iacProvider: 'CDK',
+        uxProvider: uxProvider,
       };
 
       await tsReactWebsiteGenerator(tree, options);
@@ -706,15 +706,15 @@ describe('react-website generator ux tests', () => {
         tree.read(`test-app/project.json`, 'utf-8'),
       );
 
-      expect(projectConfig.metadata.ux).toEqual(ux);
+      expect(projectConfig.metadata.uxProvider).toEqual(uxProvider);
     },
   );
 
   describe('Cloudscape', () => {
     const options: TsReactWebsiteGeneratorSchema = {
       name: 'test-app',
-      iac: 'cdk',
-      ux: 'cloudscape',
+      iacProvider: 'CDK',
+      uxProvider: 'Cloudscape',
     };
 
     it('should update package.json with required dependencies', async () => {
@@ -732,8 +732,8 @@ describe('react-website generator ux tests', () => {
   describe('Shadcn', () => {
     const options: TsReactWebsiteGeneratorSchema = {
       name: 'test-app',
-      iac: 'cdk',
-      ux: 'shadcn',
+      iacProvider: 'CDK',
+      uxProvider: 'Shadcn',
     };
 
     it('should update package.json with required dependencies', async () => {
@@ -781,7 +781,7 @@ describe('react-website generator ux tests', () => {
       expect(workspaceYaml).toMatch(/@swc\/core/);
     });
 
-    it('should use shared Shadcn components when ux is Shadcn', async () => {
+    it('should use shared Shadcn components when uxProvider is Shadcn', async () => {
       await tsReactWebsiteGenerator(tree, options);
       expect(
         tree.read('test-app/src/components/AppLayout/index.tsx')?.toString(),

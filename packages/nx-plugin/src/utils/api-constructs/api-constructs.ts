@@ -16,7 +16,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { Iac } from '../iac';
+import { IacProvider } from '../iac';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 
 interface BackendOptions {
@@ -49,26 +49,28 @@ export interface AddApiGatewayConstructOptions {
   apiNameKebabCase: string;
   constructType: 'http' | 'rest';
   backend: TrpcBackendOptions | FastApiBackendOptions | SmithyBackendOptions;
-  auth: 'iam' | 'cognito' | 'custom';
+  auth: 'IAM' | 'Cognito' | 'Custom';
 }
 
 export const addApiGatewayInfra = async (
   tree: Tree,
-  options: AddApiGatewayConstructOptions & { iac: Iac },
+  options: AddApiGatewayConstructOptions & { iacProvider: IacProvider },
 ) => {
-  if (options.iac === 'cdk') {
+  if (options.iacProvider === 'CDK') {
     await addApiGatewayCdkConstructs(tree, options);
-  } else if (options.iac === 'terraform') {
+  } else if (options.iacProvider === 'Terraform') {
     addApiGatewayTerraformModules(tree, options);
   } else {
-    throw new Error(`Unsupported iac ${options.iac}`);
+    throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
   }
 
   updateJson(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      options.iacProvider === 'CDK'
+        ? SHARED_CONSTRUCTS_DIR
+        : SHARED_TERRAFORM_DIR,
       'project.json',
     ),
     (config: ProjectConfiguration) => {

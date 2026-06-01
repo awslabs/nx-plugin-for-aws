@@ -23,7 +23,7 @@ export const runTerraformSmokeTest = async (
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
   await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'terraform')} --interactive=false --skipGit`,
+    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'Terraform')} --interactive=false --skipGit`,
     {
       cwd: dir,
       prefixWithPackageManagerCmd: false,

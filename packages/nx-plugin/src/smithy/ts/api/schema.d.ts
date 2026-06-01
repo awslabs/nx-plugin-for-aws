@@ -3,15 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { TsProjectGeneratorSchema } from '../../../ts/lib/schema';
-import { IacOption } from '../../../utils/iac';
+import { IacProviderOption } from '../../../utils/iac';
 
 export interface TsSmithyApiGeneratorSchema {
   name: string;
   namespace?: string;
-  infra: 'rest-lambda';
+  // Only API Gateway REST APIs are supported by Smithy
+  // https://smithy.io/2.0/languages/typescript/ts-ssdk/supported-endpoints.html#amazon-api-gateway-rest-apis-and-aws-lambda
+  computeType: 'ServerlessApiGatewayRestApi';
   integrationPattern?: 'isolated' | 'shared';
-  auth: 'iam' | 'cognito' | 'custom';
+  auth: 'IAM' | 'Cognito' | 'Custom';
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
-  iac: IacOption;
+  iacProvider: IacProviderOption;
 }

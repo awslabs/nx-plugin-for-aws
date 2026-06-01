@@ -26,7 +26,7 @@ describe('smoke test - git-secrets', () => {
 
   it('should block commits containing AWS access keys', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'gs-test', 'cdk')} --interactive=false`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'gs-test', 'CDK')} --interactive=false`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,

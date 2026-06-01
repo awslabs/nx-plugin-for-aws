@@ -2,7 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { generateFiles, joinPathFragments, Tree } from '@nx/devkit';
+import {
+  generateFiles,
+  joinPathFragments,
+  Tree,
+  workspaceRoot,
+} from '@nx/devkit';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+import { pathToFileURL } from 'url';
 import { AwsNxPluginConfig } from '.';
 import { applyGritQL, matchGritQL } from '../ast';
 import { formatFilesInSubtree } from '../format';
@@ -13,15 +21,10 @@ export const AWS_NX_PLUGIN_CONFIG_FILE_NAME = 'aws-nx-plugin.config.mts';
 /**
  * Ensure that the config file exists
  */
-export const ensureAwsNxPluginConfig = async (
-  tree: Tree,
-): Promise<AwsNxPluginConfig> => {
+export const ensureAwsNxPluginConfig = async (tree: Tree): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
-    // Create an empty config file if it doesn't already exist
     generateFiles(tree, joinPathFragments(__dirname, 'files'), '.', {});
   }
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  return await readAwsNxPluginConfig(tree)!;
 };
 
 /**
@@ -33,7 +36,34 @@ export const readAwsNxPluginConfig = async (
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
     return undefined;
   }
-  const configTs = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8');
+  // Prefer loading from disk via tsx (supports imports in the config).
+  // Falls back to data-URL evaluation for virtual trees in unit tests.
+  const onDisk = resolve(workspaceRoot, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+  if (existsSync(onDisk)) {
+    try {
+      const { tsImport } = await import('tsx/esm/api');
+      const mod = await tsImport(onDisk, pathToFileURL(__filename).href);
+      return (mod.default ?? mod) as AwsNxPluginConfig;
+    } catch {
+      // fall through to data-URL approach
+    }
+  }
+  let configTs = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+  // Strip our own import and inline stubs for the data-URL evaluator
+  // which cannot resolve external modules or execute imported functions.
+  if (configTs.includes('@aws/nx-plugin/license')) {
+    const { PRE_APPROVED_LICENSES } =
+      await import('../../license/dependency-check/pre-approved');
+    configTs = configTs.replace(
+      /import\s*\{[^}]*\}\s*from\s*['"]@aws\/nx-plugin\/license['"];?\n?/,
+      [
+        `const DEFAULT_LICENSE_ALLOWLIST = ${JSON.stringify(PRE_APPROVED_LICENSES)};`,
+        `const npmCollector = () => ({ name: 'npm', traceCommand: '', collect: async () => [] });`,
+        `const pythonCollector = () => ({ name: 'python', traceCommand: '', collect: async () => [] });`,
+        '',
+      ].join('\n'),
+    );
+  }
   return await importTypeScriptModule(configTs);
 };
 

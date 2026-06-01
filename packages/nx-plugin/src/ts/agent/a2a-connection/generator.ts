@@ -60,16 +60,13 @@ export const tsAgentA2aConnectionGenerator = async (
     );
   }
 
-  if ((targetAgentComponent.protocol ?? '').toLowerCase() !== 'a2a') {
+  if (targetAgentComponent.protocol !== 'A2A') {
     throw new Error(
-      `Target agent '${targetAgentComponent.name}' uses the ${targetAgentComponent.protocol ?? 'http'} protocol — only A2A agents can be connected as tools.`,
+      `Target agent '${targetAgentComponent.name}' uses the ${targetAgentComponent.protocol ?? 'HTTP'} protocol — only A2A agents can be connected as tools.`,
     );
   }
 
-  if (
-    targetAgentComponent.auth &&
-    targetAgentComponent.auth.toLowerCase() !== 'iam'
-  ) {
+  if (targetAgentComponent.auth && targetAgentComponent.auth !== 'IAM') {
     throw new Error(
       `A2A agent connection currently only supports IAM authentication, but '${targetAgentComponent.name}' uses '${targetAgentComponent.auth}' authentication.`,
     );

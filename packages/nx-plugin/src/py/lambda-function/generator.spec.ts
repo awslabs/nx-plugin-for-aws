@@ -51,9 +51,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     expect(
@@ -91,9 +91,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -161,9 +161,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs files
@@ -230,9 +230,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -274,10 +274,10 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
+      functionName: 'test-function',
       functionPath: 'nested/path',
-      event: 'Any',
-      iac: 'cdk',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     expect(
@@ -314,9 +314,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const lambdaFunctionPath = joinPathFragments(
@@ -361,9 +361,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'APIGatewayProxyEventModel',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'APIGatewayProxyEventModel',
+      iacProvider: 'CDK',
     });
 
     const lambdaFunctionContent = tree.read(
@@ -412,9 +412,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const appChanges = sortObjectKeys(
@@ -461,9 +461,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test_project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -503,9 +503,9 @@ describe('lambda-handler project generator', () => {
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     // Verify the metric was added to app.ts
@@ -536,15 +536,15 @@ dev = []
 
     await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
-      name: 'test-function',
-      event: 'Any',
-      iac: 'cdk',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     const deps =
@@ -562,7 +562,7 @@ dev = []
     ).toBe(true);
   });
 
-  describe('terraform iac', () => {
+  describe('terraform iacProvider', () => {
     it('should generate terraform files for python lambda function and snapshot them', async () => {
       tree.write(
         'apps/test_project/project.json',
@@ -590,9 +590,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'terraform',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -658,10 +658,10 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
+        functionName: 'test-function',
         functionPath: 'lambda-functions',
-        event: 'Any',
-        iac: 'terraform',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       // Find terraform files
@@ -711,9 +711,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'APIGatewayProxyEventModel',
-        iac: 'terraform',
+        functionName: 'test-function',
+        eventSource: 'APIGatewayProxyEventModel',
+        iacProvider: 'Terraform',
       });
 
       // Find terraform files
@@ -766,9 +766,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'terraform',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       // Check that shared terraform project has build dependency on the lambda function project
@@ -817,9 +817,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'terraform',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       // Verify CDK files are NOT created
@@ -830,7 +830,7 @@ dev = []
       ).toBeFalsy();
     });
 
-    it('should throw error for invalid iac', async () => {
+    it('should throw error for invalid iacProvider', async () => {
       tree.write(
         'apps/test_project/project.json',
         JSON.stringify({
@@ -851,11 +851,11 @@ dev = []
       await expect(
         pyLambdaFunctionGenerator(tree, {
           project: 'test-project',
-          name: 'test-function',
-          event: 'Any',
-          iac: 'InvalidProvider' as any,
+          functionName: 'test-function',
+          eventSource: 'Any',
+          iacProvider: 'InvalidProvider' as any,
         }),
-      ).rejects.toThrow('Unsupported iac InvalidProvider');
+      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
     });
 
     it('should handle terraform with scoped project names', async () => {
@@ -890,9 +890,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'scoped_project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'terraform',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       // Verify terraform files are created
@@ -942,10 +942,10 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'My Complex Function Name!',
+        functionName: 'My Complex Function Name!',
         functionPath: 'nested/path',
-        event: 'Any',
-        iac: 'terraform',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       // Verify terraform files are created
@@ -995,9 +995,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'SnapshotFunction',
-        event: 'APIGatewayProxyEventModel',
-        iac: 'terraform',
+        functionName: 'SnapshotFunction',
+        eventSource: 'APIGatewayProxyEventModel',
+        iacProvider: 'Terraform',
       });
 
       // Find terraform files
@@ -1047,9 +1047,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'terraform',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
       });
 
       const projectConfig = JSON.parse(
@@ -1072,12 +1072,12 @@ dev = []
       expect(projectConfig.targets.build.dependsOn).toContain('bundle');
     });
 
-    it('should inherit iac from config when set to Inherit', async () => {
+    it('should inherit iacProvider from config when set to Inherit', async () => {
       // Set up config with CDK provider using utility methods
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
         iac: {
-          provider: 'cdk',
+          provider: 'CDK',
         },
       });
 
@@ -1100,9 +1100,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'inherit',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Inherit',
       });
 
       // Verify CDK constructs are created (not terraform)
@@ -1135,9 +1135,9 @@ dev = []
 
       await pyLambdaFunctionGenerator(tree, {
         project: 'test-project',
-        name: 'test-function',
-        event: 'Any',
-        iac: 'cdk',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'CDK',
       });
 
       const projectConfig = JSON.parse(

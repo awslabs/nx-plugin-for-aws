@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export const IAC_PROVIDERS = ['cdk', 'terraform'] as const;
+export const IAC_PROVIDERS = ['CDK', 'Terraform'] as const;
 
-export type Iac = (typeof IAC_PROVIDERS)[number];
+export type IacProvider = (typeof IAC_PROVIDERS)[number];
 
-export type IacOption = Iac | 'inherit';
+export type IacProviderOption = IacProvider | 'Inherit';

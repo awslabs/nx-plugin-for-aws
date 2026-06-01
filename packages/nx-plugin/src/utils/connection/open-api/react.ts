@@ -47,7 +47,7 @@ export interface AddOpenApiReactClientOptions {
   /**
    * Authentication method
    */
-  auth: 'iam' | 'cognito' | 'custom';
+  auth: 'IAM' | 'Cognito' | 'Custom';
   /**
    * Port on which the backend project's local server listens
    */
@@ -161,7 +161,7 @@ export const addOpenApiReactClient = async (
   });
 
   // Add sigv4 fetch
-  if (auth === 'iam') {
+  if (auth === 'IAM') {
     generateFiles(
       tree,
       joinPathFragments(__dirname, '../../files/website/hooks/sigv4'),
@@ -258,7 +258,7 @@ export const addOpenApiReactClient = async (
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      ...((auth === 'iam'
+      ...((auth === 'IAM'
         ? [
             'oidc-client-ts',
             'react-oidc-context',
@@ -266,7 +266,7 @@ export const addOpenApiReactClient = async (
             'aws4fetch',
           ]
         : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
+      ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
       '@tanstack/react-query',
       '@tanstack/react-query-devtools',
     ]),

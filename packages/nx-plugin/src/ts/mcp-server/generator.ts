@@ -32,8 +32,8 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
 import { getNpmScope } from '../../utils/npm-scope';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
+import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
 import { FsCommands } from '../../utils/fs';
@@ -68,15 +68,15 @@ export const tsMcpServerGenerator = async (
   const relativeSourceDir = targetSourceDir.replace(project.root + '/', './');
   const distDir = joinPathFragments('dist', project.root);
 
-  const infra = options.infra ?? 'agentcore';
+  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
 
-  if (infra === 'none' && options.auth && options.auth !== 'iam') {
+  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
     console.warn(
-      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'iam';
+  const auth = options.auth ?? 'IAM';
 
   // Create a package.json if one doesn't exist, since we want to add the server as a bin target
   const projectPackageJsonPath = joinPathFragments(
@@ -134,9 +134,9 @@ export const tsMcpServerGenerator = async (
     '@modelcontextprotocol/inspector',
   ]);
 
-  // Add hosting based on infra
-  if (infra === 'agentcore') {
-    const containers = await resolveContainers(tree, 'inherit');
+  // Add hosting based on compute type
+  if (computeType === 'BedrockAgentCoreRuntime') {
+    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -165,7 +165,7 @@ export const tsMcpServerGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -176,8 +176,8 @@ export const tsMcpServerGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
-    const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -186,9 +186,9 @@ export const tsMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       dockerOutputDir,
-      iac,
+      iacProvider,
       auth,
-      containers,
+      containerEngine,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP
@@ -279,6 +279,11 @@ export const tsMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);
+
+  const { addLicenseExceptions } = await import('../../license/config');
+  const { MCP_INSPECTOR_EXCEPTIONS } =
+    await import('../../license/known-exceptions');
+  await addLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return () => {

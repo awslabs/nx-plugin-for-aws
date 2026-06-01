@@ -20,7 +20,7 @@ describe('smoke test - react-website', () => {
 
   it('should generate and build', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'react-website', 'cdk')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'react-website', 'CDK')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -31,42 +31,42 @@ describe('smoke test - react-website', () => {
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --name=my-api --infra=rest-lambda --no-interactive`,
+      `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
       opts,
     );
 
     const permutations = [
-      { name: 'website-none', ux: 'none', tanstackRouter: true },
+      { name: 'website-none', uxProvider: 'None', enableTanstackRouter: true },
       {
         name: 'website-shadcn',
-        ux: 'shadcn',
-        tanstackRouter: true,
+        uxProvider: 'Shadcn',
+        enableTanstackRouter: true,
       },
       {
         name: 'website-none-no-router',
-        ux: 'none',
-        tanstackRouter: false,
+        uxProvider: 'None',
+        enableTanstackRouter: false,
       },
       {
         name: 'website-shadcn-no-router',
-        ux: 'shadcn',
-        tanstackRouter: false,
+        uxProvider: 'Shadcn',
+        enableTanstackRouter: false,
       },
     ] as const;
 
-    for (const { name, ux, tanstackRouter } of permutations) {
+    for (const { name, uxProvider, enableTanstackRouter } of permutations) {
       const args = [
-        `generate @aws/nx-plugin:ts#website`,
+        `generate @aws/nx-plugin:ts#react-website`,
         `--name=${name}`,
-        `--ux=${ux}`,
-        `--tanstackRouter=${tanstackRouter}`,
+        `--uxProvider=${uxProvider}`,
+        `--enableTanstackRouter=${enableTanstackRouter}`,
         `--no-interactive`,
       ];
 
       await runCLI(args.join(' '), opts);
 
       await runCLI(
-        `generate @aws/nx-plugin:ts#website#auth --project=${name} --cognitoDomain=${name} --no-interactive --allowSignup=false`,
+        `generate @aws/nx-plugin:ts#react-website#auth --project=${name} --cognitoDomain=${name} --no-interactive --allowSignup=false`,
         opts,
       );
 

@@ -271,7 +271,7 @@ export async function terraformProjectGenerator(
   }
 
   // Ensure shared constructs for Terraform are created
-  await sharedConstructsGenerator(tree, { iac: 'terraform' });
+  await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
 
   // Add Terraform metrics
   await addGeneratorMetricsIfApplicable(tree, [

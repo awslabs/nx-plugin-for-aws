@@ -9,9 +9,9 @@ import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 describe('smoke test - rdb', () => {
   const pkgMgr = 'pnpm';
 
-  (['cdk', 'terraform'] as const).forEach((iac) => {
-    (['postgres', 'mysql'] as const).forEach((engine) => {
-      const targetDir = `${tmpProjPath()}/rdb-${iac}-${engine}-${pkgMgr}`;
+  (['CDK', 'Terraform'] as const).forEach((iacProvider) => {
+    (['PostgreSQL', 'MySQL'] as const).forEach((engine) => {
+      const targetDir = `${tmpProjPath()}/rdb-${iacProvider.toLowerCase()}-${engine.toLowerCase()}-${pkgMgr}`;
 
       beforeEach(() => {
         console.log(`Cleaning target directory ${targetDir}`);
@@ -21,9 +21,9 @@ describe('smoke test - rdb', () => {
         ensureDirSync(targetDir);
       });
 
-      it(`should generate and build with iac=${iac} engine=${engine}`, async () => {
+      it(`should generate and build with iacProvider=${iacProvider} engine=${engine}`, async () => {
         await runCLI(
-          `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', iac)} --interactive=false --skipGit`,
+          `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', iacProvider)} --interactive=false --skipGit`,
           {
             cwd: targetDir,
             prefixWithPackageManagerCmd: false,
@@ -33,22 +33,23 @@ describe('smoke test - rdb', () => {
         const projectRoot = `${targetDir}/e2e-test`;
         const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
+        // RDB project name follows kebab-case: PostgreSQLDb → postgre-sqldb, MySQLDb → my-sqldb
         const rdbProjectName =
-          engine === 'postgres' ? 'postgres-db' : 'mysql-db';
+          engine === 'PostgreSQL' ? 'postgre-sqldb' : 'my-sqldb';
         const rdbProject = `@e2e-test/${rdbProjectName}`;
 
         await runCLI(
-          `generate @aws/nx-plugin:ts#rdb --name=${engine}-db --infra=aurora --engine=${engine} --framework=prisma --iac=${iac} --no-interactive`,
+          `generate @aws/nx-plugin:ts#rdb --name=${engine}Db --service=Aurora --engine=${engine} --ormFramework=Prisma --iacProvider=${iacProvider} --no-interactive`,
           opts,
         );
 
         // Source projects for connection testing
         await runCLI(
-          `generate @aws/nx-plugin:ts#api --name=my-api --infra=rest-lambda --no-interactive`,
+          `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#api --name=my-smithy-api --framework=smithy --no-interactive`,
+          `generate @aws/nx-plugin:ts#smithy-api --name=my-smithy-api --no-interactive`,
           opts,
         );
         await runCLI(
@@ -56,15 +57,15 @@ describe('smoke test - rdb', () => {
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#agent --project=agents --name=http-agent --infra=none --no-interactive`,
+          `generate @aws/nx-plugin:ts#agent --project=agents --name=http-agent --computeType=None --no-interactive`,
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#agent --project=agents --name=a2a-agent --protocol=a2a --infra=none --no-interactive`,
+          `generate @aws/nx-plugin:ts#agent --project=agents --name=a2a-agent --protocol=A2A --computeType=None --no-interactive`,
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:ts#mcp-server --project=agents --name=my-mcp --infra=none --no-interactive`,
+          `generate @aws/nx-plugin:ts#mcp-server --project=agents --name=my-mcp --computeType=None --no-interactive`,
           opts,
         );
 

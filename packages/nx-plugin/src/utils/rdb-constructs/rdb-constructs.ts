@@ -16,8 +16,8 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { Iac } from '../iac';
-import { Containers } from '../containers';
+import { IacProvider } from '../iac';
+import { ContainerEngine } from '../containers';
 
 export interface AddRdbConstructOptions {
   projectName: string;
@@ -30,26 +30,28 @@ export interface AddRdbConstructOptions {
   migrationBundleDir: string;
   createDbUserBundleDir: string;
   dockerImageTag: string;
-  containers: Containers;
+  containerEngine: ContainerEngine;
 }
 
 export const addRdbInfra = async (
   tree: Tree,
-  options: AddRdbConstructOptions & { iac: Iac },
+  options: AddRdbConstructOptions & { iacProvider: IacProvider },
 ) => {
-  if (options.iac === 'cdk') {
+  if (options.iacProvider === 'CDK') {
     await addRdbCdkConstructs(tree, options);
-  } else if (options.iac === 'terraform') {
+  } else if (options.iacProvider === 'Terraform') {
     addRdbTerraformModules(tree, options);
   } else {
-    throw new Error(`Unsupported iac ${options.iac}`);
+    throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
   }
 
   updateJson(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      options.iacProvider === 'CDK'
+        ? SHARED_CONSTRUCTS_DIR
+        : SHARED_TERRAFORM_DIR,
       'project.json',
     ),
     (config: ProjectConfiguration) => {

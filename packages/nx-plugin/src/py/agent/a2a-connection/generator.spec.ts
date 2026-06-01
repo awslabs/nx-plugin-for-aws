@@ -20,8 +20,8 @@ describe('py#agent#a2a-connection generator', () => {
     path: 'py_host/host',
     port: 8082,
     rc: 'Host',
-    auth: 'iam' as const,
-    protocol: 'http' as const,
+    auth: 'IAM' as const,
+    protocol: 'HTTP' as const,
   };
 
   const REMOTE = {
@@ -30,8 +30,8 @@ describe('py#agent#a2a-connection generator', () => {
     path: 'py_remote/remote',
     port: 9001,
     rc: 'Remote',
-    auth: 'iam' as const,
-    protocol: 'a2a' as const,
+    auth: 'IAM' as const,
+    protocol: 'A2A' as const,
   };
 
   const setupProjects = () => {
@@ -202,7 +202,7 @@ dependencies = ["strands-agents"]
         sourceProject: 'test.py_host',
         targetProject: 'test.py_remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, protocol: 'http' },
+        targetComponent: { ...REMOTE, protocol: 'HTTP' },
       }),
     ).rejects.toThrow(/A2A/);
   });
@@ -214,14 +214,14 @@ dependencies = ["strands-agents"]
         sourceProject: 'test.py_host',
         targetProject: 'test.py_remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, auth: 'cognito' },
+        targetComponent: { ...REMOTE, auth: 'Cognito' },
       }),
     ).rejects.toThrow(/IAM/);
   });
 
   it('should add generator metric', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
     await pyAgentA2aConnectionGenerator(tree, {
       sourceProject: 'test.py_host',
       targetProject: 'test.py_remote',

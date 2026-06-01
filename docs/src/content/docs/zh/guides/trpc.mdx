@@ -2,8 +2,6 @@
 title: "tRPC"
 description: "tRPC 参考文档"
 generator: ts#trpc-api
-when:
-  framework: [trpc]
 ---
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
@@ -33,7 +31,7 @@ tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform
 <Snippet name="api/api-choice-note" />
 
 :::tip[API类型]
-如果您希望使用 [tRPC 订阅](https://trpc.io/docs/server/subscriptions)来流式传输响应,请选择 `rest-lambda`(默认)作为您的 `infra`。
+如果您希望使用 [tRPC 订阅](https://trpc.io/docs/server/subscriptions)来流式传输响应,请选择 `ServerlessApiGatewayRestApi`(默认)作为您的 `computeType`。
 :::
 
 :::tip[集成模式]
@@ -151,10 +149,10 @@ export const echo = publicProcedure
 
 如果添加新过程,请确保在 `src/router.ts` 的路由器中注册它。
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="Streaming subscriptions — REST API only, uses SSE">
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only, uses SSE">
 ### 订阅(流式传输)
 
-tRPC 订阅允许您使用[服务器发送事件(SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)从服务器向客户端流式传输数据。当您选择 `rest-lambda` 作为计算类型时,生成器会自动配置流式传输所需的基础设施,以及流式传输 Lambda 处理程序和 `ZodAsyncIterable` 模式辅助工具。
+tRPC 订阅允许您使用[服务器发送事件(SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)从服务器向客户端流式传输数据。当您选择 `ServerlessApiGatewayRestApi` 作为计算类型时,生成器会自动配置流式传输所需的基础设施,以及流式传输 Lambda 处理程序和 `ZodAsyncIterable` 模式辅助工具。
 
 要定义订阅过程,请使用 `.subscription` 方法和异步生成器函数。使用 `src/schema/z-async-iterable.ts` 中的 `ZodAsyncIterable` 辅助工具来定义输出模式:
 
@@ -290,7 +288,7 @@ export const echo = publicProcedure
 
 例如,让我们在 `src/middleware/identity.ts` 中实现一些中间件来从 API 中提取调用用户的详细信息。
 
-<OptionFilter when={{ auth: 'iam' }} description="Identity middleware example for IAM-authenticated APIs">
+<OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
 此示例演示了 `IAM` 身份验证的身份中间件。我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。
 
 首先,我们定义要添加到上下文中的内容:
@@ -326,7 +324,7 @@ export const createIdentityPlugin = () => {
 在我们的案例中,我们希望提取调用 Cognito 用户的详细信息。我们将通过从 API Gateway 事件中提取用户的主题 ID(或 "sub"),并从 Cognito 检索用户详细信息来实现。具体实现根据事件是由 REST API 还是 HTTP API 提供给我们的函数而有所不同:
 
 <Tabs syncKey="http-rest">
-<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -389,7 +387,7 @@ export const createIdentityPlugin = () => {
 };
 ```
 </TabItem>
-<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -461,8 +459,8 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
-当您使用 `auth: 'cognito'` 部署时,API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT,并将经过验证的声明放置在 Lambda 事件的 `event.requestContext.authorizer.claims` 上。我们的中间件只需读取这些声明——无需额外的 AWS SDK 调用,无需手动 JWT 验证。
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+当您使用 `auth: 'Cognito'` 部署时,API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT,并将经过验证的声明放置在 Lambda 事件的 `event.requestContext.authorizer.claims` 上。我们的中间件只需读取这些声明——无需额外的 AWS SDK 调用,无需手动 JWT 验证。
 
 首先,我们定义要添加到上下文中的内容:
 
@@ -553,7 +551,7 @@ tRPC API 生成器根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基�
 <Fragment slot="cdk">
 用于部署 API 的 CDK 构造位于 `common/constructs` 文件夹中。您可以在 CDK 应用程序中使用此构造,例如:
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="CDK usage for IAM or Custom authentication">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="CDK usage for IAM or Custom authentication">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -572,7 +570,7 @@ When using `Custom` auth, the construct creates a Lambda Authorizer internally f
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -589,7 +587,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-可以使用 <Link path="/guides/react-website-auth">`ts#website#auth` 生成器</Link>生成 `UserIdentity` 构造。
+可以使用 <Link path="/guides/react-website-auth">`ts#react-website-auth` 生成器</Link>生成 `UserIdentity` 构造。
 </OptionFilter>
 
 这将设置您的 API 基础设施,包括 AWS API Gateway REST 或 HTTP API、用于业务逻辑的 AWS Lambda 函数,以及根据您选择的 `auth` 方法配置的身份验证。
@@ -601,7 +599,7 @@ export class ExampleStack extends Stack {
 
 API 模块将其 Lambda 部署 zip 暂存在共享的 S3 资产存储桶中——详情请参阅 <Link path="/guides/terraform-project">Terraform 基础设施指南</Link>。每次部署实例化一次 `core/asset-bucket` 模块,并通过 `asset_bucket_name` 输入将其 `bucket_name` 输出传递给每个 API / Lambda 模块:
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="Terraform usage for IAM or Custom authentication">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="Terraform usage for IAM or Custom authentication">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -628,7 +626,7 @@ module "my_api" {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
+<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
 ```hcl {1-3, 8-9}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -711,7 +709,7 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'custom' }} description="Custom Lambda Authorizer usage with Terraform">
+<OptionFilter when={{ auth: 'Custom' }} description="Custom Lambda Authorizer usage with Terraform">
 :::caution[Custom Lambda Authorizer]
 When using `Custom` auth, your API is protected by a Lambda Authorizer that **denies all requests by default**. You must implement your authorization logic in the generated `src/authorizer.ts` file before your API will accept any traffic.
 :::
@@ -719,7 +717,7 @@ When using `Custom` auth, your API is protected by a Lambda Authorizer that **de
 </Fragment>
 </Infrastructure>
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="WAF — REST APIs get a WAF Web ACL by default">
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST APIs get a WAF Web ACL by default">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
@@ -733,7 +731,7 @@ When using `Custom` auth, your API is protected by a Lambda Authorizer that **de
 如果您为 `iacProvider` 选择了 CDK,当在 tRPC API 中添加或删除过程时,这些更改将立即反映在 CDK 构造中,无需重新构建。
 :::
 
-<OptionFilter when={{ auth: 'iam' }} description="Granting API invoke access — IAM-authenticated APIs only">
+<OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
 ### 授予访问权限(仅限 IAM)
 
 可以按如下方式授予 API 访问权限:

@@ -47,7 +47,7 @@ export const smithyReactConnectionGenerator = async (
 
   const backendMetadata = backendProjectConfig.metadata as any;
   const apiName = backendMetadata?.apiName;
-  const auth = (backendMetadata?.auth ?? 'iam').toLowerCase();
+  const auth = backendMetadata?.auth ?? 'IAM';
   const port = backendMetadata?.port ?? backendMetadata?.ports?.[0] ?? 3001;
 
   const namespace = inferNamespace(tree, modelProjectConfig);

@@ -58,7 +58,7 @@ describe('smoke test - dungeon-adventure', () => {
     // 1. Monorepo Setup
 
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', 'cdk')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', 'CDK')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -69,7 +69,7 @@ describe('smoke test - dungeon-adventure', () => {
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --name=GameApi --no-interactive`,
+      `generate @aws/nx-plugin:ts#trpc-api --name=GameApi --no-interactive`,
       opts,
     );
     await runCLI(
@@ -77,7 +77,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#agent --project=story --auth=cognito --protocol=ag-ui --no-interactive`,
+      `generate @aws/nx-plugin:py#agent --project=story --auth=Cognito --protocol=AG-UI --no-interactive`,
       opts,
     );
     await runCLI(
@@ -89,12 +89,12 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=GameUI --ux=shadcn --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=GameUI --uxProvider=Shadcn --no-interactive`,
       opts,
     );
     // No need to allow signup for the e2e tests
     await runCLI(
-      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false`,
       opts,
     );
     await runCLI(

@@ -39,7 +39,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { uvxCommand } from '../../utils/py';
-import { resolveContainers } from '../../utils/containers';
+import { resolveContainerEngine } from '../../utils/containers';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -54,9 +54,9 @@ export async function tsInfraGenerator(
   // CDK shells out to a container engine to build image assets. Default
   // (docker) needs no env override; finch is set via CDK_DOCKER per
   // https://docs.aws.amazon.com/cdk/v2/guide/build-containers.html#build-container-replace.
-  const containers = await resolveContainers(tree, 'inherit');
+  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
   const cdkEnv: Record<string, string> | undefined =
-    containers === 'docker' ? undefined : { CDK_DOCKER: containers };
+    containerEngine === 'docker' ? undefined : { CDK_DOCKER: containerEngine };
   const withCdkEnv = <T extends Record<string, unknown>>(opts: T): T => {
     if (!cdkEnv) return opts;
     const existingEnv = (opts.env as Record<string, string> | undefined) ?? {};
@@ -67,12 +67,12 @@ export async function tsInfraGenerator(
 
   // Shared constructs always in CDK for typescript infra generator
   await sharedConstructsGenerator(tree, {
-    iac: 'cdk',
+    iacProvider: 'CDK',
   });
 
   // Shared infra-config and infra-scripts packages (lazy creation, only when enabled)
-  const stageConfig = schema.stageConfig ?? false;
-  if (stageConfig) {
+  const enableStageConfig = schema.enableStageConfig ?? false;
+  if (enableStageConfig) {
     await sharedInfraConfigGenerator(tree);
     await sharedScriptsGenerator(tree);
   }
@@ -106,7 +106,7 @@ export async function tsInfraGenerator(
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerDisplayCommands().exec,
       dir: lib.dir,
-      stageConfig,
+      enableStageConfig,
       ...schema,
     },
     {
@@ -151,7 +151,7 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
-        options: stageConfig
+        options: enableStageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra-deploy.ts ${libraryRoot}`,
             })
@@ -170,7 +170,7 @@ export async function tsInfraGenerator(
       config.targets.destroy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
-        options: stageConfig
+        options: enableStageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra-destroy.ts ${libraryRoot}`,
             })
@@ -227,7 +227,7 @@ export async function tsInfraGenerator(
           `${tree.root}/${PACKAGES_DIR}`,
         )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.lib.json`,
       },
-      ...(stageConfig
+      ...(enableStageConfig
         ? [
             {
               path: `${path.relative(

@@ -74,7 +74,7 @@ describe('infra generator', () => {
         command: 'cdk synth',
       },
     });
-    // Default (stageConfig=false): deploy uses cdk directly
+    // Default (enableStageConfig=false): deploy uses cdk directly
     expect(config.targets.deploy).toMatchObject({
       executor: 'nx:run-commands',
       options: {
@@ -91,7 +91,7 @@ describe('infra generator', () => {
           'cdk deploy --require-approval=never --app ../../dist/{projectRoot}/cdk.out',
       },
     });
-    // Default (stageConfig=false): destroy uses cdk directly
+    // Default (enableStageConfig=false): destroy uses cdk directly
     expect(config.targets.destroy).toMatchObject({
       executor: 'nx:run-commands',
       options: {
@@ -310,10 +310,10 @@ describe('infra generator', () => {
     );
   });
 
-  describe('with stageConfig', () => {
+  describe('with enableStageConfig', () => {
     const stageConfigOptions: TsInfraGeneratorSchema = {
       ...options,
-      stageConfig: true,
+      enableStageConfig: true,
     };
 
     it('should use tsx infra-deploy/infra-destroy for deploy and destroy targets', async () => {

@@ -33,7 +33,7 @@ describe('trpc react generator', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'custom',
+          auth: 'Custom',
         },
       }),
     );
@@ -106,7 +106,7 @@ export function Main() {
       ...config,
       metadata: {
         ...config.metadata,
-        auth: 'iam',
+        auth: 'IAM',
       },
     }));
 
@@ -149,7 +149,7 @@ export function Main() {
       ...config,
       metadata: {
         ...config.metadata,
-        auth: 'cognito',
+        auth: 'Cognito',
       },
     }));
 
@@ -180,7 +180,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Call the generator function
     await reactGenerator(tree, {
@@ -191,13 +191,13 @@ export function Main() {
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, TRPC_REACT_GENERATOR_INFO.metric);
   });
-  describe('REST API (rest-lambda)', () => {
+  describe('REST API (ServerlessApiGatewayRestApi)', () => {
     beforeEach(() => {
       updateJson(tree, 'apps/backend/project.json', (config) => ({
         ...config,
         metadata: {
           ...config.metadata,
-          infra: 'rest-lambda',
+          computeType: 'ServerlessApiGatewayRestApi',
         },
       }));
     });
@@ -225,7 +225,7 @@ export function Main() {
         ...config,
         metadata: {
           ...config.metadata,
-          auth: 'iam',
+          auth: 'IAM',
         },
       }));
 
@@ -254,7 +254,7 @@ export function Main() {
         ...config,
         metadata: {
           ...config.metadata,
-          auth: 'cognito',
+          auth: 'Cognito',
         },
       }));
 
@@ -283,7 +283,7 @@ export function Main() {
         ...config,
         metadata: {
           ...config.metadata,
-          infra: 'http-lambda',
+          computeType: 'ServerlessApiGatewayHttpApi',
         },
       }));
 
@@ -335,7 +335,7 @@ describe('trpc react generator with unqualified names', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'custom',
+          auth: 'Custom',
         },
       }),
     );
@@ -405,7 +405,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
-      iac: 'cdk',
+      iacProvider: 'CDK',
     });
   });
 
@@ -413,9 +413,9 @@ describe('trpc react generator with real react and trpc projects', () => {
     // Generate a trpc backend
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
-      auth: 'custom',
-      infra: 'http-lambda',
-      iac: 'cdk',
+      auth: 'Custom',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      iacProvider: 'CDK',
     });
 
     await reactGenerator(tree, {
@@ -453,17 +453,17 @@ describe('trpc react generator with real react and trpc projects', () => {
     // Generate first API
     await tsTrpcApiGenerator(tree, {
       name: 'FirstApi',
-      auth: 'custom',
-      infra: 'http-lambda',
-      iac: 'cdk',
+      auth: 'Custom',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      iacProvider: 'CDK',
     });
 
     // Generate second API
     await tsTrpcApiGenerator(tree, {
       name: 'SecondApi',
-      auth: 'custom',
-      infra: 'http-lambda',
-      iac: 'cdk',
+      auth: 'Custom',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      iacProvider: 'CDK',
     });
 
     // Connect first API to frontend

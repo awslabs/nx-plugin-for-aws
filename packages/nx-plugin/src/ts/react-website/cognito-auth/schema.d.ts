@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacOption } from '../../../utils/iac';
+import { IacProviderOption } from '../../../utils/iac';
 
 export interface TsReactWebsiteAuthGeneratorSchema {
   project: string;
   allowSignup: boolean;
   cognitoDomain?: string;
-  iac: IacOption;
+  iacProvider: IacProviderOption;
 }

@@ -118,28 +118,29 @@ Add capabilities to existing projects:
 
 ## Available Generators
 
-| Generator            | Description                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `connection`         | Integrates a source project with a target project                                                                  |
-| `license`            | Add LICENSE files and configure source code licence headers                                                        |
-| `py#api`             | Create a Python API                                                                                                |
-| `py#lambda-function` | Adds a lambda function to a python project                                                                         |
-| `py#mcp-server`      | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
-| `py#project`         | Generates a Python project                                                                                         |
-| `py#agent`           | Add an AI Agent to a Python project                                                                                |
-| `terraform#project`  | Generates a Terraform project                                                                                      |
-| `ts#docs`            | Generates a documentation site                                                                                     |
-| `ts#infra`           | Generates a cdk application                                                                                        |
-| `ts#lambda-function` | Generate a TypeScript lambda function                                                                              |
-| `ts#mcp-server`      | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
-| `ts#nx-generator`    | Generator for adding an Nx Generator to an existing TypeScript project                                             |
-| `ts#nx-plugin`       | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
-| `ts#project`         | Generates a TypeScript project                                                                                     |
-| `ts#website`         | Generates a website application                                                                                    |
-| `ts#website#auth`    | Adds auth to an existing website                                                                                   |
-| `ts#agent`           | Add an AI Agent to a TypeScript project                                                                            |
-| `ts#api`             | Create a TypeScript API                                                                                            |
-| `ts#rdb`             | Create a relational database project                                                                               |
+| Generator               | Description                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `connection`            | Integrates a source project with a target project                                                                  |
+| `license`               | Add LICENSE files and configure source code licence headers                                                        |
+| `py#fast-api`           | Generates a FastAPI Python project                                                                                 |
+| `py#lambda-function`    | Adds a lambda function to a python project                                                                         |
+| `py#mcp-server`         | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
+| `py#project`            | Generates a Python project                                                                                         |
+| `py#agent`              | Add an AI Agent to a Python project                                                                                |
+| `terraform#project`     | Generates a Terraform project                                                                                      |
+| `ts#docs`               | Generates a documentation site                                                                                     |
+| `ts#infra`              | Generates a cdk application                                                                                        |
+| `ts#lambda-function`    | Generate a TypeScript lambda function                                                                              |
+| `ts#mcp-server`         | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
+| `ts#nx-generator`       | Generator for adding an Nx Generator to an existing TypeScript project                                             |
+| `ts#nx-plugin`          | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
+| `ts#project`            | Generates a TypeScript project                                                                                     |
+| `ts#react-website`      | Generates a React static website                                                                                   |
+| `ts#react-website#auth` | Adds auth to an existing React website                                                                             |
+| `ts#smithy-api`         | Create an API using Smithy and the Smithy TypeScript Server SDK                                                    |
+| `ts#agent`              | Add an AI Agent to a TypeScript project                                                                            |
+| `ts#trpc-api`           | creates a trpc backend                                                                                             |
+| `ts#rdb`                | Create a relational database project                                                                               |
 
 ## Best Practices
 

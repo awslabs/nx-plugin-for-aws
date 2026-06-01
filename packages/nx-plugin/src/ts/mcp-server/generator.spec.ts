@@ -50,8 +50,8 @@ describe('ts#mcp-server generator', () => {
   it('should add MCP server to existing TypeScript project with default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added to the existing project
@@ -68,7 +68,7 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/mcp-server/http.ts'),
     ).toBeTruthy();
 
-    // There should be no Dockerfile since the infra is none
+    // There should be no Dockerfile since the computeType is None
     expect(
       tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
     ).toBeFalsy();
@@ -115,8 +115,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with custom name
@@ -164,8 +164,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'esm-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that files were generated (ESM flag should be passed to templates)
@@ -186,8 +186,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'cjs-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that files were generated
@@ -211,8 +211,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'new-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that package.json was created
@@ -229,8 +229,8 @@ describe('ts#mcp-server generator', () => {
   it('should add dependencies to both root and project package.json', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check root package.json dependencies
@@ -283,8 +283,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'no-source-root',
       name: 'default-src-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Should default to {projectRoot}/src
@@ -297,8 +297,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'My_Special#Server!',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Name should be converted to kebab-case
@@ -322,8 +322,8 @@ describe('ts#mcp-server generator', () => {
     await expect(
       tsMcpServerGenerator(tree, {
         project: 'non-ts-project',
-        infra: 'none',
-        iac: 'cdk',
+        computeType: 'None',
+        iacProvider: 'CDK',
       }),
     ).rejects.toThrow(
       'Unsupported project non-ts-project. Expected a TypeScript project (with a tsconfig.json)',
@@ -346,8 +346,8 @@ describe('ts#mcp-server generator', () => {
 
     await tsMcpServerGenerator(tree, {
       project: '@org/nested-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Should use the last part of the project name for default server name
@@ -365,8 +365,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated MCP server files
@@ -400,8 +400,8 @@ describe('ts#mcp-server generator', () => {
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added to the existing project
@@ -470,8 +470,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with custom name
@@ -520,8 +520,8 @@ describe('ts#mcp-server generator', () => {
   it('should add additional dependencies for BedrockAgentCoreRuntime', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check root package.json dependencies
@@ -558,8 +558,8 @@ describe('ts#mcp-server generator', () => {
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -591,8 +591,8 @@ describe('ts#mcp-server generator', () => {
   it('should update shared constructs build dependencies for BedrockAgentCoreRuntime', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -613,8 +613,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'my-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that the MCP server construct uses findWorkspaceRoot to locate the bundle
@@ -629,8 +629,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated MCP server construct
@@ -663,12 +663,12 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     expectHasMetricTags(tree, TS_MCP_SERVER_GENERATOR_INFO.metric);
@@ -677,8 +677,8 @@ describe('ts#mcp-server generator', () => {
   it('should generate MCP server with Terraform provider and default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Check that MCP server files were added to the existing project
@@ -723,8 +723,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-server',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Check that MCP server files were added with custom name
@@ -761,8 +761,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-server',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Snapshot the generated Terraform core runtime file
@@ -793,8 +793,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-server',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Check that the docker image tag is correctly generated in the Terraform file
@@ -807,11 +807,11 @@ describe('ts#mcp-server generator', () => {
     );
   });
 
-  it('should not generate Terraform files when infra is none', async () => {
+  it('should not generate Terraform files when computeType is None', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'terraform',
+      computeType: 'None',
+      iacProvider: 'Terraform',
     });
 
     // Check that MCP server files were added
@@ -819,7 +819,7 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/mcp-server/index.ts'),
     ).toBeTruthy();
 
-    // There should be no Dockerfile since the infra is none
+    // There should be no Dockerfile since the computeType is None
     expect(
       tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
     ).toBeFalsy();
@@ -835,19 +835,19 @@ describe('ts#mcp-server generator', () => {
     ).toBeFalsy();
   });
 
-  it('should inherit iac from config when set to Inherit', async () => {
+  it('should inherit iacProvider from config when set to Inherit', async () => {
     // Set up config with Terraform provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
       iac: {
-        provider: 'terraform',
+        provider: 'Terraform',
       },
     });
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'inherit',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Inherit',
     });
 
     // Verify Terraform files are created (not CDK constructs)
@@ -861,8 +861,8 @@ describe('ts#mcp-server generator', () => {
   it('should create rolldown config file for BedrockAgentCoreRuntime', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check rolldown config file was created
@@ -883,8 +883,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'path-test-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check Dockerfile COPY path
@@ -909,16 +909,16 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'first-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Generate second MCP server
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'second-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check both MCP server directories exist
@@ -987,8 +987,8 @@ describe('ts#mcp-server generator', () => {
   it('should add component generator metadata with default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -1010,8 +1010,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -1033,8 +1033,8 @@ describe('ts#mcp-server generator', () => {
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -1050,8 +1050,8 @@ describe('ts#mcp-server generator', () => {
 
       await tsMcpServerGenerator(tree, {
         project: 'test-project',
-        infra: 'none',
-        iac: 'cdk',
+        computeType: 'None',
+        iacProvider: 'CDK',
       });
 
       const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -1063,8 +1063,8 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: '',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with default name

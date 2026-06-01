@@ -11,9 +11,9 @@ import {
 
 export const CONTAINER_ENGINES = ['docker', 'finch'] as const;
 
-export type Containers = (typeof CONTAINER_ENGINES)[number];
+export type ContainerEngine = (typeof CONTAINER_ENGINES)[number];
 
-export type ContainersOption = Containers | 'inherit';
+export type ContainerEngineOption = ContainerEngine | 'Inherit';
 
 /**
  * Configuration for container tooling
@@ -22,7 +22,7 @@ export interface ContainersConfig {
   /**
    * Container engine used for build/push/login operations
    */
-  engine: Containers;
+  engine: ContainerEngine;
 }
 
 const isOnPath = (binary: string): boolean => {
@@ -40,7 +40,7 @@ const isOnPath = (binary: string): boolean => {
  * falls back to finch when only finch is installed; defaults to docker
  * when neither is found.
  */
-export const inferContainers = (): Containers => {
+export const inferContainerEngine = (): ContainerEngine => {
   if (isOnPath('docker')) return 'docker';
   if (isOnPath('finch')) return 'finch';
   return 'docker';
@@ -51,11 +51,11 @@ export const inferContainers = (): Containers => {
  * `Inherit` reads the value from the workspace plugin config, defaulting
  * to docker when nothing has been configured.
  */
-export const resolveContainers = async (
+export const resolveContainerEngine = async (
   tree: Tree,
-  option: ContainersOption,
-): Promise<Containers> => {
-  if (option === 'inherit') {
+  option: ContainerEngineOption,
+): Promise<ContainerEngine> => {
+  if (option === 'Inherit') {
     const pluginConfig = await readAwsNxPluginConfig(tree);
     const engine = pluginConfig?.containers?.engine ?? 'docker';
     if (!CONTAINER_ENGINES.includes(engine)) {

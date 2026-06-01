@@ -93,7 +93,7 @@ export function Main() {
           metadata: {
             generator: TS_SMITHY_API_GENERATOR_INFO.id,
             apiName: 'TestApi',
-            auth: 'iam',
+            auth: 'IAM',
             port: 3001,
           },
         }),
@@ -347,7 +347,7 @@ export function Main() {
         ...config,
         metadata: {
           ...config.metadata,
-          auth: 'cognito',
+          auth: 'Cognito',
         },
       }));
 
@@ -375,7 +375,7 @@ export function Main() {
         ...config,
         metadata: {
           ...config.metadata,
-          auth: 'custom',
+          auth: 'Custom',
         },
       }));
 
@@ -476,7 +476,7 @@ export function Main() {
           metadata: {
             generator: TS_SMITHY_API_GENERATOR_INFO.id,
             apiName: 'TestApi',
-            auth: 'cognito',
+            auth: 'Cognito',
             port: 4000,
             modelProject: 'api-model',
           },
@@ -892,7 +892,7 @@ export function Main() {
 
   describe('metrics', () => {
     it('should add generator metric to app.ts', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
       // Setup a React project with proper main.tsx structure
       tree.write(
@@ -980,7 +980,7 @@ export function Main() {
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
         skipInstall: true,
-        iac: 'cdk',
+        iacProvider: 'CDK',
       });
     });
 
@@ -988,9 +988,9 @@ export function Main() {
       // Generate a smithy API using the real generator (creates both model and backend projects)
       await tsSmithyApiGenerator(tree, {
         name: 'TestApi',
-        auth: 'custom',
-        infra: 'rest-lambda',
-        iac: 'cdk',
+        auth: 'Custom',
+        computeType: 'ServerlessApiGatewayRestApi',
+        iacProvider: 'CDK',
       });
 
       // Connect the frontend to the smithy API using the model project name
@@ -1088,9 +1088,9 @@ export function Main() {
       // Generate a smithy API with IAM auth
       await tsSmithyApiGenerator(tree, {
         name: 'SecureApi',
-        auth: 'iam',
-        infra: 'rest-lambda',
-        iac: 'cdk',
+        auth: 'IAM',
+        computeType: 'ServerlessApiGatewayRestApi',
+        iacProvider: 'CDK',
       });
 
       // Connect the frontend to the smithy API using the model project name

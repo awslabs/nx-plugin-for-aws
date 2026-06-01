@@ -82,7 +82,7 @@ export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
 export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
-  iac?: 'cdk' | 'terraform',
+  iacProvider?: 'CDK' | 'Terraform',
   tag?: string,
 ) => {
   const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;
@@ -93,7 +93,7 @@ export const buildCreateNxWorkspaceCommand = (
     // npm requires '--' to stop interpreting subsequent flags as npm config
     ...(pm === 'npm' ? ['--'] : []),
     workspace,
-    ...(iac ? [`--iac=${iac}`] : []),
+    ...(iacProvider ? [`--iacProvider=${iacProvider}`] : []),
   ];
   return parts.join(' ');
 };

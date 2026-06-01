@@ -2,16 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { IacOption } from '../../utils/iac';
+import { IacProviderOption } from '../../utils/iac';
 
 export interface TsRdbGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  infra: 'aurora';
-  engine: 'postgres' | 'mysql';
+  service: 'Aurora';
+  engine: 'PostgreSQL' | 'MySQL';
   databaseUser?: string;
   databaseName?: string;
-  framework: 'prisma';
-  iac: IacOption;
+  ormFramework: 'Prisma';
+  iacProvider: IacProviderOption;
 }

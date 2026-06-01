@@ -22,7 +22,7 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { resolveIac } from '../../../utils/iac';
+import { resolveIacProvider } from '../../../utils/iac';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { toClassName, toKebabCase } from '../../../utils/names';
 import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
@@ -109,7 +109,7 @@ export const tsSmithyApiGenerator = async (
     },
   );
 
-  if (options.auth === 'custom') {
+  if (options.auth === 'Custom') {
     generateFiles(
       tree,
       joinPathFragments(
@@ -133,12 +133,12 @@ export const tsSmithyApiGenerator = async (
   }
 
   // Add infrastructure
-  const iac = await resolveIac(tree, options.iac);
+  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
   await sharedConstructsGenerator(tree, {
-    iac,
+    iacProvider,
   });
   await addApiGatewayInfra(tree, {
-    iac,
+    iacProvider,
     apiProjectName: backendFullyQualifiedName,
     apiNameClassName,
     apiNameKebabCase,
@@ -152,7 +152,7 @@ export const tsSmithyApiGenerator = async (
         'bundle',
       ),
       integrationPattern,
-      ...(options.auth === 'custom' && {
+      ...(options.auth === 'Custom' && {
         authorizerBundleOutputDir: joinPathFragments(
           'dist',
           backendProjectConfig.root,
@@ -163,7 +163,7 @@ export const tsSmithyApiGenerator = async (
     },
   });
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
-    iac,
+    iacProvider,
     apiNameKebabCase,
     specPath: joinPathFragments(
       'dist',
@@ -181,7 +181,7 @@ export const tsSmithyApiGenerator = async (
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
-  if (options.auth === 'custom') {
+  if (options.auth === 'Custom') {
     await addTypeScriptBundleTarget(tree, backendProjectConfig, {
       targetFilePath: 'src/authorizer.ts',
       bundleOutputDir: 'authorizer',
@@ -280,7 +280,7 @@ export const tsSmithyApiGenerator = async (
       '@aws-lambda-powertools/tracer',
       '@aws-lambda-powertools/metrics',
       '@aws-sdk/client-appconfigdata',
-      ...(options.auth === 'custom'
+      ...(options.auth === 'Custom'
         ? (['@aws-lambda-powertools/parser'] as const)
         : []),
     ]),

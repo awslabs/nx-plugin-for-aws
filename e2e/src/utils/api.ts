@@ -4,13 +4,16 @@
  */
 import { runCLI, RunCmdOpts } from '../utils';
 
-const AUTH_TYPES = ['iam', 'cognito', 'custom'] as const;
-const INFRA_TYPES = ['rest-lambda', 'http-lambda'] as const;
+const AUTH_TYPES = ['IAM', 'Cognito', 'Custom'] as const;
+const COMPUTE_TYPES = [
+  'ServerlessApiGatewayRestApi',
+  'ServerlessApiGatewayHttpApi',
+] as const;
 const INTEGRATION_PATTERNS = ['isolated', 'shared'] as const;
 
-const SHORT_INFRA: Record<(typeof INFRA_TYPES)[number], string> = {
-  'http-lambda': 'http',
-  'rest-lambda': 'rest',
+const SHORT_COMPUTE_TYPES: Record<(typeof COMPUTE_TYPES)[number], string> = {
+  ServerlessApiGatewayHttpApi: 'http',
+  ServerlessApiGatewayRestApi: 'rest',
 };
 
 export const generateApiProjectPermutations = async (
@@ -20,16 +23,16 @@ export const generateApiProjectPermutations = async (
   opts?: RunCmdOpts,
 ) => {
   for (const auth of AUTH_TYPES) {
-    for (const infra of INFRA_TYPES) {
+    for (const computeType of COMPUTE_TYPES) {
       for (const integrationPattern of INTEGRATION_PATTERNS) {
         const name = [
           namePrefix,
-          auth,
-          SHORT_INFRA[infra],
+          auth.toLowerCase(),
+          SHORT_COMPUTE_TYPES[computeType],
           integrationPattern,
         ].join(sep);
         await runCLI(
-          `generate @aws/nx-plugin:${generator} --name=${name} --auth=${auth} --infra=${infra} --integrationPattern=${integrationPattern} --no-interactive`,
+          `generate @aws/nx-plugin:${generator} --name=${name} --auth=${auth} --computeType=${computeType} --integrationPattern=${integrationPattern} --no-interactive`,
           opts,
         );
       }
@@ -44,12 +47,12 @@ export const connectApiProjectPermutations = async (
   opts?: RunCmdOpts,
 ) => {
   for (const auth of AUTH_TYPES) {
-    for (const infra of INFRA_TYPES) {
+    for (const computeType of COMPUTE_TYPES) {
       for (const integrationPattern of INTEGRATION_PATTERNS) {
         const name = [
           namePrefix,
-          auth,
-          SHORT_INFRA[infra],
+          auth.toLowerCase(),
+          SHORT_COMPUTE_TYPES[computeType],
           integrationPattern,
         ].join(sep);
         await runCLI(

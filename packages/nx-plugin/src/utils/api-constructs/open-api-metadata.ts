@@ -8,7 +8,7 @@ import {
   Tree,
   updateJson,
 } from '@nx/devkit';
-import { Iac } from '../iac';
+import { IacProvider } from '../iac';
 import { updateGitIgnore } from '../git';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
@@ -17,7 +17,7 @@ import {
 } from '../shared-constructs-constants';
 
 export interface AddOpenApiMetadataGenerateTargetOptions {
-  iac: Iac;
+  iacProvider: IacProvider;
   apiNameKebabCase: string;
   specPath: string;
   specBuildTargetName: string;
@@ -30,13 +30,13 @@ export interface AddOpenApiMetadataGenerateTargetOptions {
 export const addSharedConstructsOpenApiMetadataGenerateTarget = (
   tree: Tree,
   {
-    iac,
+    iacProvider,
     apiNameKebabCase,
     specPath,
     specBuildTargetName,
   }: AddOpenApiMetadataGenerateTargetOptions,
 ) => {
-  if (iac !== 'cdk') {
+  if (iacProvider !== 'CDK') {
     // For Terraform, we do not support type-safe integration builders, rather only the single lambda
     // router pattern, and therefore do not need to add depenencies on metadata generation.
     return;

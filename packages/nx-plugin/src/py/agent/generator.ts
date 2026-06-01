@@ -43,8 +43,8 @@ import { FsCommands } from '../../utils/fs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
+import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
 
@@ -89,16 +89,16 @@ export const pyAgentGenerator = async (
     agentNameSnakeCase,
   );
 
-  const infra = options.infra ?? 'agentcore';
-  const protocol = options.protocol ?? 'http';
+  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const protocol = options.protocol ?? 'HTTP';
 
-  if (infra === 'none' && options.auth && options.auth !== 'iam') {
+  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
     console.warn(
-      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'iam';
+  const auth = options.auth ?? 'IAM';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `session_id_context` and propagate the AgentCore
@@ -146,9 +146,9 @@ export const pyAgentGenerator = async (
     'boto3',
     'fastapi',
     'mcp',
-    ...(protocol === 'a2a'
+    ...(protocol === 'A2A'
       ? (['strands-agents[a2a]'] as const)
-      : protocol === 'ag-ui'
+      : protocol === 'AG-UI'
         ? (['strands-agents', 'ag-ui-protocol', 'ag-ui-strands'] as const)
         : (['strands-agents'] as const)),
     'strands-agents-tools',
@@ -158,8 +158,8 @@ export const pyAgentGenerator = async (
     'fastapi[standard]',
   ]);
 
-  if (infra === 'agentcore') {
-    const containers = await resolveContainers(tree, 'inherit');
+  if (computeType === 'BedrockAgentCoreRuntime') {
+    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -206,7 +206,7 @@ export const pyAgentGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -217,29 +217,29 @@ export const pyAgentGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
-    const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the agent.
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
     const infraProtocol =
-      protocol === 'ag-ui' ? ('http' as const) : (protocol as 'http' | 'a2a');
+      protocol === 'AG-UI' ? ('HTTP' as const) : (protocol as 'HTTP' | 'A2A');
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,
       dockerOutputDir,
-      iac,
+      iacProvider,
       projectName: project.name,
       auth,
       serverProtocol: infraProtocol,
-      containers,
+      containerEngine,
     });
   }
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
-  const localDevPortStart = protocol === 'a2a' ? 9000 : 8081;
+  const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
   // All protocols use fastapi dev for hot reload:
@@ -255,7 +255,7 @@ export const pyAgentGenerator = async (
   const openApiTargetName = `${agentTargetPrefix}-openapi`;
   const clientGenTargetName = `${agentTargetPrefix}-generate-client`;
 
-  if (protocol === 'http') {
+  if (protocol === 'HTTP') {
     // Emit the OpenAPI spec generator script (shared with react-connection)
     generateFiles(
       tree,
@@ -302,25 +302,25 @@ export const pyAgentGenerator = async (
     {},
     withVersions([
       'agent-chat-cli',
-      ...(protocol === 'http'
+      ...(protocol === 'HTTP'
         ? (['tsx', '@types/node'] as const)
         : ([] as const)),
     ]),
   );
 
   const chatUrl =
-    protocol === 'ag-ui'
+    protocol === 'AG-UI'
       ? `http://localhost:${localDevPort}/invocations`
       : `http://localhost:${localDevPort}`;
   const chatCommand =
-    protocol === 'http'
+    protocol === 'HTTP'
       ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : protocol === 'ag-ui'
+      : protocol === 'AG-UI'
         ? `agent-chat-cli agui ${chatUrl}`
         : `agent-chat-cli a2a ${chatUrl}`;
 
   const httpOnlyTargets =
-    protocol === 'http'
+    protocol === 'HTTP'
       ? {
           [openApiTargetName]: {
             cache: true,
@@ -391,7 +391,7 @@ export const pyAgentGenerator = async (
           },
         },
         dependsOn: [
-          ...(protocol === 'http' ? [clientGenTargetName] : []),
+          ...(protocol === 'HTTP' ? [clientGenTargetName] : []),
           `${agentTargetPrefix}-serve-local`,
         ],
       },
@@ -413,6 +413,13 @@ export const pyAgentGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_AGENT_GENERATOR_INFO]);
+
+  if (protocol === 'AG-UI') {
+    const { addLicenseExceptions } = await import('../../license/config');
+    const { AG_UI_STRANDS_EXCEPTIONS } =
+      await import('../../license/known-exceptions');
+    await addLicenseExceptions(tree, AG_UI_STRANDS_EXCEPTIONS);
+  }
 
   await formatFilesInSubtree(tree);
   return async () => {

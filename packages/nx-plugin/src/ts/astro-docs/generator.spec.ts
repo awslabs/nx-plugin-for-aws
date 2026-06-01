@@ -200,7 +200,7 @@ describe('ts#astro-docs generator', () => {
   });
 
   it('should add generator metric to app.ts when shared constructs exist', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     await tsAstroDocsGenerator(tree, {
       name: 'docs',

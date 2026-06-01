@@ -43,7 +43,7 @@ describe('ts strands agent react connection generator', () => {
               path: 'src/agent',
               port: 8081,
               rc: 'TestAgent',
-              auth: 'iam',
+              auth: 'IAM',
             },
           ],
         },
@@ -74,7 +74,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'iam',
+        auth: 'IAM',
       },
     });
     // Verify generated files
@@ -109,7 +109,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'iam',
+        auth: 'IAM',
       },
     });
     const mainTsxContent = tree.read('apps/frontend/src/main.tsx', 'utf-8');
@@ -126,7 +126,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'iam',
+        auth: 'IAM',
       },
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -150,7 +150,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'iam',
+        auth: 'IAM',
       },
     });
 
@@ -182,7 +182,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'cognito',
+        auth: 'Cognito',
       },
     });
 
@@ -209,7 +209,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'custom',
+        auth: 'Custom',
       },
     });
 
@@ -269,7 +269,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     await tsAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',
@@ -280,7 +280,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'iam',
+        auth: 'IAM',
       },
     });
 
@@ -298,8 +298,8 @@ export function Main() {
           path: 'src/agent',
           port: 9000,
           rc: 'TestAgent',
-          auth: 'iam',
-          protocol: 'a2a',
+          auth: 'IAM',
+          protocol: 'A2A',
         },
       }),
     ).rejects.toThrow(/A2A/);
@@ -315,8 +315,8 @@ export function Main() {
         path: 'src/my-agui-agent',
         port: 8081,
         rc: 'MyAguiAgent',
-        auth: 'iam',
-        protocol: 'ag-ui',
+        auth: 'IAM',
+        protocol: 'AG-UI',
       },
     });
 
@@ -360,7 +360,7 @@ describe('ts strands agent react connection with real projects', () => {
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
-      iac: 'cdk',
+      iacProvider: 'CDK',
     });
   });
 
@@ -368,13 +368,13 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate a ts project for the agent
     await tsProjectGenerator(tree, {
       name: 'agent-project',
-      type: 'application',
+      projectType: 'application',
     });
 
     // Generate a strands agent
     await tsAgentGenerator(tree, {
       project: 'agent-project',
-      infra: 'none',
+      computeType: 'None',
     });
 
     // Connect react to strands agent
@@ -422,14 +422,14 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate a ts project for the agent
     await tsProjectGenerator(tree, {
       name: 'agent-project',
-      type: 'application',
+      projectType: 'application',
     });
 
     // Generate an AG-UI agent
     await tsAgentGenerator(tree, {
       project: 'agent-project',
-      protocol: 'ag-ui',
-      infra: 'none',
+      protocol: 'AG-UI',
+      computeType: 'None',
     });
 
     // Connect react to AG-UI agent
@@ -442,7 +442,7 @@ describe('ts strands agent react connection with real projects', () => {
         path: 'src/agent',
         port: 8081,
         rc: 'AgentProject',
-        protocol: 'ag-ui',
+        protocol: 'AG-UI',
       },
     });
 

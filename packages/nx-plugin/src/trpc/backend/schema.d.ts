@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Linter } from '@nx/eslint';
-import { IacOption } from '../../utils/iac';
+import { IacProviderOption } from '../../utils/iac';
 import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
 
 export interface TsTrpcApiGeneratorSchema {
   name: string;
-  infra: 'rest-lambda' | 'http-lambda';
+  computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
   integrationPattern?: 'isolated' | 'shared';
-  auth: 'iam' | 'cognito' | 'custom';
+  auth: 'IAM' | 'Cognito' | 'Custom';
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
-  iac: IacOption;
+  iacProvider: IacProviderOption;
 }

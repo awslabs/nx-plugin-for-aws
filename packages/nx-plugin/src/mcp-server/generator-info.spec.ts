@@ -391,10 +391,10 @@ Some middle text.
   describe('option filtering', () => {
     const pageWithBranches = `
 # Guide
-<OptionFilter when={{ infra: 'rest-lambda' }}>
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 REST-only content
 </OptionFilter>
-<OptionFilter when={{ infra: 'http-lambda' }}>
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 HTTP-only content
 </OptionFilter>
 common content
@@ -406,7 +406,7 @@ common content
         generators,
         undefined,
         undefined,
-        { infra: 'http-lambda' },
+        { computeType: 'ServerlessApiGatewayHttpApi' },
       );
       expect(result).toContain('HTTP-only content');
       expect(result).not.toContain('REST-only content');
@@ -417,10 +417,12 @@ common content
       const result = await postProcessGuide(pageWithBranches, generators);
       expect(result).toContain('REST-only content');
       expect(result).toContain('HTTP-only content');
-      expect(result).toMatch(/\[!NOTE]\s+Only when infra = rest-lambda/);
+      expect(result).toMatch(
+        /\[!NOTE]\s+Only when computeType = ServerlessApiGatewayRestApi/,
+      );
     });
 
-    it('filters Infrastructure to CDK slot when iac is CDK', async () => {
+    it('filters Infrastructure to CDK slot when iacProvider is CDK', async () => {
       const page = `
 # Deploy
 <Infrastructure>
@@ -437,13 +439,13 @@ terraform instructions
         generators,
         undefined,
         undefined,
-        { iac: 'cdk' },
+        { iacProvider: 'CDK' },
       );
       expect(result).toContain('cdk instructions');
       expect(result).not.toContain('terraform instructions');
     });
 
-    it('leaves Infrastructure blocks untouched when iac omitted', async () => {
+    it('leaves Infrastructure blocks untouched when iacProvider omitted', async () => {
       const page = `
 <Infrastructure>
 <Fragment slot="cdk">cdk here</Fragment>
@@ -484,7 +486,7 @@ title: React to AG-UI Agent
 when:
   sourceType: react
   targetType: py#agent
-  protocol: ag-ui
+  protocol: AG-UI
 ---
 REACT_AGUI_BODY`,
       'connection/react-py-agent.mdx': `---
@@ -493,8 +495,8 @@ when:
   sourceType: react
   targetType: py#agent
   protocol:
-    - http
-    - a2a
+    - HTTP
+    - A2A
 ---
 REACT_PY_STRANDS_BODY`,
     };
@@ -567,7 +569,7 @@ REACT_PY_STRANDS_BODY`,
         {
           sourceType: 'react',
           targetType: 'py#agent',
-          protocol: 'ag-ui',
+          protocol: 'AG-UI',
         },
       );
       expect(agui.content).toMatch(bodyMatcher('REACT_AGUI_BODY'));
@@ -581,7 +583,7 @@ REACT_PY_STRANDS_BODY`,
         {
           sourceType: 'react',
           targetType: 'py#agent',
-          protocol: 'http',
+          protocol: 'HTTP',
         },
       );
       expect(http.content).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
@@ -605,7 +607,7 @@ REACT_PY_STRANDS_BODY`,
         [connectionInfo],
         undefined,
         undefined,
-        { sourceType: 'ts#trpc-api', targetType: 'smithy', protocol: 'http' },
+        { sourceType: 'ts#trpc-api', targetType: 'smithy', protocol: 'HTTP' },
       );
       expect(result.kind).toBe('unsupported');
       expect(result.content).toContain('Unsupported combination');
@@ -638,7 +640,7 @@ REACT_PY_STRANDS_BODY`,
       // The enums come from the union of frontmatter values, sorted into
       // some stable order — just make sure the expected values appear.
       expect(rendered).toMatch(/sourceType: react\b/);
-      expect(rendered).toMatch(/protocol: .*ag-ui/);
+      expect(rendered).toMatch(/protocol: .*AG-UI/);
     });
   });
 

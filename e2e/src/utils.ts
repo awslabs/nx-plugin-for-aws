@@ -9,7 +9,11 @@ import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
 import { backOff } from 'exponential-backoff';
 // eslint-disable-next-line
-import { TS_VERSIONS } from '../../packages/nx-plugin/src/utils/versions';
+import {
+  TS_VERSIONS,
+  PY_VERSIONS,
+} from '../../packages/nx-plugin/src/utils/versions';
+export { TS_VERSIONS, PY_VERSIONS };
 
 export interface RunCmdOpts {
   silenceError?: boolean;

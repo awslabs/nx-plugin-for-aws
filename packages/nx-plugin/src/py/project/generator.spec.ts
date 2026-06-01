@@ -20,7 +20,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     // Verify project structure
@@ -43,7 +43,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const projectConfig = JSON.parse(
@@ -68,7 +68,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const projectConfig = JSON.parse(
@@ -90,7 +90,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const rootPyproject = parse(tree.read('pyproject.toml', 'utf-8'));
@@ -104,7 +104,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const pyprojectToml = parse(
@@ -122,7 +122,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const nxJson = JSON.parse(tree.read('nx.json', 'utf-8'));
@@ -139,7 +139,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
       moduleName: 'custom_module',
     });
 
@@ -151,7 +151,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
     const rootGitIgnorePatterns =
       tree.read('.gitignore', 'utf-8')?.split('\n') ?? [];
@@ -167,7 +167,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
     const packageJson = readJson(tree, 'package.json');
     expect(packageJson.devDependencies).toHaveProperty('@nxlv/python');
@@ -178,7 +178,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     expect(
@@ -188,13 +188,13 @@ describe('python project generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Call the generator function
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     // Verify the metric was added to app.ts
@@ -205,7 +205,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const pyprojectToml = parse(
@@ -220,7 +220,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const projectConfig = JSON.parse(
@@ -241,7 +241,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const projectConfig = JSON.parse(
@@ -265,7 +265,7 @@ describe('python project generator', () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
-      type: 'application',
+      projectType: 'application',
     });
 
     const nxJson = JSON.parse(tree.read('nx.json', 'utf-8'));
@@ -281,7 +281,7 @@ describe('python project generator', () => {
       name: 'test-project',
       directory: 'packages',
       subDirectory: 'libs',
-      type: 'library',
+      projectType: 'library',
     });
     expect(tree.exists('packages/libs')).toBeTruthy();
     expect(tree.exists('packages/libs/pyproject.toml')).toBeTruthy();

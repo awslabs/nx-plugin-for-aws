@@ -2,8 +2,6 @@
 title: tRPC
 description: Documentazione di riferimento per tRPC
 generator: ts#trpc-api
-when:
-  framework: [trpc]
 ---
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
@@ -33,7 +31,7 @@ Puoi generare una nuova API tRPC in due modi:
 <Snippet name="api/api-choice-note" />
 
 :::tip[Tipo di API]
-Seleziona `rest-lambda` (predefinito) come `infra` se desideri utilizzare le [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) per lo streaming delle risposte.
+Seleziona `ServerlessApiGatewayRestApi` (predefinito) come `computeType` se desideri utilizzare le [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) per lo streaming delle risposte.
 :::
 
 :::tip[Pattern di integrazione]
@@ -151,10 +149,10 @@ L'uso di `query` per definire l'implementazione indica che l'operazione non è m
 
 Se aggiungi una nuova procedura, assicurati di registrarla aggiungendola al router in `src/router.ts`.
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="Streaming subscriptions — REST API only, uses SSE">
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only, uses SSE">
 ### Subscriptions (Streaming)
 
-Le subscriptions tRPC ti permettono di effettuare lo streaming di dati dal server al client utilizzando [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Quando selezioni `rest-lambda` come tipo di compute, il generatore configura automaticamente l'infrastruttura necessaria per lo streaming, oltre a un Lambda handler per lo streaming e l'helper schema `ZodAsyncIterable`.
+Le subscriptions tRPC ti permettono di effettuare lo streaming di dati dal server al client utilizzando [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Quando selezioni `ServerlessApiGatewayRestApi` come tipo di compute, il generatore configura automaticamente l'infrastruttura necessaria per lo streaming, oltre a un Lambda handler per lo streaming e l'helper schema `ZodAsyncIterable`.
 
 Per definire una procedura subscription, utilizza il metodo `.subscription` con una funzione async generator. Usa l'helper `ZodAsyncIterable` da `src/schema/z-async-iterable.ts` per definire lo schema di output:
 
@@ -290,7 +288,7 @@ Puoi aggiungere valori aggiuntivi al contesto fornito alle procedure implementan
 
 Come esempio, implementiamo un middleware per estrarre dettagli sull'utente chiamante dalla nostra API in `src/middleware/identity.ts`.
 
-<OptionFilter when={{ auth: 'iam' }} description="Identity middleware example for IAM-authenticated APIs">
+<OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
 Questo esempio illustra il middleware per l'identità per l'autenticazione `IAM`. Cerchiamo il chiamante in Cognito utilizzando il sub estratto dall'evento API Gateway.
 
 Per prima cosa, definiamo cosa aggiungeremo al contesto:
@@ -326,7 +324,7 @@ export const createIdentityPlugin = () => {
 Nel nostro caso, vogliamo estrarre dettagli sull'utente Cognito chiamante. Lo faremo estraendo l'ID subject (o "sub") dell'utente dall'evento API Gateway e recuperando i dettagli utente da Cognito. L'implementazione varia a seconda che l'evento sia fornito alla nostra funzione da un'API REST o HTTP:
 
 <Tabs syncKey="http-rest">
-<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -389,7 +387,7 @@ export const createIdentityPlugin = () => {
 };
 ```
 </TabItem>
-<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -461,8 +459,8 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
-Quando effettui il deployment con `auth: 'cognito'`, l'authorizer Cognito User Pools di API Gateway verifica il JWT che il chiamante fornisce nell'header `Authorization` e posiziona i claim verificati sull'evento Lambda in `event.requestContext.authorizer.claims`. Il nostro middleware legge semplicemente quei claim — nessuna chiamata extra all'AWS SDK, nessuna verifica manuale del JWT.
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+Quando effettui il deployment con `auth: 'Cognito'`, l'authorizer Cognito User Pools di API Gateway verifica il JWT che il chiamante fornisce nell'header `Authorization` e posiziona i claim verificati sull'evento Lambda in `event.requestContext.authorizer.claims`. Il nostro middleware legge semplicemente quei claim — nessuna chiamata extra all'AWS SDK, nessuna verifica manuale del JWT.
 
 Per prima cosa, definiamo cosa aggiungeremo al contesto:
 
@@ -553,7 +551,7 @@ Il generatore di API tRPC crea infrastruttura come codice CDK o Terraform in bas
 <Fragment slot="cdk">
 Il costrutto CDK per deployare la tua API si trova nella cartella `common/constructs`. Puoi utilizzarlo in un'applicazione CDK, ad esempio:
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="CDK usage for IAM or Custom authentication">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="CDK usage for IAM or Custom authentication">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -572,7 +570,7 @@ When using `Custom` auth, the construct creates a Lambda Authorizer internally f
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -589,7 +587,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Il costrutto `UserIdentity` può essere generato utilizzando il <Link path="/guides/react-website-auth">generatore `ts#website#auth`</Link>.
+Il costrutto `UserIdentity` può essere generato utilizzando il <Link path="/guides/react-website-auth">generatore `ts#react-website-auth`</Link>.
 </OptionFilter>
 
 Questo configura l'infrastruttura della tua API, inclusa un'API AWS API Gateway REST o HTTP, funzioni AWS Lambda per la business logic e autenticazione basata sul metodo `auth` scelto.
@@ -601,7 +599,7 @@ I moduli Terraform per deployare la tua API si trovano nella cartella `common/te
 
 Il modulo API carica il suo zip di deployment Lambda in un bucket S3 di asset condiviso — vedi la <Link path="/guides/terraform-project">guida all'infrastruttura Terraform</Link> per i dettagli. Istanzia il modulo `core/asset-bucket` una volta per deployment e passa il suo output `bucket_name` in ogni modulo API / Lambda tramite l'input `asset_bucket_name`:
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="Terraform usage for IAM or Custom authentication">
+<OptionFilter when={{ auth: ['IAM', 'Custom'] }} description="Terraform usage for IAM or Custom authentication">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -628,7 +626,7 @@ module "my_api" {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
+<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
 ```hcl {1-3, 8-9}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -711,7 +709,7 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'custom' }} description="Custom Lambda Authorizer usage with Terraform">
+<OptionFilter when={{ auth: 'Custom' }} description="Custom Lambda Authorizer usage with Terraform">
 :::caution[Custom Lambda Authorizer]
 When using `Custom` auth, your API is protected by a Lambda Authorizer that **denies all requests by default**. You must implement your authorization logic in the generated `src/authorizer.ts` file before your API will accept any traffic.
 :::
@@ -719,7 +717,7 @@ When using `Custom` auth, your API is protected by a Lambda Authorizer that **de
 </Fragment>
 </Infrastructure>
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="WAF — REST APIs get a WAF Web ACL by default">
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST APIs get a WAF Web ACL by default">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
@@ -733,7 +731,7 @@ When using `Custom` auth, your API is protected by a Lambda Authorizer that **de
 Se hai selezionato CDK per il tuo `iacProvider`, quando aggiungi o rimuovi una procedura nella tua API tRPC, queste modifiche si rifletteranno immediatamente nel costrutto CDK senza necessità di ricompilare.
 :::
 
-<OptionFilter when={{ auth: 'iam' }} description="Granting API invoke access — IAM-authenticated APIs only">
+<OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
 ### Concessione Accesso (Solo IAM)
 
 Puoi concedere accesso alla tua API come segue:

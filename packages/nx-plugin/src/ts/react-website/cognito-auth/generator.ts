@@ -31,7 +31,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
-import { resolveIac } from '../../../utils/iac';
+import { resolveIacProvider } from '../../../utils/iac';
 import {
   addCloudscapeAuthMenu,
   addNoneAuthMenu,
@@ -73,14 +73,14 @@ export async function tsReactWebsiteAuthGenerator(
     project: options.project,
   });
 
-  const iac = await resolveIac(tree, options.iac);
+  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
 
   await sharedConstructsGenerator(tree, {
-    iac,
+    iacProvider,
   });
 
   await addIdentityInfra(tree, {
-    iac,
+    iacProvider,
     allowSignup: options.allowSignup,
     cognitoDomain,
   });
@@ -121,9 +121,8 @@ export async function tsReactWebsiteAuthGenerator(
     options.project,
   );
 
-  const ux = (
-    (projectConfiguration.metadata as any)?.ux ?? 'cloudscape'
-  ).toLowerCase();
+  const uxProvider =
+    (projectConfiguration.metadata as any)?.uxProvider ?? 'Cloudscape';
 
   await applyGritQL(tree, mainTsxPath, readGritPattern('cognito-auth-wrapper'));
   // Update App Layout
@@ -147,19 +146,19 @@ export async function tsReactWebsiteAuthGenerator(
     );
     // TODO: update utils if they exist by appending to the array
     // Add a top-level navigation menu that shows the signed-in user's profile and actions
-    switch (ux) {
-      case 'cloudscape':
+    switch (uxProvider) {
+      case 'Cloudscape':
         await addCloudscapeAuthMenu(tree, appLayoutTsxPath);
         break;
-      case 'shadcn':
+      case 'Shadcn':
         await addShadcnAuthMenu(tree, appLayoutTsxPath);
         break;
-      case 'none':
+      case 'None':
         await addNoneAuthMenu(tree, appLayoutTsxPath);
         break;
       default:
         throw new Error(
-          `Top-level navigation menu to show the signed-in user for ux "${ux}" is not implemented.`,
+          `Top-level navigation menu to show the signed-in user for uxProvider "${uxProvider}" is not implemented.`,
         );
     }
   } else {

@@ -16,13 +16,13 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { Iac } from '../iac';
+import { IacProvider } from '../iac';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 
 export interface AddLambdaFunctionConstructOptions {
   functionProjectName: string;
-  nameClassName: string;
-  nameKebabCase: string;
+  functionNameClassName: string;
+  functionNameKebabCase: string;
   bundlePathFromRoot: string;
   handler: string;
   runtime: 'node' | 'python';
@@ -34,22 +34,24 @@ export interface AddLambdaFunctionConstructOptions {
 export const addLambdaFunctionInfra = async (
   tree: Tree,
   options: AddLambdaFunctionConstructOptions & {
-    iac: Iac;
+    iacProvider: IacProvider;
   },
 ) => {
-  if (options.iac === 'cdk') {
+  if (options.iacProvider === 'CDK') {
     await addLambdaFunctionCdkConstructs(tree, options);
-  } else if (options.iac === 'terraform') {
+  } else if (options.iacProvider === 'Terraform') {
     addLambdaFunctionTerraformModules(tree, options);
   } else {
-    throw new Error(`Unsupported iac ${options.iac}`);
+    throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
   }
 
   updateJson(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      options.iacProvider === 'CDK'
+        ? SHARED_CONSTRUCTS_DIR
+        : SHARED_TERRAFORM_DIR,
       'project.json',
     ),
     (config: ProjectConfiguration) => {
@@ -98,7 +100,7 @@ const addLambdaFunctionCdkConstructs = async (
       'lambda-functions',
       'index.ts',
     ),
-    `./${options.nameKebabCase}.js`,
+    `./${options.functionNameKebabCase}.js`,
   );
   await addStarExport(
     tree,

@@ -31,8 +31,8 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { FsCommands } from '../../utils/fs';
 import { withVersions } from '../../utils/versions';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
+import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
 
@@ -77,15 +77,15 @@ export const pyMcpServerGenerator = async (
     mcpServerNameSnakeCase,
   );
 
-  const infra = options.infra ?? 'agentcore';
+  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
 
-  if (infra === 'none' && options.auth && options.auth !== 'iam') {
+  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
     console.warn(
-      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'iam';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example server
   generateFiles(
@@ -109,8 +109,8 @@ export const pyMcpServerGenerator = async (
     'aws-opentelemetry-distro',
   ]);
 
-  if (infra === 'agentcore') {
-    const containers = await resolveContainers(tree, 'inherit');
+  if (computeType === 'BedrockAgentCoreRuntime') {
+    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -155,7 +155,7 @@ export const pyMcpServerGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -183,8 +183,8 @@ export const pyMcpServerGenerator = async (
     };
 
     // Add shared constructs
-    const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -193,9 +193,9 @@ export const pyMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       dockerOutputDir,
-      iac,
+      iacProvider,
       auth,
-      containers,
+      containerEngine,
     });
   }
 
@@ -274,6 +274,11 @@ export const pyMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);
+
+  const { addLicenseExceptions } = await import('../../license/config');
+  const { MCP_INSPECTOR_EXCEPTIONS } =
+    await import('../../license/known-exceptions');
+  await addLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return async () => {

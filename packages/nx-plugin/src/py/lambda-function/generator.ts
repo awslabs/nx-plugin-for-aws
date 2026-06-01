@@ -34,7 +34,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { toProjectRelativePath } from '../../utils/paths';
-import { resolveIac } from '../../utils/iac';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -56,10 +56,10 @@ export interface LambdaFunctionDetails {
 
 const getLambdaFunctionDetails = (
   tree: Tree,
-  schema: { moduleName: string; name: string; functionPath?: string },
+  schema: { moduleName: string; functionName: string; functionPath?: string },
 ): LambdaFunctionDetails => {
   const scope = toSnakeCase(getNpmScope(tree));
-  const normalizedFunctionName = toSnakeCase(schema.name);
+  const normalizedFunctionName = toSnakeCase(schema.functionName);
   const fullyQualifiedFunctionName = `${scope}.${normalizedFunctionName}`;
   const normalizedFunctionPath = `${schema.moduleName}.${schema.functionPath ? `${toDotNotation(schema.functionPath)}.` : ''}${normalizedFunctionName}.lambda_handler`;
 
@@ -108,15 +108,15 @@ export const pyLambdaFunctionGenerator = async (
   const { normalizedFunctionName, normalizedFunctionPath } =
     getLambdaFunctionDetails(tree, {
       moduleName,
-      name: schema.name,
+      functionName: schema.functionName,
       functionPath: schema.functionPath,
     });
 
   const constructFunctionName = `${normalizedProjectName}_${normalizedFunctionName}`;
   const constructFunctionClassName = toClassName(constructFunctionName);
   const constructFunctionKebabCase = toKebabCase(constructFunctionName);
-  const lambdaFunctionClassName = toClassName(schema.name);
-  const lambdaFunctionKebabCase = toKebabCase(schema.name);
+  const lambdaFunctionClassName = toClassName(schema.functionName);
+  const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
 
   const functionPath = joinPathFragments(
     projectConfig.sourceRoot,
@@ -131,10 +131,10 @@ export const pyLambdaFunctionGenerator = async (
     );
   }
 
-  const iac = await resolveIac(tree, schema.iac);
+  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
 
   await sharedConstructsGenerator(tree, {
-    iac,
+    iacProvider,
   });
 
   // Check if the project has a bundle target and if not add it
@@ -142,12 +142,12 @@ export const pyLambdaFunctionGenerator = async (
 
   await addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
-    nameClassName: constructFunctionClassName,
-    nameKebabCase: constructFunctionKebabCase,
+    functionNameClassName: constructFunctionClassName,
+    functionNameKebabCase: constructFunctionKebabCase,
     handler: normalizedFunctionPath,
     bundlePathFromRoot: bundleOutputDir,
     runtime: 'python',
-    iac,
+    iacProvider,
   });
 
   const enhancedOptions = {

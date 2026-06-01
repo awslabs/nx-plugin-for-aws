@@ -201,7 +201,7 @@ const applyFilterTransforms = (
   tree: Root,
   options: Record<string, string> | undefined,
 ): void => {
-  const iac = options?.iac;
+  const iacProvider = options?.iacProvider;
 
   const transform = (parent: JsxParent): void => {
     const children = parent.children as RootContent[];
@@ -228,8 +228,8 @@ const applyFilterTransforms = (
       }
 
       if (child.name === 'Infrastructure') {
-        if (iac === 'cdk' || iac === 'terraform') {
-          const body = selectInfrastructureSlot(child, iac);
+        if (iacProvider === 'CDK' || iacProvider === 'Terraform') {
+          const body = selectInfrastructureSlot(child, iacProvider);
           const pseudo: MdxJsxFlowElement = {
             type: 'mdxJsxFlowElement',
             name: 'tmp',
@@ -241,7 +241,7 @@ const applyFilterTransforms = (
           i--;
           continue;
         }
-        // No iac → keep both slots so readers / agents see both variants.
+        // No iacProvider → keep both slots so readers / agents see both variants.
         transform(child);
         continue;
       }
@@ -275,9 +275,9 @@ const applyFilterTransforms = (
 
 const selectInfrastructureSlot = (
   node: JsxElement,
-  iac: 'cdk' | 'terraform',
+  iacProvider: 'CDK' | 'Terraform',
 ): RootContent[] => {
-  const slotName = iac.toLowerCase();
+  const slotName = iacProvider.toLowerCase();
   const frag = (node.children as RootContent[]).find(
     (c): c is MdxJsxFlowElement =>
       isJsxElement(c) &&
@@ -437,11 +437,13 @@ const renderComponent = (
     case 'CreateNxWorkspaceCommand': {
       const workspace = readStringAttr(node, 'workspace');
       if (!workspace) return undefined;
-      const iac = readStringAttr(node, 'iac') as
-        | 'cdk'
-        | 'terraform'
+      const iacProvider = readStringAttr(node, 'iacProvider') as
+        | 'CDK'
+        | 'Terraform'
         | undefined;
-      return [codeBlock(buildCreateNxWorkspaceCommand(pm, workspace, iac))];
+      return [
+        codeBlock(buildCreateNxWorkspaceCommand(pm, workspace, iacProvider)),
+      ];
     }
     case 'InstallCommand': {
       const pkg =

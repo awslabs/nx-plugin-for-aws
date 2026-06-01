@@ -20,7 +20,7 @@ describe('smoke test - smithy-api', () => {
 
   it('should generate and build', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'smithy', 'cdk')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'smithy', 'CDK')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -35,17 +35,17 @@ describe('smoke test - smithy-api', () => {
     // and the terraform smoke test. We only generate a single Smithy API here to avoid
     // Docker build cache mount contention when multiple Smithy model builds run concurrently.
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --name=smithy-shared --framework=smithy --integrationPattern=shared --no-interactive`,
+      `generate @aws/nx-plugin:ts#smithy-api --name=smithy-shared --integrationPattern=shared --no-interactive`,
       opts,
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
       opts,
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
       opts,
     );
 

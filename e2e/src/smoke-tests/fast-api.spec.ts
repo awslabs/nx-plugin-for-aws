@@ -24,7 +24,7 @@ describe('smoke test - fast-api', () => {
 
   it('should generate and build', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'fast-api', 'cdk')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'fast-api', 'CDK')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -34,15 +34,15 @@ describe('smoke test - fast-api', () => {
     const projectRoot = `${targetDir}/fast-api`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-    await generateApiProjectPermutations('py#api', 'fast', '_', opts);
+    await generateApiProjectPermutations('py#fast-api', 'fast', '_', opts);
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
       opts,
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
       opts,
     );
 

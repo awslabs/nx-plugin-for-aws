@@ -25,21 +25,21 @@ import {
   SHARED_TERRAFORM_NAME,
 } from './shared-constructs-constants';
 import { readAwsNxPluginConfig } from './config/utils';
-import { Iac } from './iac';
+import { IacProvider } from './iac';
 
 export interface SharedConstructsGeneratorOptions {
-  iac: Iac;
+  iacProvider: IacProvider;
 }
 
 export async function sharedConstructsGenerator(
   tree: Tree,
   options: SharedConstructsGeneratorOptions,
 ) {
-  const { iac } = options;
+  const { iacProvider } = options;
   const npmScopePrefix = getNpmScopePrefix(tree);
   updateGitignore(tree);
 
-  if (iac === 'cdk') {
+  if (iacProvider === 'CDK') {
     if (
       !tree.exists(
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
@@ -89,7 +89,7 @@ export async function sharedConstructsGenerator(
   }
 
   // Handle Terraform provider
-  if (iac === 'terraform') {
+  if (iacProvider === 'Terraform') {
     const terraformLibPath = joinPathFragments(
       PACKAGES_DIR,
       SHARED_TERRAFORM_DIR,

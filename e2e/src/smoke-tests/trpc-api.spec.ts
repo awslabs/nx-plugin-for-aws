@@ -24,7 +24,7 @@ describe('smoke test - trpc-api', () => {
 
   it('should generate and build', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'trpc', 'cdk')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'trpc', 'CDK')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -34,15 +34,15 @@ describe('smoke test - trpc-api', () => {
     const projectRoot = `${targetDir}/trpc`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-    await generateApiProjectPermutations('ts#api', 'trpc', '-', opts);
+    await generateApiProjectPermutations('ts#trpc-api', 'trpc', '-', opts);
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
       opts,
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
       opts,
     );
 

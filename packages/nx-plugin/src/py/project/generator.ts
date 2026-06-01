@@ -140,7 +140,7 @@ export const pyProjectGenerator = async (
     rootPyprojectDependencyGroup: 'main',
     pyenvPythonVersion: '3.14.0',
     pyprojectPythonDependency: '>=3.14',
-    projectType: schema.type,
+    projectType: schema.projectType,
     projectNameAndRootFormat: 'as-provided',
     moduleName: normalizedModuleName,
     directory: dir,
@@ -259,6 +259,11 @@ export const pyProjectGenerator = async (
   ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);
+
+  // Add pythonCollector to the license check config if dependency checking
+  // is configured and the python collector isn't already present.
+  const { addPythonCollectorToConfig } = await import('../../license/config');
+  await addPythonCollectorToConfig(tree);
 
   return async () => {
     installPackagesTask(tree);

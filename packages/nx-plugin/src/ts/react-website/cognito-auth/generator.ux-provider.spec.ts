@@ -8,17 +8,17 @@ import { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { SUPPORTED_UX_PROVIDERS } from '../app/generator';
 
-describe('cognito-auth generator ux tests', () => {
+describe('cognito-auth generator uxProvider tests', () => {
   let tree: Tree;
 
   const options: TsReactWebsiteAuthGeneratorSchema = {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
-    iac: 'cdk',
+    iacProvider: 'CDK',
   };
 
-  const setupTree = (ux: string) => {
+  const setupTree = (uxProvider: string) => {
     tree = createTreeUsingTsSolutionSetup();
 
     // Set up a mock project structure
@@ -28,7 +28,7 @@ describe('cognito-auth generator ux tests', () => {
         name: 'test-project',
         sourceRoot: 'packages/test-project/src',
         metadata: {
-          ux,
+          uxProvider,
         },
       }),
     );
@@ -60,9 +60,9 @@ describe('cognito-auth generator ux tests', () => {
   });
 
   it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
-    'should run generator without error for ux=%s',
-    async (ux) => {
-      setupTree(ux);
+    'should run generator without error for uxProvider=%s',
+    async (uxProvider) => {
+      setupTree(uxProvider);
 
       // If this test fails, you need to implement support for this ux provider in this generator!
       await tsReactWebsiteAuthGenerator(tree, options);
@@ -71,7 +71,7 @@ describe('cognito-auth generator ux tests', () => {
 
   describe('None', () => {
     beforeEach(() => {
-      setupTree('none');
+      setupTree('None');
     });
 
     it('should update AppLayout', async () => {
@@ -249,7 +249,7 @@ export default AppLayout;
 
   describe('Cloudscape', () => {
     beforeEach(() => {
-      setupTree('cloudscape');
+      setupTree('Cloudscape');
     });
 
     it('should update AppLayout', async () => {
@@ -448,7 +448,7 @@ export default AppLayout;
 
   describe('Shadcn', () => {
     beforeEach(() => {
-      setupTree('shadcn');
+      setupTree('Shadcn');
     });
 
     it('should update AppLayout', async () => {

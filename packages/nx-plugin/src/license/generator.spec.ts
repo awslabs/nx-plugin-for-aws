@@ -51,36 +51,70 @@ describe('license generator', () => {
       copyrightHolder: 'Foo',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.spdx).toBe('MIT');
-    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
-      'Foo',
-    );
+    let source = tree.read('aws-nx-plugin.config.mts', 'utf-8')!;
+    expect(source).toContain("spdx: 'MIT'");
+    expect(source).toContain("copyrightHolder: 'Foo'");
 
     await licenseGenerator(tree, {
       license: 'MIT',
       copyrightHolder: 'Bar',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
-      'Bar',
-    );
+    source = tree.read('aws-nx-plugin.config.mts', 'utf-8')!;
+    expect(source).toContain("copyrightHolder: 'Bar'");
 
     await licenseGenerator(tree, {
       license: 'ASL',
       copyrightHolder: 'Baz',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.spdx).toBe('ASL');
-    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
-      'Baz',
-    );
+    source = tree.read('aws-nx-plugin.config.mts', 'utf-8')!;
+    expect(source).toContain("spdx: 'ASL'");
+    expect(source).toContain("copyrightHolder: 'Baz'");
+  });
+
+  it('should configure dependency check by default', async () => {
+    await licenseGenerator(tree, options);
+
+    const configSource = tree.read('aws-nx-plugin.config.mts', 'utf-8')!;
+    expect(configSource).toContain("from '@aws/nx-plugin/license'");
+    expect(configSource).toContain('allow: DEFAULT_LICENSE_ALLOWLIST');
+    expect(configSource).toContain('exceptions');
+
+    const nxJson = readNxJson(tree);
+    expect(
+      (nxJson.plugins ?? []).some(
+        (p) =>
+          (typeof p === 'string' ? p : p.plugin) ===
+          '@aws/nx-plugin/license-check-plugin',
+      ),
+    ).toBe(true);
+  });
+
+  it('should skip dependency check wiring when disabled', async () => {
+    await licenseGenerator(tree, {
+      ...options,
+      dependencyCheck: false,
+    });
+
+    const config = await readAwsNxPluginConfig(tree);
+    expect(config.license!.dependencyCheck).toBeUndefined();
+
+    const nxJson = readNxJson(tree);
+    expect(
+      (nxJson.plugins ?? []).some(
+        (p) =>
+          (typeof p === 'string' ? p : p.plugin) ===
+          '@aws/nx-plugin/license-check-plugin',
+      ),
+    ).toBe(false);
   });
 
   it('should add generator metric to app.ts', async () => {
     tree = createTreeUsingTsSolutionSetup();
 
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Call the generator function
     await licenseGenerator(tree, options);

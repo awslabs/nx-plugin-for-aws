@@ -62,8 +62,8 @@ dev-dependencies = []
   it('should add MCP server to existing Python project with default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added to the existing project
@@ -134,8 +134,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with custom name
@@ -177,8 +177,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'My_Special#Server!',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Name should be converted to snake_case for Python modules
@@ -206,8 +206,8 @@ dev-dependencies = []
     await expect(
       pyMcpServerGenerator(tree, {
         project: 'non-py-project',
-        infra: 'none',
-        iac: 'cdk',
+        computeType: 'None',
+        iacProvider: 'CDK',
       }),
     ).rejects.toThrow();
   });
@@ -229,8 +229,8 @@ dev-dependencies = []
     await expect(
       pyMcpServerGenerator(tree, {
         project: 'no-source-root',
-        infra: 'none',
-        iac: 'cdk',
+        computeType: 'None',
+        iacProvider: 'CDK',
       }),
     ).rejects.toThrow(
       'This project does not have a source root. Please add a source root to the project configuration before running this generator.',
@@ -261,8 +261,8 @@ dev-dependencies = []
 
     await pyMcpServerGenerator(tree, {
       project: 'proj.nested-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Should use the last part of the project name for default server name
@@ -282,8 +282,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated MCP server files
@@ -320,8 +320,8 @@ dev-dependencies = []
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added to the existing project
@@ -392,8 +392,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with custom name
@@ -441,8 +441,8 @@ dev-dependencies = []
   it('should add additional dependencies for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check root package.json dependencies
@@ -463,8 +463,8 @@ dev-dependencies = []
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -496,8 +496,8 @@ dev-dependencies = []
   it('should update shared constructs build dependencies for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -521,8 +521,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'my-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that the MCP server construct uses findWorkspaceRoot to locate the bundle
@@ -537,8 +537,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated MCP server construct
@@ -573,8 +573,8 @@ dev-dependencies = []
   it('should handle Python bundle target configuration for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -624,8 +624,8 @@ dev-dependencies = []
 
     await pyMcpServerGenerator(tree, {
       project: 'complex-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that the module name is extracted correctly from the source root
@@ -638,12 +638,12 @@ dev-dependencies = []
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     expectHasMetricTags(tree, PY_MCP_SERVER_GENERATOR_INFO.metric);
@@ -652,8 +652,8 @@ dev-dependencies = []
   it('should handle docker target dependencies correctly for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -678,8 +678,8 @@ dev-dependencies = []
   it('should generate MCP server with Terraform provider and default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Check that MCP server files were added to the existing project
@@ -724,8 +724,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-server',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Check that MCP server files were added with custom name
@@ -772,8 +772,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-server',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Snapshot the generated Terraform core runtime file
@@ -804,8 +804,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-server',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     // Check that the docker image tag is correctly generated in the Terraform file
@@ -821,8 +821,8 @@ dev-dependencies = []
   it('should not generate Terraform files when computeType is None', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'terraform',
+      computeType: 'None',
+      iacProvider: 'Terraform',
     });
 
     // Check that MCP server files were added
@@ -849,8 +849,8 @@ dev-dependencies = []
   it('should handle Python bundle target configuration for Terraform provider', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'terraform',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
     });
 
     const projectConfig = JSON.parse(
@@ -877,19 +877,19 @@ dev-dependencies = []
     );
   });
 
-  it('should inherit iac from config when set to Inherit', async () => {
+  it('should inherit iacProvider from config when set to Inherit', async () => {
     // Set up config with CDK provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
       iac: {
-        provider: 'cdk',
+        provider: 'CDK',
       },
     });
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
-      iac: 'inherit',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Inherit',
     });
 
     // Verify CDK constructs are created (not terraform)
@@ -900,8 +900,8 @@ dev-dependencies = []
   it('should add component generator metadata with default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -923,8 +923,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-server',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -945,8 +945,8 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: '',
-      infra: 'none',
-      iac: 'cdk',
+      computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with default name

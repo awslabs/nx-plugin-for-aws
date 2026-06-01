@@ -31,8 +31,8 @@ import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import { addIgnoresToEslintConfig } from '../lib/eslint';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
+import { resolveIacProvider } from '../../utils/iac';
+import { resolveContainerEngine } from '../../utils/containers';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import { updateGitIgnore } from '../../utils/git';
 import { assignPort } from '../../utils/port';
@@ -49,8 +49,8 @@ export const tsRdbGenerator = async (
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);
-  const iac = await resolveIac(tree, options.iac);
-  const containers = await resolveContainers(tree, 'inherit');
+  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -76,30 +76,30 @@ export const tsRdbGenerator = async (
   const localDbPort = assignPort(
     tree,
     projectConfig,
-    options.engine === 'mysql' ? 3306 : 5432,
+    options.engine === 'MySQL' ? 3306 : 5432,
   );
   const localDbHost = 'localhost';
-  const localDbUser = options.engine === 'mysql' ? 'root' : 'dbadmin';
+  const localDbUser = options.engine === 'MySQL' ? 'root' : 'dbadmin';
   const localDbPassword = 'password';
 
   const templateOptions = {
     engine: options.engine,
     runtimeConfigKey: nameClassName,
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
-    databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
+    databaseProvider: options.engine === 'MySQL' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
     prismaAdapterPackage:
-      options.engine === 'mysql'
+      options.engine === 'MySQL'
         ? '@prisma/adapter-mariadb'
         : '@prisma/adapter-pg',
     prismaAdapterClassName:
-      options.engine === 'mysql' ? 'PrismaMariaDb' : 'PrismaPg',
+      options.engine === 'MySQL' ? 'PrismaMariaDb' : 'PrismaPg',
     localDbPort,
     localDbHost,
     localDbName: databaseName,
     localDbUser,
     localDbPassword,
-    containers,
+    containerEngine,
   };
 
   generateFiles(
@@ -155,7 +155,7 @@ export const tsRdbGenerator = async (
   };
   const containerName = `${getNpmScope(tree)}-${databaseName}`;
   const dockerImage =
-    options.engine === 'mysql'
+    options.engine === 'MySQL'
       ? 'public.ecr.aws/docker/library/mysql:8.0.44'
       : 'public.ecr.aws/docker/library/postgres:17.7';
   projectConfig.targets['docker-pull'] = {
@@ -168,7 +168,7 @@ export const tsRdbGenerator = async (
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/docker-start.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'mysql' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
+      command: `tsx scripts/docker-start.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'MySQL' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
       cwd: '{projectRoot}',
     },
     continuous: true,
@@ -200,12 +200,12 @@ export const tsRdbGenerator = async (
     'migration',
   );
   const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
-  if (iac === 'terraform') {
+  if (iacProvider === 'Terraform') {
     projectConfig.targets['docker'] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `${containers} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+        command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
       },
       dependsOn: ['bundle'],
     };
@@ -217,16 +217,16 @@ export const tsRdbGenerator = async (
     engine: options.engine,
   });
 
-  await sharedConstructsGenerator(tree, { iac });
+  await sharedConstructsGenerator(tree, { iacProvider });
   await addRdbInfra(tree, {
-    iac,
+    iacProvider,
     projectName: fullyQualifiedName,
     nameClassName,
     nameKebabCase,
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
     databaseName,
     adminUser: databaseUser,
-    engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
+    engine: options.engine === 'MySQL' ? 'mysql' : 'postgres',
     migrationBundleDir,
     createDbUserBundleDir: joinPathFragments(
       'dist',
@@ -235,7 +235,7 @@ export const tsRdbGenerator = async (
       'create-db-user',
     ),
     dockerImageTag,
-    containers,
+    containerEngine,
   });
 
   addDependenciesToPackageJson(
@@ -246,7 +246,7 @@ export const tsRdbGenerator = async (
       '@aws-sdk/client-secrets-manager',
       '@aws-sdk/rds-signer',
       '@prisma/client',
-      ...(options.engine === 'mysql'
+      ...(options.engine === 'MySQL'
         ? (['@prisma/adapter-mariadb', 'mariadb'] as const)
         : (['@prisma/adapter-pg', 'pg'] as const)),
     ]),
@@ -254,7 +254,7 @@ export const tsRdbGenerator = async (
       'prisma',
       'tsx',
       '@types/aws-lambda',
-      ...(options.engine === 'mysql'
+      ...(options.engine === 'MySQL'
         ? ([] as const)
         : (['@types/pg'] as const)),
     ]),

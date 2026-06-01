@@ -19,9 +19,9 @@ export const addTsAgentTargetToServeLocal = async (
   targetProjectName: string,
   options: TsAgentServeLocalOptions,
 ) => {
-  const protocol = options.targetComponent?.protocol ?? 'http';
+  const protocol = options.targetComponent?.protocol ?? 'HTTP';
   const localUrl =
-    protocol === 'ag-ui'
+    protocol === 'AG-UI'
       ? `http://localhost:${options.port}/invocations`
       : `ws://localhost:${options.port}/ws`;
 

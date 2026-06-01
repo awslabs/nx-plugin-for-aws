@@ -33,9 +33,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify project structure
@@ -53,10 +53,10 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
       moduleName: 'my_module',
-      iac: 'cdk',
+      iacProvider: 'CDK',
     });
 
     // Verify project structure
@@ -69,9 +69,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -121,9 +121,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const pyprojectToml = parse(
@@ -152,9 +152,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -198,10 +198,10 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'rest-lambda',
+      computeType: 'ServerlessApiGatewayRestApi',
       integrationPattern: 'shared',
-      auth: 'iam',
-      iac: 'cdk',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const appApiContent = tree.read(
@@ -221,10 +221,10 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
+      computeType: 'ServerlessApiGatewayHttpApi',
       integrationPattern: 'shared',
-      auth: 'iam',
-      iac: 'cdk',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const appApiContent = tree.read(
@@ -242,9 +242,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
-      infra: 'rest-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -288,9 +288,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -312,9 +312,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
@@ -327,9 +327,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const config = JSON.parse(tree.read('apps/test_api/project.json', 'utf-8'));
@@ -337,7 +337,7 @@ describe('fastapi project generator', () => {
     expect(config.metadata).toEqual({
       apiName: 'test-api',
       apiType: 'fast-api',
-      auth: 'iam',
+      auth: 'IAM',
       generator: FAST_API_GENERATOR_INFO.id,
       ports: [8000],
     });
@@ -347,9 +347,9 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const appChanges = sortObjectKeys(
@@ -370,24 +370,24 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, FAST_API_GENERATOR_INFO.metric);
   });
 
-  it.each(['rest-lambda', 'http-lambda'])(
-    'should include CORS middleware in init.py when using %s infra',
-    async (infra: 'rest-lambda' | 'http-lambda') => {
+  it.each(['Rest', 'Http'])(
+    'should include CORS middleware in init.py when using %s API',
+    async (api: 'Rest' | 'Http') => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra,
-        auth: 'iam',
-        iac: 'cdk',
+        computeType: `ServerlessApiGateway${api}Api`,
+        auth: 'IAM',
+        iacProvider: 'CDK',
       });
 
       // Read the generated init.py file
@@ -408,27 +408,27 @@ describe('fastapi project generator', () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'first-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Generate second API
     await pyFastApiProjectGenerator(tree, {
       name: 'second-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Generate third API
     await pyFastApiProjectGenerator(tree, {
       name: 'third-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Check metadata ports
@@ -458,14 +458,14 @@ describe('fastapi project generator', () => {
     );
   });
 
-  describe('terraform iac', () => {
+  describe('terraform iacProvider', () => {
     it('should generate terraform files for HTTP API with IAM auth and snapshot them', async () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'http-lambda',
-        auth: 'iam',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -509,9 +509,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'http-lambda',
-        auth: 'cognito',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'Cognito',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -558,9 +558,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'http-lambda',
-        auth: 'custom',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'Custom',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -606,9 +606,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'rest-lambda',
-        auth: 'iam',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -652,9 +652,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'rest-lambda',
-        auth: 'cognito',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'Cognito',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -701,9 +701,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'rest-lambda',
-        auth: 'custom',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'Custom',
+        iacProvider: 'Terraform',
       });
 
       // Find all terraform files
@@ -749,9 +749,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'http-lambda',
-        auth: 'iam',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
       });
 
       // Check that shared terraform project has build dependency on the API project
@@ -784,9 +784,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'http-lambda',
-        auth: 'iam',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
       });
 
       // Verify CDK files are NOT created
@@ -798,25 +798,25 @@ describe('fastapi project generator', () => {
       ).toBeFalsy();
     });
 
-    it('should throw error for invalid iac', async () => {
+    it('should throw error for invalid iacProvider', async () => {
       await expect(
         pyFastApiProjectGenerator(tree, {
           name: 'test-api',
           directory: 'apps',
-          infra: 'http-lambda',
-          auth: 'iam',
-          iac: 'InvalidProvider' as any,
+          computeType: 'ServerlessApiGatewayHttpApi',
+          auth: 'IAM',
+          iacProvider: 'InvalidProvider' as any,
         }),
-      ).rejects.toThrow('Unsupported iac InvalidProvider');
+      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
     });
 
     it('should generate correct FastAPI handler configuration with custom module name', async () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'test-api',
         directory: 'apps',
-        infra: 'http-lambda',
-        auth: 'iam',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
         moduleName: 'custom_module',
       });
 
@@ -842,9 +842,9 @@ describe('fastapi project generator', () => {
       await pyFastApiProjectGenerator(tree, {
         name: 'nested-api',
         directory: 'apps/nested/path',
-        infra: 'rest-lambda',
-        auth: 'cognito',
-        iac: 'terraform',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'Cognito',
+        iacProvider: 'Terraform',
       });
 
       // Verify terraform files are created
@@ -871,21 +871,21 @@ describe('fastapi project generator', () => {
     });
   });
 
-  it('should inherit iac from config when set to Inherit', async () => {
+  it('should inherit iacProvider from config when set to Inherit', async () => {
     // Set up config with CDK provider using utility methods
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
       iac: {
-        provider: 'cdk',
+        provider: 'CDK',
       },
     });
 
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'inherit',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'Inherit',
     });
 
     // Verify CDK constructs are created (not terraform)
@@ -901,9 +901,9 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'packages',
       subDirectory: 'apis',
-      infra: 'http-lambda',
-      auth: 'iam',
-      iac: 'cdk',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
     });
     expect(tree.exists('packages/apis')).toBeTruthy();
     expect(tree.exists('packages/apis/pyproject.toml')).toBeTruthy();

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { SPDXLicenseIdentifier } from './schema';
+import type { DependencyCheckConfig } from './dependency-check/types';
 
 export interface LicenseConfig {
   /**
@@ -27,7 +28,18 @@ export interface LicenseConfig {
    * Configuration for LICENSE files
    */
   files?: LicenseFileConfig;
+  /**
+   * Configuration for dependency license allowlist checking.
+   * Set to `false` to disable the check entirely.
+   */
+  dependencyCheck?: false | DependencyCheckConfig;
 }
+
+export type {
+  DependencyCheckConfig,
+  DependencyCheckException,
+  AllowlistEntry,
+} from './dependency-check/types';
 
 /**
  * Configuration for the LICENSE file sync

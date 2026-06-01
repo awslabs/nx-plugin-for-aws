@@ -16,12 +16,12 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { Iac } from '../iac';
-import { Containers } from '../containers';
+import { IacProvider } from '../iac';
+import { ContainerEngine } from '../containers';
 
-type IACProvider = { iac: Iac };
+type IACProvider = { iacProvider: IacProvider };
 
-export type AgentCoreAuth = 'iam' | 'cognito';
+export type AgentCoreAuth = 'IAM' | 'Cognito';
 
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
@@ -30,20 +30,20 @@ export interface AddAgentCoreInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   appDirectory: string;
-  serverProtocol: 'mcp' | 'http' | 'a2a';
+  serverProtocol: 'MCP' | 'HTTP' | 'A2A';
   auth: AgentCoreAuth;
-  containers: Containers;
+  containerEngine: ContainerEngine;
 }
 
 const addAgentCoreInfra = async (
   tree: Tree,
-  options: AddAgentCoreInfraProps & { iac: Iac },
+  options: AddAgentCoreInfraProps & { iacProvider: IacProvider },
 ) => {
-  switch (options.iac) {
-    case 'cdk':
+  switch (options.iacProvider) {
+    case 'CDK':
       await addAgentCoreCDKInfra(tree, options);
       break;
-    case 'terraform':
+    case 'Terraform':
       addAgentCoreTerraformInfra(tree, options);
       break;
   }
@@ -53,7 +53,9 @@ const addAgentCoreInfra = async (
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      options.iacProvider === 'CDK'
+        ? SHARED_CONSTRUCTS_DIR
+        : SHARED_TERRAFORM_DIR,
       'project.json',
     ),
     (config: ProjectConfiguration) => {
@@ -136,7 +138,7 @@ const addAgentCoreTerraformInfra = (
       'core',
       'agent-core',
     ),
-    { containers: options.containers },
+    { containerEngine: options.containerEngine },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -167,7 +169,7 @@ export interface AddMcpServerInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   auth: AgentCoreAuth;
-  containers: Containers;
+  containerEngine: ContainerEngine;
 }
 
 /**
@@ -184,10 +186,10 @@ export const addMcpServerInfra = async (
     dockerOutputDir: options.dockerOutputDir,
     projectName: options.projectName,
     appDirectory: 'mcp-servers',
-    serverProtocol: 'mcp',
-    iac: options.iac,
+    serverProtocol: 'MCP',
+    iacProvider: options.iacProvider,
     auth: options.auth,
-    containers: options.containers,
+    containerEngine: options.containerEngine,
   });
 };
 
@@ -198,8 +200,8 @@ export interface AddAgentInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   auth: AgentCoreAuth;
-  serverProtocol?: 'http' | 'a2a';
-  containers: Containers;
+  serverProtocol?: 'HTTP' | 'A2A';
+  containerEngine: ContainerEngine;
 }
 
 /**
@@ -216,9 +218,9 @@ export const addAgentInfra = async (
     dockerImageTag: options.dockerImageTag,
     dockerOutputDir: options.dockerOutputDir,
     appDirectory: 'agents',
-    serverProtocol: options.serverProtocol ?? 'http',
-    iac: options.iac,
+    serverProtocol: options.serverProtocol ?? 'HTTP',
+    iacProvider: options.iacProvider,
     auth: options.auth,
-    containers: options.containers,
+    containerEngine: options.containerEngine,
   });
 };
