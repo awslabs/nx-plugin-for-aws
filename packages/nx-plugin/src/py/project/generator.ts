@@ -140,7 +140,7 @@ export const pyProjectGenerator = async (
     rootPyprojectDependencyGroup: 'main',
     pyenvPythonVersion: '3.14.0',
     pyprojectPythonDependency: '>=3.14',
-    projectType: schema.projectType,
+    projectType: schema.type,
     projectNameAndRootFormat: 'as-provided',
     moduleName: normalizedModuleName,
     directory: dir,

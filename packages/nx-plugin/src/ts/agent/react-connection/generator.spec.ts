@@ -368,7 +368,7 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate a ts project for the agent
     await tsProjectGenerator(tree, {
       name: 'agent-project',
-      projectType: 'application',
+      type: 'application',
     });
 
     // Generate a strands agent
@@ -422,7 +422,7 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate a ts project for the agent
     await tsProjectGenerator(tree, {
       name: 'agent-project',
-      projectType: 'application',
+      type: 'application',
     });
 
     // Generate an AG-UI agent

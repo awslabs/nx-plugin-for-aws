@@ -72,7 +72,7 @@ export const pyFastApiProjectGenerator = async (
     directory: schema.directory,
     subDirectory: schema.subDirectory,
     moduleName: normalizedModuleName,
-    projectType: 'application',
+    type: 'application',
   });
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);

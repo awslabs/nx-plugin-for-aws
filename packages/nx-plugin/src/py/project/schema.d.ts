@@ -5,7 +5,7 @@
 
 export interface PyProjectGeneratorSchema {
   readonly name: string;
-  readonly projectType: 'application' | 'library';
+  readonly type: 'application' | 'library';
   readonly directory?: string;
   readonly subDirectory?: string;
   readonly moduleName?: string;

@@ -46,7 +46,7 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 
 const ENGINE = 'docker';
 
-const [containerName, image, hostPort, dbName, dbUser, dbPassword] =
+const [containerName, image, hostPort, dbName, dbPassword] =
   process.argv.slice(2);
 
 const containerExists = (): boolean =>
@@ -76,17 +76,13 @@ if (containerExists()) {
     '--name',
     containerName,
     '-e',
-    \`POSTGRES_DB=\${dbName}\`,
+    \`MYSQL_DATABASE=\${dbName}\`,
     '-e',
-    \`POSTGRES_USER=\${dbUser}\`,
-    '-e',
-    \`POSTGRES_PASSWORD=\${dbPassword}\`,
-    '-e',
-    \`PGDATA=/var/lib/postgresql/17/docker\`,
+    \`MYSQL_ROOT_PASSWORD=\${dbPassword}\`,
     '-p',
-    \`\${hostPort}:5432\`,
+    \`\${hostPort}:3306\`,
     '-v',
-    \`\${containerName}-data:/var/lib/postgresql\`,
+    \`\${containerName}-data:/var/lib/mysql\`,
     '-d',
     image,
   ];
@@ -119,7 +115,7 @@ logs.on('exit', (code) => {
 `;
 
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/wait-for-db.ts 1`] = `
-"import { Client } from 'pg';
+"import { createConnection, Connection } from 'mariadb';
 
 const noop = () => undefined;
 
@@ -127,28 +123,28 @@ const [portArg, dbArg, userArg, passwordArg] = process.argv.slice(2);
 const timeoutAt = Date.now() + 60000;
 
 while (Date.now() < timeoutAt) {
-  const client = new Client({
-    host: 'localhost',
-    port: parseInt(portArg),
-    user: userArg,
-    password: passwordArg,
-    database: dbArg,
-    connectionTimeoutMillis: 500,
-  });
-  client.on('error', noop);
+  let conn: Connection | undefined;
   try {
-    await client.connect();
-    await client.end();
+    conn = await createConnection({
+      host: 'localhost',
+      port: parseInt(portArg),
+      user: userArg,
+      password: passwordArg,
+      database: dbArg,
+      connectTimeout: 500,
+      allowPublicKeyRetrieval: true,
+    });
+    await conn.end();
     console.log('Database is ready.');
     process.exit(0);
   } catch {
     console.log('Database is not ready.');
-    await client.end().catch(noop);
+    await conn?.end().catch(noop);
   }
   await new Promise((r) => setTimeout(r, 200));
 }
 
-throw new Error(\`Timed out waiting for postgres on port \${portArg}\`);
+throw new Error(\`Timed out waiting for mysql on port \${portArg}\`);
 "
 `;
 
@@ -167,7 +163,7 @@ export const LOCAL_DB_PASSWORD = 'password';
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/create-db-user-handler.ts 1`] = `
 "import type { CloudFormationCustomResourceEvent } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
-import { Client, escapeIdentifier } from 'pg';
+import { createPool, type PoolConnection } from 'mariadb';
 import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
 type OnEventResult = {
@@ -184,9 +180,7 @@ const resolveDbUser = (physicalResourceId?: string): string =>
 
 const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
   const { dbname, username, password, host, port } = await getDatabaseSecret();
-  const quotedDbUser = escapeIdentifier(dbUser);
-  const quotedDbName = escapeIdentifier(dbname);
-  const client = new Client({
+  const pool = createPool({
     host,
     port,
     database: dbname,
@@ -195,41 +189,29 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
     ssl: {
       rejectUnauthorized: true,
     },
-    connectionTimeoutMillis: 10_000,
+    connectionLimit: 1,
+    multipleStatements: true,
+    connectTimeout: 10_000,
   });
 
-  await client.connect();
+  const quotedDbName = pool.escapeId(dbname);
+  const quotedUser = pool.escape(dbUser);
+  const quotedHost = pool.escape('%');
+
+  let connection: PoolConnection | undefined;
 
   try {
-    await client.query('BEGIN');
-
-    const roleExists = await client.query(
-      'SELECT 1 FROM pg_roles WHERE rolname = $1',
-      [dbUser],
+    connection = await pool.getConnection();
+    await connection.query(
+      [
+        \`CREATE USER IF NOT EXISTS \${quotedUser}@\${quotedHost} IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'\`,
+        \`ALTER USER \${quotedUser}@\${quotedHost} IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS' REQUIRE SSL\`,
+        \`GRANT ALL PRIVILEGES ON \${quotedDbName}.* TO \${quotedUser}@\${quotedHost}\`,
+      ].join(';\\n'),
     );
-    if (roleExists.rowCount === 0) {
-      await client.query(\`CREATE ROLE \${quotedDbUser} WITH LOGIN;\`);
-    }
-
-    await client.query(
-      \`ALTER ROLE \${quotedDbUser} WITH LOGIN;
-      GRANT ALL PRIVILEGES ON DATABASE \${quotedDbName} TO \${quotedDbUser};
-      GRANT USAGE, CREATE ON SCHEMA public TO \${quotedDbUser};
-      GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \${quotedDbUser};
-      GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \${quotedDbUser};
-      GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO \${quotedDbUser};
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO \${quotedDbUser};
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO \${quotedDbUser};
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO \${quotedDbUser};
-      GRANT rds_iam TO \${quotedDbUser};\`,
-    );
-
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
   } finally {
-    await client.end();
+    await connection?.release();
+    await pool.end();
   }
 };
 
@@ -263,28 +245,16 @@ export { getPrisma } from './prisma.js';
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Signer } from '@aws-sdk/rds-signer';
-import { withConnectionRetry } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
 const buildDatabaseUrl = async (): Promise<string> => {
-  const hostname = process.env.HOSTNAME!;
-  const port = process.env.PORT!;
-  const database = process.env.DATABASE!;
-  const dbUser = process.env.DBUSER!;
-  const region = process.env.AWS_REGION!;
-
-  const iamAuthToken = await new Signer({
-    hostname,
-    port: Number(port),
-    region,
-    username: dbUser,
-  }).getAuthToken();
+  const { host, port, dbname, username, password } = await getDatabaseSecret();
 
   return (
-    \`postgresql://\${encodeURIComponent(dbUser)}\` +
-    \`:\${encodeURIComponent(iamAuthToken)}\` +
-    \`@\${hostname}:\${port}/\${database}\` +
-    \`?sslaccept=strict\` // \`sslaccept\` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq \`sslmode\` option.
+    \`mysql://\${encodeURIComponent(username)}\` +
+    \`:\${encodeURIComponent(password)}\` +
+    \`@\${host}:\${port}/\${dbname}\` +
+    \`?sslaccept=strict\`
   );
 };
 
@@ -317,60 +287,48 @@ import {
 } from './constants.js';
 import { getDatabaseConfig } from './utils.js';
 
-let prismaClient: PrismaClient<Prisma.LogLevel> | undefined;
-
 export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   log: LogOpts[] = ['warn', 'error'] as LogOpts[],
 ): Promise<PrismaClient<LogOpts>> => {
-  if (prismaClient) return prismaClient;
-
   if (process.env.SERVE_LOCAL === 'true') {
-    const adapter = new PrismaPg(
-      new Pool({
-        host: LOCAL_DB_HOST,
-        port: LOCAL_DB_PORT,
-        database: LOCAL_DB_NAME,
-        user: LOCAL_DB_USER,
-        password: LOCAL_DB_PASSWORD,
-        allowExitOnIdle: true,
-      }),
-    );
-    prismaClient = new PrismaClient({
+    const adapter = new PrismaMariaDb({
+      host: LOCAL_DB_HOST,
+      port: LOCAL_DB_PORT,
+      database: LOCAL_DB_NAME,
+      user: LOCAL_DB_USER,
+      password: LOCAL_DB_PASSWORD,
+      allowPublicKeyRetrieval: true,
+    });
+    return new PrismaClient({
       adapter,
       log,
-    }) as unknown as PrismaClient<Prisma.LogLevel>;
-    return prismaClient;
+    }) as unknown as PrismaClient<LogOpts>;
   }
 
   const { hostname, port, database, dbUser, region } =
     await getDatabaseConfig(DB_PACKAGE_NAME);
-  const adapter = new PrismaPg(
-    new Pool({
-      host: hostname,
-      port,
-      database,
-      user: dbUser,
-      ssl: {
-        rejectUnauthorized: true,
-      },
-      allowExitOnIdle: true,
-      password: async () => {
-        const token = await new Signer({
-          hostname,
-          port,
-          region,
-          username: dbUser,
-        }).getAuthToken();
-        return token;
-      },
-    }),
-  );
+  const iamAuthToken = await new Signer({
+    hostname,
+    port,
+    region,
+    username: dbUser,
+  }).getAuthToken();
 
-  prismaClient = new PrismaClient({
+  const adapter = new PrismaMariaDb({
+    host: hostname,
+    port,
+    database,
+    user: dbUser,
+    password: iamAuthToken,
+    ssl: {
+      rejectUnauthorized: true,
+    },
+  });
+
+  return new PrismaClient({
     adapter,
     log,
-  }) as unknown as PrismaClient<Prisma.LogLevel>;
-  return prismaClient;
+  }) as unknown as PrismaClient<LogOpts>;
 };
 "
 `;
@@ -926,7 +884,7 @@ const getDatabaseUrl = async () => {
       LOCAL_DB_PORT,
       LOCAL_DB_USER,
     } = await import('./src/constants.js');
-    return \`postgresql://\${LOCAL_DB_USER}:\${LOCAL_DB_PASSWORD}@\${LOCAL_DB_HOST}:\${LOCAL_DB_PORT}/\${LOCAL_DB_NAME}\`;
+    return \`mysql://\${LOCAL_DB_USER}:\${LOCAL_DB_PASSWORD}@\${LOCAL_DB_HOST}:\${LOCAL_DB_PORT}/\${LOCAL_DB_NAME}\`;
   }
   return process.env.DATABASE_URL;
 };
@@ -4151,6 +4109,7 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 "import { PrismaPg } from '@prisma/adapter-pg';
 import { Signer } from '@aws-sdk/rds-signer';
 import { Prisma, PrismaClient } from '../generated/prisma/client.js';
+import { Pool } from 'pg';
 import {
   DB_PACKAGE_NAME,
   LOCAL_DB_HOST,

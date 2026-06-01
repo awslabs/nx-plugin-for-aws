@@ -71,8 +71,8 @@ export async function tsInfraGenerator(
   });
 
   // Shared infra-config and infra-scripts packages (lazy creation, only when enabled)
-  const enableStageConfig = schema.enableStageConfig ?? false;
-  if (enableStageConfig) {
+  const stageConfig = schema.stageConfig ?? false;
+  if (stageConfig) {
     await sharedInfraConfigGenerator(tree);
     await sharedScriptsGenerator(tree);
   }
@@ -106,7 +106,7 @@ export async function tsInfraGenerator(
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerDisplayCommands().exec,
       dir: lib.dir,
-      enableStageConfig,
+      stageConfig,
       ...schema,
     },
     {
@@ -151,7 +151,7 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
-        options: enableStageConfig
+        options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra-deploy.ts ${libraryRoot}`,
             })
@@ -170,7 +170,7 @@ export async function tsInfraGenerator(
       config.targets.destroy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
-        options: enableStageConfig
+        options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra-destroy.ts ${libraryRoot}`,
             })
@@ -227,7 +227,7 @@ export async function tsInfraGenerator(
           `${tree.root}/${PACKAGES_DIR}`,
         )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.lib.json`,
       },
-      ...(enableStageConfig
+      ...(stageConfig
         ? [
             {
               path: `${path.relative(

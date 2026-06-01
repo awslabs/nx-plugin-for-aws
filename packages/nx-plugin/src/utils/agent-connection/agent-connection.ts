@@ -159,7 +159,7 @@ export async function ensurePythonAgentConnectionProject(
     await pyProjectGenerator(tree, {
       name: PY_AGENT_CONNECTION_NAME,
       directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
-      projectType: 'library',
+      type: 'library',
     });
   }
 

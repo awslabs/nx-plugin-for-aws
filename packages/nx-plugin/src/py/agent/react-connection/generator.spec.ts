@@ -406,7 +406,7 @@ describe(
       // Generate a py project for the agent
       await pyProjectGenerator(tree, {
         name: 'agent-project',
-        projectType: 'application',
+        type: 'application',
       });
 
       // Generate a py strands agent
@@ -471,7 +471,7 @@ describe(
       // Generate a py project for the agent
       await pyProjectGenerator(tree, {
         name: 'agent-project',
-        projectType: 'application',
+        type: 'application',
       });
 
       // Generate a py strands agent with AG-UI protocol

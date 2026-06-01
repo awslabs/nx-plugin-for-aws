@@ -217,12 +217,12 @@ const gatherCandidates = async (
   tree: Tree,
   projectConfig: ProjectConfiguration,
 ): Promise<ConnectionCandidate[]> => {
-  const projectType = await determineProjectTypeFromConfig(tree, projectConfig);
+  const type = await determineProjectTypeFromConfig(tree, projectConfig);
   const components: ComponentMetadata[] =
     (projectConfig.metadata as any)?.components ?? [];
 
   return [
-    ...(projectType ? [{ type: projectType }] : []),
+    ...(type ? [{ type: type }] : []),
     ...components.map((component) => ({
       type: component.generator,
       component,
