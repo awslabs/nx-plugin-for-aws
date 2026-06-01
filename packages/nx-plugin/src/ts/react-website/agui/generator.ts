@@ -164,7 +164,9 @@ export const addAgUiReactConnection = async (
 const resolveAgUiTheme = (
   frontendProjectConfig: ProjectConfiguration,
 ): AgUiTheme => {
-  const ux = (frontendProjectConfig.metadata as any)?.ux as string | undefined;
+  const ux = (
+    (frontendProjectConfig.metadata as any)?.ux as string | undefined
+  )?.toLowerCase();
   switch (ux) {
     case 'cloudscape':
       return 'cloudscape';

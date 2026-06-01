@@ -67,7 +67,7 @@ export const pyAgentMcpConnectionGenerator = async (
     );
   }
 
-  if (mcpComponent.auth && mcpComponent.auth !== 'iam') {
+  if (mcpComponent.auth && mcpComponent.auth.toLowerCase() !== 'iam') {
     throw new Error(
       `MCP server connection currently only supports IAM authentication, but '${mcpComponent.name}' uses '${mcpComponent.auth}' authentication.`,
     );

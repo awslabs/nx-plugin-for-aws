@@ -67,13 +67,16 @@ export const pyAgentA2aConnectionGenerator = async (
     );
   }
 
-  if (targetAgentComponent.protocol !== 'a2a') {
+  if ((targetAgentComponent.protocol ?? '').toLowerCase() !== 'a2a') {
     throw new Error(
       `Target agent '${targetAgentComponent.name}' uses the ${targetAgentComponent.protocol ?? 'http'} protocol — only A2A agents can be connected as tools.`,
     );
   }
 
-  if (targetAgentComponent.auth && targetAgentComponent.auth !== 'iam') {
+  if (
+    targetAgentComponent.auth &&
+    targetAgentComponent.auth.toLowerCase() !== 'iam'
+  ) {
     throw new Error(
       `A2A agent connection currently only supports IAM authentication, but '${targetAgentComponent.name}' uses '${targetAgentComponent.auth}' authentication.`,
     );

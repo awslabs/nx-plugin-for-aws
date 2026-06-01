@@ -43,9 +43,11 @@ export async function reactGenerator(
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const metadata = backendProjectConfig.metadata as any;
   const apiName = metadata.apiName;
-  const auth = metadata.auth ?? 'iam';
+  const auth = (metadata.auth ?? 'iam').toLowerCase();
   const port = metadata.port ?? metadata.ports?.[0] ?? 2022;
-  const isRestApi = metadata.infra === 'rest-lambda';
+  const rawInfra = (metadata.infra ?? metadata.computeType ?? '').toLowerCase();
+  const isRestApi =
+    rawInfra === 'rest-lambda' || rawInfra === 'serverlessapigatewayrestapi';
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 

@@ -56,11 +56,11 @@ export async function tsAgentReactConnectionGenerator(
   const agentName = targetComponent?.name ?? 'agent';
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
-  const auth = targetComponent?.auth ?? metadata?.auth ?? 'iam';
+  const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
   const agentProjectAlias = toScopeAlias(agentProjectConfig.name);
   const agentPath = targetComponent?.path ?? 'src/agent';
 
-  if (targetComponent?.protocol === 'a2a') {
+  if ((targetComponent?.protocol ?? '').toLowerCase() === 'a2a') {
     throw new Error(
       `Cannot connect a React website to an A2A agent. ` +
         `Consider generating an agent with the HTTP or AG-UI protocol instead.`,

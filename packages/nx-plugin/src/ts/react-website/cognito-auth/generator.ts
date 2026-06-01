@@ -121,7 +121,9 @@ export async function tsReactWebsiteAuthGenerator(
     options.project,
   );
 
-  const ux = (projectConfiguration.metadata as any)?.ux ?? 'cloudscape';
+  const ux = (
+    (projectConfiguration.metadata as any)?.ux ?? 'cloudscape'
+  ).toLowerCase();
 
   await applyGritQL(tree, mainTsxPath, readGritPattern('cognito-auth-wrapper'));
   // Update App Layout
