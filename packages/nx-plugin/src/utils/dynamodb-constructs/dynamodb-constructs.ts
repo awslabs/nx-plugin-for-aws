@@ -137,7 +137,7 @@ export const addDynamoDBTerraformModules = (
     tree,
     joinPathFragments(__dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
-    {},
+    options,
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

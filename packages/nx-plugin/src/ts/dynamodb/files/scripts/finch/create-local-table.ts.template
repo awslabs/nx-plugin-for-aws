@@ -11,6 +11,9 @@ import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
 const [tableName, port] = process.argv.slice(2);
 const endpoint = `http://localhost:${port}`;
 
+const REQUEST_TIMEOUT_MS = 10_000;
+const timeoutSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
 const client = new DynamoDBClient({
   endpoint,
   region: 'us-east-1',
@@ -27,6 +30,7 @@ const waitForTableActive = async (
   for (;;) {
     const { Table } = await waitClient.send(
       new DescribeTableCommand({ TableName: waitTableName }),
+      { abortSignal: timeoutSignal() },
     );
     const allActive =
       Table?.TableStatus === 'ACTIVE' &&
@@ -80,14 +84,19 @@ const ensureTable = async (
             GlobalSecondaryIndexes: globalSecondaryIndexes,
           }),
         }),
+        { abortSignal: timeoutSignal() },
       );
       console.log(`Created table: ${tblName}`);
+      for (const gsi of globalSecondaryIndexes) {
+        console.log(`Created GSI: ${gsi.IndexName}`);
+      }
       return;
     } catch (e) {
       // Table already exists: sync GSIs to match desired state.
       if (e instanceof ResourceInUseException) {
         const { Table } = await tblClient.send(
           new DescribeTableCommand({ TableName: tblName }),
+          { abortSignal: timeoutSignal() },
         );
         const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
         const existingNames = new Set(
@@ -108,6 +117,7 @@ const ensureTable = async (
                 { Delete: { IndexName: existing.IndexName } },
               ],
             }),
+            { abortSignal: timeoutSignal() },
           );
           console.log(`Deleted GSI: ${existing.IndexName}`);
           await waitForTableActive(tblClient, tblName);
@@ -135,6 +145,7 @@ const ensureTable = async (
                 },
               ],
             }),
+            { abortSignal: timeoutSignal() },
           );
           console.log(`Created GSI: ${gsi.indexName}`);
           await waitForTableActive(tblClient, tblName);

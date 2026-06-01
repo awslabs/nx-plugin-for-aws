@@ -1,0 +1,153 @@
+import {
+  CreateTableCommand,
+  DescribeTableCommand,
+  DynamoDBClient,
+  GlobalSecondaryIndexDescription,
+  ResourceInUseException,
+  UpdateTableCommand,
+} from '@aws-sdk/client-dynamodb';
+import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+
+const [tableName, port] = process.argv.slice(2);
+const endpoint = `http://localhost:${port}`;
+
+const client = new DynamoDBClient({
+  endpoint,
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: 'accessKeyId',
+    secretAccessKey: 'secretAccessKey',
+  },
+});
+
+const waitForTableActive = async (
+  waitClient: DynamoDBClient,
+  waitTableName: string,
+): Promise<void> => {
+  for (;;) {
+    const { Table } = await waitClient.send(
+      new DescribeTableCommand({ TableName: waitTableName }),
+    );
+    const allActive =
+      Table?.TableStatus === 'ACTIVE' &&
+      (Table?.GlobalSecondaryIndexes ?? []).every(
+        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === 'ACTIVE',
+      );
+    if (allActive) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+};
+
+const ensureTable = async (
+  tblClient: DynamoDBClient,
+  tblName: string,
+  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+): Promise<void> => {
+  const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
+    { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
+    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+  ]);
+  const attributeDefinitions = [
+    { AttributeName: 'pk', AttributeType: 'S' as const },
+    { AttributeName: 'sk', AttributeType: 'S' as const },
+    ...gsiAttributeDefinitions.filter(
+      (a, i, arr) =>
+        arr.findIndex((b) => b.AttributeName === a.AttributeName) === i,
+    ),
+  ];
+  const globalSecondaryIndexes = gsIs.map((gsi) => ({
+    IndexName: gsi.indexName,
+    KeySchema: [
+      { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
+      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+    ],
+    Projection: { ProjectionType: 'ALL' as const },
+  }));
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      // New table: create with all GSIs in one shot.
+      await tblClient.send(
+        new CreateTableCommand({
+          TableName: tblName,
+          AttributeDefinitions: attributeDefinitions,
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' },
+          ],
+          BillingMode: 'PAY_PER_REQUEST',
+          ...(globalSecondaryIndexes.length > 0 && {
+            GlobalSecondaryIndexes: globalSecondaryIndexes,
+          }),
+        }),
+      );
+      console.log(`Created table: ${tblName}`);
+      for (const gsi of globalSecondaryIndexes) {
+        console.log(`Created GSI: ${gsi.IndexName}`);
+      }
+      return;
+    } catch (e) {
+      // Table already exists: sync GSIs to match desired state.
+      if (e instanceof ResourceInUseException) {
+        const { Table } = await tblClient.send(
+          new DescribeTableCommand({ TableName: tblName }),
+        );
+        const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
+        const existingNames = new Set(
+          existingGSIs.map(
+            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? '',
+          ),
+        );
+        const desiredNames = new Set(gsIs.map((g) => g.indexName));
+
+        // DynamoDB Local only allows one GSI to be created or deleted at a time.
+        for (const existing of existingGSIs) {
+          if (!existing.IndexName || desiredNames.has(existing.IndexName))
+            continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              GlobalSecondaryIndexUpdates: [
+                { Delete: { IndexName: existing.IndexName } },
+              ],
+            }),
+          );
+          console.log(`Deleted GSI: ${existing.IndexName}`);
+          await waitForTableActive(tblClient, tblName);
+        }
+
+        for (const gsi of gsIs) {
+          if (existingNames.has(gsi.indexName)) continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              AttributeDefinitions: [
+                { AttributeName: gsi.partitionKey, AttributeType: 'S' },
+                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+              ],
+              GlobalSecondaryIndexUpdates: [
+                {
+                  Create: {
+                    IndexName: gsi.indexName,
+                    KeySchema: [
+                      { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
+                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                    ],
+                    Projection: { ProjectionType: 'ALL' },
+                  },
+                },
+              ],
+            }),
+          );
+          console.log(`Created GSI: ${gsi.indexName}`);
+          await waitForTableActive(tblClient, tblName);
+        }
+        return;
+      }
+      if (attempt === 29) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+};
+
+await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);

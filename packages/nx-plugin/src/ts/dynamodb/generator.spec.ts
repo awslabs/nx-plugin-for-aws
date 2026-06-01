@@ -11,11 +11,17 @@ import {
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { resolveContainerEngine } from '../../utils/containers';
+
+vi.mock('../../utils/containers', () => ({
+  resolveContainerEngine: vi.fn(),
+}));
 
 describe('ts#dynamodb generator', () => {
   let tree: Tree;
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
+    vi.mocked(resolveContainerEngine).mockResolvedValue('docker');
   });
 
   const defaultOptions = {
@@ -87,6 +93,12 @@ describe('ts#dynamodb generator', () => {
     expect(packageJson.dependencies['electrodb']).toBeDefined();
     expect(packageJson.devDependencies['tsx']).toBeDefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
+  });
+
+  it('should generate scripts for finch engine', async () => {
+    vi.mocked(resolveContainerEngine).mockResolvedValue('finch');
+    await tsDynamoDBGenerator(tree, defaultOptions);
+    snapshotTreeDir(tree, 'packages/my-table/scripts');
   });
 
   it('should generate terraform modules when iacProvider is Terraform', async () => {

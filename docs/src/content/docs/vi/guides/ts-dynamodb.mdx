@@ -147,6 +147,20 @@ Tệp `src/client.ts` được tạo xuất hai tiện ích chính:
 - `getDynamoDBClient()` — trả về một singleton `DynamoDBClient` được lưu trong bộ nhớ cache. Khi `SERVE_LOCAL=true`, kết nối đến phiên bản DynamoDB Local cục bộ; nếu không, tạo một client AWS sử dụng chuỗi thông tin xác thực mặc định.
 - `resolveTableName()` — trả về tên bảng DynamoDB. Khi `SERVE_LOCAL=true`, trả về hằng số tên bảng cục bộ; nếu không, lấy tên từ AWS AppConfig sử dụng biến môi trường `RUNTIME_CONFIG_APP_ID` và lưu vào bộ nhớ cache cho các lần gọi tiếp theo.
 
+### Dừng DynamoDB cục bộ
+
+Dừng `serve-local` (ví dụ: với `Ctrl+C`) sẽ tự động xóa container DynamoDB Local, nhưng giữ lại volume có tên để dữ liệu của bạn được duy trì qua các lần khởi động lại.
+
+:::caution[Windows]
+Do hạn chế với xử lý tín hiệu trên Windows, container không được tự động xóa khi `serve-local` bị dừng. Bạn sẽ cần xóa nó thủ công:
+
+```bash
+<engine> rm -f <scope>-dynamodb
+```
+
+Thay thế `<engine>` bằng công cụ container của bạn (`docker` hoặc `finch`) và `<scope>` bằng scope workspace Nx của bạn (ví dụ: `proj`).
+:::
+
 ## Thêm/Xóa Global Secondary Indexes
 
 Bắt đầu bằng cách cập nhật `GLOBAL_SECONDARY_INDEXES` trong `src/gsi.ts` — đây là nguồn chân lý cho các định nghĩa GSI của bạn, và trong lần chạy `serve-local` tiếp theo, script sẽ tự động thêm hoặc xóa các chỉ mục trên bảng cục bộ để phản ánh danh sách mới. Khi sử dụng CDK, những thay đổi này cũng được tự động phản ánh trong bảng AWS của bạn trong lần triển khai tiếp theo.
@@ -165,6 +179,10 @@ import { createExampleEntity } from ':my-scope/my-table';
 const entity = await createExampleEntity();
 const result = await entity.query.primary({ id: '123' }).go();
 ```
+
+:::note[Runtime config]
+Khi chạy trong AWS, `resolveTableName()` lấy tên bảng từ AWS AppConfig sử dụng biến môi trường `RUNTIME_CONFIG_APP_ID`. Các dự án được xây dựng với plugin này (tRPC APIs, Smithy APIs, agents, MCP servers) đã có biến này được cấu hình tự động. Đối với các dự án TypeScript khác, đảm bảo `RUNTIME_CONFIG_APP_ID` được đặt trong môi trường runtime với ID ứng dụng AppConfig được cung cấp bởi cơ sở hạ tầng của bạn.
+:::
 
 ### Generators kết nối
 
@@ -227,8 +245,6 @@ module "my_table" {
 ### Cấp quyền truy cập
 
 <Snippet name="connection/lambda-dynamodb-access" />
-
-Đảm bảo các hàm Lambda của bạn có biến môi trường RUNTIME_CONFIG_APP_ID được đặt để resolveTableName() có thể tra cứu tên bảng tại runtime.
 
 ### Bảo vệ xóa
 
@@ -344,4 +360,3 @@ module "my_table" {
 ```
 </Fragment>
 </Infrastructure>
-

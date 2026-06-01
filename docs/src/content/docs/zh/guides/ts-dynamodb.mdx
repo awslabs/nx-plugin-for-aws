@@ -147,6 +147,20 @@ export const createExampleEntity = async () =>
 - `getDynamoDBClient()` — 返回缓存的单例 `DynamoDBClient`。当 `SERVE_LOCAL=true` 时，连接到本地 DynamoDB Local 实例；否则使用默认凭证链创建 AWS 客户端。
 - `resolveTableName()` — 返回 DynamoDB 表名。当 `SERVE_LOCAL=true` 时，返回本地表名常量；否则使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 获取名称，并为后续调用缓存它。
 
+### 停止本地 DynamoDB
+
+停止 `serve-local`（例如使用 `Ctrl+C`）会自动删除 DynamoDB Local 容器，但会保留命名卷，以便您的数据在重启后保持不变。
+
+:::caution[Windows]
+由于 Windows 上信号处理的限制，停止 `serve-local` 时不会自动删除容器。您需要手动删除它：
+
+```bash
+<engine> rm -f <scope>-dynamodb
+```
+
+将 `<engine>` 替换为您的容器引擎（`docker` 或 `finch`），将 `<scope>` 替换为您的 Nx 工作区作用域（例如 `proj`）。
+:::
+
 ## 添加/删除全局二级索引
 
 首先更新 `src/gsi.ts` 中的 `GLOBAL_SECONDARY_INDEXES` — 这是您的 GSI 定义的真实来源，在下次 `serve-local` 运行时，脚本将自动在本地表上添加或删除索引以反映新列表。使用 CDK 时，这些更改也会在下次部署时自动反映在您的 AWS 表中。
@@ -165,6 +179,10 @@ import { createExampleEntity } from ':my-scope/my-table';
 const entity = await createExampleEntity();
 const result = await entity.query.primary({ id: '123' }).go();
 ```
+
+:::note[运行时配置]
+在 AWS 中运行时，`resolveTableName()` 使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 获取表名。使用此插件构建的项目（tRPC API、Smithy API、代理、MCP 服务器）已自动配置此变量。对于其他 TypeScript 项目，请确保在运行时环境中设置 `RUNTIME_CONFIG_APP_ID`，其值为您的基础设施配置的 AppConfig 应用程序 ID。
+:::
 
 ### 连接生成器
 
@@ -227,8 +245,6 @@ module "my_table" {
 ### 授予访问权限
 
 <Snippet name="connection/lambda-dynamodb-access" />
-
-确保您的 Lambda 函数设置了 RUNTIME_CONFIG_APP_ID 环境变量，以便 resolveTableName() 可以在运行时查找表名。
 
 ### 删除保护
 

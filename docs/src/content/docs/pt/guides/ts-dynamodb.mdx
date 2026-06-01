@@ -147,6 +147,20 @@ O arquivo `src/client.ts` gerado exporta dois utilitários principais:
 - `getDynamoDBClient()` — retorna um singleton `DynamoDBClient` em cache. Quando `SERVE_LOCAL=true`, conecta-se à instância local do DynamoDB Local; caso contrário, cria um cliente AWS usando a cadeia de credenciais padrão.
 - `resolveTableName()` — retorna o nome da tabela DynamoDB. Quando `SERVE_LOCAL=true`, retorna a constante do nome da tabela local; caso contrário, busca o nome do AWS AppConfig usando a variável de ambiente `RUNTIME_CONFIG_APP_ID` e o armazena em cache para chamadas subsequentes.
 
+### Parando o DynamoDB Local
+
+Parar o `serve-local` (por exemplo, com `Ctrl+C`) remove automaticamente o contêiner do DynamoDB Local, mas preserva o volume nomeado para que seus dados persistam entre reinicializações.
+
+:::caution[Windows]
+Devido a limitações no tratamento de sinais no Windows, o contêiner não é removido automaticamente quando o `serve-local` é parado. Você precisará removê-lo manualmente:
+
+```bash
+<engine> rm -f <scope>-dynamodb
+```
+
+Substitua `<engine>` pelo seu mecanismo de contêiner (`docker` ou `finch`) e `<scope>` pelo escopo do seu workspace Nx (por exemplo, `proj`).
+:::
+
 ## Adicionar/Remover Índices Secundários Globais
 
 Comece atualizando `GLOBAL_SECONDARY_INDEXES` em `src/gsi.ts` — esta é a fonte de verdade para suas definições de GSI, e na próxima execução do `serve-local` o script adicionará ou removerá automaticamente índices na tabela local para refletir a nova lista. Ao usar CDK, essas alterações também são refletidas automaticamente em sua tabela AWS na próxima implantação.
@@ -165,6 +179,10 @@ import { createExampleEntity } from ':my-scope/my-table';
 const entity = await createExampleEntity();
 const result = await entity.query.primary({ id: '123' }).go();
 ```
+
+:::note[Configuração de runtime]
+Ao executar na AWS, `resolveTableName()` busca o nome da tabela do AWS AppConfig usando a variável de ambiente `RUNTIME_CONFIG_APP_ID`. Projetos construídos com este plugin (APIs tRPC, APIs Smithy, agentes, servidores MCP) já têm essa variável configurada automaticamente. Para outros projetos TypeScript, certifique-se de que `RUNTIME_CONFIG_APP_ID` esteja definida no ambiente de runtime com o ID da aplicação AppConfig provisionado pela sua infraestrutura.
+:::
 
 ### Geradores de Conexão
 
@@ -227,8 +245,6 @@ Isso provisiona uma tabela DynamoDB com:
 ### Concedendo Acesso
 
 <Snippet name="connection/lambda-dynamodb-access" />
-
-Certifique-se de que suas funções Lambda tenham a variável de ambiente RUNTIME_CONFIG_APP_ID definida para que resolveTableName() possa buscar o nome da tabela em tempo de execução.
 
 ### Proteção contra Exclusão
 

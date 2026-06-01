@@ -147,6 +147,20 @@ export const createExampleEntity = async () =>
 - `getDynamoDBClient()` — キャッシュされたシングルトンの`DynamoDBClient`を返します。`SERVE_LOCAL=true`の場合、ローカルのDynamoDB Localインスタンスに接続します。それ以外の場合は、デフォルトの認証情報チェーンを使用してAWSクライアントを作成します。
 - `resolveTableName()` — DynamoDBテーブル名を返します。`SERVE_LOCAL=true`の場合、ローカルテーブル名定数を返します。それ以外の場合は、`RUNTIME_CONFIG_APP_ID`環境変数を使用してAWS AppConfigから名前を取得し、後続の呼び出しのためにキャッシュします。
 
+### ローカルDynamoDBの停止
+
+`serve-local`を停止する（例：`Ctrl+C`）と、DynamoDB Localコンテナは自動的に削除されますが、名前付きボリュームは保持されるため、再起動してもデータは保持されます。
+
+:::caution[Windows]
+Windowsでのシグナル処理の制限により、`serve-local`を停止してもコンテナは自動的に削除されません。手動で削除する必要があります：
+
+```bash
+<engine> rm -f <scope>-dynamodb
+```
+
+`<engine>`をコンテナエンジン（`docker`または`finch`）に、`<scope>`をNxワークスペースのスコープ（例：`proj`）に置き換えてください。
+:::
+
 ## グローバルセカンダリインデックスの追加/削除
 
 まず、`src/gsi.ts`の`GLOBAL_SECONDARY_INDEXES`を更新します。これがGSI定義の信頼できる情報源であり、次回の`serve-local`実行時にスクリプトが自動的にローカルテーブルのインデックスを追加または削除して新しいリストを反映します。CDKを使用している場合、これらの変更は次回のデプロイ時にAWSテーブルにも自動的に反映されます。
@@ -165,6 +179,10 @@ import { createExampleEntity } from ':my-scope/my-table';
 const entity = await createExampleEntity();
 const result = await entity.query.primary({ id: '123' }).go();
 ```
+
+:::note[ランタイム設定]
+AWSで実行する場合、`resolveTableName()`は`RUNTIME_CONFIG_APP_ID`環境変数を使用してAWS AppConfigからテーブル名を取得します。このプラグインで構築されたプロジェクト（tRPC API、Smithy API、エージェント、MCPサーバー）では、この変数は自動的に設定されます。他のTypeScriptプロジェクトの場合は、インフラストラクチャによってプロビジョニングされたAppConfigアプリケーションIDを使用して、ランタイム環境で`RUNTIME_CONFIG_APP_ID`が設定されていることを確認してください。
+:::
 
 ### 接続ジェネレーター
 
@@ -227,8 +245,6 @@ module "my_table" {
 ### アクセス権限の付与
 
 <Snippet name="connection/lambda-dynamodb-access" />
-
-Lambda関数がRUNTIME_CONFIG_APP_ID環境変数を設定していることを確認してください。これにより、resolveTableName()が実行時にテーブル名を検索できます。
 
 ### 削除保護
 

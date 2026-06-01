@@ -92,6 +92,14 @@ export const tsDynamoDBGenerator = async (
     dir,
     templateOptions,
   );
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'scripts', containerEngine),
+    joinPathFragments(dir, 'scripts'),
+    templateOptions,
+  );
+  tree.delete(joinPathFragments(dir, 'scripts', 'docker'));
+  tree.delete(joinPathFragments(dir, 'scripts', 'finch'));
 
   const containerName = `${getNpmScope(tree)}-dynamodb`;
 
