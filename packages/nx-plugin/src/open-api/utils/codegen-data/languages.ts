@@ -84,15 +84,92 @@ export const toTypeScriptModelName = (name: string): string => {
     : candidateName;
 };
 
+/** Set of Python types that are built-ins and do not need forward-ref quoting. */
+const PYTHON_BUILTIN_TYPES = new Set([
+  'str',
+  'int',
+  'float',
+  'bool',
+  'bytes',
+  'None',
+  'Any',
+  'datetime.date',
+  'datetime.datetime',
+]);
+
+/**
+ * Names that the generated `types_gen.py` and client modules import or define
+ * at module scope.  A user-defined schema named `Field`, `Optional`, etc.
+ * would shadow these imports and either break forward-ref resolution
+ * (`Optional["Field"]` resolves to `pydantic.Field` without escaping) or
+ * silently produce invalid runtime types.
+ *
+ * Keep this aligned with the imports at the top of:
+ *  - files/shared/types_gen.py.template
+ *  - files/sync/client_gen.py.template
+ *  - files/async/async_client_gen.py.template
+ */
+const PYTHON_RESERVED_MODEL_NAMES = new Set([
+  // typing module
+  'Any',
+  'Literal',
+  'Never',
+  'Optional',
+  'TypedDict',
+  'Union',
+  // pydantic
+  'BaseModel',
+  'ConfigDict',
+  'Field',
+  'TypeAdapter',
+  // stdlib modules referenced in templates
+  'Iterator',
+  'AsyncIterator',
+  // typing/python builtins that would also shadow primitives
+  'None',
+  'True',
+  'False',
+  'Type',
+  // namespace import in client_gen.py — never let a user model collide
+  'types_gen',
+  // base exception we emit
+  'ApiError',
+]);
+
+/**
+ * Return the Python class name for a model.  Starts from the TypeScript
+ * escape (which already handles TS-reserved names like `Error` → `_Error`)
+ * and additionally escapes names that would shadow imports in the generated
+ * Python files.
+ */
+export const toPythonClassName = (name: string): string => {
+  const tsName = toTypeScriptModelName(name);
+  return PYTHON_RESERVED_MODEL_NAMES.has(tsName) ? `_${tsName}` : tsName;
+};
+
+/**
+ * Returns true if the given python type name is a built-in (not a user-defined
+ * model).
+ */
+export const isPythonBuiltin = (type: string): boolean => {
+  if (!type) return true;
+  if (PYTHON_BUILTIN_TYPES.has(type)) return true;
+  if (type.startsWith('list[') || type.startsWith('dict[')) return true;
+  if (type.startsWith('Optional[') || type.startsWith('Union[')) return true;
+  return false;
+};
+
 const toPythonPrimitive = (property: Model): string => {
   if (property.type === 'string' && property.format === 'date') {
-    return 'date';
+    return 'datetime.date';
   } else if (property.type === 'string' && property.format === 'date-time') {
-    return 'datetime';
-  } else if (property.type === 'any') {
-    return 'object';
+    return 'datetime.datetime';
+  } else if (property.type === 'any' || property.type === 'unknown') {
+    return 'Any';
   } else if (property.type === 'binary') {
-    return 'bytearray';
+    return 'bytes';
+  } else if (property.type === 'null' || property.type === 'void') {
+    return 'None';
   } else if (property.type === 'number') {
     if ((property as any).openapiType === 'integer') {
       return 'int';
@@ -107,17 +184,75 @@ const toPythonPrimitive = (property: Model): string => {
       default:
         return 'float';
     }
+  } else if (property.type === 'integer') {
+    return 'int';
   } else if (property.type === 'boolean') {
     return 'bool';
   } else if (property.type === 'string') {
     return 'str';
   }
-  return property.type;
+  // Fall-through is a user-defined model reference.  The py-client emits
+  // classes using `pythonClassName` (which escapes TS-reserved names like
+  // `Error` → `_Error` AND Python-imported names like `Field` → `_Field`),
+  // so references must use the same escaped form.
+  return toPythonClassName(property.type);
 };
 
 /**
- * Return the python type for a given property
+ * Return the idiomatic Python type for a given property.
+ *
+ * Uses PEP-585 lower-case generics (`list[...]`, `dict[str, ...]`), fully-
+ * qualified stdlib types (`datetime.date`, `datetime.datetime`), and `bytes`
+ * for binary payloads.  Model references are returned as bare class names —
+ * callers that emit the type inside a class body (where the class isn't yet
+ * defined) should use `toPythonAnnotation` instead to get forward-ref quoting.
  */
+/** Render an enum's values as a Python `Literal[...]` expression. */
+const toPythonEnumLiteral = (property: Model): string => {
+  const members = (property as any).enum as
+    | Array<{ value: string | number | boolean | null }>
+    | undefined;
+  if (!members || members.length === 0) return toPythonPrimitive(property);
+  const rendered = members
+    .map((m) => {
+      if (typeof m.value === 'string')
+        return `"${m.value.replace(/"/g, '\\"')}"`;
+      if (m.value === null) return 'None';
+      return String(m.value);
+    })
+    .join(', ');
+  return `Literal[${rendered}]`;
+};
+
+/**
+ * Resolve the element type of a collection model.  Prefers the link's
+ * already-computed `pythonType` if the link was mutated first, since
+ * model mutation order isn't guaranteed to walk links before their
+ * parents.
+ *
+ * When the element itself is an enum (anonymous or referenced) the type is
+ * rendered as a `Literal[...]` so callers can't pass arbitrary values.
+ */
+const collectionElementType = (
+  property: Model,
+  link: Model | undefined,
+): string => {
+  if (link && link.export === 'enum') {
+    return toPythonEnumLiteral(link);
+  }
+  if (link) {
+    const precomputed = (link as any).pythonType as string | undefined;
+    if (precomputed) return precomputed;
+    return toPythonType(link);
+  }
+  // When no link is available but the collection itself carries enum members
+  // (inline enum array/dict), render them as Literal too.
+  if ((property as any).isEnum && (property as any).enum?.length > 0) {
+    return toPythonEnumLiteral(property);
+  }
+  return toPythonPrimitive({ ...property, type: property.type } as Model);
+};
+
 export const toPythonType = (property: Model): string => {
   const propertyLink = flattenModelLink(property.link);
   switch (property.export) {
@@ -125,20 +260,105 @@ export const toPythonType = (property: Model): string => {
     case 'reference':
       return toPythonPrimitive(property);
     case 'array':
-      return `List[${propertyLink && propertyLink.export !== 'enum' ? toPythonType(propertyLink) : property.type}]`;
+      return `list[${collectionElementType(property, propertyLink)}]`;
     case 'dictionary':
-      return `Dict[str, ${propertyLink && propertyLink.export !== 'enum' ? toPythonType(propertyLink) : property.type}]`;
+      return `dict[str, ${collectionElementType(property, propertyLink)}]`;
     case 'one-of':
     case 'any-of':
     case 'all-of':
-      return property.name;
+      return toPythonClassName(property.name);
     default:
-      // "any" has export = interface
-      if (PRIMITIVE_TYPES.has(property.type)) {
+      // "any"/"unknown" has export = interface — route to the primitive path
+      // so they become `Any` rather than being treated as a model reference.
+      if (PRIMITIVE_TYPES.has(property.type) || property.type === 'unknown') {
         return toPythonPrimitive(property);
       }
-      return property.type;
+      // User-defined model reference — escape names so the rendered type
+      // matches the emitted class (`Error` → `_Error`, `Field` → `_Field`,
+      // etc.).
+      return toPythonClassName(property.type);
   }
+};
+
+/**
+ * Prefix every user-defined (non-builtin) name in a python type string with
+ * the given namespace (e.g. `"types_gen."`) so the caller can reference
+ * model references through a single import.  Walks nested `list[...]`,
+ * `dict[str, ...]`, `Optional[...]` and `Union[...]` structures.
+ *
+ * Example: `qualifyPythonType('list[Pet]', 'types_gen.')` → `'list[types_gen.Pet]'`.
+ */
+export const qualifyPythonType = (
+  type: string | undefined,
+  prefix: string,
+): string => {
+  if (!type) return 'Any';
+  if (PYTHON_BUILTIN_TYPES.has(type)) return type;
+  const list = /^list\[(.*)\]$/s.exec(type);
+  if (list) return `list[${qualifyPythonType(list[1], prefix)}]`;
+  const dict = /^dict\[str, (.*)\]$/s.exec(type);
+  if (dict) return `dict[str, ${qualifyPythonType(dict[1], prefix)}]`;
+  if (
+    type.startsWith('Optional[') ||
+    type.startsWith('Union[') ||
+    type.startsWith('Literal[')
+  ) {
+    return type;
+  }
+  return `${prefix}${type}`;
+};
+
+/**
+ * Same as `toPythonType`, but wraps user-defined (non-builtin) types in
+ * forward-ref string quotes so they can be used inside class bodies before
+ * the referenced class is defined.  Collections recursively forward-quote.
+ */
+export const toPythonAnnotation = (property: Model): string => {
+  const render = (p: Model): string => {
+    const link = flattenModelLink(p.link);
+    switch (p.export) {
+      case 'generic':
+      case 'reference': {
+        const rendered = toPythonPrimitive(p);
+        return isPythonBuiltin(rendered) ? rendered : `"${rendered}"`;
+      }
+      case 'array': {
+        const inner =
+          link && link.export === 'enum'
+            ? toPythonEnumLiteral(link)
+            : link
+              ? render(link)
+              : (p as any).isEnum
+                ? toPythonEnumLiteral(p)
+                : toPythonPrimitive(p as Model);
+        return `list[${inner}]`;
+      }
+      case 'dictionary': {
+        const inner =
+          link && link.export === 'enum'
+            ? toPythonEnumLiteral(link)
+            : link
+              ? render(link)
+              : (p as any).isEnum
+                ? toPythonEnumLiteral(p)
+                : toPythonPrimitive(p as Model);
+        return `dict[str, ${inner}]`;
+      }
+      case 'one-of':
+      case 'any-of':
+      case 'all-of':
+        return `"${toPythonClassName(p.name)}"`;
+      default: {
+        if (p.type === 'unknown' || p.type === 'any') return 'Any';
+        if (PRIMITIVE_TYPES.has(p.type)) {
+          return toPythonPrimitive(p);
+        }
+        const escaped = toPythonClassName(p.type);
+        return isPythonBuiltin(escaped) ? escaped : `"${escaped}"`;
+      }
+    }
+  };
+  return render(property);
 };
 
 // @see https://github.com/OpenAPITools/openapi-generator/blob/e2a62ace74de361bef6338b7fa37da8577242aef/modules/openapi-generator/src/main/java/org/openapitools/codegen/languages/AbstractPythonCodegen.java#L106
@@ -198,9 +418,13 @@ export const toPythonName = (
 ) => {
   const nameSnakeCase = snakeCase(name);
 
-  // Check if the name is a reserved word. Reserved words that overlap with TypeScript will already be escaped
-  // with a leading _ by @hey-api/openapi-ts, so we remove this to test
-  if (PYTHON_KEYWORDS.has(name.startsWith('_') ? name.slice(1) : name)) {
+  // Check if the name is a reserved word.  Test both the raw name (reserved
+  // words that overlap with TypeScript arrive with a leading `_` from
+  // @hey-api/openapi-ts, which we strip before testing) and the snake-cased
+  // form — snakeCase strips trailing underscores so `from_` becomes `from`
+  // and would otherwise slip through.
+  const rawStripped = name.startsWith('_') ? name.slice(1) : name;
+  if (PYTHON_KEYWORDS.has(rawStripped) || PYTHON_KEYWORDS.has(nameSnakeCase)) {
     const nameSuffix = `_${nameSnakeCase}`;
     switch (namedEntity) {
       case 'model':

@@ -14,3 +14,6 @@ export type { OpenApiTsHooksGeneratorSchema } from '../src/open-api/ts-hooks/sch
 
 export { openApiTsMetadataGenerator } from '../src/open-api/ts-metadata/generator';
 export type { OpenApiTsMetadataGeneratorSchema } from '../src/open-api/ts-metadata/schema';
+
+export { openApiPyClientGenerator } from '../src/open-api/py-client/generator';
+export type { OpenApiPyClientGeneratorSchema } from '../src/open-api/py-client/schema';
