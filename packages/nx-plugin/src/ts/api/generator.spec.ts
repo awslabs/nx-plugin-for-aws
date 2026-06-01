@@ -87,4 +87,18 @@ describe('ts#api generator', () => {
     expect(tree.exists('packages/test-api/backend')).toBeTruthy();
     expect(tree.exists('packages/test-api/model')).toBeTruthy();
   });
+
+  it('should reject smithy framework with http-lambda infra', async () => {
+    await expect(
+      tsApiGenerator(tree, {
+        name: 'TestApi',
+        framework: 'smithy',
+        directory: 'packages',
+        infra: 'http-lambda' as any,
+        integrationPattern: 'isolated',
+        auth: 'iam',
+        iac: 'cdk',
+      }),
+    ).rejects.toThrow(/Unsupported infra 'http-lambda' for Smithy/);
+  });
 });
