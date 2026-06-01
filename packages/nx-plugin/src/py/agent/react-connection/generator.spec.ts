@@ -45,7 +45,7 @@ describe('py strands agent react connection generator', () => {
               path: 'agent_project/agent',
               port: 8081,
               rc: 'TestAgent',
-              auth: 'IAM',
+              auth: 'iam',
             },
           ],
         },
@@ -76,7 +76,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -100,7 +100,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -128,7 +128,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -164,7 +164,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -186,7 +186,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -208,7 +208,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -243,7 +243,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -272,7 +272,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'Cognito',
+        auth: 'cognito',
       },
     });
 
@@ -296,7 +296,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'Custom',
+        auth: 'custom',
       },
     });
 
@@ -348,7 +348,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await pyAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',
@@ -359,7 +359,7 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -377,8 +377,8 @@ export function Main() {
           path: 'agent_project/agent',
           port: 9000,
           rc: 'TestAgent',
-          auth: 'IAM',
-          protocol: 'A2A',
+          auth: 'iam',
+          protocol: 'a2a',
         },
       }),
     ).rejects.toThrow(/A2A/);
@@ -398,7 +398,7 @@ describe(
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
         skipInstall: true,
-        iacProvider: 'CDK',
+        iac: 'cdk',
       });
     });
 
@@ -406,13 +406,13 @@ describe(
       // Generate a py project for the agent
       await pyProjectGenerator(tree, {
         name: 'agent-project',
-        projectType: 'application',
+        type: 'application',
       });
 
       // Generate a py strands agent
       await pyAgentGenerator(tree, {
         project: 'agent_project',
-        computeType: 'None',
+        infra: 'none',
       });
 
       // Read the agent project configuration via Nx utils
@@ -471,14 +471,14 @@ describe(
       // Generate a py project for the agent
       await pyProjectGenerator(tree, {
         name: 'agent-project',
-        projectType: 'application',
+        type: 'application',
       });
 
       // Generate a py strands agent with AG-UI protocol
       await pyAgentGenerator(tree, {
         project: 'agent_project',
-        computeType: 'None',
-        protocol: 'AG-UI',
+        infra: 'none',
+        protocol: 'ag-ui',
       });
 
       const agentProjectConfig = readProjectConfiguration(
@@ -572,8 +572,8 @@ describe('py strands agent react connection generator - AG-UI protocol', () => {
               path: 'agent_project/agent',
               port: 8081,
               rc: 'TestAgent',
-              auth: 'IAM',
-              protocol: 'AG-UI',
+              auth: 'iam',
+              protocol: 'ag-ui',
             },
           ],
         },
@@ -603,8 +603,8 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
-        protocol: 'AG-UI',
+        auth: 'iam',
+        protocol: 'ag-ui',
       },
     });
 
@@ -650,8 +650,8 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
-        protocol: 'AG-UI',
+        auth: 'iam',
+        protocol: 'ag-ui',
       },
     });
 
@@ -674,8 +674,8 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'Cognito',
-        protocol: 'AG-UI',
+        auth: 'cognito',
+        protocol: 'ag-ui',
       },
     });
 
@@ -696,8 +696,8 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
-        protocol: 'AG-UI',
+        auth: 'iam',
+        protocol: 'ag-ui',
       },
     });
 
@@ -720,8 +720,8 @@ export function Main() {
               path: 'second_agent/second',
               port: 8082,
               rc: 'ResearchAgent',
-              auth: 'Cognito',
-              protocol: 'AG-UI',
+              auth: 'cognito',
+              protocol: 'ag-ui',
             },
           ],
         },
@@ -738,8 +738,8 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
-        protocol: 'AG-UI',
+        auth: 'iam',
+        protocol: 'ag-ui',
       },
     });
 
@@ -753,8 +753,8 @@ export function Main() {
         path: 'second_agent/second',
         port: 8082,
         rc: 'ResearchAgent',
-        auth: 'Cognito',
-        protocol: 'AG-UI',
+        auth: 'cognito',
+        protocol: 'ag-ui',
       },
     });
 
@@ -794,8 +794,8 @@ export function Main() {
           path: 'agent_project/agent',
           port: 8081,
           rc: 'TestAgent',
-          auth: 'IAM',
-          protocol: 'AG-UI',
+          auth: 'iam',
+          protocol: 'ag-ui',
         },
       });
 
@@ -840,14 +840,14 @@ export function Main() {
 });
 
 describe('py strands agent react connection generator - AG-UI themed CopilotKit', () => {
-  const writeFrontend = (tree: Tree, uxProvider?: string) => {
+  const writeFrontend = (tree: Tree, ux?: string) => {
     tree.write(
       'apps/frontend/project.json',
       JSON.stringify({
         name: 'frontend',
         root: 'apps/frontend',
         sourceRoot: 'apps/frontend/src',
-        ...(uxProvider ? { metadata: { uxProvider } } : {}),
+        ...(ux ? { metadata: { ux } } : {}),
       }),
     );
     tree.write(
@@ -864,8 +864,8 @@ describe('py strands agent react connection generator - AG-UI themed CopilotKit'
               path: 'agent_project/agent',
               port: 8081,
               rc: 'TestAgent',
-              auth: 'IAM',
-              protocol: 'AG-UI',
+              auth: 'iam',
+              protocol: 'ag-ui',
             },
           ],
         },
@@ -895,15 +895,15 @@ export function Main() {
         path: 'agent_project/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
-        protocol: 'AG-UI',
+        auth: 'iam',
+        protocol: 'ag-ui',
       },
     });
   };
 
-  it('should vend the default (unstyled) copilot theme when uxProvider is None', async () => {
+  it('should vend the default (unstyled) copilot theme when ux is None', async () => {
     const tree = createTreeUsingTsSolutionSetup();
-    writeFrontend(tree, 'None');
+    writeFrontend(tree, 'none');
     await runAgui(tree);
 
     const themeIndex = tree.read(
@@ -936,9 +936,9 @@ export function Main() {
     expect(css).toContain('pointer-events: auto;');
   });
 
-  it('should vend the cloudscape-themed copilot components when uxProvider is Cloudscape', async () => {
+  it('should vend the cloudscape-themed copilot components when ux is Cloudscape', async () => {
     const tree = createTreeUsingTsSolutionSetup();
-    writeFrontend(tree, 'Cloudscape');
+    writeFrontend(tree, 'cloudscape');
     await runAgui(tree);
 
     expect(
@@ -980,9 +980,9 @@ export function Main() {
     expect(css).toContain('pointer-events: auto;');
   });
 
-  it('should vend the shadcn-themed copilot components and shared shadcn primitives when uxProvider is Shadcn', async () => {
+  it('should vend the shadcn-themed copilot components and shared shadcn primitives when ux is Shadcn', async () => {
     const tree = createTreeUsingTsSolutionSetup();
-    writeFrontend(tree, 'Shadcn');
+    writeFrontend(tree, 'shadcn');
     await runAgui(tree);
 
     // Shadcn theme components are vended

@@ -43,9 +43,11 @@ export async function reactGenerator(
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const metadata = backendProjectConfig.metadata as any;
   const apiName = metadata.apiName;
-  const auth = metadata.auth ?? 'IAM';
+  const auth = (metadata.auth ?? 'iam').toLowerCase();
   const port = metadata.port ?? metadata.ports?.[0] ?? 2022;
-  const isRestApi = metadata.computeType === 'ServerlessApiGatewayRestApi';
+  const rawInfra = (metadata.infra ?? metadata.computeType ?? '').toLowerCase();
+  const isRestApi =
+    rawInfra === 'rest-lambda' || rawInfra === 'serverlessapigatewayrestapi';
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 
@@ -80,7 +82,7 @@ export async function reactGenerator(
     },
   );
 
-  if (auth === 'IAM') {
+  if (auth === 'iam') {
     generateFiles(
       tree,
       joinPathFragments(__dirname, '../../utils/files/website/hooks/sigv4'),
@@ -148,7 +150,7 @@ export async function reactGenerator(
       '@tanstack/react-query',
       '@tanstack/react-query-devtools',
       ...((isRestApi ? ['event-source-polyfill'] : []) as any),
-      ...((auth === 'IAM'
+      ...((auth === 'iam'
         ? [
             'oidc-client-ts',
             'aws4fetch',
@@ -156,7 +158,7 @@ export async function reactGenerator(
             'react-oidc-context',
           ]
         : []) as any),
-      ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
+      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
     withVersions([
       '@smithy/types',

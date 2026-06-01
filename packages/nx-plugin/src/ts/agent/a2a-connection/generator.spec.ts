@@ -20,8 +20,8 @@ describe('ts#agent#a2a-connection generator', () => {
     path: 'src/host',
     port: 8081,
     rc: 'Host',
-    auth: 'IAM' as const,
-    protocol: 'HTTP' as const,
+    auth: 'iam' as const,
+    protocol: 'http' as const,
   };
 
   const REMOTE = {
@@ -30,8 +30,8 @@ describe('ts#agent#a2a-connection generator', () => {
     path: 'src/remote',
     port: 9000,
     rc: 'Remote',
-    auth: 'IAM' as const,
-    protocol: 'A2A' as const,
+    auth: 'iam' as const,
+    protocol: 'a2a' as const,
   };
 
   const setupProjects = () => {
@@ -182,7 +182,7 @@ export const getAgent = async (sessionId: string) =>
         sourceProject: '@test/ts-host',
         targetProject: '@test/ts-remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, protocol: 'HTTP' },
+        targetComponent: { ...REMOTE, protocol: 'http' },
       }),
     ).rejects.toThrow(/A2A/);
   });
@@ -194,14 +194,14 @@ export const getAgent = async (sessionId: string) =>
         sourceProject: '@test/ts-host',
         targetProject: '@test/ts-remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, auth: 'Cognito' },
+        targetComponent: { ...REMOTE, auth: 'cognito' },
       }),
     ).rejects.toThrow(/IAM/);
   });
 
   it('should add generator metric', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     await tsAgentA2aConnectionGenerator(tree, {
       sourceProject: '@test/ts-host',
       targetProject: '@test/ts-remote',

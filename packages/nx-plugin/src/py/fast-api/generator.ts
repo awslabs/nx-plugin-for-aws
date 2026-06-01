@@ -35,7 +35,7 @@ import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
-import { resolveIacProvider } from '../../utils/iac';
+import { resolveIac } from '../../utils/iac';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
@@ -49,10 +49,10 @@ export const pyFastApiProjectGenerator = async (
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const integrationPattern = getIntegrationPattern(schema);
-  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+  const iac = await resolveIac(tree, schema.iac);
 
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
@@ -72,7 +72,7 @@ export const pyFastApiProjectGenerator = async (
     directory: schema.directory,
     subDirectory: schema.subDirectory,
     moduleName: normalizedModuleName,
-    projectType: 'application',
+    type: 'application',
   });
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
@@ -136,16 +136,15 @@ export const pyFastApiProjectGenerator = async (
     {
       name: normalizedModuleName,
       apiNameClassName,
-      computeType: schema.computeType,
+      infra: schema.infra,
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
 
-  if (schema.auth === 'Custom') {
-    const authorizerType =
-      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest';
+  if (schema.auth === 'custom') {
+    const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
     generateFiles(
       tree,
       joinPathFragments(
@@ -171,8 +170,7 @@ export const pyFastApiProjectGenerator = async (
     apiProjectName: projectConfig.name,
     apiNameClassName,
     apiNameKebabCase,
-    constructType:
-      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
+    constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
     backend: {
       type: 'fastapi',
       moduleName: normalizedModuleName,
@@ -180,11 +178,11 @@ export const pyFastApiProjectGenerator = async (
       integrationPattern,
     },
     auth: schema.auth,
-    iacProvider,
+    iac,
   });
 
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
-    iacProvider,
+    iac,
     apiNameKebabCase,
     specPath,
     specBuildTargetName: `${projectConfig.name}:openapi`,
@@ -195,7 +193,7 @@ export const pyFastApiProjectGenerator = async (
     'uvicorn',
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
-    ...(schema.auth === 'Custom'
+    ...(schema.auth === 'custom'
       ? (['aws-lambda-powertools[parser]'] as const)
       : []),
   ]);

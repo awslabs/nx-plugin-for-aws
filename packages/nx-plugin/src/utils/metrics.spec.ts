@@ -73,7 +73,7 @@ describe('metrics', () => {
   });
 
   it('should update metrics and version in app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Create the app.ts file with MetricsAspect class
     const appPath = METRICS_ASPECT_FILE_PATH;
@@ -176,7 +176,7 @@ describe('metrics', () => {
   });
 
   it('should handle multi-line formatted tags array correctly', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     const appPath = METRICS_ASPECT_FILE_PATH;
 
     // Simulate a multi-line tags array (as prettier would format it)
@@ -208,7 +208,7 @@ describe('metrics', () => {
   });
 
   it('should handle many tags added across multiple calls', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     const appPath = METRICS_ASPECT_FILE_PATH;
 
     for (let batch = 0; batch < 3; batch++) {
@@ -232,7 +232,7 @@ describe('metrics', () => {
   describe('terraform metrics', () => {
     it('should update metrics in terraform metrics.tf file', async () => {
       // Create shared constructs for Terraform
-      await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
 
       // Verify the metrics.tf file was created
       expect(tree.exists(TERRAFORM_METRICS_FILE_PATH)).toBe(true);
@@ -266,7 +266,7 @@ describe('metrics', () => {
 
     it('should add new metrics to existing terraform metrics', async () => {
       // Create shared constructs for Terraform
-      await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
 
       // Add initial metrics
       await addGeneratorMetricsIfApplicable(tree, [
@@ -319,7 +319,7 @@ describe('metrics', () => {
     });
 
     it('should handle empty metrics gracefully for terraform', async () => {
-      await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
 
       await addGeneratorMetricsIfApplicable(tree, []);
 
@@ -328,7 +328,7 @@ describe('metrics', () => {
     });
 
     it('should handle multi-line formatted terraform tags array correctly', async () => {
-      await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
 
       // Simulate a multi-line tags array
       const content = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8')!;
@@ -359,8 +359,8 @@ describe('metrics', () => {
 
     it('should work with both CDK and Terraform metrics simultaneously', async () => {
       // Create both CDK and Terraform shared constructs
-      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
-      await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
 
       // Add metrics - should update both files
       await addGeneratorMetricsIfApplicable(tree, [

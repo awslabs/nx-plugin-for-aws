@@ -33,7 +33,7 @@ import {
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
-import { inferContainerEngine } from '../utils/containers';
+import { inferContainers } from '../utils/containers';
 import yaml from 'js-yaml';
 
 const WORKSPACES = ['packages/*'];
@@ -159,17 +159,10 @@ const setUpGitSecrets = (tree: Tree) => {
 
 export const presetGenerator = async (
   tree: Tree,
-  {
-    addTsPlugin,
-    iacProvider,
-    gitSecrets,
-    containerEngine,
-  }: PresetGeneratorSchema,
+  { addTsPlugin, iac, gitSecrets, containers }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const resolvedContainerEngine =
-    !containerEngine || containerEngine === 'infer'
-      ? inferContainerEngine()
-      : containerEngine;
+  const resolvedContainers =
+    !containers || containers === 'infer' ? inferContainers() : containers;
   if (
     isAmazonian() &&
     !process.env.VITEST &&
@@ -195,8 +188,8 @@ export const presetGenerator = async (
   // Write IaC provider and container engine to plugin config
   await ensureAwsNxPluginConfig(tree);
   await updateAwsNxPluginConfig(tree, {
-    iac: { provider: iacProvider },
-    containers: { engine: resolvedContainerEngine },
+    iac: { provider: iac },
+    containers: { engine: resolvedContainers },
   });
 
   await initGenerator(tree, {

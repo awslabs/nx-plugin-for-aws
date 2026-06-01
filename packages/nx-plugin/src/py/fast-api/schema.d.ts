@@ -3,17 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
 export interface PyFastApiProjectGeneratorSchema {
   readonly name: string;
-  readonly computeType:
-    | 'ServerlessApiGatewayRestApi'
-    | 'ServerlessApiGatewayHttpApi';
+  readonly infra: 'rest-lambda' | 'http-lambda';
   readonly integrationPattern?: 'isolated' | 'shared';
-  readonly auth: 'IAM' | 'Cognito' | 'Custom';
+  readonly auth: 'iam' | 'cognito' | 'custom';
   readonly directory?: string;
   readonly subDirectory?: string;
   readonly moduleName?: string;
-  readonly iacProvider: IacProviderOption;
+  readonly iac: IacOption;
 }

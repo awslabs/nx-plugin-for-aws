@@ -21,9 +21,9 @@ describe('ts-lambda-function generator', () => {
   let tree: Tree;
   const options: TsLambdaFunctionGeneratorSchema = {
     project: 'test-project',
-    functionName: 'TestFunction',
-    eventSource: 'EventBridgeSchema',
-    iacProvider: 'CDK',
+    name: 'TestFunction',
+    event: 'EventBridgeSchema',
+    iac: 'cdk',
   };
   const verifier = new TypeScriptVerifier([
     '@aws-lambda-powertools/parser',
@@ -80,7 +80,7 @@ describe('ts-lambda-function generator', () => {
   });
 
   it('should create lambda function file with Any event source', async () => {
-    const anyOptions = { ...options, eventSource: 'Any' as const };
+    const anyOptions = { ...options, event: 'Any' as const };
     await tsLambdaFunctionGenerator(tree, anyOptions);
 
     const lambdaFile = tree.read(
@@ -92,7 +92,7 @@ describe('ts-lambda-function generator', () => {
   });
 
   it('should create lambda function file with SQS schema', async () => {
-    const sqsOptions = { ...options, eventSource: 'SqsSchema' as const };
+    const sqsOptions = { ...options, event: 'SqsSchema' as const };
     await tsLambdaFunctionGenerator(tree, sqsOptions);
 
     const lambdaFile = tree.read(
@@ -373,7 +373,7 @@ describe('ts-lambda-function generator', () => {
   it('should handle complex function names with special characters', async () => {
     const complexOptions = {
       ...options,
-      functionName: 'My Complex Function Name!',
+      name: 'My Complex Function Name!',
       functionPath: 'nested/path',
     };
 
@@ -393,22 +393,22 @@ describe('ts-lambda-function generator', () => {
   });
 
   it.each(Object.keys(TS_HANDLER_RETURN_TYPES))(
-    'should generate a lambda function which compiles with eventSource %s',
-    async (eventSource: EventSource) => {
+    'should generate a lambda function which compiles with event %s',
+    async (event: EventSource) => {
       await tsLambdaFunctionGenerator(tree, {
         ...options,
-        eventSource,
+        event,
       });
 
       validateTypeScript(['packages/test-project/src/test-function.ts']);
     },
   );
 
-  describe('terraform iacProvider', () => {
+  describe('terraform iac', () => {
     it('should generate terraform files for lambda function and snapshot them', async () => {
       const terraformOptions = {
         ...options,
-        iacProvider: 'Terraform' as const,
+        iac: 'terraform' as const,
       };
       await tsLambdaFunctionGenerator(tree, terraformOptions);
 
@@ -447,7 +447,7 @@ describe('ts-lambda-function generator', () => {
     it('should generate terraform files with custom function path', async () => {
       const terraformOptions = {
         ...options,
-        iacProvider: 'Terraform' as const,
+        iac: 'terraform' as const,
         functionPath: 'lambda-functions',
       };
       await tsLambdaFunctionGenerator(tree, terraformOptions);
@@ -477,8 +477,8 @@ describe('ts-lambda-function generator', () => {
     it('should generate terraform files with different event sources', async () => {
       const sqsTerraformOptions = {
         ...options,
-        iacProvider: 'Terraform' as const,
-        eventSource: 'SqsSchema' as const,
+        iac: 'terraform' as const,
+        event: 'SqsSchema' as const,
       };
       await tsLambdaFunctionGenerator(tree, sqsTerraformOptions);
 
@@ -506,7 +506,7 @@ describe('ts-lambda-function generator', () => {
     it('should configure project targets and dependencies correctly for terraform', async () => {
       const terraformOptions = {
         ...options,
-        iacProvider: 'Terraform' as const,
+        iac: 'terraform' as const,
       };
       await tsLambdaFunctionGenerator(tree, terraformOptions);
 
@@ -532,7 +532,7 @@ describe('ts-lambda-function generator', () => {
     it('should not create CDK constructs when using terraform', async () => {
       const terraformOptions = {
         ...options,
-        iacProvider: 'Terraform' as const,
+        iac: 'terraform' as const,
       };
       await tsLambdaFunctionGenerator(tree, terraformOptions);
 
@@ -540,13 +540,13 @@ describe('ts-lambda-function generator', () => {
       expect(tree.exists('packages/common/constructs')).toBeFalsy();
     });
 
-    it('should throw error for invalid iacProvider', async () => {
+    it('should throw error for invalid iac', async () => {
       await expect(
         tsLambdaFunctionGenerator(tree, {
           ...options,
-          iacProvider: 'InvalidProvider' as any,
+          iac: 'InvalidProvider' as any,
         }),
-      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
+      ).rejects.toThrow('Unsupported iac InvalidProvider');
     });
 
     it('should handle terraform with scoped project names', async () => {
@@ -567,7 +567,7 @@ describe('ts-lambda-function generator', () => {
       const scopedTerraformOptions = {
         ...options,
         project: '@myorg/scoped-project',
-        iacProvider: 'Terraform' as const,
+        iac: 'terraform' as const,
       };
       await tsLambdaFunctionGenerator(tree, scopedTerraformOptions);
 
@@ -596,9 +596,9 @@ describe('ts-lambda-function generator', () => {
     it('should handle terraform with complex function names', async () => {
       const complexTerraformOptions = {
         ...options,
-        functionName: 'My Complex Function Name!',
+        name: 'My Complex Function Name!',
         functionPath: 'nested/path',
-        iacProvider: 'Terraform' as const,
+        iac: 'terraform' as const,
       };
 
       await tsLambdaFunctionGenerator(tree, complexTerraformOptions);
@@ -628,9 +628,9 @@ describe('ts-lambda-function generator', () => {
     it('should match snapshot for terraform generated files with different configurations', async () => {
       const terraformOptions = {
         ...options,
-        functionName: 'SnapshotFunction',
-        eventSource: 'Any' as const,
-        iacProvider: 'Terraform' as const,
+        name: 'SnapshotFunction',
+        event: 'Any' as const,
+        iac: 'terraform' as const,
       };
       await tsLambdaFunctionGenerator(tree, terraformOptions);
 
@@ -654,18 +654,18 @@ describe('ts-lambda-function generator', () => {
       );
     });
 
-    it('should inherit iacProvider from config when set to Inherit', async () => {
+    it('should inherit iac from config when set to Inherit', async () => {
       // Set up config with CDK provider using utility methods
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
         iac: {
-          provider: 'CDK',
+          provider: 'cdk',
         },
       });
 
       await tsLambdaFunctionGenerator(tree, {
         ...options,
-        iacProvider: 'Inherit',
+        iac: 'inherit',
       });
 
       // Verify CDK constructs are created (not terraform)
@@ -685,7 +685,7 @@ describe('ts-lambda-function generator', () => {
       // Generate second lambda function with different name
       const secondOptions = {
         ...options,
-        functionName: 'SecondFunction',
+        name: 'SecondFunction',
       };
       await tsLambdaFunctionGenerator(tree, secondOptions);
 

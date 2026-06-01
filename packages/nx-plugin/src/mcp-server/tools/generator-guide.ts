@@ -30,7 +30,7 @@ export const addGeneratorGuideTool = (
       description:
         'Tool to retrieve detailed information about a specific generator. ' +
         'Pass `options` with the values you intend to use for any filterable option ' +
-        '(e.g. computeType, iacProvider, auth, uxProvider, protocol, sourceType, targetType) ' +
+        '(e.g. infra, iac, auth, ux, protocol, sourceType, targetType) ' +
         'to receive only the guide content relevant to those choices — this cuts noise ' +
         'and avoids suggesting configuration from a different branch. The filterable keys ' +
         'and their valid values for each generator are listed by the `list-generators` ' +
@@ -47,7 +47,7 @@ export const addGeneratorGuideTool = (
           .record(z.string(), z.string())
           .optional()
           .describe(
-            'Optional map of generator option values (e.g. { computeType: "ServerlessApiGatewayRestApi", iacProvider: "CDK" }) used to filter the guide to content that applies to those choices.',
+            'Optional map of generator option values (e.g. { infra: "rest-lambda", iac: "cdk" }) used to filter the guide to content that applies to those choices.',
           ),
       },
     },

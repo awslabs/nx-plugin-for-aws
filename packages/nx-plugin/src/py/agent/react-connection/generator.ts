@@ -56,10 +56,10 @@ export const pyAgentReactConnectionGenerator = async (
   const agentName = targetComponent?.name ?? 'agent';
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
-  const auth = targetComponent?.auth ?? metadata?.auth ?? 'IAM';
-  const protocol = targetComponent?.protocol ?? 'HTTP';
+  const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
+  const protocol = (targetComponent?.protocol ?? 'http').toLowerCase();
 
-  if (protocol === 'A2A') {
+  if (protocol === 'a2a') {
     throw new Error(
       `Cannot connect a React website to an A2A agent. ` +
         `Consider generating an agent with the HTTP or AG-UI protocol instead.`,
@@ -68,7 +68,7 @@ export const pyAgentReactConnectionGenerator = async (
 
   let additionalServeLocalDeps: string[] = [];
 
-  if (protocol === 'AG-UI') {
+  if (protocol === 'ag-ui') {
     await addAgUiReactConnection(tree, {
       frontendProjectConfig,
       agentName,

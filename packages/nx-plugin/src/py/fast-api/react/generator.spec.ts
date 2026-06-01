@@ -38,7 +38,7 @@ describe('fastapi react generator', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'Custom',
+          auth: 'custom',
         },
       }),
     );
@@ -269,7 +269,7 @@ export function Main() {
       ...config,
       metadata: {
         ...config.metadata,
-        auth: 'IAM',
+        auth: 'iam',
       },
     }));
     await fastApiReactGenerator(tree, {
@@ -300,7 +300,7 @@ export function Main() {
       ...config,
       metadata: {
         ...config.metadata,
-        auth: 'Cognito',
+        auth: 'cognito',
       },
     }));
     await fastApiReactGenerator(tree, {
@@ -323,7 +323,7 @@ export function Main() {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     // Call the generator function
     await fastApiReactGenerator(tree, {
@@ -370,7 +370,7 @@ describe('fastapi react generator with unqualified names', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          auth: 'Custom',
+          auth: 'custom',
         },
       }),
     );
@@ -468,7 +468,7 @@ describe(
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
         skipInstall: true,
-        iacProvider: 'CDK',
+        iac: 'cdk',
       });
     });
 
@@ -476,9 +476,9 @@ describe(
       // Generate a fastapi
       await pyFastApiProjectGenerator(tree, {
         name: 'TestApi',
-        auth: 'Custom',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        iacProvider: 'CDK',
+        auth: 'custom',
+        infra: 'http-lambda',
+        iac: 'cdk',
       });
 
       await fastApiReactGenerator(tree, {
@@ -524,17 +524,17 @@ describe(
       // Generate first API
       await pyFastApiProjectGenerator(tree, {
         name: 'FirstApi',
-        auth: 'Custom',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        iacProvider: 'CDK',
+        auth: 'custom',
+        infra: 'http-lambda',
+        iac: 'cdk',
       });
 
       // Generate second API
       await pyFastApiProjectGenerator(tree, {
         name: 'SecondApi',
-        auth: 'Custom',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        iacProvider: 'CDK',
+        auth: 'custom',
+        infra: 'http-lambda',
+        iac: 'cdk',
       });
 
       // Connect first API to frontend

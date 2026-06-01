@@ -44,13 +44,13 @@ import {
 import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
-import { resolveIacProvider } from '../../../utils/iac';
+import { resolveIac } from '../../../utils/iac';
 
-export const SUPPORTED_UX_PROVIDERS = ['None', 'Cloudscape', 'Shadcn'] as const;
+export const SUPPORTED_UX_PROVIDERS = ['none', 'cloudscape', 'shadcn'] as const;
 
-export type UxProviderOption = (typeof SUPPORTED_UX_PROVIDERS)[number];
+export type UxOption = (typeof SUPPORTED_UX_PROVIDERS)[number];
 
-export type UxProvider = UxProviderOption;
+export type Ux = UxOption;
 
 export const REACT_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -59,10 +59,10 @@ export async function tsReactWebsiteGenerator(
   tree: Tree,
   schema: TsReactWebsiteGeneratorSchema,
 ) {
-  const enableTailwind = schema.enableTailwind ?? true;
-  const enableTanstackRouter = schema.enableTanstackRouter ?? true;
-  const uxProvider: UxProvider = schema.uxProvider ?? 'Cloudscape';
-  if (uxProvider === 'Shadcn' && !enableTailwind) {
+  const tailwind = schema.tailwind ?? true;
+  const tanstackRouter = schema.tanstackRouter ?? true;
+  const ux: Ux = schema.ux ?? 'cloudscape';
+  if (ux === 'shadcn' && !tailwind) {
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -101,9 +101,9 @@ export async function tsReactWebsiteGenerator(
   const targets = projectConfiguration.targets;
 
   // Configure load:runtime-config target based on IaC provider
-  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+  const iac = await resolveIac(tree, schema.iac);
 
-  if (iacProvider === 'CDK') {
+  if (iac === 'cdk') {
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
@@ -113,7 +113,7 @@ export async function tsReactWebsiteGenerator(
         command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json "{projectRoot}/public/runtime-config.json"`,
       },
     };
-  } else if (iacProvider === 'Terraform') {
+  } else if (iac === 'terraform') {
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
@@ -132,7 +132,7 @@ export async function tsReactWebsiteGenerator(
     };
   } else {
     throw new Error(
-      `Unknown iacProvider: ${iacProvider}. Supported providers are: CDK, Terraform`,
+      `Unknown iac: ${iac}. Supported providers are: cdk, terraform`,
     );
   }
 
@@ -192,7 +192,7 @@ export async function tsReactWebsiteGenerator(
     projectConfiguration.name,
     REACT_WEBSITE_APP_GENERATOR_INFO,
     {
-      uxProvider,
+      ux,
       framework: 'react',
     },
   );
@@ -202,16 +202,16 @@ export async function tsReactWebsiteGenerator(
     fullyQualifiedName,
   });
 
-  if (uxProvider === 'Shadcn') {
+  if (ux === 'shadcn') {
     await sharedShadcnGenerator(tree);
   }
 
   await sharedConstructsGenerator(tree, {
-    iacProvider,
+    iac,
   });
 
   await addWebsiteInfra(tree, {
-    iacProvider,
+    iac,
     websiteProjectName: fullyQualifiedName,
     scopeAlias,
     websiteContentPath: joinPathFragments('dist', websiteContentPath),
@@ -248,8 +248,8 @@ export async function tsReactWebsiteGenerator(
     ...schema,
     fullyQualifiedName,
     pkgMgrCmd: getPackageManagerDisplayCommands().exec,
-    enableTailwind,
-    enableTanstackRouter,
+    tailwind,
+    tanstackRouter,
     scopeAlias,
     sharedShadcnStylesImport,
   };
@@ -260,7 +260,7 @@ export async function tsReactWebsiteGenerator(
   );
   const appTemplatePath = joinPathFragments(
     __dirname,
-    `./files/app/${uxProvider.toLowerCase()}`,
+    `./files/app/${ux.toLowerCase()}`,
   );
 
   generateFiles(
@@ -283,14 +283,14 @@ export async function tsReactWebsiteGenerator(
     },
   );
 
-  if (enableTanstackRouter) {
+  if (tanstackRouter) {
     const routerCommonTemplatePath = joinPathFragments(
       __dirname,
       './files/tanstack-router/common',
     );
     const routerTemplatePath = joinPathFragments(
       __dirname,
-      `./files/tanstack-router/${uxProvider.toLowerCase()}`,
+      `./files/tanstack-router/${ux.toLowerCase()}`,
     );
 
     generateFiles(
@@ -336,7 +336,7 @@ export async function tsReactWebsiteGenerator(
 
   if (tree.exists(viteConfigPath)) {
     // Add Tanstack Router import if enabled
-    if (enableTanstackRouter) {
+    if (tanstackRouter) {
       await addDestructuredImport(
         tree,
         viteConfigPath,
@@ -348,7 +348,7 @@ export async function tsReactWebsiteGenerator(
     }
 
     // Add TailwindCSS import if enabled
-    if (enableTailwind) {
+    if (tailwind) {
       await addSingleImport(
         tree,
         viteConfigPath,
@@ -370,7 +370,7 @@ export async function tsReactWebsiteGenerator(
     );
 
     // Add plugins to the plugins array
-    if (enableTanstackRouter) {
+    if (tanstackRouter) {
       // Prepend tanstackRouter (must be first plugin) — rewrite works for both single/multi-element
       await applyGritQL(
         tree,
@@ -379,7 +379,7 @@ export async function tsReactWebsiteGenerator(
       );
     }
 
-    if (enableTailwind) {
+    if (tailwind) {
       await applyGritQL(
         tree,
         viteConfigPath,
@@ -436,7 +436,7 @@ export async function tsReactWebsiteGenerator(
         lib: ['DOM'],
       },
       references:
-        uxProvider === 'Shadcn'
+        ux === 'shadcn'
           ? [
               ...(tsconfig.references ?? []).filter(
                 (ref) => ref.path !== sharedShadcnTsconfigRef,
@@ -453,22 +453,22 @@ export async function tsReactWebsiteGenerator(
 
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
 
-  if (uxProvider === 'Cloudscape') {
+  if (ux === 'cloudscape') {
     dependencies.push(
       '@cloudscape-design/components',
       '@cloudscape-design/board-components',
       '@cloudscape-design/global-styles',
     );
-  } else if (uxProvider === 'Shadcn') {
+  } else if (ux === 'shadcn') {
     // not required to add any dependencies because dependencies are added by the common/shadcn package.
   }
 
   // Add TailwindCSS dependencies if enabled
-  if (enableTailwind) {
+  if (tailwind) {
     dependencies.push('tailwindcss');
     devDependencies.push('@tailwindcss/vite');
   }
-  if (enableTanstackRouter) {
+  if (tanstackRouter) {
     dependencies.push('@tanstack/react-router');
     devDependencies.push(
       '@tanstack/router-plugin',

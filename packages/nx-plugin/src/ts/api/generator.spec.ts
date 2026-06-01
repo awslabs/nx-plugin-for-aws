@@ -19,10 +19,10 @@ describe('ts#api generator', () => {
       name: 'TestApi',
       framework: 'trpc',
       directory: 'packages',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api')).toBeTruthy();
@@ -38,10 +38,10 @@ describe('ts#api generator', () => {
     await tsApiGenerator(tree, {
       name: 'TestApi',
       directory: 'packages',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api')).toBeTruthy();
@@ -57,10 +57,10 @@ describe('ts#api generator', () => {
       name: 'TestApi',
       framework: 'smithy',
       directory: 'packages',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api/backend')).toBeTruthy();
@@ -78,10 +78,10 @@ describe('ts#api generator', () => {
       framework: 'smithy',
       namespace: 'com.example',
       directory: 'packages',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iac: 'cdk',
     });
 
     expect(tree.exists('packages/test-api/backend')).toBeTruthy();

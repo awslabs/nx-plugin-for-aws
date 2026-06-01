@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
-export type PyAgentSdk = 'strands';
-export type PyAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
-export type AgentProtocol = 'HTTP' | 'A2A' | 'AG-UI';
+export type PyAgentFramework = 'strands';
+export type PyAgentInfra = 'agentcore' | 'none';
+export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
-export type PyAgentAuth = 'IAM' | 'Cognito';
+export type PyAgentAuth = 'iam' | 'cognito';
 
 export interface PyAgentGeneratorSchema {
   project: string;
-  sdk?: PyAgentSdk;
+  framework?: PyAgentFramework;
   name?: string;
-  computeType?: PyAgentComputeType;
+  infra?: PyAgentInfra;
   auth?: PyAgentAuth;
   protocol?: AgentProtocol;
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

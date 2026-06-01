@@ -9,5 +9,5 @@ export interface TsInfraGeneratorSchema {
   //   unitTestRunner?: 'jest' | 'vitest' | 'none';
   //   linter?: Linter;
   skipInstall?: boolean;
-  enableStageConfig?: boolean;
+  stageConfig?: boolean;
 }

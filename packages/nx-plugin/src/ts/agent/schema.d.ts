@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
-export type TsAgentSdk = 'strands';
-export type TsAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
-export type AgentProtocol = 'HTTP' | 'A2A' | 'AG-UI';
+export type TsAgentFramework = 'strands';
+export type TsAgentInfra = 'agentcore' | 'none';
+export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
-export type TsAgentAuth = 'IAM' | 'Cognito';
+export type TsAgentAuth = 'iam' | 'cognito';
 
 export interface TsAgentGeneratorSchema {
   project: string;
-  sdk?: TsAgentSdk;
+  framework?: TsAgentFramework;
   name?: string;
-  computeType?: TsAgentComputeType;
+  infra?: TsAgentInfra;
   auth?: TsAgentAuth;
   protocol?: AgentProtocol;
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

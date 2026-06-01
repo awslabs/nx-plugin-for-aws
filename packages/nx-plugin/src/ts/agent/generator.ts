@@ -26,8 +26,8 @@ import { kebabCase, toClassName } from '../../utils/names';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
@@ -65,16 +65,16 @@ export const tsAgentGenerator = async (
   const relativeSourceDir = targetSourceDir.replace(project.root + '/', './');
   const distDir = joinPathFragments('dist', project.root);
 
-  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
-  const protocol = options.protocol ?? 'HTTP';
+  const infra = options.infra ?? 'agentcore';
+  const protocol = options.protocol ?? 'http';
 
-  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+  if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
-      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'IAM';
+  const auth = options.auth ?? 'iam';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `runWithSessionId` and propagate the AgentCore session
@@ -107,8 +107,8 @@ export const tsAgentGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  if (computeType === 'BedrockAgentCoreRuntime') {
-    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  if (infra === 'agentcore') {
+    const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -152,7 +152,7 @@ export const tsAgentGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
-          `${containerEngine} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -163,12 +163,12 @@ export const tsAgentGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
 
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
-    const infraProtocol: 'HTTP' | 'A2A' =
-      protocol === 'AG-UI' ? 'HTTP' : (protocol as 'HTTP' | 'A2A');
+    const infraProtocol: 'http' | 'a2a' =
+      protocol === 'ag-ui' ? 'http' : (protocol as 'http' | 'a2a');
 
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
@@ -176,10 +176,10 @@ export const tsAgentGenerator = async (
       projectName: project.name,
       dockerImageTag,
       dockerOutputDir,
-      iacProvider,
+      iac,
       auth,
       serverProtocol: infraProtocol,
-      containerEngine,
+      containers,
     });
   }
 
@@ -193,9 +193,9 @@ export const tsAgentGenerator = async (
       '@aws-sdk/client-appconfigdata',
       '@aws-lambda-powertools/parameters',
       '@modelcontextprotocol/sdk',
-      ...(protocol === 'A2A'
+      ...(protocol === 'a2a'
         ? (['express', '@a2a-js/sdk'] as const)
-        : protocol === 'AG-UI'
+        : protocol === 'ag-ui'
           ? ([
               '@ag-ui/aws-strands',
               '@ag-ui/core',
@@ -215,7 +215,7 @@ export const tsAgentGenerator = async (
       'tsx',
       '@types/node',
       'agent-chat-cli',
-      ...(protocol === 'A2A' || protocol === 'AG-UI'
+      ...(protocol === 'a2a' || protocol === 'ag-ui'
         ? (['@types/express', '@types/cors'] as const)
         : (['@types/ws', '@types/cors'] as const)),
     ]),
@@ -223,13 +223,13 @@ export const tsAgentGenerator = async (
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
-  const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
+  const localDevPortStart = protocol === 'a2a' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
   // HTTP chat needs a tiny generated script to wrap the project's tRPC
   // WebSocket client in a `ChatAdapter`. A2A speaks the standard A2A
   // protocol, so we can run `agent-chat-cli` directly as a binary.
-  if (protocol === 'HTTP') {
+  if (protocol === 'http') {
     const scriptsDir = joinPathFragments(
       project.root,
       'scripts',
@@ -251,15 +251,15 @@ export const tsAgentGenerator = async (
   }
 
   const chatUrl =
-    protocol === 'HTTP'
+    protocol === 'http'
       ? `ws://localhost:${localDevPort}/ws`
-      : protocol === 'AG-UI'
+      : protocol === 'ag-ui'
         ? `http://localhost:${localDevPort}/invocations`
         : `http://localhost:${localDevPort}`;
   const chatCommand =
-    protocol === 'HTTP'
+    protocol === 'http'
       ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : protocol === 'AG-UI'
+      : protocol === 'ag-ui'
         ? `agent-chat-cli agui ${chatUrl}`
         : `agent-chat-cli a2a ${chatUrl}`;
 

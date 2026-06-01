@@ -16,7 +16,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { IacProvider } from '../iac';
+import { Iac } from '../iac';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 
 export interface AddWebsiteInfraOptions {
@@ -32,23 +32,21 @@ export interface AddWebsiteInfraOptions {
  */
 export const addWebsiteInfra = async (
   tree: Tree,
-  options: AddWebsiteInfraOptions & { iacProvider: IacProvider },
+  options: AddWebsiteInfraOptions & { iac: Iac },
 ) => {
-  if (options.iacProvider === 'CDK') {
+  if (options.iac === 'cdk') {
     await addWebsiteCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'Terraform') {
+  } else if (options.iac === 'terraform') {
     addWebsiteTerraformModules(tree, options);
   } else {
-    throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
+    throw new Error(`Unsupported iac ${options.iac}`);
   }
 
   updateJson(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iacProvider === 'CDK'
-        ? SHARED_CONSTRUCTS_DIR
-        : SHARED_TERRAFORM_DIR,
+      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
       'project.json',
     ),
     (config: ProjectConfiguration) => {

@@ -18,7 +18,7 @@ export async function tsWebsiteAuthGenerator(
     project: schema.project,
     allowSignup: schema.allowSignup,
     cognitoDomain: schema.cognitoDomain,
-    iacProvider: schema.iacProvider,
+    iac: schema.iac,
   });
 }
 

@@ -23,7 +23,7 @@ describe('paths utils', () => {
       vi.spyOn(devkit, 'readProjectConfiguration').mockReturnValue({
         root: 'project',
         sourceRoot: 'project/src',
-        projectType: 'application',
+        type: 'application',
       });
       expect(getRelativePathToRoot(tree, 'test-project')).toBe('../');
     });
@@ -32,7 +32,7 @@ describe('paths utils', () => {
       vi.spyOn(devkit, 'readProjectConfiguration').mockReturnValue({
         root: 'apps/nested/project',
         sourceRoot: 'apps/nested/project/src',
-        projectType: 'application',
+        type: 'application',
       });
       expect(getRelativePathToRoot(tree, 'test-project')).toBe('../../../');
     });
@@ -46,17 +46,17 @@ describe('paths utils', () => {
     });
     it('should return correct path for nested directory', () => {
       expect(getRelativePathToRootByDirectory('apps/nested/project')).toBe(
-        '../../../'
+        '../../../',
       );
     });
     it('should handle directories with trailing slash', () => {
       expect(getRelativePathToRootByDirectory('apps/nested/project/')).toBe(
-        '../../../'
+        '../../../',
       );
     });
     it('should handle directories with leading slash', () => {
       expect(getRelativePathToRootByDirectory('/apps/nested/project')).toBe(
-        '../../../'
+        '../../../',
       );
     });
   });

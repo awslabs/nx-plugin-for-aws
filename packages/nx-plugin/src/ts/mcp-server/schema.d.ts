@@ -3,20 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacProviderOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac';
 
-export type TsMcpServerComputeType = 'None' | 'BedrockAgentCoreRuntime';
+export type TsMcpServerInfra = 'none' | 'agentcore';
 
-export type TsMcpServerAuth = 'IAM' | 'Cognito';
+export type TsMcpServerAuth = 'iam' | 'cognito';
 
-/**
- * TypeScript types for options defined in schema.json
- * Update this to match schema.json if you make changes.
- */
 export interface TsMcpServerGeneratorSchema {
   project: string;
   name?: string;
-  computeType?: TsMcpServerComputeType;
+  infra?: TsMcpServerInfra;
   auth?: TsMcpServerAuth;
-  iacProvider: IacProviderOption;
+  iac: IacOption;
 }

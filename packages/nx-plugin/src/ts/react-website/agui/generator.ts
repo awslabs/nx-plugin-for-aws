@@ -23,7 +23,7 @@ import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
 import { toScopeAlias, getNpmScopePrefix } from '../../../utils/npm-scope';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
 
-export type AgUiAuth = 'IAM' | 'Cognito' | 'None';
+export type AgUiAuth = 'iam' | 'cognito' | 'none';
 
 type AgUiTheme = 'cloudscape' | 'shadcn' | 'default';
 
@@ -48,7 +48,7 @@ export interface AgUiReactConnectionOptions {
  * generator multiple times is idempotent and additive.
  *
  * Also vends a `src/components/copilot` theme module picked from the
- * website's `metadata.uxProvider` (cloudscape / shadcn / default).
+ * website's `metadata.ux` (cloudscape / shadcn / default).
  */
 export const addAgUiReactConnection = async (
   tree: Tree,
@@ -83,7 +83,7 @@ export const addAgUiReactConnection = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  if (auth === 'IAM') {
+  if (auth === 'iam') {
     generateFiles(
       tree,
       joinPathFragments(__dirname, '../../../utils/files/website/hooks/sigv4'),
@@ -137,7 +137,7 @@ export const addAgUiReactConnection = async (
         ? ['@cloudscape-design/chat-components']
         : []) as any),
       ...((theme === 'shadcn' ? ['lucide-react'] : []) as any),
-      ...((auth === 'IAM'
+      ...((auth === 'iam'
         ? [
             'oidc-client-ts',
             'aws4fetch',
@@ -146,9 +146,9 @@ export const addAgUiReactConnection = async (
             'rxjs',
           ]
         : []) as any),
-      ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
+      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
-    withVersions([...((auth === 'IAM' ? ['@smithy/types'] : []) as any)]),
+    withVersions([...((auth === 'iam' ? ['@smithy/types'] : []) as any)]),
   );
 
   // Agents only publish their runtime ARN to the 'agentcore' namespace by
@@ -164,13 +164,13 @@ export const addAgUiReactConnection = async (
 const resolveAgUiTheme = (
   frontendProjectConfig: ProjectConfiguration,
 ): AgUiTheme => {
-  const uxProvider = (frontendProjectConfig.metadata as any)?.uxProvider as
-    | string
-    | undefined;
-  switch (uxProvider) {
-    case 'Cloudscape':
+  const ux = (
+    (frontendProjectConfig.metadata as any)?.ux as string | undefined
+  )?.toLowerCase();
+  switch (ux) {
+    case 'cloudscape':
       return 'cloudscape';
-    case 'Shadcn':
+    case 'shadcn':
       return 'shadcn';
     default:
       return 'default';

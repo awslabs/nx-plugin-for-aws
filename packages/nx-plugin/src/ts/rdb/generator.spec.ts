@@ -21,12 +21,12 @@ describe('ts#rdb generator', () => {
   const defaultOptions = {
     name: 'db',
     directory: 'packages',
-    service: 'Aurora' as const,
-    engine: 'PostgreSQL' as const,
+    infra: 'aurora' as const,
+    engine: 'postgres' as const,
     databaseUser: 'databaseUser',
     databaseName: 'databaseName',
-    ormFramework: 'Prisma' as const,
-    iacProvider: 'CDK' as const,
+    framework: 'prisma' as const,
+    iac: 'cdk' as const,
   };
 
   it('should generate the aurora shared construct', async () => {
@@ -170,7 +170,7 @@ describe('ts#rdb generator', () => {
   it('should add mysql prisma dependencies when engine is MySQL', async () => {
     await tsRdbGenerator(tree, {
       ...defaultOptions,
-      engine: 'MySQL',
+      engine: 'mysql',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
 
@@ -221,10 +221,10 @@ describe('ts#rdb generator', () => {
     expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
   });
 
-  it('should generate terraform modules when iacProvider is Terraform', async () => {
+  it('should generate terraform modules when iac is Terraform', async () => {
     await tsRdbGenerator(tree, {
       ...defaultOptions,
-      iacProvider: 'Terraform',
+      iac: 'terraform',
     });
     expect(
       tree.read(
@@ -244,7 +244,7 @@ describe('ts#rdb generator', () => {
   });
 
   it('should keep an existing aurora shared construct', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     tree.write(
       'packages/common/constructs/src/core/rdb/aurora.ts',
       '// preserve custom aurora construct',
@@ -260,7 +260,7 @@ describe('ts#rdb generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await tsRdbGenerator(tree, defaultOptions);
 
@@ -270,8 +270,8 @@ describe('ts#rdb generator', () => {
   it('should generate terraform modules with MySQL engine', async () => {
     await tsRdbGenerator(tree, {
       ...defaultOptions,
-      iacProvider: 'Terraform',
-      engine: 'MySQL',
+      iac: 'terraform',
+      engine: 'mysql',
     });
     expect(
       tree.read(

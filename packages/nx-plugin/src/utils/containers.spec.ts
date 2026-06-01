@@ -4,7 +4,7 @@
  */
 import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from './test';
-import { resolveContainerEngine } from './containers';
+import { resolveContainers } from './containers';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -18,14 +18,14 @@ describe('containers utils', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  describe('resolveContainerEngine', () => {
+  describe('resolveContainers', () => {
     it('should return docker when option is docker', async () => {
-      const result = await resolveContainerEngine(tree, 'docker');
+      const result = await resolveContainers(tree, 'docker');
       expect(result).toBe('docker');
     });
 
     it('should return finch when option is finch', async () => {
-      const result = await resolveContainerEngine(tree, 'finch');
+      const result = await resolveContainers(tree, 'finch');
       expect(result).toBe('finch');
     });
 
@@ -34,18 +34,18 @@ describe('containers utils', () => {
       await updateAwsNxPluginConfig(tree, {
         containers: { engine: 'finch' },
       });
-      const result = await resolveContainerEngine(tree, 'Inherit');
+      const result = await resolveContainers(tree, 'inherit');
       expect(result).toBe('finch');
     });
 
     it('should default to docker when option is Inherit and no config exists', async () => {
-      const result = await resolveContainerEngine(tree, 'Inherit');
+      const result = await resolveContainers(tree, 'inherit');
       expect(result).toBe('docker');
     });
 
     it('should default to docker when option is Inherit and config has no containers section', async () => {
       await ensureAwsNxPluginConfig(tree);
-      const result = await resolveContainerEngine(tree, 'Inherit');
+      const result = await resolveContainers(tree, 'inherit');
       expect(result).toBe('docker');
     });
 
@@ -54,7 +54,7 @@ describe('containers utils', () => {
       await updateAwsNxPluginConfig(tree, {
         containers: { engine: 'podman' as any },
       });
-      await expect(resolveContainerEngine(tree, 'Inherit')).rejects.toThrow(
+      await expect(resolveContainers(tree, 'inherit')).rejects.toThrow(
         `containers.engine in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} must be one of docker, finch`,
       );
     });

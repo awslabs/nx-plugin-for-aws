@@ -11,7 +11,7 @@ import { activatePackageManagerViaCorepack } from './corepack';
 
 /**
  * Verifies that `<pkgMgr> create @aws/nx-workspace --no-interactive` runs
- * unattended — no `iacProvider`, no `--skipGit`, no extra flags.
+ * unattended — no `iac`, no `--skipGit`, no extra flags.
  *
  * Yarn is exercised twice — classic and berry (yarn 4 via corepack) —
  * since they drive different code paths.

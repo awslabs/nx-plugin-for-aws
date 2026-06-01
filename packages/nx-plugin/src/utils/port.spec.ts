@@ -12,7 +12,7 @@ describe('port utilities', () => {
     name: 'test-project',
     root: 'apps/test-project',
     sourceRoot: 'apps/test-project/src',
-    projectType: 'application',
+    type: 'application',
   };
 
   beforeEach(() => {
@@ -154,7 +154,7 @@ describe('port utilities', () => {
         ...mockProject,
         metadata: {
           ports: [4000, 4001],
-          someOtherData: 'preserved'
+          someOtherData: 'preserved',
         } as any,
       };
 
@@ -201,7 +201,7 @@ describe('port utilities', () => {
       const port = assignPort(tree, project, 3000);
 
       expect(port).toBe(3000);
-      expect((project.metadata as any)).toBeDefined();
+      expect(project.metadata as any).toBeDefined();
       expect((project.metadata as any)?.ports).toEqual([3000]);
     });
   });

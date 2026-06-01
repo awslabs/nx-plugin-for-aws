@@ -20,7 +20,7 @@ describe('smoke test - react-website', () => {
 
   it('should generate and build', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'react-website', 'CDK')} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'react-website', 'cdk')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
@@ -31,35 +31,35 @@ describe('smoke test - react-website', () => {
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+      `generate @aws/nx-plugin:ts#api --name=my-api --infra=rest-lambda --no-interactive`,
       opts,
     );
 
     const permutations = [
-      { name: 'website-none', uxProvider: 'None', enableTanstackRouter: true },
+      { name: 'website-none', ux: 'none', tanstackRouter: true },
       {
         name: 'website-shadcn',
-        uxProvider: 'Shadcn',
-        enableTanstackRouter: true,
+        ux: 'shadcn',
+        tanstackRouter: true,
       },
       {
         name: 'website-none-no-router',
-        uxProvider: 'None',
-        enableTanstackRouter: false,
+        ux: 'none',
+        tanstackRouter: false,
       },
       {
         name: 'website-shadcn-no-router',
-        uxProvider: 'Shadcn',
-        enableTanstackRouter: false,
+        ux: 'shadcn',
+        tanstackRouter: false,
       },
     ] as const;
 
-    for (const { name, uxProvider, enableTanstackRouter } of permutations) {
+    for (const { name, ux, tanstackRouter } of permutations) {
       const args = [
         `generate @aws/nx-plugin:ts#website`,
         `--name=${name}`,
-        `--uxProvider=${uxProvider}`,
-        `--enableTanstackRouter=${enableTanstackRouter}`,
+        `--ux=${ux}`,
+        `--tanstackRouter=${tanstackRouter}`,
         `--no-interactive`,
       ];
 
