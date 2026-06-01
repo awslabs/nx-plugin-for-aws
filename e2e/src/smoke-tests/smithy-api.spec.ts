@@ -35,7 +35,7 @@ describe('smoke test - smithy-api', () => {
     // and the terraform smoke test. We only generate a single Smithy API here to avoid
     // Docker build cache mount contention when multiple Smithy model builds run concurrently.
     await runCLI(
-      `generate @aws/nx-plugin:ts#smithy-api --name=smithy-shared --integrationPattern=shared --no-interactive`,
+      `generate @aws/nx-plugin:ts#api --name=smithy-shared --framework=smithy --integrationPattern=shared --no-interactive`,
       opts,
     );
 

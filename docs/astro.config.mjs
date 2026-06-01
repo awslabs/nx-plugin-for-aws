@@ -327,21 +327,72 @@ export default defineConfig({
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#rdb', link: '/guides/ts-rdb' },
-            { label: 'ts#trpc-api', link: '/guides/trpc' },
-            { label: 'ts#smithy-api', link: '/guides/ts-smithy-api' },
-            { label: 'ts#website', link: '/guides/react-website' },
             {
-              label: 'ts#website#auth',
-              link: '/guides/react-website-auth',
+              label: 'ts#api',
+              items: [
+                {
+                  label: 'TypeScript APIs',
+                  link: '/guides/ts-api',
+                },
+                {
+                  label: 'tRPC',
+                  link: '/guides/trpc',
+                },
+                {
+                  label: 'Smithy',
+                  link: '/guides/ts-smithy-api',
+                },
+              ],
             },
-            { label: 'ts#docs', link: '/guides/astro-docs' },
+            {
+              label: 'ts#website',
+              items: [
+                {
+                  label: 'Websites',
+                  link: '/guides/website',
+                },
+                {
+                  label: 'React',
+                  link: '/guides/react-website',
+                },
+                {
+                  label: 'Authentication',
+                  link: '/guides/react-website-auth',
+                },
+              ],
+            },
+            {
+              label: 'ts#docs',
+              items: [
+                {
+                  label: 'Documentation',
+                  link: '/guides/docs',
+                },
+                {
+                  label: 'Astro',
+                  link: '/guides/astro-docs',
+                },
+              ],
+            },
             { label: 'ts#lambda-function', link: '/guides/ts-lambda-function' },
             { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },
             { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
             { label: 'ts#agent', link: '/guides/ts-agent' },
             { label: 'py#project', link: '/guides/python-project' },
-            { label: 'py#fast-api', link: '/guides/fastapi' },
+            {
+              label: 'py#api',
+              items: [
+                {
+                  label: 'Python APIs',
+                  link: '/guides/py-api',
+                },
+                {
+                  label: 'FastAPI',
+                  link: '/guides/fastapi',
+                },
+              ],
+            },
             {
               label: 'py#lambda-function',
               link: '/guides/python-lambda-function',

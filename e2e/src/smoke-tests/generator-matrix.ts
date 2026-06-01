@@ -40,21 +40,21 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // tRPC APIs — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#trpc-api --name=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
     opts,
   );
 
   // tRPC APIs with Custom auth — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:ts#trpc-api --name=my-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#trpc-api --name=my-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --name=my-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
     opts,
   );
 
@@ -70,21 +70,21 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // Python FastAPI — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:py#fast-api --name=py-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#fast-api --name=py-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
     opts,
   );
 
   // Python FastAPI with Custom auth — REST + HTTP variants.
   await runCLI(
-    `generate @aws/nx-plugin:py#fast-api --name=py-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api-custom --computeType=ServerlessApiGatewayRestApi --auth=Custom --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#fast-api --name=py-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
+    `generate @aws/nx-plugin:py#api --name=py-api-custom-http --computeType=ServerlessApiGatewayHttpApi --auth=Custom --no-interactive`,
     opts,
   );
 
@@ -176,7 +176,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
 
   // Smithy API + connection
   await runCLI(
-    `generate @aws/nx-plugin:ts#smithy-api --name=my-smithy-api --no-interactive`,
+    `generate @aws/nx-plugin:ts#api --framework=smithy --name=my-smithy-api --no-interactive`,
     opts,
   );
   await runCLI(

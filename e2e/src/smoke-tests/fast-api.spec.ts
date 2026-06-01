@@ -34,7 +34,7 @@ describe('smoke test - fast-api', () => {
     const projectRoot = `${targetDir}/fast-api`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-    await generateApiProjectPermutations('py#fast-api', 'fast', '_', opts);
+    await generateApiProjectPermutations('py#api', 'fast', '_', opts);
 
     await runCLI(
       `generate @aws/nx-plugin:ts#website --name=website --no-interactive`,
