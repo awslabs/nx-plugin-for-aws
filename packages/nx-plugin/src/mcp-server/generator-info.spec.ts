@@ -727,6 +727,114 @@ ASTRO_DOCS_BODY`,
     });
   });
 
+  describe('ts#api multi-key combination filtering', () => {
+    const variants: Record<string, string> = {
+      'ts-api.mdx': `---
+title: TypeScript API
+---
+TS_API_OVERVIEW`,
+      'trpc.mdx': `---
+title: tRPC
+when:
+  framework:
+    - trpc
+  infra:
+    - rest-lambda
+    - http-lambda
+---
+TRPC_BODY`,
+      'ts-smithy-api.mdx': `---
+title: Smithy TypeScript API
+when:
+  framework:
+    - smithy
+  infra:
+    - rest-lambda
+---
+SMITHY_BODY`,
+    };
+
+    const tsApiInfo: NxGeneratorInfo = {
+      id: 'ts#api',
+      description: 'Create a TypeScript API',
+      resolvedSchemaPath: '/fake/schema.json',
+      resolvedFactoryPath: '/fake/factory',
+      metric: 'g46',
+      guidePages: ['ts-api', 'trpc', 'ts-smithy-api'],
+    };
+
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
+        const s = String(p);
+        const match = /\/guides\/(.+)\.mdx/.exec(s);
+        if (match) return variants[`${match[1]}.mdx`] !== undefined;
+        return false;
+      });
+      const realReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation(
+        (p: any, ...rest: any[]) => {
+          const s = String(p);
+          const match = /\/guides\/(.+)\.mdx/.exec(s);
+          if (match && variants[`${match[1]}.mdx`] !== undefined) {
+            return variants[`${match[1]}.mdx`];
+          }
+          return (realReadFileSync as any)(p, ...rest);
+        },
+      );
+    });
+
+    const bodyMatcher = (label: string) =>
+      new RegExp(label.replaceAll('_', String.raw`\\?_`));
+
+    it('returns unsupported for smithy + http-lambda', async () => {
+      const result = await fetchGuidePagesForGenerator(
+        tsApiInfo,
+        [tsApiInfo],
+        undefined,
+        undefined,
+        { framework: 'smithy', infra: 'http-lambda' },
+      );
+      expect(result.kind).toBe('unsupported');
+      expect(result.content).toContain('Unsupported combination');
+      expect(result.content).toContain('framework = smithy');
+      expect(result.content).toContain('infra = http-lambda');
+    });
+
+    it('returns smithy guide for smithy + rest-lambda', async () => {
+      const result = await fetchGuidePagesForGenerator(
+        tsApiInfo,
+        [tsApiInfo],
+        undefined,
+        undefined,
+        { framework: 'smithy', infra: 'rest-lambda' },
+      );
+      expect(result.kind).toBe('ok');
+      expect(result.content).toMatch(bodyMatcher('TS_API_OVERVIEW'));
+      expect(result.content).toMatch(bodyMatcher('SMITHY_BODY'));
+      expect(result.content).not.toMatch(bodyMatcher('TRPC_BODY'));
+    });
+
+    it('returns trpc guide for trpc + http-lambda', async () => {
+      const result = await fetchGuidePagesForGenerator(
+        tsApiInfo,
+        [tsApiInfo],
+        undefined,
+        undefined,
+        { framework: 'trpc', infra: 'http-lambda' },
+      );
+      expect(result.kind).toBe('ok');
+      expect(result.content).toMatch(bodyMatcher('TRPC_BODY'));
+      expect(result.content).not.toMatch(bodyMatcher('SMITHY_BODY'));
+    });
+
+    it('surfaces infra and framework in filterable options', async () => {
+      const rendered = await renderFilterableOptionsAsync(tsApiInfo);
+      expect(rendered).toContain('framework:');
+      expect(rendered).toContain('infra:');
+    });
+  });
+
   describe('local-file fallback for guide pages', () => {
     const info: NxGeneratorInfo = {
       id: 'ts#trpc-api',

@@ -17,6 +17,13 @@ export async function tsApiGenerator(
 ) {
   const framework = options.framework ?? 'trpc';
 
+  if (framework === 'smithy' && options.infra === 'http-lambda') {
+    throw new Error(
+      `Unsupported combination: framework=smithy does not support infra=http-lambda. ` +
+        `The Smithy TypeScript API only supports infra=rest-lambda (API Gateway REST API).`,
+    );
+  }
+
   switch (framework) {
     case 'trpc':
       return tsTrpcApiGenerator(tree, {
