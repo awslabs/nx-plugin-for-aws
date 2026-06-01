@@ -7,7 +7,7 @@ import { IacOption } from '../../utils/iac';
 
 export interface PyFastApiProjectGeneratorSchema {
   readonly name: string;
-  readonly infra: 'rest-lambda' | 'http-lambda';
+  readonly infra: 'rest-lambda' | 'http-lambda' | 'none';
   readonly integrationPattern?: 'isolated' | 'shared';
   readonly auth: 'iam' | 'cognito' | 'custom';
   readonly directory?: string;

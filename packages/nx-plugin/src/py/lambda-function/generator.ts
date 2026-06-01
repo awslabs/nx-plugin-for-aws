@@ -131,24 +131,28 @@ export const pyLambdaFunctionGenerator = async (
     );
   }
 
-  const iac = await resolveIac(tree, schema.iac);
-
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  const infra = schema.infra ?? 'lambda';
 
   // Check if the project has a bundle target and if not add it
   const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
 
-  await addLambdaFunctionInfra(tree, {
-    functionProjectName: projectConfig.name,
-    nameClassName: constructFunctionClassName,
-    nameKebabCase: constructFunctionKebabCase,
-    handler: normalizedFunctionPath,
-    bundlePathFromRoot: bundleOutputDir,
-    runtime: 'python',
-    iac,
-  });
+  if (infra !== 'none') {
+    const iac = await resolveIac(tree, schema.iac);
+
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
+
+    await addLambdaFunctionInfra(tree, {
+      functionProjectName: projectConfig.name,
+      nameClassName: constructFunctionClassName,
+      nameKebabCase: constructFunctionKebabCase,
+      handler: normalizedFunctionPath,
+      bundlePathFromRoot: bundleOutputDir,
+      runtime: 'python',
+      iac,
+    });
+  }
 
   const enhancedOptions = {
     ...schema,

@@ -49,10 +49,13 @@ export type EventSource =
   | 'VpcLatticeSchema'
   | 'VpcLatticeV2Schema';
 
+export type LambdaInfraOption = 'lambda' | 'none';
+
 export interface TsLambdaFunctionGeneratorSchema {
   readonly project: string;
   readonly name: string;
   readonly functionPath?: string;
   readonly event?: EventSource;
+  readonly infra?: LambdaInfraOption;
   readonly iac: IacOption;
 }

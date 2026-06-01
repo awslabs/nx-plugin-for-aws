@@ -8,7 +8,7 @@ export interface TsRdbGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  infra: 'aurora';
+  infra: 'aurora' | 'none';
   engine: 'postgres' | 'mysql';
   databaseUser?: string;
   databaseName?: string;

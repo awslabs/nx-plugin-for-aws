@@ -91,28 +91,32 @@ export const tsLambdaFunctionGenerator = async (
     );
   }
 
-  const iac = await resolveIac(tree, schema.iac);
-
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  const infra = schema.infra ?? 'lambda';
 
   const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
 
-  await addLambdaFunctionInfra(tree, {
-    functionProjectName: projectConfig.name,
-    nameClassName: constructFunctionClassName,
-    nameKebabCase: constructFunctionNameKebabCase,
-    handler: 'index.handler',
-    runtime: 'node',
-    bundlePathFromRoot: joinPathFragments(
-      'dist',
-      dir,
-      'bundle',
-      bundleOutputDir,
-    ),
-    iac,
-  });
+  if (infra !== 'none') {
+    const iac = await resolveIac(tree, schema.iac);
+
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
+
+    await addLambdaFunctionInfra(tree, {
+      functionProjectName: projectConfig.name,
+      nameClassName: constructFunctionClassName,
+      nameKebabCase: constructFunctionNameKebabCase,
+      handler: 'index.handler',
+      runtime: 'node',
+      bundlePathFromRoot: joinPathFragments(
+        'dist',
+        dir,
+        'bundle',
+        bundleOutputDir,
+      ),
+      iac,
+    });
+  }
 
   const enhancedOptions = {
     ...schema,

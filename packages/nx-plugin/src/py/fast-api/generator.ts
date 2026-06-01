@@ -49,11 +49,6 @@ export const pyFastApiProjectGenerator = async (
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const integrationPattern = getIntegrationPattern(schema);
-  const iac = await resolveIac(tree, schema.iac);
-
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
     tree,
@@ -143,50 +138,58 @@ export const pyFastApiProjectGenerator = async (
     },
   );
 
-  if (schema.auth === 'custom') {
-    const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        '..',
-        '..',
-        'utils',
-        'api-constructs',
-        'files',
-        'py-authorizer',
-        authorizerType,
-      ),
-      joinPathFragments(dir, normalizedModuleName),
-      {},
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
+  if (schema.infra !== 'none') {
+    const iac = await resolveIac(tree, schema.iac);
+
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
+
+    if (schema.auth === 'custom') {
+      const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
+      generateFiles(
+        tree,
+        joinPathFragments(
+          __dirname,
+          '..',
+          '..',
+          'utils',
+          'api-constructs',
+          'files',
+          'py-authorizer',
+          authorizerType,
+        ),
+        joinPathFragments(dir, normalizedModuleName),
+        {},
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        },
+      );
+    }
+
+    // Add the CDK construct to deploy the FastAPI to shared constructs
+    await addApiGatewayInfra(tree, {
+      apiProjectName: projectConfig.name,
+      apiNameClassName,
+      apiNameKebabCase,
+      constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
+      backend: {
+        type: 'fastapi',
+        moduleName: normalizedModuleName,
+        bundleOutputDir,
+        integrationPattern,
       },
-    );
+      auth: schema.auth,
+      iac,
+    });
+
+    addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
+      iac,
+      apiNameKebabCase,
+      specPath,
+      specBuildTargetName: `${projectConfig.name}:openapi`,
+    });
   }
-
-  // Add the CDK construct to deploy the FastAPI to shared constructs
-  await addApiGatewayInfra(tree, {
-    apiProjectName: projectConfig.name,
-    apiNameClassName,
-    apiNameKebabCase,
-    constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
-    backend: {
-      type: 'fastapi',
-      moduleName: normalizedModuleName,
-      bundleOutputDir,
-      integrationPattern,
-    },
-    auth: schema.auth,
-    iac,
-  });
-
-  addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
-    iac,
-    apiNameKebabCase,
-    specPath,
-    specBuildTargetName: `${projectConfig.name}:openapi`,
-  });
 
   addDependenciesToPyProjectToml(tree, dir, [
     'fastapi',

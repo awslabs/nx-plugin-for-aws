@@ -8,7 +8,7 @@ import { IacOption } from '../../../utils/iac';
 export interface TsSmithyApiGeneratorSchema {
   name: string;
   namespace?: string;
-  infra: 'rest-lambda';
+  infra: 'rest-lambda' | 'none';
   integrationPattern?: 'isolated' | 'shared';
   auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];

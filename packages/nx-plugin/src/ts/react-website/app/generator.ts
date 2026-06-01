@@ -100,8 +100,10 @@ export async function tsReactWebsiteGenerator(
 
   const targets = projectConfiguration.targets;
 
-  // Configure load:runtime-config target based on IaC provider
-  const iac = await resolveIac(tree, schema.iac);
+  const infra = schema.infra ?? 'cloudfront-s3';
+
+  // Configure load:runtime-config target based on IaC provider (only when infra is not none)
+  const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
   if (iac === 'cdk') {
     targets['load:runtime-config'] = {
@@ -130,10 +132,6 @@ export async function tsReactWebsiteGenerator(
         },
       },
     };
-  } else {
-    throw new Error(
-      `Unknown iac: ${iac}. Supported providers are: cdk, terraform`,
-    );
   }
 
   const buildTarget = targets['build'];
@@ -194,6 +192,7 @@ export async function tsReactWebsiteGenerator(
     {
       ux,
       framework: 'react',
+      infra,
     },
   );
 
@@ -206,18 +205,20 @@ export async function tsReactWebsiteGenerator(
     await sharedShadcnGenerator(tree);
   }
 
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  if (iac) {
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
 
-  await addWebsiteInfra(tree, {
-    iac,
-    websiteProjectName: fullyQualifiedName,
-    scopeAlias,
-    websiteContentPath: joinPathFragments('dist', websiteContentPath),
-    websiteNameKebabCase,
-    websiteNameClassName,
-  });
+    await addWebsiteInfra(tree, {
+      iac,
+      websiteProjectName: fullyQualifiedName,
+      scopeAlias,
+      websiteContentPath: joinPathFragments('dist', websiteContentPath),
+      websiteNameKebabCase,
+      websiteNameClassName,
+    });
+  }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;

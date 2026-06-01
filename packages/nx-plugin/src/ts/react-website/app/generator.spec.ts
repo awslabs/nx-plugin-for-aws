@@ -424,9 +424,7 @@ describe('react-website generator', () => {
             ...options,
             iac: 'InvalidProvider' as any,
           }),
-        ).rejects.toThrow(
-          'Unknown iac: InvalidProvider. Supported providers are: cdk, terraform',
-        );
+        ).rejects.toThrow('Unsupported iac InvalidProvider');
       });
 
       it('should handle terraform with different directory structures', async () => {
@@ -594,9 +592,7 @@ describe('react-website generator', () => {
           ...options,
           iac: 'UnknownProvider' as any,
         }),
-      ).rejects.toThrow(
-        'Unknown iac: UnknownProvider. Supported providers are: cdk, terraform',
-      );
+      ).rejects.toThrow('Unsupported iac UnknownProvider');
     });
 
     it('should configure load:runtime-config target with custom directory for Terraform', async () => {

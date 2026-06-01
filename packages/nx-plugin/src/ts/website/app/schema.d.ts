@@ -6,6 +6,7 @@ import { IacOption } from '../../../utils/iac';
 import { UxOption } from '../../react-website/app/generator';
 
 export type WebsiteFramework = 'react';
+export type WebsiteInfraOption = 'cloudfront-s3' | 'none';
 
 export interface TsWebsiteGeneratorSchema {
   name: string;
@@ -16,5 +17,6 @@ export interface TsWebsiteGeneratorSchema {
   tanstackRouter?: boolean;
   tailwind?: boolean;
   ux?: UxOption;
+  infra?: WebsiteInfraOption;
   iac: IacOption;
 }
