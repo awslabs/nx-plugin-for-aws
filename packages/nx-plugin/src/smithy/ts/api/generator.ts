@@ -43,6 +43,13 @@ export const tsSmithyApiGenerator = async (
   tree: Tree,
   options: TsSmithyApiGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  if ((options.infra as string) !== 'rest-lambda') {
+    throw new Error(
+      `Unsupported infra '${options.infra}' for Smithy TypeScript API. ` +
+        `Only 'rest-lambda' (API Gateway REST API) is supported.`,
+    );
+  }
+
   const integrationPattern = getIntegrationPattern(options);
   const apiNameClassName = toClassName(options.name);
   const apiNameKebabCase = toKebabCase(options.name);

@@ -94,11 +94,11 @@ describe('ts#api generator', () => {
         name: 'TestApi',
         framework: 'smithy',
         directory: 'packages',
-        infra: 'http-lambda',
+        infra: 'http-lambda' as any,
         integrationPattern: 'isolated',
         auth: 'iam',
         iac: 'cdk',
       }),
-    ).rejects.toThrow(/framework=smithy does not support infra=http-lambda/);
+    ).rejects.toThrow(/Unsupported infra 'http-lambda' for Smithy/);
   });
 });
