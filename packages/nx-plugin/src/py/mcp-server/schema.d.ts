@@ -5,18 +5,14 @@
 
 import { IacProviderOption } from '../../utils/iac';
 
-export type PyMcpServerComputeType = 'None' | 'BedrockAgentCoreRuntime';
+export type PyMcpServerInfra = 'none' | 'agentcore';
 
-export type PyMcpServerAuth = 'IAM' | 'Cognito';
+export type PyMcpServerAuth = 'iam' | 'cognito';
 
-/**
- * TypeScript types for options defined in schema.json
- * Update this to match schema.json if you make changes.
- */
 export interface PyMcpServerGeneratorSchema {
   project: string;
   name?: string;
-  computeType?: PyMcpServerComputeType;
+  infra?: PyMcpServerInfra;
   auth?: PyMcpServerAuth;
   iacProvider: IacProviderOption;
 }

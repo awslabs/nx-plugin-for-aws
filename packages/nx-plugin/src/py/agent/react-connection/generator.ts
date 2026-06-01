@@ -56,7 +56,7 @@ export const pyAgentReactConnectionGenerator = async (
   const agentName = targetComponent?.name ?? 'agent';
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
-  const auth = targetComponent?.auth ?? metadata?.auth ?? 'IAM';
+  const auth = targetComponent?.auth ?? metadata?.auth ?? 'iam';
   const protocol = targetComponent?.protocol ?? 'HTTP';
 
   if (protocol === 'A2A') {

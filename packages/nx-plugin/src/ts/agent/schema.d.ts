@@ -6,16 +6,16 @@
 import { IacProviderOption } from '../../utils/iac';
 
 export type TsAgentSdk = 'strands';
-export type TsAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
+export type TsAgentInfra = 'agentcore' | 'none';
 export type AgentProtocol = 'HTTP' | 'A2A' | 'AG-UI';
 
-export type TsAgentAuth = 'IAM' | 'Cognito';
+export type TsAgentAuth = 'iam' | 'cognito';
 
 export interface TsAgentGeneratorSchema {
   project: string;
   sdk?: TsAgentSdk;
   name?: string;
-  computeType?: TsAgentComputeType;
+  infra?: TsAgentInfra;
   auth?: TsAgentAuth;
   protocol?: AgentProtocol;
   iacProvider: IacProviderOption;

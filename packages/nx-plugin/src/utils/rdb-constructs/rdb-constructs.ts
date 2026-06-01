@@ -37,9 +37,9 @@ export const addRdbInfra = async (
   tree: Tree,
   options: AddRdbConstructOptions & { iacProvider: IacProvider },
 ) => {
-  if (options.iacProvider === 'CDK') {
+  if (options.iacProvider === 'cdk') {
     await addRdbCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'Terraform') {
+  } else if (options.iacProvider === 'terraform') {
     addRdbTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
@@ -49,7 +49,7 @@ export const addRdbInfra = async (
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iacProvider === 'CDK'
+      options.iacProvider === 'cdk'
         ? SHARED_CONSTRUCTS_DIR
         : SHARED_TERRAFORM_DIR,
       'project.json',

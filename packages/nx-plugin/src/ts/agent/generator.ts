@@ -65,16 +65,16 @@ export const tsAgentGenerator = async (
   const relativeSourceDir = targetSourceDir.replace(project.root + '/', './');
   const distDir = joinPathFragments('dist', project.root);
 
-  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const infra = options.infra ?? 'agentcore';
   const protocol = options.protocol ?? 'HTTP';
 
-  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+  if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
-      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'IAM';
+  const auth = options.auth ?? 'iam';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `runWithSessionId` and propagate the AgentCore session
@@ -107,8 +107,8 @@ export const tsAgentGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  if (computeType === 'BedrockAgentCoreRuntime') {
-    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  if (infra === 'agentcore') {
+    const containerEngine = await resolveContainerEngine(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target

@@ -56,7 +56,7 @@ export async function tsAgentReactConnectionGenerator(
   const agentName = targetComponent?.name ?? 'agent';
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
-  const auth = targetComponent?.auth ?? metadata?.auth ?? 'IAM';
+  const auth = targetComponent?.auth ?? metadata?.auth ?? 'iam';
   const agentProjectAlias = toScopeAlias(agentProjectConfig.name);
   const agentPath = targetComponent?.path ?? 'src/agent';
 
@@ -135,7 +135,7 @@ export async function tsAgentReactConnectionGenerator(
     },
   );
 
-  if (auth === 'IAM') {
+  if (auth === 'iam') {
     generateFiles(
       tree,
       joinPathFragments(__dirname, '../../../utils/files/website/hooks/sigv4'),
@@ -212,7 +212,7 @@ export async function tsAgentReactConnectionGenerator(
       '@tanstack/react-query',
       '@tanstack/react-query-devtools',
       '@trpc/tanstack-react-query',
-      ...((auth === 'IAM'
+      ...((auth === 'iam'
         ? [
             'oidc-client-ts',
             'aws4fetch',
@@ -220,7 +220,7 @@ export async function tsAgentReactConnectionGenerator(
             'react-oidc-context',
           ]
         : []) as any),
-      ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
+      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
     withVersions(['@smithy/types']),
   );

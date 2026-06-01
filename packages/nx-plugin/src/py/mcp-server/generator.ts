@@ -77,15 +77,15 @@ export const pyMcpServerGenerator = async (
     mcpServerNameSnakeCase,
   );
 
-  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const infra = options.infra ?? 'agentcore';
 
-  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+  if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
-      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'IAM';
+  const auth = options.auth ?? 'iam';
 
   // Generate example server
   generateFiles(
@@ -109,8 +109,8 @@ export const pyMcpServerGenerator = async (
     'aws-opentelemetry-distro',
   ]);
 
-  if (computeType === 'BedrockAgentCoreRuntime') {
-    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  if (infra === 'agentcore') {
+    const containerEngine = await resolveContainerEngine(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target

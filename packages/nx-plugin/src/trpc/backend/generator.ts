@@ -37,17 +37,17 @@ export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
 const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
-  'ServerlessApiGatewayRestApi::isolated',
-  'ServerlessApiGatewayRestApi::shared',
-  'ServerlessApiGatewayHttpApi::isolated',
-  'ServerlessApiGatewayHttpApi::shared',
+  'rest-lambda::isolated',
+  'rest-lambda::shared',
+  'http-lambda::isolated',
+  'http-lambda::shared',
 ]);
 
 export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
-  validateTrpcComputeTypeAndIntegrationPatternCombination(options);
+  validateTrpcInfraAndIntegrationPatternCombination(options);
 
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
 
@@ -92,14 +92,13 @@ export async function tsTrpcApiGenerator(
     apiProjectName: backendProjectName,
     apiNameClassName,
     apiNameKebabCase,
-    constructType:
-      options.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
+    constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
     backend: {
       type: 'trpc',
       projectAlias: enhancedOptions.backendProjectAlias,
       bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
       integrationPattern: getIntegrationPattern(options),
-      ...(options.auth === 'Custom' && {
+      ...(options.auth === 'custom' && {
         authorizerBundleOutputDir: joinPathFragments(
           'dist',
           backendRoot,
@@ -117,7 +116,7 @@ export async function tsTrpcApiGenerator(
     apiName: options.name,
     apiType: 'trpc',
     auth: options.auth,
-    computeType: options.computeType,
+    infra: options.infra,
     integrationPattern: getIntegrationPattern(options),
   } as unknown;
 
@@ -145,7 +144,7 @@ export async function tsTrpcApiGenerator(
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
-  if (options.auth === 'Custom') {
+  if (options.auth === 'custom') {
     await addTypeScriptBundleTarget(tree, projectConfig, {
       targetFilePath: 'src/authorizer.ts',
       bundleOutputDir: 'authorizer',
@@ -171,9 +170,8 @@ export async function tsTrpcApiGenerator(
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
 
-  if (options.auth === 'Custom') {
-    const authorizerType =
-      options.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest';
+  if (options.auth === 'custom') {
+    const authorizerType = options.infra === 'http-lambda' ? 'http' : 'rest';
     generateFiles(
       tree,
       joinPathFragments(
@@ -196,7 +194,7 @@ export async function tsTrpcApiGenerator(
   }
 
   // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
-  if (options.computeType !== 'ServerlessApiGatewayRestApi') {
+  if (options.infra !== 'rest-lambda') {
     tree.delete(
       joinPathFragments(backendRoot, 'src', 'schema', 'z-async-iterable.ts'),
     );
@@ -216,7 +214,7 @@ export async function tsTrpcApiGenerator(
       '@trpc/client',
       'aws4fetch',
       '@aws-sdk/credential-providers',
-      ...(options.auth === 'Custom'
+      ...(options.auth === 'custom'
         ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
@@ -234,15 +232,15 @@ export async function tsTrpcApiGenerator(
   };
 }
 
-const validateTrpcComputeTypeAndIntegrationPatternCombination = (
+const validateTrpcInfraAndIntegrationPatternCombination = (
   options: TsTrpcApiGeneratorSchema,
 ) => {
   const integrationPattern = getIntegrationPattern(options);
-  const permutation = `${options.computeType}::${integrationPattern}`;
+  const permutation = `${options.infra}::${integrationPattern}`;
 
   if (!VALID_TRPC_INTEGRATION_PERMUTATIONS.has(permutation)) {
     throw new Error(
-      `Invalid tRPC computeType/integrationPattern combination: ${options.computeType} + ${integrationPattern}.`,
+      `Invalid tRPC infra/integrationPattern combination: ${options.infra} + ${integrationPattern}.`,
     );
   }
 };
@@ -254,12 +252,12 @@ const getIntegrationPattern = (
 };
 
 const getApiGatewayEventType = (options: TsTrpcApiGeneratorSchema): string => {
-  if (options.computeType === 'ServerlessApiGatewayRestApi') {
+  if (options.infra === 'rest-lambda') {
     return 'APIGatewayProxyEvent';
   }
-  if (options.auth === 'IAM') {
+  if (options.auth === 'iam') {
     return 'APIGatewayProxyEventV2WithIAMAuthorizer';
-  } else if (options.auth === 'Cognito') {
+  } else if (options.auth === 'cognito') {
     return 'APIGatewayProxyEventV2WithJWTAuthorizer';
   }
   return 'APIGatewayProxyEventV2';

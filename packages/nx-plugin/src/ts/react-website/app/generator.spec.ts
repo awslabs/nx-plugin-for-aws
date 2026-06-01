@@ -24,15 +24,15 @@ describe('react-website generator', () => {
 
   const options: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
-    iacProvider: 'CDK',
-    uxProvider: 'Cloudscape',
+    iacProvider: 'cdk',
+    uxProvider: 'cloudscape',
   };
 
   const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
     enableTailwind: false,
-    iacProvider: 'CDK',
-    uxProvider: 'Cloudscape',
+    iacProvider: 'cdk',
+    uxProvider: 'cloudscape',
   };
 
   beforeEach(() => {
@@ -324,7 +324,7 @@ describe('react-website generator', () => {
       it('should generate terraform files for static website and snapshot them', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Find all terraform files
@@ -375,7 +375,7 @@ describe('react-website generator', () => {
       it('should configure project targets and dependencies correctly for terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Check that shared terraform project has build dependency on the website project
@@ -404,7 +404,7 @@ describe('react-website generator', () => {
       it('should not create CDK constructs when using terraform', async () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Verify CDK files are NOT created
@@ -425,7 +425,7 @@ describe('react-website generator', () => {
             iacProvider: 'InvalidProvider' as any,
           }),
         ).rejects.toThrow(
-          'Unknown iacProvider: InvalidProvider. Supported providers are: CDK, Terraform',
+          'Unknown iacProvider: InvalidProvider. Supported providers are: cdk, terraform',
         );
       });
 
@@ -434,7 +434,7 @@ describe('react-website generator', () => {
           ...options,
           name: 'nested-website',
           directory: 'apps/nested/path',
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Verify terraform files are created
@@ -466,7 +466,7 @@ describe('react-website generator', () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
           directory: 'custom-dir',
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Find all terraform files
@@ -494,7 +494,7 @@ describe('react-website generator', () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
           enableTailwind: false,
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Find the app-specific terraform file
@@ -518,7 +518,7 @@ describe('react-website generator', () => {
         await tsReactWebsiteGenerator(tree, {
           ...options,
           enableTanstackRouter: false,
-          iacProvider: 'Terraform',
+          iacProvider: 'terraform',
         });
 
         // Find the app-specific terraform file
@@ -544,7 +544,7 @@ describe('react-website generator', () => {
     it('should configure load:runtime-config target for CDK provider', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        iacProvider: 'CDK',
+        iacProvider: 'cdk',
       });
 
       const projectConfig = readJson(tree, 'test-app/project.json');
@@ -568,7 +568,7 @@ describe('react-website generator', () => {
     it('should configure load:runtime-config target for Terraform provider', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       const projectConfig = readJson(tree, 'test-app/project.json');
@@ -595,7 +595,7 @@ describe('react-website generator', () => {
           iacProvider: 'UnknownProvider' as any,
         }),
       ).rejects.toThrow(
-        'Unknown iacProvider: UnknownProvider. Supported providers are: CDK, Terraform',
+        'Unknown iacProvider: UnknownProvider. Supported providers are: cdk, terraform',
       );
     });
 
@@ -603,7 +603,7 @@ describe('react-website generator', () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
         directory: 'custom-dir',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       const projectConfig = readJson(tree, 'custom-dir/test-app/project.json');
@@ -634,7 +634,7 @@ describe('react-website generator', () => {
 
       await tsReactWebsiteGenerator(tree, {
         ...options,
-        iacProvider: 'CDK',
+        iacProvider: 'cdk',
       });
 
       const projectConfig = readJson(tree, 'test-app/project.json');
@@ -653,13 +653,13 @@ describe('react-website generator', () => {
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
       iac: {
-        provider: 'CDK',
+        provider: 'cdk',
       },
     });
 
     await tsReactWebsiteGenerator(tree, {
       ...options,
-      iacProvider: 'Inherit',
+      iacProvider: 'inherit',
     });
 
     // Verify CDK constructs are created (not terraform)
@@ -696,7 +696,7 @@ describe('react-website generator uxProvider tests', () => {
     async (uxProvider) => {
       const options: TsReactWebsiteGeneratorSchema = {
         name: 'test-app',
-        iacProvider: 'CDK',
+        iacProvider: 'cdk',
         uxProvider: uxProvider,
       };
 
@@ -713,8 +713,8 @@ describe('react-website generator uxProvider tests', () => {
   describe('Cloudscape', () => {
     const options: TsReactWebsiteGeneratorSchema = {
       name: 'test-app',
-      iacProvider: 'CDK',
-      uxProvider: 'Cloudscape',
+      iacProvider: 'cdk',
+      uxProvider: 'cloudscape',
     };
 
     it('should update package.json with required dependencies', async () => {
@@ -732,8 +732,8 @@ describe('react-website generator uxProvider tests', () => {
   describe('Shadcn', () => {
     const options: TsReactWebsiteGeneratorSchema = {
       name: 'test-app',
-      iacProvider: 'CDK',
-      uxProvider: 'Shadcn',
+      iacProvider: 'cdk',
+      uxProvider: 'shadcn',
     };
 
     it('should update package.json with required dependencies', async () => {

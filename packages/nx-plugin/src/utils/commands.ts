@@ -82,7 +82,7 @@ export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
 export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
-  iacProvider?: 'CDK' | 'Terraform',
+  iacProvider?: 'cdk' | 'terraform',
   tag?: string,
 ) => {
   const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;

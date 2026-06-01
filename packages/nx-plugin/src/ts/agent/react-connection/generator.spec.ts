@@ -43,7 +43,7 @@ describe('ts strands agent react connection generator', () => {
               path: 'src/agent',
               port: 8081,
               rc: 'TestAgent',
-              auth: 'IAM',
+              auth: 'iam',
             },
           ],
         },
@@ -74,7 +74,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
     // Verify generated files
@@ -109,7 +109,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
     const mainTsxContent = tree.read('apps/frontend/src/main.tsx', 'utf-8');
@@ -126,7 +126,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -150,7 +150,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -182,7 +182,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'Cognito',
+        auth: 'cognito',
       },
     });
 
@@ -209,7 +209,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'Custom',
+        auth: 'custom',
       },
     });
 
@@ -269,7 +269,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
 
     await tsAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',
@@ -280,7 +280,7 @@ export function Main() {
         path: 'src/agent',
         port: 8081,
         rc: 'TestAgent',
-        auth: 'IAM',
+        auth: 'iam',
       },
     });
 
@@ -298,7 +298,7 @@ export function Main() {
           path: 'src/agent',
           port: 9000,
           rc: 'TestAgent',
-          auth: 'IAM',
+          auth: 'iam',
           protocol: 'A2A',
         },
       }),
@@ -315,7 +315,7 @@ export function Main() {
         path: 'src/my-agui-agent',
         port: 8081,
         rc: 'MyAguiAgent',
-        auth: 'IAM',
+        auth: 'iam',
         protocol: 'AG-UI',
       },
     });
@@ -360,7 +360,7 @@ describe('ts strands agent react connection with real projects', () => {
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
   });
 
@@ -374,7 +374,7 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate a strands agent
     await tsAgentGenerator(tree, {
       project: 'agent-project',
-      computeType: 'None',
+      infra: 'none',
     });
 
     // Connect react to strands agent
@@ -429,7 +429,7 @@ describe('ts strands agent react connection with real projects', () => {
     await tsAgentGenerator(tree, {
       project: 'agent-project',
       protocol: 'AG-UI',
-      computeType: 'None',
+      infra: 'none',
     });
 
     // Connect react to AG-UI agent

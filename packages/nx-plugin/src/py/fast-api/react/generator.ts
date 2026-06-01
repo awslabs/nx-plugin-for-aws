@@ -37,7 +37,7 @@ export const fastApiReactGenerator = async (
 
   const metadata = fastApiProjectConfig.metadata as any;
   const apiName = metadata?.apiName;
-  const auth = metadata?.auth ?? 'IAM';
+  const auth = metadata?.auth ?? 'iam';
   const port = metadata?.port ?? metadata?.ports?.[0] ?? 8000;
 
   await addOpenApiReactClient(tree, {

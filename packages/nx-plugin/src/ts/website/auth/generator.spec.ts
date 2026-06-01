@@ -18,8 +18,8 @@ describe('ts#website#auth generator', () => {
     tree = createTreeUsingTsSolutionSetup();
     await tsReactWebsiteGenerator(tree, {
       name: 'test-website',
-      iacProvider: 'CDK',
-      uxProvider: 'Cloudscape',
+      iacProvider: 'cdk',
+      uxProvider: 'cloudscape',
     });
   });
 
@@ -32,7 +32,7 @@ describe('ts#website#auth generator', () => {
     const options: TsWebsiteAuthGeneratorSchema = {
       project: 'test-website',
       allowSignup: false,
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     };
     await tsWebsiteAuthGenerator(tree, options);
     expect(

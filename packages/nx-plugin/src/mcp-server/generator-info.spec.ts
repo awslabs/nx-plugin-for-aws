@@ -391,10 +391,10 @@ Some middle text.
   describe('option filtering', () => {
     const pageWithBranches = `
 # Guide
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+<OptionFilter when={{ infra: 'rest-lambda' }}>
 REST-only content
 </OptionFilter>
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+<OptionFilter when={{ infra: 'http-lambda' }}>
 HTTP-only content
 </OptionFilter>
 common content
@@ -406,7 +406,7 @@ common content
         generators,
         undefined,
         undefined,
-        { computeType: 'ServerlessApiGatewayHttpApi' },
+        { infra: 'http-lambda' },
       );
       expect(result).toContain('HTTP-only content');
       expect(result).not.toContain('REST-only content');
@@ -417,9 +417,7 @@ common content
       const result = await postProcessGuide(pageWithBranches, generators);
       expect(result).toContain('REST-only content');
       expect(result).toContain('HTTP-only content');
-      expect(result).toMatch(
-        /\[!NOTE]\s+Only when computeType = ServerlessApiGatewayRestApi/,
-      );
+      expect(result).toMatch(/\[!NOTE]\s+Only when infra = rest-lambda/);
     });
 
     it('filters Infrastructure to CDK slot when iacProvider is CDK', async () => {
@@ -439,7 +437,7 @@ terraform instructions
         generators,
         undefined,
         undefined,
-        { iacProvider: 'CDK' },
+        { iacProvider: 'cdk' },
       );
       expect(result).toContain('cdk instructions');
       expect(result).not.toContain('terraform instructions');

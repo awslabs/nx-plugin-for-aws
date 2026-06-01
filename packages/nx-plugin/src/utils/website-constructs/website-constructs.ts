@@ -34,9 +34,9 @@ export const addWebsiteInfra = async (
   tree: Tree,
   options: AddWebsiteInfraOptions & { iacProvider: IacProvider },
 ) => {
-  if (options.iacProvider === 'CDK') {
+  if (options.iacProvider === 'cdk') {
     await addWebsiteCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'Terraform') {
+  } else if (options.iacProvider === 'terraform') {
     addWebsiteTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
@@ -46,7 +46,7 @@ export const addWebsiteInfra = async (
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iacProvider === 'CDK'
+      options.iacProvider === 'cdk'
         ? SHARED_CONSTRUCTS_DIR
         : SHARED_TERRAFORM_DIR,
       'project.json',

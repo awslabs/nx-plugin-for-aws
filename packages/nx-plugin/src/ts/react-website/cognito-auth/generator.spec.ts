@@ -19,7 +19,7 @@ describe('cognito-auth generator', () => {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
-    iacProvider: 'CDK',
+    iacProvider: 'cdk',
   };
   const uxProvider = 'Cloudscape';
 
@@ -561,7 +561,7 @@ describe('cognito-auth generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
 
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(

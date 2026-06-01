@@ -13,7 +13,7 @@ export const CONTAINER_ENGINES = ['docker', 'finch'] as const;
 
 export type ContainerEngine = (typeof CONTAINER_ENGINES)[number];
 
-export type ContainerEngineOption = ContainerEngine | 'Inherit';
+export type ContainerEngineOption = ContainerEngine | 'inherit';
 
 /**
  * Configuration for container tooling
@@ -55,7 +55,7 @@ export const resolveContainerEngine = async (
   tree: Tree,
   option: ContainerEngineOption,
 ): Promise<ContainerEngine> => {
-  if (option === 'Inherit') {
+  if (option === 'inherit') {
     const pluginConfig = await readAwsNxPluginConfig(tree);
     const engine = pluginConfig?.containers?.engine ?? 'docker';
     if (!CONTAINER_ENGINES.includes(engine)) {

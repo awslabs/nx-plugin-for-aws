@@ -39,7 +39,7 @@ export async function sharedConstructsGenerator(
   const npmScopePrefix = getNpmScopePrefix(tree);
   updateGitignore(tree);
 
-  if (iacProvider === 'CDK') {
+  if (iacProvider === 'cdk') {
     if (
       !tree.exists(
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
@@ -89,7 +89,7 @@ export async function sharedConstructsGenerator(
   }
 
   // Handle Terraform provider
-  if (iacProvider === 'Terraform') {
+  if (iacProvider === 'terraform') {
     const terraformLibPath = joinPathFragments(
       PACKAGES_DIR,
       SHARED_TERRAFORM_DIR,

@@ -54,7 +54,7 @@ export async function tsInfraGenerator(
   // CDK shells out to a container engine to build image assets. Default
   // (docker) needs no env override; finch is set via CDK_DOCKER per
   // https://docs.aws.amazon.com/cdk/v2/guide/build-containers.html#build-container-replace.
-  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  const containerEngine = await resolveContainerEngine(tree, 'inherit');
   const cdkEnv: Record<string, string> | undefined =
     containerEngine === 'docker' ? undefined : { CDK_DOCKER: containerEngine };
   const withCdkEnv = <T extends Record<string, unknown>>(opts: T): T => {
@@ -67,7 +67,7 @@ export async function tsInfraGenerator(
 
   // Shared constructs always in CDK for typescript infra generator
   await sharedConstructsGenerator(tree, {
-    iacProvider: 'CDK',
+    iacProvider: 'cdk',
   });
 
   // Shared infra-config and infra-scripts packages (lazy creation, only when enabled)

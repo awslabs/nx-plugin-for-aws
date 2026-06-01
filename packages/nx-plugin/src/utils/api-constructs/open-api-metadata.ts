@@ -36,7 +36,7 @@ export const addSharedConstructsOpenApiMetadataGenerateTarget = (
     specBuildTargetName,
   }: AddOpenApiMetadataGenerateTargetOptions,
 ) => {
-  if (iacProvider !== 'CDK') {
+  if (iacProvider !== 'cdk') {
     // For Terraform, we do not support type-safe integration builders, rather only the single lambda
     // router pattern, and therefore do not need to add depenencies on metadata generation.
     return;

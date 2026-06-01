@@ -19,10 +19,10 @@ describe('py#api generator', () => {
       name: 'TestApi',
       framework: 'fastapi',
       directory: 'packages',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     expect(tree.exists('packages/test_api')).toBeTruthy();
@@ -37,10 +37,10 @@ describe('py#api generator', () => {
     await pyApiGenerator(tree, {
       name: 'TestApi',
       directory: 'packages',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     expect(tree.exists('packages/test_api')).toBeTruthy();

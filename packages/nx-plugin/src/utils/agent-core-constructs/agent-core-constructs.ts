@@ -21,7 +21,7 @@ import { ContainerEngine } from '../containers';
 
 type IACProvider = { iacProvider: IacProvider };
 
-export type AgentCoreAuth = 'IAM' | 'Cognito';
+export type AgentCoreAuth = 'iam' | 'cognito';
 
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
@@ -40,10 +40,10 @@ const addAgentCoreInfra = async (
   options: AddAgentCoreInfraProps & { iacProvider: IacProvider },
 ) => {
   switch (options.iacProvider) {
-    case 'CDK':
+    case 'cdk':
       await addAgentCoreCDKInfra(tree, options);
       break;
-    case 'Terraform':
+    case 'terraform':
       addAgentCoreTerraformInfra(tree, options);
       break;
   }
@@ -53,7 +53,7 @@ const addAgentCoreInfra = async (
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iacProvider === 'CDK'
+      options.iacProvider === 'cdk'
         ? SHARED_CONSTRUCTS_DIR
         : SHARED_TERRAFORM_DIR,
       'project.json',

@@ -30,14 +30,14 @@ export interface IacConfig {
  */
 export const resolveIacProvider = async (
   tree: Tree,
-  iacProviderOption: 'CDK' | 'Terraform' | 'Inherit',
+  iacProviderOption: 'cdk' | 'terraform' | 'inherit',
 ): Promise<(typeof IAC_PROVIDERS)[number]> => {
-  if (iacProviderOption === 'Inherit') {
+  if (iacProviderOption === 'inherit') {
     const pluginConfig = await readAwsNxPluginConfig(tree);
 
     if (!pluginConfig?.iac?.provider) {
       throw new Error(
-        `IaC provider "Inherit" requires iac.provider to be set in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
+        `IaC provider "inherit" requires iac.provider to be set in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
       );
     }
     if (!IAC_PROVIDERS.includes(pluginConfig.iac.provider)) {

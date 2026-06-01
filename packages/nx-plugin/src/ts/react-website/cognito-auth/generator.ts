@@ -122,7 +122,7 @@ export async function tsReactWebsiteAuthGenerator(
   );
 
   const uxProvider =
-    (projectConfiguration.metadata as any)?.uxProvider ?? 'Cloudscape';
+    (projectConfiguration.metadata as any)?.uxProvider ?? 'cloudscape';
 
   await applyGritQL(tree, mainTsxPath, readGritPattern('cognito-auth-wrapper'));
   // Update App Layout
@@ -147,13 +147,13 @@ export async function tsReactWebsiteAuthGenerator(
     // TODO: update utils if they exist by appending to the array
     // Add a top-level navigation menu that shows the signed-in user's profile and actions
     switch (uxProvider) {
-      case 'Cloudscape':
+      case 'cloudscape':
         await addCloudscapeAuthMenu(tree, appLayoutTsxPath);
         break;
-      case 'Shadcn':
+      case 'shadcn':
         await addShadcnAuthMenu(tree, appLayoutTsxPath);
         break;
-      case 'None':
+      case 'none':
         await addNoneAuthMenu(tree, appLayoutTsxPath);
         break;
       default:

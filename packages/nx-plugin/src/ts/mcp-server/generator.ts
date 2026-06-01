@@ -68,15 +68,15 @@ export const tsMcpServerGenerator = async (
   const relativeSourceDir = targetSourceDir.replace(project.root + '/', './');
   const distDir = joinPathFragments('dist', project.root);
 
-  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const infra = options.infra ?? 'agentcore';
 
-  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+  if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
-      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'IAM';
+  const auth = options.auth ?? 'iam';
 
   // Create a package.json if one doesn't exist, since we want to add the server as a bin target
   const projectPackageJsonPath = joinPathFragments(
@@ -134,9 +134,9 @@ export const tsMcpServerGenerator = async (
     '@modelcontextprotocol/inspector',
   ]);
 
-  // Add hosting based on compute type
-  if (computeType === 'BedrockAgentCoreRuntime') {
-    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  // Add hosting based on infra
+  if (infra === 'agentcore') {
+    const containerEngine = await resolveContainerEngine(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target

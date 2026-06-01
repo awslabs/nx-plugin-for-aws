@@ -20,7 +20,7 @@ export async function pyApiGenerator(
     case 'fastapi':
       return pyFastApiProjectGenerator(tree, {
         name: options.name,
-        computeType: options.computeType,
+        infra: options.infra,
         integrationPattern: options.integrationPattern,
         auth: options.auth,
         directory: options.directory,

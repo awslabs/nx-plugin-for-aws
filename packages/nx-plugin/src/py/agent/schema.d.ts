@@ -6,16 +6,16 @@
 import { IacProviderOption } from '../../utils/iac';
 
 export type PyAgentSdk = 'strands';
-export type PyAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
+export type PyAgentInfra = 'agentcore' | 'none';
 export type AgentProtocol = 'HTTP' | 'A2A' | 'AG-UI';
 
-export type PyAgentAuth = 'IAM' | 'Cognito';
+export type PyAgentAuth = 'iam' | 'cognito';
 
 export interface PyAgentGeneratorSchema {
   project: string;
   sdk?: PyAgentSdk;
   name?: string;
-  computeType?: PyAgentComputeType;
+  infra?: PyAgentInfra;
   auth?: PyAgentAuth;
   protocol?: AgentProtocol;
   iacProvider: IacProviderOption;

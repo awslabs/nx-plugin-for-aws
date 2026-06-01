@@ -20,7 +20,7 @@ describe('ts#agent#a2a-connection generator', () => {
     path: 'src/host',
     port: 8081,
     rc: 'Host',
-    auth: 'IAM' as const,
+    auth: 'iam' as const,
     protocol: 'HTTP' as const,
   };
 
@@ -30,7 +30,7 @@ describe('ts#agent#a2a-connection generator', () => {
     path: 'src/remote',
     port: 9000,
     rc: 'Remote',
-    auth: 'IAM' as const,
+    auth: 'iam' as const,
     protocol: 'A2A' as const,
   };
 
@@ -194,14 +194,14 @@ export const getAgent = async (sessionId: string) =>
         sourceProject: '@test/ts-host',
         targetProject: '@test/ts-remote',
         sourceComponent: HOST,
-        targetComponent: { ...REMOTE, auth: 'Cognito' },
+        targetComponent: { ...REMOTE, auth: 'cognito' },
       }),
     ).rejects.toThrow(/IAM/);
   });
 
   it('should add generator metric', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
     await tsAgentA2aConnectionGenerator(tree, {
       sourceProject: '@test/ts-host',
       targetProject: '@test/ts-remote',

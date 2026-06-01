@@ -21,7 +21,7 @@ export async function tsApiGenerator(
     case 'trpc':
       return tsTrpcApiGenerator(tree, {
         name: options.name,
-        computeType: options.computeType,
+        infra: options.infra,
         integrationPattern: options.integrationPattern,
         auth: options.auth,
         directory: options.directory,
@@ -32,7 +32,7 @@ export async function tsApiGenerator(
       return tsSmithyApiGenerator(tree, {
         name: options.name,
         namespace: options.namespace,
-        computeType: 'ServerlessApiGatewayRestApi',
+        infra: 'rest-lambda',
         integrationPattern: options.integrationPattern,
         auth: options.auth,
         directory: options.directory,

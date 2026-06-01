@@ -9,9 +9,9 @@ export interface TsApiGeneratorSchema {
   name: string;
   framework?: 'trpc' | 'smithy';
   namespace?: string;
-  computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
+  infra: 'rest-lambda' | 'http-lambda';
   integrationPattern?: 'isolated' | 'shared';
-  auth: 'IAM' | 'Cognito' | 'Custom';
+  auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
   iacProvider: IacProviderOption;

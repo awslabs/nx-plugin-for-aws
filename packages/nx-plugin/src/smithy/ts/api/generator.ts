@@ -109,7 +109,7 @@ export const tsSmithyApiGenerator = async (
     },
   );
 
-  if (options.auth === 'Custom') {
+  if (options.auth === 'custom') {
     generateFiles(
       tree,
       joinPathFragments(
@@ -152,7 +152,7 @@ export const tsSmithyApiGenerator = async (
         'bundle',
       ),
       integrationPattern,
-      ...(options.auth === 'Custom' && {
+      ...(options.auth === 'custom' && {
         authorizerBundleOutputDir: joinPathFragments(
           'dist',
           backendProjectConfig.root,
@@ -181,7 +181,7 @@ export const tsSmithyApiGenerator = async (
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
-  if (options.auth === 'Custom') {
+  if (options.auth === 'custom') {
     await addTypeScriptBundleTarget(tree, backendProjectConfig, {
       targetFilePath: 'src/authorizer.ts',
       bundleOutputDir: 'authorizer',
@@ -280,7 +280,7 @@ export const tsSmithyApiGenerator = async (
       '@aws-lambda-powertools/tracer',
       '@aws-lambda-powertools/metrics',
       '@aws-sdk/client-appconfigdata',
-      ...(options.auth === 'Custom'
+      ...(options.auth === 'custom'
         ? (['@aws-lambda-powertools/parser'] as const)
         : []),
     ]),

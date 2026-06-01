@@ -102,7 +102,7 @@ describe('config utils', () => {
 
   it('should snapshot simple iac config', async () => {
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'CDK' },
+      iac: { provider: 'cdk' },
     });
 
     expect(
@@ -122,7 +122,7 @@ describe('config utils', () => {
 
   it('should snapshot merged config with multiple keys', async () => {
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'CDK' },
+      iac: { provider: 'cdk' },
     });
     await updateAwsNxPluginConfig(tree, {
       tags: ['tag1'],
@@ -133,7 +133,7 @@ describe('config utils', () => {
     ).toMatchSnapshot();
 
     const config = await readAwsNxPluginConfig(tree);
-    expect(config.iac.provider).toBe('CDK');
+    expect(config.iac.provider).toBe('cdk');
     expect(config.tags).toEqual(['tag1']);
   });
 
@@ -167,7 +167,7 @@ describe('config utils', () => {
     tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, `export default {}`);
 
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'CDK' },
+      iac: { provider: 'cdk' },
     });
 
     expect(
@@ -175,7 +175,7 @@ describe('config utils', () => {
     ).toMatchSnapshot();
 
     const config = await readAwsNxPluginConfig(tree);
-    expect(config.iac.provider).toBe('CDK');
+    expect(config.iac.provider).toBe('cdk');
   });
 
   it('should preserve JS expressions when updating a different key', async () => {
@@ -195,14 +195,14 @@ export default {
 
     // Update a DIFFERENT key — license should be left untouched
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'CDK' },
+      iac: { provider: 'cdk' },
     });
 
     const content = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
     // The template literal must still be present in source
     expect(content).toContain('${new Date().getFullYear()}');
     // The new key must be added (prettier may reformat quotes)
-    expect(content).toContain('CDK');
+    expect(content).toContain('cdk');
     expect(content).toContain('iac');
 
     expect(content).toMatchSnapshot();
@@ -227,13 +227,13 @@ export default {
 
     // Replace iac — license (with JS expression) should be unchanged
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'Terraform' },
+      iac: { provider: 'terraform' },
     });
 
     const content = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
     expect(content).toContain('${new Date().getFullYear()}');
-    expect(content).toContain('Terraform');
-    expect(content).not.toContain('CDK');
+    expect(content).toContain('terraform');
+    expect(content).not.toContain('cdk');
 
     expect(content).toMatchSnapshot();
   });
@@ -269,7 +269,7 @@ export default {
 
   it('should add multiple new keys to an empty config', async () => {
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'CDK' },
+      iac: { provider: 'cdk' },
       tags: ['a', 'b'],
     });
 
@@ -278,7 +278,7 @@ export default {
     ).toMatchSnapshot();
 
     const config = await readAwsNxPluginConfig(tree);
-    expect(config.iac.provider).toBe('CDK');
+    expect(config.iac.provider).toBe('cdk');
     expect(config.tags).toEqual(['a', 'b']);
   });
 
@@ -295,11 +295,11 @@ export default {
     );
 
     await updateAwsNxPluginConfig(tree, {
-      iac: { provider: 'CDK' },
+      iac: { provider: 'cdk' },
     });
 
     const content = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
     expect(content).toContain('${new Date().getFullYear()}');
-    expect(content).toContain('CDK');
+    expect(content).toContain('cdk');
   });
 });

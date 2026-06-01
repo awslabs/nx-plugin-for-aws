@@ -50,7 +50,7 @@ export const tsRdbGenerator = async (
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  const containerEngine = await resolveContainerEngine(tree, 'inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -200,7 +200,7 @@ export const tsRdbGenerator = async (
     'migration',
   );
   const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
-  if (iacProvider === 'Terraform') {
+  if (iacProvider === 'terraform') {
     projectConfig.targets['docker'] = {
       cache: true,
       executor: 'nx:run-commands',

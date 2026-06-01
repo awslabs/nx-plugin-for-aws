@@ -136,16 +136,15 @@ export const pyFastApiProjectGenerator = async (
     {
       name: normalizedModuleName,
       apiNameClassName,
-      computeType: schema.computeType,
+      infra: schema.infra,
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
 
-  if (schema.auth === 'Custom') {
-    const authorizerType =
-      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest';
+  if (schema.auth === 'custom') {
+    const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
     generateFiles(
       tree,
       joinPathFragments(
@@ -171,8 +170,7 @@ export const pyFastApiProjectGenerator = async (
     apiProjectName: projectConfig.name,
     apiNameClassName,
     apiNameKebabCase,
-    constructType:
-      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
+    constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
     backend: {
       type: 'fastapi',
       moduleName: normalizedModuleName,
@@ -195,7 +193,7 @@ export const pyFastApiProjectGenerator = async (
     'uvicorn',
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
-    ...(schema.auth === 'Custom'
+    ...(schema.auth === 'custom'
       ? (['aws-lambda-powertools[parser]'] as const)
       : []),
   ]);

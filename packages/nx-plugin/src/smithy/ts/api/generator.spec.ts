@@ -25,9 +25,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should generate smithy ts api with default options', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Verify model project structure
@@ -103,9 +103,9 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       directory: 'apis',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Verify directory structure
@@ -116,9 +116,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should generate smithy ts api with IAM auth', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     // Verify infrastructure files for IAM auth
@@ -140,7 +140,7 @@ describe('tsSmithyApiGenerator', () => {
       tree,
       'test-api/backend/project.json',
     );
-    expect(backendProjectConfig.metadata.auth).toBe('IAM');
+    expect(backendProjectConfig.metadata.auth).toBe('iam');
 
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
@@ -150,9 +150,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should generate smithy ts api with Cognito auth', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Cognito',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'cognito',
+      iacProvider: 'cdk',
     });
 
     // Verify infrastructure files for Cognito auth
@@ -174,7 +174,7 @@ describe('tsSmithyApiGenerator', () => {
       tree,
       'test-api/backend/project.json',
     );
-    expect(backendProjectConfig.metadata.auth).toBe('Cognito');
+    expect(backendProjectConfig.metadata.auth).toBe('cognito');
 
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
@@ -184,10 +184,10 @@ describe('tsSmithyApiGenerator', () => {
   it('should generate a shared router lambda for REST APIs when using the shared integration pattern', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
+      infra: 'rest-lambda',
       integrationPattern: 'shared',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     const appApiContent = tree.read(
@@ -205,9 +205,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should generate smithy ts api with Terraform provider', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'Terraform',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'terraform',
     });
 
     // Verify Terraform infrastructure files
@@ -234,9 +234,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should generate smithy ts api with Terraform provider and None auth', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'Terraform',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'terraform',
     });
 
     // Verify Terraform infrastructure files
@@ -257,7 +257,7 @@ describe('tsSmithyApiGenerator', () => {
       tree,
       'test-api/backend/project.json',
     );
-    expect(backendProjectConfig.metadata.auth).toBe('Custom');
+    expect(backendProjectConfig.metadata.auth).toBe('custom');
 
     expect(
       tree.read(
@@ -271,9 +271,9 @@ describe('tsSmithyApiGenerator', () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       namespace: 'com.example.custom',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     const mainSmithy = tree.read('test-api/model/src/main.smithy', 'utf-8');
@@ -284,9 +284,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should configure proper build dependencies between model and backend', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -329,9 +329,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should configure serve target for local development', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -360,9 +360,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should add dependencies to package.json', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     const packageJson = readJson(tree, 'package.json');
@@ -392,9 +392,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should configure git and eslint ignores for generated code', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Verify .gitignore
@@ -415,9 +415,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should configure bundle target', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -449,9 +449,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should add generator metadata to backend project configuration', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     const backendProjectConfig = readJson(
@@ -463,7 +463,7 @@ describe('tsSmithyApiGenerator', () => {
       TS_SMITHY_API_GENERATOR_INFO.id,
     );
     expect(backendProjectConfig.metadata).toHaveProperty('apiName', 'test-api');
-    expect(backendProjectConfig.metadata).toHaveProperty('auth', 'IAM');
+    expect(backendProjectConfig.metadata).toHaveProperty('auth', 'iam');
     expect(backendProjectConfig.metadata).toHaveProperty(
       'modelProject',
       '@proj/test-api-model',
@@ -472,14 +472,14 @@ describe('tsSmithyApiGenerator', () => {
 
   it('should add generator metric to app.ts when shared constructs exist', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
 
     // Call the generator function
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Verify the metric was added to app.ts
@@ -490,17 +490,17 @@ describe('tsSmithyApiGenerator', () => {
     // Generate first API
     await tsSmithyApiGenerator(tree, {
       name: 'api-one',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Generate second API
     await tsSmithyApiGenerator(tree, {
       name: 'api-two',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Check metadata ports instead of parsing files
@@ -517,9 +517,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should configure OpenAPI metadata generation target', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Verify shared constructs has OpenAPI metadata target
@@ -542,9 +542,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should handle kebab-case API names correctly', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'my-test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
     });
 
     // Verify model project name
@@ -570,9 +570,9 @@ describe('tsSmithyApiGenerator', () => {
     it('should generate terraform files for REST API with IAM auth and snapshot them', async () => {
       await tsSmithyApiGenerator(tree, {
         name: 'test-api',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -615,9 +615,9 @@ describe('tsSmithyApiGenerator', () => {
     it('should generate terraform files for REST API with Cognito auth and snapshot them', async () => {
       await tsSmithyApiGenerator(tree, {
         name: 'test-api',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'Cognito',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'cognito',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -663,9 +663,9 @@ describe('tsSmithyApiGenerator', () => {
     it('should configure project targets and dependencies correctly for terraform', async () => {
       await tsSmithyApiGenerator(tree, {
         name: 'test-api',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Check that shared terraform project has build dependency on the API project
@@ -695,9 +695,9 @@ describe('tsSmithyApiGenerator', () => {
     it('should not create CDK constructs when using terraform', async () => {
       await tsSmithyApiGenerator(tree, {
         name: 'test-api',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Verify CDK files are NOT created
@@ -713,8 +713,8 @@ describe('tsSmithyApiGenerator', () => {
       await expect(
         tsSmithyApiGenerator(tree, {
           name: 'test-api',
-          computeType: 'ServerlessApiGatewayRestApi',
-          auth: 'IAM',
+          infra: 'rest-lambda',
+          auth: 'iam',
           iacProvider: 'InvalidProvider' as any,
         }),
       ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
@@ -725,15 +725,15 @@ describe('tsSmithyApiGenerator', () => {
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
         iac: {
-          provider: 'CDK',
+          provider: 'cdk',
         },
       });
 
       await tsSmithyApiGenerator(tree, {
         name: 'test-api',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'IAM',
-        iacProvider: 'Inherit',
+        infra: 'rest-lambda',
+        auth: 'iam',
+        iacProvider: 'inherit',
       });
 
       // Verify CDK constructs are created (not terraform)
@@ -748,9 +748,9 @@ describe('tsSmithyApiGenerator', () => {
       await tsSmithyApiGenerator(tree, {
         name: 'nested-api',
         directory: 'apps/nested/path',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'Cognito',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'cognito',
+        iacProvider: 'terraform',
       });
 
       // Verify terraform files are created
@@ -780,9 +780,9 @@ describe('tsSmithyApiGenerator', () => {
       await tsSmithyApiGenerator(tree, {
         name: 'custom-api',
         namespace: 'com.example.custom',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'Custom',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'custom',
+        iacProvider: 'terraform',
       });
 
       // Verify terraform files are created
@@ -809,9 +809,9 @@ describe('tsSmithyApiGenerator', () => {
   it('should place project in subDirectory when provided', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
-      iacProvider: 'CDK',
+      infra: 'rest-lambda',
+      auth: 'custom',
+      iacProvider: 'cdk',
       directory: 'packages',
       subDirectory: 'apis',
     });

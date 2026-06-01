@@ -49,16 +49,16 @@ export interface AddApiGatewayConstructOptions {
   apiNameKebabCase: string;
   constructType: 'http' | 'rest';
   backend: TrpcBackendOptions | FastApiBackendOptions | SmithyBackendOptions;
-  auth: 'IAM' | 'Cognito' | 'Custom';
+  auth: 'iam' | 'cognito' | 'custom';
 }
 
 export const addApiGatewayInfra = async (
   tree: Tree,
   options: AddApiGatewayConstructOptions & { iacProvider: IacProvider },
 ) => {
-  if (options.iacProvider === 'CDK') {
+  if (options.iacProvider === 'cdk') {
     await addApiGatewayCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'Terraform') {
+  } else if (options.iacProvider === 'terraform') {
     addApiGatewayTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
@@ -68,7 +68,7 @@ export const addApiGatewayInfra = async (
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iacProvider === 'CDK'
+      options.iacProvider === 'cdk'
         ? SHARED_CONSTRUCTS_DIR
         : SHARED_TERRAFORM_DIR,
       'project.json',

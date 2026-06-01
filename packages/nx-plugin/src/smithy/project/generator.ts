@@ -32,7 +32,7 @@ export const smithyProjectGenerator = async (
   options: SmithyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const cmd = new FsCommands(tree);
-  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  const containerEngine = await resolveContainerEngine(tree, 'inherit');
 
   // Create project.json
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);

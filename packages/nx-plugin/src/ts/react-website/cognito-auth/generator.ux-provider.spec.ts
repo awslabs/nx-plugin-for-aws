@@ -15,7 +15,7 @@ describe('cognito-auth generator uxProvider tests', () => {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
-    iacProvider: 'CDK',
+    iacProvider: 'cdk',
   };
 
   const setupTree = (uxProvider: string) => {
@@ -71,7 +71,7 @@ describe('cognito-auth generator uxProvider tests', () => {
 
   describe('None', () => {
     beforeEach(() => {
-      setupTree('None');
+      setupTree('none');
     });
 
     it('should update AppLayout', async () => {
@@ -249,7 +249,7 @@ export default AppLayout;
 
   describe('Cloudscape', () => {
     beforeEach(() => {
-      setupTree('Cloudscape');
+      setupTree('cloudscape');
     });
 
     it('should update AppLayout', async () => {
@@ -448,7 +448,7 @@ export default AppLayout;
 
   describe('Shadcn', () => {
     beforeEach(() => {
-      setupTree('Shadcn');
+      setupTree('shadcn');
     });
 
     it('should update AppLayout', async () => {

@@ -28,9 +28,9 @@ export const addIdentityInfra = async (
   tree: Tree,
   options: AddIdentityInfraOptions & { iacProvider: IacProvider },
 ) => {
-  if (options.iacProvider === 'CDK') {
+  if (options.iacProvider === 'cdk') {
     await addIdentityCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'Terraform') {
+  } else if (options.iacProvider === 'terraform') {
     addIdentityTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iacProvider ${options.iacProvider}`);

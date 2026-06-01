@@ -53,7 +53,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     expect(
@@ -93,7 +93,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -163,7 +163,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     // Verify shared constructs files
@@ -232,7 +232,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -277,7 +277,7 @@ describe('lambda-handler project generator', () => {
       functionName: 'test-function',
       functionPath: 'nested/path',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     expect(
@@ -316,7 +316,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const lambdaFunctionPath = joinPathFragments(
@@ -363,7 +363,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'APIGatewayProxyEventModel',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const lambdaFunctionContent = tree.read(
@@ -414,7 +414,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const appChanges = sortObjectKeys(
@@ -463,7 +463,7 @@ describe('lambda-handler project generator', () => {
       project: 'test_project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -505,7 +505,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     // Verify the metric was added to app.ts
@@ -538,13 +538,13 @@ dev = []
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      computeType: 'None',
-      iacProvider: 'CDK',
+      infra: 'none',
+      iacProvider: 'cdk',
     });
 
     const deps =
@@ -592,7 +592,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -661,7 +661,7 @@ dev = []
         functionName: 'test-function',
         functionPath: 'lambda-functions',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Find terraform files
@@ -713,7 +713,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'APIGatewayProxyEventModel',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Find terraform files
@@ -768,7 +768,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Check that shared terraform project has build dependency on the lambda function project
@@ -819,7 +819,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Verify CDK files are NOT created
@@ -892,7 +892,7 @@ dev = []
         project: 'scoped_project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Verify terraform files are created
@@ -945,7 +945,7 @@ dev = []
         functionName: 'My Complex Function Name!',
         functionPath: 'nested/path',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Verify terraform files are created
@@ -997,7 +997,7 @@ dev = []
         project: 'test-project',
         functionName: 'SnapshotFunction',
         eventSource: 'APIGatewayProxyEventModel',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       // Find terraform files
@@ -1049,7 +1049,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'Terraform',
+        iacProvider: 'terraform',
       });
 
       const projectConfig = JSON.parse(
@@ -1077,7 +1077,7 @@ dev = []
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
         iac: {
-          provider: 'CDK',
+          provider: 'cdk',
         },
       });
 
@@ -1102,7 +1102,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'Inherit',
+        iacProvider: 'inherit',
       });
 
       // Verify CDK constructs are created (not terraform)
@@ -1137,7 +1137,7 @@ dev = []
         project: 'test-project',
         functionName: 'test-function',
         eventSource: 'Any',
-        iacProvider: 'CDK',
+        iacProvider: 'cdk',
       });
 
       const projectConfig = JSON.parse(

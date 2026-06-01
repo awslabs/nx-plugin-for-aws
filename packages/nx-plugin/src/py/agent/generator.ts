@@ -89,16 +89,16 @@ export const pyAgentGenerator = async (
     agentNameSnakeCase,
   );
 
-  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const infra = options.infra ?? 'agentcore';
   const protocol = options.protocol ?? 'HTTP';
 
-  if (computeType === 'None' && options.auth && options.auth !== 'IAM') {
+  if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
-      'Warning: auth is ignored when no compute type is configured (no infrastructure is generated)',
+      'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
     );
   }
 
-  const auth = options.auth ?? 'IAM';
+  const auth = options.auth ?? 'iam';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `session_id_context` and propagate the AgentCore
@@ -158,8 +158,8 @@ export const pyAgentGenerator = async (
     'fastapi[standard]',
   ]);
 
-  if (computeType === 'BedrockAgentCoreRuntime') {
-    const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  if (infra === 'agentcore') {
+    const containerEngine = await resolveContainerEngine(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target

@@ -34,18 +34,18 @@ describe('containers utils', () => {
       await updateAwsNxPluginConfig(tree, {
         containers: { engine: 'finch' },
       });
-      const result = await resolveContainerEngine(tree, 'Inherit');
+      const result = await resolveContainerEngine(tree, 'inherit');
       expect(result).toBe('finch');
     });
 
     it('should default to docker when option is Inherit and no config exists', async () => {
-      const result = await resolveContainerEngine(tree, 'Inherit');
+      const result = await resolveContainerEngine(tree, 'inherit');
       expect(result).toBe('docker');
     });
 
     it('should default to docker when option is Inherit and config has no containers section', async () => {
       await ensureAwsNxPluginConfig(tree);
-      const result = await resolveContainerEngine(tree, 'Inherit');
+      const result = await resolveContainerEngine(tree, 'inherit');
       expect(result).toBe('docker');
     });
 
@@ -54,7 +54,7 @@ describe('containers utils', () => {
       await updateAwsNxPluginConfig(tree, {
         containers: { engine: 'podman' as any },
       });
-      await expect(resolveContainerEngine(tree, 'Inherit')).rejects.toThrow(
+      await expect(resolveContainerEngine(tree, 'inherit')).rejects.toThrow(
         `containers.engine in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} must be one of docker, finch`,
       );
     });

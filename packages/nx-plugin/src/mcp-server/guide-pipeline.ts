@@ -228,7 +228,7 @@ const applyFilterTransforms = (
       }
 
       if (child.name === 'Infrastructure') {
-        if (iacProvider === 'CDK' || iacProvider === 'Terraform') {
+        if (iacProvider === 'cdk' || iacProvider === 'terraform') {
           const body = selectInfrastructureSlot(child, iacProvider);
           const pseudo: MdxJsxFlowElement = {
             type: 'mdxJsxFlowElement',
@@ -275,7 +275,7 @@ const applyFilterTransforms = (
 
 const selectInfrastructureSlot = (
   node: JsxElement,
-  iacProvider: 'CDK' | 'Terraform',
+  iacProvider: 'cdk' | 'terraform',
 ): RootContent[] => {
   const slotName = iacProvider.toLowerCase();
   const frag = (node.children as RootContent[]).find(
@@ -438,8 +438,8 @@ const renderComponent = (
       const workspace = readStringAttr(node, 'workspace');
       if (!workspace) return undefined;
       const iacProvider = readStringAttr(node, 'iacProvider') as
-        | 'CDK'
-        | 'Terraform'
+        | 'cdk'
+        | 'terraform'
         | undefined;
       return [
         codeBlock(buildCreateNxWorkspaceCommand(pm, workspace, iacProvider)),

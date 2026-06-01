@@ -94,8 +94,8 @@ export const tsNxPluginGenerator = async (
   // Add an MCP Server
   await tsMcpServerGenerator(tree, {
     project: fullyQualifiedName,
-    computeType: 'None',
-    iacProvider: 'CDK', // not used
+    infra: 'none',
+    iacProvider: 'cdk', // not used
   });
 
   const mcpPath = joinPathFragments(project.sourceRoot, 'mcp-server');

@@ -73,7 +73,7 @@ export const pyAgentA2aConnectionGenerator = async (
     );
   }
 
-  if (targetAgentComponent.auth && targetAgentComponent.auth !== 'IAM') {
+  if (targetAgentComponent.auth && targetAgentComponent.auth !== 'iam') {
     throw new Error(
       `A2A agent connection currently only supports IAM authentication, but '${targetAgentComponent.name}' uses '${targetAgentComponent.auth}' authentication.`,
     );

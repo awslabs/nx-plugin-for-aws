@@ -189,7 +189,7 @@ describe('smithyProjectGenerator', () => {
 
   it('should add generator metric to app.ts when shared constructs exist', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iacProvider: 'cdk' });
 
     // Call the generator function
     await smithyProjectGenerator(tree, {

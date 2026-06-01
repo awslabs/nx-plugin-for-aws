@@ -26,10 +26,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
+      infra: 'http-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     // Verify project structure
@@ -48,10 +48,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
+      infra: 'http-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
     const backendProjectConfig = JSON.parse(
       tree.read('apps/test-api/project.json', 'utf-8'),
@@ -60,8 +60,8 @@ describe('trpc backend generator', () => {
     expect(backendProjectConfig.metadata).toEqual({
       apiName: 'TestApi',
       apiType: 'trpc',
-      auth: 'IAM',
-      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'iam',
+      infra: 'http-lambda',
       integrationPattern: 'isolated',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
       ports: [2022],
@@ -72,10 +72,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     // Verify dependencies were added
@@ -100,10 +100,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     // Verify shared constructs setup
     expect(
@@ -144,10 +144,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'IAM',
+      infra: 'rest-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     // Verify shared constructs setup
     expect(
@@ -188,10 +188,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
     expect(projectConfig.targets).toHaveProperty('serve');
@@ -215,10 +215,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -245,10 +245,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     // Check rolldown config file was created
@@ -272,10 +272,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -288,10 +288,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const projectConfig = JSON.parse(
@@ -306,9 +306,9 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     const devDeps = readJson(tree, 'package.json').devDependencies;
@@ -326,9 +326,9 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     // Verify the metric was added to app.ts
@@ -339,10 +339,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'IAM',
+      infra: 'rest-lambda',
+      auth: 'iam',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     // Read the generated handler.ts file
@@ -372,10 +372,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Cognito',
+      infra: 'rest-lambda',
+      auth: 'cognito',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -389,10 +389,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'Cognito',
+      infra: 'http-lambda',
+      auth: 'cognito',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -406,10 +406,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'Custom',
+      infra: 'rest-lambda',
+      auth: 'custom',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -424,10 +424,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'Custom',
+      infra: 'http-lambda',
+      auth: 'custom',
       integrationPattern: 'isolated',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -442,10 +442,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'IAM',
+      infra: 'rest-lambda',
+      auth: 'iam',
       integrationPattern: 'shared',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const appApiContent = tree.read(
@@ -468,10 +468,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
+      infra: 'http-lambda',
+      auth: 'iam',
       integrationPattern: 'shared',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const appApiContent = tree.read(
@@ -493,14 +493,14 @@ describe('trpc backend generator', () => {
       tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType:
-          'ApplicationLoadBalancedFargateService' as TsTrpcApiGeneratorSchema['computeType'],
-        auth: 'IAM',
+        infra:
+          'ApplicationLoadBalancedFargateService' as TsTrpcApiGeneratorSchema['infra'],
+        auth: 'iam',
         integrationPattern: 'isolated',
-        iacProvider: 'CDK',
+        iacProvider: 'cdk',
       }),
     ).rejects.toThrow(
-      'Invalid tRPC computeType/integrationPattern combination: ApplicationLoadBalancedFargateService + isolated.',
+      'Invalid tRPC infra/integrationPattern combination: ApplicationLoadBalancedFargateService + isolated.',
     );
 
     expect(tree.exists('apps/test-api')).toBeFalsy();
@@ -511,27 +511,27 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, {
       name: 'FirstApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     // Generate second API
     await tsTrpcApiGenerator(tree, {
       name: 'SecondApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     // Generate third API
     await tsTrpcApiGenerator(tree, {
       name: 'ThirdApi',
       directory: 'apps',
-      computeType: 'ServerlessApiGatewayHttpApi',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
 
     // Check metadata ports
@@ -573,9 +573,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'http-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -619,9 +619,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'Cognito',
-        iacProvider: 'Terraform',
+        infra: 'http-lambda',
+        auth: 'cognito',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -668,9 +668,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'Custom',
-        iacProvider: 'Terraform',
+        infra: 'http-lambda',
+        auth: 'custom',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -716,9 +716,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -762,9 +762,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'Cognito',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'cognito',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -811,9 +811,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'Custom',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'custom',
+        iacProvider: 'terraform',
       });
 
       // Find all terraform files
@@ -859,9 +859,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'http-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Check that shared terraform project has build dependency on the API project
@@ -887,9 +887,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'IAM',
-        iacProvider: 'Terraform',
+        infra: 'http-lambda',
+        auth: 'iam',
+        iacProvider: 'terraform',
       });
 
       // Verify CDK files are NOT created
@@ -906,8 +906,8 @@ describe('trpc backend generator', () => {
         tsTrpcApiGenerator(tree, {
           name: 'TestApi',
           directory: 'apps',
-          computeType: 'ServerlessApiGatewayHttpApi',
-          auth: 'IAM',
+          infra: 'http-lambda',
+          auth: 'iam',
           iacProvider: 'InvalidProvider' as any,
         }),
       ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
@@ -917,9 +917,9 @@ describe('trpc backend generator', () => {
       await tsTrpcApiGenerator(tree, {
         name: 'NestedApi',
         directory: 'apps/nested/path',
-        computeType: 'ServerlessApiGatewayRestApi',
-        auth: 'Cognito',
-        iacProvider: 'Terraform',
+        infra: 'rest-lambda',
+        auth: 'cognito',
+        iacProvider: 'terraform',
       });
 
       // Verify terraform files are created
@@ -950,16 +950,16 @@ describe('trpc backend generator', () => {
       await ensureAwsNxPluginConfig(tree);
       await updateAwsNxPluginConfig(tree, {
         iac: {
-          provider: 'Terraform',
+          provider: 'terraform',
         },
       });
 
       await tsTrpcApiGenerator(tree, {
         name: 'TestApi',
         directory: 'apps',
-        computeType: 'ServerlessApiGatewayHttpApi',
-        auth: 'IAM',
-        iacProvider: 'Inherit',
+        infra: 'http-lambda',
+        auth: 'iam',
+        iacProvider: 'inherit',
       });
 
       // Verify Terraform files are created (not CDK constructs)
@@ -980,10 +980,10 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'packages',
       subDirectory: 'apis',
-      computeType: 'ServerlessApiGatewayHttpApi',
+      infra: 'http-lambda',
       integrationPattern: 'isolated',
-      auth: 'IAM',
-      iacProvider: 'CDK',
+      auth: 'iam',
+      iacProvider: 'cdk',
     });
     expect(tree.exists('packages/apis')).toBeTruthy();
     expect(tree.exists('packages/apis/src')).toBeTruthy();

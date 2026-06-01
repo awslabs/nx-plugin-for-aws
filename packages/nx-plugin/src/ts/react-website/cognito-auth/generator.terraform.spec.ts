@@ -22,7 +22,7 @@ describe('cognito-auth generator terraform iacProvider', () => {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
-    iacProvider: 'CDK',
+    iacProvider: 'cdk',
   };
   const uxProvider = 'Cloudscape';
 
@@ -64,7 +64,7 @@ describe('cognito-auth generator terraform iacProvider', () => {
   it('should generate terraform files for cognito auth and snapshot them', async () => {
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Find all terraform files
@@ -170,7 +170,7 @@ module "static_website" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Verify core static website terraform file exists and has add-callback-url module
@@ -265,7 +265,7 @@ module "static_website" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Read the core static website terraform file
@@ -290,7 +290,7 @@ module "static_website" {
   it('should configure project targets and dependencies correctly for terraform', async () => {
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Check that shared terraform project exists and has build target
@@ -313,7 +313,7 @@ module "static_website" {
   it('should not create CDK constructs when using terraform', async () => {
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Verify CDK files are NOT created
@@ -411,7 +411,7 @@ module "static_website" {
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
       project: 'nested-test-website',
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Verify terraform files are created
@@ -445,7 +445,7 @@ module "static_website" {
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
       allowSignup: false,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Find the core user identity terraform file
@@ -468,7 +468,7 @@ module "static_website" {
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
       cognitoDomain: 'custom-domain',
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     // Find the core user identity terraform file
@@ -554,7 +554,7 @@ output "website_bucket_name" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     const coreStaticWebsiteContent = tree.read(
@@ -646,7 +646,7 @@ resource "aws_s3_bucket_policy" "next_resource" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     const coreStaticWebsiteContent = tree.read(
@@ -713,7 +713,7 @@ resource "aws_cloudfront_distribution" "website" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     const coreStaticWebsiteContent = tree.read(
@@ -811,7 +811,7 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Terraform',
+      iacProvider: 'terraform',
     });
 
     const coreStaticWebsiteContent = tree.read(
@@ -842,7 +842,7 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, {
       iac: {
-        provider: 'Terraform',
+        provider: 'terraform',
       },
     });
 
@@ -867,7 +867,7 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
 
     await tsReactWebsiteAuthGenerator(tree, {
       ...options,
-      iacProvider: 'Inherit',
+      iacProvider: 'inherit',
     });
 
     // Verify Terraform files are created (not CDK constructs)
@@ -887,7 +887,7 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
       project: 'test-project',
       allowSignup: true,
       cognitoDomain: 'test-domain',
-      iacProvider: 'CDK',
+      iacProvider: 'cdk',
     });
 
     const projectConfig = JSON.parse(

@@ -46,7 +46,7 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
 import { resolveIacProvider } from '../../../utils/iac';
 
-export const SUPPORTED_UX_PROVIDERS = ['None', 'Cloudscape', 'Shadcn'] as const;
+export const SUPPORTED_UX_PROVIDERS = ['none', 'cloudscape', 'shadcn'] as const;
 
 export type UxProviderOption = (typeof SUPPORTED_UX_PROVIDERS)[number];
 
@@ -61,8 +61,8 @@ export async function tsReactWebsiteGenerator(
 ) {
   const enableTailwind = schema.enableTailwind ?? true;
   const enableTanstackRouter = schema.enableTanstackRouter ?? true;
-  const uxProvider: UxProvider = schema.uxProvider ?? 'Cloudscape';
-  if (uxProvider === 'Shadcn' && !enableTailwind) {
+  const uxProvider: UxProvider = schema.uxProvider ?? 'cloudscape';
+  if (uxProvider === 'shadcn' && !enableTailwind) {
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -103,7 +103,7 @@ export async function tsReactWebsiteGenerator(
   // Configure load:runtime-config target based on IaC provider
   const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
 
-  if (iacProvider === 'CDK') {
+  if (iacProvider === 'cdk') {
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
@@ -113,7 +113,7 @@ export async function tsReactWebsiteGenerator(
         command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json "{projectRoot}/public/runtime-config.json"`,
       },
     };
-  } else if (iacProvider === 'Terraform') {
+  } else if (iacProvider === 'terraform') {
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
@@ -132,7 +132,7 @@ export async function tsReactWebsiteGenerator(
     };
   } else {
     throw new Error(
-      `Unknown iacProvider: ${iacProvider}. Supported providers are: CDK, Terraform`,
+      `Unknown iacProvider: ${iacProvider}. Supported providers are: cdk, terraform`,
     );
   }
 
@@ -202,7 +202,7 @@ export async function tsReactWebsiteGenerator(
     fullyQualifiedName,
   });
 
-  if (uxProvider === 'Shadcn') {
+  if (uxProvider === 'shadcn') {
     await sharedShadcnGenerator(tree);
   }
 
@@ -436,7 +436,7 @@ export async function tsReactWebsiteGenerator(
         lib: ['DOM'],
       },
       references:
-        uxProvider === 'Shadcn'
+        uxProvider === 'shadcn'
           ? [
               ...(tsconfig.references ?? []).filter(
                 (ref) => ref.path !== sharedShadcnTsconfigRef,
@@ -453,13 +453,13 @@ export async function tsReactWebsiteGenerator(
 
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
 
-  if (uxProvider === 'Cloudscape') {
+  if (uxProvider === 'cloudscape') {
     dependencies.push(
       '@cloudscape-design/components',
       '@cloudscape-design/board-components',
       '@cloudscape-design/global-styles',
     );
-  } else if (uxProvider === 'Shadcn') {
+  } else if (uxProvider === 'shadcn') {
     // not required to add any dependencies because dependencies are added by the common/shadcn package.
   }
 
