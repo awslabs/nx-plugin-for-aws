@@ -678,6 +678,29 @@ describe('react-website generator', () => {
     expect(tree.exists('packages/websites/src')).toBeTruthy();
     expect(tree.exists('packages/websites/src/main.tsx')).toBeTruthy();
   });
+
+  describe('infra=none idempotency', () => {
+    it('should generate with infra=none then upgrade to infra=cloudfront-s3', async () => {
+      await tsReactWebsiteGenerator(tree, { ...options, infra: 'none' });
+
+      const projectJson = JSON.parse(
+        tree.read('test-app/project.json', 'utf-8'),
+      );
+      expect(projectJson.targets['load:runtime-config']).toBeUndefined();
+      expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        infra: 'cloudfront-s3',
+      });
+
+      const updatedProjectJson = JSON.parse(
+        tree.read('test-app/project.json', 'utf-8'),
+      );
+      expect(updatedProjectJson.targets['load:runtime-config']).toBeDefined();
+      expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    });
+  });
 });
 
 describe('react-website generator ux tests', () => {

@@ -126,12 +126,14 @@ export const tsLambdaFunctionGenerator = async (
     returnType: TS_HANDLER_RETURN_TYPES[schema.event],
   };
 
-  // Add a bundle target for the function
-  await addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: functionPathFromProjectRoot,
-    bundleOutputDir,
-    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-  });
+  if (infra !== 'none') {
+    // Add a bundle target for the function
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: functionPathFromProjectRoot,
+      bundleOutputDir,
+      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+    });
+  }
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);

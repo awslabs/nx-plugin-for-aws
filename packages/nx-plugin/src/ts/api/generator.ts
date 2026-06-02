@@ -32,7 +32,10 @@ export async function tsApiGenerator(
       return tsSmithyApiGenerator(tree, {
         name: options.name,
         namespace: options.namespace,
-        infra: options.infra === 'none' ? 'none' : 'rest-lambda',
+        infra:
+          options.infra === 'none'
+            ? 'none'
+            : ((options.infra ?? 'rest-lambda') as 'rest-lambda'),
         integrationPattern: options.integrationPattern,
         auth: options.auth,
         directory: options.directory,

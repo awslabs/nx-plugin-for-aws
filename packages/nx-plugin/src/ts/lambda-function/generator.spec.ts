@@ -296,6 +296,36 @@ describe('ts-lambda-function generator', () => {
     );
   });
 
+  it('should generate with infra=none then upgrade to infra=lambda', async () => {
+    await tsLambdaFunctionGenerator(tree, { ...options, infra: 'none' });
+
+    expect(
+      tree.exists('packages/test-project/src/test-function.ts'),
+    ).toBeTruthy();
+
+    const projectJson = JSON.parse(
+      tree.read('packages/test-project/project.json', 'utf-8'),
+    );
+    expect(projectJson.targets['bundle']).toBeUndefined();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+      ),
+    ).toBeFalsy();
+
+    await tsLambdaFunctionGenerator(tree, { ...options, infra: 'lambda' });
+
+    const updatedProjectJson = JSON.parse(
+      tree.read('packages/test-project/project.json', 'utf-8'),
+    );
+    expect(updatedProjectJson.targets['bundle']).toBeDefined();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+      ),
+    ).toBeTruthy();
+  });
+
   it('should throw error if project has no tsconfig.json', async () => {
     // Remove tsconfig.json
     tree.delete('packages/test-project/tsconfig.json');

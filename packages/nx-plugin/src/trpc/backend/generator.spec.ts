@@ -989,4 +989,38 @@ describe('trpc backend generator', () => {
     expect(tree.exists('packages/apis/src')).toBeTruthy();
     expect(tree.exists('packages/apis/src/index.ts')).toBeTruthy();
   });
+
+  it('should generate with infra=none then upgrade to infra=rest-lambda', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'packages',
+      infra: 'none',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/test-api/src/router.ts')).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    const projectJson = JSON.parse(
+      tree.read('packages/test-api/project.json', 'utf-8'),
+    );
+    expect(projectJson.targets['bundle']).toBeUndefined();
+
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'packages',
+      infra: 'rest-lambda',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    const updatedProjectJson = JSON.parse(
+      tree.read('packages/test-api/project.json', 'utf-8'),
+    );
+    expect(updatedProjectJson.targets['bundle']).toBeDefined();
+  });
 });
