@@ -908,4 +908,29 @@ describe('fastapi project generator', () => {
     expect(tree.exists('packages/apis')).toBeTruthy();
     expect(tree.exists('packages/apis/pyproject.toml')).toBeTruthy();
   });
+
+  it('should generate with infra=none then upgrade to infra=rest-lambda', async () => {
+    await pyFastApiProjectGenerator(tree, {
+      name: 'upgrade-api',
+      directory: 'apps',
+      infra: 'none',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('apps/upgrade_api/proj_upgrade_api/main.py'),
+    ).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await pyFastApiProjectGenerator(tree, {
+      name: 'upgrade-api',
+      directory: 'apps',
+      infra: 'rest-lambda',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
 });

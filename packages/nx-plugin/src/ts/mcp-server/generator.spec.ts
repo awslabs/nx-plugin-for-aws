@@ -1097,4 +1097,27 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
     expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
   });
+
+  it('should generate with infra=none then upgrade to infra=agentcore', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-mcp',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('apps/test-project/src/upgrade-mcp/index.ts'),
+    ).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-mcp',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
 });

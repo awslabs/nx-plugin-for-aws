@@ -1345,4 +1345,29 @@ dev-dependencies = []
       'my-custom-agent-serve-local',
     ]);
   });
+
+  it('should generate with infra=none then upgrade to infra=agentcore', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-agent',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/upgrade_agent/__init__.py',
+      ),
+    ).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-agent',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
 });

@@ -1128,4 +1128,33 @@ describe('ts#agent generator', () => {
 
     warnSpy.mockRestore();
   });
+
+  it('should generate with infra=none then upgrade to infra=agentcore', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-agent',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('apps/test-project/src/upgrade-agent/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/upgrade-agent/Dockerfile'),
+    ).toBeFalsy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-agent',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('apps/test-project/src/upgrade-agent/Dockerfile'),
+    ).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
 });

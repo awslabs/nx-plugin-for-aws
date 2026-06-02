@@ -142,53 +142,55 @@ export async function tsReactWebsiteGenerator(
     };
   }
 
-  const buildTarget = targets['build'];
-  targets['compile'] = {
-    dependsOn: ['bundle'],
-    executor: 'nx:run-commands',
-    outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
-    options: {
-      command: 'tsc --build tsconfig.app.json',
-      cwd: '{projectRoot}',
-    },
-  };
-  targets['bundle'] = {
-    ...buildTarget,
-    options: {
-      ...buildTarget.options,
-      outputPath: 'dist/{projectRoot}/bundle',
-    },
-  };
-  targets['build'] = {
-    dependsOn: [
-      'lint',
-      'compile',
-      'bundle',
-      'test',
-      ...(buildTarget.dependsOn ?? []),
-    ],
-    options: {
-      outputPath: 'dist/{projectRoot}/bundle',
-    },
-  };
-  targets['test'] = {
-    ...targets['test'],
-    options: {
-      ...(targets['test']?.options ?? {}),
-      reportsDirectory: '{workspaceRoot}/coverage/{projectRoot}',
-    },
-  };
+  if (!projectAlreadyExists) {
+    const buildTarget = targets['build'];
+    targets['compile'] = {
+      dependsOn: ['bundle'],
+      executor: 'nx:run-commands',
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
+      options: {
+        command: 'tsc --build tsconfig.app.json',
+        cwd: '{projectRoot}',
+      },
+    };
+    targets['bundle'] = {
+      ...buildTarget,
+      options: {
+        ...buildTarget.options,
+        outputPath: 'dist/{projectRoot}/bundle',
+      },
+    };
+    targets['build'] = {
+      dependsOn: [
+        'lint',
+        'compile',
+        'bundle',
+        'test',
+        ...(buildTarget.dependsOn ?? []),
+      ],
+      options: {
+        outputPath: 'dist/{projectRoot}/bundle',
+      },
+    };
+    targets['test'] = {
+      ...targets['test'],
+      options: {
+        ...(targets['test']?.options ?? {}),
+        reportsDirectory: '{workspaceRoot}/coverage/{projectRoot}',
+      },
+    };
 
-  // Add a serve-local target for running the website and its dependencies locally
-  targets['serve-local'] = {
-    executor: '@nx/vite:dev-server',
-    options: {
-      buildTarget: `${fullyQualifiedName}:build:development`,
-      hmr: true,
-      mode: 'serve-local',
-    },
-    continuous: true,
-  };
+    // Add a serve-local target for running the website and its dependencies locally
+    targets['serve-local'] = {
+      executor: '@nx/vite:dev-server',
+      options: {
+        buildTarget: `${fullyQualifiedName}:build:development`,
+        hmr: true,
+        mode: 'serve-local',
+      },
+      continuous: true,
+    };
+  }
 
   projectConfiguration.targets = sortObjectKeys(targets);
 

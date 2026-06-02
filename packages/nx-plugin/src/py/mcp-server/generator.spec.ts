@@ -971,4 +971,29 @@ dev-dependencies = []
     expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
     expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
   });
+
+  it('should generate with infra=none then upgrade to infra=agentcore', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-mcp',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/upgrade_mcp/__init__.py',
+      ),
+    ).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'upgrade-mcp',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
 });

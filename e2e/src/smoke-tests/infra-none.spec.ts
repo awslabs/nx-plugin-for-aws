@@ -76,21 +76,9 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
-    // Python agent with infra=none
-    await runCLI(
-      `generate @aws/nx-plugin:py#agent --project=py_project --name=my-agent --infra=none --no-interactive`,
-      opts,
-    );
-
     // TypeScript MCP server with infra=none
     await runCLI(
       `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp --infra=none --no-interactive`,
-      opts,
-    );
-
-    // Python MCP server with infra=none
-    await runCLI(
-      `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-mcp --infra=none --no-interactive`,
       opts,
     );
 
