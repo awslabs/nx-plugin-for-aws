@@ -7,7 +7,6 @@ import {
   GeneratorCallback,
   Tree,
   generateFiles,
-  getProjects,
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
@@ -28,11 +27,11 @@ import { toScopeAlias } from '../../utils/npm-scope';
 import { getTsLibDetails } from '../lib/generator';
 import tsProjectGenerator from '../lib/generator';
 
-import { resolveIacProvider } from '../../utils/iac';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveIac } from '../../utils/iac';
+import { resolveContainers } from '../../utils/containers';
 import { getNpmScope } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
-import { assignPort } from '../../utils/port';
+import { assignSharedPort } from '../../utils/port';
 
 export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -47,8 +46,8 @@ export const tsDynamoDBGenerator = async (
   const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
   const localTableName = `${getNpmScope(tree)}-${kebabCase(options.tableName ?? options.name)}`;
-  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-  const containerEngine = await resolveContainerEngine(tree, 'Inherit');
+  const iac = await resolveIac(tree, options.iac);
+  const containerEngine = await resolveContainers(tree, 'inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -62,21 +61,12 @@ export const tsDynamoDBGenerator = async (
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
-  const existingDynamoPort = [...getProjects(tree).values()].find(
-    (p) => (p.metadata as any)?.generator === TS_DYNAMODB_GENERATOR_INFO.id,
-  )?.metadata as any;
-
-  let localDynamoPort: number;
-  if (existingDynamoPort?.ports?.[0] !== undefined) {
-    localDynamoPort = existingDynamoPort.ports[0] as number;
-    projectConfig.metadata ??= {};
-    (projectConfig.metadata as any).ports = [
-      ...((projectConfig.metadata as any).ports ?? []),
-      localDynamoPort,
-    ];
-  } else {
-    localDynamoPort = assignPort(tree, projectConfig, 8000);
-  }
+  const localDynamoPort = assignSharedPort(
+    tree,
+    projectConfig,
+    TS_DYNAMODB_GENERATOR_INFO.id,
+    8000,
+  );
 
   const templateOptions = {
     runtimeConfigKey: nameClassName,
@@ -88,8 +78,14 @@ export const tsDynamoDBGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(__dirname, 'files', 'app'),
     dir,
+    templateOptions,
+  );
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'scripts', 'common'),
+    joinPathFragments(dir, 'scripts'),
     templateOptions,
   );
   generateFiles(
@@ -98,8 +94,6 @@ export const tsDynamoDBGenerator = async (
     joinPathFragments(dir, 'scripts'),
     templateOptions,
   );
-  tree.delete(joinPathFragments(dir, 'scripts', 'docker'));
-  tree.delete(joinPathFragments(dir, 'scripts', 'finch'));
 
   const containerName = `${getNpmScope(tree)}-dynamodb`;
 
@@ -127,9 +121,9 @@ export const tsDynamoDBGenerator = async (
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
   addGeneratorMetadata(tree, fullyQualifiedName, TS_DYNAMODB_GENERATOR_INFO);
 
-  await sharedConstructsGenerator(tree, { iacProvider });
+  await sharedConstructsGenerator(tree, { iac: iac });
   await addDynamoDBInfra(tree, {
-    iacProvider,
+    iac,
     projectName: fullyQualifiedName,
     nameClassName,
     nameKebabCase,

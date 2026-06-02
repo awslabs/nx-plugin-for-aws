@@ -16,7 +16,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { IacProvider } from '../iac';
+import { Iac } from '../iac';
 
 export interface AddDynamoDBConstructOptions {
   projectName: string;
@@ -28,23 +28,21 @@ export interface AddDynamoDBConstructOptions {
 
 export const addDynamoDBInfra = async (
   tree: Tree,
-  options: AddDynamoDBConstructOptions & { iacProvider: IacProvider },
+  options: AddDynamoDBConstructOptions & { iac: Iac },
 ) => {
-  if (options.iacProvider === 'CDK') {
+  if (options.iac === 'cdk') {
     await addDynamoDBCdkConstructs(tree, options);
-  } else if (options.iacProvider === 'Terraform') {
+  } else if (options.iac === 'terraform') {
     addDynamoDBTerraformModules(tree, options);
   } else {
-    throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
+    throw new Error(`Unsupported iac ${options.iac}`);
   }
 
   updateJson(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
-      options.iacProvider === 'CDK'
-        ? SHARED_CONSTRUCTS_DIR
-        : SHARED_TERRAFORM_DIR,
+      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
       'project.json',
     ),
     (config: ProjectConfiguration) => {

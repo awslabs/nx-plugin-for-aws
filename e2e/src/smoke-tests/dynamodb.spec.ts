@@ -10,9 +10,9 @@ import { setFinchAsContainerEngine } from './finch-install';
 describe('smoke test - dynamodb', () => {
   const pkgMgr = 'pnpm';
 
-  (['CDK', 'Terraform'] as const).forEach((iacProvider) => {
+  (['cdk', 'terraform'] as const).forEach((iacProvider) => {
     (['docker', 'finch'] as const).forEach((containerEngine) => {
-      const targetDir = `${tmpProjPath()}/dynamodb-${iacProvider.toLowerCase()}-${containerEngine}-${pkgMgr}`;
+      const targetDir = `${tmpProjPath()}/dynamodb-${iacProvider}-${containerEngine}-${pkgMgr}`;
 
       beforeEach(() => {
         console.log(`Cleaning target directory ${targetDir}`);
@@ -39,7 +39,7 @@ describe('smoke test - dynamodb', () => {
         }
 
         await runCLI(
-          `generate @aws/nx-plugin:ts#dynamodb --name=my-table --iacProvider=${iacProvider} --no-interactive`,
+          `generate @aws/nx-plugin:ts#dynamodb --name=my-table --iac=${iacProvider} --no-interactive`,
           opts,
         );
 

@@ -11,23 +11,23 @@ import {
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { resolveContainerEngine } from '../../utils/containers';
+import { resolveContainers } from '../../utils/containers';
 
 vi.mock('../../utils/containers', () => ({
-  resolveContainerEngine: vi.fn(),
+  resolveContainers: vi.fn(),
 }));
 
 describe('ts#dynamodb generator', () => {
   let tree: Tree;
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
-    vi.mocked(resolveContainerEngine).mockResolvedValue('docker');
+    vi.mocked(resolveContainers).mockResolvedValue('docker');
   });
 
   const defaultOptions = {
     name: 'MyTable',
     directory: 'packages',
-    iacProvider: 'CDK' as const,
+    iac: 'cdk' as const,
   };
 
   it('should generate the dynamodb project', async () => {
@@ -96,15 +96,15 @@ describe('ts#dynamodb generator', () => {
   });
 
   it('should generate scripts for finch engine', async () => {
-    vi.mocked(resolveContainerEngine).mockResolvedValue('finch');
+    vi.mocked(resolveContainers).mockResolvedValue('finch');
     await tsDynamoDBGenerator(tree, defaultOptions);
     snapshotTreeDir(tree, 'packages/my-table/scripts');
   });
 
-  it('should generate terraform modules when iacProvider is Terraform', async () => {
+  it('should generate terraform modules when iac is terraform', async () => {
     await tsDynamoDBGenerator(tree, {
       ...defaultOptions,
-      iacProvider: 'Terraform',
+      iac: 'terraform',
     });
     expect(
       tree.read('packages/common/terraform/src/core/dynamodb.tf', 'utf-8'),
@@ -124,7 +124,7 @@ describe('ts#dynamodb generator', () => {
   });
 
   it('should keep an existing dynamodb app construct', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
     tree.write(
       'packages/common/constructs/src/app/dynamodb/my-table.ts',
       '// preserve custom construct',
@@ -143,7 +143,7 @@ describe('ts#dynamodb generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await tsDynamoDBGenerator(tree, defaultOptions);
 
