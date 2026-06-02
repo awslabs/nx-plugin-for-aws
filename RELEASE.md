@@ -100,7 +100,7 @@ pnpm nx release --yes
 When all v1.0 workstreams are complete (see #718):
 
 1. Remove the `--specifier premajor --preid rc` logic from the `main` branch release step in `ci.yml`
-2. Change `NPM_DIST_TAG` condition in `ci.yml` back to unconditional `latest`
+2. Change `npm_config_tag` condition in `ci.yml` back to unconditional `latest`
 3. Remove the `release/0.x` branch condition from `deploy_docs`
 4. Publish `1.0.0` to `latest`
 5. Archive `release/0.x`
