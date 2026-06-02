@@ -3,16 +3,15 @@ title: "许可证"
 description: "许可证生成器的参考文档"
 generator: license
 ---
-
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import LicenseAllowlist from '@components/license-allowlist.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-自动管理工作区中的 `LICENSE` 文件和源代码头部。
-
-此生成器注册了一个[同步生成器](https://nx.dev/concepts/sync-generators)，作为 `lint` 目标的一部分执行，确保您的源文件符合所需的许可证内容和格式，同时确保项目的 `LICENSE` 文件正确无误，且相关项目文件（`package.json`、`pyproject.toml`）包含许可信息。
+管理工作区中的许可证：同步 `LICENSE` 文件和源代码头部，并检查每个依赖项是否符合许可证允许列表。
 
 ## 使用方式
 
@@ -29,15 +28,17 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 生成器将创建或更新以下文件：
 
 <FileTree>
-  - nx.json 配置了运行许可证同步生成器的 lint 目标
-  - aws-nx-plugin.config.mts 许可证同步生成器的配置
+  - nx.json 配置了运行许可证同步生成器的 lint 目标，并依赖于 license-check 目标
+  - aws-nx-plugin.config.mts 许可证同步和依赖项检查的配置
 </FileTree>
 
-`aws-nx-plugin.config.mts` 中添加了许可证头部内容和格式的默认配置，用于为部分文件类型写入适当的头部。您可能需要进一步自定义；请参阅下方的[配置部分](#configuration)。
+## 许可证头部与文件
 
-## 工作流程
+生成器注册了一个[同步生成器](https://nx.dev/concepts/sync-generators)，作为 `lint` 目标的一部分执行，确保您的源文件包含正确的许可证头部，项目包含 `LICENSE` 文件，且在 `package.json` 和 `pyproject.toml` 中设置了许可元数据。
 
-每当构建项目时（`lint` 目标运行），许可证同步生成器会确保项目中的许可信息与配置匹配（参见[下方许可证同步行为](#license-sync-behaviour)）。若检测到不一致，您将收到如下消息：
+### 工作流程
+
+每当构建项目时（`lint` 目标运行），许可证同步生成器会确保项目中的许可信息与配置匹配。若检测到不一致，您将收到如下消息：
 
 ```bash
   NX   工作区不同步
@@ -70,33 +71,27 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 请确保将许可证同步生成器所做的变更提交至版本控制，以避免持续集成构建任务因许可证不同步而失败。
 :::
 
-## 许可证同步行为
+### 同步行为
 
 许可证同步生成器执行三项主要任务：
 
-### 1. 同步源文件许可证头部
+#### 1. 同步源文件许可证头部
 
 同步生成器运行时，将确保工作区中所有源代码文件（基于配置）包含适当的许可证头部。头部以文件的第一个块注释或连续行注释形式写入（文件中的 shebang/hashbang 除外）。
 
-您可随时更新配置以更改应包含或排除的文件，以及不同文件类型的许可证头部内容或格式。更多细节请参阅[配置部分](#configuration)。
-
-### 2. 同步 LICENSE 文件
+#### 2. 同步 LICENSE 文件
 
 同步生成器运行时，将确保根 `LICENSE` 文件与配置的许可证一致，并确保所有子项目也包含正确的 `LICENSE` 文件。
 
-必要时可通过配置排除项目。更多细节请参阅[配置部分](#configuration)。
-
-### 3. 同步项目文件中的许可信息
+#### 3. 同步项目文件中的许可信息
 
 同步生成器运行时，将确保 `package.json` 和 `pyproject.toml` 文件中的 `license` 字段设置为配置的许可证。
 
-必要时可通过配置排除项目。更多细节请参阅[配置部分](#configuration)。
-
-## 配置
+### 头部与文件配置
 
 配置定义在工作区根目录的 `aws-nx-plugin.config.mts` 文件中。
 
-### SPDX 与版权持有者
+#### SPDX 与版权持有者
 
 可通过 `spdx` 配置属性随时更新所选许可证：
 
@@ -122,9 +117,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-### 许可证头部
-
-#### 内容
+#### 许可证头部内容
 
 许可证头部内容可通过两种方式配置：
 
@@ -162,7 +155,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### 格式
+#### 头部格式
 
 可通过 glob 模式为不同文件类型指定许可证头部格式。格式配置支持行注释、块注释或两者结合：
 
@@ -241,7 +234,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### 排除文件
+#### 从头部同步中排除文件
 
 默认在 git 仓库中，所有 `.gitignore` 文件会被遵循以确保仅同步版本控制管理的文件。非 git 仓库中，所有文件均被考虑，除非在配置中显式排除。
 
@@ -265,7 +258,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-### 排除项目文件同步
+#### 从文件同步中排除项目
 
 默认同步所有 `LICENSE`、`package.json` 和 `pyproject.toml` 文件。
 
@@ -286,11 +279,116 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-## 禁用许可证同步
+### 禁用许可证同步
 
 禁用许可证同步生成器：
 
-1. 从 `aws-nx-plugin.config.mts` 配置中移除 `license` 部分（或删除该文件）
+1. 从 `aws-nx-plugin.config.mts` 配置中移除 `license` 部分
 2. 从 `targetDefaults.lint.syncGenerators` 中移除 `@aws/nx-plugin:license#sync` 生成器
 
 重新启用时，只需再次运行 `license` 生成器。
+
+## 依赖项许可证检查
+
+`license` 生成器还配置了一个 `license-check` 目标，当项目的某个依赖项（或任何传递依赖项）声明的许可证不在允许列表中时，该目标会失败。
+
+### 运行方式
+
+生成器会在根 `project.json` 中写入 `license-check` 目标：
+
+```json title="project.json"
+{
+  "targets": {
+    "license-check": {
+      "executor": "@aws/nx-plugin:license-check",
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "{workspaceRoot}/aws-nx-plugin.config.mts"
+      ],
+      "options": {}
+    }
+  }
+}
+```
+
+您可以直接运行检查：
+
+<NxCommands commands={['license-check']} />
+
+结果会根据您的锁文件和 `aws-nx-plugin.config.mts` 进行缓存 — 当没有任何变化时，重新运行是即时的。
+
+收集器决定扫描的内容。`npmCollector` 使用 [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn)，`pythonCollector` 使用 [pip-licenses](https://github.com/raimon49/pip-licenses)。如果未找到已安装的依赖项，检查将通过且无需检查任何内容。
+
+### 配置
+
+默认情况下，检查使用内置的常见宽松许可证集（MIT、Apache-2.0、BSD、ISC 等），导出为 `DEFAULT_LICENSE_ALLOWLIST`。您可以在配置中扩展或覆盖它：
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/license';
+
+export default {
+  license: {
+    // ...
+    dependencyCheck: {
+      allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
+      exceptions: [
+        { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
+      ],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+<Drawer title="Default License Allowlist" trigger="View the full list of licenses in DEFAULT_LICENSE_ALLOWLIST">
+<LicenseAllowlist />
+</Drawer>
+
+#### 自定义允许列表
+
+要限制允许列表，请用您自己的数组替换 `DEFAULT_LICENSE_ALLOWLIST`。要扩展它，请展开默认值并添加条目。条目通过 SPDX ID、完整许可证名称或任何列出的别名进行匹配（不区分大小写）。
+
+#### 单个包的例外
+
+对于检查失败的包，使用 `exceptions` — 要么是因为它们的许可证不在允许列表中，要么是因为它们没有可检测的许可证元数据。`reason` 字段是必需的，以便审查者可以看到为什么授予例外。
+
+```typescript
+exceptions: [
+  {
+    package: 'union',
+    version: '0.5.0',
+    reason: 'Package ships verbatim MIT text without declaring license',
+  },
+];
+```
+
+引入具有问题元数据的依赖项的生成器（例如 MCP 服务器生成器）会在运行时自动将所需的例外添加到您的配置中。
+
+#### 收集器
+
+收集器发现依赖项并提取许可证元数据。内置收集器是 `npmCollector()`（扫描 `node_modules`）和 `pythonCollector()`（扫描 Python 虚拟环境）。许可证生成器默认配置 `npmCollector()`，并在存在 Python 项目时添加 `pythonCollector()`。
+
+要实现自定义收集器，请符合 `LicenseCollector` 接口：
+
+```typescript
+import type { LicenseCollector } from '@aws/nx-plugin/license';
+
+const myCollector = (): LicenseCollector => ({
+  name: 'my-ecosystem',
+  traceCommand: 'my-tool why <package>',
+  async collect({ workspaceRoot }) {
+    return [
+      { name: 'some-dep', version: '1.0.0', rawLicense: 'MIT', ecosystem: 'my-ecosystem' },
+    ];
+  },
+});
+```
+
+### 禁用依赖项检查
+
+要对单次运行禁用依赖项检查，请设置 `LICENSE_DEPENDENCY_CHECK=skip` 环境变量：
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+
+要永久禁用，请在配置中将 `dependencyCheck` 设置为 `false`，或使用 `--dependencyCheck=false` 重新运行生成器。

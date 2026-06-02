@@ -7,10 +7,12 @@ generator: license
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import LicenseAllowlist from '@components/license-allowlist.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Tự động quản lý các tệp `LICENSE` và header mã nguồn trong workspace của bạn.
-
-Generator này đăng ký một [sync generator](https://nx.dev/concepts/sync-generators) để thực thi như một phần của các target `lint` của bạn, đảm bảo rằng các tệp nguồn của bạn tuân thủ nội dung và định dạng giấy phép mong muốn, cũng như đảm bảo các tệp `LICENSE` của dự án được chính xác, và thông tin cấp phép được bao gồm trong các tệp dự án liên quan (`package.json`, `pyproject.toml`).
+Quản lý cấp phép trong toàn bộ workspace của bạn: đồng bộ các tệp `LICENSE` và header mã nguồn, đồng thời kiểm tra rằng mọi dependency tuân thủ danh sách giấy phép được phép.
 
 ## Cách sử dụng
 
@@ -27,15 +29,17 @@ Generator này đăng ký một [sync generator](https://nx.dev/concepts/sync-ge
 Generator sẽ tạo hoặc cập nhật các tệp sau:
 
 <FileTree>
-  - nx.json Target lint được cấu hình để chạy license sync generator
-  - aws-nx-plugin.config.mts Cấu hình cho license sync generator
+  - nx.json Target lint được cấu hình để chạy license sync generator và phụ thuộc vào target license-check
+  - aws-nx-plugin.config.mts Cấu hình cho đồng bộ giấy phép và kiểm tra dependency
 </FileTree>
 
-Một số cấu hình mặc định cho nội dung và định dạng header giấy phép được thêm vào `aws-nx-plugin.config.mts` để viết các header phù hợp cho một số loại tệp. Bạn có thể muốn tùy chỉnh thêm; vui lòng xem [phần cấu hình](#configuration) bên dưới.
+## License Header & Tệp
 
-## Quy trình làm việc
+Generator này đăng ký một [sync generator](https://nx.dev/concepts/sync-generators) để thực thi như một phần của các target `lint` của bạn, đảm bảo rằng các tệp nguồn của bạn chứa các license header chính xác, các dự án của bạn chứa các tệp `LICENSE`, và metadata cấp phép được thiết lập trong `package.json` và `pyproject.toml`.
 
-Mỗi khi bạn build các dự án của mình (và target `lint` chạy), license sync generator sẽ đảm bảo rằng việc cấp phép trong dự án của bạn khớp với cấu hình của bạn (xem [hành vi đồng bộ giấy phép bên dưới](#license-sync-behaviour)). Nếu nó phát hiện bất kỳ điều gì không đồng bộ, bạn sẽ nhận được thông báo như sau:
+### Quy trình làm việc
+
+Mỗi khi bạn build các dự án của mình (và target `lint` chạy), license sync generator sẽ đảm bảo rằng việc cấp phép trong dự án của bạn khớp với cấu hình của bạn. Nếu nó phát hiện bất kỳ điều gì không đồng bộ, bạn sẽ nhận được thông báo như sau:
 
 ```bash
   NX   The workspace is out of sync
@@ -68,33 +72,27 @@ Chọn `Yes` để đồng bộ các thay đổi.
 Hãy chắc chắn rằng bạn kiểm tra các thay đổi mà license sync generator tạo ra vào hệ thống quản lý phiên bản để đảm bảo rằng bất kỳ tác vụ build tích hợp liên tục nào không thất bại do giấy phép không đồng bộ.
 :::
 
-## Hành vi đồng bộ giấy phép
+### Hành vi đồng bộ
 
 License sync generator thực hiện ba nhiệm vụ chính:
 
-### 1. Đồng bộ License Header của tệp nguồn
+#### 1. Đồng bộ License Header của tệp nguồn
 
 Khi sync generator chạy, nó sẽ đảm bảo rằng tất cả các tệp mã nguồn trong workspace của bạn (dựa trên cấu hình của bạn) chứa license header phù hợp. Header được viết dưới dạng block comment đầu tiên hoặc chuỗi line comment liên tiếp trong tệp (ngoài shebang/hashbang nếu có trong tệp).
 
-Bạn có thể cập nhật cấu hình bất cứ lúc nào để thay đổi tệp nào nên được bao gồm hoặc loại trừ, cũng như nội dung hoặc định dạng của license header cho các loại tệp khác nhau. Để biết thêm chi tiết, vui lòng xem [phần cấu hình](#configuration) bên dưới.
-
-### 2. Đồng bộ các tệp LICENSE
+#### 2. Đồng bộ các tệp LICENSE
 
 Khi sync generator chạy, nó sẽ đảm bảo rằng tệp `LICENSE` gốc tương ứng với giấy phép đã cấu hình của bạn, cũng như đảm bảo rằng tất cả các dự án con trong workspace của bạn cũng chứa tệp `LICENSE` chính xác.
 
-Bạn có thể loại trừ các dự án trong cấu hình nếu cần. Để biết thêm chi tiết, vui lòng xem [phần cấu hình](#configuration) bên dưới.
-
-### 3. Đồng bộ thông tin cấp phép trong các tệp dự án
+#### 3. Đồng bộ thông tin cấp phép trong các tệp dự án
 
 Khi sync generator chạy, nó sẽ đảm bảo các trường `license` trong các tệp `package.json` và `pyproject.toml` được đặt theo giấy phép đã cấu hình của bạn.
 
-Bạn có thể loại trừ các dự án trong cấu hình nếu cần. Để biết thêm chi tiết, vui lòng xem [phần cấu hình](#configuration) bên dưới.
-
-## Cấu hình
+### Cấu hình Header & Tệp
 
 Cấu hình được định nghĩa trong tệp `aws-nx-plugin.config.mts` ở thư mục gốc của workspace của bạn.
 
-### SPDX và Copyright Holder
+#### SPDX và Copyright Holder
 
 Giấy phép bạn chọn có thể được cập nhật bất cứ lúc nào thông qua thuộc tính cấu hình `spdx`:
 
@@ -120,9 +118,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-### License Header
-
-#### Nội dung
+#### Nội dung License Header
 
 Nội dung license header có thể được cấu hình theo hai cách:
 
@@ -160,7 +156,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### Định dạng
+#### Định dạng Header
 
 Bạn có thể chỉ định cách license header nên được định dạng cho các loại tệp khác nhau bằng cách sử dụng các mẫu glob. Cấu hình định dạng hỗ trợ line comment, block comment, hoặc kết hợp cả hai:
 
@@ -239,7 +235,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### Loại trừ tệp
+#### Loại trừ tệp khỏi đồng bộ Header
 
 Theo mặc định, trong một repository git, tất cả các tệp `.gitignore` được tôn trọng để đảm bảo rằng chỉ các tệp được quản lý bởi hệ thống quản lý phiên bản mới được đồng bộ. Trong các repository không phải git, tất cả các tệp đều được xem xét trừ khi được loại trừ rõ ràng trong cấu hình.
 
@@ -263,7 +259,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-### Loại trừ các tệp dự án khỏi đồng bộ
+#### Loại trừ các dự án khỏi đồng bộ tệp
 
 Tất cả các tệp `LICENSE`, tệp `package.json` và tệp `pyproject.toml` được đồng bộ với giấy phép đã cấu hình theo mặc định.
 
@@ -284,11 +280,116 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-## Vô hiệu hóa đồng bộ giấy phép
+### Vô hiệu hóa đồng bộ giấy phép
 
 Để vô hiệu hóa license sync generator:
 
-1. Xóa phần `license` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts` (hoặc xóa tệp `aws-nx-plugin.config.mts`)
+1. Xóa phần `license` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts`
 2. Xóa generator `@aws/nx-plugin:license#sync` khỏi `targetDefaults.lint.syncGenerators`
 
 Để kích hoạt lại đồng bộ giấy phép, chỉ cần chạy lại generator `license`.
+
+## Kiểm tra giấy phép Dependency
+
+Generator `license` cũng cấu hình một target `license-check` sẽ thất bại khi một trong các dependency của dự án của bạn (hoặc bất kỳ transitive dependency nào) khai báo một giấy phép không có trong danh sách được phép của bạn.
+
+### Cách nó chạy
+
+Generator ghi một target `license-check` vào `project.json` gốc của bạn:
+
+```json title="project.json"
+{
+  "targets": {
+    "license-check": {
+      "executor": "@aws/nx-plugin:license-check",
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "{workspaceRoot}/aws-nx-plugin.config.mts"
+      ],
+      "options": {}
+    }
+  }
+}
+```
+
+Bạn có thể chạy kiểm tra trực tiếp:
+
+<NxCommands commands={['license-check']} />
+
+Kết quả được cache dựa trên lockfile và `aws-nx-plugin.config.mts` của bạn — việc chạy lại sẽ tức thì khi không có gì thay đổi.
+
+Các collector xác định những gì được quét. `npmCollector` sử dụng [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn), và `pythonCollector` sử dụng [pip-licenses](https://github.com/raimon49/pip-licenses). Nếu không tìm thấy dependency đã cài đặt nào, kiểm tra sẽ pass mà không có gì để kiểm tra.
+
+### Cấu hình
+
+Theo mặc định, kiểm tra sử dụng một tập hợp các giấy phép cho phép phổ biến được tích hợp sẵn (MIT, Apache-2.0, BSD, ISC, v.v.) được xuất dưới dạng `DEFAULT_LICENSE_ALLOWLIST`. Bạn có thể mở rộng hoặc ghi đè điều này trong cấu hình của mình:
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/license';
+
+export default {
+  license: {
+    // ...
+    dependencyCheck: {
+      allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
+      exceptions: [
+        { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
+      ],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+<Drawer title="Default License Allowlist" trigger="View the full list of licenses in DEFAULT_LICENSE_ALLOWLIST">
+<LicenseAllowlist />
+</Drawer>
+
+#### Tùy chỉnh danh sách được phép
+
+Để hạn chế danh sách được phép, thay thế `DEFAULT_LICENSE_ALLOWLIST` bằng mảng của riêng bạn. Để mở rộng nó, spread mặc định và thêm các mục. Các mục được khớp theo SPDX id, tên giấy phép đầy đủ, hoặc bất kỳ alias nào được liệt kê (không phân biệt chữ hoa chữ thường).
+
+#### Ngoại lệ cho từng package
+
+Sử dụng `exceptions` cho các package thất bại trong kiểm tra — hoặc vì giấy phép của chúng không có trong danh sách được phép, hoặc vì chúng được ship mà không có metadata giấy phép có thể phát hiện được. Trường `reason` là bắt buộc để người đánh giá có thể thấy lý do tại sao ngoại lệ được cấp.
+
+```typescript
+exceptions: [
+  {
+    package: 'union',
+    version: '0.5.0',
+    reason: 'Package ships verbatim MIT text without declaring license',
+  },
+];
+```
+
+Các generator giới thiệu các dependency với metadata có vấn đề (ví dụ: MCP server generator) sẽ tự động thêm các ngoại lệ cần thiết vào cấu hình của bạn khi chúng chạy.
+
+#### Collectors
+
+Các collector khám phá các dependency và trích xuất metadata giấy phép. Các collector tích hợp sẵn là `npmCollector()` (quét `node_modules`) và `pythonCollector()` (quét các môi trường ảo Python). License generator cấu hình `npmCollector()` theo mặc định và thêm `pythonCollector()` khi có các dự án Python.
+
+Để triển khai một collector tùy chỉnh, tuân thủ interface `LicenseCollector`:
+
+```typescript
+import type { LicenseCollector } from '@aws/nx-plugin/license';
+
+const myCollector = (): LicenseCollector => ({
+  name: 'my-ecosystem',
+  traceCommand: 'my-tool why <package>',
+  async collect({ workspaceRoot }) {
+    return [
+      { name: 'some-dep', version: '1.0.0', rawLicense: 'MIT', ecosystem: 'my-ecosystem' },
+    ];
+  },
+});
+```
+
+### Vô hiệu hóa kiểm tra Dependency
+
+Để vô hiệu hóa kiểm tra dependency cho một lần chạy duy nhất, đặt biến môi trường `LICENSE_DEPENDENCY_CHECK=skip`:
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+
+Để vô hiệu hóa vĩnh viễn, đặt `dependencyCheck` thành `false` trong cấu hình của bạn hoặc chạy lại generator với `--dependencyCheck=false`.
