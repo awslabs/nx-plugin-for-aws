@@ -35,6 +35,8 @@ import { resolveIac } from '../../utils/iac';
 import { resolveContainers } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
+import { ensureLicenseExceptions } from '../../license/config';
+import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 
 export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -274,6 +276,8 @@ export const pyMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);
+
+  await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return async () => {

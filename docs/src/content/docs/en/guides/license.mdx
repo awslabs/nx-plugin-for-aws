@@ -6,10 +6,12 @@ generator: license
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import LicenseAllowlist from '@components/license-allowlist.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Automatically manage `LICENSE` files and source code headers in your workspace.
-
-This generator registers a [sync generator](https://nx.dev/concepts/sync-generators) to execute as part of your `lint` targets which will ensure that your source files conform to the desired license content and format, as well as ensuring that your project's `LICENSE` files are correct, and licensing information is included in relevant project files (`package.json`, `pyproject.toml`).
+Manage licensing across your workspace: synchronise `LICENSE` files and source code headers, and check that every dependency conforms to a license allowlist.
 
 ## Usage
 
@@ -26,15 +28,17 @@ This generator registers a [sync generator](https://nx.dev/concepts/sync-generat
 The generator will create or update the following files:
 
 <FileTree>
-  - nx.json The lint target is configured to run the license sync generator
-  - aws-nx-plugin.config.mts Configuration for the license sync generator
+  - nx.json The lint target is configured to run the license sync generator and depends on the license-check target
+  - aws-nx-plugin.config.mts Configuration for license sync and dependency checking
 </FileTree>
 
-Some default configuration for license header content and format is added to `aws-nx-plugin.config.mts` to write appropriate headers for a handful of file types. You may wish to customise this further; please see the [configuration section](#configuration) below.
+## License Headers & Files
 
-## Workflow
+The generator registers a [sync generator](https://nx.dev/concepts/sync-generators) to execute as part of your `lint` targets which ensures that your source files contain the correct license headers, your projects contain `LICENSE` files, and licensing metadata is set in `package.json` and `pyproject.toml`.
 
-Whenever you build your projects (and a `lint` target runs), the license sync generator will make sure that the licensing in your project matches your configuration (see [license sync behaviour below](#license-sync-behaviour)). If it detects that anything is out of sync, you will receive a message such as:
+### Workflow
+
+Whenever you build your projects (and a `lint` target runs), the license sync generator will make sure that the licensing in your project matches your configuration. If it detects that anything is out of sync, you will receive a message such as:
 
 ```bash
   NX   The workspace is out of sync
@@ -67,33 +71,27 @@ Select `Yes` to sync the changes.
 Make sure you check the changes the license sync generator makes in to version control to ensure that any continuous integration build tasks don't fail due to licenses being out of sync.
 :::
 
-## License Sync Behaviour
+### Sync Behaviour
 
 The license sync generator performs three main tasks:
 
-### 1. Synchronise Source File License Headers
+#### 1. Synchronise Source File License Headers
 
 When the sync generator is run, it will ensure that all source code files in your workspace (based on your configuration) contain the appropriate license header. The header is written as the first block comment or consecutive series of line comments in the file (besides the shebang/hashbang if present in a file).
 
-You can update the configuration at any time to change which files should be included or excluded, as well as the content or format of license headers for different file types. For more details, please see the [configuration section](#configuration) below.
-
-### 2. Synchronise LICENSE Files
+#### 2. Synchronise LICENSE Files
 
 When the sync generator is run, it will ensure that the root `LICENSE` file corresponds to your configured license, as well as ensuring that all subprojects in your workspace also contain the correct `LICENSE` file.
 
-You can exclude projects in the configuration if required. For more details, please see the [configuration section](#configuration) below.
-
-### 3. Synchronise licensing information in project files
+#### 3. Synchronise licensing information in project files
 
 When the sync generator is run, it will ensure the `license` fields in `package.json` and `pyproject.toml` files are set to your configured license.
 
-You can exclude projects in the configuration if required. For more details, please see the [configuration section](#configuration) below.
-
-## Configuration
+### Header & File Configuration
 
 Configuration is defined in the `aws-nx-plugin.config.mts` file in the root of your workspace.
 
-### SPDX and Copyright Holder
+#### SPDX and Copyright Holder
 
 Your chosen license can be updated at any time via the `spdx` configuration property:
 
@@ -119,9 +117,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-### License Headers
-
-#### Content
+#### License Header Content
 
 The license header content can be configured in two ways:
 
@@ -159,7 +155,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### Format
+#### Header Format
 
 You can specify how license headers should be formatted for different file types using glob patterns. The format configuration supports line comments, block comments, or a combination of both:
 
@@ -238,7 +234,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### Excluding files
+#### Excluding Files from Header Sync
 
 By default, in a git repository, all `.gitignore` files are honored to ensure that only files managed by version control are synchronized. In non-git repositories, all files are considered unless explicitly excluded in configuration.
 
@@ -262,7 +258,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-### Excluding project files from sync
+#### Excluding Projects from File Sync
 
 All `LICENSE` files, `package.json` files and `pyproject.toml` files are synchronised with the configured license by default.
 
@@ -283,11 +279,116 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-## Disabling license sync
+### Disabling License Sync
 
 To disable the license sync generator:
 
-1. Remove the `license` section from your configuration in `aws-nx-plugin.config.mts` (or remove the `aws-nx-plugin.config.mts` file)
+1. Remove the `license` section from your configuration in `aws-nx-plugin.config.mts`
 2. Remove the `@aws/nx-plugin:license#sync` generator from `targetDefaults.lint.syncGenerators`
 
 To re-enable license sync, simply run the `license` generator again.
+
+## Dependency License Checks
+
+The `license` generator also configures a `license-check` target that fails when one of your project's dependencies (or any transitive dependency) declares a license that is not in your allowlist.
+
+### How it runs
+
+The generator writes a `license-check` target to your root `project.json`:
+
+```json title="project.json"
+{
+  "targets": {
+    "license-check": {
+      "executor": "@aws/nx-plugin:license-check",
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "{workspaceRoot}/aws-nx-plugin.config.mts"
+      ],
+      "options": {}
+    }
+  }
+}
+```
+
+You can run the check directly:
+
+<NxCommands commands={['license-check']} />
+
+Results are cached against your lockfile and `aws-nx-plugin.config.mts` — re-runs are instant when nothing has changed.
+
+Collectors determine what gets scanned. The `npmCollector` uses [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn), and the `pythonCollector` uses [pip-licenses](https://github.com/raimon49/pip-licenses). If no installed dependencies are found, the check passes with nothing to inspect.
+
+### Configuration
+
+By default the check uses a built-in set of common permissive licenses (MIT, Apache-2.0, BSD, ISC, etc.) exported as `DEFAULT_LICENSE_ALLOWLIST`. You can extend or override this in your config:
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/license';
+
+export default {
+  license: {
+    // ...
+    dependencyCheck: {
+      allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
+      exceptions: [
+        { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
+      ],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+<Drawer title="Default License Allowlist" trigger="View the full list of licenses in DEFAULT_LICENSE_ALLOWLIST">
+<LicenseAllowlist />
+</Drawer>
+
+#### Customizing the allowlist
+
+To restrict the allowlist, replace `DEFAULT_LICENSE_ALLOWLIST` with your own array. To extend it, spread the default and add entries. Entries are matched by SPDX id, full license name, or any of the listed aliases (case-insensitive).
+
+#### Per-package exceptions
+
+Use `exceptions` for packages that fail the check — either because their license is not in the allowlist, or because they ship without detectable license metadata. The `reason` field is required so reviewers can see why the exception was granted.
+
+```typescript
+exceptions: [
+  {
+    package: 'union',
+    version: '0.5.0',
+    reason: 'Package ships verbatim MIT text without declaring license',
+  },
+];
+```
+
+Generators that introduce dependencies with problematic metadata (e.g. the MCP server generator) automatically add the required exceptions to your config when they run.
+
+#### Collectors
+
+Collectors discover dependencies and extract license metadata. The built-in collectors are `npmCollector()` (scans `node_modules`) and `pythonCollector()` (scans Python virtual environments). The license generator configures `npmCollector()` by default and adds `pythonCollector()` when Python projects are present.
+
+To implement a custom collector, conform to the `LicenseCollector` interface:
+
+```typescript
+import type { LicenseCollector } from '@aws/nx-plugin/license';
+
+const myCollector = (): LicenseCollector => ({
+  name: 'my-ecosystem',
+  traceCommand: 'my-tool why <package>',
+  async collect({ workspaceRoot }) {
+    return [
+      { name: 'some-dep', version: '1.0.0', rawLicense: 'MIT', ecosystem: 'my-ecosystem' },
+    ];
+  },
+});
+```
+
+### Disabling Dependency Checks
+
+To disable dependency checks for a single run, set the `LICENSE_DEPENDENCY_CHECK=skip` environment variable:
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+
+To disable permanently, set `dependencyCheck` to `false` in your config or re-run the generator with `--dependencyCheck=false`.
