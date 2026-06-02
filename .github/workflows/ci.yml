@@ -34,6 +34,8 @@ jobs:
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
       - name: Build
+        env:
+          DOCS_BASE_PATH: ${{ github.ref == 'refs/heads/main' && '/nx-plugin-for-aws/preview' || '/nx-plugin-for-aws' }}
         run: pnpm nx run-many --target build --all --output-style=stream
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v6
@@ -180,14 +182,39 @@ jobs:
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
-    if: ${{ github.ref == 'refs/heads/release/0.x' && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
+    if: ${{ (github.ref == 'refs/heads/release/0.x' || github.ref == 'refs/heads/main') && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
     needs: [release]
     steps:
-      - name: Download docs artifact
+      - name: Download docs artifact (this branch)
         uses: actions/download-artifact@v8
         with:
           name: docs-artifact
-          path: docs-site
+          path: docs-this-branch
+      - name: Download docs artifact (other branch)
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: ci.yml
+          branch: ${{ github.ref == 'refs/heads/main' && 'release/0.x' || 'main' }}
+          name: docs-artifact
+          path: docs-other-branch
+          if_no_artifact_found: warn
+        continue-on-error: true
+      - name: Merge docs artifacts
+        run: |
+          mkdir -p docs-site
+          if [ "${{ github.ref }}" = "refs/heads/release/0.x" ]; then
+            cp -r docs-this-branch/* docs-site/
+            if [ -d docs-other-branch ] && [ "$(ls -A docs-other-branch 2>/dev/null)" ]; then
+              mkdir -p docs-site/preview
+              cp -r docs-other-branch/* docs-site/preview/
+            fi
+          else
+            if [ -d docs-other-branch ] && [ "$(ls -A docs-other-branch 2>/dev/null)" ]; then
+              cp -r docs-other-branch/* docs-site/
+            fi
+            mkdir -p docs-site/preview
+            cp -r docs-this-branch/* docs-site/preview/
+          fi
       - name: Setup Pages
         uses: actions/configure-pages@v6
       - name: Upload artifact

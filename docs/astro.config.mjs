@@ -29,12 +29,14 @@ const smithySyntax = () => ({
   name: 'smithy',
 });
 
+const basePath = process.env.DOCS_BASE_PATH || '/nx-plugin-for-aws';
+
 // https://astro.build/config
 export default defineConfig({
   site: 'https://awslabs.github.io',
-  base: '/nx-plugin-for-aws',
+  base: basePath,
   redirects: {
-    '/': '/nx-plugin-for-aws/en',
+    '/': `${basePath}/en`,
   },
   image: {
     service: passthroughImageService(),
@@ -66,11 +68,12 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             property: 'og:image',
-            content: '/nx-plugin-for-aws/favicon.svg',
+            content: `${basePath}/favicon.svg`,
           },
         },
       ],
       components: {
+        Header: './src/components/header.astro',
         PageSidebar: './src/components/page-sidebar.astro',
         MarkdownContent: './src/components/markdown-content.astro',
         PageTitle: './src/components/page-title.astro',
