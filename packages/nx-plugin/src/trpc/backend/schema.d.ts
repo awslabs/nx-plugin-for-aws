@@ -8,7 +8,7 @@ import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
 
 export interface TsTrpcApiGeneratorSchema {
   name: string;
-  infra: 'rest-lambda' | 'http-lambda';
+  infra: 'rest-lambda' | 'http-lambda' | 'none';
   integrationPattern?: 'isolated' | 'shared';
   auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];

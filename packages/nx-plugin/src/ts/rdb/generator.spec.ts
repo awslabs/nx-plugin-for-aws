@@ -283,4 +283,24 @@ describe('ts#rdb generator', () => {
       tree.read('packages/common/terraform/src/app/dbs/db/db.tf', 'utf-8'),
     ).toMatchSnapshot();
   });
+
+  it('should generate with infra=none then upgrade to infra=aurora', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+    expect(tree.exists('packages/db/prisma')).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    const projectJson = JSON.parse(
+      tree.read('packages/db/project.json', 'utf-8'),
+    );
+    expect(projectJson.targets['bundle']).toBeUndefined();
+
+    await tsRdbGenerator(tree, defaultOptions);
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    const updatedProjectJson = JSON.parse(
+      tree.read('packages/db/project.json', 'utf-8'),
+    );
+    expect(updatedProjectJson.targets['bundle']).toBeDefined();
+  });
 });

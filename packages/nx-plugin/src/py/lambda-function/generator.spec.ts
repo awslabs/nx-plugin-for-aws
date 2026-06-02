@@ -1154,4 +1154,47 @@ dev = []
       });
     });
   });
+
+  it('should generate with infra=none then upgrade to infra=lambda', async () => {
+    tree.write(
+      'apps/test_project/project.json',
+      JSON.stringify({
+        name: 'test-project',
+        root: 'apps/test_project',
+        sourceRoot: 'apps/test_project/test_project',
+        targets: {},
+      }),
+    );
+    tree.write(
+      'apps/test_project/pyproject.toml',
+      `[project]\n    dependencies = []\n`,
+    );
+
+    await pyLambdaFunctionGenerator(tree, {
+      project: 'test-project',
+      name: 'test-function',
+      event: 'Any',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('apps/test_project/test_project/test_function.py'),
+    ).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await pyLambdaFunctionGenerator(tree, {
+      project: 'test-project',
+      name: 'test-function',
+      event: 'Any',
+      infra: 'lambda',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+      ),
+    ).toBeTruthy();
+  });
 });

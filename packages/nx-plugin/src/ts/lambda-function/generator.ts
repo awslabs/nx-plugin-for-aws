@@ -84,35 +84,39 @@ export const tsLambdaFunctionGenerator = async (
     functionPathFromProjectRoot,
   );
 
-  // Check that the project does not already have a lambda handler
-  if (tree.exists(functionPath)) {
+  const infra = schema.infra ?? 'lambda';
+  const handlerAlreadyExists = tree.exists(functionPath);
+
+  if (handlerAlreadyExists && infra === 'none') {
     throw new Error(
       `This project already has a lambda function with the name ${nameKebabCase}. Please remove the lambda function before running this generator or use a different name.`,
     );
   }
 
-  const iac = await resolveIac(tree, schema.iac);
-
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
-
   const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
 
-  await addLambdaFunctionInfra(tree, {
-    functionProjectName: projectConfig.name,
-    nameClassName: constructFunctionClassName,
-    nameKebabCase: constructFunctionNameKebabCase,
-    handler: 'index.handler',
-    runtime: 'node',
-    bundlePathFromRoot: joinPathFragments(
-      'dist',
-      dir,
-      'bundle',
-      bundleOutputDir,
-    ),
-    iac,
-  });
+  if (infra !== 'none') {
+    const iac = await resolveIac(tree, schema.iac);
+
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
+
+    await addLambdaFunctionInfra(tree, {
+      functionProjectName: projectConfig.name,
+      nameClassName: constructFunctionClassName,
+      nameKebabCase: constructFunctionNameKebabCase,
+      handler: 'index.handler',
+      runtime: 'node',
+      bundlePathFromRoot: joinPathFragments(
+        'dist',
+        dir,
+        'bundle',
+        bundleOutputDir,
+      ),
+      iac,
+    });
+  }
 
   const enhancedOptions = {
     ...schema,
@@ -122,12 +126,14 @@ export const tsLambdaFunctionGenerator = async (
     returnType: TS_HANDLER_RETURN_TYPES[schema.event],
   };
 
-  // Add a bundle target for the function
-  await addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: functionPathFromProjectRoot,
-    bundleOutputDir,
-    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-  });
+  if (infra !== 'none') {
+    // Add a bundle target for the function
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: functionPathFromProjectRoot,
+      bundleOutputDir,
+      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+    });
+  }
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);

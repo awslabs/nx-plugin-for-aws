@@ -75,23 +75,31 @@ export async function tsReactWebsiteGenerator(
     schema.directory || '.',
     schema.subDirectory || websiteNameKebabCase,
   );
+
+  const projectAlreadyExists = tree.exists(
+    joinPathFragments(websiteContentPath, 'project.json'),
+  );
+
   // TODO: consider exposing and supporting e2e tests
   const e2eTestRunner = 'none';
-  await applicationGenerator(tree, {
-    ...schema,
-    name: fullyQualifiedName,
-    directory: websiteContentPath,
-    routing: false,
-    e2eTestRunner,
-    linter: 'eslint',
-    bundler: 'vite',
-    unitTestRunner: 'vitest',
-    useProjectJson: true,
-    style: 'css',
-  });
 
-  // Replace with simpler sample source code
-  tree.delete(joinPathFragments(websiteContentPath, 'src'));
+  if (!projectAlreadyExists) {
+    await applicationGenerator(tree, {
+      ...schema,
+      name: fullyQualifiedName,
+      directory: websiteContentPath,
+      routing: false,
+      e2eTestRunner,
+      linter: 'eslint',
+      bundler: 'vite',
+      unitTestRunner: 'vitest',
+      useProjectJson: true,
+      style: 'css',
+    });
+
+    // Replace with simpler sample source code
+    tree.delete(joinPathFragments(websiteContentPath, 'src'));
+  }
 
   const projectConfiguration = readProjectConfiguration(
     tree,
@@ -100,8 +108,10 @@ export async function tsReactWebsiteGenerator(
 
   const targets = projectConfiguration.targets;
 
-  // Configure load:runtime-config target based on IaC provider
-  const iac = await resolveIac(tree, schema.iac);
+  const infra = schema.infra ?? 'cloudfront-s3';
+
+  // Configure load:runtime-config target based on IaC provider (only when infra is not none)
+  const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
   if (iac === 'cdk') {
     targets['load:runtime-config'] = {
@@ -130,59 +140,57 @@ export async function tsReactWebsiteGenerator(
         },
       },
     };
-  } else {
-    throw new Error(
-      `Unknown iac: ${iac}. Supported providers are: cdk, terraform`,
-    );
   }
 
-  const buildTarget = targets['build'];
-  targets['compile'] = {
-    dependsOn: ['bundle'],
-    executor: 'nx:run-commands',
-    outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
-    options: {
-      command: 'tsc --build tsconfig.app.json',
-      cwd: '{projectRoot}',
-    },
-  };
-  targets['bundle'] = {
-    ...buildTarget,
-    options: {
-      ...buildTarget.options,
-      outputPath: 'dist/{projectRoot}/bundle',
-    },
-  };
-  targets['build'] = {
-    dependsOn: [
-      'lint',
-      'compile',
-      'bundle',
-      'test',
-      ...(buildTarget.dependsOn ?? []),
-    ],
-    options: {
-      outputPath: 'dist/{projectRoot}/bundle',
-    },
-  };
-  targets['test'] = {
-    ...targets['test'],
-    options: {
-      ...(targets['test']?.options ?? {}),
-      reportsDirectory: '{workspaceRoot}/coverage/{projectRoot}',
-    },
-  };
+  if (!projectAlreadyExists) {
+    const buildTarget = targets['build'];
+    targets['compile'] = {
+      dependsOn: ['bundle'],
+      executor: 'nx:run-commands',
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
+      options: {
+        command: 'tsc --build tsconfig.app.json',
+        cwd: '{projectRoot}',
+      },
+    };
+    targets['bundle'] = {
+      ...buildTarget,
+      options: {
+        ...buildTarget.options,
+        outputPath: 'dist/{projectRoot}/bundle',
+      },
+    };
+    targets['build'] = {
+      dependsOn: [
+        'lint',
+        'compile',
+        'bundle',
+        'test',
+        ...(buildTarget.dependsOn ?? []),
+      ],
+      options: {
+        outputPath: 'dist/{projectRoot}/bundle',
+      },
+    };
+    targets['test'] = {
+      ...targets['test'],
+      options: {
+        ...(targets['test']?.options ?? {}),
+        reportsDirectory: '{workspaceRoot}/coverage/{projectRoot}',
+      },
+    };
 
-  // Add a serve-local target for running the website and its dependencies locally
-  targets['serve-local'] = {
-    executor: '@nx/vite:dev-server',
-    options: {
-      buildTarget: `${fullyQualifiedName}:build:development`,
-      hmr: true,
-      mode: 'serve-local',
-    },
-    continuous: true,
-  };
+    // Add a serve-local target for running the website and its dependencies locally
+    targets['serve-local'] = {
+      executor: '@nx/vite:dev-server',
+      options: {
+        buildTarget: `${fullyQualifiedName}:build:development`,
+        hmr: true,
+        mode: 'serve-local',
+      },
+      continuous: true,
+    };
+  }
 
   projectConfiguration.targets = sortObjectKeys(targets);
 
@@ -194,6 +202,7 @@ export async function tsReactWebsiteGenerator(
     {
       ux,
       framework: 'react',
+      infra,
     },
   );
 
@@ -206,18 +215,20 @@ export async function tsReactWebsiteGenerator(
     await sharedShadcnGenerator(tree);
   }
 
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  if (iac) {
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
 
-  await addWebsiteInfra(tree, {
-    iac,
-    websiteProjectName: fullyQualifiedName,
-    scopeAlias,
-    websiteContentPath: joinPathFragments('dist', websiteContentPath),
-    websiteNameKebabCase,
-    websiteNameClassName,
-  });
+    await addWebsiteInfra(tree, {
+      iac,
+      websiteProjectName: fullyQualifiedName,
+      scopeAlias,
+      websiteContentPath: joinPathFragments('dist', websiteContentPath),
+      websiteNameKebabCase,
+      websiteNameClassName,
+    });
+  }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;

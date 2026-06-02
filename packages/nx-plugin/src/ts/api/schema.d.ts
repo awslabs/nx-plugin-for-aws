@@ -9,7 +9,7 @@ export interface TsApiGeneratorSchema {
   name: string;
   framework?: 'trpc' | 'smithy';
   namespace?: string;
-  infra: 'rest-lambda' | 'http-lambda';
+  infra: 'rest-lambda' | 'http-lambda' | 'none';
   integrationPattern?: 'isolated' | 'shared';
   auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];

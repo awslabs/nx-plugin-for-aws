@@ -49,7 +49,6 @@ export const tsRdbGenerator = async (
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);
-  const iac = await resolveIac(tree, options.iac);
   const containers = await resolveContainers(tree, 'inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
@@ -57,10 +56,20 @@ export const tsRdbGenerator = async (
     subDirectory: options.subDirectory,
   });
 
-  await tsProjectGenerator(tree, {
-    name: options.name,
-    directory: options.directory,
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await tsProjectGenerator(tree, {
+      name: options.name,
+      directory: options.directory,
+    });
+  }
 
   updateJson(tree, joinPathFragments(dir, 'tsconfig.lib.json'), (tsConfig) => ({
     ...tsConfig,
@@ -113,38 +122,49 @@ export const tsRdbGenerator = async (
     projectConfig.root,
   );
   const fs = new FsCommands(tree);
-  await addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: 'src/migration-handler.ts',
-    bundleOutputDir: 'migration',
-  });
-  await addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: 'src/create-db-user-handler.ts',
-    bundleOutputDir: 'create-db-user',
-  });
-  const bundleTarget = projectConfig.targets['bundle'];
-  const rolldownCommand = bundleTarget.options.command;
-  delete bundleTarget.options.command;
-  bundleTarget.options = {
-    ...bundleTarget.options,
-    commands: [
-      fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-      fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-      fs.cp(
-        'prisma',
-        `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
-      ),
-      fs.cp(
-        'prisma.config.ts',
-        `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
-      ),
-      fs.cp(
-        'Dockerfile',
-        `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
-      ),
-      rolldownCommand,
-    ],
-    parallel: false,
-  };
+  const migrationBundleDir = joinPathFragments(
+    'dist',
+    projectConfig.root,
+    'bundle',
+    'migration',
+  );
+  const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
+
+  if (options.infra !== 'none') {
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: 'src/migration-handler.ts',
+      bundleOutputDir: 'migration',
+    });
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: 'src/create-db-user-handler.ts',
+      bundleOutputDir: 'create-db-user',
+    });
+    const bundleTarget = projectConfig.targets['bundle'];
+    const rolldownCommand = bundleTarget.options.command;
+    delete bundleTarget.options.command;
+    bundleTarget.options = {
+      ...bundleTarget.options,
+      commands: [
+        fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+        fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+        fs.cp(
+          'prisma',
+          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
+        ),
+        fs.cp(
+          'prisma.config.ts',
+          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
+        ),
+        fs.cp(
+          'Dockerfile',
+          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
+        ),
+        rolldownCommand,
+      ],
+      parallel: false,
+    };
+  }
+
   projectConfig.targets.generate = {
     executor: 'nx:run-commands',
     outputs: ['{projectRoot}/generated/prisma'],
@@ -193,23 +213,20 @@ export const tsRdbGenerator = async (
       },
     },
   };
-  const migrationBundleDir = joinPathFragments(
-    'dist',
-    projectConfig.root,
-    'bundle',
-    'migration',
-  );
-  const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
-  if (iac === 'terraform') {
-    projectConfig.targets['docker'] = {
-      cache: true,
-      executor: 'nx:run-commands',
-      options: {
-        command: `${containers} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
-      },
-      dependsOn: ['bundle'],
-    };
-    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+  if (options.infra !== 'none') {
+    const iac = await resolveIac(tree, options.iac);
+    if (iac === 'terraform') {
+      projectConfig.targets['docker'] = {
+        cache: true,
+        executor: 'nx:run-commands',
+        options: {
+          command: `${containers} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+        },
+        dependsOn: ['bundle'],
+      };
+      addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+    }
+    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
@@ -217,26 +234,29 @@ export const tsRdbGenerator = async (
     engine: options.engine,
   });
 
-  await sharedConstructsGenerator(tree, { iac });
-  await addRdbInfra(tree, {
-    iac,
-    projectName: fullyQualifiedName,
-    nameClassName,
-    nameKebabCase,
-    databasePackageAlias: toScopeAlias(fullyQualifiedName),
-    databaseName,
-    adminUser: databaseUser,
-    engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
-    migrationBundleDir,
-    createDbUserBundleDir: joinPathFragments(
-      'dist',
-      projectConfig.root,
-      'bundle',
-      'create-db-user',
-    ),
-    dockerImageTag,
-    containers,
-  });
+  if (options.infra !== 'none') {
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
+    await addRdbInfra(tree, {
+      iac,
+      projectName: fullyQualifiedName,
+      nameClassName,
+      nameKebabCase,
+      databasePackageAlias: toScopeAlias(fullyQualifiedName),
+      databaseName,
+      adminUser: databaseUser,
+      engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
+      migrationBundleDir,
+      createDbUserBundleDir: joinPathFragments(
+        'dist',
+        projectConfig.root,
+        'bundle',
+        'create-db-user',
+      ),
+      dockerImageTag,
+      containers,
+    });
+  }
 
   addDependenciesToPackageJson(
     tree,

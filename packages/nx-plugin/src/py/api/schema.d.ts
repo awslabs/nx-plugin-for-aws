@@ -7,7 +7,7 @@ import { IacOption } from '../../utils/iac';
 export interface PyApiGeneratorSchema {
   readonly name: string;
   readonly framework?: 'fastapi';
-  readonly infra: 'rest-lambda' | 'http-lambda';
+  readonly infra: 'rest-lambda' | 'http-lambda' | 'none';
   readonly integrationPattern?: 'isolated' | 'shared';
   readonly auth: 'iam' | 'cognito' | 'custom';
   readonly directory?: string;

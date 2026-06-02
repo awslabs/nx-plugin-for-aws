@@ -47,10 +47,13 @@ type EventSource =
   | 'VpcLatticeModel'
   | 'VpcLatticeV2Model';
 
+export type LambdaInfraOption = 'lambda' | 'none';
+
 export interface PyLambdaFunctionGeneratorSchema {
   readonly project: string;
   readonly name: string;
   readonly functionPath?: string;
   readonly event?: EventSource;
+  readonly infra?: LambdaInfraOption;
   readonly iac: IacOption;
 }

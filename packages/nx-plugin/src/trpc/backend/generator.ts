@@ -41,19 +41,17 @@ const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
   'rest-lambda::shared',
   'http-lambda::isolated',
   'http-lambda::shared',
+  'none::isolated',
+  'none::shared',
 ]);
 
 export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
-  validateTrpcInfraAndIntegrationPatternCombination(options);
-
-  const iac = await resolveIac(tree, options.iac);
-
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  if (options.infra !== 'none') {
+    validateTrpcInfraAndIntegrationPatternCombination(options);
+  }
 
   const apiNamespace = getNpmScopePrefix(tree);
   const apiNameKebabCase = kebabCase(options.name);
@@ -62,11 +60,21 @@ export async function tsTrpcApiGenerator(
   const backendName = apiNameKebabCase;
   const backendProjectName = `${apiNamespace}${backendName}`;
 
-  await tsProjectGenerator(tree, {
-    name: backendName,
-    directory: options.directory,
-    subDirectory: options.subDirectory,
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfigurationUnqualified(tree, backendProjectName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await tsProjectGenerator(tree, {
+      name: backendName,
+      directory: options.directory,
+      subDirectory: options.subDirectory,
+    });
+  }
 
   const projectConfig = readProjectConfigurationUnqualified(
     tree,
@@ -88,28 +96,36 @@ export async function tsTrpcApiGenerator(
     ...options,
   };
 
-  await addApiGatewayInfra(tree, {
-    apiProjectName: backendProjectName,
-    apiNameClassName,
-    apiNameKebabCase,
-    constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
-    backend: {
-      type: 'trpc',
-      projectAlias: enhancedOptions.backendProjectAlias,
-      bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
-      integrationPattern: getIntegrationPattern(options),
-      ...(options.auth === 'custom' && {
-        authorizerBundleOutputDir: joinPathFragments(
-          'dist',
-          backendRoot,
-          'bundle',
-          'authorizer',
-        ),
-      }),
-    },
-    auth: options.auth,
-    iac,
-  });
+  if (options.infra !== 'none') {
+    const iac = await resolveIac(tree, options.iac);
+
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
+
+    await addApiGatewayInfra(tree, {
+      apiProjectName: backendProjectName,
+      apiNameClassName,
+      apiNameKebabCase,
+      constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
+      backend: {
+        type: 'trpc',
+        projectAlias: enhancedOptions.backendProjectAlias,
+        bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
+        integrationPattern: getIntegrationPattern(options),
+        ...(options.auth === 'custom' && {
+          authorizerBundleOutputDir: joinPathFragments(
+            'dist',
+            backendRoot,
+            'bundle',
+            'authorizer',
+          ),
+        }),
+      },
+      auth: options.auth,
+      iac,
+    });
+  }
 
   projectConfig.metadata = {
     ...projectConfig.metadata,
@@ -139,20 +155,22 @@ export async function tsTrpcApiGenerator(
     },
   };
 
-  await addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: 'src/handler.ts',
-    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-  });
-
-  if (options.auth === 'custom') {
+  if (options.infra !== 'none') {
     await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/authorizer.ts',
-      bundleOutputDir: 'authorizer',
-      external: [/@aws-sdk\/.*/],
+      targetFilePath: 'src/handler.ts',
+      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
     });
-  }
 
-  addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+    if (options.auth === 'custom') {
+      await addTypeScriptBundleTarget(tree, projectConfig, {
+        targetFilePath: 'src/authorizer.ts',
+        bundleOutputDir: 'authorizer',
+        external: [/@aws-sdk\/.*/],
+      });
+    }
+
+    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+  }
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
 
@@ -170,7 +188,7 @@ export async function tsTrpcApiGenerator(
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
 
-  if (options.auth === 'custom') {
+  if (options.infra !== 'none' && options.auth === 'custom') {
     const authorizerType = options.infra === 'http-lambda' ? 'http' : 'rest';
     generateFiles(
       tree,
@@ -194,7 +212,7 @@ export async function tsTrpcApiGenerator(
   }
 
   // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
-  if (options.infra !== 'rest-lambda') {
+  if (options.infra !== 'rest-lambda' && options.infra !== 'none') {
     tree.delete(
       joinPathFragments(backendRoot, 'src', 'schema', 'z-async-iterable.ts'),
     );

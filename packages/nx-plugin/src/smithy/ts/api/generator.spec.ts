@@ -819,4 +819,25 @@ describe('tsSmithyApiGenerator', () => {
     expect(tree.exists('packages/apis/backend')).toBeTruthy();
     expect(tree.exists('packages/apis/backend/src')).toBeTruthy();
   });
+
+  it('should generate with infra=none then upgrade to infra=rest-lambda', async () => {
+    await tsSmithyApiGenerator(tree, {
+      name: 'upgrade-api',
+      infra: 'none',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('upgrade-api/backend/src')).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    await tsSmithyApiGenerator(tree, {
+      name: 'upgrade-api',
+      infra: 'rest-lambda',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
 });

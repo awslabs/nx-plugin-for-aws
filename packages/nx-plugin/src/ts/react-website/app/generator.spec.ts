@@ -424,9 +424,7 @@ describe('react-website generator', () => {
             ...options,
             iac: 'InvalidProvider' as any,
           }),
-        ).rejects.toThrow(
-          'Unknown iac: InvalidProvider. Supported providers are: cdk, terraform',
-        );
+        ).rejects.toThrow('Unsupported iac InvalidProvider');
       });
 
       it('should handle terraform with different directory structures', async () => {
@@ -594,9 +592,7 @@ describe('react-website generator', () => {
           ...options,
           iac: 'UnknownProvider' as any,
         }),
-      ).rejects.toThrow(
-        'Unknown iac: UnknownProvider. Supported providers are: cdk, terraform',
-      );
+      ).rejects.toThrow('Unsupported iac UnknownProvider');
     });
 
     it('should configure load:runtime-config target with custom directory for Terraform', async () => {
@@ -681,6 +677,29 @@ describe('react-website generator', () => {
     expect(tree.exists('packages/websites')).toBeTruthy();
     expect(tree.exists('packages/websites/src')).toBeTruthy();
     expect(tree.exists('packages/websites/src/main.tsx')).toBeTruthy();
+  });
+
+  describe('infra=none idempotency', () => {
+    it('should generate with infra=none then upgrade to infra=cloudfront-s3', async () => {
+      await tsReactWebsiteGenerator(tree, { ...options, infra: 'none' });
+
+      const projectJson = JSON.parse(
+        tree.read('test-app/project.json', 'utf-8'),
+      );
+      expect(projectJson.targets['load:runtime-config']).toBeUndefined();
+      expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        infra: 'cloudfront-s3',
+      });
+
+      const updatedProjectJson = JSON.parse(
+        tree.read('test-app/project.json', 'utf-8'),
+      );
+      expect(updatedProjectJson.targets['load:runtime-config']).toBeDefined();
+      expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    });
   });
 });
 

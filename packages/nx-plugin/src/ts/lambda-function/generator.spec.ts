@@ -282,16 +282,48 @@ describe('ts-lambda-function generator', () => {
     );
   });
 
-  it('should throw error if lambda function already exists', async () => {
+  it('should throw error if lambda function already exists and infra is none', async () => {
     // Create the lambda function file first
     tree.write(
       'packages/test-project/src/test-function.ts',
       '// existing file',
     );
 
-    await expect(tsLambdaFunctionGenerator(tree, options)).rejects.toThrow(
+    await expect(
+      tsLambdaFunctionGenerator(tree, { ...options, infra: 'none' }),
+    ).rejects.toThrow(
       'This project already has a lambda function with the name test-function',
     );
+  });
+
+  it('should generate with infra=none then upgrade to infra=lambda', async () => {
+    await tsLambdaFunctionGenerator(tree, { ...options, infra: 'none' });
+
+    expect(
+      tree.exists('packages/test-project/src/test-function.ts'),
+    ).toBeTruthy();
+
+    const projectJson = JSON.parse(
+      tree.read('packages/test-project/project.json', 'utf-8'),
+    );
+    expect(projectJson.targets['bundle']).toBeUndefined();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+      ),
+    ).toBeFalsy();
+
+    await tsLambdaFunctionGenerator(tree, { ...options, infra: 'lambda' });
+
+    const updatedProjectJson = JSON.parse(
+      tree.read('packages/test-project/project.json', 'utf-8'),
+    );
+    expect(updatedProjectJson.targets['bundle']).toBeDefined();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+      ),
+    ).toBeTruthy();
   });
 
   it('should throw error if project has no tsconfig.json', async () => {

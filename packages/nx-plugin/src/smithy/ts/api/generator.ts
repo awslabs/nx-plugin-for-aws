@@ -43,7 +43,10 @@ export const tsSmithyApiGenerator = async (
   tree: Tree,
   options: TsSmithyApiGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  if ((options.infra as string) !== 'rest-lambda') {
+  if (
+    (options.infra as string) !== 'rest-lambda' &&
+    (options.infra as string) !== 'none'
+  ) {
     throw new Error(
       `Unsupported infra '${options.infra}' for Smithy TypeScript API. ` +
         `Only 'rest-lambda' (API Gateway REST API) is supported.`,
@@ -57,14 +60,31 @@ export const tsSmithyApiGenerator = async (
     getTsLibDetails(tree, options);
   const modelProjectName = `${apiNameKebabCase}-model`;
 
-  // Generate the model project
-  await smithyProjectGenerator(tree, {
-    name: modelProjectName,
-    serviceName: apiNameClassName,
-    namespace: options.namespace,
-    directory: dir,
-    subDirectory: 'model',
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfigurationUnqualified(tree, backendFullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    // Generate the model project
+    await smithyProjectGenerator(tree, {
+      name: modelProjectName,
+      serviceName: apiNameClassName,
+      namespace: options.namespace,
+      directory: dir,
+      subDirectory: 'model',
+    });
+
+    // Generate the backend project
+    await tsProjectGenerator(tree, {
+      name: options.name,
+      directory: dir,
+      subDirectory: 'backend',
+    });
+  }
 
   // Add metadata to associate backend project with model project
   const modelProjectConfig = readProjectConfigurationUnqualified(
@@ -77,13 +97,6 @@ export const tsSmithyApiGenerator = async (
       ...modelProjectConfig.metadata,
       backendProject: backendFullyQualifiedName,
     } as any,
-  });
-
-  // Generate the backend project
-  await tsProjectGenerator(tree, {
-    name: options.name,
-    directory: dir,
-    subDirectory: 'backend',
   });
 
   addGeneratorMetadata(
@@ -116,84 +129,86 @@ export const tsSmithyApiGenerator = async (
     },
   );
 
-  if (options.auth === 'custom') {
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        '..',
-        '..',
-        '..',
-        'utils',
-        'api-constructs',
-        'files',
-        'cdk',
-        'authorizer',
-        'rest',
-      ),
-      backendProjectConfig.sourceRoot,
-      {},
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
-  }
+  if (options.infra !== 'none') {
+    if (options.auth === 'custom') {
+      generateFiles(
+        tree,
+        joinPathFragments(
+          __dirname,
+          '..',
+          '..',
+          '..',
+          'utils',
+          'api-constructs',
+          'files',
+          'cdk',
+          'authorizer',
+          'rest',
+        ),
+        backendProjectConfig.sourceRoot,
+        {},
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        },
+      );
+    }
 
-  // Add infrastructure
-  const iac = await resolveIac(tree, options.iac);
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
-  await addApiGatewayInfra(tree, {
-    iac,
-    apiProjectName: backendFullyQualifiedName,
-    apiNameClassName,
-    apiNameKebabCase,
-    auth: options.auth,
-    constructType: 'rest', // While possible in theory, Smithy doesn't support HTTP APIs
-    backend: {
-      type: 'smithy',
-      bundleOutputDir: joinPathFragments(
-        'dist',
-        backendProjectConfig.root,
-        'bundle',
-      ),
-      integrationPattern,
-      ...(options.auth === 'custom' && {
-        authorizerBundleOutputDir: joinPathFragments(
+    // Add infrastructure
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, {
+      iac,
+    });
+    await addApiGatewayInfra(tree, {
+      iac,
+      apiProjectName: backendFullyQualifiedName,
+      apiNameClassName,
+      apiNameKebabCase,
+      auth: options.auth,
+      constructType: 'rest',
+      backend: {
+        type: 'smithy',
+        bundleOutputDir: joinPathFragments(
           'dist',
           backendProjectConfig.root,
           'bundle',
-          'authorizer',
         ),
-      }),
-    },
-  });
-  addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
-    iac,
-    apiNameKebabCase,
-    specPath: joinPathFragments(
-      'dist',
-      modelProjectConfig.root,
-      'build',
-      'openapi',
-      'openapi.json',
-    ),
-    specBuildTargetName: `${modelProjectConfig.name}:build`,
-  });
-
-  // Add bundle target using rolldown
-  await addTypeScriptBundleTarget(tree, backendProjectConfig, {
-    targetFilePath: 'src/handler.ts',
-    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-  });
-
-  if (options.auth === 'custom') {
-    await addTypeScriptBundleTarget(tree, backendProjectConfig, {
-      targetFilePath: 'src/authorizer.ts',
-      bundleOutputDir: 'authorizer',
-      external: [/@aws-sdk\/.*/],
+        integrationPattern,
+        ...(options.auth === 'custom' && {
+          authorizerBundleOutputDir: joinPathFragments(
+            'dist',
+            backendProjectConfig.root,
+            'bundle',
+            'authorizer',
+          ),
+        }),
+      },
     });
+    addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
+      iac,
+      apiNameKebabCase,
+      specPath: joinPathFragments(
+        'dist',
+        modelProjectConfig.root,
+        'build',
+        'openapi',
+        'openapi.json',
+      ),
+      specBuildTargetName: `${modelProjectConfig.name}:build`,
+    });
+
+    // Add bundle target using rolldown
+    await addTypeScriptBundleTarget(tree, backendProjectConfig, {
+      targetFilePath: 'src/handler.ts',
+      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+    });
+
+    if (options.auth === 'custom') {
+      await addTypeScriptBundleTarget(tree, backendProjectConfig, {
+        targetFilePath: 'src/authorizer.ts',
+        bundleOutputDir: 'authorizer',
+        external: [/@aws-sdk\/.*/],
+      });
+    }
   }
 
   const cmd = new FsCommands(tree);
