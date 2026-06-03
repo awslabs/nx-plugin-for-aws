@@ -11,5 +11,6 @@ export interface PresetGeneratorSchema {
   readonly addTsPlugin?: boolean;
   readonly iac: Iac;
   readonly gitSecrets?: boolean;
+  readonly mcp?: boolean;
   readonly containers?: PresetContainersOption;
 }
