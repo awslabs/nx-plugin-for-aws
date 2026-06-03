@@ -7,6 +7,7 @@ import {
   UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
 import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+import { timeoutSignal } from './utils.js';
 
 const [tableName, port] = process.argv.slice(2);
 const endpoint = `http://localhost:${port}`;
@@ -27,6 +28,7 @@ const waitForTableActive = async (
   for (;;) {
     const { Table } = await waitClient.send(
       new DescribeTableCommand({ TableName: waitTableName }),
+      { abortSignal: timeoutSignal() },
     );
     const allActive =
       Table?.TableStatus === 'ACTIVE' &&
@@ -80,6 +82,7 @@ const ensureTable = async (
             GlobalSecondaryIndexes: globalSecondaryIndexes,
           }),
         }),
+        { abortSignal: timeoutSignal() },
       );
       console.log(`Created table: ${tblName}`);
       for (const gsi of globalSecondaryIndexes) {
@@ -91,6 +94,7 @@ const ensureTable = async (
       if (e instanceof ResourceInUseException) {
         const { Table } = await tblClient.send(
           new DescribeTableCommand({ TableName: tblName }),
+          { abortSignal: timeoutSignal() },
         );
         const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
         const existingNames = new Set(
@@ -111,6 +115,7 @@ const ensureTable = async (
                 { Delete: { IndexName: existing.IndexName } },
               ],
             }),
+            { abortSignal: timeoutSignal() },
           );
           console.log(`Deleted GSI: ${existing.IndexName}`);
           await waitForTableActive(tblClient, tblName);
@@ -138,6 +143,7 @@ const ensureTable = async (
                 },
               ],
             }),
+            { abortSignal: timeoutSignal() },
           );
           console.log(`Created GSI: ${gsi.indexName}`);
           await waitForTableActive(tblClient, tblName);

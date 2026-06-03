@@ -11,6 +11,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { formatFilesInSubtree } from '../../../utils/format';
 
 export const TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -42,6 +43,7 @@ export const tsDynamoDBAgentConnectionGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [
     TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO,
   ]);
+  await formatFilesInSubtree(tree);
 };
 
 export default tsDynamoDBAgentConnectionGenerator;
