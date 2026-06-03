@@ -87,20 +87,8 @@ export const tsDynamoDBGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app'),
+    joinPathFragments(__dirname, 'files'),
     dir,
-    templateOptions,
-  );
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'scripts', 'common'),
-    joinPathFragments(dir, 'scripts'),
-    templateOptions,
-  );
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'scripts', containerEngine),
-    joinPathFragments(dir, 'scripts'),
     templateOptions,
   );
 
