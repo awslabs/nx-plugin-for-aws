@@ -77,7 +77,7 @@ The default `npm install @aws/nx-plugin` always resolves to the stable 0.x versi
 On `main` (first prerelease):
 
 ```bash
-pnpm nx release --yes --skip-publish --specifier premajor --preid rc
+pnpm nx release --skip-publish --specifier premajor --preid rc
 pnpm nx release publish --tag next
 # Publishes 1.0.0-rc.0 to "next" dist-tag
 ```
@@ -85,7 +85,7 @@ pnpm nx release publish --tag next
 On `main` (subsequent prereleases, after v1.0.0-rc.0 tag exists):
 
 ```bash
-pnpm nx release --yes --skip-publish --preid rc
+pnpm nx release --skip-publish --preid rc
 pnpm nx release publish --tag next
 # Publishes 1.0.0-rc.N to "next" dist-tag
 ```
@@ -93,7 +93,7 @@ pnpm nx release publish --tag next
 On `release/0.x` (stable):
 
 ```bash
-pnpm nx release --yes --skip-publish
+pnpm nx release --skip-publish
 pnpm nx release publish --tag latest
 # Publishes 0.x.y to "latest" dist-tag
 ```
