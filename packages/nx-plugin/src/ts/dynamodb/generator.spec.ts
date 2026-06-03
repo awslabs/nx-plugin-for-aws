@@ -107,11 +107,14 @@ describe('ts#dynamodb generator', () => {
       iac: 'terraform',
     });
     expect(
-      tree.read('packages/common/terraform/src/core/dynamodb.tf', 'utf-8'),
+      tree.read(
+        'packages/common/terraform/src/core/dynamodb/dynamodb.tf',
+        'utf-8',
+      ),
     ).toMatchSnapshot();
     expect(
       tree.read(
-        'packages/common/terraform/src/app/dynamodb/my-table.tf',
+        'packages/common/terraform/src/app/dynamodb/my-table/my-table.tf',
         'utf-8',
       ),
     ).toMatchSnapshot();

@@ -244,6 +244,24 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
+  // DynamoDB connections — tRPC, Smithy, TS agent, TS MCP server.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=@e2e-test/my-table --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-smithy-api --targetProject=@e2e-test/my-table --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-ts-agent --targetProject=@e2e-test/my-table --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-mcp-server --targetProject=@e2e-test/my-table --no-interactive`,
+    opts,
+  );
+
   // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iacProvider inherited.
   await runCLI(
     `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
