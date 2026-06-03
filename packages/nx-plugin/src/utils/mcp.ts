@@ -18,7 +18,7 @@ export const NX_PLUGIN_MCP_SERVER_COMMAND = 'npx';
 /**
  * Arguments used to launch the Nx Plugin for AWS MCP server.
  */
-export const NX_PLUGIN_MCP_SERVER_ARGS = ['-y', '@aws/nx-plugin-mcp'];
+export const NX_PLUGIN_MCP_SERVER_ARGS = ['-y', '@aws/nx-plugin-mcp@next'];
 
 /**
  * A single stdio MCP server entry, shared by agents that use the `mcpServers` config shape.

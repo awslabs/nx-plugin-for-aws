@@ -123,7 +123,7 @@ describe('preset generator', () => {
     expect(readJson(tree, '.mcp.json').mcpServers['nx-plugin-for-aws']).toEqual(
       {
         command: 'npx',
-        args: ['-y', '@aws/nx-plugin-mcp'],
+        args: ['-y', '@aws/nx-plugin-mcp@next'],
       },
     );
   });
