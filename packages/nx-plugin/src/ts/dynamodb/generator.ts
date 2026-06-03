@@ -46,7 +46,6 @@ export const tsDynamoDBGenerator = async (
   const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
   const localTableName = `${getNpmScope(tree)}-${kebabCase(options.tableName ?? options.name)}`;
-  const iac = await resolveIac(tree, options.iac);
   const containerEngine = await resolveContainers(tree, 'inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
@@ -54,10 +53,20 @@ export const tsDynamoDBGenerator = async (
     subDirectory: options.subDirectory,
   });
 
-  await tsProjectGenerator(tree, {
-    name: options.name,
-    directory: options.directory,
-  });
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await tsProjectGenerator(tree, {
+      name: options.name,
+      directory: options.directory,
+    });
+  }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
@@ -121,15 +130,18 @@ export const tsDynamoDBGenerator = async (
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
   addGeneratorMetadata(tree, fullyQualifiedName, TS_DYNAMODB_GENERATOR_INFO);
 
-  await sharedConstructsGenerator(tree, { iac: iac });
-  await addDynamoDBInfra(tree, {
-    iac,
-    projectName: fullyQualifiedName,
-    nameClassName,
-    nameKebabCase,
-    dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
-    tableName: localTableName,
-  });
+  if (options.infra !== 'none') {
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
+    await addDynamoDBInfra(tree, {
+      iac,
+      projectName: fullyQualifiedName,
+      nameClassName,
+      nameKebabCase,
+      dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
+      tableName: localTableName,
+    });
+  }
 
   addDependenciesToPackageJson(
     tree,

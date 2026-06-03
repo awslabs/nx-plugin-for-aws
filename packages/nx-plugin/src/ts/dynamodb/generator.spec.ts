@@ -27,6 +27,7 @@ describe('ts#dynamodb generator', () => {
   const defaultOptions = {
     name: 'MyTable',
     directory: 'packages',
+    infra: 'dynamodb' as const,
     iac: 'cdk' as const,
   };
 
@@ -173,6 +174,24 @@ describe('ts#dynamodb generator', () => {
     expect(secondConfig.targets['serve-local'].options.commands[0]).toContain(
       `${portOf(firstConfig)}`,
     );
+  });
+
+  it('should generate with infra=none then upgrade to infra=dynamodb', async () => {
+    await tsDynamoDBGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+    snapshotTreeDir(tree, 'packages/my-table/src');
+    snapshotTreeDir(tree, 'packages/my-table/scripts');
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+    const projectJson = JSON.parse(
+      tree.read('packages/my-table/project.json', 'utf-8'),
+    );
+    expect(projectJson.targets['pull-image']).toBeDefined();
+    expect(projectJson.targets['serve-local']).toBeDefined();
+
+    await tsDynamoDBGenerator(tree, defaultOptions);
+
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
   });
 
   it('should use custom tableName when provided', async () => {

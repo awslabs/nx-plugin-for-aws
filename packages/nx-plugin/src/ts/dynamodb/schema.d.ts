@@ -9,5 +9,6 @@ export interface TsDynamoDBGeneratorSchema {
   directory?: string;
   subDirectory?: string;
   tableName?: string;
+  infra: 'dynamodb' | 'none';
   iac: IacOption;
 }
