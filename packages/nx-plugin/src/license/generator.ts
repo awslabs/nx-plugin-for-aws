@@ -97,6 +97,21 @@ const writeLicenseCheckTarget = (tree: Tree): void => {
     options: {},
   };
   tree.write(rootProjectJsonPath, JSON.stringify(rootProject, null, 2));
+
+  // Adding a root project.json registers the workspace root as an Nx project.
+  // Suppress target inference from the root package.json scripts (build, lint,
+  // test, etc. are `nx run-many` wrappers) so they don't become targets — an
+  // inferred `build` target would recurse when running `nx run-many --target build`.
+  if (tree.exists('package.json')) {
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8')!);
+    if (
+      !packageJson.nx?.includedScripts ||
+      packageJson.nx.includedScripts.length !== 0
+    ) {
+      packageJson.nx = { ...packageJson.nx, includedScripts: [] };
+      tree.write('package.json', JSON.stringify(packageJson, null, 2));
+    }
+  }
 };
 
 const addExceptionsForExistingProjects = async (tree: Tree): Promise<void> => {

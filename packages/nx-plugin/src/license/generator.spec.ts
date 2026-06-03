@@ -109,6 +109,27 @@ describe('license generator', () => {
       );
     });
 
+    it('should suppress root package.json script target inference', async () => {
+      // The root package.json has `nx run-many` wrapper scripts (build, lint,
+      // test). Adding a root project.json registers the root as a project, so
+      // we must set includedScripts: [] to stop Nx inferring a recursive
+      // `build` target from those scripts.
+      tree.write(
+        'package.json',
+        JSON.stringify({
+          name: '@test/source',
+          scripts: { build: 'nx run-many --target build' },
+        }),
+      );
+
+      await licenseGenerator(tree, options);
+
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8')!);
+      expect(packageJson.nx.includedScripts).toEqual([]);
+      // The build wrapper script is preserved
+      expect(packageJson.scripts.build).toBe('nx run-many --target build');
+    });
+
     it('should not write license-check target when dependencyCheck is false', async () => {
       await licenseGenerator(tree, { ...options, dependencyCheck: false });
 
