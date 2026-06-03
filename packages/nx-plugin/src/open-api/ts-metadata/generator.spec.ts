@@ -2,12 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { Spec } from '../utils/types';
-import { openApiTsMetadataGenerator } from './generator';
+import type { Tree } from '@nx/devkit';
 import { importTypeScriptModule } from '../../utils/js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+import type { Spec } from '../utils/types';
+import { openApiTsMetadataGenerator } from './generator';
 
 describe('openApiTsMetadataGenerator', () => {
   let tree: Tree;

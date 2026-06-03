@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+
+import TOML from '@iarna/toml';
 import { execSync } from 'child_process';
 import { glob as fastGlob } from 'fast-glob';
-import TOML from '@iarna/toml';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { uvxCommand } from '../../../utils/py';
 
 export interface PythonDependency {

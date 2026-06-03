@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { GeneratorCallback, Tree } from '@nx/devkit';
-import { TsDocsGeneratorSchema } from './schema';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import type { GeneratorCallback, Tree } from '@nx/devkit';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { tsAstroDocsGenerator } from '../astro-docs/generator';
+import type { TsDocsGeneratorSchema } from './schema';
 
 export const TS_DOCS_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

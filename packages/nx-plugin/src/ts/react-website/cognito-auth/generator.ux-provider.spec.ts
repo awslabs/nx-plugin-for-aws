@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { tsReactWebsiteAuthGenerator } from './generator';
-import { TsReactWebsiteAuthGeneratorSchema } from './schema';
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { SUPPORTED_UX_PROVIDERS } from '../app/generator';
+import { tsReactWebsiteAuthGenerator } from './generator';
+import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
 describe('cognito-auth generator ux tests', () => {
   let tree: Tree;
@@ -59,15 +59,14 @@ describe('cognito-auth generator ux tests', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
-    'should run generator without error for ux=%s',
-    async (ux) => {
-      setupTree(ux);
+  it.each(
+    SUPPORTED_UX_PROVIDERS.map((p) => [p]),
+  )('should run generator without error for ux=%s', async (ux) => {
+    setupTree(ux);
 
-      // If this test fails, you need to implement support for this ux provider in this generator!
-      await tsReactWebsiteAuthGenerator(tree, options);
-    },
-  );
+    // If this test fails, you need to implement support for this ux provider in this generator!
+    await tsReactWebsiteAuthGenerator(tree, options);
+  });
 
   describe('None', () => {
     beforeEach(() => {

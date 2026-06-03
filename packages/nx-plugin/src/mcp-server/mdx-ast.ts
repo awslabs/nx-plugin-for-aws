@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import yaml from 'js-yaml';
 import type { Root, RootContent, Yaml } from 'mdast';
 import type {
   MdxJsxAttribute,
@@ -9,7 +11,6 @@ import type {
   MdxJsxFlowElement,
   MdxJsxTextElement,
 } from 'mdast-util-mdx-jsx';
-import yaml from 'js-yaml';
 import { parseWhenExpression } from './option-filter';
 
 export type JsxParent = Root | MdxJsxFlowElement | MdxJsxTextElement;

@@ -2,10 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, beforeEach } from 'vitest';
-import { Tree } from '@nx/devkit';
+
+import type { Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { formatFilesInSubtree } from './format';
 import { createTreeUsingTsSolutionSetup } from './test';
+
 describe('format utils', () => {
   let tree: Tree;
   beforeEach(() => {
@@ -24,32 +26,33 @@ describe('format utils', () => {
       });
       // Execute
       await formatFilesInSubtree(tree, 'src');
-      // Verify - these should match prettier's default formatting
+      // Verify - these should match biome's formatting with our default config
       expect(tree.read('src/test1.ts')?.toString()).toBe(
-        'const x = 1;\nconst y = 2;\nconst z = 3;\n'
+        'const x = 1;\nconst y = 2;\nconst z = 3;\n',
       );
       expect(tree.read('src/test2.ts')?.toString()).toBe(
-        'function test() {\n  return true;\n}\n'
+        'function test() {\n  return true;\n}\n',
       );
       // Files outside src should remain unformatted
       expect(tree.read('other/test3.ts')?.toString()).toBe('const y=2;');
     });
-    it('should use prettier config from tree if available', async () => {
-      // Setup
+    it('should use biome config from tree if available', async () => {
+      // Setup - biome config with no semicolons
       tree.write(
-        '.prettierrc',
+        'biome.json',
         JSON.stringify({
-          semi: false,
-          singleQuote: true,
-          tabWidth: 2,
-        })
+          formatter: { indentStyle: 'space', indentWidth: 2 },
+          javascript: {
+            formatter: { quoteStyle: 'single', semicolons: 'asNeeded' },
+          },
+        }),
       );
       tree.write('src/test.ts', 'const x=1;const y="hello";');
       // Execute
       await formatFilesInSubtree(tree, 'src');
-      // Verify - should respect prettier config
+      // Verify - should respect biome config (no semicolons, single quotes)
       expect(tree.read('src/test.ts')?.toString()).toBe(
-        "const x = 1\nconst y = 'hello'\n"
+        "const x = 1\nconst y = 'hello'\n",
       );
     });
     it('should not format deleted files', async () => {

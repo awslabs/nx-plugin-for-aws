@@ -2,12 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { runCheck, formatReport } from './check';
-import { AllowlistEntry } from './types';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { formatReport, runCheck } from './check';
+import type { AllowlistEntry } from './types';
 
 const allow: AllowlistEntry[] = [
   { spdxId: 'MIT', fullName: 'MIT License', aliases: [] },

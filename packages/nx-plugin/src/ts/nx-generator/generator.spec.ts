@@ -2,18 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
-import {
-  tsNxGeneratorGenerator,
-  NX_GENERATOR_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import NxPluginForAwsPackageJson from '../../../package.json';
-import NxPluginForAwsProjectJson from '../../../project.json';
+import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
 import * as fs from 'fs';
 import * as path from 'path';
+import NxPluginForAwsPackageJson from '../../../package.json';
+import NxPluginForAwsProjectJson from '../../../project.json';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import {
+  NX_GENERATOR_GENERATOR_INFO,
+  tsNxGeneratorGenerator,
+} from './generator';
 
 describe('nx-generator generator', () => {
   describe('within @aws/nx-plugin', () => {

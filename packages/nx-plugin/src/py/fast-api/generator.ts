@@ -3,40 +3,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  type GeneratorCallback,
   generateFiles,
-  GeneratorCallback,
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   ProjectConfiguration,
   readProjectConfiguration,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { PyFastApiProjectGeneratorSchema } from './schema';
-import { UVProvider, Logger } from '../../utils/nxlv-python';
-import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { toClassName, toKebabCase } from '../../utils/names';
+import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
-import { sortObjectKeys } from '../../utils/object';
+import { FsCommands } from '../../utils/fs';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { toClassName, toKebabCase } from '../../utils/names';
 import {
-  NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
-import { FsCommands } from '../../utils/fs';
-import { addOpenApiGeneration } from './react/open-api';
+import { Logger, UVProvider } from '../../utils/nxlv-python';
+import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
-import { resolveIac } from '../../utils/iac';
-import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
+import { addOpenApiGeneration } from './react/open-api';
+import type { PyFastApiProjectGeneratorSchema } from './schema';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -2,12 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { generateFiles, joinPathFragments, Tree } from '@nx/devkit';
-import { join } from 'path';
+import { generateFiles, joinPathFragments, type Tree } from '@nx/devkit';
 import { createJiti } from 'jiti';
-import { AwsNxPluginConfig } from '.';
+import { join } from 'path';
 import { applyGritQL, matchGritQL } from '../ast';
 import { formatFilesInSubtree } from '../format';
+import type { AwsNxPluginConfig } from '.';
 
 export const AWS_NX_PLUGIN_CONFIG_FILE_NAME = 'aws-nx-plugin.config.mts';
 

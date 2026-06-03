@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { withVersions, TS_VERSIONS } from './versions';
+import { TS_VERSIONS, withVersions } from './versions';
+
 describe('versions utils', () => {
   describe('withVersions', () => {
     it('should return empty object for empty dependencies array', () => {

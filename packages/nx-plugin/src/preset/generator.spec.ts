@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readJson, readNxJson } from '@nx/devkit';
-import { presetGenerator, isAmazonian } from './generator';
-import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { readJson, readNxJson, type Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
+import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
+import { isAmazonian, presetGenerator } from './generator';
 
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
@@ -26,6 +26,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { execSync } from 'child_process';
 import { readAwsNxPluginConfig } from '../utils/config/utils';
+
 const mockExecSync = execSync as ReturnType<typeof vi.fn>;
 
 describe('preset generator', () => {

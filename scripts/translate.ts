@@ -235,7 +235,8 @@ Both values are locale codes (e.g. ISO 639-1 / BCP-47 style, or common short for
 You have one tool available: \`fileEditor\`. Use it to:
 - Read the source file (\`command: "view"\`). For large files you can read a portion at a time using \`view_range\`, then request the next range.
 - Read the existing translation if one is provided (\`command: "view"\`).
-- Write the translated file (\`command: "create"\` — it overwrites).
+- Apply a targeted edit to the existing translation (\`command: "str_replace"\` with \`old_str\`/\`new_str\`).
+- Write a brand new file (\`command: "create"\` — it overwrites).
 
 Translation rules:
 1. Translate natural-language prose into the target language. Keep technical accuracy.
@@ -249,9 +250,9 @@ Translation rules:
    - Translate only string values for the \`title\` and \`description\` keys.
    - Leave \`date\`, \`authors\`, \`template\`, \`slug\`, and all other keys untouched.
 5. If any localised link paths embed the source locale (e.g. \`/${config.sourceLanguage}/foo\`), rewrite them to the target locale (\`/${targetLang}/foo\`).
-6. Efficiency rule: if an existing translation is provided AND a diff is provided, reuse the existing translation verbatim for any section of the document that is NOT touched by the diff. Only retranslate sections that actually changed. Still emit the complete final file.
-7. If no existing translation exists, translate the whole file.
-8. Never wrap the file output in triple backticks.
+6. Incremental edits (IMPORTANT for large files): if an existing translation AND a diff are provided, do NOT rewrite the whole file. Instead apply one \`str_replace\` per changed region, translating only the prose the diff touched and leaving every other section of the existing translation untouched. Rewriting a large file in full with \`create\` can exceed output limits and fail; \`str_replace\` keeps each edit small and reliable.
+7. Only use \`command: "create"\` when no existing translation exists, then translate the whole file.
+8. Never wrap output in triple backticks.
 9. Always use absolute paths with \`fileEditor\`.
 
 When the translated file has been written, reply with a one-line summary and stop.`;
@@ -267,8 +268,19 @@ function buildUserPrompt(file: FileToTranslate, targetLang: string): string {
     : 'There is no prior diff for this file — treat it as new content and translate in full.';
 
   const existingBlock = existingTranslationExists
-    ? `An existing translation for locale \`${targetLang}\` already lives at:\n  \`${targetAbsPath}\`\nRead it with \`fileEditor\` (\`command: "view"\`) before writing so you can reuse any sections that have not changed.`
-    : `No existing translation exists yet — you will create it fresh.`;
+    ? `An existing translation for locale \`${targetLang}\` already lives at:\n  \`${targetAbsPath}\`\nRead it with \`fileEditor\` (\`command: "view"\`) and update it in place with \`str_replace\` edits for the changed regions only.`
+    : `No existing translation exists yet, so you will create it fresh.`;
+
+  const steps = existingTranslationExists
+    ? `Steps:
+1. Read the source file (use \`view_range\` slices if it is long) to see the current English content.
+2. Read the existing translation at the target path.
+3. For each region the diff changed, apply a \`str_replace\` to the target file: match the corresponding existing translated text in \`old_str\` and put the newly translated text in \`new_str\`. Do NOT rewrite the whole file with \`create\` — large files fail that way.
+4. Reply with a single short confirmation line.`
+    : `Steps:
+1. Read the source file. If it is long, read it in slices using \`view_range\`.
+2. Write the full translated file to the target path using \`command: "create"\`.
+3. Reply with a single short confirmation line.`;
 
   return `Translate one file from source locale \`${config.sourceLanguage}\` into target locale \`${targetLang}\`.
 
@@ -279,12 +291,18 @@ ${existingBlock}
 
 ${diffBlock}
 
-Steps:
-1. Read the source file. If it is long, read it in slices using \`view_range\`.
-2. If an existing translation is present, read it first so you can reuse unchanged sections.
-3. Write the full translated file to the target path using \`command: "create"\`.
-4. Reply with a single short confirmation line.`;
+${steps}`;
 }
+
+/**
+ * Number of times to retry a single (file x language) translation when the
+ * Bedrock stream drops mid-message. Large files occasionally hit transient
+ * streaming errors; a fresh agent invocation re-reads the source and existing
+ * translation, so retries are idempotent.
+ */
+const TRANSLATE_MAX_ATTEMPTS = 4;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function translateFileForLanguage(
   file: FileToTranslate,
@@ -295,25 +313,50 @@ async function translateFileForLanguage(
     ? (await fs.stat(targetAbsPath)).mtimeMs
     : 0;
 
-  const agent = new Agent({
-    model: new BedrockModel({
-      modelId: config.modelId,
-      region: process.env.AWS_REGION ?? config.awsRegion,
-      maxTokens: 64_000,
-      temperature: 0.2,
-    }),
-    systemPrompt: buildSystemPrompt(targetLang),
-    tools: [fileEditor],
-    printer: !!options.verbose,
-  });
-  agent.addHook(BeforeToolCallEvent, rejectOutsideDocsDir);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= TRANSLATE_MAX_ATTEMPTS; attempt++) {
+    const agent = new Agent({
+      model: new BedrockModel({
+        modelId: config.modelId,
+        region: process.env.AWS_REGION ?? config.awsRegion,
+        maxTokens: 64_000,
+        temperature: 0.2,
+      }),
+      systemPrompt: buildSystemPrompt(targetLang),
+      tools: [fileEditor],
+      printer: !!options.verbose,
+    });
+    agent.addHook(BeforeToolCallEvent, rejectOutsideDocsDir);
 
-  const result = await agent.invoke(buildUserPrompt(file, targetLang));
+    try {
+      const result = await agent.invoke(buildUserPrompt(file, targetLang));
+      if (result.stopReason !== 'endTurn') {
+        log.warn(
+          `agent stopped with reason=${result.stopReason} while translating ${file.relativePath} → ${targetLang} — inspect output above`,
+        );
+      }
+      lastError = undefined;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (attempt < TRANSLATE_MAX_ATTEMPTS) {
+        const delayMs = 2000 * attempt;
+        log.warn(
+          `translation attempt ${attempt}/${TRANSLATE_MAX_ATTEMPTS} for ${file.relativePath} → ${targetLang} failed (${err instanceof Error ? err.message : String(err)}); retrying in ${delayMs}ms`,
+        );
+        await sleep(delayMs);
+      }
+    }
+  }
 
-  if (result.stopReason !== 'endTurn') {
-    log.warn(
-      `agent stopped with reason=${result.stopReason} while translating ${file.relativePath} → ${targetLang} — inspect output above`,
-    );
+  // If every attempt errored but the file was nonetheless written this run
+  // (the agent often completes the fileEditor write before the final summary
+  // stream drops), treat it as success. Otherwise surface the last error.
+  const wroteThisRun =
+    fs.existsSync(targetAbsPath) &&
+    (await fs.stat(targetAbsPath)).mtimeMs > beforeMtimeMs;
+  if (lastError && !wroteThisRun) {
+    throw lastError;
   }
 
   // Sanity check: the target file should now exist and have been written during this run.
@@ -660,7 +703,10 @@ async function main() {
   }
 
   // Build one task per (file × target language) — each is a fresh agent invocation,
-  // so context windows stay small no matter how big the docs site is.
+  // so context windows stay small no matter how big the docs site is. A single
+  // failing translation records its error rather than aborting the whole run, so
+  // every other (file × language) still completes and gets written to disk.
+  const failures: string[] = [];
   const tasks = targetLanguages.flatMap((lang) =>
     files.map((file) => async () => {
       log.info(`  ${file.relativePath} → ${lang}`);
@@ -670,7 +716,7 @@ async function main() {
         log.error(
           `${file.relativePath} → ${lang}: ${err instanceof Error ? err.message : String(err)}`,
         );
-        throw err;
+        failures.push(`${file.relativePath} → ${lang}`);
       }
     }),
   );
@@ -680,6 +726,12 @@ async function main() {
     `Running ${tasks.length} translation(s) with concurrency=${concurrency}`,
   );
   await runWithConcurrency(tasks, concurrency);
+
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} translation(s) failed after retries:\n  ${failures.join('\n  ')}`,
+    );
+  }
 
   log.info('Done.');
 }

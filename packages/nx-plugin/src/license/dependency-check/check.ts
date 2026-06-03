@@ -2,10 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createEvaluator } from './evaluator';
-import { DEFAULT_COLLECTORS, LicenseCollector } from './collectors/collector';
+
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
 import {
+  DEFAULT_COLLECTORS,
+  type LicenseCollector,
+} from './collectors/collector';
+import { createEvaluator } from './evaluator';
+import type {
   CheckedDependency,
   CheckResult,
   DependencyCheckConfig,

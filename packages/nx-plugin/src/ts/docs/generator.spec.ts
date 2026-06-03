@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, Tree } from '@nx/devkit';
-import { tsDocsGenerator } from './generator';
+import { readJson, type Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { tsDocsGenerator } from './generator';
 
 describe('ts#docs generator', () => {
   let tree: Tree;

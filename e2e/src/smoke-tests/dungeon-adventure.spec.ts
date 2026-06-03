@@ -2,7 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getPackageManagerCommand } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import {
   buildCreateNxWorkspaceCommand,
@@ -11,8 +14,6 @@ import {
   runCLI,
   tmpProjPath,
 } from '../utils';
-import { getPackageManagerCommand } from '@nx/devkit';
-import { join } from 'path';
 
 const isUpdateSnapshot = () =>
   (globalThis as any).__vitest_worker__?.config?.snapshotOptions

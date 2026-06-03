@@ -5,14 +5,14 @@
 import {
   addDependenciesToPackageJson,
   readNxJson,
-  Tree,
+  type Tree,
   updateNxJson,
 } from '@nx/devkit';
+import { readFileSync } from 'fs';
 import { join } from 'path';
-import { ConfigureProjectOptions } from './types';
 import { applyGritQL } from '../../utils/ast';
 import { withVersions } from '../../utils/versions';
-import { readFileSync } from 'fs';
+import type { ConfigureProjectOptions } from './types';
 
 const readGritPattern = (name: string): string =>
   readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();

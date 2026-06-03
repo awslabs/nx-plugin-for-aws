@@ -2,18 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readProjectConfiguration, Tree } from '@nx/devkit';
-import { TRPC_BACKEND_GENERATOR_INFO, tsTrpcApiGenerator } from './generator';
-import { TsTrpcApiGeneratorSchema } from './schema';
-import {
-  createTreeUsingTsSolutionSetup,
-  snapshotTreeDir,
-} from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../utils/test';
+import { TRPC_BACKEND_GENERATOR_INFO, tsTrpcApiGenerator } from './generator';
+import type { TsTrpcApiGeneratorSchema } from './schema';
 
 describe('trpc backend generator', () => {
   let tree: Tree;

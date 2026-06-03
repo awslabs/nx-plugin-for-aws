@@ -6,18 +6,18 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type Tree,
   updateJson,
 } from '@nx/devkit';
+import { addStarExport } from '../ast';
+import type { Containers } from '../containers';
+import type { Iac } from '../iac';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { addStarExport } from '../ast';
-import { Iac } from '../iac';
-import { Containers } from '../containers';
 
 type IACProvider = { iac: Iac };
 

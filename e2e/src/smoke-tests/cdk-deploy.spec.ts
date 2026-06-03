@@ -2,13 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
 import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
-import { join } from 'path';
-import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
-import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
-import { runSmokeTest } from './smoke-test';
 import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
@@ -21,6 +20,8 @@ import {
   invokeTrpcApi,
   pingWebsite,
 } from './deploy-invocations';
+import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
+import { runSmokeTest } from './smoke-test';
 
 /**
  * Delete any CloudFormation stacks matching the test run prefix that were

@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from './test';
-import { resolveIac } from './iac';
+import type { Tree } from '@nx/devkit';
 import {
+  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
 } from './config/utils';
+import { resolveIac } from './iac';
+import { createTreeUsingTsSolutionSetup } from './test';
 
 describe('iac utils', () => {
   let tree: Tree;

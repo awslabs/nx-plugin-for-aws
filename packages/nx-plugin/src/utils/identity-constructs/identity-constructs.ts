@@ -6,15 +6,15 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
 } from '@nx/devkit';
+import { addStarExport } from '../ast';
+import type { Iac } from '../iac';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { addStarExport } from '../ast';
-import { Iac } from '../iac';
 
 export interface AddIdentityInfraOptions {
   cognitoDomain: string;

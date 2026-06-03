@@ -5,40 +5,40 @@
 import {
   addDependenciesToPackageJson,
   ensurePackage,
-  GeneratorCallback,
+  type GeneratorCallback,
   installPackagesTask,
   joinPathFragments,
   readNxJson,
   readProjectConfiguration,
-  Tree,
+  type Tree,
   updateNxJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { PyProjectGeneratorSchema } from './schema';
-import {
-  migrateToSharedVenvGenerator,
-  uvProjectGenerator,
-  UVProvider,
-  Logger,
-} from '../../utils/nxlv-python';
-import { withVersions } from '../../utils/versions';
-import { getNpmScope } from '../../utils/npm-scope';
-import { toSnakeCase } from '../../utils/names';
-import { sortObjectKeys } from '../../utils/object';
-import { updateGitIgnore } from '../../utils/git';
-import {
-  NxGeneratorInfo,
-  addGeneratorMetadata,
-  getGeneratorInfo,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { updateToml } from '../../utils/toml';
-import { addDependenciesToDependencyGroupInPyProjectToml } from '../../utils/py';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import {
   addLicenseCheckToLintTarget,
   ensurePythonLicenseCollector,
 } from '../../license/config';
+import { updateGitIgnore } from '../../utils/git';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { toSnakeCase } from '../../utils/names';
+import { getNpmScope } from '../../utils/npm-scope';
+import {
+  addGeneratorMetadata,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+} from '../../utils/nx';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
+import {
+  Logger,
+  migrateToSharedVenvGenerator,
+  UVProvider,
+  uvProjectGenerator,
+} from '../../utils/nxlv-python';
+import { sortObjectKeys } from '../../utils/object';
+import { addDependenciesToDependencyGroupInPyProjectToml } from '../../utils/py';
+import { updateToml } from '../../utils/toml';
+import { withVersions } from '../../utils/versions';
+import type { PyProjectGeneratorSchema } from './schema';
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

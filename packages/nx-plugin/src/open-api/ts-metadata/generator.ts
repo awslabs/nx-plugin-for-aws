@@ -2,12 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { generateFiles, Tree } from '@nx/devkit';
-import { OpenApiTsMetadataGeneratorSchema } from './schema';
-import { formatFilesInSubtree } from '../../utils/format';
+import { generateFiles, type Tree } from '@nx/devkit';
 import path from 'path';
-import { CodeGenData } from '../utils/codegen-data/types';
+import { formatFilesInSubtree } from '../../utils/format';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
+import type { CodeGenData } from '../utils/codegen-data/types';
+import type { OpenApiTsMetadataGeneratorSchema } from './schema';
 
 /**
  * Generates typescript metadata from an openapi spec

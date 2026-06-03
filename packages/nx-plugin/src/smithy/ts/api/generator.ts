@@ -3,38 +3,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsSmithyApiGeneratorSchema } from './schema';
+import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
+import { addApiGatewayInfra } from '../../../utils/api-constructs/api-constructs';
+import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
+import { addTypeScriptBundleTarget } from '../../../utils/bundle/bundle';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { FsCommands } from '../../../utils/fs';
+import { updateGitIgnore } from '../../../utils/git';
+import { resolveIac } from '../../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { toClassName, toKebabCase } from '../../../utils/names';
 import {
-  NxGeneratorInfo,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { resolveIac } from '../../../utils/iac';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { toClassName, toKebabCase } from '../../../utils/names';
-import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
 import { assignPort } from '../../../utils/port';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { withVersions } from '../../../utils/versions';
 import smithyProjectGenerator from '../../project/generator';
-import { addTypeScriptBundleTarget } from '../../../utils/bundle/bundle';
-import { updateGitIgnore } from '../../../utils/git';
-import { addIgnoresToEslintConfig } from '../../../ts/lib/eslint';
-import { FsCommands } from '../../../utils/fs';
-import { addApiGatewayInfra } from '../../../utils/api-constructs/api-constructs';
-import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
+import type { TsSmithyApiGeneratorSchema } from './schema';
 
 export const TS_SMITHY_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -279,11 +278,6 @@ export const tsSmithyApiGenerator = async (
     ...patterns,
     'src/generated',
   ]);
-  await addIgnoresToEslintConfig(
-    tree,
-    joinPathFragments(backendProjectConfig.root, 'eslint.config.mjs'),
-    ['**/generated'],
-  );
 
   updateProjectConfiguration(
     tree,

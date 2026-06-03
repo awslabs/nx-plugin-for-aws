@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
-import { tsAgentGenerator, TS_AGENT_GENERATOR_INFO } from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { TS_AGENT_GENERATOR_INFO, tsAgentGenerator } from './generator';
 
 describe('ts#agent generator', () => {
   let tree: Tree;

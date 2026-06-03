@@ -2,16 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
+import type { Spec } from '../utils/types';
+import openApiTsClientGenerator from './generator';
 import {
   callGeneratedClientStreaming,
-  mockStreamingFetch,
   mockJsonlStreamingFetch,
+  mockStreamingFetch,
 } from './generator.utils.spec';
-import { Spec } from '../utils/types';
-import openApiTsClientGenerator from './generator';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 
 describe('openApiTsClientGenerator - streaming', () => {
   let tree: Tree;

@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { PackageManager } from '@nx/devkit';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { PackageManager } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
-import { join } from 'path';
 import { afterEach, beforeEach, describe, it } from 'vitest';
+import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 export const runSmokeTest = async (
@@ -92,7 +93,7 @@ export interface SmokeTestOptions {
    * clean environment (e.g. activating yarn 4 via corepack). Returning a
    * teardown function registers it for `afterEach`.
    */
-  setup?: () => void | (() => void);
+  setup?: () => undefined | (() => void);
   onProjectCreate?: (projectRoot: string) => void;
 }
 
@@ -102,7 +103,7 @@ export const smokeTest = (
 ) => {
   const variant = options.variant ?? pkgMgr;
   describe(`smoke test - ${variant}`, () => {
-    let teardown: (() => void) | void;
+    let teardown: (() => void) | undefined;
     beforeEach(() => {
       teardown = options.setup?.();
       const targetDir = `${tmpProjPath()}/${variant}`;

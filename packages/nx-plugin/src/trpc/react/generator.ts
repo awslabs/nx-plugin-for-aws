@@ -8,22 +8,22 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
 } from '@nx/devkit';
-import { ReactGeneratorSchema } from './schema';
+import { addTargetToServeLocal } from '../../connection/serve-local';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
-import { toScopeAlias } from '../../utils/npm-scope';
-import { withVersions } from '../../utils/versions';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
-import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { toClassName } from '../../utils/names';
+import { toScopeAlias } from '../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addTargetToServeLocal } from '../../connection/serve-local';
+import { withVersions } from '../../utils/versions';
+import type { ReactGeneratorSchema } from './schema';
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

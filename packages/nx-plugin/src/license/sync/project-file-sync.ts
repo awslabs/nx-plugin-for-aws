@@ -2,9 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { generateFiles, joinPathFragments, Tree, updateJson } from '@nx/devkit';
-import { LicenseSourceConfig } from '../config-types';
+import {
+  generateFiles,
+  joinPathFragments,
+  type Tree,
+  updateJson,
+} from '@nx/devkit';
 import { updateToml } from '../../utils/toml';
+import type { LicenseSourceConfig } from '../config-types';
 
 /**
  * Different project files with licensing information to be synchronised

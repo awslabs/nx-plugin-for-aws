@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, joinPathFragments } from '@nx/devkit';
+import { joinPathFragments, type Tree } from '@nx/devkit';
 import { applyGritQL } from './ast';
 import { formatFilesInSubtree } from './format';
-import { NxGeneratorInfo, getPackageVersion } from './nx';
+import { getPackageVersion, type NxGeneratorInfo } from './nx';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,

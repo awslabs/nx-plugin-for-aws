@@ -4,17 +4,17 @@
  */
 
 import {
-  Tree,
   getProjects,
   joinPathFragments,
   readJson,
+  type Tree,
   updateJson,
 } from '@nx/devkit';
+import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { relative } from 'path';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
-import { formatFilesInSubtree } from '../../utils/format';
-import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import PackageJson from '../../../package.json';
+import { formatFilesInSubtree } from '../../utils/format';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 
 export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -2,26 +2,26 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, updateJson } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import {
-  LAMBDA_FUNCTION_GENERATOR_INFO,
-  pyLambdaFunctionGenerator,
-} from './generator';
-import { pyMcpServerGenerator } from '../mcp-server/generator';
+
 import { parse } from '@iarna/toml';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import { joinPathFragments } from '@nx/devkit';
-import { sortObjectKeys } from '../../utils/object';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
+import { joinPathFragments, type Tree, updateJson } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
+import { sortObjectKeys } from '../../utils/object';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+} from '../../utils/shared-constructs-constants';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { pyMcpServerGenerator } from '../mcp-server/generator';
+import {
+  LAMBDA_FUNCTION_GENERATOR_INFO,
+  pyLambdaFunctionGenerator,
+} from './generator';
 
 describe('lambda-handler project generator', () => {
   let tree: Tree;

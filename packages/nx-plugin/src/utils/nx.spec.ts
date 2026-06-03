@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { ProjectConfiguration, Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from './test';
-import { expect, describe, it, beforeEach } from 'vitest';
+import type { ProjectConfiguration, Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  NxGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from './nx';
+import { createTreeUsingTsSolutionSetup } from './test';
 
 describe('readProjectConfigurationUnqualified', () => {
   let tree: Tree;

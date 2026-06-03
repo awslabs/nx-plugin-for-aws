@@ -2,15 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { Tree } from '@nx/devkit';
+import type { LicenseLinesContent } from '../../license/config-types';
 import {
+  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   ensureAwsNxPluginConfig,
   readAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
 } from './utils';
-import { LicenseLinesContent } from '../../license/config-types';
 
 describe('config utils', () => {
   let tree: Tree;

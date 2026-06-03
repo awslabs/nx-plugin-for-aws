@@ -2,22 +2,23 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import fs from 'fs';
+import path from 'path';
+import type { NxGeneratorInfo } from '../utils/generators';
 import { kebabCase } from '../utils/names';
-import { NxGeneratorInfo } from '../utils/generators';
-import { evaluatePredicate } from './option-filter';
+import { parseMdx, postProcessGuideWithRemark } from './guide-pipeline';
 import {
   buildNxCommand,
   renderGeneratorCommand,
   renderSchema,
 } from './guide-render';
-import { parseMdx, postProcessGuideWithRemark } from './guide-pipeline';
 import { collectFilterableKeysFromJsx, extractFrontmatter } from './mdx-ast';
+import { evaluatePredicate } from './option-filter';
 import {
   filterableOptionsFromSchema,
   type GeneratorSchema,
 } from './schema-registry';
-import fs from 'fs';
-import path from 'path';
 
 // Re-export so existing callers of `generator-info` continue working.
 export { buildNxCommand } from './guide-render';

@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { SPDXLicenseIdentifier } from './schema';
+
 import type { DependencyCheckConfig } from './dependency-check/types';
+import type { SPDXLicenseIdentifier } from './schema';
 
 export interface LicenseConfig {
   /**
@@ -47,9 +48,9 @@ export interface LicenseSourceConfig {
 }
 
 export type {
+  AllowlistEntry,
   DependencyCheckConfig,
   DependencyCheckException,
-  AllowlistEntry,
 } from './dependency-check/types';
 
 /**

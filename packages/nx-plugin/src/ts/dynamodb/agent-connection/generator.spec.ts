@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readProjectConfiguration } from '@nx/devkit';
-import { describe, it, expect, beforeEach } from 'vitest';
-import { tsDynamoDBAgentConnectionGenerator } from './generator';
+import { readProjectConfiguration, type Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { tsDynamoDBAgentConnectionGenerator } from './generator';
 
 describe('ts#dynamodb agent-connection generator', () => {
   let tree: Tree;

@@ -2,9 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+
+import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { addHookResultToRouterProviderContext } from './website';
 
 describe('website ast utils', () => {

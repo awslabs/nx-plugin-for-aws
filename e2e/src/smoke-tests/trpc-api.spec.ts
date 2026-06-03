@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync } from 'fs';
+import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import {

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { OpenAPIV3 } from 'openapi-types';
-import { Spec } from './types';
+import type { Spec } from './types';
 
 /**
  * Return whether or not the given OpenAPI object is a reference

@@ -3,42 +3,41 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
   detectPackageManager,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
   readJson,
+  type Tree,
   updateJson,
   updateProjectConfiguration,
   writeJson,
 } from '@nx/devkit';
-import { TsMcpServerGeneratorSchema } from './schema';
+import { ensureLicenseExceptions } from '../../license/config';
+import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { resolveContainers } from '../../utils/containers';
+import { formatFilesInSubtree } from '../../utils/format';
+import { FsCommands } from '../../utils/fs';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, toClassName } from '../../utils/names';
+import { getNpmScope } from '../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { TS_VERSIONS, withVersions } from '../../utils/versions';
-import { kebabCase, toClassName } from '../../utils/names';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-
-import { getNpmScope } from '../../utils/npm-scope';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
-import { FsCommands } from '../../utils/fs';
-import { ensureLicenseExceptions } from '../../license/config';
-import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import type { TsMcpServerGeneratorSchema } from './schema';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

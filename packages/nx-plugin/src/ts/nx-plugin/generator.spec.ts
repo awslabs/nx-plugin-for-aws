@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readProjectConfiguration, readJson } from '@nx/devkit';
-import { tsNxPluginGenerator, TS_NX_PLUGIN_GENERATOR_INFO } from './generator';
+import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { TS_NX_PLUGIN_GENERATOR_INFO, tsNxPluginGenerator } from './generator';
 
 describe('ts#nx-plugin generator', () => {
   let tree: Tree;

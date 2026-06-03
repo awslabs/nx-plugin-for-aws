@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { smokeTest } from './smoke-test';
+
 import { installFinch, setFinchAsContainerEngine } from './finch-install';
+import { smokeTest } from './smoke-test';
 
 // Runs the full generator matrix with `containers.engine: finch` to verify
 // every generator that ships container tooling honours the workspace

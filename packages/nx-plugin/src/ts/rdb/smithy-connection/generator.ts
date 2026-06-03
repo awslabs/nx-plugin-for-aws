@@ -3,27 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  Tree,
   joinPathFragments,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsRdbSmithyConnectionGeneratorSchema } from './schema';
-import {
-  NxGeneratorInfo,
-  addDependencyToTargetIfNotPresent,
-  getGeneratorInfo,
-  readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { pascalCase } from '../../../utils/names';
 import camelCase from 'lodash.camelcase';
-import { toScopeAlias } from '../../../utils/npm-scope';
 import {
   addDestructuredImport,
   applyGritQL,
   matchGritQL,
 } from '../../../utils/ast';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { pascalCase } from '../../../utils/names';
+import { toScopeAlias } from '../../../utils/npm-scope';
+import {
+  addDependencyToTargetIfNotPresent,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../../utils/nx';
+import type { TsRdbSmithyConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

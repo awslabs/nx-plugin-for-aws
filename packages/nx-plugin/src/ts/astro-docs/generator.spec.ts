@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, Tree } from '@nx/devkit';
-import {
-  tsAstroDocsGenerator,
-  TS_ASTRO_DOCS_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { readJson, type Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import {
+  TS_ASTRO_DOCS_GENERATOR_INFO,
+  tsAstroDocsGenerator,
+} from './generator';
 
 describe('ts#astro-docs generator', () => {
   let tree: Tree;

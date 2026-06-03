@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
-import { addTargetToServeLocal, ServeLocalOptions } from './serve-local';
+import { addTargetToServeLocal, type ServeLocalOptions } from './serve-local';
 
 describe('serve-local', () => {
   let tree: Tree;

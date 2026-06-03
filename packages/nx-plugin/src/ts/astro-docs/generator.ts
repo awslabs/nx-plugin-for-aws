@@ -3,28 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  ProjectConfiguration,
-  Tree,
   addDependenciesToPackageJson,
   addProjectConfiguration,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type ProjectConfiguration,
+  type Tree,
 } from '@nx/devkit';
-import { TsAstroDocsGeneratorSchema } from './schema';
+import { formatFilesInSubtree } from '../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { toKebabCase } from '../../utils/names';
+import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
-import { toKebabCase } from '../../utils/names';
-import { ITsDepVersion, withVersions } from '../../utils/versions';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+import { type ITsDepVersion, withVersions } from '../../utils/versions';
+import type { TsAstroDocsGeneratorSchema } from './schema';
 
 export const TS_ASTRO_DOCS_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

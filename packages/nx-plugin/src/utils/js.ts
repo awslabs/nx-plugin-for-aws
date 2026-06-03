@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import ts from 'typescript';
+
 import { dynamicImport } from '@nx/devkit/src/utils/config-utils';
+import ts from 'typescript';
 
 /**
  * Imports a javascript module from a string of js code

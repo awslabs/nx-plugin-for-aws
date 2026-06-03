@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { execSync } from 'child_process';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { output, PackageManager } from '@nx/devkit';
-import { existsSync } from 'fs';
+
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { output, type PackageManager } from '@nx/devkit';
 import { backOff } from 'exponential-backoff';
 // eslint-disable-next-line
 import { TS_VERSIONS } from '../../packages/nx-plugin/src/utils/versions';
@@ -173,4 +174,4 @@ export {
 } from '../../packages/nx-plugin/src/utils/commands';
 
 export const getDungeonAdventureElectroDbDependencies = () =>
-  `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']} @aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;
+  `electrodb@${TS_VERSIONS.electrodb} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']} @aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;

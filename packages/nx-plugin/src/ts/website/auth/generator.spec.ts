@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import {
-  tsWebsiteAuthGenerator,
-  TS_WEBSITE_AUTH_GENERATOR_INFO,
-} from './generator';
-import { TsWebsiteAuthGeneratorSchema } from './schema';
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
+import {
+  TS_WEBSITE_AUTH_GENERATOR_INFO,
+  tsWebsiteAuthGenerator,
+} from './generator';
+import type { TsWebsiteAuthGeneratorSchema } from './schema';
 
 describe('ts#website#auth generator', () => {
   let tree: Tree;

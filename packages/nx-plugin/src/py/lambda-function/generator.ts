@@ -3,38 +3,38 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  type GeneratorCallback,
   generateFiles,
-  GeneratorCallback,
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { PyLambdaFunctionGeneratorSchema } from './schema';
-import { UVProvider, Logger } from '../../utils/nxlv-python';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { formatFilesInSubtree } from '../../utils/format';
+import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
   toClassName,
   toDotNotation,
   toKebabCase,
   toSnakeCase,
 } from '../../utils/names';
-import { formatFilesInSubtree } from '../../utils/format';
 import { getNpmScope } from '../../utils/npm-scope';
-import { sortObjectKeys } from '../../utils/object';
 import {
-  NxGeneratorInfo,
   addComponentGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
+import { Logger, UVProvider } from '../../utils/nxlv-python';
+import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
-import { resolveIac } from '../../utils/iac';
+import { addDependenciesToPyProjectToml } from '../../utils/py';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import type { PyLambdaFunctionGeneratorSchema } from './schema';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

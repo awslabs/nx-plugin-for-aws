@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, beforeEach } from 'vitest';
-import { Tree, joinPathFragments } from '@nx/devkit';
+
+import { joinPathFragments, type Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { sharedConstructsGenerator } from './shared-constructs';
 import {
   PACKAGES_DIR,

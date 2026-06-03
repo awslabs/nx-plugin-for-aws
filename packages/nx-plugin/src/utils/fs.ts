@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addDependenciesToPackageJson, Tree } from '@nx/devkit';
+import { addDependenciesToPackageJson, type Tree } from '@nx/devkit';
 import { withVersions } from './versions';
 
 /**

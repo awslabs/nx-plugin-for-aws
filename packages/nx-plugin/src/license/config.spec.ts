@@ -2,7 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
+import { afterEach, beforeEach, vi } from 'vitest';
+import {
+  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+  readAwsNxPluginConfig,
+} from '../utils/config/utils';
+import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import {
   defaultLicenseConfig,
   ensureDependencyCheckBlock,
@@ -11,15 +17,9 @@ import {
   readLicenseConfig,
   writeLicenseConfig,
 } from './config';
-import { SPDXLicenseIdentifier } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
-import {
-  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-  readAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { LicenseSourceConfig } from './config-types';
-import { DependencyCheckException } from './dependency-check/types';
-import { beforeEach, afterEach, vi } from 'vitest';
+import type { LicenseSourceConfig } from './config-types';
+import type { DependencyCheckException } from './dependency-check/types';
+import type { SPDXLicenseIdentifier } from './schema';
 
 const LICENSES: SPDXLicenseIdentifier[] = ['Apache-2.0', 'MIT', 'ASL'];
 
@@ -53,14 +53,13 @@ describe('license config', () => {
   });
 
   describe('defaultLicenseConfig', () => {
-    it.each(LICENSES)(
-      'should generate default license config for %s',
-      (spdx) => {
-        expect(
-          defaultLicenseConfig(spdx, 'Test Inc. or its affiliates'),
-        ).toMatchSnapshot();
-      },
-    );
+    it.each(
+      LICENSES,
+    )('should generate default license config for %s', (spdx) => {
+      expect(
+        defaultLicenseConfig(spdx, 'Test Inc. or its affiliates'),
+      ).toMatchSnapshot();
+    });
   });
 
   describe('readLicenseConfig', () => {

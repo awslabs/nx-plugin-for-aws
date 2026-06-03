@@ -2,26 +2,26 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { Spec } from '../utils/types';
-import { openApiTsHooksGenerator } from './generator';
-import { importTypeScriptModule } from '../../utils/js';
-import { waitFor, render, fireEvent } from '@testing-library/react';
+import type { Tree } from '@nx/devkit';
 import {
   QueryClient,
   QueryClientProvider,
-  useQuery,
-  useMutation,
+  type UseInfiniteQueryResult,
+  type UseMutationResult,
+  type UseQueryResult,
   useInfiniteQuery,
-  UseQueryResult,
-  UseInfiniteQueryResult,
-  UseMutationResult,
+  useMutation,
+  useQuery,
 } from '@tanstack/react-query';
-import React from 'react';
-import { Mock } from 'vitest';
-import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
+import { fireEvent, render, waitFor } from '@testing-library/react';
+import type React from 'react';
+import type { Mock } from 'vitest';
+import { importTypeScriptModule } from '../../utils/js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
+import type { Spec } from '../utils/types';
+import { openApiTsHooksGenerator } from './generator';
 
 describe('openApiTsHooksGenerator', () => {
   let tree: Tree;

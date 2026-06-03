@@ -2,13 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { LicenseConfig } from '../../license/config-types';
-import { IacConfig } from '../iac';
-import { ContainersConfig } from '../containers';
+import type { LicenseConfig } from '../../license/config-types';
+import type { ContainersConfig } from '../containers';
+import type { IacConfig } from '../iac';
 
 export * from '../../license/config-types';
-export { IacConfig, Iac } from '../iac';
-export { ContainersConfig, Containers } from '../containers';
+export { Containers, ContainersConfig } from '../containers';
+export { Iac, IacConfig } from '../iac';
 
 /**
  * Configuration for the nx plugin

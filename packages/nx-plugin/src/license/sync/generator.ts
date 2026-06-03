@@ -2,26 +2,31 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { getProjects, globAsync, joinPathFragments, Tree } from '@nx/devkit';
-import { LANGUAGE_COMMENT_SYNTAX, readLicenseConfig } from '../config';
 import {
+  getProjects,
+  globAsync,
+  joinPathFragments,
+  type Tree,
+} from '@nx/devkit';
+import { glob as fastGlob } from 'fast-glob';
+import { minimatch } from 'minimatch';
+import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
+import { basename } from 'path';
+import PackageJson from '../../../package.json';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
+import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git';
+import { getGeneratorInfo } from '../../utils/nx';
+import { LANGUAGE_COMMENT_SYNTAX, readLicenseConfig } from '../config';
+import type {
   CommentSyntax,
   LicenseHeaderConfig,
   LicenseHeaderFormat,
 } from '../config-types';
-import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
-import { basename } from 'path';
-import { glob as fastGlob } from 'fast-glob';
-import { minimatch } from 'minimatch';
-import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git';
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
 import {
   PROJECT_FILES_TO_SYNC,
-  ProjectFileToSync,
+  type ProjectFileToSync,
   syncProjectFile,
 } from './project-file-sync';
-import { getGeneratorInfo } from '../../utils/nx';
-import PackageJson from '../../../package.json';
 
 export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${getGeneratorInfo(__filename).id}`;
 

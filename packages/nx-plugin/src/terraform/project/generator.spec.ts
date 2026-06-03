@@ -2,16 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readProjectConfiguration, readNxJson } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import {
-  terraformProjectGenerator,
-  TERRAFORM_PROJECT_GENERATOR_INFO,
-} from './generator';
-import { TerraformProjectGeneratorSchema } from './schema';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { readNxJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tsLibGenerator from '../../ts/lib/generator';
 import * as gitUtils from '../../utils/git';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import {
+  TERRAFORM_PROJECT_GENERATOR_INFO,
+  terraformProjectGenerator,
+} from './generator';
+import type { TerraformProjectGeneratorSchema } from './schema';
 
 describe('terraformProjectGenerator', () => {
   let tree: Tree;

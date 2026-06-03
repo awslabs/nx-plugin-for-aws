@@ -3,27 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsNxPluginGeneratorSchema } from './schema';
+import { formatFilesInSubtree } from '../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
-  NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
-import { configureTsProjectAsNxPlugin } from './utils';
 import tsMcpServerGenerator from '../mcp-server/generator';
+import type { TsNxPluginGeneratorSchema } from './schema';
+import { configureTsProjectAsNxPlugin } from './utils';
 
 export const TS_NX_PLUGIN_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -2,22 +2,27 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
-import { pyAgentGenerator, PY_AGENT_GENERATOR_INFO } from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+
 import { parse } from '@iarna/toml';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
-import { joinPathFragments } from '@nx/devkit';
 import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
+  addProjectConfiguration,
+  joinPathFragments,
+  type Tree,
+  writeJson,
+} from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+} from '../../utils/shared-constructs-constants';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator';
 
 describe('py#agent generator', () => {
   let tree: Tree;

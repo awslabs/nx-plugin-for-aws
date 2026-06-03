@@ -7,21 +7,21 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type Tree,
 } from '@nx/devkit';
-import { runtimeConfigGenerator } from '../runtime-config/generator';
-import { withVersions } from '../../../utils/versions';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
-import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import { kebabCase } from '../../../utils/names';
-import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
-import { toScopeAlias, getNpmScopePrefix } from '../../../utils/npm-scope';
+import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
+import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
+import { withVersions } from '../../../utils/versions';
+import { runtimeConfigGenerator } from '../runtime-config/generator';
 
 export type AgUiAuth = 'iam' | 'cognito' | 'none';
 

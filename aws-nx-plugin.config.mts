@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import type { AwsNxPluginConfig } from '@aws/nx-plugin';
 import {
   DEFAULT_LICENSE_ALLOWLIST,
   npmCollector,
@@ -34,12 +34,6 @@ export default {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [
-        {
-          package: 'eslint-plugin-local-custom-nx-plugin-for-aws-rules',
-          reason:
-            'First-party Apache-2.0 workspace tooling; license metadata is not exposed via the file: linked node_modules copy.',
-          spdx: 'Apache-2.0',
-        },
         {
           package: '@modelcontextprotocol/inspector',
           reason:

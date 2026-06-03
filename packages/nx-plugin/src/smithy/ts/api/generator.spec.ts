@@ -2,18 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, Tree } from '@nx/devkit';
-import {
-  tsSmithyApiGenerator,
-  TS_SMITHY_API_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { readJson, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import {
+  TS_SMITHY_API_GENERATOR_INFO,
+  tsSmithyApiGenerator,
+} from './generator';
 
 describe('tsSmithyApiGenerator', () => {
   let tree: Tree;
@@ -389,7 +389,7 @@ describe('tsSmithyApiGenerator', () => {
     expect(packageJson.devDependencies).toHaveProperty('@types/aws-lambda');
   });
 
-  it('should configure git and eslint ignores for generated code', async () => {
+  it('should configure git ignores for generated code', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',
       infra: 'rest-lambda',
@@ -401,15 +401,7 @@ describe('tsSmithyApiGenerator', () => {
     const gitignore = tree.read('test-api/backend/.gitignore', 'utf-8');
     expect(gitignore).toContain('src/generated');
 
-    // Verify eslint config
-    const eslintConfig = tree.read(
-      'test-api/backend/eslint.config.mjs',
-      'utf-8',
-    );
-    expect(eslintConfig).toContain('**/generated');
-
     expect(gitignore).toMatchSnapshot('gitignore');
-    expect(eslintConfig).toMatchSnapshot('eslint.config.mjs');
   });
 
   it('should configure bundle target', async () => {

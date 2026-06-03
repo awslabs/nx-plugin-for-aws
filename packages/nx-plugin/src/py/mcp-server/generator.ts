@@ -3,40 +3,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { PyMcpServerGeneratorSchema } from './schema';
-import {
-  NxGeneratorInfo,
-  addComponentGeneratorMetadata,
-  getGeneratorInfo,
-  readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { getNpmScope } from '../../utils/npm-scope';
-import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { FsCommands } from '../../utils/fs';
-import { withVersions } from '../../utils/versions';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
-import { assignPort } from '../../utils/port';
-import { toProjectRelativePath } from '../../utils/paths';
 import { ensureLicenseExceptions } from '../../license/config';
 import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { resolveContainers } from '../../utils/containers';
+import { formatFilesInSubtree } from '../../utils/format';
+import { FsCommands } from '../../utils/fs';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
+import { getNpmScope } from '../../utils/npm-scope';
+import {
+  addComponentGeneratorMetadata,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
+import { Logger, UVProvider } from '../../utils/nxlv-python';
+import { toProjectRelativePath } from '../../utils/paths';
+import { assignPort } from '../../utils/port';
+import { addDependenciesToPyProjectToml } from '../../utils/py';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
+import type { PyMcpServerGeneratorSchema } from './schema';
 
 export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

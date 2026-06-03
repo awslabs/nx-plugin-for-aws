@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockExecSync = vi.fn();
 vi.mock('child_process', () => ({
@@ -14,8 +14,9 @@ vi.mock('child_process', () => ({
 }));
 
 // Import after mock is set up
-const { collectPythonDependencies, findWorkspacePyProjectNames } =
-  await import('./python-collector');
+const { collectPythonDependencies, findWorkspacePyProjectNames } = await import(
+  './python-collector'
+);
 
 describe('python collector', () => {
   let dir: string;

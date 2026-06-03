@@ -3,41 +3,41 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { PyAgentMcpConnectionGeneratorSchema } from './schema';
 import {
-  NxGeneratorInfo,
-  addDependencyToTargetIfNotPresent,
-  getGeneratorInfo,
-  readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { snakeCase } from '../../../utils/names';
-import {
-  addDependenciesToPyProjectToml,
-  addWorkspaceDependencyToPyProject,
-} from '../../../utils/py';
-import {
-  ensurePythonAgentConnectionProject,
   addPythonCoreClient,
-  getPythonAgentConnectionProjectDir,
+  addPythonReExport,
+  ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
-  addPythonReExport,
+  getPythonAgentConnectionProjectDir,
 } from '../../../utils/agent-connection/agent-connection';
 import {
   addPythonDestructuredImport,
   applyGritQL,
   matchGritQL,
 } from '../../../utils/ast';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { snakeCase } from '../../../utils/names';
+import {
+  addDependencyToTargetIfNotPresent,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../../utils/nx';
+import {
+  addDependenciesToPyProjectToml,
+  addWorkspaceDependencyToPyProject,
+} from '../../../utils/py';
+import type { PyAgentMcpConnectionGeneratorSchema } from './schema';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;

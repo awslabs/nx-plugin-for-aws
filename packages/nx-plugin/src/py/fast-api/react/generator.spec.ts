@@ -2,17 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, updateJson } from '@nx/devkit';
+import { type Tree, updateJson } from '@nx/devkit';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
+import { matchGritQL } from '../../../utils/ast';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { pyFastApiProjectGenerator } from '../generator';
 import {
   FAST_API_REACT_GENERATOR_INFO,
   fastApiReactGenerator,
 } from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { matchGritQL } from '../../../utils/ast';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
-import { pyFastApiProjectGenerator } from '../generator';
 
 describe('fastapi react generator', () => {
   let tree: Tree;
@@ -455,110 +455,108 @@ export function Main() {
   });
 });
 
-describe(
-  'fastapi react generator with real react and trpc projects',
-  { timeout: 120_000 },
-  () => {
-    let tree: Tree;
+describe('fastapi react generator with real react and trpc projects', {
+  timeout: 120_000,
+}, () => {
+  let tree: Tree;
 
-    beforeEach(async () => {
-      tree = createTreeUsingTsSolutionSetup();
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
 
-      // Generate a react website
-      await tsReactWebsiteGenerator(tree, {
-        name: 'frontend',
-        skipInstall: true,
-        iac: 'cdk',
-      });
+    // Generate a react website
+    await tsReactWebsiteGenerator(tree, {
+      name: 'frontend',
+      skipInstall: true,
+      iac: 'cdk',
+    });
+  });
+
+  it('should configure serve-local integration with generated projects', async () => {
+    // Generate a fastapi
+    await pyFastApiProjectGenerator(tree, {
+      name: 'TestApi',
+      auth: 'custom',
+      infra: 'http-lambda',
+      iac: 'cdk',
     });
 
-    it('should configure serve-local integration with generated projects', async () => {
-      // Generate a fastapi
-      await pyFastApiProjectGenerator(tree, {
-        name: 'TestApi',
-        auth: 'custom',
-        infra: 'http-lambda',
-        iac: 'cdk',
-      });
-
-      await fastApiReactGenerator(tree, {
-        frontendProjectName: 'frontend',
-        fastApiProjectName: 'test_api',
-      });
-
-      // Read the frontend project configuration
-      const frontendProject = JSON.parse(
-        tree.read('frontend/project.json', 'utf-8'),
-      );
-
-      // Verify that serve-local target now depends on backend serve-local target
-      expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
-        projects: ['proj.test_api'],
-        target: 'serve-local',
-      });
-      // Should also depend on the generate target (for initial generation)
-      expect(frontendProject.targets['serve-local'].dependsOn).toContain(
-        'generate:test-api-client',
-      );
-      // Should also depend on the generate watch target (for ongoing changes)
-      expect(frontendProject.targets['serve-local'].dependsOn).toContain(
-        'watch-generate:test-api-client',
-      );
-
-      // Verify that the runtime config was created and modified
-      expect(
-        tree.exists('frontend/src/components/RuntimeConfig/index.tsx'),
-      ).toBeTruthy();
-
-      const runtimeConfigContent = tree.read(
-        'frontend/src/components/RuntimeConfig/index.tsx',
-        'utf-8',
-      );
-
-      // Verify that the runtime config includes the API override
-      expect(runtimeConfigContent).toContain('runtimeConfig.apis.TestApi');
-      expect(runtimeConfigContent).toContain('http://localhost:8000/');
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'test_api',
     });
 
-    it('should use correct port numbers in runtime config overrides', async () => {
-      // Generate first API
-      await pyFastApiProjectGenerator(tree, {
-        name: 'FirstApi',
-        auth: 'custom',
-        infra: 'http-lambda',
-        iac: 'cdk',
-      });
+    // Read the frontend project configuration
+    const frontendProject = JSON.parse(
+      tree.read('frontend/project.json', 'utf-8'),
+    );
 
-      // Generate second API
-      await pyFastApiProjectGenerator(tree, {
-        name: 'SecondApi',
-        auth: 'custom',
-        infra: 'http-lambda',
-        iac: 'cdk',
-      });
-
-      // Connect first API to frontend
-      await fastApiReactGenerator(tree, {
-        frontendProjectName: 'frontend',
-        fastApiProjectName: 'first_api',
-      });
-
-      // Connect second API to frontend
-      await fastApiReactGenerator(tree, {
-        frontendProjectName: 'frontend',
-        fastApiProjectName: 'second_api',
-      });
-
-      // Verify that the runtime config includes the correct port overrides
-      const runtimeConfigContent = tree.read(
-        'frontend/src/components/RuntimeConfig/index.tsx',
-        'utf-8',
-      );
-
-      expect(runtimeConfigContent).toContain('runtimeConfig.apis.FirstApi');
-      expect(runtimeConfigContent).toContain('http://localhost:8000/');
-      expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
-      expect(runtimeConfigContent).toContain('http://localhost:8001/');
+    // Verify that serve-local target now depends on backend serve-local target
+    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+      projects: ['proj.test_api'],
+      target: 'serve-local',
     });
-  },
-);
+    // Should also depend on the generate target (for initial generation)
+    expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+      'generate:test-api-client',
+    );
+    // Should also depend on the generate watch target (for ongoing changes)
+    expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+      'watch-generate:test-api-client',
+    );
+
+    // Verify that the runtime config was created and modified
+    expect(
+      tree.exists('frontend/src/components/RuntimeConfig/index.tsx'),
+    ).toBeTruthy();
+
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    // Verify that the runtime config includes the API override
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.TestApi');
+    expect(runtimeConfigContent).toContain('http://localhost:8000/');
+  });
+
+  it('should use correct port numbers in runtime config overrides', async () => {
+    // Generate first API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'FirstApi',
+      auth: 'custom',
+      infra: 'http-lambda',
+      iac: 'cdk',
+    });
+
+    // Generate second API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'SecondApi',
+      auth: 'custom',
+      infra: 'http-lambda',
+      iac: 'cdk',
+    });
+
+    // Connect first API to frontend
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'first_api',
+    });
+
+    // Connect second API to frontend
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'second_api',
+    });
+
+    // Verify that the runtime config includes the correct port overrides
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.FirstApi');
+    expect(runtimeConfigContent).toContain('http://localhost:8000/');
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
+    expect(runtimeConfigContent).toContain('http://localhost:8001/');
+  });
+});

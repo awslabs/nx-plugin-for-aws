@@ -2,21 +2,21 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { SPDXLicenseIdentifier } from './schema';
+import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
-import {
+import { formatFilesInSubtree } from '../utils/format';
+import { addDependencyToTargetIfNotPresent } from '../utils/nx';
+import type {
   CommentSyntax,
   LicenseConfig,
   LicenseSourceConfig,
 } from './config-types';
-import { DependencyCheckException } from './dependency-check/types';
-import { addDependencyToTargetIfNotPresent } from '../utils/nx';
-import { formatFilesInSubtree } from '../utils/format';
+import type { DependencyCheckException } from './dependency-check/types';
+import type { SPDXLicenseIdentifier } from './schema';
 
 /**
  * Licenses containing a placeholder for the copyright year.
@@ -168,8 +168,9 @@ const prependLicenseProperty = async (
   tree: Tree,
   property: string,
 ): Promise<boolean> => {
-  const { insertViaGritQL, GRIT_INSERT_PLACEHOLDER } =
-    await import('../utils/ast');
+  const { insertViaGritQL, GRIT_INSERT_PLACEHOLDER } = await import(
+    '../utils/ast'
+  );
 
   // Non-empty license object: insert before the first existing property.
   const intoNonEmpty = await insertViaGritQL(
@@ -293,7 +294,7 @@ export const addLicenseCheckToLintTarget = (
   const licenseCheckProject = findLicenseCheckProjectName(tree);
   if (!licenseCheckProject) return;
 
-  let project;
+  let project: ProjectConfiguration;
   try {
     project = readProjectConfiguration(tree, projectName);
   } catch {
@@ -387,8 +388,9 @@ export const ensureLicenseExceptions = async (
 ): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
-  const { insertViaGritQL, GRIT_INSERT_PLACEHOLDER } =
-    await import('../utils/ast');
+  const { insertViaGritQL, GRIT_INSERT_PLACEHOLDER } = await import(
+    '../utils/ast'
+  );
 
   if (!(await hasDependenciesBlock(tree))) {
     return;

@@ -4,15 +4,15 @@
  */
 import {
   joinPathFragments,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { applyGritQL } from '../utils/ast';
+import { toClassName } from '../utils/names';
 import {
   addDependencyToTargetIfNotPresent,
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
-import { toClassName } from '../utils/names';
 
 export interface ServeLocalOptions {
   apiName: string;

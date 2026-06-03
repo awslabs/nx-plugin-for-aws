@@ -2,13 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, Tree, updateJson } from '@nx/devkit';
+import { joinPathFragments, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
-import { toScopeAlias } from '../../utils/npm-scope';
-import { ConfigureProjectOptions } from './types';
-import { configureVitest } from './vitest';
-import { configureEslint } from './eslint';
 import { addLicenseCheckToLintTarget } from '../../license/config';
+import { toScopeAlias } from '../../utils/npm-scope';
+import { configureBiomeLint } from './biome';
+import type { ConfigureProjectOptions } from './types';
+import { configureVitest } from './vitest';
 
 /**
  * Updates typescript projects
@@ -92,7 +92,7 @@ export const configureTsProject = async (
     tree.delete(join(options.dir, 'package.json'));
   }
 
-  await configureEslint(tree, options);
+  await configureBiomeLint(tree, options);
   await configureVitest(tree, options);
 
   // If license checking is configured, make this project's lint target depend

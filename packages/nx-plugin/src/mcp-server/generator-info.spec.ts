@@ -2,13 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { NxGeneratorInfo } from '../utils/generators';
+
+import fs from 'fs';
+import type { NxGeneratorInfo } from '../utils/generators';
 import {
   fetchGuidePagesForGenerator,
   postProcessGuide,
   renderFilterableOptionsAsync,
 } from './generator-info';
-import fs from 'fs';
 
 describe('postProcessGuide', () => {
   const generators: NxGeneratorInfo[] = [

@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { TsApiGeneratorSchema } from './schema';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
-import { tsTrpcApiGenerator } from '../../trpc/backend/generator';
+import type { Tree } from '@nx/devkit';
 import { tsSmithyApiGenerator } from '../../smithy/ts/api/generator';
+import { tsTrpcApiGenerator } from '../../trpc/backend/generator';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
+import type { TsApiGeneratorSchema } from './schema';
 
 export const TS_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

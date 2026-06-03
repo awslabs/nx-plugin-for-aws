@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { GeneratorCallback, Tree } from '@nx/devkit';
-import { TsWebsiteGeneratorSchema } from './schema';
+import type { GeneratorCallback, Tree } from '@nx/devkit';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx';
 import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
-import { getGeneratorInfo, NxGeneratorInfo } from '../../../utils/nx';
+import type { TsWebsiteGeneratorSchema } from './schema';
 
 export const TS_WEBSITE_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, Tree } from '@nx/devkit';
+
+import { parse } from '@iarna/toml';
+import { readJson, type Tree } from '@nx/devkit';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { PY_PROJECT_GENERATOR_INFO, pyProjectGenerator } from './generator';
-import { parse } from '@iarna/toml';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('python project generator', () => {
   let tree: Tree;

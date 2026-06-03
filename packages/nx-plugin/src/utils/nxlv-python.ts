@@ -18,7 +18,7 @@
  * moduleResolution: "bundler" does not allow deep path type imports for
  * packages without proper exports.
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import path from 'path';
 
 // ---------------------------------------------------------------------------

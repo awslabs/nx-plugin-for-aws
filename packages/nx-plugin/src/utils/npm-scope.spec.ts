@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { getNpmScope, getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { createTreeUsingTsSolutionSetup } from './test';
+
 describe('npm-scope utils', () => {
   describe('getNpmScope', () => {
     it('should return monorepo when package.json does not exist', () => {

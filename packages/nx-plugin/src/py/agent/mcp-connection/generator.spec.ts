@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import {
-  pyAgentMcpConnectionGenerator,
-  PY_AGENT_MCP_CONNECTION_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import type { Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import {
+  PY_AGENT_MCP_CONNECTION_GENERATOR_INFO,
+  pyAgentMcpConnectionGenerator,
+} from './generator';
 
 describe('py#agent#mcp-connection generator', () => {
   let tree: Tree;

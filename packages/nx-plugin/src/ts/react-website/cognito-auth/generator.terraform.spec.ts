@@ -2,18 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import {
-  COGNITO_AUTH_GENERATOR_INFO,
-  tsReactWebsiteAuthGenerator,
-} from './generator';
-import { TsReactWebsiteAuthGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import type { Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { RUNTIME_CONFIG_GENERATOR_INFO } from '../runtime-config/generator';
+import {
+  COGNITO_AUTH_GENERATOR_INFO,
+  tsReactWebsiteAuthGenerator,
+} from './generator';
+import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
 describe('cognito-auth generator terraform iac', () => {
   let tree: Tree;

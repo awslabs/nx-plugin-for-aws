@@ -3,37 +3,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsAgentGeneratorSchema } from './schema';
+import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
+import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { resolveContainers } from '../../utils/containers';
+import { formatFilesInSubtree } from '../../utils/format';
+import { FsCommands } from '../../utils/fs';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, toClassName } from '../../utils/names';
+import { getNpmScope } from '../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { kebabCase, toClassName } from '../../utils/names';
-import { TS_VERSIONS, withVersions } from '../../utils/versions';
-import { getNpmScope } from '../../utils/npm-scope';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-
 import { assignPort } from '../../utils/port';
-import { FsCommands } from '../../utils/fs';
-import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import type { TsAgentGeneratorSchema } from './schema';
 
 export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

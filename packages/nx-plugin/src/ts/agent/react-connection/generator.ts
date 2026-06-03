@@ -8,29 +8,29 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
   updateJson,
 } from '@nx/devkit';
-import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
-import { toScopeAlias } from '../../../utils/npm-scope';
-import { withVersions } from '../../../utils/versions';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
-import { kebabCase, toClassName } from '../../../utils/names';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { kebabCase, toClassName } from '../../../utils/names';
+import { toScopeAlias } from '../../../utils/npm-scope';
 import {
-  ComponentMetadata,
-  NxGeneratorInfo,
+  type ComponentMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { addTsAgentTargetToServeLocal } from './serve-local';
-import { ResolvedConnectionOptions } from '../../../connection/generator';
-import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import { withVersions } from '../../../utils/versions';
 import {
+  type AgUiAuth,
   addAgUiReactConnection,
-  AgUiAuth,
 } from '../../react-website/agui/generator';
+import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
+import { addTsAgentTargetToServeLocal } from './serve-local';
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -2,16 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { tsDynamoDBGenerator, TS_DYNAMODB_GENERATOR_INFO } from './generator';
+import type { Tree } from '@nx/devkit';
+import { resolveContainers } from '../../utils/containers';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { resolveContainers } from '../../utils/containers';
+import { TS_DYNAMODB_GENERATOR_INFO, tsDynamoDBGenerator } from './generator';
 
 vi.mock('../../utils/containers', () => ({
   resolveContainers: vi.fn(),

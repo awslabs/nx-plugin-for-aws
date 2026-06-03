@@ -7,16 +7,16 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { kebabCase, toClassName } from '../../names';
-import { sortObjectKeys } from '../../object';
-import { updateGitIgnore } from '../../git';
+import { addTargetToServeLocal } from '../../../connection/serve-local';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../ast';
-import { addTargetToServeLocal } from '../../../connection/serve-local';
+import { updateGitIgnore } from '../../git';
+import { kebabCase, toClassName } from '../../names';
+import { sortObjectKeys } from '../../object';
 import { withVersions } from '../../versions';
 
 export interface AddOpenApiReactClientOptions {

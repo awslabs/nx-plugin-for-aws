@@ -2,25 +2,25 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+
+import { parse } from '@iarna/toml';
+import { joinPathFragments, type Tree } from '@nx/devkit';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
+import { sortObjectKeys } from '../../utils/object';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+} from '../../utils/shared-constructs-constants';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   FAST_API_GENERATOR_INFO,
   pyFastApiProjectGenerator,
 } from './generator';
-import { parse } from '@iarna/toml';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import { joinPathFragments } from '@nx/devkit';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
-import { sortObjectKeys } from '../../utils/object';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import {
-  ensureAwsNxPluginConfig,
-  updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
 
 describe('fastapi project generator', () => {
   let tree: Tree;
@@ -379,29 +379,31 @@ describe('fastapi project generator', () => {
     expectHasMetricTags(tree, FAST_API_GENERATOR_INFO.metric);
   });
 
-  it.each(['rest-lambda', 'http-lambda'])(
-    'should include CORS middleware in init.py when using %s infra',
-    async (infra: 'rest-lambda' | 'http-lambda') => {
-      await pyFastApiProjectGenerator(tree, {
-        name: 'test-api',
-        directory: 'apps',
-        infra,
-        auth: 'iam',
-        iac: 'cdk',
-      });
+  it.each([
+    'rest-lambda',
+    'http-lambda',
+  ])('should include CORS middleware in init.py when using %s infra', async (infra:
+    | 'rest-lambda'
+    | 'http-lambda') => {
+    await pyFastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+      infra,
+      auth: 'iam',
+      iac: 'cdk',
+    });
 
-      // Read the generated init.py file
-      const initPyContent = tree.read(
-        'apps/test_api/proj_test_api/init.py',
-        'utf-8',
-      );
+    // Read the generated init.py file
+    const initPyContent = tree.read(
+      'apps/test_api/proj_test_api/init.py',
+      'utf-8',
+    );
 
-      // Verify CORS origin is configured
-      expect(initPyContent).toContain(
-        'response.headers["Access-Control-Allow-Origin"] = cors_origin',
-      );
-    },
-  );
+    // Verify CORS origin is configured
+    expect(initPyContent).toContain(
+      'response.headers["Access-Control-Allow-Origin"] = cors_origin',
+    );
+  });
 
   it('should increment ports when running generator multiple times', async () => {
     // Generate first API

@@ -2,10 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createTree } from '@nx/devkit/testing';
-import { readJson, writeJson, Tree } from '@nx/devkit';
+
 import TOML from '@iarna/toml';
-import { describe, it, expect } from 'vitest';
+import { readJson, type Tree, writeJson } from '@nx/devkit';
+import { createTree } from '@nx/devkit/testing';
+import { describe, expect, it } from 'vitest';
 import { configureMcpServers, NX_PLUGIN_MCP_SERVER_NAME } from './mcp';
 
 describe('mcp utils', () => {

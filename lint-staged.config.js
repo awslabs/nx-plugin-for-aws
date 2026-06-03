@@ -3,9 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 module.exports = {
-  '{packages,e2e,docs}/**/*.{ts,tsx,js,json,md,html,css,scss}': [
-    'pnpm nx affected --target lint --uncommitted --fix true',
-    'pnpm nx format:write --uncommitted',
+  '{packages,e2e,docs}/**/*.{ts,tsx,js,json,css,scss}': [
+    'biome check --write --no-errors-on-unmatched',
   ],
-  '*.{js,md,json}': ['pnpm nx format:write --uncommitted'],
+  '*.{js,json}': ['biome check --write --no-errors-on-unmatched'],
 };

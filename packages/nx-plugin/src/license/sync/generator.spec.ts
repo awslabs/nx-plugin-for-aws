@@ -2,20 +2,20 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { licenseSyncGenerator } from './generator';
+import { addProjectConfiguration, type Tree } from '@nx/devkit';
+import { execSync } from 'child_process';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { FsTree, flushChanges } from 'nx/src/generators/tree';
+import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
+import os from 'os';
+import path from 'path';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
-import { LicenseSourceConfig } from '../config-types';
-import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
-import { mkdirSync, mkdtempSync, rmSync } from 'fs';
-import { flushChanges, FsTree } from 'nx/src/generators/tree';
-import { execSync } from 'child_process';
-import path from 'path';
-import os from 'os';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import type { LicenseSourceConfig } from '../config-types';
+import { licenseSyncGenerator } from './generator';
 
 describe('licenseSyncGenerator', () => {
   let tree: Tree;
@@ -1047,23 +1047,25 @@ describe('licenseSyncGenerator', () => {
       expected: '=begin\nTest Header\n=end\nputs "hello"',
       description: 'alternative block syntax (Ruby)',
     },
-  ])(
-    'should support popular languages: $description',
-    async ({ ext, content, format, expected }) => {
-      await addLicenseConfig({
-        header: {
-          content: {
-            lines: ['Test Header'],
-          },
-          format: {
-            [`**/*.${ext}`]: format,
-          },
+  ])('should support popular languages: $description', async ({
+    ext,
+    content,
+    format,
+    expected,
+  }) => {
+    await addLicenseConfig({
+      header: {
+        content: {
+          lines: ['Test Header'],
         },
-      });
+        format: {
+          [`**/*.${ext}`]: format,
+        },
+      },
+    });
 
-      tree.write(`test.${ext}`, content);
-      await licenseSyncGenerator(tree);
-      expect(tree.read(`test.${ext}`, 'utf-8')).toBe(expected);
-    },
-  );
+    tree.write(`test.${ext}`, content);
+    await licenseSyncGenerator(tree);
+    expect(tree.read(`test.${ext}`, 'utf-8')).toBe(expected);
+  });
 });

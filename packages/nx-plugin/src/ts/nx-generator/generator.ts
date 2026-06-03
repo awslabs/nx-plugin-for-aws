@@ -3,29 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  type GeneratorCallback,
   generateFiles,
-  GeneratorCallback,
   installPackagesTask,
   joinPathFragments,
   readJson,
-  Tree,
+  type Tree,
   writeJson,
 } from '@nx/devkit';
-import { TsNxGeneratorGeneratorSchema } from './schema';
-import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import camelCase from 'lodash.camelcase';
-import { getRelativePathToRootByDirectory } from '../../utils/paths';
+import PackageJson from '../../../package.json';
 import { addStarExport, applyGritQL } from '../../utils/ast';
+import { formatFilesInSubtree } from '../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import PackageJson from '../../../package.json';
-import { configureTsProjectAsNxPlugin } from '../nx-plugin/utils';
 import { sortObjectKeys } from '../../utils/object';
+import { getRelativePathToRootByDirectory } from '../../utils/paths';
+import { configureTsProjectAsNxPlugin } from '../nx-plugin/utils';
+import type { TsNxGeneratorGeneratorSchema } from './schema';
 
 export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(__filename);
 

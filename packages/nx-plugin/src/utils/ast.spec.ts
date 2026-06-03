@@ -2,16 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, beforeEach } from 'vitest';
-import { Tree } from '@nx/devkit';
+
+import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addDestructuredImport,
   addPythonDestructuredImport,
   addSingleImport,
   addStarExport,
-  hasExportDeclaration,
   applyGritQL,
+  hasExportDeclaration,
   matchGritQL,
 } from './ast';
 
@@ -146,7 +147,7 @@ describe('ast utils', () => {
       await addStarExport(tree, 'index.ts', './module');
 
       const writtenContent = tree.read('index.ts', 'utf-8');
-      expect(writtenContent).toContain('export * from "./module"');
+      expect(writtenContent).toContain("export * from './module'");
     });
 
     it('should not duplicate existing star export', async () => {
@@ -163,7 +164,7 @@ describe('ast utils', () => {
       await addStarExport(tree, 'index.ts', './module');
 
       const writtenContent = tree.read('index.ts', 'utf-8');
-      expect(writtenContent).toContain('export * from "./module"');
+      expect(writtenContent).toContain("export * from './module'");
     });
   });
 

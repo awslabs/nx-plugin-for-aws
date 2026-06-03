@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, updateJson } from '@nx/devkit';
+import { type Tree, updateJson } from '@nx/devkit';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import {
   COGNITO_AUTH_GENERATOR_INFO,
   tsReactWebsiteAuthGenerator,
 } from './generator';
-import { TsReactWebsiteAuthGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
 describe('cognito-auth generator', () => {
   let tree: Tree;

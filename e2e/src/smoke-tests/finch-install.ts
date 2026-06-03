@@ -2,16 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { execSync, spawn, spawnSync } from 'child_process';
+import { execSync, spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
   writeFileSync,
-} from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const FINCH_VERSION = '1.17.0';
 

@@ -3,39 +3,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
   detectPackageManager,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
   readNxJson,
+  type Tree,
   updateJson,
   updateNxJson,
 } from '@nx/devkit';
-import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { formatFilesInSubtree } from '../utils/format';
-import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
-import { withVersions } from '../utils/versions';
 import { initGenerator } from '@nx/js';
-import { readModulePackageJson } from 'nx/src/utils/package-json';
-import { getNpmScope } from '../utils/npm-scope';
-import GeneratorsJson from '../../generators.json';
-import { PresetGeneratorSchema } from './schema';
 import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
 import * as enquirer from 'enquirer';
+import { readFileSync } from 'fs';
+import yaml from 'js-yaml';
+import { readModulePackageJson } from 'nx/src/utils/package-json';
+import GeneratorsJson from '../../generators.json';
+import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
-import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { inferContainers } from '../utils/containers';
+import { DEFAULT_BIOME_CONFIG, formatFilesInSubtree } from '../utils/format';
 import { configureMcpServers } from '../utils/mcp';
-import yaml from 'js-yaml';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
+import { getNpmScope } from '../utils/npm-scope';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
+import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
+import { withVersions } from '../utils/versions';
+import type { PresetGeneratorSchema } from './schema';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
@@ -194,7 +194,7 @@ export const presetGenerator = async (
   });
 
   await initGenerator(tree, {
-    formatter: 'prettier',
+    formatter: 'none',
     addTsPlugin: addTsPlugin ?? true,
   });
 
@@ -245,10 +245,14 @@ export const presetGenerator = async (
     {},
     {
       '@nx/workspace': readModulePackageJson('@nx/js').packageJson.version,
-      // Pin TypeScript 6 and a compatible typescript-eslint version
-      ...withVersions(['typescript', 'typescript-eslint']),
+      ...withVersions(['typescript', '@biomejs/biome']),
     },
   );
+
+  // Write biome.json for formatting and linting
+  if (!tree.exists('biome.json')) {
+    tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
+  }
 
   generateFiles(
     tree, // the virtual file system

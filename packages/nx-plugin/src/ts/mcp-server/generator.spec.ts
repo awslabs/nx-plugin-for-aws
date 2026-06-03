@@ -3,19 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as devkit from '@nx/devkit';
-import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
-import {
-  tsMcpServerGenerator,
-  TS_MCP_SERVER_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
+import { vi } from 'vitest';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
-import { vi } from 'vitest';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import {
+  TS_MCP_SERVER_GENERATOR_INFO,
+  tsMcpServerGenerator,
+} from './generator';
 
 describe('ts#mcp-server generator', () => {
   let tree: Tree;
@@ -1043,21 +1043,22 @@ describe('ts#mcp-server generator', () => {
     ).toBe(rootPackageJson.dependencies.zod);
   });
 
-  it.each(['pnpm', 'npm', 'bun'] as const)(
-    'should not add yarn resolutions for %s',
-    async (pkgMgr) => {
-      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+  it.each([
+    'pnpm',
+    'npm',
+    'bun',
+  ] as const)('should not add yarn resolutions for %s', async (pkgMgr) => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
 
-      await tsMcpServerGenerator(tree, {
-        project: 'test-project',
-        infra: 'none',
-        iac: 'cdk',
-      });
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
 
-      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(rootPackageJson.resolutions).toBeUndefined();
-    },
-  );
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.resolutions).toBeUndefined();
+  });
 
   it('should use default name when empty string is provided', async () => {
     await tsMcpServerGenerator(tree, {

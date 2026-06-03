@@ -3,25 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  ProjectConfiguration,
-  Tree,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type ProjectConfiguration,
+  type Tree,
 } from '@nx/devkit';
-import { SmithyReactConnectionGeneratorSchema } from './schema';
+import { addOpenApiReactClient } from '../../utils/connection/open-api/react';
+import { formatFilesInSubtree } from '../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
-  NxGeneratorInfo,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
-import { addOpenApiReactClient } from '../../utils/connection/open-api/react';
+import type { SmithyReactConnectionGeneratorSchema } from './schema';
 
 export const SMITHY_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

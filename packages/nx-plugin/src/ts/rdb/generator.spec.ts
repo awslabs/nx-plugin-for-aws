@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { tsRdbGenerator, TS_RDB_GENERATOR_INFO } from './generator';
+import type { Tree } from '@nx/devkit';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator';
 
 describe('ts#rdb generator', () => {
   let tree: Tree;
@@ -55,12 +55,6 @@ describe('ts#rdb generator', () => {
       JSON.parse(tree.read('packages/db/tsconfig.lib.json', 'utf-8') ?? '{}')
         .include,
     ).toEqual(['src/**/*.ts', 'generated/prisma/**/*.ts']);
-    expect(tree.read('packages/db/eslint.config.mjs', 'utf-8')).toContain(
-      "'**/generated/**'",
-    );
-    expect(tree.read('packages/db/eslint.config.mjs', 'utf-8')).toContain(
-      "'**/out-tsc'",
-    );
     expect(
       tree.read('packages/common/constructs/src/core/index.ts', 'utf-8'),
     ).toMatchSnapshot();

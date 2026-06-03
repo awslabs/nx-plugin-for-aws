@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { runCLI, RunCmdOpts } from '../utils';
+import { type RunCmdOpts, runCLI } from '../utils';
 
 const AUTH_TYPES = ['iam', 'cognito', 'custom'] as const;
 const INFRA_TYPES = ['rest-lambda', 'http-lambda'] as const;

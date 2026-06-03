@@ -2,4 +2,4 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-export { createNxWorkspace, buildArgs } from './create-nx-workspace';
+export { buildArgs, createNxWorkspace } from './create-nx-workspace';
