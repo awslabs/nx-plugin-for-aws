@@ -28,7 +28,7 @@ Key capabilities:
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
 - [Node >= 22](https://nodejs.org/en/download) (We recommend using something like [NVM](https://github.com/nvm-sh/nvm) to manage your node versions)
   - verify by running `node --version`
-- [PNPM >= 10](https://pnpm.io/installation#using-npm) (you can also use [Yarn >= 4](https://yarnpkg.com/getting-started/install), [Bun >= 1](https://bun.sh/docs/installation), or [NPM >= 10](https://nodejs.org/en/learn/getting-started/an-introduction-to-the-npm-package-manager) if you prefer)
+- [PNPM >= 11](https://pnpm.io/installation#using-npm) (you can also use [Yarn >= 4](https://yarnpkg.com/getting-started/install), [Bun >= 1](https://bun.sh/docs/installation), or [NPM >= 10](https://nodejs.org/en/learn/getting-started/an-introduction-to-the-npm-package-manager) if you prefer)
   - verify by running `pnpm --version`, `yarn --version`, `bun --version` or `npm --version`
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
   1. install Python 3.14 by running: `uv python install 3.14.0`

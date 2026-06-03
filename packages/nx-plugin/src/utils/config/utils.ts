@@ -12,6 +12,22 @@ import { formatFilesInSubtree } from '../format';
 export const AWS_NX_PLUGIN_CONFIG_FILE_NAME = 'aws-nx-plugin.config.mts';
 
 /**
+ * Aliases used by jiti to resolve `@aws/nx-plugin` imports in the config file
+ * to this package's source, so the config can be evaluated in-memory.
+ */
+const AWS_NX_PLUGIN_JITI_ALIASES = {
+  '@aws/nx-plugin/sdk/license': join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    'sdk',
+    'license',
+  ),
+  '@aws/nx-plugin': join(__dirname, '..', '..'),
+};
+
+/**
  * Ensure that the config file exists
  */
 export const ensureAwsNxPluginConfig = async (
@@ -40,15 +56,8 @@ export const readAwsNxPluginConfig = async (
   }
   const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
   const configFilePath = join(tree.root, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
-  const licenseIndexPath = join(__dirname, '..', '..', 'license');
-  const pluginIndexPath = join(__dirname, '..', '..');
 
-  const jiti = createJiti(__filename, {
-    alias: {
-      '@aws/nx-plugin/license': licenseIndexPath,
-      '@aws/nx-plugin': pluginIndexPath,
-    },
-  });
+  const jiti = createJiti(__filename, { alias: AWS_NX_PLUGIN_JITI_ALIASES });
 
   const mod = jiti.evalModule(source, { filename: configFilePath });
   return (mod as any).default ?? mod;
@@ -67,15 +76,8 @@ export const readAwsNxPluginConfigFromDisk = (
   if (!existsSync(configPath)) return undefined;
 
   const source = readFileSync(configPath, 'utf-8');
-  const licenseIndexPath = join(__dirname, '..', '..', 'license');
-  const pluginIndexPath = join(__dirname, '..', '..');
 
-  const jiti = createJiti(__filename, {
-    alias: {
-      '@aws/nx-plugin/license': licenseIndexPath,
-      '@aws/nx-plugin': pluginIndexPath,
-    },
-  });
+  const jiti = createJiti(__filename, { alias: AWS_NX_PLUGIN_JITI_ALIASES });
   const mod = jiti.evalModule(source, { filename: configPath });
   return (mod as any).default ?? mod;
 };

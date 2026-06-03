@@ -111,21 +111,47 @@ export const LANGUAGE_COMMENT_SYNTAX: { [ext: string]: CommentSyntax } = {
   smithy: { line: '//' },
 };
 
-export const defaultDependencyCheckConfig = (): NonNullable<
-  Exclude<LicenseConfig['dependencyCheck'], false>
-> => ({
-  allow: [],
-  collectors: [],
-  exceptions: [],
-});
+/**
+ * Module specifier for the license helpers exported by this package, used by
+ * imports written into the user's config file.
+ */
+const LICENSE_SDK_MODULE = '@aws/nx-plugin/sdk/license';
+
+/**
+ * Placeholder inserted by GritQL and then substituted with a real exception
+ * literal, so user-provided strings never enter the GritQL pattern.
+ */
+const EXCEPTION_PLACEHOLDER = '"__LICENSE_EXCEPTION_PLACEHOLDER__"';
+
+/**
+ * Escape a string for embedding in a single-quoted TypeScript string literal.
+ */
+const toStringLiteral = (value: string): string =>
+  `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+
+/**
+ * Build the object literal source for a dependency check exception.
+ */
+const exceptionLiteral = (exception: DependencyCheckException): string => {
+  const parts = [`package: ${toStringLiteral(exception.package)}`];
+  if (exception.version !== undefined) {
+    parts.push(`version: ${toStringLiteral(exception.version)}`);
+  }
+  parts.push(`reason: ${toStringLiteral(exception.reason)}`);
+  if (exception.spdx !== undefined) {
+    parts.push(`spdx: ${toStringLiteral(exception.spdx)}`);
+  }
+  return `{ ${parts.join(', ')} }`;
+};
 
 export interface EnsureDependencyCheckBlockOptions {
   includeCollectors?: 'npm' | 'npm+python';
 }
 
 /**
- * Ensure the `dependencyCheck` block exists in the config file.
- * Idempotent: if the block already exists, this is a no-op.
+ * Ensure the `dependencyCheck` block exists within the `license` config.
+ * Idempotent via GritQL: if a `dependencyCheck` property already exists it is
+ * left untouched, so user customizations are never overwritten.
  */
 export const ensureDependencyCheckBlock = async (
   tree: Tree,
@@ -133,10 +159,19 @@ export const ensureDependencyCheckBlock = async (
 ): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
-  const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-  if (source.includes('dependencyCheck')) return;
+  const { addDestructuredImport, applyGritQL, matchGritQL } =
+    await import('../utils/ast');
 
-  const { addDestructuredImport, applyGritQL } = await import('../utils/ast');
+  // No-op if the dependency check is already configured
+  if (
+    await matchGritQL(
+      tree,
+      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+      '`dependencyCheck: $_`',
+    )
+  ) {
+    return;
+  }
 
   const imports = ['DEFAULT_LICENSE_ALLOWLIST', 'npmCollector'];
   if (options?.includeCollectors === 'npm+python') {
@@ -146,7 +181,7 @@ export const ensureDependencyCheckBlock = async (
     tree,
     AWS_NX_PLUGIN_CONFIG_FILE_NAME,
     imports,
-    '@aws/nx-plugin/license',
+    LICENSE_SDK_MODULE,
   );
 
   const collectorsExpr =
@@ -156,49 +191,21 @@ export const ensureDependencyCheckBlock = async (
 
   const depCheckBlock = `dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, ${collectorsExpr}, exceptions: [] }`;
 
-  // Append dependencyCheck to the license object by finding the last property
-  // and inserting after it. We use a direct source manipulation approach
-  // since GritQL's += on nested objects can produce double commas.
-  const currentSource = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-
-  // Find the license object's closing brace by locating `license:` and
-  // then finding the matching closing brace.
-  const licenseIdx = currentSource.indexOf('license:');
-  if (licenseIdx === -1) return;
-
-  // Find the opening brace of the license object
-  const openBrace = currentSource.indexOf('{', licenseIdx);
-  if (openBrace === -1) return;
-
-  // Find the matching closing brace
-  let depth = 0;
-  let closeBrace = -1;
-  for (let i = openBrace; i < currentSource.length; i++) {
-    if (currentSource[i] === '{') depth++;
-    if (currentSource[i] === '}') {
-      depth--;
-      if (depth === 0) {
-        closeBrace = i;
-        break;
-      }
-    }
-  }
-
-  if (closeBrace === -1) return;
-
-  // Insert the dependencyCheck block before the closing brace
-  const before = currentSource.slice(0, closeBrace);
-  const after = currentSource.slice(closeBrace);
-  const needsComma = before.trimEnd().endsWith(',') ? '' : ',';
-  const updated = `${before}${needsComma}\n    ${depCheckBlock},\n  ${after}`;
-  tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, updated);
+  // Append the block to the license object. GritQL's += inserts the property
+  // with a comma separator, so we don't add one ourselves.
+  await applyGritQL(
+    tree,
+    AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+    `\`license: { $props }\` where { $props <: not contains \`dependencyCheck: $_\`, $props += \`${depCheckBlock}\` }`,
+  );
 
   await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
 };
 
 /**
  * Ensure license exceptions are present in the config.
- * Idempotent: skips exceptions whose package is already listed.
+ * Idempotent via GritQL: an exception whose package is already listed is
+ * skipped. Existing exceptions, collectors, and the allowlist are preserved.
  */
 export const ensureLicenseExceptions = async (
   tree: Tree,
@@ -206,35 +213,50 @@ export const ensureLicenseExceptions = async (
 ): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
-  const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-  if (!source.includes('dependencyCheck')) return;
+  const { applyGritQL, matchGritQL } = await import('../utils/ast');
 
-  const { applyGritQL } = await import('../utils/ast');
+  if (
+    !(await matchGritQL(
+      tree,
+      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+      '`dependencyCheck: $_`',
+    ))
+  ) {
+    return;
+  }
 
   let modified = false;
   for (const exception of exceptions) {
-    const currentSource = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-    if (currentSource.includes(exception.package)) continue;
+    const packageMatch = `\`package: ${JSON.stringify(exception.package)}\``;
 
-    const exceptionLiteral = `{ package: '${exception.package}', reason: '${exception.reason.replace(/'/g, "\\'")}', spdx: '${exception.spdx}' }`;
-
-    // Try appending to non-empty exceptions array
-    let appended = await applyGritQL(
+    // Insert a placeholder via GritQL, then substitute the real exception
+    // literal. This keeps user-provided strings (e.g. reasons with quotes)
+    // out of the GritQL pattern, where they would otherwise break parsing.
+    // Scoped to the dependencyCheck block and only applied if the package
+    // isn't already listed, so existing exceptions are never overwritten.
+    const appended = await applyGritQL(
       tree,
       AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-      `\`exceptions: [$items]\` => \`exceptions: [$items, ${exceptionLiteral}]\` where { $items <: within \`dependencyCheck: $_\`, $items <: not \`\` }`,
+      `\`dependencyCheck: { $dc }\` where {
+        $dc <: not contains ${packageMatch},
+        or {
+          $dc <: contains \`exceptions: []\` => \`exceptions: [${EXCEPTION_PLACEHOLDER}]\`,
+          $dc <: contains \`exceptions: [$items]\` => \`exceptions: [$items, ${EXCEPTION_PLACEHOLDER}]\`
+        }
+      }`,
     );
 
-    if (!appended) {
-      // Handle empty array: exceptions: []
-      appended = await applyGritQL(
-        tree,
+    if (appended) {
+      const content = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+      const literal = exceptionLiteral(exception);
+      // Function replacer avoids `$` in the literal being treated as a
+      // special replacement pattern.
+      tree.write(
         AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-        `\`exceptions: []\` => \`exceptions: [${exceptionLiteral}]\` where { $_ <: within \`dependencyCheck: $_\` }`,
+        content.replace(EXCEPTION_PLACEHOLDER, () => literal),
       );
+      modified = true;
     }
-
-    if (appended) modified = true;
   }
 
   if (modified) {
@@ -244,27 +266,49 @@ export const ensureLicenseExceptions = async (
 
 /**
  * Add pythonCollector() to the dependency check config if not already present.
+ * Idempotent via GritQL: skipped if pythonCollector is already a collector.
  */
 export const ensurePythonLicenseCollector = async (
   tree: Tree,
 ): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
-  const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-  if (!source.includes('dependencyCheck')) return;
-  if (source.includes('pythonCollector')) return;
 
-  const { addDestructuredImport, applyGritQL } = await import('../utils/ast');
-  await addDestructuredImport(
+  const { addDestructuredImport, applyGritQL, matchGritQL } =
+    await import('../utils/ast');
+
+  if (
+    !(await matchGritQL(
+      tree,
+      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+      '`dependencyCheck: $_`',
+    ))
+  ) {
+    return;
+  }
+
+  // Append pythonCollector() into the collectors array (empty or non-empty),
+  // scoped to dependencyCheck, only if it isn't already configured.
+  const added = await applyGritQL(
     tree,
     AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-    ['pythonCollector'],
-    '@aws/nx-plugin/license',
+    `\`dependencyCheck: { $dc }\` where {
+      $dc <: not contains \`pythonCollector\`,
+      or {
+        $dc <: contains \`collectors: []\` => \`collectors: [pythonCollector()]\`,
+        $dc <: contains \`collectors: [$items]\` => \`collectors: [$items, pythonCollector()]\`
+      }
+    }`,
   );
-  await applyGritQL(
-    tree,
-    AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-    '`collectors: [$items]` => `collectors: [$items, pythonCollector()]` where { $items <: within `dependencyCheck: $_` }',
-  );
+
+  if (added) {
+    await addDestructuredImport(
+      tree,
+      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+      ['pythonCollector'],
+      LICENSE_SDK_MODULE,
+    );
+    await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+  }
 };
 
 /**
