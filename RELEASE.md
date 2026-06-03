@@ -77,21 +77,24 @@ The default `npm install @aws/nx-plugin` always resolves to the stable 0.x versi
 On `main` (first prerelease):
 
 ```bash
-pnpm nx release --yes --specifier premajor --preid rc
+pnpm nx release --skip-publish --specifier premajor --preid rc
+pnpm nx release publish --tag next
 # Publishes 1.0.0-rc.0 to "next" dist-tag
 ```
 
 On `main` (subsequent prereleases, after v1.0.0-rc.0 tag exists):
 
 ```bash
-pnpm nx release --yes --preid rc
+pnpm nx release --skip-publish --preid rc
+pnpm nx release publish --tag next
 # Publishes 1.0.0-rc.N to "next" dist-tag
 ```
 
 On `release/0.x` (stable):
 
 ```bash
-pnpm nx release --yes
+pnpm nx release --skip-publish
+pnpm nx release publish --tag latest
 # Publishes 0.x.y to "latest" dist-tag
 ```
 
@@ -100,7 +103,7 @@ pnpm nx release --yes
 When all v1.0 workstreams are complete (see #718):
 
 1. Remove the `--specifier premajor --preid rc` logic from the `main` branch release step in `ci.yml`
-2. Change `npm_config_tag` condition in `ci.yml` back to unconditional `latest`
+2. Change the `NPM_DIST_TAG` condition in `ci.yml` back to unconditional `latest`
 3. Remove the `release/0.x` branch condition from `deploy_docs`
 4. Publish `1.0.0` to `latest`
 5. Archive `release/0.x`
