@@ -1,0 +1,1502 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#dynamodb generator > should generate scripts for finch engine > packages/my-table/scripts/create-local-table.ts 1`] = `
+"import {
+  CreateTableCommand,
+  DescribeTableCommand,
+  DynamoDBClient,
+  GlobalSecondaryIndexDescription,
+  ResourceInUseException,
+  UpdateTableCommand,
+} from '@aws-sdk/client-dynamodb';
+import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+
+const [tableName, port] = process.argv.slice(2);
+const endpoint = \`http://localhost:\${port}\`;
+
+const REQUEST_TIMEOUT_MS = 10_000;
+const timeoutSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
+const client = new DynamoDBClient({
+  endpoint,
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: 'accessKeyId',
+    secretAccessKey: 'secretAccessKey',
+  },
+});
+
+const waitForTableActive = async (
+  waitClient: DynamoDBClient,
+  waitTableName: string,
+): Promise<void> => {
+  for (;;) {
+    const { Table } = await waitClient.send(
+      new DescribeTableCommand({ TableName: waitTableName }),
+      { abortSignal: timeoutSignal() },
+    );
+    const allActive =
+      Table?.TableStatus === 'ACTIVE' &&
+      (Table?.GlobalSecondaryIndexes ?? []).every(
+        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === 'ACTIVE',
+      );
+    if (allActive) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+};
+
+const ensureTable = async (
+  tblClient: DynamoDBClient,
+  tblName: string,
+  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+): Promise<void> => {
+  const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
+    { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
+    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+  ]);
+  const attributeDefinitions = [
+    { AttributeName: 'pk', AttributeType: 'S' as const },
+    { AttributeName: 'sk', AttributeType: 'S' as const },
+    ...gsiAttributeDefinitions.filter(
+      (a, i, arr) =>
+        arr.findIndex((b) => b.AttributeName === a.AttributeName) === i,
+    ),
+  ];
+  const globalSecondaryIndexes = gsIs.map((gsi) => ({
+    IndexName: gsi.indexName,
+    KeySchema: [
+      { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
+      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+    ],
+    Projection: { ProjectionType: 'ALL' as const },
+  }));
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      // New table: create with all GSIs in one shot.
+      await tblClient.send(
+        new CreateTableCommand({
+          TableName: tblName,
+          AttributeDefinitions: attributeDefinitions,
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' },
+          ],
+          BillingMode: 'PAY_PER_REQUEST',
+          ...(globalSecondaryIndexes.length > 0 && {
+            GlobalSecondaryIndexes: globalSecondaryIndexes,
+          }),
+        }),
+        { abortSignal: timeoutSignal() },
+      );
+      console.log(\`Created table: \${tblName}\`);
+      for (const gsi of globalSecondaryIndexes) {
+        console.log(\`Created GSI: \${gsi.IndexName}\`);
+      }
+      return;
+    } catch (e) {
+      // Table already exists: sync GSIs to match desired state.
+      if (e instanceof ResourceInUseException) {
+        const { Table } = await tblClient.send(
+          new DescribeTableCommand({ TableName: tblName }),
+          { abortSignal: timeoutSignal() },
+        );
+        const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
+        const existingNames = new Set(
+          existingGSIs.map(
+            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? '',
+          ),
+        );
+        const desiredNames = new Set(gsIs.map((g) => g.indexName));
+
+        // DynamoDB Local only allows one GSI to be created or deleted at a time.
+        for (const existing of existingGSIs) {
+          if (!existing.IndexName || desiredNames.has(existing.IndexName))
+            continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              GlobalSecondaryIndexUpdates: [
+                { Delete: { IndexName: existing.IndexName } },
+              ],
+            }),
+            { abortSignal: timeoutSignal() },
+          );
+          console.log(\`Deleted GSI: \${existing.IndexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+
+        for (const gsi of gsIs) {
+          if (existingNames.has(gsi.indexName)) continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              AttributeDefinitions: [
+                { AttributeName: gsi.partitionKey, AttributeType: 'S' },
+                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+              ],
+              GlobalSecondaryIndexUpdates: [
+                {
+                  Create: {
+                    IndexName: gsi.indexName,
+                    KeySchema: [
+                      { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
+                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                    ],
+                    Projection: { ProjectionType: 'ALL' },
+                  },
+                },
+              ],
+            }),
+            { abortSignal: timeoutSignal() },
+          );
+          console.log(\`Created GSI: \${gsi.indexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+        return;
+      }
+      if (attempt === 29) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+};
+
+await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+"
+`;
+
+exports[`ts#dynamodb generator > should generate scripts for finch engine > packages/my-table/scripts/pull-image.ts 1`] = `
+"import { spawnSync } from 'child_process';
+
+const ENGINE = 'finch';
+const image = process.argv[2];
+
+const inspect = spawnSync(ENGINE, ['image', 'inspect', image], {
+  stdio: 'ignore',
+});
+
+if (inspect.status !== 0) {
+  const pull = spawnSync(ENGINE, ['pull', image], { stdio: 'inherit' });
+  if (pull.status !== 0) {
+    process.exit(pull.status ?? 1);
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate scripts for finch engine > packages/my-table/scripts/start-container.ts 1`] = `
+"import { spawn, spawnSync } from 'child_process';
+
+const ENGINE = 'finch';
+
+const [containerName, image, hostPort] = process.argv.slice(2);
+
+const containerExists = (): boolean =>
+  spawnSync(ENGINE, ['container', 'inspect', containerName], {
+    stdio: 'ignore',
+  }).status === 0;
+
+const isRunning = (): boolean => {
+  const result = spawnSync(
+    ENGINE,
+    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
+    { encoding: 'utf-8' },
+  );
+  return result.status === 0 && result.stdout.trim() === 'true';
+};
+
+// Multiple dynamo table packages run serve-local in parallel sharing the same
+// container. All processes stream logs, but only the one that created the
+// container stops it on exit — others just detach.
+let created = false;
+let runRetries = 0;
+
+for (;;) {
+  if (containerExists()) {
+    if (!isRunning()) {
+      // Another process may have started it between our inspect and start — container engine start
+      // exits 0 even if the container is already running, so no special-casing needed.
+      const start = spawnSync(ENGINE, ['start', containerName], {
+        stdio: 'inherit',
+      });
+      if (start.status !== 0) process.exit(start.status ?? 1);
+    }
+    break;
+  }
+  const runArgs = (
+    \`run --name \${containerName} -u root -w /home/dynamodblocal\` +
+    \` -p \${hostPort}:\${hostPort} -v \${containerName}-data:/home/dynamodblocal/data\` +
+    \` -d \${image} -jar DynamoDBLocal.jar -sharedDb -dbPath ./data -port \${hostPort} -optimizeDbBeforeStartup\`
+  ).split(' ');
+  const create = spawnSync(ENGINE, runArgs, { stdio: 'pipe' });
+  if (create.status === 0) {
+    created = true;
+    break;
+  }
+  if (!containerExists() && ++runRetries > 3) {
+    process.stderr.write(create.stderr);
+    process.exit(create.status ?? 1);
+  }
+}
+
+const logs = spawn(ENGINE, ['logs', '-f', containerName], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+});
+
+let exiting = false;
+
+const cleanup = () => {
+  if (exiting) return;
+  exiting = true;
+  if (created) {
+    spawnSync(ENGINE, ['rm', '-f', containerName], { stdio: 'ignore' });
+  }
+  logs.kill();
+  process.exit(0);
+};
+
+process.on('SIGTERM', cleanup);
+process.on('SIGINT', cleanup);
+process.on('SIGHUP', cleanup);
+
+logs.on('exit', (code) => {
+  if (!exiting) process.exit(code ?? 0);
+});
+"
+`;
+
+exports[`ts#dynamodb generator > should generate terraform modules when iac is terraform 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+variable "name" {
+  description = "Name for the DynamoDB table."
+  type        = string
+}
+
+variable "billing_mode" {
+  description = "Controls how you are charged for read and write throughput."
+  type        = string
+  default     = "PAY_PER_REQUEST"
+}
+
+variable "point_in_time_recovery_enabled" {
+  description = "Whether to enable point-in-time recovery for the table."
+  type        = bool
+  default     = true
+}
+
+variable "deletion_protection_enabled" {
+  description = "Whether to enable deletion protection on the table."
+  type        = bool
+  default     = true
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table."
+  type        = bool
+  default     = true
+}
+
+variable "global_secondary_indexes" {
+  description = "Global secondary indexes to create on the table. All key attributes must be of type string."
+  type = list(object({
+    name            = string
+    hash_key        = string
+    range_key       = string
+    projection_type = string
+  }))
+  default = []
+}
+
+locals {
+  gsi_attribute_names = distinct(flatten([
+    for gsi in var.global_secondary_indexes : [gsi.hash_key, gsi.range_key]
+  ]))
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
+resource "aws_kms_key" "table" {
+  description         = "KMS key for DynamoDB table \${var.name}"
+  enable_key_rotation = var.enable_key_rotation
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:\${data.aws_partition.current.partition}:iam::\${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowDynamoDBService"
+        Effect = "Allow"
+        Principal = {
+          Service = "dynamodb.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_dynamodb_table" "table" {
+  name                        = var.name
+  billing_mode                = var.billing_mode
+  hash_key                    = "pk"
+  range_key                   = "sk"
+  deletion_protection_enabled = var.deletion_protection_enabled
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  dynamic "attribute" {
+    for_each = toset(local.gsi_attribute_names)
+    content {
+      name = attribute.value
+      type = "S"
+    }
+  }
+
+  dynamic "global_secondary_index" {
+    for_each = var.global_secondary_indexes
+    content {
+      name            = global_secondary_index.value.name
+      hash_key        = global_secondary_index.value.hash_key
+      range_key       = global_secondary_index.value.range_key
+      projection_type = global_secondary_index.value.projection_type
+    }
+  }
+
+  point_in_time_recovery {
+    enabled = var.point_in_time_recovery_enabled
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = aws_kms_key.table.arn
+  }
+}
+
+output "table_name" {
+  description = "Name of the DynamoDB table."
+  value       = aws_dynamodb_table.table.name
+}
+
+output "table_arn" {
+  description = "ARN of the DynamoDB table."
+  value       = aws_dynamodb_table.table.arn
+}
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key used to encrypt the DynamoDB table."
+  value       = aws_kms_key.table.arn
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate terraform modules when iac is terraform 2`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+variable "billing_mode" {
+  description = "Controls how you are charged for read and write throughput."
+  type        = string
+  default     = "PAY_PER_REQUEST"
+}
+
+variable "point_in_time_recovery_enabled" {
+  description = "Whether to enable point-in-time recovery for the table."
+  type        = bool
+  default     = true
+}
+
+variable "deletion_protection_enabled" {
+  description = "Whether to enable deletion protection on the table."
+  type        = bool
+  default     = true
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table."
+  type        = bool
+  default     = true
+}
+
+module "dynamodb_table" {
+  source                         = "../../../core/dynamodb"
+  name                           = "proj-my-table"
+  billing_mode                   = var.billing_mode
+  point_in_time_recovery_enabled = var.point_in_time_recovery_enabled
+  deletion_protection_enabled    = var.deletion_protection_enabled
+  enable_key_rotation            = var.enable_key_rotation
+  global_secondary_indexes = [
+    {
+      name            = "gsi1pk-gsi1sk-index"
+      hash_key        = "gsi1pk"
+      range_key       = "gsi1sk"
+      projection_type = "ALL"
+    },
+    {
+      name            = "gsi2pk-gsi2sk-index"
+      hash_key        = "gsi2pk"
+      range_key       = "gsi2sk"
+      projection_type = "ALL"
+    },
+  ]
+}
+
+module "add_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "dynamodb"
+  key       = "MyTable"
+  value = {
+    tableName = module.dynamodb_table.table_name
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/create-local-table.ts 1`] = `
+"import {
+  CreateTableCommand,
+  DescribeTableCommand,
+  DynamoDBClient,
+  GlobalSecondaryIndexDescription,
+  ResourceInUseException,
+  UpdateTableCommand,
+} from '@aws-sdk/client-dynamodb';
+import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+
+const [tableName, port] = process.argv.slice(2);
+const endpoint = \`http://localhost:\${port}\`;
+
+const REQUEST_TIMEOUT_MS = 10_000;
+const timeoutSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
+const client = new DynamoDBClient({
+  endpoint,
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: 'accessKeyId',
+    secretAccessKey: 'secretAccessKey',
+  },
+});
+
+const waitForTableActive = async (
+  waitClient: DynamoDBClient,
+  waitTableName: string,
+): Promise<void> => {
+  for (;;) {
+    const { Table } = await waitClient.send(
+      new DescribeTableCommand({ TableName: waitTableName }),
+      { abortSignal: timeoutSignal() },
+    );
+    const allActive =
+      Table?.TableStatus === 'ACTIVE' &&
+      (Table?.GlobalSecondaryIndexes ?? []).every(
+        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === 'ACTIVE',
+      );
+    if (allActive) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+};
+
+const ensureTable = async (
+  tblClient: DynamoDBClient,
+  tblName: string,
+  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+): Promise<void> => {
+  const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
+    { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
+    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+  ]);
+  const attributeDefinitions = [
+    { AttributeName: 'pk', AttributeType: 'S' as const },
+    { AttributeName: 'sk', AttributeType: 'S' as const },
+    ...gsiAttributeDefinitions.filter(
+      (a, i, arr) =>
+        arr.findIndex((b) => b.AttributeName === a.AttributeName) === i,
+    ),
+  ];
+  const globalSecondaryIndexes = gsIs.map((gsi) => ({
+    IndexName: gsi.indexName,
+    KeySchema: [
+      { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
+      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+    ],
+    Projection: { ProjectionType: 'ALL' as const },
+  }));
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      // New table: create with all GSIs in one shot.
+      await tblClient.send(
+        new CreateTableCommand({
+          TableName: tblName,
+          AttributeDefinitions: attributeDefinitions,
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' },
+          ],
+          BillingMode: 'PAY_PER_REQUEST',
+          ...(globalSecondaryIndexes.length > 0 && {
+            GlobalSecondaryIndexes: globalSecondaryIndexes,
+          }),
+        }),
+        { abortSignal: timeoutSignal() },
+      );
+      console.log(\`Created table: \${tblName}\`);
+      for (const gsi of globalSecondaryIndexes) {
+        console.log(\`Created GSI: \${gsi.IndexName}\`);
+      }
+      return;
+    } catch (e) {
+      // Table already exists: sync GSIs to match desired state.
+      if (e instanceof ResourceInUseException) {
+        const { Table } = await tblClient.send(
+          new DescribeTableCommand({ TableName: tblName }),
+          { abortSignal: timeoutSignal() },
+        );
+        const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
+        const existingNames = new Set(
+          existingGSIs.map(
+            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? '',
+          ),
+        );
+        const desiredNames = new Set(gsIs.map((g) => g.indexName));
+
+        // DynamoDB Local only allows one GSI to be created or deleted at a time.
+        for (const existing of existingGSIs) {
+          if (!existing.IndexName || desiredNames.has(existing.IndexName))
+            continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              GlobalSecondaryIndexUpdates: [
+                { Delete: { IndexName: existing.IndexName } },
+              ],
+            }),
+            { abortSignal: timeoutSignal() },
+          );
+          console.log(\`Deleted GSI: \${existing.IndexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+
+        for (const gsi of gsIs) {
+          if (existingNames.has(gsi.indexName)) continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              AttributeDefinitions: [
+                { AttributeName: gsi.partitionKey, AttributeType: 'S' },
+                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+              ],
+              GlobalSecondaryIndexUpdates: [
+                {
+                  Create: {
+                    IndexName: gsi.indexName,
+                    KeySchema: [
+                      { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
+                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                    ],
+                    Projection: { ProjectionType: 'ALL' },
+                  },
+                },
+              ],
+            }),
+            { abortSignal: timeoutSignal() },
+          );
+          console.log(\`Created GSI: \${gsi.indexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+        return;
+      }
+      if (attempt === 29) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+};
+
+await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/pull-image.ts 1`] = `
+"import { spawnSync } from 'child_process';
+
+const ENGINE = 'docker';
+const image = process.argv[2];
+
+const inspect = spawnSync(ENGINE, ['image', 'inspect', image], {
+  stdio: 'ignore',
+});
+
+if (inspect.status !== 0) {
+  const pull = spawnSync(ENGINE, ['pull', image], { stdio: 'inherit' });
+  if (pull.status !== 0) {
+    process.exit(pull.status ?? 1);
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/start-container.ts 1`] = `
+"import { spawn, spawnSync } from 'child_process';
+
+const ENGINE = 'docker';
+
+const [containerName, image, hostPort] = process.argv.slice(2);
+
+const containerExists = (): boolean =>
+  spawnSync(ENGINE, ['container', 'inspect', containerName], {
+    stdio: 'ignore',
+  }).status === 0;
+
+const isRunning = (): boolean => {
+  const result = spawnSync(
+    ENGINE,
+    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
+    { encoding: 'utf-8' },
+  );
+  return result.status === 0 && result.stdout.trim() === 'true';
+};
+
+// Multiple dynamo table packages run serve-local in parallel sharing the same
+// container. All processes stream logs, but only the one that created the
+// container stops it on exit — others just detach.
+let created = false;
+let runRetries = 0;
+
+for (;;) {
+  if (containerExists()) {
+    if (!isRunning()) {
+      // Another process may have started it between our inspect and start — container engine start
+      // exits 0 even if the container is already running, so no special-casing needed.
+      const start = spawnSync(ENGINE, ['start', containerName], {
+        stdio: 'inherit',
+      });
+      if (start.status !== 0) process.exit(start.status ?? 1);
+    }
+    break;
+  }
+  const runArgs = (
+    \`run --rm --name \${containerName} -u root -w /home/dynamodblocal\` +
+    \` -p \${hostPort}:\${hostPort} -v \${containerName}-data:/home/dynamodblocal/data\` +
+    \` -d \${image} -jar DynamoDBLocal.jar -sharedDb -dbPath ./data -port \${hostPort} -optimizeDbBeforeStartup\`
+  ).split(' ');
+  const create = spawnSync(ENGINE, runArgs, { stdio: 'pipe' });
+  if (create.status === 0) {
+    created = true;
+    break;
+  }
+  if (!containerExists() && ++runRetries > 3) {
+    process.stderr.write(create.stderr);
+    process.exit(create.status ?? 1);
+  }
+}
+
+const logs = spawn(ENGINE, ['logs', '-f', containerName], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+});
+
+let exiting = false;
+
+const cleanup = () => {
+  if (exiting) return;
+  exiting = true;
+  if (created) {
+    spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
+  }
+  logs.kill();
+  process.exit(0);
+};
+
+process.on('SIGTERM', cleanup);
+process.on('SIGINT', cleanup);
+process.on('SIGHUP', cleanup);
+
+logs.on('exit', (code) => {
+  if (!exiting) process.exit(code ?? 0);
+});
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/client.ts 1`] = `
+"import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import {
+  PACKAGE_NAME,
+  LOCAL_ACCESS_KEY_ID,
+  LOCAL_ENDPOINT,
+  LOCAL_REGION,
+  LOCAL_SECRET_ACCESS_KEY,
+  LOCAL_TABLE_NAME,
+} from './constants.js';
+
+let _client: DynamoDBClient | undefined;
+
+export const getDynamoDBClient = (): DynamoDBClient => {
+  _client ??=
+    process.env.SERVE_LOCAL === 'true'
+      ? new DynamoDBClient({
+          endpoint: LOCAL_ENDPOINT,
+          region: LOCAL_REGION,
+          credentials: {
+            accessKeyId: LOCAL_ACCESS_KEY_ID,
+            secretAccessKey: LOCAL_SECRET_ACCESS_KEY,
+          },
+        })
+      : new DynamoDBClient({});
+  return _client;
+};
+
+type DynamoDBConfig = {
+  tableName: string;
+};
+
+let _tableName: string | undefined;
+
+export const resolveTableName = async (): Promise<string> => {
+  if (process.env.SERVE_LOCAL === 'true') {
+    return LOCAL_TABLE_NAME;
+  }
+  if (_tableName === undefined) {
+    const appId = process.env.RUNTIME_CONFIG_APP_ID;
+    if (!appId) {
+      throw new Error('RUNTIME_CONFIG_APP_ID environment variable is not set');
+    }
+    const config = await getAppConfig<{
+      [key: string]: DynamoDBConfig | undefined;
+    }>('dynamodb', {
+      application: appId,
+      environment: 'default',
+      transform: 'json',
+    });
+    const tableName = config?.[PACKAGE_NAME]?.tableName;
+    if (!tableName) {
+      throw new Error('Could not resolve table name from runtime config');
+    }
+    _tableName = tableName;
+  }
+  return _tableName!;
+};
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/constants.ts 1`] = `
+"export const PACKAGE_NAME = 'MyTable';
+
+// Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
+export const LOCAL_PORT = 8000;
+export const LOCAL_REGION = 'us-east-1';
+export const LOCAL_ACCESS_KEY_ID = 'accessKeyId';
+export const LOCAL_SECRET_ACCESS_KEY = 'secretAccessKey';
+export const LOCAL_ENDPOINT = \`http://localhost:\${LOCAL_PORT}\`;
+export const LOCAL_TABLE_NAME = 'proj-my-table';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/entities/example.ts 1`] = `
+"import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+// Example entity - replace with your own entities using ElectroDB
+// See https://electrodb.dev/en/modeling/entities/ for documentation
+export const createExampleEntity = async () =>
+  new Entity(
+    {
+      model: {
+        entity: 'example',
+        version: '1',
+        service: 'MyTable',
+      },
+      attributes: {
+        id: {
+          type: 'string',
+          required: true,
+        },
+        createdAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          readOnly: true,
+        },
+        updatedAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/entities/index.ts 1`] = `
+"export { createExampleEntity } from './example.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/gsi.ts 1`] = `
+"// GSIs to synchronize on the local table at startup and provision in infrastructure.
+// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
+export const GLOBAL_SECONDARY_INDEXES = [
+  {
+    indexName: 'gsi1pk-gsi1sk-index',
+    partitionKey: 'gsi1pk',
+    sortKey: 'gsi1sk',
+  },
+  {
+    indexName: 'gsi2pk-gsi2sk-index',
+    partitionKey: 'gsi2pk',
+    sortKey: 'gsi2sk',
+  },
+];
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/index.ts 1`] = `
+"export {
+  PACKAGE_NAME,
+  LOCAL_ACCESS_KEY_ID,
+  LOCAL_ENDPOINT,
+  LOCAL_REGION,
+  LOCAL_SECRET_ACCESS_KEY,
+  LOCAL_TABLE_NAME,
+} from './constants.js';
+export { getDynamoDBClient, resolveTableName } from './client.js';
+export { GLOBAL_SECONDARY_INDEXES } from './gsi.js';
+export * from './entities/index.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 1`] = `
+"import { Construct } from 'constructs';
+import {
+  AttributeType,
+  BillingMode,
+  Table,
+  TableEncryption,
+  TableProps,
+} from 'aws-cdk-lib/aws-dynamodb';
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { RuntimeConfig } from './runtime-config.js';
+
+type _DynamoDBTableProps = Omit<
+  TableProps,
+  'tableName' | 'partitionKey' | 'sortKey' | 'encryption' | 'encryptionKey'
+>;
+
+export interface DynamoDBTableProps extends _DynamoDBTableProps {
+  /**
+   * The DynamoDB table name. If omitted, CDK auto-generates a unique name
+   * from the stack name and construct path.
+   */
+  readonly tableName?: string;
+
+  /**
+   * RuntimeConfig key used under the \`dynamodb\` namespace.
+   */
+  readonly runtimeConfigKey: string;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the table.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
+}
+
+export abstract class DynamoDBTable extends Construct {
+  public readonly table: Table;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      tableName,
+      runtimeConfigKey,
+      billingMode = BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification = { pointInTimeRecoveryEnabled: true },
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
+      ...rest
+    }: DynamoDBTableProps,
+  ) {
+    super(scope, id);
+
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
+
+    this.table = new Table(this, runtimeConfigKey, {
+      ...rest,
+      ...(tableName !== undefined && { tableName }),
+      partitionKey: { name: 'pk', type: AttributeType.STRING },
+      sortKey: { name: 'sk', type: AttributeType.STRING },
+      billingMode,
+      pointInTimeRecoverySpecification,
+      deletionProtection,
+      encryptionKey: key,
+      encryption: TableEncryption.CUSTOMER_MANAGED,
+      removalPolicy,
+    });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('dynamodb', runtimeConfigKey, { tableName: this.table.tableName });
+  }
+
+  public grantReadData(grantee: IGrantable): Grant {
+    return this.table.grantReadData(grantee);
+  }
+
+  public grantWriteData(grantee: IGrantable): Grant {
+    return this.table.grantWriteData(grantee);
+  }
+
+  public grantReadWriteData(grantee: IGrantable): Grant {
+    return this.table.grantReadWriteData(grantee);
+  }
+
+  public grantFullAccess(grantee: IGrantable): Grant {
+    return this.table.grantFullAccess(grantee);
+  }
+
+  public grantStreamRead(grantee: IGrantable): Grant {
+    return this.table.grantStreamRead(grantee);
+  }
+
+  public grantTableListStreams(grantee: IGrantable): Grant {
+    return this.table.grantTableListStreams(grantee);
+  }
+
+  public grant(grantee: IGrantable, ...actions: string[]): Grant {
+    return this.table.grant(grantee, ...actions);
+  }
+
+  public grantStream(grantee: IGrantable, ...actions: string[]): Grant {
+    return this.table.grantStream(grantee, ...actions);
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 2`] = `
+"import { Construct } from 'constructs';
+import { PACKAGE_NAME, GLOBAL_SECONDARY_INDEXES } from ':proj/my-table';
+import { AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
+import { DynamoDBTable, DynamoDBTableProps } from '../../core/dynamodb.js';
+
+export type MyTableProps = Omit<DynamoDBTableProps, 'runtimeConfigKey'>;
+
+export class MyTable extends DynamoDBTable {
+  constructor(scope: Construct, id: string, props?: MyTableProps) {
+    super(scope, id, {
+      ...props,
+      runtimeConfigKey: PACKAGE_NAME,
+    });
+
+    for (const gsi of GLOBAL_SECONDARY_INDEXES) {
+      this.table.addGlobalSecondaryIndex({
+        indexName: gsi.indexName,
+        partitionKey: { name: gsi.partitionKey, type: AttributeType.STRING },
+        sortKey: { name: gsi.sortKey, type: AttributeType.STRING },
+        projectionType: ProjectionType.ALL,
+      });
+    }
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 3`] = `
+"export * from './my-table.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 4`] = `
+"export * from './dynamodb/index.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/scripts/create-local-table.ts 1`] = `
+"import {
+  CreateTableCommand,
+  DescribeTableCommand,
+  DynamoDBClient,
+  GlobalSecondaryIndexDescription,
+  ResourceInUseException,
+  UpdateTableCommand,
+} from '@aws-sdk/client-dynamodb';
+import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+
+const [tableName, port] = process.argv.slice(2);
+const endpoint = \`http://localhost:\${port}\`;
+
+const REQUEST_TIMEOUT_MS = 10_000;
+const timeoutSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
+const client = new DynamoDBClient({
+  endpoint,
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: 'accessKeyId',
+    secretAccessKey: 'secretAccessKey',
+  },
+});
+
+const waitForTableActive = async (
+  waitClient: DynamoDBClient,
+  waitTableName: string,
+): Promise<void> => {
+  for (;;) {
+    const { Table } = await waitClient.send(
+      new DescribeTableCommand({ TableName: waitTableName }),
+      { abortSignal: timeoutSignal() },
+    );
+    const allActive =
+      Table?.TableStatus === 'ACTIVE' &&
+      (Table?.GlobalSecondaryIndexes ?? []).every(
+        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === 'ACTIVE',
+      );
+    if (allActive) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+};
+
+const ensureTable = async (
+  tblClient: DynamoDBClient,
+  tblName: string,
+  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+): Promise<void> => {
+  const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
+    { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
+    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+  ]);
+  const attributeDefinitions = [
+    { AttributeName: 'pk', AttributeType: 'S' as const },
+    { AttributeName: 'sk', AttributeType: 'S' as const },
+    ...gsiAttributeDefinitions.filter(
+      (a, i, arr) =>
+        arr.findIndex((b) => b.AttributeName === a.AttributeName) === i,
+    ),
+  ];
+  const globalSecondaryIndexes = gsIs.map((gsi) => ({
+    IndexName: gsi.indexName,
+    KeySchema: [
+      { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
+      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+    ],
+    Projection: { ProjectionType: 'ALL' as const },
+  }));
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      // New table: create with all GSIs in one shot.
+      await tblClient.send(
+        new CreateTableCommand({
+          TableName: tblName,
+          AttributeDefinitions: attributeDefinitions,
+          KeySchema: [
+            { AttributeName: 'pk', KeyType: 'HASH' },
+            { AttributeName: 'sk', KeyType: 'RANGE' },
+          ],
+          BillingMode: 'PAY_PER_REQUEST',
+          ...(globalSecondaryIndexes.length > 0 && {
+            GlobalSecondaryIndexes: globalSecondaryIndexes,
+          }),
+        }),
+        { abortSignal: timeoutSignal() },
+      );
+      console.log(\`Created table: \${tblName}\`);
+      for (const gsi of globalSecondaryIndexes) {
+        console.log(\`Created GSI: \${gsi.IndexName}\`);
+      }
+      return;
+    } catch (e) {
+      // Table already exists: sync GSIs to match desired state.
+      if (e instanceof ResourceInUseException) {
+        const { Table } = await tblClient.send(
+          new DescribeTableCommand({ TableName: tblName }),
+          { abortSignal: timeoutSignal() },
+        );
+        const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
+        const existingNames = new Set(
+          existingGSIs.map(
+            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? '',
+          ),
+        );
+        const desiredNames = new Set(gsIs.map((g) => g.indexName));
+
+        // DynamoDB Local only allows one GSI to be created or deleted at a time.
+        for (const existing of existingGSIs) {
+          if (!existing.IndexName || desiredNames.has(existing.IndexName))
+            continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              GlobalSecondaryIndexUpdates: [
+                { Delete: { IndexName: existing.IndexName } },
+              ],
+            }),
+            { abortSignal: timeoutSignal() },
+          );
+          console.log(\`Deleted GSI: \${existing.IndexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+
+        for (const gsi of gsIs) {
+          if (existingNames.has(gsi.indexName)) continue;
+          await tblClient.send(
+            new UpdateTableCommand({
+              TableName: tblName,
+              AttributeDefinitions: [
+                { AttributeName: gsi.partitionKey, AttributeType: 'S' },
+                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+              ],
+              GlobalSecondaryIndexUpdates: [
+                {
+                  Create: {
+                    IndexName: gsi.indexName,
+                    KeySchema: [
+                      { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
+                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                    ],
+                    Projection: { ProjectionType: 'ALL' },
+                  },
+                },
+              ],
+            }),
+            { abortSignal: timeoutSignal() },
+          );
+          console.log(\`Created GSI: \${gsi.indexName}\`);
+          await waitForTableActive(tblClient, tblName);
+        }
+        return;
+      }
+      if (attempt === 29) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+};
+
+await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/scripts/pull-image.ts 1`] = `
+"import { spawnSync } from 'child_process';
+
+const ENGINE = 'docker';
+const image = process.argv[2];
+
+const inspect = spawnSync(ENGINE, ['image', 'inspect', image], {
+  stdio: 'ignore',
+});
+
+if (inspect.status !== 0) {
+  const pull = spawnSync(ENGINE, ['pull', image], { stdio: 'inherit' });
+  if (pull.status !== 0) {
+    process.exit(pull.status ?? 1);
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/scripts/start-container.ts 1`] = `
+"import { spawn, spawnSync } from 'child_process';
+
+const ENGINE = 'docker';
+
+const [containerName, image, hostPort] = process.argv.slice(2);
+
+const containerExists = (): boolean =>
+  spawnSync(ENGINE, ['container', 'inspect', containerName], {
+    stdio: 'ignore',
+  }).status === 0;
+
+const isRunning = (): boolean => {
+  const result = spawnSync(
+    ENGINE,
+    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
+    { encoding: 'utf-8' },
+  );
+  return result.status === 0 && result.stdout.trim() === 'true';
+};
+
+// Multiple dynamo table packages run serve-local in parallel sharing the same
+// container. All processes stream logs, but only the one that created the
+// container stops it on exit — others just detach.
+let created = false;
+let runRetries = 0;
+
+for (;;) {
+  if (containerExists()) {
+    if (!isRunning()) {
+      // Another process may have started it between our inspect and start — container engine start
+      // exits 0 even if the container is already running, so no special-casing needed.
+      const start = spawnSync(ENGINE, ['start', containerName], {
+        stdio: 'inherit',
+      });
+      if (start.status !== 0) process.exit(start.status ?? 1);
+    }
+    break;
+  }
+  const runArgs = (
+    \`run --rm --name \${containerName} -u root -w /home/dynamodblocal\` +
+    \` -p \${hostPort}:\${hostPort} -v \${containerName}-data:/home/dynamodblocal/data\` +
+    \` -d \${image} -jar DynamoDBLocal.jar -sharedDb -dbPath ./data -port \${hostPort} -optimizeDbBeforeStartup\`
+  ).split(' ');
+  const create = spawnSync(ENGINE, runArgs, { stdio: 'pipe' });
+  if (create.status === 0) {
+    created = true;
+    break;
+  }
+  if (!containerExists() && ++runRetries > 3) {
+    process.stderr.write(create.stderr);
+    process.exit(create.status ?? 1);
+  }
+}
+
+const logs = spawn(ENGINE, ['logs', '-f', containerName], {
+  stdio: ['ignore', 'inherit', 'inherit'],
+});
+
+let exiting = false;
+
+const cleanup = () => {
+  if (exiting) return;
+  exiting = true;
+  if (created) {
+    spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
+  }
+  logs.kill();
+  process.exit(0);
+};
+
+process.on('SIGTERM', cleanup);
+process.on('SIGINT', cleanup);
+process.on('SIGHUP', cleanup);
+
+logs.on('exit', (code) => {
+  if (!exiting) process.exit(code ?? 0);
+});
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/client.ts 1`] = `
+"import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import {
+  PACKAGE_NAME,
+  LOCAL_ACCESS_KEY_ID,
+  LOCAL_ENDPOINT,
+  LOCAL_REGION,
+  LOCAL_SECRET_ACCESS_KEY,
+  LOCAL_TABLE_NAME,
+} from './constants.js';
+
+let _client: DynamoDBClient | undefined;
+
+export const getDynamoDBClient = (): DynamoDBClient => {
+  _client ??=
+    process.env.SERVE_LOCAL === 'true'
+      ? new DynamoDBClient({
+          endpoint: LOCAL_ENDPOINT,
+          region: LOCAL_REGION,
+          credentials: {
+            accessKeyId: LOCAL_ACCESS_KEY_ID,
+            secretAccessKey: LOCAL_SECRET_ACCESS_KEY,
+          },
+        })
+      : new DynamoDBClient({});
+  return _client;
+};
+
+type DynamoDBConfig = {
+  tableName: string;
+};
+
+let _tableName: string | undefined;
+
+export const resolveTableName = async (): Promise<string> => {
+  if (process.env.SERVE_LOCAL === 'true') {
+    return LOCAL_TABLE_NAME;
+  }
+  if (_tableName === undefined) {
+    const appId = process.env.RUNTIME_CONFIG_APP_ID;
+    if (!appId) {
+      throw new Error('RUNTIME_CONFIG_APP_ID environment variable is not set');
+    }
+    const config = await getAppConfig<{
+      [key: string]: DynamoDBConfig | undefined;
+    }>('dynamodb', {
+      application: appId,
+      environment: 'default',
+      transform: 'json',
+    });
+    const tableName = config?.[PACKAGE_NAME]?.tableName;
+    if (!tableName) {
+      throw new Error('Could not resolve table name from runtime config');
+    }
+    _tableName = tableName;
+  }
+  return _tableName!;
+};
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/constants.ts 1`] = `
+"export const PACKAGE_NAME = 'MyTable';
+
+// Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
+export const LOCAL_PORT = 8000;
+export const LOCAL_REGION = 'us-east-1';
+export const LOCAL_ACCESS_KEY_ID = 'accessKeyId';
+export const LOCAL_SECRET_ACCESS_KEY = 'secretAccessKey';
+export const LOCAL_ENDPOINT = \`http://localhost:\${LOCAL_PORT}\`;
+export const LOCAL_TABLE_NAME = 'proj-my-table';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/entities/example.ts 1`] = `
+"import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+// Example entity - replace with your own entities using ElectroDB
+// See https://electrodb.dev/en/modeling/entities/ for documentation
+export const createExampleEntity = async () =>
+  new Entity(
+    {
+      model: {
+        entity: 'example',
+        version: '1',
+        service: 'MyTable',
+      },
+      attributes: {
+        id: {
+          type: 'string',
+          required: true,
+        },
+        createdAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          readOnly: true,
+        },
+        updatedAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/entities/index.ts 1`] = `
+"export { createExampleEntity } from './example.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/gsi.ts 1`] = `
+"// GSIs to synchronize on the local table at startup and provision in infrastructure.
+// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
+export const GLOBAL_SECONDARY_INDEXES = [
+  {
+    indexName: 'gsi1pk-gsi1sk-index',
+    partitionKey: 'gsi1pk',
+    sortKey: 'gsi1sk',
+  },
+  {
+    indexName: 'gsi2pk-gsi2sk-index',
+    partitionKey: 'gsi2pk',
+    sortKey: 'gsi2sk',
+  },
+];
+"
+`;
+
+exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/index.ts 1`] = `
+"export {
+  PACKAGE_NAME,
+  LOCAL_ACCESS_KEY_ID,
+  LOCAL_ENDPOINT,
+  LOCAL_REGION,
+  LOCAL_SECRET_ACCESS_KEY,
+  LOCAL_TABLE_NAME,
+} from './constants.js';
+export { getDynamoDBClient, resolveTableName } from './client.js';
+export { GLOBAL_SECONDARY_INDEXES } from './gsi.js';
+export * from './entities/index.js';
+"
+`;

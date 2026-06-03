@@ -1,0 +1,80 @@
+---
+title: Accesso Lambda a DynamoDB
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Per consentire alle funzioni Lambda di accedere alla tabella DynamoDB, concedi le autorizzazioni necessarie nella tua infrastruttura.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Chiama `grantReadWriteData` sul costrutto della tabella. Questo concede sia le autorizzazioni DynamoDB che KMS richieste dal ruolo di esecuzione Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this).build(),
+});
+
+Object.entries(api.integrations).forEach(([, integration]) => {
+  table.grantReadWriteData(integration.handler);
+});
+```
+
+:::note
+Questo esempio concede l'accesso a ogni handler nella tua API. Se solo alcuni handler necessitano di accesso, configurali individualmente.
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+Concedi al ruolo di esecuzione Lambda l'autorizzazione per accedere alla tabella DynamoDB e alla sua chiave di crittografia KMS:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_api.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>

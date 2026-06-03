@@ -1,0 +1,81 @@
+---
+title: Lambda DynamoDB 액세스
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Lambda 함수가 DynamoDB 테이블에 액세스할 수 있도록 하려면 인프라에서 필요한 권한을 부여하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+테이블 구성에서 `grantReadWriteData`를 호출하세요. 이는 Lambda 실행 역할에 필요한 DynamoDB 및 KMS 권한을 모두 부여합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this).build(),
+});
+
+Object.entries(api.integrations).forEach(([, integration]) => {
+  table.grantReadWriteData(integration.handler);
+});
+```
+
+:::note
+이 예제는 API의 모든 핸들러에 액세스 권한을 부여합니다. 일부 핸들러만 액세스가 필요한 경우 개별적으로 구성하세요.
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+Lambda 실행 역할에 DynamoDB 테이블 및 KMS 암호화 키에 액세스할 수 있는 권한을 부여하세요:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_api.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+

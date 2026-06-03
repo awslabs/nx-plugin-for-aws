@@ -1,0 +1,128 @@
+---
+title: Agente TypeScript a DynamoDB
+description: Conectar un Agente TypeScript a una tabla DynamoDB
+when:
+  sourceType: ts#agent
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+El generador `connection` conecta un <Link path="guides/ts-agent">Agente TypeScript</Link> a un proyecto <Link path="guides/ts-dynamodb">DynamoDB</Link>, configurando el desarrollo local para que ambos se inicien juntos automáticamente.
+
+## Requisitos previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/ts-agent">`ts#agent`</Link>
+2. Un proyecto <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>
+
+## Uso
+
+### Ejecutar el generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto Agent como origen y tu proyecto DynamoDB como destino. Si el proyecto contiene múltiples componentes de agente, especifica `sourceComponent` para desambiguar.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del generador
+
+El generador actualiza el target `<agent-name>-serve-local` del agente en `project.json` para que dependa del target `serve-local` del proyecto DynamoDB. No se modifican archivos de código fuente.
+
+## Usar DynamoDB en Agentes
+
+Importa las factories de entidades del paquete DynamoDB y úsalas dentro de la definición de tu agente:
+
+```ts title="packages/my-service/src/my-agent/agent.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+
+export const getAgent = async () => {
+  // ...
+  return new Agent({
+    tools: [
+      tool({
+        name: 'list_examples',
+        description: 'List all example items',
+        func: async () => {
+          const entity = await createExampleEntity();
+          const result = await entity.scan.go();
+          return result.data;
+        },
+      }),
+    ],
+  });
+};
+```
+
+## Infraestructura
+
+Para permitir que la función Lambda del agente acceda a la tabla DynamoDB, otorga los permisos necesarios en tu infraestructura.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+table.grantReadWriteData(myAgent);
+```
+
+`grantReadWriteData` otorga tanto los permisos de DynamoDB como de KMS al rol de ejecución del agente.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_agent.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Desarrollo local
+
+<Snippet name="connection/dynamodb-local-development" />

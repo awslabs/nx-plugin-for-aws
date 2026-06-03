@@ -1,0 +1,365 @@
+---
+title: DynamoDB
+description: DynamoDB 프로젝트 생성
+generator: ts#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+이 생성기는 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/)를 기반으로 하는 새로운 TypeScript 프로젝트를 생성하며, 타입 안전한 엔티티 모델링을 위해 [ElectroDB](https://electrodb.dev/)를 사용합니다. AWS CDK 또는 Terraform을 사용하여 DynamoDB 테이블을 프로비저닝하고 관리하는 데 필요한 애플리케이션 코드와 인프라를 생성하며, 단일 테이블 설계 지원과 DynamoDB Local을 통한 로컬 개발 환경을 제공합니다.
+
+## 사용법
+
+### DynamoDB 프로젝트 생성
+
+<RunGenerator generator="ts#dynamodb" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#dynamodb" />
+
+## 생성기 출력
+
+생성기는 `<directory>/<name>` 디렉토리에 다음과 같은 프로젝트 구조를 생성합니다:
+
+<FileTree>
+  - scripts
+    - create-local-table.ts 로컬 DynamoDB Local 인스턴스에 DynamoDB 테이블 생성
+    - pull-image.ts DynamoDB Local 이미지 가져오기
+    - start-container.ts DynamoDB Local 컨테이너 시작
+  - src
+    - index.ts 프로젝트 진입점 및 내보내기
+    - constants.ts 로컬 개발 상수 및 런타임 구성 키
+    - client.ts DynamoDB 클라이언트 싱글톤 및 테이블 이름 확인
+    - entities
+      - example.ts 예제 ElectroDB 엔티티 정의
+      - index.ts 엔티티 내보내기
+  - project.json 프로젝트 구성 및 빌드 타겟
+</FileTree>
+
+### 인프라
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dynamodb
+            - \<name>.ts 테이블별 인프라
+        - core
+          - dynamodb.ts 범용 DynamoDB 테이블 구성
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dynamodb
+            - \<name>
+              - \<name>.tf 테이블별 모듈
+        - core
+          - dynamodb
+            - dynamodb.tf 범용 DynamoDB 모듈
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+### 로컬 DynamoDB 시작
+
+생성기는 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 인스턴스를 시작하고 테이블을 생성하는 `serve-local` 타겟을 구성합니다:
+
+<NxCommands commands={['run <project-name>:serve-local']} />
+
+이 명령은 자동으로:
+1. DynamoDB Local 이미지를 가져옵니다 (`pull-image` 타겟)
+2. 컨테이너를 시작합니다
+3. 사전 정의된 인덱스로 로컬 테이블을 생성합니다
+
+### 데이터 모델링
+
+생성된 프로젝트는 단일 DynamoDB 테이블에서 타입 안전한 엔티티 모델링을 위해 [ElectroDB](https://electrodb.dev/)를 사용합니다. 생성된 예제 엔티티를 시작점으로 사용하여 `src/entities/` 아래에 엔티티 파일을 추가하거나 업데이트하세요.
+
+엔티티 정의 예제:
+
+```ts title="packages/my-table/src/entities/example.ts"
+import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+export const createExampleEntity = async () =>
+  new Entity(
+    {
+      model: {
+        entity: 'example',
+        version: '1',
+        service: 'MyTable',
+      },
+      attributes: {
+        id: {
+          type: 'string',
+          required: true,
+        },
+        createdAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          readOnly: true,
+        },
+        updatedAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+```
+
+자세한 내용은 [ElectroDB 엔티티 문서](https://electrodb.dev/en/modeling/entities/)를 참조하세요.
+
+### DynamoDB 클라이언트 사용
+
+생성된 `src/client.ts`는 두 가지 주요 유틸리티를 내보냅니다:
+
+- `getDynamoDBClient()` — 캐시된 싱글톤 `DynamoDBClient`를 반환합니다. `SERVE_LOCAL=true`일 때는 로컬 DynamoDB Local 인스턴스에 연결하고, 그렇지 않으면 기본 자격 증명 체인을 사용하여 AWS 클라이언트를 생성합니다.
+- `resolveTableName()` — DynamoDB 테이블 이름을 반환합니다. `SERVE_LOCAL=true`일 때는 로컬 테이블 이름 상수를 반환하고, 그렇지 않으면 `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 이름을 가져와 후속 호출을 위해 캐시합니다.
+
+### 로컬 DynamoDB 중지
+
+`serve-local`을 중지하면 (예: `Ctrl+C`로) DynamoDB Local 컨테이너가 자동으로 제거되지만, 명명된 볼륨은 보존되어 재시작 시에도 데이터가 유지됩니다.
+
+:::caution[Windows]
+Windows의 신호 처리 제한으로 인해 `serve-local`을 중지할 때 컨테이너가 자동으로 제거되지 않습니다. 수동으로 제거해야 합니다:
+
+```bash
+<engine> rm -f <scope>-dynamodb
+```
+
+`<engine>`을 컨테이너 엔진(`docker` 또는 `finch`)으로, `<scope>`를 Nx 워크스페이스 스코프(예: `proj`)로 바꾸세요.
+:::
+
+## 글로벌 보조 인덱스 추가/제거
+
+먼저 `src/gsi.ts`의 `GLOBAL_SECONDARY_INDEXES`를 업데이트하세요 — 이것이 GSI 정의의 단일 진실 공급원이며, 다음 `serve-local` 실행 시 스크립트가 자동으로 로컬 테이블의 인덱스를 추가하거나 제거하여 새 목록을 반영합니다. CDK를 사용하는 경우 이러한 변경 사항은 다음 배포 시 AWS 테이블에도 자동으로 반영됩니다.
+
+<OptionFilter when={{ iac: 'terraform' }}>
+  CDK와 달리 `src/gsi.ts`의 변경 사항은 Terraform 모듈에 자동으로 반영되지 않습니다. 배포하기 전에 해당 GSI 정의를 추가하거나 제거하도록 Terraform 모듈도 수동으로 업데이트해야 합니다.
+</OptionFilter>
+
+## 테이블 연결
+
+모든 TypeScript 프로젝트에서 DynamoDB 패키지의 엔티티 팩토리를 가져와 직접 사용할 수 있습니다:
+
+```ts
+import { createExampleEntity } from ':my-scope/my-table';
+
+const entity = await createExampleEntity();
+const result = await entity.query.primary({ id: '123' }).go();
+```
+
+:::note[런타임 구성]
+AWS에서 실행할 때 `resolveTableName()`은 `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 테이블 이름을 가져옵니다. 이 플러그인으로 빌드된 프로젝트(tRPC API, Smithy API, 에이전트, MCP 서버)는 이미 이 변수가 자동으로 구성되어 있습니다. 다른 TypeScript 프로젝트의 경우 인프라에서 프로비저닝한 AppConfig 애플리케이션 ID로 런타임 환경에 `RUNTIME_CONFIG_APP_ID`가 설정되어 있는지 확인하세요. 자세한 내용은 <Link path="guides/runtime-config">런타임 구성 가이드</Link>를 참조하세요.
+:::
+
+### 연결 생성기
+
+특정 프로젝트 유형의 경우 `connection` 생성기를 사용하여 로컬 개발 종속성을 자동으로 연결하면 DynamoDB Local이 프로젝트와 함께 자동으로 시작됩니다:
+
+- <Link path="guides/connection/trpc-dynamodb">tRPC API → DynamoDB</Link>
+- <Link path="guides/connection/smithy-dynamodb">Smithy API → DynamoDB</Link>
+- <Link path="guides/connection/ts-agent-dynamodb">TypeScript Agent → DynamoDB</Link>
+- <Link path="guides/connection/ts-mcp-server-dynamodb">MCP Server → DynamoDB</Link>
+
+## 테이블 배포
+
+DynamoDB 생성기는 선택한 `iac`에 따라 CDK 또는 Terraform 인프라를 생성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 구성은 `common/constructs`에 생성됩니다. 사용 예제:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+다음과 같은 DynamoDB 테이블을 프로비저닝합니다:
+- `pk` (파티션 키) 및 `sk` (정렬 키), 둘 다 `String` 타입
+- 기본적으로 2개의 글로벌 보조 인덱스, `src/gsi.ts`에 정의된 대로
+- 온디맨드 (`PAY_PER_REQUEST`) 요금 청구
+- 자동 키 교체가 활성화된 고객 관리형 KMS 암호화
+- 특정 시점 복구 활성화
+- 삭제 보호 활성화
+- AWS AppConfig의 `dynamodb` 네임스페이스 아래 Runtime Config에 테이블 이름 등록
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 `common/terraform`에 생성됩니다. 사용 예제:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+다음과 같은 DynamoDB 테이블을 프로비저닝합니다:
+- `pk` (파티션 키) 및 `sk` (정렬 키), 둘 다 `String` 타입
+- 기본적으로 2개의 글로벌 보조 인덱스, `src/gsi.ts`에 정의된 대로
+- 온디맨드 (`PAY_PER_REQUEST`) 요금 청구
+- 자동 키 교체가 활성화된 고객 관리형 KMS 암호화
+- 특정 시점 복구 활성화
+- 삭제 보호 활성화
+- Runtime Config에 테이블 이름 등록
+</Fragment>
+</Infrastructure>
+
+### 액세스 권한 부여
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+### 삭제 보호
+
+삭제 보호는 기본적으로 활성화되어 실수로 테이블이 삭제되는 것을 방지합니다.
+
+#### 삭제 보호 비활성화
+
+단기 개발 또는 프리뷰 스택과 같이 테이블 삭제가 예상되는 환경에서는 비활성화하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 요금 청구 모드
+
+테이블은 기본적으로 온디맨드 (`PAY_PER_REQUEST`) 요금 청구를 사용합니다. 예측 가능한 고처리량 워크로드의 경우 프로비저닝된 용량으로 전환하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 특정 시점 복구
+
+[특정 시점 복구](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)는 기본적으로 활성화되어 있어 지난 35일 동안의 임의 시점으로 테이블을 복원할 수 있습니다.
+
+#### 특정 시점 복구 비활성화
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 암호화 키 교체
+
+테이블을 암호화하는 데 사용되는 KMS 키는 기본적으로 자동 키 교체가 활성화되어 있습니다. 보안 정책이 외부에서 교체를 관리하는 경우 비활성화하세요.
+
+#### 암호화 키 교체 비활성화
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>
+

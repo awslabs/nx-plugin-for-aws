@@ -1,0 +1,128 @@
+---
+title: TypeScript Agent đến DynamoDB
+description: Kết nối TypeScript Agent với bảng DynamoDB
+when:
+  sourceType: ts#agent
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator `connection` kết nối một <Link path="guides/ts-agent">TypeScript Agent</Link> với dự án <Link path="guides/ts-dynamodb">DynamoDB</Link>, cấu hình phát triển cục bộ để cả hai khởi động cùng nhau tự động.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/ts-agent">`ts#agent`</Link>
+2. Một dự án <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án Agent của bạn làm nguồn và dự án DynamoDB của bạn làm đích. Nếu dự án chứa nhiều thành phần agent, hãy chỉ định `sourceComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator cập nhật target `<agent-name>-serve-local` của agent trong `project.json` để phụ thuộc vào target `serve-local` của dự án DynamoDB. Không có tệp nguồn nào được sửa đổi.
+
+## Sử dụng DynamoDB trong Agents
+
+Import các entity factory từ package DynamoDB và sử dụng chúng bên trong định nghĩa agent của bạn:
+
+```ts title="packages/my-service/src/my-agent/agent.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+
+export const getAgent = async () => {
+  // ...
+  return new Agent({
+    tools: [
+      tool({
+        name: 'list_examples',
+        description: 'List all example items',
+        func: async () => {
+          const entity = await createExampleEntity();
+          const result = await entity.scan.go();
+          return result.data;
+        },
+      }),
+    ],
+  });
+};
+```
+
+## Cơ sở hạ tầng
+
+Để cho phép hàm Lambda của agent truy cập bảng DynamoDB, hãy cấp các quyền cần thiết trong cơ sở hạ tầng của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+table.grantReadWriteData(myAgent);
+```
+
+`grantReadWriteData` cấp cả quyền DynamoDB và KMS cho execution role của agent.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_agent.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+<Snippet name="connection/dynamodb-local-development" />

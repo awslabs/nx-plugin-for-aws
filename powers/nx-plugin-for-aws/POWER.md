@@ -141,6 +141,7 @@ Add capabilities to existing projects:
 | `ts#agent`           | Add an AI Agent to a TypeScript project                                                                            |
 | `ts#api`             | Create a TypeScript API                                                                                            |
 | `ts#rdb`             | Create a relational database project                                                                               |
+| `ts#dynamodb`        | Create a DynamoDB project                                                                                          |
 
 ## Best Practices
 

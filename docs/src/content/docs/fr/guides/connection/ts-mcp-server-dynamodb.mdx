@@ -1,0 +1,125 @@
+---
+title: Serveur MCP vers DynamoDB
+description: Connecter un serveur MCP TypeScript à une table DynamoDB
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Le générateur `connection` relie un <Link path="guides/ts-mcp-server">serveur MCP TypeScript</Link> à un projet <Link path="guides/ts-dynamodb">DynamoDB</Link>, en configurant le développement local pour que les deux démarrent ensemble automatiquement.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link>
+2. Un projet <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez votre projet de serveur MCP comme source et votre projet DynamoDB comme cible. Si le projet contient plusieurs composants de serveur MCP, spécifiez `sourceComponent` pour lever l'ambiguïté.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur met à jour la cible `<mcp-server-name>-serve-local` du serveur MCP dans `project.json` pour dépendre de la cible `serve-local` du projet DynamoDB. Aucun fichier source n'est modifié.
+
+## Utiliser DynamoDB dans les outils
+
+Importez les factories d'entités depuis le package DynamoDB et utilisez-les dans `createServer` :
+
+```ts title="packages/my-service/src/my-mcp/server.ts"
+import { createExampleEntity } from ':my-scope/my-table';
+
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+
+  server.tool('list_examples', 'List all example items', {}, async () => {
+    const entity = await createExampleEntity();
+    const result = await entity.scan.go();
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result.data) }],
+    };
+  });
+
+  return server;
+};
+```
+
+## Infrastructure
+
+Pour permettre au serveur MCP d'accéder à la table DynamoDB, accordez les permissions nécessaires dans votre infrastructure.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+
+table.grantReadWriteData(myMcpServer);
+```
+
+`grantReadWriteData` accorde à la fois les permissions DynamoDB et KMS au rôle d'exécution du serveur MCP.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_mcp_server.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Développement local
+
+<Snippet name="connection/dynamodb-local-development" />

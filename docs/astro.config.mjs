@@ -330,6 +330,7 @@ export default defineConfig({
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#rdb', link: '/guides/ts-rdb' },
+            { label: 'ts#dynamodb', link: '/guides/ts-dynamodb' },
             {
               label: 'ts#api',
               items: [
@@ -479,6 +480,22 @@ export default defineConfig({
                 {
                   label: 'MCP Server → Relational Database',
                   link: '/guides/connection/ts-mcp-server-rdb',
+                },
+                {
+                  label: 'tRPC API → DynamoDB',
+                  link: '/guides/connection/trpc-dynamodb',
+                },
+                {
+                  label: 'Smithy API → DynamoDB',
+                  link: '/guides/connection/smithy-dynamodb',
+                },
+                {
+                  label: 'TypeScript Agent → DynamoDB',
+                  link: '/guides/connection/ts-agent-dynamodb',
+                },
+                {
+                  label: 'MCP Server → DynamoDB',
+                  link: '/guides/connection/ts-mcp-server-dynamodb',
                 },
               ],
             },
