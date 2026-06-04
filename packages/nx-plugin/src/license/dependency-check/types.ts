@@ -20,6 +20,15 @@ export interface DependencyCheckConfig {
   allow: AllowlistEntry[];
   exceptions?: DependencyCheckException[];
   collectors?: import('./collectors/collector').LicenseCollector[];
+  /**
+   * Called once for every discovered dependency, with its package name and the
+   * SPDX license expression resolved for it (an exception's `spdx` takes
+   * precedence over the raw declared license; may be an empty string if no
+   * license was declared). Useful for reporting — e.g. printing every
+   * dependency's license. Invoked for all dependencies regardless of whether
+   * the check passes.
+   */
+  onDependency?: (dependency: { package: string; spdx: string }) => void;
 }
 
 export type LicenseStatus = 'PRE_APPROVED' | 'UNKNOWN' | 'NOT_APPROVED';

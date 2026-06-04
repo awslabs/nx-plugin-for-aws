@@ -33,27 +33,27 @@ interface ProjectFile {
 export async function licenseSyncGenerator(
   tree: Tree,
 ): Promise<SyncGeneratorResult> {
-  const config = await readLicenseConfig(tree);
+  const source = (await readLicenseConfig(tree))?.source;
 
-  if (!config) {
-    // Nothing to do when not configured
+  if (!source) {
+    // Nothing to do when source licensing (headers + LICENSE files) isn't configured
     return {};
   }
 
   const licenseHeadersUpdated: string[] = [];
 
-  if (config.header) {
+  if (source.header) {
     // Get all candidate project files for header
     const candidateProjectFiles = await getCandidateProjectFilesForHeader(
       tree,
-      config.header,
+      source.header,
     );
 
-    const headerContentLines = loadHeaderContentLines(tree, config.header);
+    const headerContentLines = loadHeaderContentLines(tree, source.header);
 
     // Add headers to project files which match the include pattern
     for (const [includePattern, format] of Object.entries(
-      config.header.format,
+      source.header.format,
     )) {
       const files = minimatch.match(candidateProjectFiles, includePattern);
 
@@ -62,7 +62,7 @@ export async function licenseSyncGenerator(
           tree,
           file,
           headerContentLines,
-          config.header,
+          source.header,
           format,
         );
         if (didAdd) {
@@ -76,7 +76,7 @@ export async function licenseSyncGenerator(
 
   // Helper to check whether a file should be included in the sync based on file exclude configuration
   const isFileIncludedInSync = (path: string): boolean =>
-    !(config?.files?.exclude ?? []).some((excludePattern) =>
+    !(source.files?.exclude ?? []).some((excludePattern) =>
       minimatch(path, excludePattern),
     );
 
@@ -98,7 +98,7 @@ export async function licenseSyncGenerator(
         if (isFileIncludedInSync(projectFilePath)) {
           const prevContent = tree.read(projectFilePath, 'utf-8');
 
-          syncProjectFile(tree, projectRoot, projectFile, config);
+          syncProjectFile(tree, projectRoot, projectFile, source);
 
           const newContent = tree.read(projectFilePath, 'utf-8');
 

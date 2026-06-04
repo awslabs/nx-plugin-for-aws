@@ -51,29 +51,33 @@ describe('license generator', () => {
       copyrightHolder: 'Foo',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.spdx).toBe('MIT');
-    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
-      'Foo',
+    expect((await readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
+      'MIT',
     );
+    expect(
+      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
+    ).toBe('Foo');
 
     await licenseGenerator(tree, {
       license: 'MIT',
       copyrightHolder: 'Bar',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
-      'Bar',
-    );
+    expect(
+      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
+    ).toBe('Bar');
 
     await licenseGenerator(tree, {
       license: 'ASL',
       copyrightHolder: 'Baz',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.spdx).toBe('ASL');
-    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
-      'Baz',
+    expect((await readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
+      'ASL',
     );
+    expect(
+      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
+    ).toBe('Baz');
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -172,6 +176,64 @@ describe('license generator', () => {
         const projectJson = JSON.parse(tree.read('project.json', 'utf-8')!);
         expect(projectJson.targets?.['license-check']).toBeUndefined();
       }
+    });
+
+    describe('lint depends on license-check', () => {
+      const lintDependsOn = (config: any) =>
+        config.targets?.lint?.dependsOn ?? [];
+
+      it('wires existing projects lint targets to the root license-check', async () => {
+        tree.write('package.json', JSON.stringify({ name: '@test/source' }));
+        addProjectConfiguration(tree, '@test/with-lint', {
+          root: 'packages/with-lint',
+          targets: { lint: { executor: '@nx/eslint:lint' } },
+        });
+        addProjectConfiguration(tree, '@test/no-lint', {
+          root: 'packages/no-lint',
+          targets: { build: {} },
+        });
+
+        await licenseGenerator(tree, options);
+
+        const { getProjects } = await import('@nx/devkit');
+        const projects = getProjects(tree);
+        // The linting project depends on the root license-check.
+        expect(lintDependsOn(projects.get('@test/with-lint'))).toContainEqual({
+          projects: ['@test/source'],
+          target: 'license-check',
+        });
+        // A project with no lint target is left alone (no lint target created).
+        expect(projects.get('@test/no-lint')!.targets?.lint).toBeUndefined();
+      });
+
+      it('does not make the license-check project depend on its own target', async () => {
+        tree.write('package.json', JSON.stringify({ name: '@test/source' }));
+        await licenseGenerator(tree, options);
+
+        const { getProjects } = await import('@nx/devkit');
+        const root = getProjects(tree).get('@test/source');
+        expect(lintDependsOn(root)).not.toContainEqual({
+          projects: ['@test/source'],
+          target: 'license-check',
+        });
+      });
+
+      it('is idempotent across re-runs', async () => {
+        tree.write('package.json', JSON.stringify({ name: '@test/source' }));
+        addProjectConfiguration(tree, '@test/lib', {
+          root: 'packages/lib',
+          targets: { lint: { executor: '@nx/eslint:lint' } },
+        });
+
+        await licenseGenerator(tree, options);
+        await licenseGenerator(tree, options);
+
+        const { getProjects } = await import('@nx/devkit');
+        const deps = lintDependsOn(getProjects(tree).get('@test/lib')).filter(
+          (d: any) => d?.target === 'license-check',
+        );
+        expect(deps).toHaveLength(1);
+      });
     });
 
     it('should be idempotent - running twice produces same result', async () => {

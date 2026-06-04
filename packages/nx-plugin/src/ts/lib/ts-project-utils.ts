@@ -8,6 +8,7 @@ import { toScopeAlias } from '../../utils/npm-scope';
 import { ConfigureProjectOptions } from './types';
 import { configureVitest } from './vitest';
 import { configureEslint } from './eslint';
+import { addLicenseCheckToLintTarget } from '../../license/config';
 
 /**
  * Updates typescript projects
@@ -93,4 +94,10 @@ export const configureTsProject = async (
 
   await configureEslint(tree, options);
   await configureVitest(tree, options);
+
+  // If license checking is configured, make this project's lint target depend
+  // on the root license-check target. No-op if there's no license-check target
+  // (i.e. the license generator hasn't run); the license generator wires up
+  // existing projects itself, so this works regardless of generator order.
+  addLicenseCheckToLintTarget(tree, options.fullyQualifiedName);
 };

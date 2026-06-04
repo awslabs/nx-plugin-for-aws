@@ -17,7 +17,7 @@ import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
 } from '../utils/config/utils';
-import { LicenseConfig } from './config-types';
+import { LicenseSourceConfig } from './config-types';
 import { DependencyCheckException } from './dependency-check/types';
 import { beforeEach, afterEach, vi } from 'vitest';
 
@@ -26,7 +26,7 @@ const LICENSES: SPDXLicenseIdentifier[] = ['Apache-2.0', 'MIT', 'ASL'];
 describe('license config', () => {
   let tree: Tree;
 
-  const sampleConfig: LicenseConfig = {
+  const sampleConfig: LicenseSourceConfig = {
     spdx: 'ASL',
     copyrightHolder: 'Test Inc.',
     header: {
@@ -69,12 +69,12 @@ describe('license config', () => {
         AWS_NX_PLUGIN_CONFIG_FILE_NAME,
         `
         export default {
-          license: ${JSON.stringify(sampleConfig)}
+          license: { source: ${JSON.stringify(sampleConfig)} }
         };
       `,
       );
 
-      expect(await readLicenseConfig(tree)).toEqual(sampleConfig);
+      expect(await readLicenseConfig(tree)).toEqual({ source: sampleConfig });
     });
   });
 
@@ -106,18 +106,20 @@ describe('license config', () => {
     ): DependencyCheckException => ({ package: pkg, reason, spdx });
 
     describe('ensureDependencyCheckBlock', () => {
-      it('should add a dependencyCheck block to a license config', async () => {
+      it('should add a dependencies block to a license config', async () => {
         writeConfig(`{
   license: {
-    spdx: 'Apache-2.0',
-    copyrightHolder: 'Test',
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Test',
+    },
   },
 }`);
 
         await ensureDependencyCheckBlock(tree);
 
         const config = read();
-        expect(config).toContain('dependencyCheck');
+        expect(config).toContain('dependencies');
         expect(config).toContain('DEFAULT_LICENSE_ALLOWLIST');
         expect(config).toContain('npmCollector()');
         expect(config).not.toContain('pythonCollector');
@@ -127,7 +129,7 @@ describe('license config', () => {
 
       it('should add pythonCollector when requested', async () => {
         writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } }`,
+          `{ license: { source: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } } }`,
         );
 
         await ensureDependencyCheckBlock(tree, {
@@ -142,10 +144,12 @@ describe('license config', () => {
       it('should preserve other license properties', async () => {
         writeConfig(`{
   license: {
-    spdx: 'Apache-2.0',
-    copyrightHolder: 'Test',
-    header: {
-      content: { lines: ['Copyright Test'] },
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Test',
+      header: {
+        content: { lines: ['Copyright Test'] },
+      },
     },
   },
 }`);
@@ -155,15 +159,17 @@ describe('license config', () => {
         const config = read();
         expect(config).toContain('header');
         expect(config).toContain('Copyright Test');
-        expect(config).toContain('dependencyCheck');
+        expect(config).toContain('dependencies');
       });
 
       it('should be idempotent and not overwrite an existing block', async () => {
         writeConfig(`{
   license: {
-    spdx: 'Apache-2.0',
-    copyrightHolder: 'Test',
-    dependencyCheck: {
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Test',
+    },
+    dependencies: {
       allow: MY_CUSTOM_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [{ package: 'my-pkg', reason: 'mine', spdx: 'MIT' }],
@@ -178,7 +184,7 @@ describe('license config', () => {
         expect(config).toContain('my-pkg');
         // Should not have added the default allowlist import or a second block
         expect(config).not.toContain('DEFAULT_LICENSE_ALLOWLIST');
-        expect(config.match(/dependencyCheck/g)).toHaveLength(1);
+        expect(config.match(/dependencies/g)).toHaveLength(1);
       });
 
       it('should be a no-op when no config file exists', async () => {
@@ -191,7 +197,7 @@ describe('license config', () => {
       it('should append to an empty exceptions array', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [],
       exceptions: [],
@@ -202,7 +208,7 @@ describe('license config', () => {
         await ensureLicenseExceptions(tree, [exception('pkg-a')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        expect((config!.license as any).dependencyCheck.exceptions).toEqual([
+        expect((config!.license as any).dependencies.exceptions).toEqual([
           { package: 'pkg-a', reason: 'because', spdx: 'MIT' },
         ]);
       });
@@ -210,7 +216,7 @@ describe('license config', () => {
       it('should append to a non-empty exceptions array', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [],
       exceptions: [{ package: 'existing', reason: 'r', spdx: 'MIT' }],
@@ -221,7 +227,7 @@ describe('license config', () => {
         await ensureLicenseExceptions(tree, [exception('pkg-b')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(2);
         expect(exceptions.map((e: any) => e.package)).toEqual([
           'existing',
@@ -232,7 +238,7 @@ describe('license config', () => {
       it('should add multiple exceptions', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: { allow: [], collectors: [], exceptions: [] },
+    dependencies: { allow: [], collectors: [], exceptions: [] },
   },
 }`);
 
@@ -244,7 +250,7 @@ describe('license config', () => {
 
         const config = await readAwsNxPluginConfig(tree);
         expect(
-          (config!.license as any).dependencyCheck.exceptions.map(
+          (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
           ),
         ).toEqual(['pkg-a', 'pkg-b', 'pkg-c']);
@@ -253,7 +259,7 @@ describe('license config', () => {
       it('should be idempotent for an already-listed package', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [],
       exceptions: [{ package: 'pkg-a', reason: 'original reason', spdx: 'MIT' }],
@@ -266,7 +272,7 @@ describe('license config', () => {
         ]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(1);
         // Original reason preserved — not overwritten
         expect(exceptions[0].reason).toBe('original reason');
@@ -275,7 +281,7 @@ describe('license config', () => {
       it('should only add the missing exceptions from a mixed list', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [],
       exceptions: [{ package: 'pkg-a', reason: 'r', spdx: 'MIT' }],
@@ -290,7 +296,7 @@ describe('license config', () => {
 
         const config = await readAwsNxPluginConfig(tree);
         expect(
-          (config!.license as any).dependencyCheck.exceptions.map(
+          (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
           ),
         ).toEqual(['pkg-a', 'pkg-b']);
@@ -299,7 +305,7 @@ describe('license config', () => {
       it('should preserve the allowlist and collectors when adding exceptions', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: MY_CUSTOM_ALLOWLIST,
       collectors: [npmCollector(), pythonCollector()],
       exceptions: [],
@@ -319,7 +325,7 @@ describe('license config', () => {
       it('should escape special characters in the reason', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: { allow: [], collectors: [], exceptions: [] },
+    dependencies: { allow: [], collectors: [], exceptions: [] },
   },
 }`);
 
@@ -328,14 +334,14 @@ describe('license config', () => {
         ]);
 
         const config = await readAwsNxPluginConfig(tree);
-        expect(
-          (config!.license as any).dependencyCheck.exceptions[0].reason,
-        ).toBe("it's a 'quoted' reason");
+        expect((config!.license as any).dependencies.exceptions[0].reason).toBe(
+          "it's a 'quoted' reason",
+        );
       });
 
-      it('should be a no-op when dependencyCheck is not configured', async () => {
+      it('should be a no-op when dependencies is not configured', async () => {
         writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } }`,
+          `{ license: { source: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } } }`,
         );
 
         await ensureLicenseExceptions(tree, [exception('pkg-a')]);
@@ -348,7 +354,7 @@ describe('license config', () => {
       it('should add pythonCollector to an existing collectors array', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [],
@@ -367,7 +373,7 @@ describe('license config', () => {
       it('should add pythonCollector to an empty collectors array', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: { allow: [], collectors: [], exceptions: [] },
+    dependencies: { allow: [], collectors: [], exceptions: [] },
   },
 }`);
 
@@ -379,7 +385,7 @@ describe('license config', () => {
       it('should be idempotent', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [npmCollector(), pythonCollector()],
       exceptions: [],
@@ -393,9 +399,9 @@ describe('license config', () => {
         expect(config.match(/pythonCollector/g)).toHaveLength(1);
       });
 
-      it('should be a no-op when dependencyCheck is not configured', async () => {
+      it('should be a no-op when dependencies is not configured', async () => {
         writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } }`,
+          `{ license: { source: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } } }`,
         );
 
         await ensurePythonLicenseCollector(tree);
@@ -406,24 +412,34 @@ describe('license config', () => {
 
     describe('combined orderings', () => {
       it('should support block -> python -> exceptions', async () => {
-        writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } }`,
-        );
+        writeConfig(`{
+  license: {
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Test',
+    },
+  },
+}`);
 
         await ensureDependencyCheckBlock(tree);
         await ensurePythonLicenseCollector(tree);
         await ensureLicenseExceptions(tree, [exception('pkg-a')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const dc = (config!.license as any).dependencyCheck;
+        const dc = (config!.license as any).dependencies;
         expect(dc.exceptions.map((e: any) => e.package)).toEqual(['pkg-a']);
         expect(read()).toContain('pythonCollector()');
       });
 
       it('should support exceptions added across multiple calls', async () => {
-        writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Test' } }`,
-        );
+        writeConfig(`{
+  license: {
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Test',
+    },
+  },
+}`);
 
         await ensureDependencyCheckBlock(tree, {
           includeCollectors: 'npm+python',
@@ -435,7 +451,7 @@ describe('license config', () => {
 
         const config = await readAwsNxPluginConfig(tree);
         expect(
-          (config!.license as any).dependencyCheck.exceptions.map(
+          (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
           ),
         ).toEqual(['pkg-a', 'pkg-b']);
@@ -450,7 +466,7 @@ describe('license config', () => {
         // append would capture it and produce a `[ ...a, , ...b ]` elision.
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [],
       exceptions: [
@@ -464,7 +480,7 @@ describe('license config', () => {
         await ensureLicenseExceptions(tree, [exception('c')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(3);
         expect(noHole(exceptions)).toBe(true);
         expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'b', 'c']);
@@ -473,9 +489,14 @@ describe('license config', () => {
       });
 
       it('should not create a hole appending across separate calls (forward generator order)', async () => {
-        writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'T' } }`,
-        );
+        writeConfig(`{
+  license: {
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'T',
+    },
+  },
+}`);
 
         await ensureDependencyCheckBlock(tree);
         // First call adds 4 exceptions (array becomes multi-line w/ trailing comma)
@@ -489,7 +510,7 @@ describe('license config', () => {
         await ensureLicenseExceptions(tree, [exception('p5')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(5);
         expect(noHole(exceptions)).toBe(true);
       });
@@ -498,7 +519,7 @@ describe('license config', () => {
         // A config that already contains an elision should not keep growing holes.
         writeConfig(`{
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: [],
       collectors: [],
       exceptions: [
@@ -513,7 +534,7 @@ describe('license config', () => {
         await ensureLicenseExceptions(tree, [exception('d')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(noHole(exceptions)).toBe(true);
         expect(exceptions.map((e: any) => e.package)).toEqual([
           'a',
@@ -529,7 +550,7 @@ describe('license config', () => {
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [
         npmCollector(),
@@ -544,7 +565,7 @@ export default {
         await ensurePythonLicenseCollector(tree);
 
         const config = await readAwsNxPluginConfig(tree);
-        const collectors = (config!.license as any).dependencyCheck.collectors;
+        const collectors = (config!.license as any).dependencies.collectors;
         expect(noHole(collectors)).toBe(true);
         expect(collectors).toHaveLength(3);
         expect(read()).toContain('pythonCollector()');
@@ -553,13 +574,15 @@ export default {
       });
     });
 
-    describe('writeLicenseConfig preserves dependencyCheck', () => {
-      it('should keep a customized dependencyCheck block when re-writing the license', async () => {
+    describe('writeLicenseConfig preserves dependencies', () => {
+      it('should keep a customized dependencies block when re-writing the license', async () => {
         writeConfig(`{
   license: {
-    spdx: 'Apache-2.0',
-    copyrightHolder: 'Old',
-    dependencyCheck: {
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Old',
+    },
+    dependencies: {
       allow: MY_CUSTOM_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [{ package: 'my-pkg', reason: 'vetted', spdx: 'GPL-3.0' }],
@@ -576,17 +599,17 @@ export default {
         const config = read();
         // License header re-written
         expect(config).toContain('New Corp');
-        // dependencyCheck customizations preserved verbatim
+        // dependencies customizations preserved verbatim
         expect(config).toContain('MY_CUSTOM_ALLOWLIST');
         expect(config).toContain('my-pkg');
         expect(config).toContain('npmCollector()');
-        // Exactly one dependencyCheck block
-        expect(config.match(/dependencyCheck/g)).toHaveLength(1);
+        // Exactly one dependencies block
+        expect(config.match(/dependencies/g)).toHaveLength(1);
       });
 
-      it('should not add a dependencyCheck block if none existed', async () => {
+      it('should not add a dependencies block if none existed', async () => {
         writeConfig(
-          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Old' } }`,
+          `{ license: { source: { spdx: 'Apache-2.0', copyrightHolder: 'Old' } } }`,
         );
 
         await writeLicenseConfig(tree, {
@@ -595,18 +618,20 @@ export default {
           header: { content: { lines: ['hi'] }, format: {} },
         });
 
-        expect(read()).not.toContain('dependencyCheck');
+        expect(read()).not.toContain('dependencies');
       });
 
-      it('should preserve a dependencyCheck whose reason contains backticks and ${}', async () => {
+      it('should preserve a dependencies block whose reason contains backticks and ${}', async () => {
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    spdx: 'Apache-2.0',
-    copyrightHolder: 'Old',
-    dependencyCheck: {
+    source: {
+      spdx: 'Apache-2.0',
+      copyrightHolder: 'Old',
+    },
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [{ package: 'tick', reason: 'has a \`backtick\` and \${dollar}', spdx: 'MIT' }],
@@ -622,23 +647,23 @@ export default {
         });
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(1);
         expect(exceptions[0].package).toBe('tick');
         expect(exceptions[0].reason).toBe('has a `backtick` and ${dollar}');
-        expect((config!.license as any).copyrightHolder).toBe('New');
+        expect((config!.license as any).source.copyrightHolder).toBe('New');
       });
     });
 
     describe('robustness against unusual config shapes', () => {
-      it('should target the license dependencyCheck, not a same-shaped object elsewhere', async () => {
+      it('should target the license dependencies, not a same-shaped object elsewhere', async () => {
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
-const other = { dependencyCheck: { exceptions: [{ package: 'DECOY', reason: 'r', spdx: 'MIT' }] } };
+const other = { somethingElse: { exceptions: [{ package: 'DECOY', reason: 'r', spdx: 'MIT' }] } };
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [{ package: 'a', reason: 'r', spdx: 'MIT' }],
@@ -650,7 +675,7 @@ export default {
         await ensureLicenseExceptions(tree, [exception('real')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'real']);
         // The decoy object is untouched, and no placeholder leaked into source.
         expect(read()).toContain("package: 'DECOY'");
@@ -660,7 +685,7 @@ export default {
       it('should round-trip a reason containing newlines, backslashes and backticks', async () => {
         writeConfig(`{
   license: {
-    dependencyCheck: { allow: [], collectors: [], exceptions: [] },
+    dependencies: { allow: [], collectors: [], exceptions: [] },
   },
 }`);
 
@@ -673,9 +698,9 @@ export default {
         ]);
 
         const config = await readAwsNxPluginConfig(tree);
-        expect(
-          (config!.license as any).dependencyCheck.exceptions[0].reason,
-        ).toBe('line1\nline2 \\ back `tick` ${x}');
+        expect((config!.license as any).dependencies.exceptions[0].reason).toBe(
+          'line1\nline2 \\ back `tick` ${x}',
+        );
       });
 
       it('should preserve collector call arguments when adding pythonCollector', async () => {
@@ -684,7 +709,7 @@ export default {
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector({ excludePackages: ['foo'] })],
       exceptions: [],
@@ -698,6 +723,12 @@ export default {
         const source = read();
         expect(source).toContain("excludePackages: ['foo']");
         expect(source).toContain('pythonCollector()');
+        // The single existing collector is a call WITH an argument; appending
+        // must still insert a comma (no `)pythonCollector` run-on).
+        const config = await readAwsNxPluginConfig(tree);
+        expect((config!.license as any).dependencies.collectors).toHaveLength(
+          2,
+        );
       });
 
       it('should leave the config untouched when collectors is not an array literal', async () => {
@@ -705,7 +736,7 @@ export default {
 const MY_COLLECTORS = [npmCollector()];
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: MY_COLLECTORS,
       exceptions: [],
@@ -726,7 +757,7 @@ export default {
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
-export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()], exceptions: [] } } };`,
+export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()], exceptions: [] } } };`,
         );
 
         for (let i = 0; i < 12; i++) {
@@ -734,7 +765,7 @@ export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST,
         }
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(12);
         expect(exceptions.every((e: any) => e != null)).toBe(true);
       });
@@ -747,7 +778,7 @@ export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST,
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [
@@ -761,7 +792,7 @@ export default {
         await ensureLicenseExceptions(tree, [exception('b')]);
 
         const config = await readAwsNxPluginConfig(tree);
-        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'b']);
         // The new element is live (not swallowed by the comment) and the
         // comment is preserved.
@@ -774,7 +805,7 @@ export default {
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [
@@ -790,7 +821,7 @@ export default {
 
         const config = await readAwsNxPluginConfig(tree);
         expect(
-          (config!.license as any).dependencyCheck.exceptions.map(
+          (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
           ),
         ).toEqual(['a', 'b']);
@@ -802,7 +833,7 @@ export default {
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [npmCollector()],
       exceptions: [
@@ -817,7 +848,7 @@ export default {
 
         const config = await readAwsNxPluginConfig(tree);
         expect(
-          (config!.license as any).dependencyCheck.exceptions.map(
+          (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
           ),
         ).toEqual(['first']);
@@ -829,7 +860,7 @@ export default {
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
-    dependencyCheck: {
+    dependencies: {
       allow: DEFAULT_LICENSE_ALLOWLIST,
       collectors: [
         npmCollector(), // npm only for now
@@ -843,9 +874,9 @@ export default {
         await ensurePythonLicenseCollector(tree);
 
         const config = await readAwsNxPluginConfig(tree);
-        expect(
-          (config!.license as any).dependencyCheck.collectors,
-        ).toHaveLength(2);
+        expect((config!.license as any).dependencies.collectors).toHaveLength(
+          2,
+        );
         expect(read()).toContain('pythonCollector()');
       });
     });
@@ -855,7 +886,7 @@ export default {
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
-export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()] } } };`,
+export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()] } } };`,
         );
 
         await expect(
@@ -868,7 +899,7 @@ export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST,
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
           `import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
-export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, exceptions: [] } } };`,
+export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, exceptions: [] } } };`,
         );
 
         await expect(
@@ -877,10 +908,10 @@ export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST,
         await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
       });
 
-      it('should not crash on an empty dependencyCheck object', async () => {
+      it('should not crash on an empty dependencies object', async () => {
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-          `export default { license: { dependencyCheck: {} } };`,
+          `export default { license: { dependencies: {} } };`,
         );
 
         await ensureLicenseExceptions(tree, [exception('x')]);
@@ -900,14 +931,14 @@ export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST,
         await ensureDependencyCheckBlock(tree);
 
         await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
-        expect(read()).not.toContain('dependencyCheck');
+        expect(read()).not.toContain('dependencies');
       });
 
       it('should not crash when exceptions is not an array literal', async () => {
         tree.write(
           AWS_NX_PLUGIN_CONFIG_FILE_NAME,
           `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
-export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()], exceptions: {} } } };`,
+export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()], exceptions: {} } } };`,
         );
 
         await expect(

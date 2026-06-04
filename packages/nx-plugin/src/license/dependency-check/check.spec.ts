@@ -92,6 +92,32 @@ describe('runCheck', () => {
     expect(result.pass).toBe(true);
   });
 
+  it('calls onDependency for every dependency with package and spdx', async () => {
+    writePkg(join(dir, 'node_modules'), 'mit-pkg', '1.0.0', 'MIT');
+    writePkg(join(dir, 'node_modules'), 'gpl-pkg', '1.0.0', 'GPL-3.0');
+    const seen: { package: string; spdx: string }[] = [];
+    await runCheck({
+      projectRoot: dir,
+      config: { allow, onDependency: (d) => seen.push(d) },
+    });
+    expect(seen).toContainEqual({ package: 'mit-pkg', spdx: 'MIT' });
+    expect(seen).toContainEqual({ package: 'gpl-pkg', spdx: 'GPL-3.0' });
+  });
+
+  it('passes an exception spdx to onDependency over the raw license', async () => {
+    writePkg(join(dir, 'node_modules'), 'gpl-pkg', '1.0.0', 'GPL-3.0');
+    const seen: { package: string; spdx: string }[] = [];
+    await runCheck({
+      projectRoot: dir,
+      config: {
+        allow,
+        exceptions: [{ package: 'gpl-pkg', reason: 'r', spdx: 'MIT' }],
+        onDependency: (d) => seen.push(d),
+      },
+    });
+    expect(seen).toContainEqual({ package: 'gpl-pkg', spdx: 'MIT' });
+  });
+
   it('fails when a dep declares no license', async () => {
     writePkg(join(dir, 'node_modules'), 'no-license-pkg', '1.0.0', null);
     const result = await runCheck({

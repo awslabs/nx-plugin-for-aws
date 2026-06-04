@@ -7,6 +7,22 @@ import type { DependencyCheckConfig } from './dependency-check/types';
 
 export interface LicenseConfig {
   /**
+   * Configuration for licensing your own source code: license headers and
+   * LICENSE files. Omit to disable source license header and file syncing.
+   */
+  source?: LicenseSourceConfig;
+  /**
+   * Configuration for checking your dependencies' licenses against an
+   * allowlist. Omit to disable dependency license checking.
+   */
+  dependencies?: DependencyCheckConfig;
+}
+
+/**
+ * Configuration for licensing your own source code (headers and LICENSE files).
+ */
+export interface LicenseSourceConfig {
+  /**
    * The SPDX license identifier for your chosen license.
    * License files will be synchronised according to the chosen SPDX
    */
@@ -28,11 +44,6 @@ export interface LicenseConfig {
    * Configuration for LICENSE files
    */
   files?: LicenseFileConfig;
-  /**
-   * Configuration for dependency license allowlist checking.
-   * Set to `false` to disable the check entirely.
-   */
-  dependencyCheck?: false | DependencyCheckConfig;
 }
 
 export type {

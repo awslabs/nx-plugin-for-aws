@@ -5,6 +5,7 @@
 import { getProjects, readNxJson, Tree, updateNxJson } from '@nx/devkit';
 import { LicenseGeneratorSchema } from './schema';
 import {
+  addLicenseCheckToAllLintTargets,
   defaultLicenseConfig,
   ensureDependencyCheckBlock,
   ensureLicenseExceptions,
@@ -53,6 +54,10 @@ export async function licenseGenerator(
     }
     await addExceptionsForExistingProjects(tree);
     await writeLicenseCheckTarget(tree);
+    // Make every existing project's lint target depend on the root
+    // license-check target, so the check runs as part of lint/build regardless
+    // of whether projects were created before or after the license generator.
+    addLicenseCheckToAllLintTargets(tree);
   }
 
   const nxJson = readNxJson(tree);

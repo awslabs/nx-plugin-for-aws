@@ -14,11 +14,8 @@ const loadConfig = (): DependencyCheckConfig | null => {
   const config = readAwsNxPluginConfigFromDisk(workspaceRoot);
   if (!config) return null;
 
-  const license = config.license;
-  if (!license) return null;
-  const dc = license.dependencyCheck;
-  if (dc === false || dc === undefined) return null;
-  return dc as DependencyCheckConfig;
+  // Dependency checking is enabled by the presence of `license.dependencies`.
+  return config.license?.dependencies ?? null;
 };
 
 export default async function runLicenseCheckExecutor(

@@ -11,7 +11,7 @@ import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Manage licensing across your workspace: synchronise `LICENSE` files and source code headers, and check that every dependency conforms to a license allowlist.
+Manage licensing across your workspace: synchronise `LICENSE` files and source code headers for your own code (`license.source`), and check that every dependency conforms to a license allowlist (`license.dependencies`).
 
 ## Usage
 
@@ -29,7 +29,7 @@ The generator will create or update the following files:
 
 <FileTree>
   - nx.json The lint target is configured to run the license sync generator and depends on the license-check target
-  - aws-nx-plugin.config.mts Configuration for license sync and dependency checking
+  - aws-nx-plugin.config.mts Configuration for license source sync (`license.source`) and dependency checking (`license.dependencies`)
 </FileTree>
 
 ## License Headers & Files
@@ -95,10 +95,12 @@ Configuration is defined in the `aws-nx-plugin.config.mts` file in the root of y
 
 Your chosen license can be updated at any time via the `spdx` configuration property:
 
-```typescript title="aws-nx-plugin.config.mts" {3}
+```typescript title="aws-nx-plugin.config.mts" {4}
 export default {
   license: {
-    spdx: 'MIT',
+    source: {
+      spdx: 'MIT',
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -107,12 +109,14 @@ When the sync generator runs, all `LICENSE` files, `package.json` and `pyproject
 
 You can additionally configure the copyright holder and copyright year, which are included in some `LICENSE` files:
 
-```typescript title="aws-nx-plugin.config.mts" {4,5}
+```typescript title="aws-nx-plugin.config.mts" {5,6}
 export default {
   license: {
-    spdx: 'MIT',
-    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
-    copyrightYear: 2025,
+    source: {
+      spdx: 'MIT',
+      copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+      copyrightYear: 2025,
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -123,18 +127,20 @@ The license header content can be configured in two ways:
 
 1. Using inline content:
 
-```typescript title="aws-nx-plugin.config.mts" {5-9}
+```typescript title="aws-nx-plugin.config.mts" {6-10}
 export default {
   license: {
-    header: {
-      content: {
-        lines: [
-          'Copyright: My Company, Incorporated.',
-          'Licensed under the MIT License',
-          'All rights reserved',
-        ];
+    source: {
+      header: {
+        content: {
+          lines: [
+            'Copyright: My Company, Incorporated.',
+            'Licensed under the MIT License',
+            'All rights reserved',
+          ];
+        }
+        // ... format configuration
       }
-      // ... format configuration
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -142,14 +148,16 @@ export default {
 
 2. Loading from a file:
 
-```typescript title="aws-nx-plugin.config.mts" {5}
+```typescript title="aws-nx-plugin.config.mts" {6}
 export default {
   license: {
-    header: {
-      content: {
-        filePath: 'license-header.txt'; // relative to workspace root
+    source: {
+      header: {
+        content: {
+          filePath: 'license-header.txt'; // relative to workspace root
+        }
+        // ... format configuration
       }
-      // ... format configuration
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -159,34 +167,36 @@ export default {
 
 You can specify how license headers should be formatted for different file types using glob patterns. The format configuration supports line comments, block comments, or a combination of both:
 
-```typescript title="aws-nx-plugin.config.mts" {7-29}
+```typescript title="aws-nx-plugin.config.mts" {8-30}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['Copyright notice here'],
-      },
-      format: {
-        // Line comments
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['Copyright notice here'],
         },
-        // Block comments
-        '**/*.css': {
-          blockStart: '/*',
-          blockEnd: '*/',
-        },
-        // Block comments with line prefixes
-        '**/*.java': {
-          blockStart: '/*',
-          lineStart: ' * ',
-          blockEnd: ' */',
-        },
-        // Line comments with header/footer
-        '**/*.py': {
-          blockStart: '# ------------',
-          lineStart: '# ',
-          blockEnd: '# ------------',
+        format: {
+          // Line comments
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+          // Block comments
+          '**/*.css': {
+            blockStart: '/*',
+            blockEnd: '*/',
+          },
+          // Block comments with line prefixes
+          '**/*.java': {
+            blockStart: '/*',
+            lineStart: ' * ',
+            blockEnd: ' */',
+          },
+          // Line comments with header/footer
+          '**/*.py': {
+            blockStart: '# ------------',
+            lineStart: '# ',
+            blockEnd: '# ------------',
+          },
         },
       },
     },
@@ -205,27 +215,29 @@ The format configuration supports:
 
 For file types that aren't natively supported, you can specify custom comment syntax to tell the sync generator how to identify existing license headers in these file types.
 
-```typescript title="aws-nx-plugin.config.mts" {12-22}
+```typescript title="aws-nx-plugin.config.mts" {13-23}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.xyz': {
-          lineStart: '## ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
-      },
-      commentSyntax: {
-        xyz: {
-          line: '##', // Define line comment syntax
+        format: {
+          '**/*.xyz': {
+            lineStart: '## ',
+          },
         },
-        abc: {
-          block: {
-            // Define block comment syntax
-            start: '<!--',
-            end: '-->',
+        commentSyntax: {
+          xyz: {
+            line: '##', // Define line comment syntax
+          },
+          abc: {
+            block: {
+              // Define block comment syntax
+              start: '<!--',
+              end: '-->',
+            },
           },
         },
       },
@@ -240,19 +252,21 @@ By default, in a git repository, all `.gitignore` files are honored to ensure th
 
 You can exclude additional files from license header synchronization using glob patterns:
 
-```typescript title="aws-nx-plugin.config.mts" {12-16}
+```typescript title="aws-nx-plugin.config.mts" {13}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
+        format: {
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+        },
+        exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
       },
-      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
     },
   },
 } satisfies AwsNxPluginConfig;
@@ -264,16 +278,18 @@ All `LICENSE` files, `package.json` files and `pyproject.toml` files are synchro
 
 You can exclude specific projects or files from synchronization using glob patterns:
 
-```typescript title="aws-nx-plugin.config.mts" {3-10}
+```typescript title="aws-nx-plugin.config.mts" {4-11}
 export default {
   license: {
-    files: {
-      exclude: [
-        // do not sync LICENSE file, package.json or pyproject.toml
-        'packages/excluded-project',
-        // do not sync LICENSE file, but sync package.json and/or pyproject.toml
-        'apps/internal/LICENSE',
-      ];
+    source: {
+      files: {
+        exclude: [
+          // do not sync LICENSE file, package.json or pyproject.toml
+          'packages/excluded-project',
+          // do not sync LICENSE file, but sync package.json and/or pyproject.toml
+          'apps/internal/LICENSE',
+        ];
+      }
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -281,10 +297,10 @@ export default {
 
 ### Disabling License Sync
 
-To disable the license sync generator:
+License source sync is enabled by the presence of the `license.source` key in your configuration. To disable it:
 
-1. Remove the `license` section from your configuration in `aws-nx-plugin.config.mts`
-2. Remove the `@aws/nx-plugin:license#sync` generator from `targetDefaults.lint.syncGenerators`
+1. Remove the `license.source` section from your configuration in `aws-nx-plugin.config.mts` (you can keep `license.dependencies` if you still want dependency license checking)
+2. If you also want to fully remove the sync generator, remove the `@aws/nx-plugin:license#sync` generator from `targetDefaults.lint.syncGenerators`
 
 To re-enable license sync, simply run the `license` generator again.
 
@@ -312,13 +328,27 @@ The generator writes a `license-check` target to your root `project.json`:
 }
 ```
 
+The `inputs` are computed for your workspace: only lockfiles that are actually present are included, along with `aws-nx-plugin.config.mts`, plus a `{workspaceRoot}/**/uv.lock` glob when Python dependency checking is enabled (i.e. a Python collector is configured).
+
 You can run the check directly:
 
 <NxCommands commands={['license-check']} />
 
-Results are cached against your lockfile and `aws-nx-plugin.config.mts` — re-runs are instant when nothing has changed.
+Results are cached against your lockfiles and `aws-nx-plugin.config.mts` — re-runs are instant when nothing has changed.
 
 Collectors determine what gets scanned. The `npmCollector` uses [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn), and the `pythonCollector` uses [pip-licenses](https://github.com/raimon49/pip-licenses). If no installed dependencies are found, the check passes with nothing to inspect.
+
+### Running as part of lint/build
+
+The dependency license check runs automatically whenever you `lint` or `build` any project in your workspace. The `license` generator wires each project's `lint` target to depend on the root `license-check` target, and the project generators (`ts#*` and `py#*`) do the same when they run — so the check is wired up regardless of the order generators are run in.
+
+This means you don't need to run the check explicitly, though you can still do so with the NxCommands `license-check` target:
+
+<NxCommands commands={['license-check']} />
+
+The wiring is a cross-project `dependsOn` on each project's `lint` target that points at the root `license-check` target. To skip the check during a lint or build, set the `LICENSE_DEPENDENCY_CHECK=skip` environment variable:
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
 ### Configuration
 
@@ -331,7 +361,7 @@ import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
     // ...
-    dependencyCheck: {
+    dependencies: {
       allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
       exceptions: [
         { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
@@ -385,10 +415,34 @@ const myCollector = (): LicenseCollector => ({
 });
 ```
 
+#### The onDependency hook
+
+`license.dependencies` accepts an optional `onDependency` callback that is invoked once for every discovered dependency, regardless of whether it passes or fails the check. It receives `{ package, spdx }`, where `package` is the package name and `spdx` is the resolved SPDX license expression. An exception's `spdx` takes precedence over the raw declared license, and `spdx` may be an empty string if no license was declared.
+
+This is a handy way to print out all of the licenses across your project. Run the `license-check` target to see the output:
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      onDependency: ({ package: pkg, spdx }) => {
+        console.log(`${pkg} - ${spdx}`);
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
 ### Disabling Dependency Checks
 
-To disable dependency checks for a single run, set the `LICENSE_DEPENDENCY_CHECK=skip` environment variable:
+Dependency license checking is enabled by the presence of the `license.dependencies` key in your configuration.
+
+To disable the checks for a single run, set the `LICENSE_DEPENDENCY_CHECK=skip` environment variable:
 
 <PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
-To disable permanently, set `dependencyCheck` to `false` in your config or re-run the generator with `--dependencyCheck=false`.
+To disable permanently, remove the `license.dependencies` key from your configuration in `aws-nx-plugin.config.mts`. You can also re-run the `license` generator with `--dependencyCheck=false` to scaffold without it — the generator flag is still named `--dependencyCheck` and controls whether the generator writes the `dependencies` block.

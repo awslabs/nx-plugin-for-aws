@@ -47,6 +47,7 @@ export const runCheck = async (
       const exception = findException(config.exceptions, dep.name, dep.version);
       const license = exception?.spdx ?? dep.rawLicense;
       const status = exception ? 'PRE_APPROVED' : evaluator.evaluate(license);
+      config.onDependency?.({ package: dep.name, spdx: license });
       dependencies.push({
         name: dep.name,
         version: dep.version,
@@ -121,7 +122,7 @@ export const formatReport = (
   }
 
   lines.push(
-    `To fix, add exceptions to license.dependencyCheck.exceptions in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}:`,
+    `To fix, add exceptions to license.dependencies.exceptions in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}:`,
   );
   lines.push('');
   lines.push('  exceptions: [');
@@ -139,7 +140,7 @@ export const formatReport = (
   ];
   if (uniqueLicenses.length > 0) {
     lines.push(
-      'Or add the license to dependencyCheck.allow if it should be broadly permitted:',
+      'Or add the license to license.dependencies.allow if it should be broadly permitted:',
     );
     lines.push('');
     lines.push('  allow: [');
