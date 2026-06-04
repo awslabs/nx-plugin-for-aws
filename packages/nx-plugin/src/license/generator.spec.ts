@@ -107,11 +107,41 @@ describe('license generator', () => {
       expect(projectJson.targets['license-check'].inputs).toContain(
         '{workspaceRoot}/aws-nx-plugin.config.mts',
       );
-      // A uv.lock glob is always included so Python dependency changes (whose
-      // lockfiles may be created later, in subdirectories) invalidate the cache.
-      expect(projectJson.targets['license-check'].inputs).toContain(
-        '{workspaceRoot}/**/uv.lock',
+    });
+
+    it('should only include lockfiles that are present', async () => {
+      tree.write('pnpm-lock.yaml', '');
+      await licenseGenerator(tree, options);
+
+      const inputs = JSON.parse(tree.read('project.json', 'utf-8')!).targets[
+        'license-check'
+      ].inputs;
+      expect(inputs).toContain('{workspaceRoot}/pnpm-lock.yaml');
+      // Other package managers' lockfiles are absent, so they're not listed.
+      expect(inputs).not.toContain('{workspaceRoot}/yarn.lock');
+      expect(inputs).not.toContain('{workspaceRoot}/package-lock.json');
+      expect(inputs).not.toContain('{workspaceRoot}/bun.lockb');
+      // No python project → no uv.lock input.
+      expect(inputs).not.toContain('{workspaceRoot}/**/uv.lock');
+    });
+
+    it('should include uv.lock input when a python project exists', async () => {
+      tree.write('pnpm-lock.yaml', '');
+      addProjectConfiguration(tree, 'py-app', {
+        root: 'packages/py_app',
+        sourceRoot: 'packages/py_app/src',
+      });
+      tree.write(
+        'packages/py_app/pyproject.toml',
+        '[project]\nname = "py-app"\n',
       );
+
+      await licenseGenerator(tree, options);
+
+      const inputs = JSON.parse(tree.read('project.json', 'utf-8')!).targets[
+        'license-check'
+      ].inputs;
+      expect(inputs).toContain('{workspaceRoot}/**/uv.lock');
     });
 
     it('should suppress root package.json script target inference', async () => {
@@ -262,13 +292,25 @@ describe('license generator', () => {
     it('should add pythonCollector when py#project runs after license generator', async () => {
       const { ensurePythonLicenseCollector } = await import('./config');
 
+      tree.write('pnpm-lock.yaml', '');
       await licenseGenerator(tree, options);
       let config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
       expect(config).not.toContain('pythonCollector');
+      // No uv.lock input yet — no python collector.
+      expect(
+        JSON.parse(tree.read('project.json', 'utf-8')!).targets['license-check']
+          .inputs,
+      ).not.toContain('{workspaceRoot}/**/uv.lock');
 
       await ensurePythonLicenseCollector(tree);
       config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
       expect(config).toContain('pythonCollector');
+      // Adding the python collector also adds the uv.lock cache input, even
+      // though it ran after the license generator.
+      expect(
+        JSON.parse(tree.read('project.json', 'utf-8')!).targets['license-check']
+          .inputs,
+      ).toContain('{workspaceRoot}/**/uv.lock');
     });
 
     it('should add MCP exceptions when mcp-server runs after license generator', async () => {

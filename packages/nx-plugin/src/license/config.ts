@@ -153,6 +153,63 @@ const appendToArray = (key: string, node: string, ins: string) =>
     $scope <: contains \`${key}: [$items]\` where { $items += \`${ins}\` }
   }`;
 
+/**
+ * Workspace-root npm-ecosystem lockfiles. Each is added to the license-check
+ * cache inputs only when present, so the cache invalidates on dependency
+ * changes without listing lockfiles for package managers the workspace doesn't
+ * use.
+ */
+const NPM_LOCKFILES = [
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'bun.lockb',
+];
+
+/**
+ * Recompute the `inputs` of the root `license-check` target from what's
+ * currently in the workspace: the present npm lockfiles, the config file, and
+ * a recursive uv.lock glob when the dependency check uses a Python collector.
+ *
+ * The uv lockfile is keyed off the collector (not file presence) because it is
+ * created by `uv` *after* the generator runs, and may live in a subdirectory of
+ * a uv workspace. Callers run this whenever they change the relevant state, so
+ * the inputs stay correct regardless of generator order. No-op if the
+ * license-check target doesn't exist yet.
+ */
+export const updateLicenseCheckTargetInputs = async (
+  tree: Tree,
+): Promise<void> => {
+  const rootProjectJsonPath = 'project.json';
+  if (!tree.exists(rootProjectJsonPath)) return;
+
+  const rootProject = JSON.parse(tree.read(rootProjectJsonPath, 'utf-8')!);
+  const target = rootProject.targets?.['license-check'];
+  if (!target) return;
+
+  const inputs = NPM_LOCKFILES.filter((f) => tree.exists(f)).map(
+    (f) => `{workspaceRoot}/${f}`,
+  );
+
+  if (await hasPythonCollector(tree)) {
+    inputs.push('{workspaceRoot}/**/uv.lock');
+  }
+
+  inputs.push('{workspaceRoot}/aws-nx-plugin.config.mts');
+
+  target.inputs = inputs;
+  tree.write(rootProjectJsonPath, JSON.stringify(rootProject, null, 2));
+};
+
+/**
+ * Whether the dependency check config has a `pythonCollector` configured.
+ */
+const hasPythonCollector = async (tree: Tree): Promise<boolean> => {
+  if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return false;
+  const { matchGritQL } = await import('../utils/ast');
+  return matchGritQL(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME, '`pythonCollector`');
+};
+
 export interface EnsureDependencyCheckBlockOptions {
   includeCollectors?: 'npm' | 'npm+python';
 }
@@ -303,6 +360,10 @@ export const ensurePythonLicenseCollector = async (
       LICENSE_SDK_MODULE,
     );
     await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+    // Now that a Python collector is configured, ensure uv.lock is a cache
+    // input. Runs here (not only in the license generator) so it's added
+    // whenever the collector is — e.g. when py#project runs after license.
+    await updateLicenseCheckTargetInputs(tree);
   }
 };
 

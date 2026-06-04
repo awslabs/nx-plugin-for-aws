@@ -9,6 +9,7 @@ import {
   ensureDependencyCheckBlock,
   ensureLicenseExceptions,
   ensurePythonLicenseCollector,
+  updateLicenseCheckTargetInputs,
   writeLicenseConfig,
 } from './config';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
@@ -51,7 +52,7 @@ export async function licenseGenerator(
       await ensurePythonLicenseCollector(tree);
     }
     await addExceptionsForExistingProjects(tree);
-    writeLicenseCheckTarget(tree);
+    await writeLicenseCheckTarget(tree);
   }
 
   const nxJson = readNxJson(tree);
@@ -79,25 +80,9 @@ export async function licenseGenerator(
 }
 
 /**
- * Lockfile glob inputs for the license-check cache.
- *
- * Globs (rather than only lockfiles that exist at generation time) ensure the
- * cache invalidates whenever dependencies change anywhere in the workspace —
- * including Python (`uv.lock`) projects added after the license generator runs,
- * whose lockfiles may live in subdirectories of a uv workspace.
+ * Write/update root project.json with the license-check target.
  */
-const LICENSE_CHECK_LOCKFILE_INPUTS = [
-  '{workspaceRoot}/pnpm-lock.yaml',
-  '{workspaceRoot}/yarn.lock',
-  '{workspaceRoot}/package-lock.json',
-  '{workspaceRoot}/bun.lockb',
-  '{workspaceRoot}/**/uv.lock',
-];
-
-/**
- * Write/update root project.json with license-check target
- */
-const writeLicenseCheckTarget = (tree: Tree): void => {
+const writeLicenseCheckTarget = async (tree: Tree): Promise<void> => {
   const rootProjectJsonPath = 'project.json';
   let rootProject: any = {};
   if (tree.exists(rootProjectJsonPath)) {
@@ -107,13 +92,14 @@ const writeLicenseCheckTarget = (tree: Tree): void => {
   rootProject.targets['license-check'] = {
     executor: '@aws/nx-plugin:license-check',
     cache: true,
-    inputs: [
-      ...LICENSE_CHECK_LOCKFILE_INPUTS,
-      '{workspaceRoot}/aws-nx-plugin.config.mts',
-    ],
+    inputs: [],
     options: {},
   };
   tree.write(rootProjectJsonPath, JSON.stringify(rootProject, null, 2));
+
+  // Populate `inputs` from the lockfiles actually present (+ uv.lock if a
+  // Python collector is configured) and the config file.
+  await updateLicenseCheckTargetInputs(tree);
 
   // Adding a root project.json registers the workspace root as an Nx project.
   // Suppress target inference from the root package.json scripts (build, lint,
