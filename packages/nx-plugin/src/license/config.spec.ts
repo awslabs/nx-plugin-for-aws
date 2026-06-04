@@ -739,5 +739,182 @@ export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST,
         expect(exceptions.every((e: any) => e != null)).toBe(true);
       });
     });
+
+    describe('comments in the config', () => {
+      it('should append without corrupting a trailing line comment', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector()],
+      exceptions: [
+        { package: 'a', reason: 'r', spdx: 'MIT' }, // keep me
+      ],
+    },
+  },
+};`,
+        );
+
+        await ensureLicenseExceptions(tree, [exception('b')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'b']);
+        // The new element is live (not swallowed by the comment) and the
+        // comment is preserved.
+        expect(read()).toContain('keep me');
+      });
+
+      it('should append when a comment sits before the closing bracket', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector()],
+      exceptions: [
+        { package: 'a', reason: 'r', spdx: 'MIT' },
+        // add more below
+      ],
+    },
+  },
+};`,
+        );
+
+        await ensureLicenseExceptions(tree, [exception('b')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        expect(
+          (config!.license as any).dependencyCheck.exceptions.map(
+            (e: any) => e.package,
+          ),
+        ).toEqual(['a', 'b']);
+      });
+
+      it('should add the first exception into a commented-but-empty array', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector()],
+      exceptions: [
+        // none yet
+      ],
+    },
+  },
+};`,
+        );
+
+        await ensureLicenseExceptions(tree, [exception('first')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        expect(
+          (config!.license as any).dependencyCheck.exceptions.map(
+            (e: any) => e.package,
+          ),
+        ).toEqual(['first']);
+      });
+
+      it('should add pythonCollector around a comment in the collectors array', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [
+        npmCollector(), // npm only for now
+      ],
+      exceptions: [],
+    },
+  },
+};`,
+        );
+
+        await ensurePythonLicenseCollector(tree);
+
+        const config = await readAwsNxPluginConfig(tree);
+        expect(
+          (config!.license as any).dependencyCheck.collectors,
+        ).toHaveLength(2);
+        expect(read()).toContain('pythonCollector()');
+      });
+    });
+
+    describe('missing or unfindable arrays are skipped, not crashed', () => {
+      it('should not crash when the exceptions key is missing', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()] } } };`,
+        );
+
+        await expect(
+          ensureLicenseExceptions(tree, [exception('x')]),
+        ).resolves.toBeUndefined();
+        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+      });
+
+      it('should not crash when the collectors key is missing', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, exceptions: [] } } };`,
+        );
+
+        await expect(
+          ensurePythonLicenseCollector(tree),
+        ).resolves.toBeUndefined();
+        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+      });
+
+      it('should not crash on an empty dependencyCheck object', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `export default { license: { dependencyCheck: {} } };`,
+        );
+
+        await ensureLicenseExceptions(tree, [exception('x')]);
+        await ensurePythonLicenseCollector(tree);
+
+        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+      });
+
+      it('should not crash when there is no license object at all', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `export default { iac: { provider: 'cdk' } };`,
+        );
+
+        await ensureLicenseExceptions(tree, [exception('x')]);
+        await ensurePythonLicenseCollector(tree);
+        await ensureDependencyCheckBlock(tree);
+
+        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(read()).not.toContain('dependencyCheck');
+      });
+
+      it('should not crash when exceptions is not an array literal', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()], exceptions: {} } } };`,
+        );
+
+        await expect(
+          ensureLicenseExceptions(tree, [exception('x')]),
+        ).resolves.toBeUndefined();
+        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+      });
+    });
   });
 });

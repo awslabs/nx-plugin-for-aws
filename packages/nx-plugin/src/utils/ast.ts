@@ -386,11 +386,25 @@ export const appendToArrayInScope = async (
 
     if (appended) {
       const content = tree.read(filePath)!.toString();
+      const at = content.indexOf(placeholder);
+
+      // `+=` inserts the placeholder immediately after the last element's
+      // source text. If that element is followed by a trailing line comment
+      // (`// ...`), the placeholder lands *inside* the comment, which would
+      // comment out the new element. Detect an unterminated `//` between the
+      // start of the placeholder's line and the placeholder, and start the new
+      // element on its own line so the comment is preserved and the element
+      // stays live. (Block comments `/* */` are already closed, so no fix is
+      // needed there.)
+      const lineStart = content.lastIndexOf('\n', at) + 1;
+      const precedingOnLine = content.slice(lineStart, at);
+      const prefix = precedingOnLine.includes('//') ? '\n' : '';
+
       // Function replacer avoids `$` in the element text being treated as a
       // special replacement pattern.
       tree.write(
         filePath,
-        content.replace(placeholder, () => elements[i]),
+        content.replace(placeholder, () => `${prefix}${elements[i]}`),
       );
       modified = true;
     }
