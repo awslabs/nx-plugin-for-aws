@@ -270,11 +270,11 @@ export const matchGritQL = async (
 };
 
 /**
- * Capture the source text of the first match of a GritQL pattern in a file.
+ * Capture the source text of the first match of a GritQL pattern.
  *
- * Returns the matched node's text (e.g. for `` `dependencyCheck: $v` `` it
- * returns the full `dependencyCheck: { ... }` property text), or undefined if
- * the pattern doesn't match. The file is not modified.
+ * For example `` `dependencyCheck: $_` `` returns the whole
+ * `dependencyCheck: { ... }` property text. Returns undefined if nothing
+ * matches. The file is not modified.
  */
 export const captureGritQL = async (
   tree: Tree,
@@ -288,9 +288,7 @@ export const captureGritQL = async (
   try {
     const query = new QueryBuilder(pattern);
     query.filter((node) => {
-      if (captured === undefined) {
-        captured = node.text();
-      }
+      captured ??= node.text();
       return true;
     });
     await query.applyToFile({ path: filePath, content: source });
@@ -300,115 +298,38 @@ export const captureGritQL = async (
   return captured;
 };
 
-let appendPlaceholderCounter = 0;
-
-export interface AppendToArrayOptions {
-  /**
-   * A GritQL pattern that matches the object scope containing the array,
-   * binding its body to `$scope`. For example
-   * `` `dependencyCheck: { $scope }` ``. All rewrites are constrained to this
-   * scope, so identically-named arrays elsewhere in the file are untouched.
-   */
-  scopePattern: string;
-  /** Name of the array property to append into (e.g. `exceptions`). */
-  arrayKey: string;
-  /**
-   * Source texts of the elements to append. Each is inserted via a placeholder
-   * and then substituted, so user-provided strings never enter the GritQL
-   * pattern (where quotes/`$` would break parsing or be misinterpreted).
-   */
-  elements: string[];
-  /**
-   * Optional extra GritQL condition (referencing `$scope`) that must hold for
-   * an element to be appended — used for de-duplication. Receives the
-   * placeholder-free index of the element being added; return a condition
-   * string such as `` $scope <: not contains `package: "x"` ``.
-   */
-  guard?: (elementIndex: number) => string | undefined;
-  /**
-   * GritQL pattern that a single array element matches, used to disambiguate a
-   * single-element array (`[x]`) from a multi-element one in the rewrite — the
-   * single-element branch only fires when the sole element matches this. Must
-   * match the kind of element being appended. Defaults to `` `{ $_ }` ``
-   * (object literals); pass `` `$_()` `` for call expressions like
-   * `npmCollector()`.
-   */
-  elementNodePattern?: string;
-}
+/**
+ * A unique token that is a valid identifier, so it can stand in for an array
+ * element or object property inside a GritQL rewrite.
+ */
+export const GRIT_INSERT_PLACEHOLDER = '__GRIT_INSERT_PLACEHOLDER__';
 
 /**
- * Append elements to a named array property within a scoped object, using
- * GritQL exclusively.
+ * Apply a GritQL rewrite that inserts {@link GRIT_INSERT_PLACEHOLDER}, then
+ * replace the placeholder with `text`. Routing user-provided text through a
+ * placeholder keeps it out of the GritQL pattern, where quotes, backticks or
+ * `${...}` would otherwise break parsing.
  *
- * Branches on the array's shape so the result is always well-formed:
- *  - empty `[]`            → `[<new>]`
- *  - single inline `[x]`   → `[x, <new>]`
- *  - multi-element `[...]`  → list-append (`+=`), which is comma-aware and so
- *    does not introduce array holes even when a trailing comma is present.
- *
- * Returns true if the file was modified.
+ * GritQL inserts the placeholder right after the previous element's text. If
+ * that element has a trailing line comment (`// ...`) the placeholder lands
+ * inside it, so we move the text to its own line in that case. The caller
+ * formats afterwards. Returns true if the pattern matched and the file changed.
  */
-export const appendToArrayInScope = async (
+export const insertViaGritQL = async (
   tree: Tree,
   filePath: string,
-  options: AppendToArrayOptions,
+  pattern: string,
+  text: string,
 ): Promise<boolean> => {
-  const {
-    scopePattern,
-    arrayKey,
-    elements,
-    guard,
-    elementNodePattern = '`{ $_ }`',
-  } = options;
-  let modified = false;
-
-  for (let i = 0; i < elements.length; i++) {
-    const placeholder = `"__GRIT_APPEND_PLACEHOLDER_${appendPlaceholderCounter++}__"`;
-    const guardCondition = guard?.(i);
-    const guardClause = guardCondition ? `${guardCondition},` : '';
-
-    // Branch on the array shape. The multi-element branch uses `+=` to append
-    // to the element list, which is comma-aware (no double-comma holes). The
-    // empty and single-inline branches use direct rewrites since `+=` does not
-    // emit a separator for those shapes. The single-element branch is
-    // constrained to a sole element matching `elementNodePattern` so it does
-    // not greedily capture a multi-element token range.
-    const pattern = `${scopePattern} where {
-      ${guardClause}
-      or {
-        $scope <: contains \`${arrayKey}: []\` => \`${arrayKey}: [${placeholder}]\`,
-        $scope <: contains \`${arrayKey}: [$only]\` where { $only <: ${elementNodePattern} } => \`${arrayKey}: [$only, ${placeholder}]\`,
-        $scope <: contains \`${arrayKey}: [$elements]\` where { $elements += \`${placeholder}\` }
-      }
-    }`;
-
-    const appended = await applyGritQL(tree, filePath, pattern);
-
-    if (appended) {
-      const content = tree.read(filePath)!.toString();
-      const at = content.indexOf(placeholder);
-
-      // `+=` inserts the placeholder immediately after the last element's
-      // source text. If that element is followed by a trailing line comment
-      // (`// ...`), the placeholder lands *inside* the comment, which would
-      // comment out the new element. Detect an unterminated `//` between the
-      // start of the placeholder's line and the placeholder, and start the new
-      // element on its own line so the comment is preserved and the element
-      // stays live. (Block comments `/* */` are already closed, so no fix is
-      // needed there.)
-      const lineStart = content.lastIndexOf('\n', at) + 1;
-      const precedingOnLine = content.slice(lineStart, at);
-      const prefix = precedingOnLine.includes('//') ? '\n' : '';
-
-      // Function replacer avoids `$` in the element text being treated as a
-      // special replacement pattern.
-      tree.write(
-        filePath,
-        content.replace(placeholder, () => `${prefix}${elements[i]}`),
-      );
-      modified = true;
-    }
-  }
-
-  return modified;
+  if (!(await applyGritQL(tree, filePath, pattern))) return false;
+  const content = tree.read(filePath)!.toString();
+  const at = content.indexOf(GRIT_INSERT_PLACEHOLDER);
+  const lineSoFar = content.slice(content.lastIndexOf('\n', at) + 1, at);
+  const replacement = lineSoFar.includes('//') ? `\n${text}` : text;
+  // Function replacer so `$` in `text` isn't treated as a replacement pattern.
+  tree.write(
+    filePath,
+    content.replace(GRIT_INSERT_PLACEHOLDER, () => replacement),
+  );
+  return true;
 };
