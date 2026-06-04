@@ -11,7 +11,7 @@ import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-管理工作区中的许可证：同步 `LICENSE` 文件和源代码头部，并检查每个依赖项是否符合许可证允许列表。
+管理工作区中的许可证：为您自己的代码同步 `LICENSE` 文件和源代码头部（`license.source`），并检查每个依赖项是否符合许可证允许列表（`license.dependencies`）。
 
 ## 使用方式
 
@@ -29,7 +29,7 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 
 <FileTree>
   - nx.json 配置了运行许可证同步生成器的 lint 目标，并依赖于 license-check 目标
-  - aws-nx-plugin.config.mts 许可证同步和依赖项检查的配置
+  - aws-nx-plugin.config.mts 许可证源代码同步（`license.source`）和依赖项检查（`license.dependencies`）的配置
 </FileTree>
 
 ## 许可证头部与文件
@@ -95,10 +95,12 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 
 可通过 `spdx` 配置属性随时更新所选许可证：
 
-```typescript title="aws-nx-plugin.config.mts" {3}
+```typescript title="aws-nx-plugin.config.mts" {4}
 export default {
   license: {
-    spdx: 'MIT',
+    source: {
+      spdx: 'MIT',
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -107,12 +109,14 @@ export default {
 
 可额外配置版权持有者和年份（部分 `LICENSE` 文件包含）：
 
-```typescript title="aws-nx-plugin.config.mts" {4,5}
+```typescript title="aws-nx-plugin.config.mts" {5,6}
 export default {
   license: {
-    spdx: 'MIT',
-    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
-    copyrightYear: 2025,
+    source: {
+      spdx: 'MIT',
+      copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+      copyrightYear: 2025,
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -123,18 +127,20 @@ export default {
 
 1. 内联内容：
 
-```typescript title="aws-nx-plugin.config.mts" {5-9}
+```typescript title="aws-nx-plugin.config.mts" {6-10}
 export default {
   license: {
-    header: {
-      content: {
-        lines: [
-          'Copyright: My Company, Incorporated.',
-          'Licensed under the MIT License',
-          'All rights reserved',
-        ];
+    source: {
+      header: {
+        content: {
+          lines: [
+            'Copyright: My Company, Incorporated.',
+            'Licensed under the MIT License',
+            'All rights reserved',
+          ];
+        }
+        // ... 格式配置
       }
-      // ... 格式配置
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -142,14 +148,16 @@ export default {
 
 2. 从文件加载：
 
-```typescript title="aws-nx-plugin.config.mts" {5}
+```typescript title="aws-nx-plugin.config.mts" {6}
 export default {
   license: {
-    header: {
-      content: {
-        filePath: 'license-header.txt'; // 相对于工作区根目录
+    source: {
+      header: {
+        content: {
+          filePath: 'license-header.txt'; // 相对于工作区根目录
+        }
+        // ... 格式配置
       }
-      // ... 格式配置
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -159,34 +167,36 @@ export default {
 
 可通过 glob 模式为不同文件类型指定许可证头部格式。格式配置支持行注释、块注释或两者结合：
 
-```typescript title="aws-nx-plugin.config.mts" {7-29}
+```typescript title="aws-nx-plugin.config.mts" {8-30}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['Copyright notice here'],
-      },
-      format: {
-        // 行注释
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['Copyright notice here'],
         },
-        // 块注释
-        '**/*.css': {
-          blockStart: '/*',
-          blockEnd: '*/',
-        },
-        // 带行前缀的块注释
-        '**/*.java': {
-          blockStart: '/*',
-          lineStart: ' * ',
-          blockEnd: ' */',
-        },
-        // 带头部/尾部的行注释
-        '**/*.py': {
-          blockStart: '# ------------',
-          lineStart: '# ',
-          blockEnd: '# ------------',
+        format: {
+          // 行注释
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+          // 块注释
+          '**/*.css': {
+            blockStart: '/*',
+            blockEnd: '*/',
+          },
+          // 带行前缀的块注释
+          '**/*.java': {
+            blockStart: '/*',
+            lineStart: ' * ',
+            blockEnd: ' */',
+          },
+          // 带头部/尾部的行注释
+          '**/*.py': {
+            blockStart: '# ------------',
+            lineStart: '# ',
+            blockEnd: '# ------------',
+          },
         },
       },
     },
@@ -205,27 +215,29 @@ export default {
 
 对于原生不支持的文件类型，可指定自定义注释语法以帮助同步生成器识别现有许可证头部：
 
-```typescript title="aws-nx-plugin.config.mts" {12-22}
+```typescript title="aws-nx-plugin.config.mts" {13-23}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.xyz': {
-          lineStart: '## ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
-      },
-      commentSyntax: {
-        xyz: {
-          line: '##', // 定义行注释语法
+        format: {
+          '**/*.xyz': {
+            lineStart: '## ',
+          },
         },
-        abc: {
-          block: {
-            // 定义块注释语法
-            start: '<!--',
-            end: '-->',
+        commentSyntax: {
+          xyz: {
+            line: '##', // 定义行注释语法
+          },
+          abc: {
+            block: {
+              // 定义块注释语法
+              start: '<!--',
+              end: '-->',
+            },
           },
         },
       },
@@ -240,19 +252,21 @@ export default {
 
 可通过 glob 模式排除文件：
 
-```typescript title="aws-nx-plugin.config.mts" {12-16}
+```typescript title="aws-nx-plugin.config.mts" {13}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
+        format: {
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+        },
+        exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
       },
-      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
     },
   },
 } satisfies AwsNxPluginConfig;
@@ -264,16 +278,18 @@ export default {
 
 可通过 glob 模式排除特定项目或文件：
 
-```typescript title="aws-nx-plugin.config.mts" {3-10}
+```typescript title="aws-nx-plugin.config.mts" {4-11}
 export default {
   license: {
-    files: {
-      exclude: [
-        // 不同步 LICENSE、package.json 或 pyproject.toml
-        'packages/excluded-project',
-        // 不同步 LICENSE，但同步 package.json 和/或 pyproject.toml
-        'apps/internal/LICENSE',
-      ];
+    source: {
+      files: {
+        exclude: [
+          // 不同步 LICENSE、package.json 或 pyproject.toml
+          'packages/excluded-project',
+          // 不同步 LICENSE，但同步 package.json 和/或 pyproject.toml
+          'apps/internal/LICENSE',
+        ];
+      }
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -281,10 +297,10 @@ export default {
 
 ### 禁用许可证同步
 
-禁用许可证同步生成器：
+许可证源代码同步通过配置中存在 `license.source` 键来启用。要禁用它：
 
-1. 从 `aws-nx-plugin.config.mts` 配置中移除 `license` 部分
-2. 从 `targetDefaults.lint.syncGenerators` 中移除 `@aws/nx-plugin:license#sync` 生成器
+1. 从 `aws-nx-plugin.config.mts` 配置中移除 `license.source` 部分（如果仍需依赖项许可证检查，可保留 `license.dependencies`）
+2. 如果还想完全移除同步生成器，请从 `targetDefaults.lint.syncGenerators` 中移除 `@aws/nx-plugin:license#sync` 生成器
 
 重新启用时，只需再次运行 `license` 生成器。
 
@@ -312,6 +328,8 @@ export default {
 }
 ```
 
+`inputs` 是为您的工作区计算的：仅包含实际存在的锁文件以及 `aws-nx-plugin.config.mts`，当启用 Python 依赖项检查时（即配置了 Python 收集器），还会包含 `{workspaceRoot}/**/uv.lock` glob。
+
 您可以直接运行检查：
 
 <NxCommands commands={['license-check']} />
@@ -319,6 +337,18 @@ export default {
 结果会根据您的锁文件和 `aws-nx-plugin.config.mts` 进行缓存 — 当没有任何变化时，重新运行是即时的。
 
 收集器决定扫描的内容。`npmCollector` 使用 [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn)，`pythonCollector` 使用 [pip-licenses](https://github.com/raimon49/pip-licenses)。如果未找到已安装的依赖项，检查将通过且无需检查任何内容。
+
+### 作为 lint/build 的一部分运行
+
+依赖项许可证检查会在您对工作区中的任何项目执行 `lint` 或 `build` 时自动运行。`license` 生成器会将每个项目的 `lint` 目标连接到根 `license-check` 目标，项目生成器（`ts#*` 和 `py#*`）在运行时也会执行相同操作 — 因此无论生成器的运行顺序如何，检查都会被连接。
+
+这意味着您无需显式运行检查，尽管您仍然可以使用 NxCommands `license-check` 目标来执行：
+
+<NxCommands commands={['license-check']} />
+
+连接方式是在每个项目的 `lint` 目标上设置跨项目 `dependsOn`，指向根 `license-check` 目标。要在 lint 或 build 期间跳过检查，请设置 `LICENSE_DEPENDENCY_CHECK=skip` 环境变量：
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
 ### 配置
 
@@ -331,7 +361,7 @@ import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
     // ...
-    dependencyCheck: {
+    dependencies: {
       allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
       exceptions: [
         { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
@@ -385,10 +415,34 @@ const myCollector = (): LicenseCollector => ({
 });
 ```
 
+#### onDependency 钩子
+
+`license.dependencies` 接受一个可选的 `onDependency` 回调，该回调会为每个发现的依赖项调用一次，无论它是否通过检查。它接收 `{ package, spdx }`，其中 `package` 是包名称，`spdx` 是解析的 SPDX 许可证表达式。例外的 `spdx` 优先于原始声明的许可证，如果未声明许可证，`spdx` 可能是空字符串。
+
+这是打印项目中所有许可证的便捷方式。运行 `license-check` 目标以查看输出：
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      onDependency: ({ package: pkg, spdx }) => {
+        console.log(`${pkg} - ${spdx}`);
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
 ### 禁用依赖项检查
 
-要对单次运行禁用依赖项检查，请设置 `LICENSE_DEPENDENCY_CHECK=skip` 环境变量：
+依赖项许可证检查通过配置中存在 `license.dependencies` 键来启用。
+
+要对单次运行禁用检查，请设置 `LICENSE_DEPENDENCY_CHECK=skip` 环境变量：
 
 <PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
-要永久禁用，请在配置中将 `dependencyCheck` 设置为 `false`，或使用 `--dependencyCheck=false` 重新运行生成器。
+要永久禁用，请从 `aws-nx-plugin.config.mts` 配置中移除 `license.dependencies` 键。您也可以使用 `--dependencyCheck=false` 重新运行 `license` 生成器以在不包含它的情况下进行脚手架 — 生成器标志仍命名为 `--dependencyCheck`，并控制生成器是否写入 `dependencies` 块。

@@ -11,7 +11,7 @@ import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-ワークスペース全体のライセンスを管理：`LICENSE`ファイルとソースコードヘッダーを同期し、すべての依存関係がライセンス許可リストに準拠していることを確認します。
+ワークスペース全体のライセンスを管理：自分のコード用に`LICENSE`ファイルとソースコードヘッダーを同期（`license.source`）し、すべての依存関係がライセンス許可リストに準拠していることを確認（`license.dependencies`）します。
 
 ## 使用方法
 
@@ -29,7 +29,7 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 
 <FileTree>
   - nx.json lintターゲットがライセンス同期ジェネレータを実行し、license-checkターゲットに依存するよう設定
-  - aws-nx-plugin.config.mts ライセンス同期と依存関係チェックの設定ファイル
+  - aws-nx-plugin.config.mts ライセンスソース同期（`license.source`）と依存関係チェック（`license.dependencies`）の設定ファイル
 </FileTree>
 
 ## ライセンスヘッダーとファイル
@@ -95,10 +95,12 @@ CI環境ではエラーが発生します。
 
 ライセンスは`spdx`設定プロパティで随時更新可能です：
 
-```typescript title="aws-nx-plugin.config.mts" {3}
+```typescript title="aws-nx-plugin.config.mts" {4}
 export default {
   license: {
-    spdx: 'MIT',
+    source: {
+      spdx: 'MIT',
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -107,12 +109,14 @@ export default {
 
 著作権者と著作年を追加設定可能です（一部LICENSEファイルに記載）：
 
-```typescript title="aws-nx-plugin.config.mts" {4,5}
+```typescript title="aws-nx-plugin.config.mts" {5,6}
 export default {
   license: {
-    spdx: 'MIT',
-    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
-    copyrightYear: 2025,
+    source: {
+      spdx: 'MIT',
+      copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+      copyrightYear: 2025,
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -123,18 +127,20 @@ export default {
 
 1. インラインコンテンツ：
 
-```typescript title="aws-nx-plugin.config.mts" {5-9}
+```typescript title="aws-nx-plugin.config.mts" {6-10}
 export default {
   license: {
-    header: {
-      content: {
-        lines: [
-          'Copyright: My Company, Incorporated.',
-          'Licensed under the MIT License',
-          'All rights reserved',
-        ];
+    source: {
+      header: {
+        content: {
+          lines: [
+            'Copyright: My Company, Incorporated.',
+            'Licensed under the MIT License',
+            'All rights reserved',
+          ];
+        }
+        // ... フォーマット設定
       }
-      // ... フォーマット設定
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -142,14 +148,16 @@ export default {
 
 2. ファイルからの読み込み：
 
-```typescript title="aws-nx-plugin.config.mts" {5}
+```typescript title="aws-nx-plugin.config.mts" {6}
 export default {
   license: {
-    header: {
-      content: {
-        filePath: 'license-header.txt'; // ワークスペースルートからの相対パス
+    source: {
+      header: {
+        content: {
+          filePath: 'license-header.txt'; // ワークスペースルートからの相対パス
+        }
+        // ... フォーマット設定
       }
-      // ... フォーマット設定
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -159,34 +167,36 @@ export default {
 
 ファイルタイプ別にライセンスヘッダーのフォーマットをglobパターンで指定可能です。行コメント、ブロックコメント、またはその組み合わせを設定できます：
 
-```typescript title="aws-nx-plugin.config.mts" {7-29}
+```typescript title="aws-nx-plugin.config.mts" {8-30}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['Copyright notice here'],
-      },
-      format: {
-        // 行コメント
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['Copyright notice here'],
         },
-        // ブロックコメント
-        '**/*.css': {
-          blockStart: '/*',
-          blockEnd: '*/',
-        },
-        // 行プレフィックス付きブロックコメント
-        '**/*.java': {
-          blockStart: '/*',
-          lineStart: ' * ',
-          blockEnd: ' */',
-        },
-        // ヘッダー/フッター付き行コメント
-        '**/*.py': {
-          blockStart: '# ------------',
-          lineStart: '# ',
-          blockEnd: '# ------------',
+        format: {
+          // 行コメント
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+          // ブロックコメント
+          '**/*.css': {
+            blockStart: '/*',
+            blockEnd: '*/',
+          },
+          // 行プレフィックス付きブロックコメント
+          '**/*.java': {
+            blockStart: '/*',
+            lineStart: ' * ',
+            blockEnd: ' */',
+          },
+          // ヘッダー/フッター付き行コメント
+          '**/*.py': {
+            blockStart: '# ------------',
+            lineStart: '# ',
+            blockEnd: '# ------------',
+          },
         },
       },
     },
@@ -205,27 +215,29 @@ export default {
 
 ネイティブサポートされないファイルタイプの場合、カスタムコメント構文を指定して既存ライセンスヘッダーを識別可能です：
 
-```typescript title="aws-nx-plugin.config.mts" {12-22}
+```typescript title="aws-nx-plugin.config.mts" {13-23}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.xyz': {
-          lineStart: '## ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
-      },
-      commentSyntax: {
-        xyz: {
-          line: '##', // 行コメント構文の定義
+        format: {
+          '**/*.xyz': {
+            lineStart: '## ',
+          },
         },
-        abc: {
-          block: {
-            // ブロックコメント構文の定義
-            start: '<!--',
-            end: '-->',
+        commentSyntax: {
+          xyz: {
+            line: '##', // 行コメント構文の定義
+          },
+          abc: {
+            block: {
+              // ブロックコメント構文の定義
+              start: '<!--',
+              end: '-->',
+            },
           },
         },
       },
@@ -240,19 +252,21 @@ export default {
 
 globパターンでライセンスヘッダー同期から除外するファイルを追加指定可能です：
 
-```typescript title="aws-nx-plugin.config.mts" {12-16}
+```typescript title="aws-nx-plugin.config.mts" {13}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
+        format: {
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+        },
+        exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
       },
-      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
     },
   },
 } satisfies AwsNxPluginConfig;
@@ -264,16 +278,18 @@ export default {
 
 globパターンで特定プロジェクト/ファイルの同期を除外可能です：
 
-```typescript title="aws-nx-plugin.config.mts" {3-10}
+```typescript title="aws-nx-plugin.config.mts" {4-11}
 export default {
   license: {
-    files: {
-      exclude: [
-        // LICENSEファイル、package.json、pyproject.tomlの同期を除外
-        'packages/excluded-project',
-        // LICENSEファイルの同期を除外（package.json/pyproject.tomlは同期）
-        'apps/internal/LICENSE',
-      ];
+    source: {
+      files: {
+        exclude: [
+          // LICENSEファイル、package.json、pyproject.tomlの同期を除外
+          'packages/excluded-project',
+          // LICENSEファイルの同期を除外（package.json/pyproject.tomlは同期）
+          'apps/internal/LICENSE',
+        ];
+      }
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -281,10 +297,10 @@ export default {
 
 ### ライセンス同期の無効化
 
-ライセンス同期を無効化する手順：
+ライセンスソース同期は、設定に`license.source`キーが存在することで有効になります。無効化する手順：
 
-1. `aws-nx-plugin.config.mts`から`license`セクションを削除
-2. `targetDefaults.lint.syncGenerators`から`@aws/nx-plugin:license#sync`ジェネレータを削除
+1. `aws-nx-plugin.config.mts`から`license.source`セクションを削除（依存関係ライセンスチェックを継続したい場合は`license.dependencies`は残せます）
+2. 同期ジェネレータを完全に削除したい場合は、`targetDefaults.lint.syncGenerators`から`@aws/nx-plugin:license#sync`ジェネレータを削除
 
 再度有効化するには`license`ジェネレータを再実行します。
 
@@ -312,6 +328,8 @@ export default {
 }
 ```
 
+`inputs`はワークスペースに合わせて計算されます：実際に存在するロックファイルのみが含まれ、`aws-nx-plugin.config.mts`と、Python依存関係チェックが有効な場合（つまりPythonコレクターが設定されている場合）は`{workspaceRoot}/**/uv.lock`グロブが追加されます。
+
 チェックを直接実行できます：
 
 <NxCommands commands={['license-check']} />
@@ -319,6 +337,18 @@ export default {
 結果はロックファイルと`aws-nx-plugin.config.mts`に対してキャッシュされます — 変更がない場合、再実行は即座に完了します。
 
 コレクターがスキャン対象を決定します。`npmCollector`は[license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn)を使用し、`pythonCollector`は[pip-licenses](https://github.com/raimon49/pip-licenses)を使用します。インストールされた依存関係が見つからない場合、チェックは検査対象なしで成功します。
+
+### lint/buildの一部として実行
+
+依存関係ライセンスチェックは、ワークスペース内の任意のプロジェクトを`lint`または`build`する際に自動的に実行されます。`license`ジェネレータは各プロジェクトの`lint`ターゲットがルートの`license-check`ターゲットに依存するよう配線し、プロジェクトジェネレータ（`ts#*`と`py#*`）も実行時に同様の配線を行います — そのため、ジェネレータの実行順序に関係なくチェックが配線されます。
+
+つまり、チェックを明示的に実行する必要はありませんが、NxCommandsの`license-check`ターゲットで実行することもできます：
+
+<NxCommands commands={['license-check']} />
+
+配線は各プロジェクトの`lint`ターゲット上のクロスプロジェクト`dependsOn`で、ルートの`license-check`ターゲットを指します。lintまたはbuild中にチェックをスキップするには、`LICENSE_DEPENDENCY_CHECK=skip`環境変数を設定します：
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
 ### 設定
 
@@ -331,7 +361,7 @@ import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
     // ...
-    dependencyCheck: {
+    dependencies: {
       allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
       exceptions: [
         { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
@@ -385,10 +415,34 @@ const myCollector = (): LicenseCollector => ({
 });
 ```
 
+#### onDependencyフック
+
+`license.dependencies`は、オプションの`onDependency`コールバックを受け入れます。これは、チェックに合格するか失敗するかに関係なく、発見されたすべての依存関係に対して一度呼び出されます。`{ package, spdx }`を受け取り、`package`はパッケージ名、`spdx`は解決されたSPDXライセンス式です。例外の`spdx`は生の宣言ライセンスよりも優先され、ライセンスが宣言されていない場合は`spdx`が空文字列になることがあります。
+
+これは、プロジェクト全体のすべてのライセンスを出力する便利な方法です。`license-check`ターゲットを実行して出力を確認します：
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      onDependency: ({ package: pkg, spdx }) => {
+        console.log(`${pkg} - ${spdx}`);
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
 ### 依存関係チェックの無効化
 
-単一実行で依存関係チェックを無効にするには、`LICENSE_DEPENDENCY_CHECK=skip`環境変数を設定します：
+依存関係ライセンスチェックは、設定に`license.dependencies`キーが存在することで有効になります。
+
+単一実行でチェックを無効にするには、`LICENSE_DEPENDENCY_CHECK=skip`環境変数を設定します：
 
 <PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
-恒久的に無効にするには、設定で`dependencyCheck`を`false`に設定するか、`--dependencyCheck=false`でジェネレータを再実行します。
+恒久的に無効にするには、`aws-nx-plugin.config.mts`の設定から`license.dependencies`キーを削除します。また、`--dependencyCheck=false`で`license`ジェネレータを再実行して、それなしでスキャフォールドすることもできます — ジェネレータフラグは引き続き`--dependencyCheck`という名前で、ジェネレータが`dependencies`ブロックを書き込むかどうかを制御します。

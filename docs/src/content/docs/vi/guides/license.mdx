@@ -12,7 +12,7 @@ import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Quản lý cấp phép trong toàn bộ workspace của bạn: đồng bộ các tệp `LICENSE` và header mã nguồn, đồng thời kiểm tra rằng mọi dependency tuân thủ danh sách giấy phép được phép.
+Quản lý cấp phép trong toàn bộ workspace của bạn: đồng bộ các tệp `LICENSE` và header mã nguồn cho code của riêng bạn (`license.source`), đồng thời kiểm tra rằng mọi dependency tuân thủ danh sách giấy phép được phép (`license.dependencies`).
 
 ## Cách sử dụng
 
@@ -30,7 +30,7 @@ Generator sẽ tạo hoặc cập nhật các tệp sau:
 
 <FileTree>
   - nx.json Target lint được cấu hình để chạy license sync generator và phụ thuộc vào target license-check
-  - aws-nx-plugin.config.mts Cấu hình cho đồng bộ giấy phép và kiểm tra dependency
+  - aws-nx-plugin.config.mts Cấu hình cho đồng bộ nguồn giấy phép (`license.source`) và kiểm tra dependency (`license.dependencies`)
 </FileTree>
 
 ## License Header & Tệp
@@ -96,10 +96,12 @@ Cấu hình được định nghĩa trong tệp `aws-nx-plugin.config.mts` ở t
 
 Giấy phép bạn chọn có thể được cập nhật bất cứ lúc nào thông qua thuộc tính cấu hình `spdx`:
 
-```typescript title="aws-nx-plugin.config.mts" {3}
+```typescript title="aws-nx-plugin.config.mts" {4}
 export default {
   license: {
-    spdx: 'MIT',
+    source: {
+      spdx: 'MIT',
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -108,12 +110,14 @@ Khi sync generator chạy, tất cả các tệp `LICENSE`, `package.json` và `
 
 Bạn có thể cấu hình thêm chủ sở hữu bản quyền và năm bản quyền, được bao gồm trong một số tệp `LICENSE`:
 
-```typescript title="aws-nx-plugin.config.mts" {4,5}
+```typescript title="aws-nx-plugin.config.mts" {5,6}
 export default {
   license: {
-    spdx: 'MIT',
-    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
-    copyrightYear: 2025,
+    source: {
+      spdx: 'MIT',
+      copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+      copyrightYear: 2025,
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -124,18 +128,20 @@ Nội dung license header có thể được cấu hình theo hai cách:
 
 1. Sử dụng nội dung inline:
 
-```typescript title="aws-nx-plugin.config.mts" {5-9}
+```typescript title="aws-nx-plugin.config.mts" {6-10}
 export default {
   license: {
-    header: {
-      content: {
-        lines: [
-          'Copyright: My Company, Incorporated.',
-          'Licensed under the MIT License',
-          'All rights reserved',
-        ];
+    source: {
+      header: {
+        content: {
+          lines: [
+            'Copyright: My Company, Incorporated.',
+            'Licensed under the MIT License',
+            'All rights reserved',
+          ];
+        }
+        // ... format configuration
       }
-      // ... format configuration
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -143,14 +149,16 @@ export default {
 
 2. Tải từ một tệp:
 
-```typescript title="aws-nx-plugin.config.mts" {5}
+```typescript title="aws-nx-plugin.config.mts" {6}
 export default {
   license: {
-    header: {
-      content: {
-        filePath: 'license-header.txt'; // relative to workspace root
+    source: {
+      header: {
+        content: {
+          filePath: 'license-header.txt'; // relative to workspace root
+        }
+        // ... format configuration
       }
-      // ... format configuration
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -160,34 +168,36 @@ export default {
 
 Bạn có thể chỉ định cách license header nên được định dạng cho các loại tệp khác nhau bằng cách sử dụng các mẫu glob. Cấu hình định dạng hỗ trợ line comment, block comment, hoặc kết hợp cả hai:
 
-```typescript title="aws-nx-plugin.config.mts" {7-29}
+```typescript title="aws-nx-plugin.config.mts" {8-30}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['Copyright notice here'],
-      },
-      format: {
-        // Line comments
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['Copyright notice here'],
         },
-        // Block comments
-        '**/*.css': {
-          blockStart: '/*',
-          blockEnd: '*/',
-        },
-        // Block comments with line prefixes
-        '**/*.java': {
-          blockStart: '/*',
-          lineStart: ' * ',
-          blockEnd: ' */',
-        },
-        // Line comments with header/footer
-        '**/*.py': {
-          blockStart: '# ------------',
-          lineStart: '# ',
-          blockEnd: '# ------------',
+        format: {
+          // Line comments
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+          // Block comments
+          '**/*.css': {
+            blockStart: '/*',
+            blockEnd: '*/',
+          },
+          // Block comments with line prefixes
+          '**/*.java': {
+            blockStart: '/*',
+            lineStart: ' * ',
+            blockEnd: ' */',
+          },
+          // Line comments with header/footer
+          '**/*.py': {
+            blockStart: '# ------------',
+            lineStart: '# ',
+            blockEnd: '# ------------',
+          },
         },
       },
     },
@@ -206,27 +216,29 @@ Cấu hình định dạng hỗ trợ:
 
 Đối với các loại tệp không được hỗ trợ sẵn, bạn có thể chỉ định cú pháp comment tùy chỉnh để cho sync generator biết cách xác định các license header hiện có trong các loại tệp này.
 
-```typescript title="aws-nx-plugin.config.mts" {12-22}
+```typescript title="aws-nx-plugin.config.mts" {13-23}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.xyz': {
-          lineStart: '## ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
-      },
-      commentSyntax: {
-        xyz: {
-          line: '##', // Define line comment syntax
+        format: {
+          '**/*.xyz': {
+            lineStart: '## ',
+          },
         },
-        abc: {
-          block: {
-            // Define block comment syntax
-            start: '<!--',
-            end: '-->',
+        commentSyntax: {
+          xyz: {
+            line: '##', // Define line comment syntax
+          },
+          abc: {
+            block: {
+              // Define block comment syntax
+              start: '<!--',
+              end: '-->',
+            },
           },
         },
       },
@@ -241,19 +253,21 @@ Theo mặc định, trong một repository git, tất cả các tệp `.gitignor
 
 Bạn có thể loại trừ các tệp bổ sung khỏi việc đồng bộ license header bằng cách sử dụng các mẫu glob:
 
-```typescript title="aws-nx-plugin.config.mts" {12-16}
+```typescript title="aws-nx-plugin.config.mts" {13}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
+        format: {
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+        },
+        exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
       },
-      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
     },
   },
 } satisfies AwsNxPluginConfig;
@@ -265,16 +279,18 @@ Tất cả các tệp `LICENSE`, tệp `package.json` và tệp `pyproject.toml`
 
 Bạn có thể loại trừ các dự án hoặc tệp cụ thể khỏi việc đồng bộ bằng cách sử dụng các mẫu glob:
 
-```typescript title="aws-nx-plugin.config.mts" {3-10}
+```typescript title="aws-nx-plugin.config.mts" {4-11}
 export default {
   license: {
-    files: {
-      exclude: [
-        // do not sync LICENSE file, package.json or pyproject.toml
-        'packages/excluded-project',
-        // do not sync LICENSE file, but sync package.json and/or pyproject.toml
-        'apps/internal/LICENSE',
-      ];
+    source: {
+      files: {
+        exclude: [
+          // do not sync LICENSE file, package.json or pyproject.toml
+          'packages/excluded-project',
+          // do not sync LICENSE file, but sync package.json and/or pyproject.toml
+          'apps/internal/LICENSE',
+        ];
+      }
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -282,10 +298,10 @@ export default {
 
 ### Vô hiệu hóa đồng bộ giấy phép
 
-Để vô hiệu hóa license sync generator:
+Đồng bộ nguồn giấy phép được kích hoạt bởi sự hiện diện của khóa `license.source` trong cấu hình của bạn. Để vô hiệu hóa nó:
 
-1. Xóa phần `license` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts`
-2. Xóa generator `@aws/nx-plugin:license#sync` khỏi `targetDefaults.lint.syncGenerators`
+1. Xóa phần `license.source` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts` (bạn có thể giữ `license.dependencies` nếu bạn vẫn muốn kiểm tra giấy phép dependency)
+2. Nếu bạn cũng muốn xóa hoàn toàn sync generator, hãy xóa generator `@aws/nx-plugin:license#sync` khỏi `targetDefaults.lint.syncGenerators`
 
 Để kích hoạt lại đồng bộ giấy phép, chỉ cần chạy lại generator `license`.
 
@@ -313,13 +329,27 @@ Generator ghi một target `license-check` vào `project.json` gốc của bạn
 }
 ```
 
+Các `inputs` được tính toán cho workspace của bạn: chỉ các lockfile thực sự có mặt mới được bao gồm, cùng với `aws-nx-plugin.config.mts`, cộng thêm một glob `{workspaceRoot}/**/uv.lock` khi kiểm tra dependency Python được bật (tức là một Python collector được cấu hình).
+
 Bạn có thể chạy kiểm tra trực tiếp:
 
 <NxCommands commands={['license-check']} />
 
-Kết quả được cache dựa trên lockfile và `aws-nx-plugin.config.mts` của bạn — việc chạy lại sẽ tức thì khi không có gì thay đổi.
+Kết quả được cache dựa trên các lockfile và `aws-nx-plugin.config.mts` của bạn — việc chạy lại sẽ tức thì khi không có gì thay đổi.
 
 Các collector xác định những gì được quét. `npmCollector` sử dụng [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn), và `pythonCollector` sử dụng [pip-licenses](https://github.com/raimon49/pip-licenses). Nếu không tìm thấy dependency đã cài đặt nào, kiểm tra sẽ pass mà không có gì để kiểm tra.
+
+### Chạy như một phần của lint/build
+
+Kiểm tra giấy phép dependency chạy tự động mỗi khi bạn `lint` hoặc `build` bất kỳ dự án nào trong workspace của bạn. Generator `license` kết nối target `lint` của mỗi dự án để phụ thuộc vào target `license-check` gốc, và các project generator (`ts#*` và `py#*`) cũng làm điều tương tự khi chúng chạy — vì vậy kiểm tra được kết nối bất kể thứ tự các generator được chạy.
+
+Điều này có nghĩa là bạn không cần chạy kiểm tra một cách rõ ràng, mặc dù bạn vẫn có thể làm như vậy với target NxCommands `license-check`:
+
+<NxCommands commands={['license-check']} />
+
+Kết nối là một `dependsOn` cross-project trên target `lint` của mỗi dự án trỏ đến target `license-check` gốc. Để bỏ qua kiểm tra trong quá trình lint hoặc build, hãy đặt biến môi trường `LICENSE_DEPENDENCY_CHECK=skip`:
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
 ### Cấu hình
 
@@ -332,7 +362,7 @@ import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
 export default {
   license: {
     // ...
-    dependencyCheck: {
+    dependencies: {
       allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
       exceptions: [
         { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
@@ -386,10 +416,34 @@ const myCollector = (): LicenseCollector => ({
 });
 ```
 
+#### Hook onDependency
+
+`license.dependencies` chấp nhận một callback `onDependency` tùy chọn được gọi một lần cho mỗi dependency được phát hiện, bất kể nó pass hay fail kiểm tra. Nó nhận `{ package, spdx }`, trong đó `package` là tên package và `spdx` là biểu thức giấy phép SPDX đã được phân giải. `spdx` của một ngoại lệ được ưu tiên hơn giấy phép được khai báo thô, và `spdx` có thể là một chuỗi rỗng nếu không có giấy phép nào được khai báo.
+
+Đây là một cách tiện lợi để in ra tất cả các giấy phép trong dự án của bạn. Chạy target `license-check` để xem đầu ra:
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      onDependency: ({ package: pkg, spdx }) => {
+        console.log(`${pkg} - ${spdx}`);
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
 ### Vô hiệu hóa kiểm tra Dependency
 
-Để vô hiệu hóa kiểm tra dependency cho một lần chạy duy nhất, đặt biến môi trường `LICENSE_DEPENDENCY_CHECK=skip`:
+Kiểm tra giấy phép dependency được kích hoạt bởi sự hiện diện của khóa `license.dependencies` trong cấu hình của bạn.
+
+Để vô hiệu hóa kiểm tra cho một lần chạy duy nhất, đặt biến môi trường `LICENSE_DEPENDENCY_CHECK=skip`:
 
 <PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
 
-Để vô hiệu hóa vĩnh viễn, đặt `dependencyCheck` thành `false` trong cấu hình của bạn hoặc chạy lại generator với `--dependencyCheck=false`.
+Để vô hiệu hóa vĩnh viễn, xóa khóa `license.dependencies` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts`. Bạn cũng có thể chạy lại generator `license` với `--dependencyCheck=false` để scaffold mà không có nó — cờ generator vẫn được đặt tên là `--dependencyCheck` và kiểm soát việc generator có ghi block `dependencies` hay không.
