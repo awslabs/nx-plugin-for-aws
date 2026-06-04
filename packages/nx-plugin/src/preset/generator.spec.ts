@@ -107,6 +107,46 @@ describe('preset generator', () => {
     expect(packageJson.devDependencies.husky).toBeDefined();
   });
 
+  it('should configure MCP servers by default', async () => {
+    await presetGenerator(tree, { addTsPlugin: false, iac: 'cdk' });
+
+    for (const filePath of [
+      '.mcp.json',
+      '.cursor/mcp.json',
+      '.kiro/settings/mcp.json',
+      '.gemini/settings.json',
+      '.vscode/mcp.json',
+      '.codex/config.toml',
+    ]) {
+      expect(tree.exists(filePath)).toBe(true);
+    }
+    expect(readJson(tree, '.mcp.json').mcpServers['nx-plugin-for-aws']).toEqual(
+      {
+        command: 'npx',
+        args: ['-y', '@aws/nx-plugin-mcp@next'],
+      },
+    );
+  });
+
+  it('should not configure MCP servers when mcp is false', async () => {
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iac: 'cdk',
+      mcp: false,
+    });
+
+    for (const filePath of [
+      '.mcp.json',
+      '.cursor/mcp.json',
+      '.kiro/settings/mcp.json',
+      '.gemini/settings.json',
+      '.vscode/mcp.json',
+      '.codex/config.toml',
+    ]) {
+      expect(tree.exists(filePath)).toBe(false);
+    }
+  });
+
   it('should disable analytics in nx.json', async () => {
     await presetGenerator(tree, {
       addTsPlugin: false,

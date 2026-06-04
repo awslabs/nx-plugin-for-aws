@@ -34,6 +34,7 @@ import {
 } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { inferContainers } from '../utils/containers';
+import { configureMcpServers } from '../utils/mcp';
 import yaml from 'js-yaml';
 
 const WORKSPACES = ['packages/*'];
@@ -159,7 +160,7 @@ const setUpGitSecrets = (tree: Tree) => {
 
 export const presetGenerator = async (
   tree: Tree,
-  { addTsPlugin, iac, gitSecrets, containers }: PresetGeneratorSchema,
+  { addTsPlugin, iac, gitSecrets, mcp, containers }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
@@ -274,6 +275,10 @@ export const presetGenerator = async (
 
   if (gitSecrets !== false) {
     setUpGitSecrets(tree);
+  }
+
+  if (mcp !== false) {
+    configureMcpServers(tree);
   }
 
   await formatFilesInSubtree(tree);
