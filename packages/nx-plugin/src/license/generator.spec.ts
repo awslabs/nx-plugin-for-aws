@@ -107,6 +107,11 @@ describe('license generator', () => {
       expect(projectJson.targets['license-check'].inputs).toContain(
         '{workspaceRoot}/aws-nx-plugin.config.mts',
       );
+      // A uv.lock glob is always included so Python dependency changes (whose
+      // lockfiles may be created later, in subdirectories) invalidate the cache.
+      expect(projectJson.targets['license-check'].inputs).toContain(
+        '{workspaceRoot}/**/uv.lock',
+      );
     });
 
     it('should suppress root package.json script target inference', async () => {

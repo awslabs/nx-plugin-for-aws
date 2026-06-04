@@ -8,6 +8,7 @@ import {
   defaultLicenseConfig,
   ensureDependencyCheckBlock,
   ensureLicenseExceptions,
+  ensurePythonLicenseCollector,
   writeLicenseConfig,
 } from './config';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
@@ -43,6 +44,12 @@ export async function licenseGenerator(
     await ensureDependencyCheckBlock(tree, {
       includeCollectors: hasPython ? 'npm+python' : 'npm',
     });
+    // When the dependencyCheck block already existed (e.g. on a re-run after
+    // python projects were added), the block above is a no-op — so explicitly
+    // ensure the python collector is present. This is idempotent.
+    if (hasPython) {
+      await ensurePythonLicenseCollector(tree);
+    }
     await addExceptionsForExistingProjects(tree);
     writeLicenseCheckTarget(tree);
   }
@@ -72,18 +79,25 @@ export async function licenseGenerator(
 }
 
 /**
+ * Lockfile glob inputs for the license-check cache.
+ *
+ * Globs (rather than only lockfiles that exist at generation time) ensure the
+ * cache invalidates whenever dependencies change anywhere in the workspace —
+ * including Python (`uv.lock`) projects added after the license generator runs,
+ * whose lockfiles may live in subdirectories of a uv workspace.
+ */
+const LICENSE_CHECK_LOCKFILE_INPUTS = [
+  '{workspaceRoot}/pnpm-lock.yaml',
+  '{workspaceRoot}/yarn.lock',
+  '{workspaceRoot}/package-lock.json',
+  '{workspaceRoot}/bun.lockb',
+  '{workspaceRoot}/**/uv.lock',
+];
+
+/**
  * Write/update root project.json with license-check target
  */
 const writeLicenseCheckTarget = (tree: Tree): void => {
-  const lockfiles: string[] = [];
-  if (tree.exists('pnpm-lock.yaml'))
-    lockfiles.push('{workspaceRoot}/pnpm-lock.yaml');
-  if (tree.exists('yarn.lock')) lockfiles.push('{workspaceRoot}/yarn.lock');
-  if (tree.exists('package-lock.json'))
-    lockfiles.push('{workspaceRoot}/package-lock.json');
-  if (tree.exists('bun.lockb')) lockfiles.push('{workspaceRoot}/bun.lockb');
-  if (tree.exists('uv.lock')) lockfiles.push('{workspaceRoot}/uv.lock');
-
   const rootProjectJsonPath = 'project.json';
   let rootProject: any = {};
   if (tree.exists(rootProjectJsonPath)) {
@@ -93,7 +107,10 @@ const writeLicenseCheckTarget = (tree: Tree): void => {
   rootProject.targets['license-check'] = {
     executor: '@aws/nx-plugin:license-check',
     cache: true,
-    inputs: [...lockfiles, '{workspaceRoot}/aws-nx-plugin.config.mts'],
+    inputs: [
+      ...LICENSE_CHECK_LOCKFILE_INPUTS,
+      '{workspaceRoot}/aws-nx-plugin.config.mts',
+    ],
     options: {},
   };
   tree.write(rootProjectJsonPath, JSON.stringify(rootProject, null, 2));

@@ -25,7 +25,7 @@ const findException = (
 ): DependencyCheckException | undefined => {
   if (!exceptions) return undefined;
   return exceptions.find(
-    (e) => e.package === name && (!e.version || e.version === version),
+    (e) => e && e.package === name && (!e.version || e.version === version),
   );
 };
 

@@ -150,4 +150,56 @@ describe('smoke test - license-check', () => {
 
     await runCLI('run-many --target=license-check --all --verbose', opts);
   });
+
+  it('fails license-check when a non-permissive Python dep is added', async () => {
+    const pyProjectTomlPath = join(
+      projectRoot,
+      'packages',
+      'py_deps',
+      'pyproject.toml',
+    );
+    const pyToml = TOML.parse(readFileSync(pyProjectTomlPath, 'utf-8'));
+    // paramiko is LGPL-2.1 — not on the allowlist, so the check must fail
+    (pyToml.project as any).dependencies = [
+      ...((pyToml.project as any).dependencies ?? []),
+      'paramiko==3.5.1',
+    ];
+    writeFileSync(pyProjectTomlPath, TOML.stringify(pyToml));
+
+    await runCLI('uv sync --directory packages/py_deps', {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+      redirectStderr: true,
+    });
+
+    let failed = false;
+    try {
+      await runCLI('run-many --target=license-check --all --verbose', opts);
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+  });
+
+  it('passes license-check when the non-permissive Python dep is removed', async () => {
+    const pyProjectTomlPath = join(
+      projectRoot,
+      'packages',
+      'py_deps',
+      'pyproject.toml',
+    );
+    const pyToml = TOML.parse(readFileSync(pyProjectTomlPath, 'utf-8'));
+    (pyToml.project as any).dependencies = (
+      (pyToml.project as any).dependencies ?? []
+    ).filter((dep: string) => !dep.startsWith('paramiko'));
+    writeFileSync(pyProjectTomlPath, TOML.stringify(pyToml));
+
+    await runCLI('uv sync --directory packages/py_deps', {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+      redirectStderr: true,
+    });
+
+    await runCLI('run-many --target=license-check --all --verbose', opts);
+  });
 });

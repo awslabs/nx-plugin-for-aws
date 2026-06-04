@@ -441,5 +441,162 @@ describe('license config', () => {
         ).toEqual(['pkg-a', 'pkg-b']);
       });
     });
+
+    describe('array integrity (no holes)', () => {
+      const noHole = (arr: any[]) => arr.every((e) => e != null);
+
+      it('should not create a hole when appending to a multi-line exceptions array', async () => {
+        // A prettier-formatted multi-element array has a trailing comma; a naive
+        // append would capture it and produce a `[ ...a, , ...b ]` elision.
+        writeConfig(`{
+  license: {
+    dependencyCheck: {
+      allow: [],
+      collectors: [],
+      exceptions: [
+        { package: 'a', reason: 'r', spdx: 'MIT' },
+        { package: 'b', reason: 'r', spdx: 'MIT' },
+      ],
+    },
+  },
+}`);
+
+        await ensureLicenseExceptions(tree, [exception('c')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(exceptions).toHaveLength(3);
+        expect(noHole(exceptions)).toBe(true);
+        expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'b', 'c']);
+        // The raw source must not contain a bare double comma.
+        expect(read().replace(/\{[^{}]*\}/g, 'X')).not.toMatch(/,\s*,/);
+      });
+
+      it('should not create a hole appending across separate calls (forward generator order)', async () => {
+        writeConfig(
+          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'T' } }`,
+        );
+
+        await ensureDependencyCheckBlock(tree);
+        // First call adds 4 exceptions (array becomes multi-line w/ trailing comma)
+        await ensureLicenseExceptions(tree, [
+          exception('p1'),
+          exception('p2'),
+          exception('p3'),
+          exception('p4'),
+        ]);
+        // Second, separate call (after a format pass) appends one more
+        await ensureLicenseExceptions(tree, [exception('p5')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(exceptions).toHaveLength(5);
+        expect(noHole(exceptions)).toBe(true);
+      });
+
+      it('should repair (not propagate) a pre-existing hole when appending', async () => {
+        // A config that already contains an elision should not keep growing holes.
+        writeConfig(`{
+  license: {
+    dependencyCheck: {
+      allow: [],
+      collectors: [],
+      exceptions: [
+        { package: 'a', reason: 'r', spdx: 'MIT' },
+        { package: 'b', reason: 'r', spdx: 'MIT' },
+      ],
+    },
+  },
+}`);
+
+        await ensureLicenseExceptions(tree, [exception('c')]);
+        await ensureLicenseExceptions(tree, [exception('d')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(noHole(exceptions)).toBe(true);
+        expect(exceptions.map((e: any) => e.package)).toEqual([
+          'a',
+          'b',
+          'c',
+          'd',
+        ]);
+      });
+
+      it('should not create a hole appending to a multi-line collectors array', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [
+        npmCollector(),
+        npmCollector(),
+      ],
+      exceptions: [],
+    },
+  },
+};`,
+        );
+
+        await ensurePythonLicenseCollector(tree);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const collectors = (config!.license as any).dependencyCheck.collectors;
+        expect(noHole(collectors)).toBe(true);
+        expect(collectors).toHaveLength(3);
+        expect(read()).toContain('pythonCollector()');
+        // No bare double comma in the source.
+        expect(read()).not.toMatch(/\(\),\s*,/);
+      });
+    });
+
+    describe('writeLicenseConfig preserves dependencyCheck', () => {
+      it('should keep a customized dependencyCheck block when re-writing the license', async () => {
+        writeConfig(`{
+  license: {
+    spdx: 'Apache-2.0',
+    copyrightHolder: 'Old',
+    dependencyCheck: {
+      allow: MY_CUSTOM_ALLOWLIST,
+      collectors: [npmCollector()],
+      exceptions: [{ package: 'my-pkg', reason: 'vetted', spdx: 'GPL-3.0' }],
+    },
+  },
+}`);
+
+        await writeLicenseConfig(tree, {
+          spdx: 'MIT',
+          copyrightHolder: 'New Corp',
+          header: { content: { lines: ['hello'] }, format: {} },
+        });
+
+        const config = read();
+        // License header re-written
+        expect(config).toContain('New Corp');
+        // dependencyCheck customizations preserved verbatim
+        expect(config).toContain('MY_CUSTOM_ALLOWLIST');
+        expect(config).toContain('my-pkg');
+        expect(config).toContain('npmCollector()');
+        // Exactly one dependencyCheck block
+        expect(config.match(/dependencyCheck/g)).toHaveLength(1);
+      });
+
+      it('should not add a dependencyCheck block if none existed', async () => {
+        writeConfig(
+          `{ license: { spdx: 'Apache-2.0', copyrightHolder: 'Old' } }`,
+        );
+
+        await writeLicenseConfig(tree, {
+          spdx: 'MIT',
+          copyrightHolder: 'New',
+          header: { content: { lines: ['hi'] }, format: {} },
+        });
+
+        expect(read()).not.toContain('dependencyCheck');
+      });
+    });
   });
 });

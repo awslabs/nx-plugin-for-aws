@@ -268,3 +268,133 @@ export const matchGritQL = async (
   }
   return matched;
 };
+
+/**
+ * Capture the source text of the first match of a GritQL pattern in a file.
+ *
+ * Returns the matched node's text (e.g. for `` `dependencyCheck: $v` `` it
+ * returns the full `dependencyCheck: { ... }` property text), or undefined if
+ * the pattern doesn't match. The file is not modified.
+ */
+export const captureGritQL = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<string | undefined> => {
+  if (!tree.exists(filePath)) return undefined;
+  ensureGritDir(tree);
+  const source = tree.read(filePath)!.toString();
+  let captured: string | undefined;
+  try {
+    const query = new QueryBuilder(pattern);
+    query.filter((node) => {
+      if (captured === undefined) {
+        captured = node.text();
+      }
+      return true;
+    });
+    await query.applyToFile({ path: filePath, content: source });
+  } catch {
+    return undefined;
+  }
+  return captured;
+};
+
+let appendPlaceholderCounter = 0;
+
+export interface AppendToArrayOptions {
+  /**
+   * A GritQL pattern that matches the object scope containing the array,
+   * binding its body to `$scope`. For example
+   * `` `dependencyCheck: { $scope }` ``. All rewrites are constrained to this
+   * scope, so identically-named arrays elsewhere in the file are untouched.
+   */
+  scopePattern: string;
+  /** Name of the array property to append into (e.g. `exceptions`). */
+  arrayKey: string;
+  /**
+   * Source texts of the elements to append. Each is inserted via a placeholder
+   * and then substituted, so user-provided strings never enter the GritQL
+   * pattern (where quotes/`$` would break parsing or be misinterpreted).
+   */
+  elements: string[];
+  /**
+   * Optional extra GritQL condition (referencing `$scope`) that must hold for
+   * an element to be appended — used for de-duplication. Receives the
+   * placeholder-free index of the element being added; return a condition
+   * string such as `` $scope <: not contains `package: "x"` ``.
+   */
+  guard?: (elementIndex: number) => string | undefined;
+  /**
+   * GritQL pattern that a single array element matches, used to disambiguate a
+   * single-element array (`[x]`) from a multi-element one in the rewrite — the
+   * single-element branch only fires when the sole element matches this. Must
+   * match the kind of element being appended. Defaults to `` `{ $_ }` ``
+   * (object literals); pass `` `$_()` `` for call expressions like
+   * `npmCollector()`.
+   */
+  elementNodePattern?: string;
+}
+
+/**
+ * Append elements to a named array property within a scoped object, using
+ * GritQL exclusively.
+ *
+ * Branches on the array's shape so the result is always well-formed:
+ *  - empty `[]`            → `[<new>]`
+ *  - single inline `[x]`   → `[x, <new>]`
+ *  - multi-element `[...]`  → list-append (`+=`), which is comma-aware and so
+ *    does not introduce array holes even when a trailing comma is present.
+ *
+ * Returns true if the file was modified.
+ */
+export const appendToArrayInScope = async (
+  tree: Tree,
+  filePath: string,
+  options: AppendToArrayOptions,
+): Promise<boolean> => {
+  const {
+    scopePattern,
+    arrayKey,
+    elements,
+    guard,
+    elementNodePattern = '`{ $_ }`',
+  } = options;
+  let modified = false;
+
+  for (let i = 0; i < elements.length; i++) {
+    const placeholder = `"__GRIT_APPEND_PLACEHOLDER_${appendPlaceholderCounter++}__"`;
+    const guardCondition = guard?.(i);
+    const guardClause = guardCondition ? `${guardCondition},` : '';
+
+    // Branch on the array shape. The multi-element branch uses `+=` to append
+    // to the element list, which is comma-aware (no double-comma holes). The
+    // empty and single-inline branches use direct rewrites since `+=` does not
+    // emit a separator for those shapes. The single-element branch is
+    // constrained to a sole element matching `elementNodePattern` so it does
+    // not greedily capture a multi-element token range.
+    const pattern = `${scopePattern} where {
+      ${guardClause}
+      or {
+        $scope <: contains \`${arrayKey}: []\` => \`${arrayKey}: [${placeholder}]\`,
+        $scope <: contains \`${arrayKey}: [$only]\` where { $only <: ${elementNodePattern} } => \`${arrayKey}: [$only, ${placeholder}]\`,
+        $scope <: contains \`${arrayKey}: [$elements]\` where { $elements += \`${placeholder}\` }
+      }
+    }`;
+
+    const appended = await applyGritQL(tree, filePath, pattern);
+
+    if (appended) {
+      const content = tree.read(filePath)!.toString();
+      // Function replacer avoids `$` in the element text being treated as a
+      // special replacement pattern.
+      tree.write(
+        filePath,
+        content.replace(placeholder, () => elements[i]),
+      );
+      modified = true;
+    }
+  }
+
+  return modified;
+};
