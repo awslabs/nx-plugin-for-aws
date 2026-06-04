@@ -597,6 +597,147 @@ export default {
 
         expect(read()).not.toContain('dependencyCheck');
       });
+
+      it('should preserve a dependencyCheck whose reason contains backticks and ${}', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    spdx: 'Apache-2.0',
+    copyrightHolder: 'Old',
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector()],
+      exceptions: [{ package: 'tick', reason: 'has a \`backtick\` and \${dollar}', spdx: 'MIT' }],
+    },
+  },
+};`,
+        );
+
+        await writeLicenseConfig(tree, {
+          spdx: 'MIT',
+          copyrightHolder: 'New',
+          header: { content: { lines: ['hi'] }, format: {} },
+        });
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(exceptions).toHaveLength(1);
+        expect(exceptions[0].package).toBe('tick');
+        expect(exceptions[0].reason).toBe('has a `backtick` and ${dollar}');
+        expect((config!.license as any).copyrightHolder).toBe('New');
+      });
+    });
+
+    describe('robustness against unusual config shapes', () => {
+      it('should target the license dependencyCheck, not a same-shaped object elsewhere', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+const other = { dependencyCheck: { exceptions: [{ package: 'DECOY', reason: 'r', spdx: 'MIT' }] } };
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector()],
+      exceptions: [{ package: 'a', reason: 'r', spdx: 'MIT' }],
+    },
+  },
+};`,
+        );
+
+        await ensureLicenseExceptions(tree, [exception('real')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'real']);
+        // The decoy object is untouched, and no placeholder leaked into source.
+        expect(read()).toContain("package: 'DECOY'");
+        expect(read()).not.toContain('PLACEHOLDER');
+      });
+
+      it('should round-trip a reason containing newlines, backslashes and backticks', async () => {
+        writeConfig(`{
+  license: {
+    dependencyCheck: { allow: [], collectors: [], exceptions: [] },
+  },
+}`);
+
+        await ensureLicenseExceptions(tree, [
+          {
+            package: 'weird',
+            reason: 'line1\nline2 \\ back `tick` ${x}',
+            spdx: 'MIT',
+          },
+        ]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        expect(
+          (config!.license as any).dependencyCheck.exceptions[0].reason,
+        ).toBe('line1\nline2 \\ back `tick` ${x}');
+      });
+
+      it('should preserve collector call arguments when adding pythonCollector', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector({ excludePackages: ['foo'] })],
+      exceptions: [],
+    },
+  },
+};`,
+        );
+
+        await ensurePythonLicenseCollector(tree);
+
+        const source = read();
+        expect(source).toContain("excludePackages: ['foo']");
+        expect(source).toContain('pythonCollector()');
+      });
+
+      it('should leave the config untouched when collectors is not an array literal', async () => {
+        const original = `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+const MY_COLLECTORS = [npmCollector()];
+export default {
+  license: {
+    dependencyCheck: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: MY_COLLECTORS,
+      exceptions: [],
+    },
+  },
+};`;
+        tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, original);
+
+        await ensurePythonLicenseCollector(tree);
+
+        // No safe array literal to edit — config is left valid and unchanged
+        // rather than corrupted.
+        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(read()).not.toContain('pythonCollector()');
+      });
+
+      it('should remain valid across many sequential single appends', async () => {
+        tree.write(
+          AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+          `import { DEFAULT_LICENSE_ALLOWLIST, npmCollector } from '@aws/nx-plugin/sdk/license';
+export default { license: { dependencyCheck: { allow: DEFAULT_LICENSE_ALLOWLIST, collectors: [npmCollector()], exceptions: [] } } };`,
+        );
+
+        for (let i = 0; i < 12; i++) {
+          await ensureLicenseExceptions(tree, [exception(`pkg-${i}`)]);
+        }
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencyCheck.exceptions;
+        expect(exceptions).toHaveLength(12);
+        expect(exceptions.every((e: any) => e != null)).toBe(true);
+      });
     });
   });
 });

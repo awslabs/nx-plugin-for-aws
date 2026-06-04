@@ -118,16 +118,26 @@ export const LANGUAGE_COMMENT_SYNTAX: { [ext: string]: CommentSyntax } = {
 const LICENSE_SDK_MODULE = '@aws/nx-plugin/sdk/license';
 
 /**
- * Escape a string for embedding in a single-quoted TypeScript string literal.
+ * Produce a valid TypeScript string literal for an arbitrary value.
+ * `JSON.stringify` yields a double-quoted literal with all escaping handled
+ * (quotes, backslashes, newlines, and other control characters), so the result
+ * is always parseable — prettier later normalises the quote style.
  */
-const toStringLiteral = (value: string): string =>
-  `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+const toStringLiteral = (value: string): string => JSON.stringify(value);
 
 /**
  * Escape a string for embedding in a double-quoted GritQL string pattern.
+ * Control characters are stripped to single spaces because a literal newline
+ * inside a GritQL backtick string breaks pattern parsing; the value is only
+ * used for an equality check against existing source, where package names
+ * never contain control characters.
  */
 const toGritStringLiteral = (value: string): string =>
-  `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  `"${value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f]/g, ' ')}"`;
 
 /**
  * Build the object literal source for a dependency check exception.
@@ -145,10 +155,15 @@ const exceptionLiteral = (exception: DependencyCheckException): string => {
 };
 
 /**
- * GritQL pattern binding the body of the `dependencyCheck` object to `$scope`.
- * All dependency-check edits are constrained to this scope.
+ * GritQL pattern binding the body of the `license` object to `$scope`.
+ *
+ * Array edits are scoped to the license object (rather than to a bare
+ * `dependencyCheck: { ... }`) so a `dependencyCheck`-shaped object declared
+ * elsewhere in the file is never matched. The `collectors`/`exceptions` arrays
+ * only exist inside `license.dependencyCheck`, so searching within the license
+ * body targets them unambiguously.
  */
-const DEPENDENCY_CHECK_SCOPE = '`dependencyCheck: { $scope }`';
+const DEPENDENCY_CHECK_SCOPE = '`license: { $scope }`';
 
 export interface EnsureDependencyCheckBlockOptions {
   includeCollectors?: 'npm' | 'npm+python';
@@ -420,14 +435,27 @@ export const writeLicenseConfig = async (tree: Tree, config: LicenseConfig) => {
   });
 
   // Re-attach the preserved dependencyCheck block into the freshly-written
-  // license object (only if it isn't already present).
+  // license object (only if it isn't already present). A placeholder property
+  // is appended via GritQL's list-aware `+=`, then substituted with the
+  // captured text — so the preserved block's own content (which may contain
+  // backticks, `${...}`, quotes) never enters the GritQL pattern.
   if (preservedDependencyCheck) {
-    await applyGritQL(
+    const placeholder = '__GRIT_DEPENDENCY_CHECK_PLACEHOLDER__';
+    const appended = await applyGritQL(
       tree,
       AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-      `\`license: { $props }\` where { $props <: not contains \`dependencyCheck: $_\`, $props += \`${preservedDependencyCheck}\` }`,
+      `\`license: { $props }\` where { $props <: not contains \`dependencyCheck: $_\`, $props += \`${placeholder}: true\` }`,
     );
-    await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+    if (appended) {
+      const content = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+      // Function replacer avoids `$` in the captured text being treated as a
+      // special replacement pattern.
+      tree.write(
+        AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+        content.replace(`${placeholder}: true`, () => preservedDependencyCheck),
+      );
+      await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+    }
   }
 };
 
