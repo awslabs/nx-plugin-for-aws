@@ -270,7 +270,7 @@ export const pyProjectGenerator = async (
   // on the root license-check target. No-op if license checking isn't set up;
   // the license generator wires up existing projects itself, so the dependency
   // is added regardless of which generator runs first.
-  addLicenseCheckToLintTarget(tree, fullyQualifiedName);
+  await addLicenseCheckToLintTarget(tree, fullyQualifiedName);
 
   return async () => {
     installPackagesTask(tree);

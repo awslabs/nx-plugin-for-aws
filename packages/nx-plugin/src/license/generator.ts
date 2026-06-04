@@ -17,6 +17,7 @@ import { ensureAwsNxPluginConfig } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
 import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
+import { formatFilesInSubtree } from '../utils/format';
 import {
   MCP_INSPECTOR_EXCEPTIONS,
   AG_UI_STRANDS_EXCEPTIONS,
@@ -57,7 +58,7 @@ export async function licenseGenerator(
     // Make every existing project's lint target depend on the root
     // license-check target, so the check runs as part of lint/build regardless
     // of whether projects were created before or after the license generator.
-    addLicenseCheckToAllLintTargets(tree);
+    await addLicenseCheckToAllLintTargets(tree);
   }
 
   const nxJson = readNxJson(tree);
@@ -82,6 +83,8 @@ export async function licenseGenerator(
   updateNxJson(tree, updatedNxJson);
 
   await addGeneratorMetricsIfApplicable(tree, [LICENSE_GENERATOR_INFO]);
+
+  await formatFilesInSubtree(tree);
 }
 
 /**

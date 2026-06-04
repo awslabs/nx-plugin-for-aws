@@ -99,5 +99,5 @@ export const configureTsProject = async (
   // on the root license-check target. No-op if there's no license-check target
   // (i.e. the license generator hasn't run); the license generator wires up
   // existing projects itself, so this works regardless of generator order.
-  addLicenseCheckToLintTarget(tree, options.fullyQualifiedName);
+  await addLicenseCheckToLintTarget(tree, options.fullyQualifiedName);
 };
