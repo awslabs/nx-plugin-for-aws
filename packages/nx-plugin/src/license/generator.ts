@@ -58,7 +58,7 @@ export async function licenseGenerator(
     // Make every existing project's lint target depend on the root
     // license-check target, so the check runs as part of lint/build regardless
     // of whether projects were created before or after the license generator.
-    await addLicenseCheckToAllLintTargets(tree);
+    addLicenseCheckToAllLintTargets(tree);
   }
 
   const nxJson = readNxJson(tree);

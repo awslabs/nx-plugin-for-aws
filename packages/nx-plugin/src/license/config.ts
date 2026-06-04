@@ -282,13 +282,13 @@ const findLicenseCheckProjectName = (tree: Tree): string | undefined => {
  * license checking runs as part of lint/build. No-op when the project has no
  * `lint` target or there's no license-check target to depend on. Idempotent.
  *
- * The updated project.json is formatted, since `updateProjectConfiguration`
- * writes expanded JSON that would otherwise fail a project's own JSON lint.
+ * Callers format afterwards (generators call `formatFilesInSubtree` at the end),
+ * so the rewritten project.json matches prettier.
  */
-export const addLicenseCheckToLintTarget = async (
+export const addLicenseCheckToLintTarget = (
   tree: Tree,
   projectName: string,
-): Promise<void> => {
+): void => {
   const {
     readProjectConfiguration,
     updateProjectConfiguration,
@@ -313,7 +313,6 @@ export const addLicenseCheckToLintTarget = async (
     target: 'license-check',
   });
   updateProjectConfiguration(tree, projectName, project);
-  await formatFilesInSubtree(tree, `${project.root}/project.json`);
 };
 
 /**
@@ -321,12 +320,10 @@ export const addLicenseCheckToLintTarget = async (
  * Called by the license generator so existing projects pick up the dependency
  * regardless of the order generators ran in.
  */
-export const addLicenseCheckToAllLintTargets = async (
-  tree: Tree,
-): Promise<void> => {
+export const addLicenseCheckToAllLintTargets = (tree: Tree): void => {
   const { getProjects } = require('@nx/devkit');
   for (const [name] of getProjects(tree)) {
-    await addLicenseCheckToLintTarget(tree, name);
+    addLicenseCheckToLintTarget(tree, name);
   }
 };
 
