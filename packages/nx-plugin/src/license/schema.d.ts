@@ -14,4 +14,9 @@ export interface LicenseGeneratorSchema {
    * Copyright holder name
    */
   copyrightHolder: string;
+
+  /**
+   * Whether to configure dependency license allowlist checking.
+   */
+  dependencyCheck?: boolean;
 }

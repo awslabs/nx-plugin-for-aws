@@ -153,6 +153,7 @@ export const PY_VERSIONS = {
   httpx: '==0.28.1',
   mcp: '==1.27.2',
   'pip-check-updates': '==0.28.0',
+  'pip-licenses': '==5.5.5',
   'strands-agents': '==1.42.0',
   'strands-agents[a2a]': '==1.42.0',
   'strands-agents-tools': '==0.7.0',

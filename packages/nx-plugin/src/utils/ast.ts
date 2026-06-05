@@ -268,3 +268,72 @@ export const matchGritQL = async (
   }
   return matched;
 };
+
+/**
+ * Capture the source text of the first match of a GritQL pattern.
+ *
+ * For example `` `dependencyCheck: $_` `` returns the whole
+ * `dependencyCheck: { ... }` property text. Returns undefined if nothing
+ * matches. The file is not modified.
+ */
+export const captureGritQL = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<string | undefined> => {
+  if (!tree.exists(filePath)) return undefined;
+  ensureGritDir(tree);
+  const source = tree.read(filePath)!.toString();
+  let captured: string | undefined;
+  try {
+    const query = new QueryBuilder(pattern);
+    query.filter((node) => {
+      captured ??= node.text();
+      return true;
+    });
+    await query.applyToFile({ path: filePath, content: source });
+  } catch {
+    return undefined;
+  }
+  return captured;
+};
+
+/**
+ * A unique token that is a valid identifier, so it can stand in for an array
+ * element or object property inside a GritQL rewrite.
+ */
+export const GRIT_INSERT_PLACEHOLDER = '__GRIT_INSERT_PLACEHOLDER__';
+
+/**
+ * Apply a GritQL rewrite that inserts {@link GRIT_INSERT_PLACEHOLDER}, then
+ * replace the placeholder with `text`. Routing user-provided text through a
+ * placeholder keeps it out of the GritQL pattern, where quotes, backticks or
+ * `${...}` would otherwise break parsing.
+ *
+ * Any separator (e.g. a leading `, ` when appending to an array) must be part
+ * of the GritQL pattern, not `text`. The one adjustment made here: if the
+ * placeholder lands after a trailing line comment (`// ...`) — which would
+ * comment out the text — the text is moved to its own line.
+ *
+ * The caller formats afterwards. Returns true if the pattern matched and the
+ * file changed.
+ */
+export const insertViaGritQL = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+  text: string,
+): Promise<boolean> => {
+  if (!(await applyGritQL(tree, filePath, pattern))) return false;
+  const content = tree.read(filePath)!.toString();
+  const at = content.indexOf(GRIT_INSERT_PLACEHOLDER);
+  const lineSoFar = content.slice(content.lastIndexOf('\n', at) + 1, at);
+  const replacement = lineSoFar.includes('//') ? `\n${text}` : text;
+
+  // Function replacer so `$` in `text` isn't treated as a replacement pattern.
+  tree.write(
+    filePath,
+    content.replace(GRIT_INSERT_PLACEHOLDER, () => replacement),
+  );
+  return true;
+};

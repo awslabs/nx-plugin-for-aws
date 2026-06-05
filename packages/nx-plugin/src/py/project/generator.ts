@@ -35,6 +35,10 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { updateToml } from '../../utils/toml';
 import { addDependenciesToDependencyGroupInPyProjectToml } from '../../utils/py';
 import type { UVPyprojectToml } from '../../utils/nxlv-python';
+import {
+  addLicenseCheckToLintTarget,
+  ensurePythonLicenseCollector,
+} from '../../license/config';
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -259,6 +263,14 @@ export const pyProjectGenerator = async (
   ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);
+
+  await ensurePythonLicenseCollector(tree);
+
+  // If license checking is configured, make this project's lint target depend
+  // on the root license-check target. No-op if license checking isn't set up;
+  // the license generator wires up existing projects itself, so the dependency
+  // is added regardless of which generator runs first.
+  addLicenseCheckToLintTarget(tree, fullyQualifiedName);
 
   return async () => {
     installPackagesTask(tree);

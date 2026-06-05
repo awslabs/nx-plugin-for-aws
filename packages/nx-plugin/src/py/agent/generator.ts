@@ -47,6 +47,8 @@ import { resolveIac } from '../../utils/iac';
 import { resolveContainers } from '../../utils/containers';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
+import { ensureLicenseExceptions } from '../../license/config';
+import { AG_UI_STRANDS_EXCEPTIONS } from '../../license/known-exceptions';
 
 export const PY_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -413,6 +415,10 @@ export const pyAgentGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_AGENT_GENERATOR_INFO]);
+
+  if (protocol === 'ag-ui') {
+    await ensureLicenseExceptions(tree, AG_UI_STRANDS_EXCEPTIONS);
+  }
 
   await formatFilesInSubtree(tree);
   return async () => {

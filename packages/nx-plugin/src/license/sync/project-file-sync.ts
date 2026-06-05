@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { generateFiles, joinPathFragments, Tree, updateJson } from '@nx/devkit';
-import { LicenseConfig } from '../config-types';
+import { LicenseSourceConfig } from '../config-types';
 import { updateToml } from '../../utils/toml';
 
 /**
@@ -22,7 +22,7 @@ export type ProjectFileToSync = (typeof PROJECT_FILES_TO_SYNC)[number];
  */
 const SYNC_STRATEGIES: Record<
   ProjectFileToSync,
-  (tree: Tree, projectRoot: string, config: LicenseConfig) => void
+  (tree: Tree, projectRoot: string, config: LicenseSourceConfig) => void
 > = {
   LICENSE: (tree, projectRoot, config) => {
     generateFiles(
@@ -68,7 +68,7 @@ export const syncProjectFile = (
   tree: Tree,
   projectRoot: string,
   projectFile: (typeof PROJECT_FILES_TO_SYNC)[number],
-  config: LicenseConfig,
+  config: LicenseSourceConfig,
 ) => {
   return SYNC_STRATEGIES[projectFile](tree, projectRoot, config);
 };

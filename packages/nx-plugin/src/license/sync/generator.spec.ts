@@ -9,7 +9,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
-import { LicenseConfig } from '../config-types';
+import { LicenseSourceConfig } from '../config-types';
 import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
@@ -25,35 +25,37 @@ describe('licenseSyncGenerator', () => {
   });
 
   const addLicenseConfig = async (
-    licenseConfig?: Partial<LicenseConfig> & Pick<LicenseConfig, 'header'>,
+    sourceConfig?: Partial<LicenseSourceConfig>,
     _tree: Tree = tree,
   ) => {
     await ensureAwsNxPluginConfig(_tree);
     await updateAwsNxPluginConfig(_tree, {
-      license: licenseConfig
-        ? {
-            spdx: 'MIT',
-            copyrightHolder: 'foo',
-            copyrightYear: 2025,
-            ...licenseConfig,
-          }
-        : {
-            spdx: 'Apache-2.0',
-            copyrightHolder: 'Test',
-            header: {
-              content: {
-                lines: ['Test Header'],
-              },
-              format: {
-                '**/*.{ts,js}': {
-                  lineStart: '// ',
+      license: {
+        source: sourceConfig
+          ? {
+              spdx: 'MIT',
+              copyrightHolder: 'foo',
+              copyrightYear: 2025,
+              ...sourceConfig,
+            }
+          : {
+              spdx: 'Apache-2.0',
+              copyrightHolder: 'Test',
+              header: {
+                content: {
+                  lines: ['Test Header'],
                 },
-                '**/*.sh': {
-                  lineStart: '# ',
+                format: {
+                  '**/*.{ts,js}': {
+                    lineStart: '// ',
+                  },
+                  '**/*.sh': {
+                    lineStart: '# ',
+                  },
                 },
               },
             },
-          },
+      },
     });
   };
 

@@ -3,12 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { generateFiles, joinPathFragments, Tree } from '@nx/devkit';
+import { join } from 'path';
+import { createJiti } from 'jiti';
 import { AwsNxPluginConfig } from '.';
 import { applyGritQL, matchGritQL } from '../ast';
 import { formatFilesInSubtree } from '../format';
-import { importTypeScriptModule } from '../js';
 
 export const AWS_NX_PLUGIN_CONFIG_FILE_NAME = 'aws-nx-plugin.config.mts';
+
+/**
+ * Aliases used by jiti to resolve `@aws/nx-plugin` imports in the config file
+ * to this package's source, so the config can be evaluated in-memory.
+ */
+const AWS_NX_PLUGIN_JITI_ALIASES = {
+  '@aws/nx-plugin/sdk/license': join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    'sdk',
+    'license',
+  ),
+  '@aws/nx-plugin': join(__dirname, '..', '..'),
+};
 
 /**
  * Ensure that the config file exists
@@ -25,7 +42,11 @@ export const ensureAwsNxPluginConfig = async (
 };
 
 /**
- * Read config from the aws nx plugin configuration file
+ * Read config from the aws nx plugin configuration file.
+ *
+ * Uses jiti to evaluate the TypeScript source in-memory with proper module
+ * resolution — imports from @aws/nx-plugin/* resolve via alias, and any
+ * third-party imports resolve from the workspace's node_modules.
  */
 export const readAwsNxPluginConfig = async (
   tree: Tree,
@@ -33,8 +54,32 @@ export const readAwsNxPluginConfig = async (
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
     return undefined;
   }
-  const configTs = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8');
-  return await importTypeScriptModule(configTs);
+  const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+  const configFilePath = join(tree.root, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+
+  const jiti = createJiti(__filename, { alias: AWS_NX_PLUGIN_JITI_ALIASES });
+
+  const mod = jiti.evalModule(source, { filename: configFilePath });
+  return (mod as any).default ?? mod;
+};
+
+/**
+ * Read config directly from disk. Used by executors that run in the real
+ * workspace (not a virtual Tree). Resolves all imports — including
+ * third-party dependencies — from the workspace's node_modules.
+ */
+export const readAwsNxPluginConfigFromDisk = (
+  workspaceRoot: string,
+): AwsNxPluginConfig | undefined => {
+  const { existsSync, readFileSync } = require('fs');
+  const configPath = join(workspaceRoot, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+  if (!existsSync(configPath)) return undefined;
+
+  const source = readFileSync(configPath, 'utf-8');
+
+  const jiti = createJiti(__filename, { alias: AWS_NX_PLUGIN_JITI_ALIASES });
+  const mod = jiti.evalModule(source, { filename: configPath });
+  return (mod as any).default ?? mod;
 };
 
 const PLACEHOLDER = '"__PLACEHOLDER__"';

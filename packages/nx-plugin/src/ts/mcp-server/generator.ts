@@ -37,6 +37,8 @@ import { resolveContainers } from '../../utils/containers';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
 import { FsCommands } from '../../utils/fs';
+import { ensureLicenseExceptions } from '../../license/config';
+import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -279,6 +281,8 @@ export const tsMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);
+
+  await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return () => {

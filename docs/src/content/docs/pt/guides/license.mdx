@@ -3,16 +3,15 @@ title: "Licença"
 description: "Documentação de referência para o gerador de Licença"
 generator: license
 ---
-
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import LicenseAllowlist from '@components/license-allowlist.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Gerencie automaticamente arquivos `LICENSE` e cabeçalhos de código fonte em seu workspace.
-
-Este gerador registra um [sync generator](https://nx.dev/concepts/sync-generators) para executar como parte dos seus targets `lint`, garantindo que seus arquivos fonte estejam em conformidade com o conteúdo e formato desejado da licença, além de assegurar que os arquivos `LICENSE` do seu projeto estejam corretos e que as informações de licenciamento estejam incluídas em arquivos relevantes do projeto (`package.json`, `pyproject.toml`).
+Gerencie o licenciamento em todo o seu workspace: sincronize arquivos `LICENSE` e cabeçalhos de código fonte para seu próprio código (`license.source`), e verifique se cada dependência está em conformidade com uma lista de licenças permitidas (`license.dependencies`).
 
 ## Utilização
 
@@ -29,15 +28,17 @@ Este gerador registra um [sync generator](https://nx.dev/concepts/sync-generator
 O gerador criará ou atualizará os seguintes arquivos:
 
 <FileTree>
-  - nx.json O target lint é configurado para executar o sync generator de licença
-  - aws-nx-plugin.config.mts Configuração para o sync generator de licença
+  - nx.json O target lint é configurado para executar o sync generator de licença e depende do target license-check
+  - aws-nx-plugin.config.mts Configuração para sincronização de código fonte de licença (`license.source`) e verificação de dependências (`license.dependencies`)
 </FileTree>
 
-Uma configuração padrão para conteúdo e formato de cabeçalhos de licença é adicionada ao `aws-nx-plugin.config.mts` para escrever cabeçalhos apropriados para vários tipos de arquivo. Você pode personalizar isso posteriormente; consulte a [seção de configuração](#configuração) abaixo.
+## Cabeçalhos e Arquivos de Licença
 
-## Fluxo de Trabalho
+O gerador registra um [sync generator](https://nx.dev/concepts/sync-generators) para executar como parte dos seus targets `lint`, garantindo que seus arquivos fonte contenham os cabeçalhos de licença corretos, seus projetos contenham arquivos `LICENSE`, e os metadados de licenciamento estejam definidos em `package.json` e `pyproject.toml`.
 
-Sempre que você construir seus projetos (e um target `lint` for executado), o sync generator de licença garantirá que o licenciamento em seu projeto corresponda à sua configuração (veja [comportamento de sincronização de licença abaixo](#comportamento-de-sincronização-de-licença)). Se detectar que algo está desatualizado, você receberá uma mensagem como:
+### Fluxo de Trabalho
+
+Sempre que você construir seus projetos (e um target `lint` for executado), o sync generator de licença garantirá que o licenciamento em seu projeto corresponda à sua configuração. Se detectar que algo está desatualizado, você receberá uma mensagem como:
 
 ```bash
   NX   O workspace está desatualizado
@@ -70,40 +71,36 @@ Selecione `Sim` para sincronizar as alterações.
 Verifique as alterações feitas pelo sync generator de licença no controle de versão para garantir que as tasks de construção em integração contínua não falhem devido a licenças desatualizadas.
 :::
 
-## Comportamento de Sincronização de Licença
+### Comportamento de Sincronização
 
 O sync generator de licença executa três tarefas principais:
 
-### 1. Sincronizar Cabeçalhos de Licença em Arquivos Fonte
+#### 1. Sincronizar Cabeçalhos de Licença em Arquivos Fonte
 
 Quando executado, o sync generator garantirá que todos os arquivos fonte do workspace (baseado em sua configuração) contenham o cabeçalho de licença apropriado. O cabeçalho é escrito como o primeiro bloco de comentário ou série consecutiva de comentários de linha no arquivo (além do shebang/hashbang, se presente).
 
-Você pode atualizar a configuração a qualquer momento para alterar quais arquivos devem ser incluídos/excluídos, bem como o conteúdo ou formato dos cabeçalhos para diferentes tipos de arquivo. Para detalhes, consulte a [seção de configuração](#configuração).
-
-### 2. Sincronizar Arquivos LICENSE
+#### 2. Sincronizar Arquivos LICENSE
 
 Quando executado, o sync generator garantirá que o arquivo raiz `LICENSE` corresponda à licença configurada, além de verificar que todos os subprojetos no workspace contenham o arquivo `LICENSE` correto.
 
-Você pode excluir projetos na configuração se necessário. Para detalhes, consulte a [seção de configuração](#configuração).
-
-### 3. Sincronizar Informações de Licença em Arquivos de Projeto
+#### 3. Sincronizar Informações de Licença em Arquivos de Projeto
 
 Quando executado, o sync generator garantirá que os campos `license` em arquivos `package.json` e `pyproject.toml` estejam definidos conforme sua licença configurada.
 
-Você pode excluir projetos na configuração se necessário. Para detalhes, consulte a [seção de configuração](#configuração).
-
-## Configuração
+### Configuração de Cabeçalhos e Arquivos
 
 A configuração é definida no arquivo `aws-nx-plugin.config.mts` na raiz do workspace.
 
-### SPDX e Detentor dos Direitos Autorais
+#### SPDX e Detentor dos Direitos Autorais
 
 Sua licença pode ser atualizada a qualquer momento via propriedade `spdx`:
 
-```typescript title="aws-nx-plugin.config.mts" {3}
+```typescript title="aws-nx-plugin.config.mts" {4}
 export default {
   license: {
-    spdx: 'MIT',
+    source: {
+      spdx: 'MIT',
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
@@ -112,36 +109,38 @@ Quando o sync generator é executado, todos os arquivos `LICENSE`, `package.json
 
 Você pode configurar adicionalmente o detentor dos direitos autorais e o ano, que são incluídos em alguns arquivos `LICENSE`:
 
-```typescript title="aws-nx-plugin.config.mts" {4,5}
+```typescript title="aws-nx-plugin.config.mts" {5,6}
 export default {
   license: {
-    spdx: 'MIT',
-    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
-    copyrightYear: 2025,
+    source: {
+      spdx: 'MIT',
+      copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+      copyrightYear: 2025,
+    },
   },
 } satisfies AwsNxPluginConfig;
 ```
 
-### Cabeçalhos de Licença
-
-#### Conteúdo
+#### Conteúdo do Cabeçalho de Licença
 
 O conteúdo do cabeçalho pode ser configurado de duas formas:
 
 1. Usando conteúdo inline:
 
-```typescript title="aws-nx-plugin.config.mts" {5-9}
+```typescript title="aws-nx-plugin.config.mts" {6-10}
 export default {
   license: {
-    header: {
-      content: {
-        lines: [
-          'Copyright: My Company, Incorporated.',
-          'Licensed under the MIT License',
-          'All rights reserved',
-        ];
+    source: {
+      header: {
+        content: {
+          lines: [
+            'Copyright: My Company, Incorporated.',
+            'Licensed under the MIT License',
+            'All rights reserved',
+          ];
+        }
+        // ... configuração de formato
       }
-      // ... configuração de formato
     }
   }
 } satisfies AwsNxPluginConfig;
@@ -149,51 +148,55 @@ export default {
 
 2. Carregando de um arquivo:
 
-```typescript title="aws-nx-plugin.config.mts" {5}
+```typescript title="aws-nx-plugin.config.mts" {6}
 export default {
   license: {
-    header: {
-      content: {
-        filePath: 'license-header.txt'; // relativo à raiz do workspace
+    source: {
+      header: {
+        content: {
+          filePath: 'license-header.txt'; // relativo à raiz do workspace
+        }
+        // ... configuração de formato
       }
-      // ... configuração de formato
     }
   }
 } satisfies AwsNxPluginConfig;
 ```
 
-#### Formato
+#### Formato do Cabeçalho
 
 Você pode especificar como os cabeçalhos são formatados para diferentes tipos de arquivo usando padrões glob. A configuração suporta comentários de linha, bloco ou combinação de ambos:
 
-```typescript title="aws-nx-plugin.config.mts" {7-29}
+```typescript title="aws-nx-plugin.config.mts" {8-30}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['Copyright notice here'],
-      },
-      format: {
-        // Comentários de linha
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['Copyright notice here'],
         },
-        // Comentários de bloco
-        '**/*.css': {
-          blockStart: '/*',
-          blockEnd: '*/',
-        },
-        // Comentários de bloco com prefixos
-        '**/*.java': {
-          blockStart: '/*',
-          lineStart: ' * ',
-          blockEnd: ' */',
-        },
-        // Comentários de linha com cabeçalho/rodapé
-        '**/*.py': {
-          blockStart: '# ------------',
-          lineStart: '# ',
-          blockEnd: '# ------------',
+        format: {
+          // Comentários de linha
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+          // Comentários de bloco
+          '**/*.css': {
+            blockStart: '/*',
+            blockEnd: '*/',
+          },
+          // Comentários de bloco com prefixos
+          '**/*.java': {
+            blockStart: '/*',
+            lineStart: ' * ',
+            blockEnd: ' */',
+          },
+          // Comentários de linha com cabeçalho/rodapé
+          '**/*.py': {
+            blockStart: '# ------------',
+            lineStart: '# ',
+            blockEnd: '# ------------',
+          },
         },
       },
     },
@@ -212,27 +215,29 @@ A configuração de formato suporta:
 
 Para tipos de arquivo não suportados nativamente, você pode especificar sintaxe personalizada para identificar cabeçalhos existentes:
 
-```typescript title="aws-nx-plugin.config.mts" {12-22}
+```typescript title="aws-nx-plugin.config.mts" {13-23}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.xyz': {
-          lineStart: '## ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
-      },
-      commentSyntax: {
-        xyz: {
-          line: '##', // Define sintaxe de comentário de linha
+        format: {
+          '**/*.xyz': {
+            lineStart: '## ',
+          },
         },
-        abc: {
-          block: {
-            // Define sintaxe de comentário de bloco
-            start: '<!--',
-            end: '-->',
+        commentSyntax: {
+          xyz: {
+            line: '##', // Define sintaxe de comentário de linha
+          },
+          abc: {
+            block: {
+              // Define sintaxe de comentário de bloco
+              start: '<!--',
+              end: '-->',
+            },
           },
         },
       },
@@ -241,56 +246,203 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-#### Excluir Arquivos
+#### Excluir Arquivos da Sincronização de Cabeçalhos
 
 Por padrão, em repositórios git, todos os arquivos `.gitignore` são respeitados. Em repositórios não-git, todos os arquivos são considerados a menos que explicitamente excluídos na configuração.
 
 Você pode excluir arquivos adicionais usando padrões glob:
 
-```typescript title="aws-nx-plugin.config.mts" {12-16}
+```typescript title="aws-nx-plugin.config.mts" {13}
 export default {
   license: {
-    header: {
-      content: {
-        lines: ['My license header'],
-      },
-      format: {
-        '**/*.ts': {
-          lineStart: '// ',
+    source: {
+      header: {
+        content: {
+          lines: ['My license header'],
         },
+        format: {
+          '**/*.ts': {
+            lineStart: '// ',
+          },
+        },
+        exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
       },
-      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
     },
   },
 } satisfies AwsNxPluginConfig;
 ```
 
-### Excluir Arquivos de Projeto da Sincronização
+#### Excluir Projetos da Sincronização de Arquivos
 
 Todos os arquivos `LICENSE`, `package.json` e `pyproject.toml` são sincronizados por padrão.
 
 Você pode excluir projetos ou arquivos específicos usando padrões glob:
 
-```typescript title="aws-nx-plugin.config.mts" {3-10}
+```typescript title="aws-nx-plugin.config.mts" {4-11}
 export default {
   license: {
-    files: {
-      exclude: [
-        // não sincroniza LICENSE, package.json ou pyproject.toml
-        'packages/excluded-project',
-        // não sincroniza LICENSE, mas sincroniza package.json/pyproject.toml
-        'apps/internal/LICENSE',
-      ];
+    source: {
+      files: {
+        exclude: [
+          // não sincroniza LICENSE, package.json ou pyproject.toml
+          'packages/excluded-project',
+          // não sincroniza LICENSE, mas sincroniza package.json/pyproject.toml
+          'apps/internal/LICENSE',
+        ];
+      }
     }
   }
 } satisfies AwsNxPluginConfig;
 ```
 
-## Desativar Sincronização de Licença
+### Desativar Sincronização de Licença
 
-Para desativar o sync generator de licença:
+A sincronização de código fonte de licença é habilitada pela presença da chave `license.source` em sua configuração. Para desativá-la:
 
-1. Remova a seção `license` do `aws-nx-plugin.config.mts` (ou remova o arquivo)
-2. Remova o gerador `@aws/nx-plugin:license#sync` de `targetDefaults.lint.syncGenerators`
+1. Remova a seção `license.source` da sua configuração em `aws-nx-plugin.config.mts` (você pode manter `license.dependencies` se ainda quiser verificação de licença de dependências)
+2. Se você também quiser remover completamente o sync generator, remova o gerador `@aws/nx-plugin:license#sync` de `targetDefaults.lint.syncGenerators`
 
 Para reativar, execute novamente o gerador `license`.
+
+## Verificação de Licenças de Dependências
+
+O gerador `license` também configura um target `license-check` que falha quando uma das dependências do seu projeto (ou qualquer dependência transitiva) declara uma licença que não está na sua lista de permissões.
+
+### Como Funciona
+
+O gerador cria um target `license-check` no seu `project.json` raiz:
+
+```json title="project.json"
+{
+  "targets": {
+    "license-check": {
+      "executor": "@aws/nx-plugin:license-check",
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/pnpm-lock.yaml",
+        "{workspaceRoot}/aws-nx-plugin.config.mts"
+      ],
+      "options": {}
+    }
+  }
+}
+```
+
+Os `inputs` são computados para seu workspace: apenas lockfiles que estão realmente presentes são incluídos, juntamente com `aws-nx-plugin.config.mts`, mais um glob `{workspaceRoot}/**/uv.lock` quando a verificação de dependências Python está habilitada (ou seja, um coletor Python está configurado).
+
+Você pode executar a verificação diretamente:
+
+<NxCommands commands={['license-check']} />
+
+Os resultados são armazenados em cache com base nos seus lockfiles e `aws-nx-plugin.config.mts` — re-execuções são instantâneas quando nada mudou.
+
+Coletores determinam o que é verificado. O `npmCollector` usa [license-checker-rseidelsohn](https://github.com/nicedoc/license-checker-rseidelsohn), e o `pythonCollector` usa [pip-licenses](https://github.com/raimon49/pip-licenses). Se nenhuma dependência instalada for encontrada, a verificação passa sem nada para inspecionar.
+
+### Executar como parte de lint/build
+
+A verificação de licença de dependências é executada automaticamente sempre que você executa `lint` ou `build` em qualquer projeto no seu workspace. O gerador `license` conecta o target `lint` de cada projeto para depender do target `license-check` raiz, e os geradores de projeto (`ts#*` e `py#*`) fazem o mesmo quando são executados — então a verificação é conectada independentemente da ordem em que os geradores são executados.
+
+Isso significa que você não precisa executar a verificação explicitamente, embora ainda possa fazê-lo com o target `license-check`:
+
+<NxCommands commands={['license-check']} />
+
+A conexão é um `dependsOn` entre projetos no target `lint` de cada projeto que aponta para o target `license-check` raiz. Para pular a verificação durante um lint ou build, defina a variável de ambiente `LICENSE_DEPENDENCY_CHECK=skip`:
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+
+### Configuração
+
+Por padrão, a verificação usa um conjunto integrado de licenças permissivas comuns (MIT, Apache-2.0, BSD, ISC, etc.) exportado como `DEFAULT_LICENSE_ALLOWLIST`. Você pode estender ou substituir isso na sua configuração:
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    // ...
+    dependencies: {
+      allow: [...DEFAULT_LICENSE_ALLOWLIST, { spdxId: 'LGPL-2.1-or-later', fullName: 'GNU Lesser General Public License v2.1 or later', aliases: [] }],
+      exceptions: [
+        { package: 'some-package', reason: 'Audited manually — ships MIT text without SPDX field' },
+      ],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+<Drawer title="Default License Allowlist" trigger="View the full list of licenses in DEFAULT_LICENSE_ALLOWLIST">
+<LicenseAllowlist />
+</Drawer>
+
+#### Personalizar a Lista de Permissões
+
+Para restringir a lista de permissões, substitua `DEFAULT_LICENSE_ALLOWLIST` pelo seu próprio array. Para estendê-la, espalhe o padrão e adicione entradas. As entradas são correspondidas por ID SPDX, nome completo da licença ou qualquer um dos aliases listados (sem distinção entre maiúsculas e minúsculas).
+
+#### Exceções por Pacote
+
+Use `exceptions` para pacotes que falham na verificação — seja porque sua licença não está na lista de permissões, ou porque são distribuídos sem metadados de licença detectáveis. O campo `reason` é obrigatório para que os revisores possam ver por que a exceção foi concedida.
+
+```typescript
+exceptions: [
+  {
+    package: 'union',
+    version: '0.5.0',
+    reason: 'Package ships verbatim MIT text without declaring license',
+  },
+];
+```
+
+Geradores que introduzem dependências com metadados problemáticos (por exemplo, o gerador de servidor MCP) adicionam automaticamente as exceções necessárias à sua configuração quando são executados.
+
+#### Coletores
+
+Coletores descobrem dependências e extraem metadados de licença. Os coletores integrados são `npmCollector()` (verifica `node_modules`) e `pythonCollector()` (verifica ambientes virtuais Python). O gerador de licença configura `npmCollector()` por padrão e adiciona `pythonCollector()` quando projetos Python estão presentes.
+
+Para implementar um coletor personalizado, conforme a interface `LicenseCollector`:
+
+```typescript
+import type { LicenseCollector } from '@aws/nx-plugin/sdk/license';
+
+const myCollector = (): LicenseCollector => ({
+  name: 'my-ecosystem',
+  traceCommand: 'my-tool why <package>',
+  async collect({ workspaceRoot }) {
+    return [
+      { name: 'some-dep', version: '1.0.0', rawLicense: 'MIT', ecosystem: 'my-ecosystem' },
+    ];
+  },
+});
+```
+
+#### O hook onDependency
+
+`license.dependencies` aceita um callback opcional `onDependency` que é invocado uma vez para cada dependência descoberta, independentemente de passar ou falhar na verificação. Ele recebe `{ package, spdx }`, onde `package` é o nome do pacote e `spdx` é a expressão de licença SPDX resolvida. O `spdx` de uma exceção tem precedência sobre a licença declarada bruta, e `spdx` pode ser uma string vazia se nenhuma licença foi declarada.
+
+Esta é uma maneira prática de imprimir todas as licenças em seu projeto. Execute o target `license-check` para ver a saída:
+
+```typescript title="aws-nx-plugin.config.mts"
+import { AwsNxPluginConfig } from '@aws/nx-plugin';
+import { DEFAULT_LICENSE_ALLOWLIST } from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      onDependency: ({ package: pkg, spdx }) => {
+        console.log(`${pkg} - ${spdx}`);
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### Desativar Verificações de Dependências
+
+A verificação de licença de dependências é habilitada pela presença da chave `license.dependencies` em sua configuração.
+
+Para desativar as verificações para uma única execução, defina a variável de ambiente `LICENSE_DEPENDENCY_CHECK=skip`:
+
+<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+
+Para desativar permanentemente, remova a chave `license.dependencies` da sua configuração em `aws-nx-plugin.config.mts`. Você também pode executar novamente o gerador `license` com `--dependencyCheck=false` para criar o scaffold sem ela.

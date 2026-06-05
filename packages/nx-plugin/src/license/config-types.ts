@@ -3,8 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { SPDXLicenseIdentifier } from './schema';
+import type { DependencyCheckConfig } from './dependency-check/types';
 
 export interface LicenseConfig {
+  /**
+   * Configuration for licensing your own source code: license headers and
+   * LICENSE files. Omit to disable source license header and file syncing.
+   */
+  source?: LicenseSourceConfig;
+  /**
+   * Configuration for checking your dependencies' licenses against an
+   * allowlist. Omit to disable dependency license checking.
+   */
+  dependencies?: DependencyCheckConfig;
+}
+
+/**
+ * Configuration for licensing your own source code (headers and LICENSE files).
+ */
+export interface LicenseSourceConfig {
   /**
    * The SPDX license identifier for your chosen license.
    * License files will be synchronised according to the chosen SPDX
@@ -28,6 +45,12 @@ export interface LicenseConfig {
    */
   files?: LicenseFileConfig;
 }
+
+export type {
+  DependencyCheckConfig,
+  DependencyCheckException,
+  AllowlistEntry,
+} from './dependency-check/types';
 
 /**
  * Configuration for the LICENSE file sync
