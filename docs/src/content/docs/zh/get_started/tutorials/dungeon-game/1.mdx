@@ -617,7 +617,51 @@ export class StoryAgent extends Construct implements IGrantable {
 
 </Drawer>
 
-## 任务 5:创建用户界面 (UI)
+## 任务 5:创建游戏数据库
+
+我们的游戏状态 — 保存的游戏和每个玩家的库存 — 存储在 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) 中。使用 `ts#dynamodb` 生成器创建名为 `DungeonDb` 的 DynamoDB 项目:
+
+<RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
+
+:::tip[本地优先开发]
+`ts#dynamodb` 生成器提供 `serve-local` 目标,在容器中运行 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)。结合 `connection` 生成器(我们将在下面运行),这意味着**整个游戏在您的机器上运行,无需调用 AWS**,直到您在教程结束时选择部署。您需要安装并运行[容器引擎](https://docs.docker.com/get-started/get-docker/),例如 Docker 或 Finch。
+:::
+
+您将看到文件树中出现了新文件。
+<Drawer title="ts#dynamodb 更新文件" trigger="点击此处查看文件详情。">
+`ts#dynamodb` 生成器生成这些文件。
+
+<FileTree>
+- packages/
+  - dungeon-db/
+    - scripts/
+      - create-local-table.ts 在 DynamoDB Local 中创建表
+      - pull-image.ts 拉取 DynamoDB Local 镜像
+      - start-container.ts 启动 DynamoDB Local 容器
+    - src/
+      - index.ts 入口点和导出
+      - constants.ts 本地开发常量和运行时配置键
+      - client.ts DynamoDB 客户端单例和表名解析
+      - gsi.ts 全局二级索引的真实来源
+      - entities/
+        - example.ts 示例 ElectroDB 实体(我们将替换此文件)
+        - index.ts 实体导出
+    - project.json 添加 `serve-local` 和 `pull-image` 目标
+  - common/constructs/
+    - src/
+      - app/dynamodb/
+        - dungeon-db.ts 用于配置表的构造体
+      - core/
+        - dynamodb.ts 通用 DynamoDB 表构造体
+</FileTree>
+
+生成的 `src/client.ts` 导出 `getDynamoDBClient()` 和 `resolveTableName()`。当 `SERVE_LOCAL=true`(由 `serve-local` 目标自动设置)时,它们连接到 DynamoDB Local;否则它们连接到 AWS 并从<Link path="guides/runtime-config">运行时配置</Link>解析已部署的表名。我们将在<Link path="get_started/tutorials/dungeon-game/2">模块 2</Link> 中在此项目中建模 `Game` 和 `Inventory` 实体。
+
+更多详情请参考 <Link path="guides/ts-dynamodb">ts#dynamodb 生成器指南</Link>。
+
+</Drawer>
+
+## 任务 6:创建用户界面 (UI)
 
 在此任务中,我们将创建与游戏交互的 UI。
 
@@ -628,7 +672,7 @@ export class StoryAgent extends Construct implements IGrantable {
 <RunGenerator generator="ts#website" requiredParameters={{name:"GameUI", ux:"shadcn"}} noInteractive />
 
 :::note[Shadcn UI]
-我们选择 `--uxProvider=Shadcn` 使生成的网站使用 [shadcn/ui](https://ui.shadcn.com/) 组件并使用 Tailwind 样式 — 我们所有的路由代码都使用 shadcn 原语如 `Card`、`Button` 和 `Input`,稍后的 `connection` 生成器会连接匹配的 shadcn 主题 [CopilotKit](https://docs.copilotkit.ai/) 聊天界面。
+我们选择 `--ux=shadcn` 使生成的网站使用 [shadcn/ui](https://ui.shadcn.com/) 组件并使用 Tailwind 样式 — 我们所有的路由代码都使用 shadcn 原语如 `Card`、`Button` 和 `Input`,稍后的 `connection` 生成器会连接匹配的 shadcn 主题 [CopilotKit](https://docs.copilotkit.ai/) 聊天界面。
 :::
 
 您将看到文件树中出现了新文件。
@@ -988,6 +1032,18 @@ root &&
 更多详情请参考 <Link path="guides/connection/react-agui">React 到 AG-UI 连接指南</Link>。
 </Drawer>
 
+### 连接游戏 API 和库存 MCP 服务器到数据库
+
+游戏 API 和库存 MCP 服务器都会读写我们的 DynamoDB 表,因此让我们将它们连接到 `DungeonDb` 项目。`connection` 生成器检测到目标是 `ts#dynamodb` 项目,并将每个源项目的 `serve-local` 目标配置为自动启动 DynamoDB Local。
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<Aside type="tip" title="一条命令在本地启动整个堆栈">
+因为故事代理的 `agent-serve-local` 已经依赖于库存 MCP 服务器的 `mcp-server-serve-local`(通过上面的 `story → inventory` 连接),而游戏 API 和 MCP 服务器现在都依赖于 `dungeon-db:serve-local`,运行任何一个项目的 `serve-local` 目标都会按正确顺序启动它所需的每个依赖项 — 包括 DynamoDB Local。我们将在本教程的其余部分依赖这一点。
+</Aside>
+
 ### 游戏 UI:基础设施
 
 创建 CDK 基础设施的最终子项目。
@@ -1064,7 +1120,7 @@ export class ApplicationStack extends Stack {
 
 </Drawer>
 
-## 任务 6:更新基础设施
+## 任务 7:更新基础设施
 
 更新 `packages/infra/src/stacks/application-stack.ts` 以实例化部分已生成的构造体:
 
@@ -1074,7 +1130,7 @@ export class ApplicationStack extends Stack {
 我们为 Game API 提供了默认集成。默认情况下,API 中的每个操作都映射到独立的 Lambda 函数处理该操作。
 :::
 
-## 任务 7:构建代码
+## 任务 8:构建代码
 
 <Drawer title="Nx 命令" trigger="现在首次构建代码">
 
@@ -1135,6 +1191,10 @@ No, run the tasks without syncing the changes
 该消息表示 NX 检测到可自动更新的文件。此处指未设置项目引用的 `tsconfig.json` 文件。
 
 选择 **Yes, sync the changes and run the tasks** 选项继续。您会注意到所有 IDE 相关导入错误自动解决,因为同步生成器会自动添加缺失的 TypeScript 引用!
+
+<Aside type="note" title="非交互式环境">
+在非交互式 shell(例如 CI)中没有提示 — 构建会失败并显示"workspace is out of sync"错误。运行 <NxCommands commands={['sync']} /> 应用待处理的同步生成器,然后再次构建,或在 `nx.json` 中将 `sync.applyChanges` 设置为 `true` 以在每次构建时自动应用更改。每当项目引用发生变化时(例如在下一个模块中添加过程后),您都会遇到相同的不同步检查。
+</Aside>
 
 所有构建产物现在位于 monorepo 根目录的 `dist/` 文件夹中。这是使用 `@aws/nx-plugin` 生成项目的标准做法,避免生成文件污染文件树。如需清理文件,删除 `dist/` 文件夹即可,无需担心构建产物散布在文件树各处。
 

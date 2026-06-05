@@ -620,7 +620,51 @@ O gerador `ts#mcp-server` gera estes arquivos.
 
 </Drawer>
 
-## Tarefa 5: Criar a Interface do Usuário (UI)
+## Tarefa 5: Criar o banco de dados do jogo
+
+O estado do nosso jogo — jogos salvos e o inventário de cada jogador — reside no [Amazon DynamoDB](https://aws.amazon.com/dynamodb/). Crie um projeto DynamoDB chamado `DungeonDb` com o gerador `ts#dynamodb`:
+
+<RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
+
+:::tip[Desenvolvimento local-first]
+O gerador `ts#dynamodb` fornece um target `serve-local` que executa o [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) em um contêiner. Combinado com o gerador `connection` (que executamos abaixo), isso significa que **o jogo inteiro roda em sua máquina sem chamadas AWS** até que você escolha fazer o deploy no final do tutorial. Você precisará de [um motor de contêiner](https://docs.docker.com/get-started/get-docker/) como Docker ou Finch instalado e em execução.
+:::
+
+Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
+<Drawer title="Arquivos atualizados do ts#dynamodb" trigger="Clique aqui para examinar estes arquivos em mais detalhes.">
+O gerador `ts#dynamodb` gera estes arquivos.
+
+<FileTree>
+- packages/
+  - dungeon-db/
+    - scripts/
+      - create-local-table.ts cria a tabela no DynamoDB Local
+      - pull-image.ts baixa a imagem do DynamoDB Local
+      - start-container.ts inicia o contêiner do DynamoDB Local
+    - src/
+      - index.ts ponto de entrada e exports
+      - constants.ts constantes de desenvolvimento local e chave de configuração de runtime
+      - client.ts singleton do cliente DynamoDB e resolução do nome da tabela
+      - gsi.ts fonte de verdade para Global Secondary Indexes
+      - entities/
+        - example.ts entidade ElectroDB de exemplo (vamos substituir isso)
+        - index.ts exports de entidades
+    - project.json adiciona os targets `serve-local` e `pull-image`
+  - common/constructs/
+    - src/
+      - app/dynamodb/
+        - dungeon-db.ts construct para provisionar sua tabela
+      - core/
+        - dynamodb.ts construct genérico de tabela DynamoDB
+</FileTree>
+
+O `src/client.ts` gerado exporta `getDynamoDBClient()` e `resolveTableName()`. Quando `SERVE_LOCAL=true` (definido automaticamente pelos targets `serve-local`) estes se conectam ao DynamoDB Local; caso contrário, eles se conectam à AWS e resolvem o nome da tabela implantada a partir da <Link path="guides/runtime-config">Configuração de Runtime</Link>. Vamos modelar nossas entidades `Game` e `Inventory` neste projeto no <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>.
+
+Para mais detalhes, consulte o <Link path="guides/ts-dynamodb">guia do gerador ts#dynamodb</Link>.
+
+</Drawer>
+
+## Tarefa 6: Criar a Interface do Usuário (UI)
 
 Nesta tarefa, criaremos a UI que permitirá interagir com o jogo.
 
@@ -631,7 +675,7 @@ Para criar a UI, crie um website chamado `GameUI` usando estas etapas:
 <RunGenerator generator="ts#website" requiredParameters={{name:"GameUI", ux:"shadcn"}} noInteractive />
 
 :::note[Shadcn UI]
-Selecionamos `--uxProvider=Shadcn` para que o website gerado use componentes [shadcn/ui](https://ui.shadcn.com/) estilizados com Tailwind — todo o código de rota usa primitivos shadcn como `Card`, `Button` e `Input`, e o gerador `connection` posteriormente conecta uma superfície de chat [CopilotKit](https://docs.copilotkit.ai/) com tema shadcn correspondente.
+Selecionamos `--ux=shadcn` para que o website gerado use componentes [shadcn/ui](https://ui.shadcn.com/) estilizados com Tailwind — todo o código de rota usa primitivos shadcn como `Card`, `Button` e `Input`, e o gerador `connection` posteriormente conecta uma superfície de chat [CopilotKit](https://docs.copilotkit.ai/) com tema shadcn correspondente.
 :::
 
 Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
@@ -991,6 +1035,18 @@ O gerador:
 Para mais detalhes, consulte o <Link path="guides/connection/react-agui">guia de conexão React para AG-UI</Link>.
 </Drawer>
 
+### Conectar a Game API e o servidor MCP de inventário ao banco de dados
+
+Tanto a Game API quanto o servidor MCP de inventário leem e escrevem em nossa tabela DynamoDB, então vamos conectá-los ao projeto `DungeonDb`. O gerador `connection` detecta que o alvo é um projeto `ts#dynamodb` e configura o target `serve-local` de cada projeto de origem para iniciar o DynamoDB Local automaticamente.
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<Aside type="tip" title="Um comando inicializa toda a stack localmente">
+Como o `agent-serve-local` do Story Agent já depende do `mcp-server-serve-local` do servidor MCP de inventário (via a conexão `story → inventory` acima), e tanto a Game API quanto o servidor MCP agora dependem de `dungeon-db:serve-local`, executar o target `serve-local` de qualquer projeto inicia todas as dependências necessárias — incluindo o DynamoDB Local — na ordem correta. Vamos confiar nisso durante o resto do tutorial.
+</Aside>
+
 ### UI do Jogo: Infraestrutura
 
 Vamos criar o subprojeto final para a infraestrutura CDK.
@@ -1067,7 +1123,7 @@ Vamos instanciar nossos constructs CDK para construir nosso jogo dungeon adventu
 
 </Drawer>
 
-## Tarefa 6: Atualizar nossa infraestrutura
+## Tarefa 7: Atualizar nossa infraestrutura
 
 Vamos atualizar `packages/infra/src/stacks/application-stack.ts` para instanciar alguns de nossos constructs gerados:
 
@@ -1077,7 +1133,7 @@ Vamos atualizar `packages/infra/src/stacks/application-stack.ts` para instanciar
 Fornecemos integrações padrão para nossa Game API. Por padrão, cada operação em nossa API é mapeada para uma função Lambda individual para lidar com essa operação.
 :::
 
-## Tarefa 7: Construir o código
+## Tarefa 8: Construir o código
 
 <Drawer title="Comandos Nx" trigger="Agora é hora de construir nosso código pela primeira vez">
 
@@ -1138,6 +1194,10 @@ No, run the tasks without syncing the changes
 Esta mensagem indica que o NX detectou alguns arquivos que podem ser atualizados automaticamente. Neste caso, está se referindo aos arquivos `tsconfig.json` que não têm referências de projeto TypeScript configuradas em projetos dependentes.
 
 Selecione a opção **Yes, sync the changes and run the tasks** para prosseguir. Você deve notar que todos os erros de importação relacionados à IDE são resolvidos automaticamente, pois o gerador de sincronização adicionará as referências TypeScript faltantes automaticamente!
+
+<Aside type="note" title="Ambientes não interativos">
+Em um shell não interativo (CI, por exemplo) não há prompt — o build falha com um erro "workspace is out of sync". Execute <NxCommands commands={['sync']} /> para aplicar os geradores de sincronização pendentes, depois faça o build novamente, ou defina `sync.applyChanges` como `true` em `nx.json` para aplicar as mudanças automaticamente em cada build. Você encontrará essa mesma verificação de fora de sincronia sempre que as referências do projeto mudarem (por exemplo, após adicionar procedimentos no próximo módulo).
+</Aside>
 
 Todos os artefatos construídos estão agora disponíveis dentro da pasta `dist/` na raiz do monorepo. Esta é uma prática padrão ao usar projetos gerados pelo `@aws/nx-plugin`, pois não polui sua árvore de arquivos com arquivos gerados. Caso queira limpar seus arquivos, delete a pasta `dist/` sem se preocupar com artefatos de build espalhados pela árvore de arquivos.
 
