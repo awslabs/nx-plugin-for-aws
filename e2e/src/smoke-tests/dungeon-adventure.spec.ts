@@ -478,6 +478,14 @@ describe('smoke test - dungeon-adventure', () => {
     // Every component runs fully offline: serve-local boots DynamoDB Local via
     // the connection generators, and the Story Agent's LLM is pointed at a mock
     // OpenAI server (same strategy as the serve-local smoke test).
+    //
+    // This part drives long-lived dev servers via detached process groups and
+    // POSIX signals, so it only runs on non-Windows (matching the serve-local
+    // smoke test, which is Linux-only). On Windows we stop after verifying
+    // generation and build above.
+    if (process.platform === 'win32') {
+      return;
+    }
 
     // Point the Story Agent at the mock LLM
     llmMock = await startLlmMock(LLM_MOCK_PORT);
@@ -512,11 +520,9 @@ describe('smoke test - dungeon-adventure', () => {
       'serve-local',
     );
 
-    // Start the whole stack once via the website's serve-local target, which
-    // cascades through game-api, the Story Agent (which boots the Inventory MCP
-    // server), and DynamoDB Local. Exercising every component against a single
-    // running stack mirrors how a user develops locally and avoids tearing the
-    // shared DynamoDB Local container down and up between assertions.
+    // Bring the whole stack up with the one command the tutorial documents:
+    // game-ui:serve-local cascades through the Game API, the Story Agent (which
+    // boots the Inventory MCP server) and DynamoDB Local.
     const UI_PORT = 4200;
     await startAndWait('@dungeon-adventure/game-ui:serve-local', UI_PORT);
     await waitForPort(dynamoPort, STARTUP_TIMEOUT_MS);
