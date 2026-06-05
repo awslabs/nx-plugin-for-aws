@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 import { glob as fastGlob } from 'fast-glob';
+import TOML from '@iarna/toml';
 import { uvxCommand } from '../../../utils/py';
 
 export interface PythonDependency {
@@ -55,10 +56,11 @@ export const findWorkspacePyProjectNames = async (
   for (const tomlFile of tomlFiles) {
     try {
       const content = readFileSync(join(start, tomlFile), 'utf-8');
-      const match = content.match(/^\s*name\s*=\s*"([^"]+)"/m);
-      if (match) names.push(match[1]);
+      const parsed = TOML.parse(content);
+      const name = (parsed.project as TOML.JsonMap | undefined)?.name;
+      if (typeof name === 'string') names.push(name);
     } catch {
-      // skip unreadable files
+      // skip unreadable or malformed files
     }
   }
   return names;

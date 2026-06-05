@@ -14,7 +14,8 @@ vi.mock('child_process', () => ({
 }));
 
 // Import after mock is set up
-const { collectPythonDependencies } = await import('./python-collector');
+const { collectPythonDependencies, findWorkspacePyProjectNames } =
+  await import('./python-collector');
 
 describe('python collector', () => {
   let dir: string;
@@ -115,5 +116,50 @@ describe('python collector', () => {
 
     const result = await collectPythonDependencies({ start: dir });
     expect(result).toEqual([]);
+  });
+
+  describe('findWorkspacePyProjectNames', () => {
+    const writePyproject = (relDir: string, content: string): void => {
+      const projDir = join(dir, relDir);
+      mkdirSync(projDir, { recursive: true });
+      writeFileSync(join(projDir, 'pyproject.toml'), content);
+    };
+
+    it('reads [project].name from pyproject.toml files', async () => {
+      writePyproject(
+        'packages/a',
+        '[project]\nname = "pkg_a"\nversion = "1.0"\n',
+      );
+      writePyproject('packages/b', '[project]\nname = "pkg_b"\n');
+
+      const names = await findWorkspacePyProjectNames(dir);
+      expect(names.sort()).toEqual(['pkg_a', 'pkg_b']);
+    });
+
+    it('reads the project name regardless of quote style or table order', async () => {
+      // Single-quoted, and a `name` under another table first — a line-based
+      // regex would mis-read the dependency-group name; TOML parsing is correct.
+      writePyproject(
+        'packages/c',
+        [
+          '[tool.uv]',
+          'name = "not-the-project"',
+          '',
+          '[project]',
+          "name = 'pkg_c'",
+        ].join('\n'),
+      );
+
+      const names = await findWorkspacePyProjectNames(dir);
+      expect(names).toEqual(['pkg_c']);
+    });
+
+    it('skips malformed toml without throwing', async () => {
+      writePyproject('packages/bad', 'this is = = not valid toml [[[');
+      writePyproject('packages/good', '[project]\nname = "ok"\n');
+
+      const names = await findWorkspacePyProjectNames(dir);
+      expect(names).toEqual(['ok']);
+    });
   });
 });
