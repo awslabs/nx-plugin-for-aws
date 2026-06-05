@@ -1,6 +1,6 @@
 ---
-title: "Implémenter et configurer l'agent Story"
-description: "Un guide pas à pas pour construire un jeu d'aventure de donjon alimenté par une IA agentique en utilisant le @aws/nx-plugin."
+title: Implémenter et configurer l'agent Story
+description: Un guide détaillé pour construire un jeu d'aventure de donjon alimenté par une IA agentique en utilisant @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -21,9 +21,9 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Tâche 1 : Implémenter le Story Agent
+## Tâche 1 : Implémenter l'agent Story
 
-Le Story Agent est un agent [Strands](https://strandsagents.com/) généré avec `--protocol=AG-UI` dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, afin que l'interface utilisateur puisse diffuser depuis celui-ci via le [protocole Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Il utilise l'Inventory MCP Server pour gérer les objets du joueur, et le [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) intégré de Strands pour persister l'historique des conversations dans le bucket de sessions que nous avons provisionné dans le Module 2.
+L'agent Story est un agent [Strands](https://strandsagents.com/) généré avec `--protocol=AG-UI` dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, afin que l'interface utilisateur puisse diffuser depuis celui-ci via le [protocole Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Il utilise le serveur MCP Inventory pour gérer les objets du joueur, et le [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) intégré de Strands pour persister l'historique des conversations dans le bucket de sessions que nous avons provisionné dans le Module 2.
 
 ### Implémentation de l'agent
 
@@ -40,10 +40,10 @@ Mettez à jour les fichiers suivants dans `packages/story/dungeon_adventure_stor
 
 Les modifications sont :
 
-- `main.py` ajoute un `session_manager_provider` qui crée un `S3SessionManager` par `thread_id` lors du déploiement, et se replie sur un `FileSessionManager` sur disque sous `/tmp/strands-sessions` lors de l'exécution sous `agent-serve-local` (`SERVE_LOCAL=true`). En déploiement, le bucket S3 est le même que celui depuis lequel le `queryActions` de l'API Game lit, de sorte que le navigateur peut reconstruire les transcriptions lors d'une nouvelle visite ; localement, l'agent s'exécute entièrement hors ligne contre le serveur MCP local sans aucun appel AWS.
-- `agent.py` supprime l'outil d'exemple `subtract` et remplace le prompt système par un prompt de maître de donjon qui invite le premier message utilisateur à indiquer le nom du joueur et le genre, et utilise les outils de l'Inventory MCP Server.
+- `main.py` ajoute un `session_manager_provider` qui crée un `S3SessionManager` par `thread_id` lors du déploiement, et revient à un `FileSessionManager` sur disque sous `/tmp/strands-sessions` lors de l'exécution sous `agent-serve-local` (`SERVE_LOCAL=true`). En déploiement, le bucket S3 est le même que celui que le `queryActions` de l'API Game lit, afin que le navigateur puisse reconstruire les transcriptions lors d'une nouvelle visite ; localement, l'agent s'exécute entièrement hors ligne contre le serveur MCP local sans appels AWS.
+- `agent.py` supprime l'outil d'exemple `subtract` et remplace le prompt système par un prompt de maître de donjon qui invite le premier message utilisateur à indiquer le nom du joueur et le genre, et utilise les outils du serveur MCP Inventory.
 
-## Tâche 2 : Déploiement et tests
+## Tâche 2 : Tester votre agent localement
 
 ### Compiler le code
 
@@ -57,141 +57,35 @@ Si vous rencontrez des erreurs de lint, exécutez la commande suivante pour les 
 <PackageManagerShortCommand commands={["lint"]} />
 </Aside>
 
-### Déployer votre application
-Pour déployer votre application, exécutez la commande suivante :
+### Discuter avec votre agent
 
-<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+Ouvrez un REPL interactif contre une copie servie localement de l'agent AG-UI en utilisant la cible `agent-chat` générée :
 
-Ce déploiement prendra environ 2 minutes.
+<NxCommands commands={["agent-chat story"]} />
 
-Une fois le déploiement terminé, vous verrez des sorties similaires à ceci _(certaines valeurs ont été masquées)_ :
+`agent-chat` a `dependsOn: ['agent-serve-local']`, il n'est donc pas nécessaire de démarrer le serveur d'agent séparément — Nx lancera `agent-serve-local` (qui à son tour démarre le serveur MCP Inventory, et à travers lui DynamoDB Local), puis lancera le REPL AG-UI [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) contre `http://localhost:8081/invocations`. Toute la pile d'agents s'exécute localement sans appels AWS.
 
+Votre premier message devrait indiquer à l'agent le nom de votre héros et le genre (par exemple : `My name is Alice. Start my zombie adventure.`) et l'histoire sera diffusée en retour.
+
+<Aside type="tip" title="Historique de session local">
+Sous `agent-serve-local` (`SERVE_LOCAL=true`), l'historique des conversations est écrit dans `/tmp/strands-sessions` via le `FileSessionManager` de Strands au lieu de S3. Réutiliser le même `threadId` lors d'appels ultérieurs continue la même histoire — le gestionnaire de session de fichiers rejoue les messages précédents.
+</Aside>
+
+<Aside type="tip" title="curl brut">
+Si vous préférez un appel HTTP brut contre le serveur local, la forme `RunAgentInput` AG-UI est :
 ```bash
-dungeon-adventure-infra-sandbox-Application
-dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
-
- ✅  dungeon-adventure-infra-sandbox-Application
-
-✨  Deployment time: 354s
-
-Outputs:
-dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
-dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
-dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+curl -N -X POST http://127.0.0.1:8081/invocations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "Alice-zombie00000000000000000000000",
+    "runId": "run-1",
+    "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+    "tools": [], "context": [], "state": {}, "forwardedProps": {}
+  }'
 ```
+</Aside>
 
-### Tester votre Agent
-
-Vous pouvez tester votre Agent via :
-<ul>
-<li>Le démarrage d'une instance locale du serveur Agent et le dialogue avec celui-ci via la cible générée `agent-chat`, ou</li>
-<li>L'appel de l'API déployée en utilisant curl avec un token JWT.</li>
-</ul>
-
-<Tabs>
-  <TabItem label="Local">
-    Ouvrez un REPL interactif contre une copie servie localement de l'agent AG-UI en utilisant la cible générée `agent-chat` :
-
-    <NxCommands commands={["agent-chat story"]} />
-
-    `agent-chat` a `dependsOn: ['agent-serve-local']`, il n'est donc pas nécessaire de démarrer le serveur agent séparément — Nx lancera `agent-serve-local` (qui à son tour démarre le serveur MCP Inventory localement), puis lancera le REPL AG-UI [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) contre `http://localhost:8081/invocations`. Votre premier message devrait indiquer à l'agent le nom de votre héros et le genre (par exemple : `My name is Alice. Start my zombie adventure.`) et l'histoire sera diffusée en retour.
-
-    <Aside type="tip" title="curl brut">
-    Si vous préférez un appel HTTP brut contre le serveur local, la forme `RunAgentInput` AG-UI est :
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -H "Content-Type: application/json" \
-      -d '{
-        "threadId": "Alice-zombie00000000000000000000000",
-        "runId": "run-1",
-        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
-        "tools": [], "context": [], "state": {}, "forwardedProps": {}
-      }'
-    ```
-    Réutiliser le même `threadId` lors des appels suivants continuera la même histoire — le `S3SessionManager` rejoue les messages précédents.
-    </Aside>
-  </TabItem>
-  <TabItem label="Deployed">
-    Pour tester l'agent déployé, vous devrez vous authentifier avec Cognito et obtenir un token JWT. Tout d'abord, configurez vos variables d'environnement :
-
-    ```bash
-    # Définissez votre User Pool ID et Client ID Cognito depuis les sorties CDK
-    export POOL_ID="<UserPoolId depuis les sorties CDK>"
-    export CLIENT_ID="<UserPoolClientId depuis les sorties CDK>"
-    export REGION="<votre-région>"
-    ```
-
-    Créez un utilisateur test et obtenez un token d'authentification :
-
-    ```bash
-    # Désactiver MFA pour simplifier la création d'utilisateur
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Créer l'utilisateur
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Définir un mot de passe permanent (remplacez par quelque chose de plus sécurisé !)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Authentifier l'utilisateur et capturer le token d'accès
-    export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
-      --client-id "$CLIENT_ID" \
-      --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
-      --region $REGION \
-      --query "AuthenticationResult.AccessToken" \
-      --output text)
-    ```
-
-    Invoquez l'agent déployé en utilisant l'URL du runtime Bedrock AgentCore :
-
-    ```bash
-    # Définir l'ARN du Story Agent depuis les sorties CDK
-    export AGENT_ARN="<StoryAgentArn depuis les sorties CDK>"
-
-    # Encoder l'ARN en URL
-    export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
-
-    # Construire l'URL d'invocation
-    export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
-
-    # Invoquer l'agent avec une charge utile AG-UI RunAgentInput
-    curl -N -X POST "$AGENT_URL" \
-      -H "authorization: Bearer $BEARER_TOKEN" \
-      -H "Content-Type: application/json" \
-      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: Alice-zombie00000000000000000000000" \
-      -d '{
-        "threadId": "Alice-zombie00000000000000000000000",
-        "runId": "run-1",
-        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
-        "tools": [], "context": [], "state": {}, "forwardedProps": {}
-      }'
-    ```
-
-    :::note[Encodage URL]
-    L'encodage URL est nécessaire pour formater correctement l'ARN pour le point de terminaison de l'API Bedrock AgentCore.
-    :::
-  </TabItem>
-</Tabs>
-
-Si la commande s'exécute avec succès, vous devriez commencer à voir l'histoire diffusée en retour sous forme de [flux d'événements AG-UI](https://docs.copilotkit.ai/aws-strands/protocol/events) (Server-Sent Events) — les blocs `RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` encapsulent les tokens réels de l'histoire :
+Si la commande s'exécute avec succès, vous devriez commencer à voir l'histoire diffusée en retour sous forme de [flux d'événements AG-UI](https://docs.copilotkit.ai/aws-strands/protocol/events) (Server-Sent Events) — les événements `RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` encapsulent les tokens réels de l'histoire :
 
 ```
 data: {"type":"RUN_STARTED","threadId":"Alice-zombie00000000000000000000000",...}
@@ -201,4 +95,3 @@ data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"The moans grow l
 ```
 
 Félicitations. Vous avez construit et testé votre premier agent Strands localement ! 🎉🎉🎉
-ntCore Runtime ! 🎉🎉🎉
