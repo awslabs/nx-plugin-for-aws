@@ -142,18 +142,16 @@ const exceptionLiteral = (exception: DependencyCheckException): string => {
 /**
  * GritQL `or` block that appends `$ins` (the insert placeholder) to the named
  * array inside the matched `$scope`, without ever producing an array hole:
- *   - `key: []`  → `key: [$ins]` (a list-append `+=` does not match an empty
- *     array, so the empty case is rewritten directly)
- *   - otherwise  → list-append `+=`, which is comma-aware and so handles
- *     trailing commas and multi-element arrays correctly
- *
- * `+=` omits the separator only after a single *inline* element (`[x]` →
- * `[x$ins]`); `insertViaGritQL` repairs that one case when substituting `$ins`.
+ *   - empty `key: []`  → `key: [$ins]` (a list-append `+=` does not match an
+ *     empty array, so the empty case is rewritten directly)
+ *   - otherwise        → list-append `+=` of `, $ins`; the leading comma is the
+ *     element separator and `+=` places it correctly for single inline,
+ *     single-with-trailing-comma and multi-element arrays alike
  */
 const appendToArray = (key: string, ins: string) =>
   `or {
     $scope <: contains \`${key}: []\` => \`${key}: [${ins}]\`,
-    $scope <: contains \`${key}: [$items]\` where { $items += \`${ins}\` }
+    $scope <: contains \`${key}: [$items]\` where { $items += \`, ${ins}\` }
   }`;
 
 /**
