@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'child_process';
 
-const ENGINE = '<%= containers %>';
+const ENGINE = '<%= containerEngine %>';
 
 <%_ if (engine === 'mysql') { _%>
 const [containerName, image, hostPort, dbName, dbPassword] =
@@ -33,29 +33,25 @@ if (containerExists()) {
   }
 } else {
 <%_ if (engine === 'mysql') { _%>
-  const runArgs = [
-    'run',
-    '--name', containerName,
-    '-e', `MYSQL_DATABASE=${dbName}`,
-    '-e', `MYSQL_ROOT_PASSWORD=${dbPassword}`,
-    '-p', `${hostPort}:3306`,
-    '-v', `${containerName}-data:/var/lib/mysql`,
-    '-d',
-    image,
-  ];
+  const runArgs = (
+    `run <%- containerEngine === 'docker' ? '--rm ' : '' %>--name ${containerName}` +
+    ` -e MYSQL_DATABASE=${dbName}` +
+    ` -e MYSQL_ROOT_PASSWORD=${dbPassword}` +
+    ` -p ${hostPort}:3306` +
+    ` -v ${containerName}-data:/var/lib/mysql` +
+    ` -d ${image}`
+  ).split(' ');
 <%_ } else { _%>
-  const runArgs = [
-    'run',
-    '--name', containerName,
-    '-e', `POSTGRES_DB=${dbName}`,
-    '-e', `POSTGRES_USER=${dbUser}`,
-    '-e', `POSTGRES_PASSWORD=${dbPassword}`,
-    '-e', `PGDATA=/var/lib/postgresql/17/docker`,
-    '-p', `${hostPort}:5432`,
-    '-v', `${containerName}-data:/var/lib/postgresql`,
-    '-d',
-    image,
-  ];
+  const runArgs = (
+    `run <%- containerEngine === 'docker' ? '--rm ' : '' %>--name ${containerName}` +
+    ` -e POSTGRES_DB=${dbName}` +
+    ` -e POSTGRES_USER=${dbUser}` +
+    ` -e POSTGRES_PASSWORD=${dbPassword}` +
+    ` -e PGDATA=/var/lib/postgresql/17/docker` +
+    ` -p ${hostPort}:5432` +
+    ` -v ${containerName}-data:/var/lib/postgresql` +
+    ` -d ${image}`
+  ).split(' ');
 <%_ } _%>
   const create = spawnSync(ENGINE, runArgs, { stdio: 'inherit' });
   if (create.status !== 0) process.exit(create.status ?? 1);
@@ -70,7 +66,11 @@ let exiting = false;
 const cleanup = () => {
   if (exiting) return;
   exiting = true;
+<%_ if (containerEngine === 'docker') { _%>
   spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
+<%_ } else { _%>
+  spawnSync(ENGINE, ['rm', '-f', containerName], { stdio: 'ignore' });
+<%_ } _%>
   logs.kill();
   process.exit(0);
 };

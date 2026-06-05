@@ -49,7 +49,7 @@ export const tsRdbGenerator = async (
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);
-  const containers = await resolveContainers(tree, 'inherit');
+  const containerEngine = await resolveContainers(tree, 'inherit');
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -108,7 +108,7 @@ export const tsRdbGenerator = async (
     localDbName: databaseName,
     localDbUser,
     localDbPassword,
-    containers,
+    containerEngine,
   };
 
   generateFiles(
@@ -178,21 +178,21 @@ export const tsRdbGenerator = async (
     options.engine === 'mysql'
       ? 'public.ecr.aws/docker/library/mysql:8.0.44'
       : 'public.ecr.aws/docker/library/postgres:17.7';
-  projectConfig.targets['docker-pull'] = {
+  projectConfig.targets['pull-image'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/docker-pull.ts ${dockerImage}`,
+      command: `tsx scripts/pull-image.ts ${dockerImage}`,
       cwd: '{projectRoot}',
     },
   };
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/docker-start.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'mysql' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
+      command: `tsx scripts/start-container.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'mysql' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
       cwd: '{projectRoot}',
     },
     continuous: true,
-    dependsOn: ['docker-pull'],
+    dependsOn: ['pull-image'],
   };
   projectConfig.targets['wait-for-db'] = {
     executor: 'nx:run-commands',
@@ -220,7 +220,7 @@ export const tsRdbGenerator = async (
         cache: true,
         executor: 'nx:run-commands',
         options: {
-          command: `${containers} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
         },
         dependsOn: ['bundle'],
       };
@@ -254,7 +254,7 @@ export const tsRdbGenerator = async (
         'create-db-user',
       ),
       dockerImageTag,
-      containers,
+      containerEngine,
     });
   }
 

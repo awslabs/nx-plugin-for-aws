@@ -30,7 +30,7 @@ export interface AddRdbConstructOptions {
   migrationBundleDir: string;
   createDbUserBundleDir: string;
   dockerImageTag: string;
-  containers: Containers;
+  containerEngine: Containers;
 }
 
 export const addRdbInfra = async (
