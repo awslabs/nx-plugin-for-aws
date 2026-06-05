@@ -173,5 +173,8 @@ export {
   buildPackageManagerShortCommand,
 } from '../../packages/nx-plugin/src/utils/commands';
 
+// The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.
+// The Game API's actions.query procedure additionally needs the S3 client to
+// read the agent's conversation history.
 export const getDungeonAdventureElectroDbDependencies = () =>
-  `electrodb@${TS_VERSIONS.electrodb} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']} @aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;
+  `@aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;
