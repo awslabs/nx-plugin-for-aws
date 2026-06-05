@@ -310,10 +310,16 @@ export const GRIT_INSERT_PLACEHOLDER = '__GRIT_INSERT_PLACEHOLDER__';
  * placeholder keeps it out of the GritQL pattern, where quotes, backticks or
  * `${...}` would otherwise break parsing.
  *
- * GritQL inserts the placeholder right after the previous element's text. If
- * that element has a trailing line comment (`// ...`) the placeholder lands
- * inside it, so we move the text to its own line in that case. The caller
- * formats afterwards. Returns true if the pattern matched and the file changed.
+ * GritQL inserts the placeholder right after the preceding token, which needs
+ * two adjustments so the result is well-formed:
+ *  - If the preceding element has a trailing line comment (`// ...`), the
+ *    placeholder lands inside the comment, so the text moves to its own line.
+ *  - When appending to an array, GritQL's `+=` does not emit a separator after a
+ *    single inline element (`[x]` → `[x<text>]`). If the placeholder directly
+ *    follows an element (not a `,` or opening `[`/`{`/`(`), a comma is inserted.
+ *
+ * The caller formats afterwards. Returns true if the pattern matched and the
+ * file changed.
  */
 export const insertViaGritQL = async (
   tree: Tree,
@@ -325,7 +331,17 @@ export const insertViaGritQL = async (
   const content = tree.read(filePath)!.toString();
   const at = content.indexOf(GRIT_INSERT_PLACEHOLDER);
   const lineSoFar = content.slice(content.lastIndexOf('\n', at) + 1, at);
-  const replacement = lineSoFar.includes('//') ? `\n${text}` : text;
+  const prevChar = content.slice(0, at).trimEnd().slice(-1);
+
+  let replacement = text;
+  if (lineSoFar.includes('//')) {
+    // A trailing line comment would swallow the text — start a new line.
+    replacement = `\n${text}`;
+  } else if (prevChar && !'[{(,'.includes(prevChar)) {
+    // Directly follows an element with no separator — add one.
+    replacement = `, ${text}`;
+  }
+
   // Function replacer so `$` in `text` isn't treated as a replacement pattern.
   tree.write(
     filePath,

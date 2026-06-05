@@ -488,6 +488,76 @@ describe('license config', () => {
         expect(read().replace(/\{[^{}]*\}/g, 'X')).not.toMatch(/,\s*,/);
       });
 
+      it('should not create a hole appending to a single multi-line exception with a trailing comma', async () => {
+        // A single hand-written exception, multi-line with a trailing comma (as
+        // prettier produces). A naive single-element rewrite would re-emit the
+        // existing element AND keep the trailing comma, producing `[a, , new]`.
+        writeConfig(`{
+  license: {
+    dependencies: {
+      allow: [],
+      collectors: [],
+      exceptions: [
+        { package: 'foo', reason: 'yolo' },
+      ],
+    },
+  },
+}`);
+
+        await ensureLicenseExceptions(tree, [exception('bar')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencies.exceptions;
+        expect(exceptions).toHaveLength(2);
+        expect(noHole(exceptions)).toBe(true);
+        expect(exceptions.map((e: any) => e.package)).toEqual(['foo', 'bar']);
+        expect(read().replace(/\{[^{}]*\}/g, 'X')).not.toMatch(/,\s*,/);
+      });
+
+      it('should add a comma when appending to a single inline exception', async () => {
+        // `[x]` with no trailing comma — GritQL `+=` omits the separator, which
+        // must be repaired so we don't get `[x{ new }]`.
+        writeConfig(`{
+  license: {
+    dependencies: {
+      allow: [],
+      collectors: [],
+      exceptions: [{ package: 'foo', reason: 'r', spdx: 'MIT' }],
+    },
+  },
+}`);
+
+        await ensureLicenseExceptions(tree, [exception('bar')]);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencies.exceptions;
+        expect(exceptions.map((e: any) => e.package)).toEqual(['foo', 'bar']);
+        expect(noHole(exceptions)).toBe(true);
+      });
+
+      it('should add MCP exceptions into a single trailing-comma exception (user repro)', async () => {
+        const { MCP_INSPECTOR_EXCEPTIONS } = await import('./known-exceptions');
+        writeConfig(`{
+  license: {
+    dependencies: {
+      allow: [],
+      collectors: [],
+      exceptions: [
+        { package: 'foo', reason: 'yolo' },
+      ],
+    },
+  },
+}`);
+
+        await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
+
+        const config = await readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencies.exceptions;
+        expect(noHole(exceptions)).toBe(true);
+        expect(exceptions[0].package).toBe('foo');
+        expect(exceptions).toHaveLength(1 + MCP_INSPECTOR_EXCEPTIONS.length);
+      });
+
       it('should not create a hole appending across separate calls (forward generator order)', async () => {
         writeConfig(`{
   license: {

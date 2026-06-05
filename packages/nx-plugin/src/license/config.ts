@@ -141,20 +141,18 @@ const exceptionLiteral = (exception: DependencyCheckException): string => {
 
 /**
  * GritQL `or` block that appends `$ins` (the insert placeholder) to the named
- * array inside the matched `$scope`, handling all three array shapes without
- * ever producing an array hole:
- *   - `key: []`      → `key: [$ins]`
- *   - `key: [x]`     → `key: [x, $ins]`   (single element matching `node`)
- *   - `key: [a, b,]` → list-append, which is comma-aware (no trailing-comma hole)
+ * array inside the matched `$scope`, without ever producing an array hole:
+ *   - `key: []`  → `key: [$ins]` (a list-append `+=` does not match an empty
+ *     array, so the empty case is rewritten directly)
+ *   - otherwise  → list-append `+=`, which is comma-aware and so handles
+ *     trailing commas and multi-element arrays correctly
  *
- * `node` is the GritQL pattern a lone element matches (e.g. `` `{ $_ }` `` for
- * an object, `` `$_($_)` `` for a call with or without an argument), used so
- * the single-element branch can't greedily match a multi-element array.
+ * `+=` omits the separator only after a single *inline* element (`[x]` →
+ * `[x$ins]`); `insertViaGritQL` repairs that one case when substituting `$ins`.
  */
-const appendToArray = (key: string, node: string, ins: string) =>
+const appendToArray = (key: string, ins: string) =>
   `or {
     $scope <: contains \`${key}: []\` => \`${key}: [${ins}]\`,
-    $scope <: contains \`${key}: [$only]\` where { $only <: ${node} } => \`${key}: [$only, ${ins}]\`,
     $scope <: contains \`${key}: [$items]\` where { $items += \`${ins}\` }
   }`;
 
@@ -406,7 +404,7 @@ export const ensureLicenseExceptions = async (
       AWS_NX_PLUGIN_CONFIG_FILE_NAME,
       `\`dependencies: { $scope }\` where {
         $scope <: not contains \`package: ${pkg}\`,
-        ${appendToArray('exceptions', '`{ $_ }`', GRIT_INSERT_PLACEHOLDER)}
+        ${appendToArray('exceptions', GRIT_INSERT_PLACEHOLDER)}
       }`,
       exceptionLiteral(exception),
     );
@@ -439,7 +437,7 @@ export const ensurePythonLicenseCollector = async (
     AWS_NX_PLUGIN_CONFIG_FILE_NAME,
     `\`dependencies: { $scope }\` where {
       $scope <: not contains \`pythonCollector\`,
-      ${appendToArray('collectors', '`$_($_)`', GRIT_INSERT_PLACEHOLDER)}
+      ${appendToArray('collectors', GRIT_INSERT_PLACEHOLDER)}
     }`,
     'pythonCollector()',
   );
