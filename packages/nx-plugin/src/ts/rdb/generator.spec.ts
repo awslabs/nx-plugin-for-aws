@@ -97,11 +97,11 @@ describe('ts#rdb generator', () => {
       },
     });
     snapshotTreeDir(tree, 'packages/db/scripts');
-    expect(projectConfig.targets['docker-pull']).toEqual({
+    expect(projectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-pull.ts public.ecr.aws/docker/library/postgres:17.7',
+          'tsx scripts/pull-image.ts public.ecr.aws/docker/library/postgres:17.7',
         cwd: '{projectRoot}',
       },
     });
@@ -109,11 +109,11 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-start.ts proj-database_name public.ecr.aws/docker/library/postgres:17.7 5432 database_name dbadmin password',
+          'tsx scripts/start-container.ts proj-database_name public.ecr.aws/docker/library/postgres:17.7 5432 database_name dbadmin password',
         cwd: '{projectRoot}',
       },
       continuous: true,
-      dependsOn: ['docker-pull'],
+      dependsOn: ['pull-image'],
     });
     expect(projectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',
@@ -188,11 +188,11 @@ describe('ts#rdb generator', () => {
       '@proj/db',
     );
     snapshotTreeDir(tree, 'packages/db/scripts');
-    expect(mysqlProjectConfig.targets['docker-pull']).toEqual({
+    expect(mysqlProjectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-pull.ts public.ecr.aws/docker/library/mysql:8.0.44',
+          'tsx scripts/pull-image.ts public.ecr.aws/docker/library/mysql:8.0.44',
         cwd: '{projectRoot}',
       },
     });
@@ -200,11 +200,11 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-start.ts proj-database_name public.ecr.aws/docker/library/mysql:8.0.44 3306 database_name password',
+          'tsx scripts/start-container.ts proj-database_name public.ecr.aws/docker/library/mysql:8.0.44 3306 database_name password',
         cwd: '{projectRoot}',
       },
       continuous: true,
-      dependsOn: ['docker-pull'],
+      dependsOn: ['pull-image'],
     });
     expect(mysqlProjectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',
