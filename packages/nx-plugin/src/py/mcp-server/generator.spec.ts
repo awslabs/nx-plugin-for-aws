@@ -128,8 +128,16 @@ dev-dependencies = []
     expect(projectConfig.targets['mcp-server-inspect'].executor).toBe(
       'nx:run-commands',
     );
+    expect(projectConfig.targets['mcp-server-inspect'].dependsOn).toContain(
+      'mcp-server-serve-local',
+    );
     expect(
-      projectConfig.targets['mcp-server-inspect'].options.commands,
+      projectConfig.targets['mcp-server-inspect'].options.commands[0],
+    ).toContain(
+      'mcp-inspector --transport http --server-url http://localhost:',
+    );
+    expect(
+      projectConfig.targets['mcp-server-inspect-stdio'].options.commands,
     ).toEqual([
       'mcp-inspector -- uv run -m proj_test_project.mcp_server.stdio',
     ]);
@@ -171,8 +179,16 @@ dev-dependencies = []
     expect(
       projectConfig.targets['custom-server-serve-stdio'].options.commands,
     ).toEqual(['uv run -m proj_test_project.custom_server.stdio']);
+    expect(projectConfig.targets['custom-server-inspect'].dependsOn).toContain(
+      'custom-server-serve-local',
+    );
     expect(
-      projectConfig.targets['custom-server-inspect'].options.commands,
+      projectConfig.targets['custom-server-inspect'].options.commands[0],
+    ).toContain(
+      'mcp-inspector --transport http --server-url http://localhost:',
+    );
+    expect(
+      projectConfig.targets['custom-server-inspect-stdio'].options.commands,
     ).toEqual([
       'mcp-inspector -- uv run -m proj_test_project.custom_server.stdio',
     ]);

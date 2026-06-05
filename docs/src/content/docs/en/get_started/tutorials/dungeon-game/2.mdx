@@ -76,7 +76,7 @@ item: Item {
 game -> item: 1..*
 ```
 
-We will model our data with [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) on top of the `DungeonDb` table we created with the `ts#dynamodb` generator in <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>. That generator already added `electrodb` and `@aws-sdk/client-dynamodb` to the workspace, so the only extra dependency we need is the S3 client used by the Game API's `queryActions` procedure to read the conversation turns the agent has written:
+The `ts#dynamodb` generator set up [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/), which we will use to model our data. We will persist conversation history in S3, so we add a dependency on the S3 client:
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
@@ -84,21 +84,15 @@ We will model our data with [ElectroDB](https://electrodb.dev/en/core-concepts/i
 All dependencies are added to the root `package.json` as the `@aws/nx-plugin` follows the [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) principle. For more information, refer to the <Link path="guides/typescript-project#dependencies">ts#project guide</Link>.
 </Aside>
 
-We model our entities in the `dungeon-db` project so that both the Game API and the Inventory MCP server can import them without depending on each other. Replace the generated example entity in `packages/dungeon-db/src/entities/index.ts` with our `Game` and `Inventory` entities, and delete `packages/dungeon-db/src/entities/example.ts`:
+Replace the generated example entity in `packages/dungeon-db/src/entities/index.ts` with our `Game` and `Inventory` entities, and delete `packages/dungeon-db/src/entities/example.ts`:
 
 <E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
-
-Notice that the entities use the `getDynamoDBClient()` and `resolveTableName()` helpers from the project's generated `client.ts` — this is what lets the same entity code talk to DynamoDB Local during development and the deployed table in AWS.
 
 ElectroDB allows us to not only define our types, but can also provide defaults for certain values like timestamps. In addition, ElectroDB follows [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) which is the best practice when using DynamoDB.
 
 <Aside title="ElectroDB Collections">
 Whilst ElectroDB does support [collections](https://electrodb.dev/en/modeling/collections/), we have chosen not to use them in this tutorial for simplicity.
 </Aside>
-
-Our entities only use the table's primary index, so update `packages/dungeon-db/src/gsi.ts` to remove the example Global Secondary Indexes — this keeps DynamoDB Local and the deployed table in sync with what our entities actually use:
-
-<E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/gsi.ts.template" />
 
 ### Defining our procedures
 
@@ -161,7 +155,7 @@ Notice here that since each procedure is served by an individual lambda function
 :::
 
 :::tip[Runtime Configuration]
-The `DungeonDb` construct registers the deployed table name in <Link path="guides/runtime-config">Runtime Configuration</Link> under the `dynamodb` namespace, stored in AWS AppConfig. The generated `resolveTableName()` helper retrieves it at runtime using Lambda Powertools, rather than needing it passed as an environment variable. A benefit of this approach is that as the number of tables or other infrastructure identifiers grows, you only need a single `RUNTIME_CONFIG_APP_ID` environment variable when running against deployed infrastructure.
+The `DungeonDb` construct registers the deployed table name in <Link path="guides/runtime-config">Runtime Configuration</Link> under the `dynamodb` namespace, stored in AWS AppConfig. The Game API and Inventory MCP server retrieve it at runtime using Lambda Powertools, rather than needing it passed as an environment variable. A benefit of this approach is that as the number of tables or other infrastructure identifiers grows, you only need a single `RUNTIME_CONFIG_APP_ID` environment variable when running against deployed infrastructure.
 :::
 
 ## Task 4: Test the Game API locally
@@ -176,17 +170,11 @@ Then build the codebase:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-<Aside type="note" title="Workspace out of sync">
-Adding procedures and the new project references means Nx may again prompt that "The workspace is out of sync" (as in <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>). Select **Yes, sync the changes and run the tasks** to continue. You'll see this prompt whenever project references change.
-</Aside>
-
 ### Start the local server
 
-Start the Game API locally with the `serve-local` target. Make sure your container engine (Docker or Finch) is running first, since this also boots DynamoDB Local:
+Start the Game API locally with the `serve-local` target, which also boots DynamoDB Local:
 
 <NxCommands commands={["serve-local game-api"]} />
-
-The `serve-local` target sets `SERVE_LOCAL=true`, so `resolveTableName()` returns the local table name and `getDynamoDBClient()` connects to DynamoDB Local instead of AWS — no deployment and no `RUNTIME_CONFIG_APP_ID` required.
 
 <Aside type="tip" title="First run">
 The first run pulls the DynamoDB Local container image, which may take a moment. Leave the server running in this terminal and open a second terminal for the `curl` commands below.
@@ -240,36 +228,10 @@ You can stop the local server (`Ctrl+C`) once you're done.
 
 ## Task 5: Test the Inventory MCP server locally
 
-We can try out the MCP server's tools with the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) using the generated `mcp-server-inspect` target. The inspector connects to the server over STDIO, so we run DynamoDB Local separately and tell the server to use it.
-
-In one terminal, start DynamoDB Local:
-
-<NxCommands commands={["serve-local dungeon-db"]} />
-
-In a second terminal, start the inspector:
+We can try out the MCP server's tools with the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) using the generated `mcp-server-inspect` target:
 
 <NxCommands commands={["mcp-server-inspect inventory"]} />
 
-This starts the MCP Inspector at `http://localhost:6274`. In the inspector UI, before connecting, add an environment variable `SERVE_LOCAL` with the value `true` so the server's tools talk to DynamoDB Local, then click **Connect**.
-
-<Aside type="tip" title="Why set SERVE_LOCAL?">
-Unlike `serve-local`, the `mcp-server-inspect` target runs the plain STDIO server, so it doesn't set `SERVE_LOCAL` for you. Setting it in the inspector's environment makes `getDynamoDBClient()` and `resolveTableName()` connect to the local table rather than AWS.
-</Aside>
-
-Switch to the **Tools** tab, click **List Tools**, and try `add-to-inventory` (e.g. `playerName: Alice`, `itemName: Rusty Sword`, `emoji: ⚔️`) followed by `list-inventory-items` to see it persisted to DynamoDB Local. Stop both terminals (`Ctrl+C`) when you're done.
-
-<Aside type="tip" title="Prefer the HTTP transport?">
-If you'd rather drive the server over HTTP (e.g. for scripting), the `mcp-server-serve-local` target runs the Streamable HTTP transport with `SERVE_LOCAL=true` set for you, and starts DynamoDB Local automatically:
-
-<NxCommands commands={["run @dungeon-adventure/inventory:mcp-server-serve-local"]} />
-
-Then initialize a session against `http://localhost:8000/mcp`:
-```bash
-curl -X POST http://localhost:8000/mcp \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0.0"}}}'
-```
-</Aside>
+This serves the MCP server locally (booting DynamoDB Local too) and launches the MCP Inspector at `http://localhost:6274` pre-configured to connect to it. Click **Connect**, switch to the **Tools** tab, click **List Tools**, and try `add-to-inventory` (e.g. `playerName: Alice`, `itemName: Rusty Sword`, `emoji: ⚔️`) followed by `list-inventory-items` to see it persisted to DynamoDB Local. Stop the server (`Ctrl+C`) when you're done.
 
 Congratulations, you have built and tested your first tRPC API and MCP server against a local DynamoDB table!  🎉🎉🎉

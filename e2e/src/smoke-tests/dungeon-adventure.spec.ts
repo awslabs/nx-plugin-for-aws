@@ -346,10 +346,6 @@ describe('smoke test - dungeon-adventure', () => {
       '2/dungeon-db/entities/index.ts.template',
     );
     rmSync(`${opts.cwd}/packages/dungeon-db/src/entities/example.ts`);
-    writeFromTemplate(
-      `${opts.cwd}/packages/dungeon-db/src/gsi.ts`,
-      '2/dungeon-db/gsi.ts.template',
-    );
 
     // Game API schema
     ensureDirSync(`${opts.cwd}/packages/game-api/src/schema`);

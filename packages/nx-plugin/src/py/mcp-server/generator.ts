@@ -244,6 +244,20 @@ export const pyMcpServerGenerator = async (
       },
       [`${mcpTargetPrefix}-inspect`]: {
         executor: 'nx:run-commands',
+        // Launch the inspector against the locally served (serve-local) HTTP
+        // server. serve-local starts the server and any connected dependencies
+        // (e.g. a local database).
+        dependsOn: [`${mcpTargetPrefix}-serve-local`],
+        options: {
+          commands: [
+            `mcp-inspector --transport http --server-url http://localhost:${localDevPort}/mcp`,
+          ],
+          cwd: '{projectRoot}',
+        },
+        continuous: true,
+      },
+      [`${mcpTargetPrefix}-inspect-stdio`]: {
+        executor: 'nx:run-commands',
         options: {
           commands: [
             `mcp-inspector -- uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`,
