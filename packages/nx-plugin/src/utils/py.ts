@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { parse, stringify } from '@iarna/toml';
-import { joinPathFragments, Tree } from '@nx/devkit';
-import type { UVPyprojectToml } from './nxlv-python';
-import { IPyDepVersion, withPyVersions } from './versions';
+import { joinPathFragments, type Tree } from '@nx/devkit';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
+import type { UVPyprojectToml } from './nxlv-python';
 import { updateToml } from './toml';
+import { type IPyDepVersion, withPyVersions } from './versions';
 
 // Dedup key that distinguishes bare packages from the same package with
 // extras (e.g. `foo` vs `foo[bar]`), so adding a bare dep doesn't drop a

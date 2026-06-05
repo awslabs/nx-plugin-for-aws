@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { ExecutorContext, workspaceRoot } from '@nx/devkit';
-import { runCheck, formatReport } from './check';
-import { DependencyCheckConfig } from './types';
+import { type ExecutorContext, workspaceRoot } from '@nx/devkit';
 import { readAwsNxPluginConfigFromDisk } from '../../utils/config/utils';
-import { npmCollector, LicenseCollector } from './collectors/collector';
+import { formatReport, runCheck } from './check';
+import { type LicenseCollector, npmCollector } from './collectors/collector';
+import type { DependencyCheckConfig } from './types';
 
 export type LicenseCheckExecutorSchema = Record<string, never>;
 

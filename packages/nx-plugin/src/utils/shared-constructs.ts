@@ -7,15 +7,16 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type Tree,
   updateJson,
 } from '@nx/devkit';
-import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import tsProjectGenerator from '../ts/lib/generator';
 import terraformProjectGenerator from '../terraform/project/generator';
-import { withVersions } from './versions';
+import tsProjectGenerator from '../ts/lib/generator';
+import { readAwsNxPluginConfig } from './config/utils';
 import { formatFilesInSubtree } from './format';
+import type { Iac } from './iac';
+import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
@@ -24,8 +25,7 @@ import {
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from './shared-constructs-constants';
-import { readAwsNxPluginConfig } from './config/utils';
-import { Iac } from './iac';
+import { withVersions } from './versions';
 
 export interface SharedConstructsGeneratorOptions {
   iac: Iac;

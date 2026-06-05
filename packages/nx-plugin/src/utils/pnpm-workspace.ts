@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { detectPackageManager, Tree } from '@nx/devkit';
+import { detectPackageManager, type Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';

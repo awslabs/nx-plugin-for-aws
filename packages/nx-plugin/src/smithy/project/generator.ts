@@ -3,26 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  Tree,
   addProjectConfiguration,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  type Tree,
 } from '@nx/devkit';
-import { SmithyProjectGeneratorSchema } from './schema';
-import {
-  NxGeneratorInfo,
-  addGeneratorMetadata,
-  getGeneratorInfo,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
 import { getTsLibDetails } from '../../ts/lib/generator';
+import { resolveContainers } from '../../utils/containers';
+import { formatFilesInSubtree } from '../../utils/format';
+import { FsCommands } from '../../utils/fs';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
-import { FsCommands } from '../../utils/fs';
-import { resolveContainers } from '../../utils/containers';
+import {
+  addGeneratorMetadata,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+} from '../../utils/nx';
+import type { SmithyProjectGeneratorSchema } from './schema';
 
 export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

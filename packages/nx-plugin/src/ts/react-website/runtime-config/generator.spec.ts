@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import {
   RUNTIME_CONFIG_GENERATOR_INFO,
   runtimeConfigGenerator,
 } from './generator';
-import { RuntimeConfigGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import type { RuntimeConfigGeneratorSchema } from './schema';
 
 describe('runtime-config generator', () => {
   let tree: Tree;

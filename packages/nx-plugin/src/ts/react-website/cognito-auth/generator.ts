@@ -3,43 +3,43 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  joinPathFragments,
-  generateFiles,
-  Tree,
   addDependenciesToPackageJson,
+  generateFiles,
   installPackagesTask,
+  joinPathFragments,
   OverwriteStrategy,
+  type Tree,
 } from '@nx/devkit';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { TsReactWebsiteAuthGeneratorSchema as TsReactWebsiteAuthGeneratorSchema } from './schema';
-import { runtimeConfigGenerator } from '../runtime-config/generator';
-import { withVersions } from '../../../utils/versions';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { resolveIac } from '../../../utils/iac';
+import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { getNpmScope } from '../../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addComponentGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
-import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
-import { resolveIac } from '../../../utils/iac';
+import { toProjectRelativePath } from '../../../utils/paths';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { withVersions } from '../../../utils/versions';
+import { runtimeConfigGenerator } from '../runtime-config/generator';
+import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import {
   addCloudscapeAuthMenu,
   addNoneAuthMenu,
   addShadcnAuthMenu,
   deriveCognitoDomainPrefix,
 } from './utils';
-import { toProjectRelativePath } from '../../../utils/paths';
-import { getNpmScope } from '../../../utils/npm-scope';
 
 const readGritPattern = (name: string): string =>
   readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();

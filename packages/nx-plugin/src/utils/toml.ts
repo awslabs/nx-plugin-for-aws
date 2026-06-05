@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+
 import TOML from '@iarna/toml';
+import type { Tree } from '@nx/devkit';
 
 /**
  * Update a toml file

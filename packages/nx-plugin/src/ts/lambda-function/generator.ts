@@ -4,32 +4,32 @@
  */
 import {
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
-  GeneratorCallback,
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsLambdaFunctionGeneratorSchema } from './schema';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { toClassName, toKebabCase, pascalCase } from '../../utils/names';
-import { formatFilesInSubtree } from '../../utils/format';
-import { sortObjectKeys } from '../../utils/object';
-import {
-  NxGeneratorInfo,
-  addComponentGeneratorMetadata,
-  getGeneratorInfo,
-  readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { withVersions } from '../../utils/versions';
 import camelCase from 'lodash.camelcase';
-import { TS_HANDLER_RETURN_TYPES } from './io';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { pascalCase, toClassName, toKebabCase } from '../../utils/names';
+import {
+  addComponentGeneratorMetadata,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
+import { TS_HANDLER_RETURN_TYPES } from './io';
+import type { TsLambdaFunctionGeneratorSchema } from './schema';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

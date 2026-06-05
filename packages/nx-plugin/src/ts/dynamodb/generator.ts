@@ -4,34 +4,31 @@
  */
 import {
   addDependenciesToPackageJson,
-  GeneratorCallback,
-  Tree,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsDynamoDBGeneratorSchema } from './schema';
-import {
-  NxGeneratorInfo,
-  getGeneratorInfo,
-  addGeneratorMetadata,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
-import { toClassName, kebabCase } from '../../utils/names';
-import { toScopeAlias } from '../../utils/npm-scope';
-import { getTsLibDetails } from '../lib/generator';
-import tsProjectGenerator from '../lib/generator';
-
-import { resolveIac } from '../../utils/iac';
 import { resolveContainers } from '../../utils/containers';
-import { getNpmScope } from '../../utils/npm-scope';
-import { withVersions } from '../../utils/versions';
+import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
+import { formatFilesInSubtree } from '../../utils/format';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, toClassName } from '../../utils/names';
+import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
+import {
+  addGeneratorMetadata,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+} from '../../utils/nx';
 import { assignSharedPort } from '../../utils/port';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
+import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
+import type { TsDynamoDBGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

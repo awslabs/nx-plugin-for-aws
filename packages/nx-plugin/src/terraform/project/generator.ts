@@ -3,39 +3,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  joinPathFragments,
-  addProjectConfiguration,
-  generateFiles,
-  Tree,
-  OverwriteStrategy,
-  TargetConfiguration,
-  readNxJson,
-  updateNxJson,
-  GeneratorCallback,
-  installPackagesTask,
   addDependenciesToPackageJson,
+  addProjectConfiguration,
   detectPackageManager,
+  type GeneratorCallback,
+  generateFiles,
+  installPackagesTask,
+  joinPathFragments,
+  OverwriteStrategy,
+  readNxJson,
+  type TargetConfiguration,
+  type Tree,
   updateJson,
+  updateNxJson,
 } from '@nx/devkit';
-import { TerraformProjectGeneratorSchema } from './schema';
-import { getTsLibDetails } from '../../ts/lib/generator';
 import { join, relative } from 'path';
-import { sortObjectKeys } from '../../utils/object';
+import { getTsLibDetails } from '../../ts/lib/generator';
+import { updateGitIgnore } from '../../utils/git';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase } from '../../utils/names';
 import {
-  NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
 } from '../../utils/nx';
-import { updateGitIgnore } from '../../utils/git';
-import { withVersions } from '../../utils/versions';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { sortObjectKeys } from '../../utils/object';
 import { uvxCommand } from '../../utils/py';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from '../../utils/shared-constructs-constants';
-import { kebabCase } from '../../utils/names';
+import { withVersions } from '../../utils/versions';
+import type { TerraformProjectGeneratorSchema } from './schema';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =

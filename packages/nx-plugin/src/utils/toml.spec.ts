@@ -2,9 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import TOML from '@iarna/toml';
 import { createTree } from '@nx/devkit/testing';
 import { updateToml } from './toml';
-import TOML from '@iarna/toml';
 
 describe('toml utils', () => {
   describe('updateToml', () => {

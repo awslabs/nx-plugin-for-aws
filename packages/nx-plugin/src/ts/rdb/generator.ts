@@ -4,39 +4,38 @@
  */
 import {
   addDependenciesToPackageJson,
-  GeneratorCallback,
-  Tree,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
+  type Tree,
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsRdbGeneratorSchema } from './schema';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { resolveContainers } from '../../utils/containers';
+import { formatFilesInSubtree } from '../../utils/format';
+import { FsCommands } from '../../utils/fs';
+import { updateGitIgnore } from '../../utils/git';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, snakeCase, toClassName } from '../../utils/names';
+import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
-  NxGeneratorInfo,
   getGeneratorInfo,
+  type NxGeneratorInfo,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
-import { toClassName, kebabCase, snakeCase } from '../../utils/names';
-import { FsCommands } from '../../utils/fs';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
-import { addIgnoresToEslintConfig } from '../lib/eslint';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
-import { TS_VERSIONS, withVersions } from '../../utils/versions';
-import { resolveIac } from '../../utils/iac';
-import { resolveContainers } from '../../utils/containers';
-import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
-import { updateGitIgnore } from '../../utils/git';
-import { assignPort } from '../../utils/port';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
+import { assignPort } from '../../utils/port';
+import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
+import type { TsRdbGeneratorSchema } from './schema';
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -75,11 +74,6 @@ export const tsRdbGenerator = async (
     ...tsConfig,
     include: ['src/**/*.ts', 'generated/prisma/**/*.ts'],
   }));
-  await addIgnoresToEslintConfig(
-    tree,
-    joinPathFragments(dir, 'eslint.config.mjs'),
-    ['**/generated/**', '**/out-tsc'],
-  );
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const localDbPort = assignPort(

@@ -3,24 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  Tree,
   joinPathFragments,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsRdbAgentConnectionGeneratorSchema } from './schema';
+import camelCase from 'lodash.camelcase';
+import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { pascalCase } from '../../../utils/names';
+import { toScopeAlias } from '../../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { pascalCase } from '../../../utils/names';
-import camelCase from 'lodash.camelcase';
-import { toScopeAlias } from '../../../utils/npm-scope';
-import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
 import { injectRdsCaBundleIntoDockerfile } from '../utils';
+import type { TsRdbAgentConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createEvaluator } from './evaluator';
-import { AllowlistEntry } from './types';
+import type { AllowlistEntry } from './types';
 
 const allow: AllowlistEntry[] = [
   { spdxId: 'MIT', fullName: 'MIT License', aliases: ['MIT License'] },

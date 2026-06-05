@@ -2,19 +2,19 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { addProjectConfiguration, readNxJson, Tree } from '@nx/devkit';
 
-import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator';
-import { LicenseGeneratorSchema } from './schema';
+import { addProjectConfiguration, readNxJson, type Tree } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
 } from '../utils/config/utils';
-import { SYNC_GENERATOR_NAME } from './sync/generator';
-import { sharedConstructsGenerator } from '../utils/shared-constructs';
 import { expectHasMetricTags } from '../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
+import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator';
+import type { LicenseGeneratorSchema } from './schema';
+import { SYNC_GENERATOR_NAME } from './sync/generator';
 
 describe('license generator', () => {
   let tree: Tree;

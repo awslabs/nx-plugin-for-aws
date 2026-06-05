@@ -3,4 +3,5 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { smokeTest } from './smoke-test';
+
 smokeTest('npm');

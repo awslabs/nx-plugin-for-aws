@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { join } from 'path';
 import { beforeEach, describe, it } from 'vitest';
+import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 /**

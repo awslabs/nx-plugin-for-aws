@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import {
-  tsAgentA2aConnectionGenerator,
-  TS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import type { Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import {
+  TS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
+  tsAgentA2aConnectionGenerator,
+} from './generator';
 
 describe('ts#agent#a2a-connection generator', () => {
   let tree: Tree;

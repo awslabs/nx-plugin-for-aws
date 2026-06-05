@@ -8,30 +8,30 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsTrpcApiGeneratorSchema } from './schema';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import tsProjectGenerator from '../../ts/lib/generator';
-import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
-import { withVersions } from '../../utils/versions';
-import { kebabCase, toClassName } from '../../utils/names';
+import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { sortObjectKeys } from '../../utils/object';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, toClassName } from '../../utils/names';
+import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import { sortObjectKeys } from '../../utils/object';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { assignPort } from '../../utils/port';
-import { resolveIac } from '../../utils/iac';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
+import type { TsTrpcApiGeneratorSchema } from './schema';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

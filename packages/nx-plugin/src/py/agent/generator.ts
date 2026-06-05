@@ -3,52 +3,51 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { withVersions } from '../../utils/versions';
-import { updateGitIgnore } from '../../utils/git';
-import { sortObjectKeys } from '../../utils/object';
-import { PyAgentGeneratorSchema } from './schema';
-import {
-  NxGeneratorInfo,
-  addComponentGeneratorMetadata,
-  addDependencyToTargetIfNotPresent,
-  getGeneratorInfo,
-  readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { formatFilesInSubtree } from '../../utils/format';
-import { kebabCase, toSnakeCase, toClassName } from '../../utils/names';
-import {
-  addDependenciesToDependencyGroupInPyProjectToml,
-  addDependenciesToPyProjectToml,
-} from '../../utils/py';
-import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { ensureLicenseExceptions } from '../../license/config';
+import { AG_UI_STRANDS_EXCEPTIONS } from '../../license/known-exceptions';
 import {
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
 } from '../../utils/agent-connection/agent-connection';
-import { addWorkspaceDependencyToPyProject } from '../../utils/py';
-
+import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { FsCommands } from '../../utils/fs';
-import { getNpmScope } from '../../utils/npm-scope';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
-import { resolveIac } from '../../utils/iac';
 import { resolveContainers } from '../../utils/containers';
-import { assignPort } from '../../utils/port';
+import { formatFilesInSubtree } from '../../utils/format';
+import { FsCommands } from '../../utils/fs';
+import { updateGitIgnore } from '../../utils/git';
+import { resolveIac } from '../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
+import { getNpmScope } from '../../utils/npm-scope';
+import {
+  addComponentGeneratorMetadata,
+  addDependencyToTargetIfNotPresent,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
+import { Logger, UVProvider } from '../../utils/nxlv-python';
+import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
-import { ensureLicenseExceptions } from '../../license/config';
-import { AG_UI_STRANDS_EXCEPTIONS } from '../../license/known-exceptions';
+import { assignPort } from '../../utils/port';
+import {
+  addDependenciesToDependencyGroupInPyProjectToml,
+  addDependenciesToPyProjectToml,
+  addWorkspaceDependencyToPyProject,
+} from '../../utils/py';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
+import type { PyAgentGeneratorSchema } from './schema';
 
 export const PY_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

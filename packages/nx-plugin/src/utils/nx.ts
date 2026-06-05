@@ -4,18 +4,19 @@
  */
 import {
   getProjects,
-  ProjectConfiguration,
+  type ProjectConfiguration,
   readProjectConfiguration,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import PackageJson from '../../package.json';
 import * as path from 'path';
-import { getNpmScope, getNpmScopePrefix } from './npm-scope';
+import PackageJson from '../../package.json';
 import { toSnakeCase } from './names';
+import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 
-export type { NxGeneratorInfo, GeneratorInfo } from './generators';
+export type { GeneratorInfo, NxGeneratorInfo } from './generators';
 export { buildGeneratorInfoList } from './generators';
+
 import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
 
 const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));

@@ -2,16 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, updateProjectConfiguration } from '@nx/devkit';
-import { TsDynamoDBSmithyConnectionGeneratorSchema } from './schema';
+import { type Tree, updateProjectConfiguration } from '@nx/devkit';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
-  NxGeneratorInfo,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
+import type { TsDynamoDBSmithyConnectionGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_SMITHY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

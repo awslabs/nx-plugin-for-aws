@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { Project, createProjectSync, ts } from '@ts-morph/bootstrap';
+import type { Tree } from '@nx/devkit';
+import { createProjectSync, type Project, ts } from '@ts-morph/bootstrap';
 import { execSync } from 'child_process';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
 import { createTreeUsingTsSolutionSetup } from '../test';
 
 /**

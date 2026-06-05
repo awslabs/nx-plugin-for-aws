@@ -2,23 +2,23 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, updateJson } from '@nx/devkit';
+import { type Tree, updateJson } from '@nx/devkit';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fastApiReactGenerator from '../py/fast-api/react/generator';
+import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
+import trpcReactGenerator from '../trpc/react/generator';
+import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
+import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
+import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
+import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import {
+  type Connection,
   connectionGenerator,
   determineProjectType,
   findComponentInMetadata,
-  resolveConnection,
-  Connection,
   PROJECT_COMPONENT_SENTINEL,
+  resolveConnection,
 } from './generator';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
-import { vi, expect, describe, it, beforeEach } from 'vitest';
-import trpcReactGenerator from '../trpc/react/generator';
-import fastApiReactGenerator from '../py/fast-api/react/generator';
-import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
-import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
-import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
-import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
 
 // Mock the generators
 vi.mock('../trpc/react/generator', () => ({

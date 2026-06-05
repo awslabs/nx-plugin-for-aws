@@ -3,43 +3,43 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  joinPathFragments,
-  readProjectConfiguration,
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
-  Tree,
-  updateJson,
-  ProjectConfiguration,
-  GeneratorCallback,
-  OverwriteStrategy,
   installPackagesTask,
+  joinPathFragments,
+  OverwriteStrategy,
+  type ProjectConfiguration,
+  readProjectConfiguration,
+  type Tree,
+  updateJson,
 } from '@nx/devkit';
-import { TsInfraGeneratorSchema } from './schema';
+import path from 'path';
 import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
-import { withVersions } from '../../utils/versions';
+import { resolveContainers } from '../../utils/containers';
+import { formatFilesInSubtree } from '../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
+import {
+  addDependencyToTargetIfNotPresent,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+} from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+import { uvxCommand } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
-import { sharedScriptsGenerator } from '../../utils/shared-scripts';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_INFRA_CONFIG_DIR,
 } from '../../utils/shared-constructs-constants';
-import path from 'path';
-import { formatFilesInSubtree } from '../../utils/format';
-import { sortObjectKeys } from '../../utils/object';
-import {
-  NxGeneratorInfo,
-  addDependencyToTargetIfNotPresent,
-  addGeneratorMetadata,
-  getGeneratorInfo,
-} from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase } from '../../utils/names';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { uvxCommand } from '../../utils/py';
-import { resolveContainers } from '../../utils/containers';
+import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
+import { sharedScriptsGenerator } from '../../utils/shared-scripts';
+import { withVersions } from '../../utils/versions';
+import type { TsInfraGeneratorSchema } from './schema';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

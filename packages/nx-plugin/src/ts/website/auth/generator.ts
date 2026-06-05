@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { TsWebsiteAuthGeneratorSchema } from './schema';
+import type { Tree } from '@nx/devkit';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx';
 import { tsReactWebsiteAuthGenerator } from '../../react-website/cognito-auth/generator';
-import { getGeneratorInfo, NxGeneratorInfo } from '../../../utils/nx';
+import type { TsWebsiteAuthGeneratorSchema } from './schema';
 
 export const TS_WEBSITE_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

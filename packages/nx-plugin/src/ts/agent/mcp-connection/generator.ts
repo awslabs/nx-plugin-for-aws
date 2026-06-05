@@ -3,37 +3,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  OverwriteStrategy,
-  Tree,
   addDependenciesToPackageJson,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsAgentMcpConnectionGeneratorSchema } from './schema';
 import {
-  NxGeneratorInfo,
-  addDependencyToTargetIfNotPresent,
-  getGeneratorInfo,
-  readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { kebabCase } from '../../../utils/names';
-import { withVersions } from '../../../utils/versions';
-import { getNpmScope } from '../../../utils/npm-scope';
+  AGENT_CONNECTION_PROJECT_DIR,
+  addTypeScriptCoreClient,
+  ensureTypeScriptAgentConnectionProject,
+} from '../../../utils/agent-connection/agent-connection';
 import {
   addDestructuredImport,
   addStarExport,
   applyGritQL,
 } from '../../../utils/ast';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { kebabCase } from '../../../utils/names';
+import { getNpmScope } from '../../../utils/npm-scope';
 import {
-  ensureTypeScriptAgentConnectionProject,
-  addTypeScriptCoreClient,
-  AGENT_CONNECTION_PROJECT_DIR,
-} from '../../../utils/agent-connection/agent-connection';
+  addDependencyToTargetIfNotPresent,
+  getGeneratorInfo,
+  type NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../../utils/nx';
+import { withVersions } from '../../../utils/versions';
+import type { TsAgentMcpConnectionGeneratorSchema } from './schema';
 
 export const TS_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

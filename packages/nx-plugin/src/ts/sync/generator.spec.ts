@@ -2,10 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { tsSyncGeneratorGenerator } from './generator';
+import { addProjectConfiguration, readJson, type Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { addProjectConfiguration, readJson } from '@nx/devkit';
+import { tsSyncGeneratorGenerator } from './generator';
 
 describe('ts-sync generator', () => {
   let tree: Tree;

@@ -7,21 +7,20 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
   updateJson,
 } from '@nx/devkit';
 import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { formatFilesInSubtree } from './format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import { applyGritQL } from './ast';
+import { ensurePnpmIgnoresWorkspaceRootCheck } from './pnpm-workspace';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
   SHARED_SHADCN_NAME,
 } from './shared-constructs-constants';
-import { ITsDepVersion, withVersions } from './versions';
-import { ensurePnpmIgnoresWorkspaceRootCheck } from './pnpm-workspace';
+import { type ITsDepVersion, withVersions } from './versions';
 
 const SHADCN_DEPS = [
   'class-variance-authority',
@@ -32,24 +31,6 @@ const SHADCN_DEPS = [
   'radix-ui',
 ] as const satisfies ITsDepVersion[];
 
-const addSharedShadcnEslintRules = async (
-  tree: Tree,
-  eslintConfigPath: string,
-): Promise<void> => {
-  if (!tree.exists(eslintConfigPath)) {
-    return;
-  }
-
-  // shadcn generates aliased imports from components.json, which conflict with our
-  // relative-import lint rule. This rule is therefore disabled for common-shadcn.
-  // The `not contains` guard makes this idempotent.
-  await applyGritQL(
-    tree,
-    eslintConfigPath,
-    "`export default [$items]` where { $items <: not contains `@nx/enforce-module-boundaries`, $items += `{ files: ['**/*.{ts,tsx,js,jsx}'], rules: { '@nx/enforce-module-boundaries': 'off' } }` }",
-  );
-};
-
 export async function sharedShadcnGenerator(tree: Tree) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const scopeAlias = toScopeAlias(npmScopePrefix);
@@ -57,8 +38,6 @@ export async function sharedShadcnGenerator(tree: Tree) {
   const fullyQualifiedName = `${npmScopePrefix}${SHARED_SHADCN_NAME}`;
   const libraryRoot = joinPathFragments(PACKAGES_DIR, SHARED_SHADCN_DIR);
   const shadcnSrcRoot = joinPathFragments(libraryRoot, 'src');
-  const eslintConfigPath = joinPathFragments(libraryRoot, 'eslint.config.mjs');
-
   ensurePnpmIgnoresWorkspaceRootCheck(tree);
 
   if (!tree.exists(joinPathFragments(libraryRoot, 'project.json'))) {
@@ -118,7 +97,6 @@ export async function sharedShadcnGenerator(tree: Tree) {
       }),
     );
 
-    await addSharedShadcnEslintRules(tree, eslintConfigPath);
     addDependenciesToPackageJson(tree, withVersions([...SHADCN_DEPS]), {});
   }
 

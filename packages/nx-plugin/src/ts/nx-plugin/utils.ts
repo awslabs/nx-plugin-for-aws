@@ -6,13 +6,13 @@ import {
   addDependenciesToPackageJson,
   joinPathFragments,
   readJson,
-  Tree,
+  type Tree,
   updateJson,
   writeJson,
 } from '@nx/devkit';
+import PackageJson from '../../../package.json';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { withVersions } from '../../utils/versions';
-import PackageJson from '../../../package.json';
 
 /**
  * Configures a TypeScript project as an Nx Plugin

@@ -2,14 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readJson, readProjectConfiguration } from '@nx/devkit';
-import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
-import { TsInfraGeneratorSchema } from './schema';
+import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
+import type { TsInfraGeneratorSchema } from './schema';
 
 describe('infra generator', () => {
   let tree: Tree;

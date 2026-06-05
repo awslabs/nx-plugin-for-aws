@@ -6,14 +6,14 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
 } from '@nx/devkit';
-import tsProjectGenerator from '../../ts/lib/generator';
 import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../../py/project/generator';
-import { addDependenciesToPyProjectToml } from '../py';
+import tsProjectGenerator from '../../ts/lib/generator';
 import { addStarExport, applyGritQL, matchGritQL } from '../ast';
+import { addDependenciesToPyProjectToml } from '../py';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;

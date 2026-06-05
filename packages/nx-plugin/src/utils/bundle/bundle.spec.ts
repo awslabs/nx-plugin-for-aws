@@ -4,13 +4,13 @@
  */
 
 import {
-  Tree,
-  ProjectConfiguration,
-  readJson,
   addProjectConfiguration,
+  type ProjectConfiguration,
+  readJson,
+  type Tree,
 } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../test';
-import { addTypeScriptBundleTarget, addPythonBundleTarget } from './bundle';
+import { addPythonBundleTarget, addTypeScriptBundleTarget } from './bundle';
 
 describe('bundle utilities', () => {
   let tree: Tree;

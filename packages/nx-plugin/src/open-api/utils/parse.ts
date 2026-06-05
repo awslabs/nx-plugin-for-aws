@@ -2,9 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+
 import SwaggerParser from '@apidevtools/swagger-parser';
-import { Spec } from './types';
+import type { Tree } from '@nx/devkit';
+import type { Spec } from './types';
 
 const TREE_PROTOCOL_PREFIX = 'workspace://';
 

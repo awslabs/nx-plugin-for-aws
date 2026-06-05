@@ -3,24 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  OverwriteStrategy,
-  Tree,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsRdbTrpcConnectionGeneratorSchema } from './schema';
+import camelCase from 'lodash.camelcase';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { kebabCase, pascalCase } from '../../../utils/names';
+import { toScopeAlias } from '../../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { kebabCase, pascalCase } from '../../../utils/names';
-import camelCase from 'lodash.camelcase';
-import { toScopeAlias } from '../../../utils/npm-scope';
+import type { TsRdbTrpcConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_TRPC_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

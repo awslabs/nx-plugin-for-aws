@@ -4,47 +4,47 @@
  */
 import {
   addDependenciesToPackageJson,
-  Tree,
-  readProjectConfiguration,
-  joinPathFragments,
   generateFiles,
-  names,
-  updateJson,
   installPackagesTask,
+  joinPathFragments,
+  names,
   OverwriteStrategy,
+  readProjectConfiguration,
+  type Tree,
+  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-// typescript factory imports removed — now using GritQL for vite config transforms
-import { TsReactWebsiteGeneratorSchema } from './schema';
 import { applicationGenerator } from '@nx/react';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
-import { configureTsProject } from '../../lib/ts-project-utils';
-import { ITsDepVersion, withVersions } from '../../../utils/versions';
-import { getRelativePathToRoot } from '../../../utils/paths';
-import {
-  PACKAGES_DIR,
-  SHARED_SHADCN_DIR,
-} from '../../../utils/shared-constructs-constants';
-import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
+import { relative, sep } from 'path';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
-import { relative, sep } from 'path';
-import { sortObjectKeys } from '../../../utils/object';
+import { resolveIac } from '../../../utils/iac';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
+import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
 } from '../../../utils/nx';
+import { sortObjectKeys } from '../../../utils/object';
+import { getRelativePathToRoot } from '../../../utils/paths';
+import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  PACKAGES_DIR,
+  SHARED_SHADCN_DIR,
+} from '../../../utils/shared-constructs-constants';
 import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { type ITsDepVersion, withVersions } from '../../../utils/versions';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
-import { resolveIac } from '../../../utils/iac';
+import { configureTsProject } from '../../lib/ts-project-utils';
+// typescript factory imports removed — now using GritQL for vite config transforms
+import type { TsReactWebsiteGeneratorSchema } from './schema';
 
 export const SUPPORTED_UX_PROVIDERS = ['none', 'cloudscape', 'shadcn'] as const;
 
@@ -90,7 +90,7 @@ export async function tsReactWebsiteGenerator(
       directory: websiteContentPath,
       routing: false,
       e2eTestRunner,
-      linter: 'eslint',
+      linter: 'none',
       bundler: 'vite',
       unitTestRunner: 'vitest',
       useProjectJson: true,

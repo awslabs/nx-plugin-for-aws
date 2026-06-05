@@ -2,19 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { readProjectConfiguration, type Tree } from '@nx/devkit';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
+import { matchGritQL } from '../../../utils/ast';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { pyProjectGenerator } from '../../project/generator';
+import { pyAgentGenerator } from '../generator';
 import {
   PY_AGENT_REACT_CONNECTION_GENERATOR_INFO,
   pyAgentReactConnectionGenerator,
 } from './generator';
-import { readProjectConfiguration } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { matchGritQL } from '../../../utils/ast';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
-import { pyProjectGenerator } from '../../project/generator';
-import { pyAgentGenerator } from '../generator';
 
 describe('py strands agent react connection generator', () => {
   let tree: Tree;
@@ -385,165 +384,163 @@ export function Main() {
   });
 });
 
-describe(
-  'py strands agent react connection with real projects',
-  { timeout: 120_000 },
-  () => {
-    let tree: Tree;
+describe('py strands agent react connection with real projects', {
+  timeout: 120_000,
+}, () => {
+  let tree: Tree;
 
-    beforeEach(async () => {
-      tree = createTreeUsingTsSolutionSetup();
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
 
-      // Generate a React website
-      await tsReactWebsiteGenerator(tree, {
-        name: 'frontend',
-        skipInstall: true,
-        iac: 'cdk',
-      });
+    // Generate a React website
+    await tsReactWebsiteGenerator(tree, {
+      name: 'frontend',
+      skipInstall: true,
+      iac: 'cdk',
+    });
+  });
+
+  it('should configure serve-local integration with generated projects', async () => {
+    // Generate a py project for the agent
+    await pyProjectGenerator(tree, {
+      name: 'agent-project',
+      type: 'application',
     });
 
-    it('should configure serve-local integration with generated projects', async () => {
-      // Generate a py project for the agent
-      await pyProjectGenerator(tree, {
-        name: 'agent-project',
-        type: 'application',
-      });
-
-      // Generate a py strands agent
-      await pyAgentGenerator(tree, {
-        project: 'agent_project',
-        infra: 'none',
-      });
-
-      // Read the agent project configuration via Nx utils
-      const agentProjectConfig = readProjectConfiguration(
-        tree,
-        'proj.agent_project',
-      );
-      const agentComponent = (agentProjectConfig.metadata as any)
-        ?.components?.[0];
-
-      // Connect react to py strands agent
-      await pyAgentReactConnectionGenerator(tree, {
-        sourceProject: 'frontend',
-        targetProject: 'agent_project',
-        targetComponent: agentComponent,
-      });
-
-      // Read the frontend project configuration
-      const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
-
-      // Verify that serve-local target now depends on agent serve-local target
-      expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
-        projects: expect.arrayContaining([
-          expect.stringContaining('agent_project'),
-        ]),
-        target: 'agent-serve-local',
-      });
-
-      // Verify that the runtime config was created and modified
-      expect(
-        tree.exists('frontend/src/components/RuntimeConfig/index.tsx'),
-      ).toBeTruthy();
-
-      const runtimeConfigContent = tree.read(
-        'frontend/src/components/RuntimeConfig/index.tsx',
-        'utf-8',
-      );
-
-      // Verify that the runtime config includes the agent runtime override
-      expect(runtimeConfigContent).toContain('runtimeConfig.agentRuntimes.');
-      expect(runtimeConfigContent).toContain('http://localhost:');
-
-      // Re-read agent project config after connection generator ran
-      const updatedAgentConfig = readProjectConfiguration(
-        tree,
-        'proj.agent_project',
-      );
-      expect(updatedAgentConfig.targets['agent-openapi']).toBeDefined();
-
-      // Verify OpenAPI spec generation script was created
-      const openApiScriptPath = `${agentProjectConfig.root}/scripts/agent_openapi.py`;
-      expect(tree.exists(openApiScriptPath)).toBeTruthy();
+    // Generate a py strands agent
+    await pyAgentGenerator(tree, {
+      project: 'agent_project',
+      infra: 'none',
     });
 
-    it('should configure AG-UI (CopilotKit) integration for AG-UI protocol agents', async () => {
-      // Generate a py project for the agent
-      await pyProjectGenerator(tree, {
-        name: 'agent-project',
-        type: 'application',
-      });
+    // Read the agent project configuration via Nx utils
+    const agentProjectConfig = readProjectConfiguration(
+      tree,
+      'proj.agent_project',
+    );
+    const agentComponent = (agentProjectConfig.metadata as any)
+      ?.components?.[0];
 
-      // Generate a py strands agent with AG-UI protocol
-      await pyAgentGenerator(tree, {
-        project: 'agent_project',
-        infra: 'none',
-        protocol: 'ag-ui',
-      });
-
-      const agentProjectConfig = readProjectConfiguration(
-        tree,
-        'proj.agent_project',
-      );
-      const agentComponent = (agentProjectConfig.metadata as any)
-        ?.components?.[0];
-
-      await pyAgentReactConnectionGenerator(tree, {
-        sourceProject: 'frontend',
-        targetProject: 'agent_project',
-        targetComponent: agentComponent,
-      });
-
-      const agentNameClassName = agentComponent.rc;
-
-      // AG-UI creates a single shared AguiProvider and a per-agent hook
-      expect(
-        tree.exists('frontend/src/components/AguiProvider.tsx'),
-      ).toBeTruthy();
-      expect(
-        tree.exists(`frontend/src/hooks/useAgui${agentNameClassName}.tsx`),
-      ).toBeTruthy();
-
-      // AG-UI should NOT generate OpenAPI scripts / hooks
-      expect(
-        tree.exists(`${agentProjectConfig.root}/scripts/agent_openapi.py`),
-      ).toBeFalsy();
-
-      // main.tsx should wrap <App /> with the shared AguiProvider
-      expect(
-        await matchGritQL(
-          tree,
-          'frontend/src/main.tsx',
-          '`<AguiProvider>$_</AguiProvider>`',
-        ),
-      ).toBe(true);
-
-      // AguiProvider should call the agent's hook and spread it into selfManagedAgents
-      const providerSrc = tree.read(
-        'frontend/src/components/AguiProvider.tsx',
-        'utf-8',
-      ) as string;
-      expect(providerSrc).toContain(`useAgui${agentNameClassName}`);
-
-      // CopilotKit + AG-UI client deps should be added to the root package.json.
-      // @copilotkit/react-core v2 ships both the provider and the chat
-      // components, so we don't need @copilotkit/react-ui.
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
-      expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
-      expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
-
-      // serve-local should be wired up for the agent's continuous target
-      const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
-      expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
-        projects: expect.arrayContaining([
-          expect.stringContaining('agent_project'),
-        ]),
-        target: 'agent-serve-local',
-      });
+    // Connect react to py strands agent
+    await pyAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent_project',
+      targetComponent: agentComponent,
     });
-  },
-);
+
+    // Read the frontend project configuration
+    const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
+
+    // Verify that serve-local target now depends on agent serve-local target
+    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+      projects: expect.arrayContaining([
+        expect.stringContaining('agent_project'),
+      ]),
+      target: 'agent-serve-local',
+    });
+
+    // Verify that the runtime config was created and modified
+    expect(
+      tree.exists('frontend/src/components/RuntimeConfig/index.tsx'),
+    ).toBeTruthy();
+
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    // Verify that the runtime config includes the agent runtime override
+    expect(runtimeConfigContent).toContain('runtimeConfig.agentRuntimes.');
+    expect(runtimeConfigContent).toContain('http://localhost:');
+
+    // Re-read agent project config after connection generator ran
+    const updatedAgentConfig = readProjectConfiguration(
+      tree,
+      'proj.agent_project',
+    );
+    expect(updatedAgentConfig.targets['agent-openapi']).toBeDefined();
+
+    // Verify OpenAPI spec generation script was created
+    const openApiScriptPath = `${agentProjectConfig.root}/scripts/agent_openapi.py`;
+    expect(tree.exists(openApiScriptPath)).toBeTruthy();
+  });
+
+  it('should configure AG-UI (CopilotKit) integration for AG-UI protocol agents', async () => {
+    // Generate a py project for the agent
+    await pyProjectGenerator(tree, {
+      name: 'agent-project',
+      type: 'application',
+    });
+
+    // Generate a py strands agent with AG-UI protocol
+    await pyAgentGenerator(tree, {
+      project: 'agent_project',
+      infra: 'none',
+      protocol: 'ag-ui',
+    });
+
+    const agentProjectConfig = readProjectConfiguration(
+      tree,
+      'proj.agent_project',
+    );
+    const agentComponent = (agentProjectConfig.metadata as any)
+      ?.components?.[0];
+
+    await pyAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent_project',
+      targetComponent: agentComponent,
+    });
+
+    const agentNameClassName = agentComponent.rc;
+
+    // AG-UI creates a single shared AguiProvider and a per-agent hook
+    expect(
+      tree.exists('frontend/src/components/AguiProvider.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(`frontend/src/hooks/useAgui${agentNameClassName}.tsx`),
+    ).toBeTruthy();
+
+    // AG-UI should NOT generate OpenAPI scripts / hooks
+    expect(
+      tree.exists(`${agentProjectConfig.root}/scripts/agent_openapi.py`),
+    ).toBeFalsy();
+
+    // main.tsx should wrap <App /> with the shared AguiProvider
+    expect(
+      await matchGritQL(
+        tree,
+        'frontend/src/main.tsx',
+        '`<AguiProvider>$_</AguiProvider>`',
+      ),
+    ).toBe(true);
+
+    // AguiProvider should call the agent's hook and spread it into selfManagedAgents
+    const providerSrc = tree.read(
+      'frontend/src/components/AguiProvider.tsx',
+      'utf-8',
+    ) as string;
+    expect(providerSrc).toContain(`useAgui${agentNameClassName}`);
+
+    // CopilotKit + AG-UI client deps should be added to the root package.json.
+    // @copilotkit/react-core v2 ships both the provider and the chat
+    // components, so we don't need @copilotkit/react-ui.
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
+    expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
+    expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
+
+    // serve-local should be wired up for the agent's continuous target
+    const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
+    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+      projects: expect.arrayContaining([
+        expect.stringContaining('agent_project'),
+      ]),
+      target: 'agent-serve-local',
+    });
+  });
+});
 
 describe('py strands agent react connection generator - AG-UI protocol', () => {
   let tree: Tree;

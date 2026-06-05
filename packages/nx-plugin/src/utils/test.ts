@@ -2,10 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { vi, expect } from 'vitest';
+
+import { joinPathFragments, type Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { joinPathFragments, Tree } from '@nx/devkit';
 import solutionSetup from '@nx/js/src/utils/typescript/ts-solution-setup';
+import { expect, vi } from 'vitest';
+import { DEFAULT_BIOME_CONFIG } from './format';
 
 export const createTreeUsingTsSolutionSetup = (): Tree => {
   vi.spyOn(solutionSetup, 'isUsingTsSolutionSetup').mockImplementation(
@@ -17,6 +19,9 @@ export const createTreeUsingTsSolutionSetup = (): Tree => {
   tree.write('pnpm-workspace.yaml', `packages:\n  - packages/*`);
 
   tree.write('tsconfig.json', '{}');
+  // The preset always writes biome.json at the workspace root, so mirror that
+  // here for realistic lint-target configuration.
+  tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
   return tree;
 };
 

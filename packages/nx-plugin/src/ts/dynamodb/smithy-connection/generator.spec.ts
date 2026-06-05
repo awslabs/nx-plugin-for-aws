@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readProjectConfiguration } from '@nx/devkit';
-import { describe, it, expect, beforeEach } from 'vitest';
-import { tsDynamoDBSmithyConnectionGenerator } from './generator';
+import { readProjectConfiguration, type Tree } from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { tsDynamoDBSmithyConnectionGenerator } from './generator';
 
 describe('ts#dynamodb smithy-connection generator', () => {
   let tree: Tree;

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, Tree } from '@nx/devkit';
+import { joinPathFragments, type Tree } from '@nx/devkit';
 import { execSync } from 'child_process';
 import uniqBy from 'lodash.uniqby';
 

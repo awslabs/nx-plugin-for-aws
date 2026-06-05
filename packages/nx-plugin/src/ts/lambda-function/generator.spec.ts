@@ -2,20 +2,20 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, Tree } from '@nx/devkit';
-import {
-  tsLambdaFunctionGenerator,
-  TS_LAMBDA_FUNCTION_GENERATOR_INFO,
-} from './generator';
-import { EventSource, TsLambdaFunctionGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { TS_HANDLER_RETURN_TYPES } from './io';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+import {
+  TS_LAMBDA_FUNCTION_GENERATOR_INFO,
+  tsLambdaFunctionGenerator,
+} from './generator';
+import { TS_HANDLER_RETURN_TYPES } from './io';
+import type { EventSource, TsLambdaFunctionGeneratorSchema } from './schema';
 
 describe('ts-lambda-function generator', () => {
   let tree: Tree;
@@ -424,17 +424,16 @@ describe('ts-lambda-function generator', () => {
     expect(tree.exists(constructPath)).toBeTruthy();
   });
 
-  it.each(Object.keys(TS_HANDLER_RETURN_TYPES))(
-    'should generate a lambda function which compiles with event %s',
-    async (event: EventSource) => {
-      await tsLambdaFunctionGenerator(tree, {
-        ...options,
-        event,
-      });
+  it.each(
+    Object.keys(TS_HANDLER_RETURN_TYPES),
+  )('should generate a lambda function which compiles with event %s', async (event: EventSource) => {
+    await tsLambdaFunctionGenerator(tree, {
+      ...options,
+      event,
+    });
 
-      validateTypeScript(['packages/test-project/src/test-function.ts']);
-    },
-  );
+    validateTypeScript(['packages/test-project/src/test-function.ts']);
+  });
 
   describe('terraform iac', () => {
     it('should generate terraform files for lambda function and snapshot them', async () => {

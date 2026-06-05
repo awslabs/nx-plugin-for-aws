@@ -5,12 +5,12 @@
 import {
   generateFiles,
   joinPathFragments,
-  ProjectConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { sortObjectKeys } from '../../../utils/object';
 import { snakeCase } from '../../../utils/names';
+import { sortObjectKeys } from '../../../utils/object';
 
 export interface AddOpenApiGenerationOptions {
   project: ProjectConfiguration;

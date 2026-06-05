@@ -2,9 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, it, expect } from 'vitest';
+
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { describe, expect, it } from 'vitest';
 
 describe('smoke test - mcp-server', () => {
   it('should start the MCP server and respond to tool calls', async () => {

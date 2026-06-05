@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import camelCase from 'lodash.camelcase';
 import cloneDeepWith from 'lodash.clonedeepwith';
 import type { OpenAPIV3 } from 'openapi-types';
-import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
-import { Spec } from './types';
 import { pascalCase, toClassName, upperFirst } from '../../utils/names';
-import camelCase from 'lodash.camelcase';
+import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
+import type { Spec } from './types';
 
 interface SubSchema {
   readonly nameParts: string[];

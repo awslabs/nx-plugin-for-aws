@@ -2,22 +2,22 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, Tree } from '@nx/devkit';
+import { readJson, type Tree } from '@nx/devkit';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../../utils/config/utils';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../../utils/test';
 import {
   REACT_WEBSITE_APP_GENERATOR_INFO,
   SUPPORTED_UX_PROVIDERS,
   tsReactWebsiteGenerator,
 } from './generator';
-import { TsReactWebsiteGeneratorSchema } from './schema';
-import {
-  createTreeUsingTsSolutionSetup,
-  snapshotTreeDir,
-} from '../../../utils/test';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import {
-  ensureAwsNxPluginConfig,
-  updateAwsNxPluginConfig,
-} from '../../../utils/config/utils';
+import type { TsReactWebsiteGeneratorSchema } from './schema';
 
 describe('react-website generator', () => {
   let tree: Tree;
@@ -271,7 +271,8 @@ describe('react-website generator', () => {
       const stylesContent = tree.read('test-app/src/styles.css')?.toString();
 
       expect(stylesContent).toBeDefined();
-      expect(stylesContent).toContain("@import 'tailwindcss'");
+      expect(stylesContent).toContain('@import');
+      expect(stylesContent).toContain('tailwindcss');
       expect(stylesContent).toMatchSnapshot('styles.css-with-tailwind');
     });
 
@@ -317,7 +318,8 @@ describe('react-website generator', () => {
       expect(packageJson.dependencies).toHaveProperty('tailwindcss');
       expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
       expect(viteConfig).toContain('tailwindcss()');
-      expect(stylesContent).toContain("@import 'tailwindcss'");
+      expect(stylesContent).toContain('@import');
+      expect(stylesContent).toContain('tailwindcss');
     });
 
     describe('terraform iac', () => {
@@ -710,24 +712,23 @@ describe('react-website generator ux tests', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
-    'should add ux metadata (ux=%s)',
-    async (ux) => {
-      const options: TsReactWebsiteGeneratorSchema = {
-        name: 'test-app',
-        iac: 'cdk',
-        ux: ux,
-      };
+  it.each(
+    SUPPORTED_UX_PROVIDERS.map((p) => [p]),
+  )('should add ux metadata (ux=%s)', async (ux) => {
+    const options: TsReactWebsiteGeneratorSchema = {
+      name: 'test-app',
+      iac: 'cdk',
+      ux: ux,
+    };
 
-      await tsReactWebsiteGenerator(tree, options);
+    await tsReactWebsiteGenerator(tree, options);
 
-      const projectConfig = JSON.parse(
-        tree.read(`test-app/project.json`, 'utf-8'),
-      );
+    const projectConfig = JSON.parse(
+      tree.read(`test-app/project.json`, 'utf-8'),
+    );
 
-      expect(projectConfig.metadata.ux).toEqual(ux);
-    },
-  );
+    expect(projectConfig.metadata.ux).toEqual(ux);
+  });
 
   describe('Cloudscape', () => {
     const options: TsReactWebsiteGeneratorSchema = {

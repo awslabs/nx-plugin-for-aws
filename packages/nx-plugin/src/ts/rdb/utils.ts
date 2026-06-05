@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 
 const RDS_CA_RUN = [
   'RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \\',

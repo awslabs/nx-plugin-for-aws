@@ -3,37 +3,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  GeneratorCallback,
-  NxJsonConfiguration,
-  OverwriteStrategy,
-  Tree,
+  type GeneratorCallback,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  type NxJsonConfiguration,
+  OverwriteStrategy,
   readProjectConfiguration,
+  type Tree,
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsProjectGeneratorSchema } from './schema';
 import { libraryGenerator } from '@nx/js';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
-import { configureTsProject } from './ts-project-utils';
-import { toKebabCase } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { sortObjectKeys } from '../../utils/object';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { toKebabCase } from '../../utils/names';
+import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
 } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { applyGritQL } from '../../utils/ast';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-
-const readGritPattern = (name: string): string =>
-  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
+import { sortObjectKeys } from '../../utils/object';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+import type { TsProjectGeneratorSchema } from './schema';
+import { configureTsProject } from './ts-project-utils';
 
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -81,7 +75,7 @@ export const tsProjectGenerator = async (
     directory: dir,
     skipPackageJson: true,
     bundler: 'tsc', // TODO: consider supporting others
-    linter: 'eslint',
+    linter: 'none',
     unitTestRunner: 'vitest',
   });
 
@@ -207,13 +201,6 @@ export const tsProjectGenerator = async (
 
     return nxJson;
   });
-
-  // change error to warn for the @nx/dependency-checks rule
-  await applyGritQL(
-    tree,
-    joinPathFragments(dir, 'eslint.config.mjs'),
-    readGritPattern('eslint-dependency-checks-warn'),
-  );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_LIB_GENERATOR_INFO]);
 

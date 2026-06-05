@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync, writeFileSync } from 'fs';
+
+import { execSync } from 'node:child_process';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { join } from 'path';
-import { execSync } from 'child_process';
-import { describe, beforeEach, it, expect } from 'vitest';
 
 describe('smoke test - git-secrets', () => {
   const pkgMgr = 'pnpm';

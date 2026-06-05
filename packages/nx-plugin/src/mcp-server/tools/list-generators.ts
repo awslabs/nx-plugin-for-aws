@@ -2,13 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { PackageManagerSchema } from '../schema';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { NxGeneratorInfo } from '../../utils/generators';
 import {
   renderFilterableOptionsAsync,
   renderGeneratorInfo,
 } from '../generator-info';
-import { NxGeneratorInfo } from '../../utils/generators';
+import { PackageManagerSchema } from '../schema';
 
 /**
  * Adds a tool which lists details about the available generators.

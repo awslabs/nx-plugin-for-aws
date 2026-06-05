@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
+import type { Tree } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
 import { kebabCase } from '../../../utils/names';
 
 const readGritPattern = (name: string): string =>

@@ -2,17 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { installPackagesTask, Tree } from '@nx/devkit';
-import { FastApiReactGeneratorSchema } from './schema';
+import { installPackagesTask, type Tree } from '@nx/devkit';
+import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
-  NxGeneratorInfo,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addOpenApiGeneration } from './open-api';
-import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
+import type { FastApiReactGeneratorSchema } from './schema';
 
 export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

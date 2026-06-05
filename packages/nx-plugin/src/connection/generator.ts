@@ -2,35 +2,39 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, ProjectConfiguration, Tree } from '@nx/devkit';
-import { ConnectionGeneratorSchema } from './schema';
-import trpcReactGenerator from '../trpc/react/generator';
-import { hasExportDeclaration } from '../utils/ast';
-import { readToml } from '../utils/toml';
-import fastApiReactGenerator from '../py/fast-api/react/generator';
 import {
-  ComponentMetadata,
-  readProjectConfigurationUnqualified,
-} from '../utils/nx';
-import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
-import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
-import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
-import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator';
-import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator';
-import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator';
+  joinPathFragments,
+  type ProjectConfiguration,
+  type Tree,
+} from '@nx/devkit';
+import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator';
 import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator';
-import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
+import fastApiReactGenerator from '../py/fast-api/react/generator';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
+import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
+import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
+import trpcReactGenerator from '../trpc/react/generator';
+import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator';
+import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator';
+import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator';
+import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator';
+import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator';
+import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator';
+import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator';
+import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator';
+import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
+import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
+import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator';
 import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
 import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
-import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
-import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator';
-import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
-import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator';
-import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator';
-import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator';
-import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator';
-import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator';
+import { hasExportDeclaration } from '../utils/ast';
+import {
+  type ComponentMetadata,
+  readProjectConfigurationUnqualified,
+} from '../utils/nx';
+import { readToml } from '../utils/toml';
+import type { ConnectionGeneratorSchema } from './schema';
 
 /**
  * List of supported source and target project types for connections.

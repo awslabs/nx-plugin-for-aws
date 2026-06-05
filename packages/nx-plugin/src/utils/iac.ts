@@ -2,13 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
 } from './config/utils';
 
 export { IAC_PROVIDERS, type Iac, type IacOption } from './iac-providers';
+
 import { IAC_PROVIDERS } from './iac-providers';
 
 /**

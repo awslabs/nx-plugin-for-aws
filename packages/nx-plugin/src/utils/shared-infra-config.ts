@@ -6,16 +6,16 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
 } from '@nx/devkit';
-import { getNpmScopePrefix } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
 import { formatFilesInSubtree } from './format';
+import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
-  SHARED_INFRA_CONFIG_NAME,
   SHARED_INFRA_CONFIG_DIR,
+  SHARED_INFRA_CONFIG_NAME,
 } from './shared-constructs-constants';
 
 /**

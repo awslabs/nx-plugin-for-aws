@@ -4,12 +4,12 @@
  */
 import {
   joinPathFragments,
-  ProjectConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type Tree,
   updateJson,
 } from '@nx/devkit';
-import { Iac } from '../iac';
 import { updateGitIgnore } from '../git';
+import type { Iac } from '../iac';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,

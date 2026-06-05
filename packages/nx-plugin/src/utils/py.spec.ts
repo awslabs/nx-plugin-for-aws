@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+
 import { parse, stringify } from '@iarna/toml';
+import type { Tree } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import type { UVPyprojectToml } from './nxlv-python';
 import { addDependenciesToPyProjectToml } from './py';
-import { IPyDepVersion } from './versions';
+import type { IPyDepVersion } from './versions';
 
 describe('addDependenciesToPyProjectToml', () => {
   let tree: Tree;

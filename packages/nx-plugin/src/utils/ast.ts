@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+
 import { QueryBuilder } from '@getgrit/gritql';
+import type { Tree } from '@nx/devkit';
 import * as path from 'path';
 import { updateGitIgnore } from './git';
 
@@ -153,7 +154,7 @@ export const addSingleImport = async (
 
   // Prepend new import to file
   const contents = tree.read(filePath)!.toString();
-  tree.write(filePath, `import ${variableName} from "${from}";\n${contents}`);
+  tree.write(filePath, `import ${variableName} from '${from}';\n${contents}`);
 };
 
 /**
@@ -169,7 +170,7 @@ export const addStarExport = async (
 
   // For empty/non-existent files, just write the export
   if (!contents.trim()) {
-    tree.write(filePath, `export * from "${from}";\n`);
+    tree.write(filePath, `export * from '${from}';\n`);
     return;
   }
 
@@ -184,7 +185,7 @@ export const addStarExport = async (
   }
 
   // Prepend new export to file
-  tree.write(filePath, `export * from "${from}";\n${contents}`);
+  tree.write(filePath, `export * from '${from}';\n${contents}`);
 };
 
 /**

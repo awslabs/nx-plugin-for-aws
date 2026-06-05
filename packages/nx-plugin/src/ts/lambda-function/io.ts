@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { EventSource } from './schema';
+import type { EventSource } from './schema';
 
 /**
  * Mapping of EventSource to the corresponding return type from @types/aws-lambda

@@ -13,8 +13,8 @@
 
 import type {
   ArrayExpression,
-  Literal,
   Node as EstreeNode,
+  Literal,
   Program,
   Property,
 } from 'estree';

@@ -2,20 +2,22 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, updateJson } from '@nx/devkit';
-import { vi, expect, describe, it, beforeEach } from 'vitest';
-import {
-  smithyReactConnectionGenerator,
-  SMITHY_REACT_CONNECTION_GENERATOR_INFO,
-} from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { type Tree, updateJson } from '@nx/devkit';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator';
+import { matchGritQL } from '../../utils/ast';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { matchGritQL } from '../../utils/ast';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
-import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
-import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator';
-import { tsSmithyApiGenerator } from '../ts/api/generator';
+import {
+  TS_SMITHY_API_GENERATOR_INFO,
+  tsSmithyApiGenerator,
+} from '../ts/api/generator';
+import {
+  SMITHY_REACT_CONNECTION_GENERATOR_INFO,
+  smithyReactConnectionGenerator,
+} from './generator';
 
 describe('smithy#react-connection generator', () => {
   let tree: Tree;

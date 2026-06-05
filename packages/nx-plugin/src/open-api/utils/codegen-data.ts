@@ -2,16 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import * as gen from '@hey-api/openapi-ts';
+
 import type { Plugin } from '@hey-api/openapi-ts';
-import { normaliseOpenApiSpecForCodeGen } from './normalise';
-import { Spec } from './types';
-import type { OpenAPIV3, OpenAPIV3_1 } from 'openapi-types';
+import * as gen from '@hey-api/openapi-ts';
 import camelCase from 'lodash.camelcase';
 import orderBy from 'lodash.orderby';
-import uniqBy from 'lodash.uniqby';
 import trim from 'lodash.trim';
-import { resolveIfRef, isRef, splitRef } from './refs';
+import uniqBy from 'lodash.uniqby';
+import type { OpenAPIV3, OpenAPIV3_1 } from 'openapi-types';
 import {
   kebabCase,
   pascalCase,
@@ -21,23 +19,26 @@ import {
 } from '../../utils/names';
 import {
   toPythonName,
-  toTypeScriptType,
   toPythonType,
-  toTypeScriptName,
   toTypeScriptModelName,
+  toTypeScriptName,
+  toTypeScriptType,
 } from './codegen-data/languages';
 import {
-  CodeGenData,
-  ClientData,
-  Model,
-  flattenModelLink,
+  type ClientData,
   COLLECTION_TYPES,
   COMPOSED_SCHEMA_TYPES,
+  type CodeGenData,
+  flattenModelLink,
+  type Model,
+  type Operation,
   PRIMITIVE_TYPES,
-  VENDOR_EXTENSIONS,
   STREAMING_CONTENT_TYPES,
-  Operation,
+  VENDOR_EXTENSIONS,
 } from './codegen-data/types';
+import { normaliseOpenApiSpecForCodeGen } from './normalise';
+import { isRef, resolveIfRef, splitRef } from './refs';
+import type { Spec } from './types';
 
 /**
  * Builds a data structure from an OpenAPI spec which can be used to generate code

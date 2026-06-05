@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from './test';
-import { sharedConstructsGenerator } from './shared-constructs';
+import type { Tree } from '@nx/devkit';
 import {
   addGeneratorMetricsIfApplicable,
   METRIC_ID,
   METRICS_ASPECT_FILE_PATH,
   TERRAFORM_METRICS_FILE_PATH,
 } from './metrics';
+import { sharedConstructsGenerator } from './shared-constructs';
+import { createTreeUsingTsSolutionSetup } from './test';
 
 /**
  * Asserts that the MetricsAspect tags array in the CDK app.ts file

@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { NxGeneratorInfo } from '../../utils/generators';
-import { PACKAGE_MANAGERS } from '../schema';
-import { buildNxCommand, fetchGuidePages } from '../generator-info';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { NxGeneratorInfo } from '../../utils/generators';
 import { IAC_PROVIDERS } from '../../utils/iac-providers';
+import { buildNxCommand, fetchGuidePages } from '../generator-info';
+import { PACKAGE_MANAGERS } from '../schema';
 
 export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 

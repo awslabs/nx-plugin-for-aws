@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import fs from 'fs';
-import { createServer } from './server';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import fs from 'fs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from './server';
 
 describe('MCP Server', () => {
   let client: Client;

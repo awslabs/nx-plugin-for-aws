@@ -4,13 +4,13 @@
  */
 import {
   joinPathFragments,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { applyGritQL } from '../utils/ast';
 import {
-  ComponentMetadata,
   addDependencyToTargetIfNotPresent,
+  type ComponentMetadata,
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
 

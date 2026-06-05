@@ -3,24 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  joinPathFragments,
   generateFiles,
-  Tree,
+  joinPathFragments,
   OverwriteStrategy,
+  type Tree,
 } from '@nx/devkit';
-import { RuntimeConfigGeneratorSchema } from './schema';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
-import { formatFilesInSubtree } from '../../../utils/format';
 import { addSingleImport, applyGritQL, matchGritQL } from '../../../utils/ast';
+import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import {
-  NxGeneratorInfo,
   addComponentGeneratorMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { toProjectRelativePath } from '../../../utils/paths';
-import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
+import type { RuntimeConfigGeneratorSchema } from './schema';
 
 export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

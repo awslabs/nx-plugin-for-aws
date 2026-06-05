@@ -2,12 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, Tree } from '@nx/devkit';
-import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { readJson, readNxJson, type Tree } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator';
 
 describe('ts lib generator', () => {
   let tree: Tree;

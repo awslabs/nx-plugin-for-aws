@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import fs from 'fs';
 /**
  * Unified + remark-mdx pipeline for the MCP `generator-guide` tool.
  *
@@ -17,20 +18,13 @@
  */
 import type { Root, RootContent } from 'mdast';
 import type { MdxJsxFlowElement } from 'mdast-util-mdx-jsx';
-import { NxGeneratorInfo } from '../utils/generators';
-import {
-  describePredicate,
-  evaluatePredicate,
-  extractStringArrayExpression,
-  parseWhenExpression,
-  type Predicate,
-} from './option-filter';
 import {
   buildCreateNxWorkspaceCommand,
   buildInstallCommand,
   buildPackageManagerExecCommand,
   buildPackageManagerShortCommand,
 } from '../utils/commands';
+import type { NxGeneratorInfo } from '../utils/generators';
 import {
   buildNxCommand,
   renderGeneratorCommand,
@@ -39,13 +33,19 @@ import {
 import {
   hasBareAttr,
   isJsxElement,
+  type JsxElement,
+  type JsxParent,
   readEstreeAttr,
   readExpressionAttr,
   readStringAttr,
-  type JsxElement,
-  type JsxParent,
 } from './mdx-ast';
-import fs from 'fs';
+import {
+  describePredicate,
+  evaluatePredicate,
+  extractStringArrayExpression,
+  type Predicate,
+  parseWhenExpression,
+} from './option-filter';
 
 export interface PipelineOptions {
   generators: NxGeneratorInfo[];

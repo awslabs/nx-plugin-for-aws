@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { PyApiGeneratorSchema } from './schema';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import type { Tree } from '@nx/devkit';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { pyFastApiProjectGenerator } from '../fast-api/generator';
+import type { PyApiGeneratorSchema } from './schema';
 
 export const PY_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

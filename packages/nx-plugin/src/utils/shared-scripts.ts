@@ -7,18 +7,18 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
 } from '@nx/devkit';
-import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
-import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
+import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
-  SHARED_SCRIPTS_NAME,
   SHARED_SCRIPTS_DIR,
+  SHARED_SCRIPTS_NAME,
 } from './shared-constructs-constants';
+import { withVersions } from './versions';
 
 /**
  * Lazily creates the shared scripts package at packages/common/scripts/.

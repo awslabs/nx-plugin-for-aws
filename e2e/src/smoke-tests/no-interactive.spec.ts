@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { PackageManager } from '@nx/devkit';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { existsSync, rmSync } from 'fs';
+
+import { existsSync, rmSync } from 'node:fs';
+import type { PackageManager } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { activatePackageManagerViaCorepack } from './corepack';
 
 /**
@@ -19,7 +20,7 @@ import { activatePackageManagerViaCorepack } from './corepack';
 interface Variant {
   variant: string;
   pkgMgr: PackageManager;
-  setup?: () => void | (() => void);
+  setup?: () => undefined | (() => void);
 }
 
 const VARIANTS: Variant[] = [
@@ -47,7 +48,7 @@ describe('smoke test - no-interactive', () => {
     describe(variant, () => {
       const targetDir = `${tmpProjPath()}/no-interactive-${variant}`;
       const projectRoot = `${targetDir}/e2e-test`;
-      let teardown: (() => void) | void;
+      let teardown: (() => void) | undefined;
 
       beforeEach(() => {
         teardown = setup?.();

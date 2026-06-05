@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import { execSync } from 'child_process';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,

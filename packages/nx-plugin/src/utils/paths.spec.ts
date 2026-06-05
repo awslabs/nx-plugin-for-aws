@@ -2,13 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import * as devkit from '@nx/devkit';
 import { describe, expect, it, vi } from 'vitest';
 import {
   getRelativePathToRoot,
   getRelativePathToRootByDirectory,
 } from './paths';
-import * as devkit from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from './test';
+
 vi.mock('@nx/devkit', async () => {
   const actual = await vi.importActual('@nx/devkit');
   return {

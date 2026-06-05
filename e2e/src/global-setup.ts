@@ -2,17 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { startLocalRegistry } from '@nx/js/plugins/jest/local-registry';
-import { join } from 'path';
-import { execSync } from 'child_process';
+
+import { execSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
-  rmSync,
   readFileSync,
+  rmSync,
   writeFileSync,
-} from 'fs';
-import { homedir } from 'os';
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { startLocalRegistry } from '@nx/js/plugins/jest/local-registry';
 
 const PUBLIC_REGISTRY = 'https://registry.npmjs.org/';
 const VERDACCIO_AUTH_TOKEN = 'secretVerdaccioToken';

@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import { addAgentTargetToServeLocal } from '../../../connection/agent-serve-local';
-import { ComponentMetadata } from '../../../utils/nx';
+import type { ComponentMetadata } from '../../../utils/nx';
 
 export interface TsAgentServeLocalOptions {
   agentName: string;

@@ -2,14 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { execSync } from 'child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { execSync } from 'node:child_process';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
-import { join } from 'path';
 
 import { runCLI, tmpProjPath } from '../utils';
-import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
-import { runTerraformSmokeTest } from './terraform-smoke-test';
 import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
@@ -22,6 +20,8 @@ import {
   invokeTrpcApi,
   pingWebsite,
 } from './deploy-invocations';
+import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
+import { runTerraformSmokeTest } from './terraform-smoke-test';
 
 function readTerraformOutputs(projectRoot: string): Record<string, string> {
   // Read outputs directly (not via `nx output`) to avoid nx cache serving a stale value.

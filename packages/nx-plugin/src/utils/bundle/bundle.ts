@@ -8,14 +8,14 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
-  TargetConfiguration,
-  Tree,
+  type ProjectConfiguration,
+  type TargetConfiguration,
+  type Tree,
 } from '@nx/devkit';
-import { withVersions } from '../versions';
 import { applyGritQL } from '../ast';
-import { getRelativePathToRoot } from '../paths';
 import { addDependencyToTargetIfNotPresent } from '../nx';
+import { getRelativePathToRoot } from '../paths';
+import { withVersions } from '../versions';
 
 export interface AddPythonBundleTargetOptions {
   /**
@@ -25,7 +25,8 @@ export interface AddPythonBundleTargetOptions {
   pythonPlatform?: 'x86_64-manylinux_2_28' | 'aarch64-manylinux_2_28';
 }
 
-interface CreatePythonBundleTargetOptions extends Required<AddPythonBundleTargetOptions> {
+interface CreatePythonBundleTargetOptions
+  extends Required<AddPythonBundleTargetOptions> {
   /**
    * Python package name
    */

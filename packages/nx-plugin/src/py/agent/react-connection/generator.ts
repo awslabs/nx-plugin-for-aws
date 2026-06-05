@@ -7,30 +7,30 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  Tree,
+  type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import {
-  ComponentMetadata,
-  NxGeneratorInfo,
+  type AgUiAuth,
+  addAgUiReactConnection,
+} from '../../../ts/react-website/agui/generator';
+import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
+import { formatFilesInSubtree } from '../../../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
+import {
+  type ComponentMetadata,
   getGeneratorInfo,
+  type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
-import { ResolvedConnectionOptions } from '../../../connection/generator';
-import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
-import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
 import { sortObjectKeys } from '../../../utils/object';
 import {
   addPyAgentTargetToServeLocal,
   openApiClientServeLocalDeps,
 } from './serve-local';
-import {
-  addAgUiReactConnection,
-  AgUiAuth,
-} from '../../../ts/react-website/agui/generator';
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

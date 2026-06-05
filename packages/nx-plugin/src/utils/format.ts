@@ -2,14 +2,81 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, Tree } from '@nx/devkit';
-import path from 'path';
-import type * as Prettier from 'prettier';
+
+import { Biome } from '@biomejs/js-api/nodejs';
+import type { Tree } from '@nx/devkit';
 import { execSync } from 'child_process';
+import path from 'path';
+
+export const DEFAULT_BIOME_CONFIG = {
+  $schema: 'https://biomejs.dev/schemas/2.4.16/schema.json',
+  root: true,
+  formatter: {
+    enabled: true,
+    indentStyle: 'space',
+    indentWidth: 2,
+    lineWidth: 80,
+  },
+  javascript: {
+    formatter: {
+      quoteStyle: 'single',
+      trailingCommas: 'all',
+    },
+  },
+  css: {
+    formatter: {
+      quoteStyle: 'single',
+    },
+    linter: {
+      enabled: false,
+    },
+  },
+  linter: {
+    enabled: true,
+    rules: {
+      recommended: false,
+      correctness: {
+        noUndeclaredDependencies: 'warn',
+      },
+    },
+  },
+  assist: {
+    actions: {
+      source: {
+        organizeImports: 'on',
+      },
+    },
+  },
+  files: {
+    includes: [
+      '**',
+      '!**/dist',
+      '!**/out-tsc',
+      '!**/node_modules',
+      '!**/.nx',
+      '!**/.venv',
+      '!**/*.css',
+    ],
+  },
+};
+
+const BIOME_FORMATTABLE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.mts',
+  '.cts',
+  '.json',
+  '.jsonc',
+  '.css',
+]);
 
 /**
  * Format files in the given directory within the tree.
- * Handles both TypeScript/JavaScript (via prettier) and Python (via ruff) files.
+ * Handles both TypeScript/JavaScript/JSON (via biome) and Python (via ruff) files.
  * See https://github.com/nrwl/nx/blob/4cd640a9187954505d12de5b6d76a90d8ce4c2eb/packages/devkit/src/generators/format-files.ts#L11
  */
 export async function formatFilesInSubtree(
@@ -22,7 +89,9 @@ export async function formatFilesInSubtree(
     .filter((file) => (dir ? file.path.startsWith(dir) : true));
 
   const pyFiles = changedFiles.filter((file) => file.path.endsWith('.py'));
-  const otherFiles = changedFiles.filter((file) => !file.path.endsWith('.py'));
+  const otherFiles = changedFiles.filter((file) =>
+    BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)),
+  );
 
   // Format Python files with ruff (lint fixes + formatting)
   for (const file of pyFiles) {
@@ -37,45 +106,35 @@ export async function formatFilesInSubtree(
     }
   }
 
-  // Format other files with prettier
-  let prettier: typeof Prettier;
-  try {
-    prettier = await import('prettier');
-  } catch {
-    // Skip formatting if prettier cannot be imported
-    return;
-  }
-  const changedPrettierInTree = getChangedPrettierConfigInTree(tree);
-  await Promise.all(
-    otherFiles.map(async (file) => {
-      try {
-        const systemPath = path.join(tree.root, file.path);
-        const resolvedOptions = await prettier.resolveConfig(systemPath, {
-          editorconfig: true,
-        });
-        const options: Prettier.Options = {
-          trailingComma: 'all',
-          ...resolvedOptions,
-          ...changedPrettierInTree,
-          filepath: systemPath,
-        };
-        const support = await prettier.getFileInfo(systemPath, options as any);
-        if (support.ignored || !support.inferredParser) {
-          return;
-        }
+  // Format TS/JS/JSON/CSS files with Biome via its library API, so nothing is
+  // written to the filesystem (the config is applied in-memory).
+  if (otherFiles.length === 0) return;
 
-        tree.write(
-          file.path,
-          // In prettier v3 the format result is a promise
-          await (prettier.format(file.content.toString('utf-8'), options) as
-            | Promise<string>
-            | string),
+  try {
+    const biome = new Biome();
+    const { projectKey } = biome.openProject();
+    // Apply the workspace biome.json if it exists in the tree, otherwise the defaults.
+    const treeConfig = tree.read('biome.json', 'utf-8');
+    biome.applyConfiguration(
+      projectKey,
+      treeConfig ? JSON.parse(treeConfig) : DEFAULT_BIOME_CONFIG,
+    );
+
+    for (const file of otherFiles) {
+      try {
+        const { content } = biome.formatContent(
+          projectKey,
+          file.content.toString('utf-8'),
+          { filePath: file.path },
         );
-      } catch (e) {
-        console.warn(`Could not format ${file.path}. Error: "${e.message}"`);
+        tree.write(file.path, content);
+      } catch {
+        // Leave individual files that fail to format untouched
       }
-    }),
-  );
+    }
+  } catch {
+    // Silently skip formatting failures
+  }
 }
 
 /**
@@ -138,15 +197,4 @@ function ruffFixAndFormat(content: string, filePath: string): string {
   }
 
   return content;
-}
-function getChangedPrettierConfigInTree(tree: Tree): Prettier.Options | null {
-  if (tree.listChanges().find((file) => file.path === '.prettierrc')) {
-    try {
-      return readJson(tree, '.prettierrc');
-    } catch {
-      return null;
-    }
-  } else {
-    return null;
-  }
 }

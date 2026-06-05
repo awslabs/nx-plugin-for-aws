@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { getProjects, ProjectConfiguration, Tree } from '@nx/devkit';
+import { getProjects, type ProjectConfiguration, type Tree } from '@nx/devkit';
 
 /**
  * Assign a port shared across all projects created by the same generator.

@@ -2,12 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { flushChanges, FsTree, Tree } from 'nx/src/generators/tree';
-import { getGitIncludedFiles, isWithinGitRepo, updateGitIgnore } from './git';
+
+import { execSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
+import { FsTree, flushChanges, type Tree } from 'nx/src/generators/tree';
 import * as os from 'os';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { getGitIncludedFiles, isWithinGitRepo, updateGitIgnore } from './git';
 import { createTreeUsingTsSolutionSetup } from './test';
 
 describe('git utils', () => {

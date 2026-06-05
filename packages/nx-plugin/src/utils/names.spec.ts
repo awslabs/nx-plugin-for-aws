@@ -4,12 +4,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  toClassName,
-  toKebabCase,
-  toSnakeCase,
-  toDotNotation,
   kebabCase,
   snakeCase,
+  toClassName,
+  toDotNotation,
+  toKebabCase,
+  toSnakeCase,
 } from './names';
 
 describe('names utils', () => {

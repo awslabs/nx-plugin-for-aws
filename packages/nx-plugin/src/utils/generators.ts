@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import GeneratorsJson from '../../generators.json';
+
 import * as path from 'path';
+import GeneratorsJson from '../../generators.json';
 
 export interface GeneratorInfo {
   readonly id: string;

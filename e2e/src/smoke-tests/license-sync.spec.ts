@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+
+import { execSync } from 'node:child_process';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { join } from 'path';
-import { execSync } from 'child_process';
 
 describe('smoke test - license-sync', () => {
   const pkgMgr = 'pnpm';

@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import type { Tree } from '@nx/devkit';
 import { addDestructuredImport, applyGritQL, matchGritQL } from '../ast';
-import { Tree } from '@nx/devkit';
 
 export interface AddHookResultToRouterProviderContextProps {
   hook: string; // eg useAuth

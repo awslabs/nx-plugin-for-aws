@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
 import * as licenseChecker from 'license-checker-rseidelsohn';
+import { join } from 'path';
 
 export interface NpmDependency {
   name: string;

@@ -2,8 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { getProjects, readNxJson, Tree, updateNxJson } from '@nx/devkit';
-import { LicenseGeneratorSchema } from './schema';
+import { getProjects, readNxJson, type Tree, updateNxJson } from '@nx/devkit';
+import { PY_AGENT_GENERATOR_INFO } from '../py/agent/generator';
+import { PY_MCP_SERVER_GENERATOR_INFO } from '../py/mcp-server/generator';
+import { TS_MCP_SERVER_GENERATOR_INFO } from '../ts/mcp-server/generator';
+import { ensureAwsNxPluginConfig } from '../utils/config/utils';
+import { formatFilesInSubtree } from '../utils/format';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
 import {
   addLicenseCheckToAllLintTargets,
   defaultLicenseConfig,
@@ -13,18 +19,12 @@ import {
   updateLicenseCheckTargetInputs,
   writeLicenseConfig,
 } from './config';
-import { ensureAwsNxPluginConfig } from '../utils/config/utils';
-import { SYNC_GENERATOR_NAME } from './sync/generator';
-import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { formatFilesInSubtree } from '../utils/format';
 import {
-  MCP_INSPECTOR_EXCEPTIONS,
   AG_UI_STRANDS_EXCEPTIONS,
+  MCP_INSPECTOR_EXCEPTIONS,
 } from './known-exceptions';
-import { TS_MCP_SERVER_GENERATOR_INFO } from '../ts/mcp-server/generator';
-import { PY_MCP_SERVER_GENERATOR_INFO } from '../py/mcp-server/generator';
-import { PY_AGENT_GENERATOR_INFO } from '../py/agent/generator';
+import type { LicenseGeneratorSchema } from './schema';
+import { SYNC_GENERATOR_NAME } from './sync/generator';
 
 export const LICENSE_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

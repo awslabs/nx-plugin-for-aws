@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { Spec } from '../utils/types';
-import { openApiTsHooksGenerator } from './generator';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+import type { Spec } from '../utils/types';
+import { openApiTsHooksGenerator } from './generator';
 
 describe('openApiTsHooksGenerator - Duplicate Types', () => {
   let tree: Tree;

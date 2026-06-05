@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { openApiTsClientGenerator } from './generator';
+
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { Spec } from '../utils/types';
-import { Tree } from '@nx/devkit';
 import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
+import type { Spec } from '../utils/types';
+import { openApiTsClientGenerator } from './generator';
 
 describe('openApiTsClientGenerator - duplicate types', () => {
   let tree: Tree;
