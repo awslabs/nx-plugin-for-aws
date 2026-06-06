@@ -5,7 +5,8 @@
 
 import { Biome } from '@biomejs/js-api/nodejs';
 import type { Tree } from '@nx/devkit';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 
 export const DEFAULT_BIOME_CONFIG = {
@@ -106,10 +107,60 @@ export async function formatFilesInSubtree(
     }
   }
 
-  // Format TS/JS/JSON/CSS files with Biome via its library API, so nothing is
-  // written to the filesystem (the config is applied in-memory).
   if (otherFiles.length === 0) return;
 
+  // Use the workspace's own Biome CLI (its version and config) when biome.json
+  // exists on disk; otherwise format via the bundled library API with the
+  // in-memory tree config. The CLI path does not see in-tree config changes.
+  if (existsSync(path.join(tree.root, 'biome.json'))) {
+    formatWithBiomeCli(tree, otherFiles);
+  } else {
+    formatWithBiomeApi(tree, otherFiles);
+  }
+}
+
+/**
+ * Format files via the workspace's Biome CLI, run from the workspace root so it
+ * discovers the on-disk biome.json.
+ */
+function formatWithBiomeCli(
+  tree: Tree,
+  files: { path: string; content: Buffer | null }[],
+): void {
+  const biome = getBiomeCommand(tree.root);
+  if (!biome) {
+    // Fall back to the library API if the CLI cannot be resolved
+    formatWithBiomeApi(tree, files);
+    return;
+  }
+
+  for (const file of files) {
+    try {
+      const content = execFileSync(
+        biome.command,
+        [...biome.args, 'format', `--stdin-file-path=${file.path}`],
+        {
+          input: file.content?.toString('utf-8') ?? '',
+          encoding: 'utf-8',
+          cwd: tree.root,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+      );
+      tree.write(file.path, content);
+    } catch {
+      // Leave individual files that fail to format untouched
+    }
+  }
+}
+
+/**
+ * Format files via the bundled Biome library API, applying the in-memory tree
+ * config.
+ */
+function formatWithBiomeApi(
+  tree: Tree,
+  files: { path: string; content: Buffer | null }[],
+): void {
   try {
     const biome = new Biome();
     const { projectKey } = biome.openProject();
@@ -120,11 +171,11 @@ export async function formatFilesInSubtree(
       treeConfig ? JSON.parse(treeConfig) : DEFAULT_BIOME_CONFIG,
     );
 
-    for (const file of otherFiles) {
+    for (const file of files) {
       try {
         const { content } = biome.formatContent(
           projectKey,
-          file.content.toString('utf-8'),
+          file.content?.toString('utf-8') ?? '',
           { filePath: file.path },
         );
         tree.write(file.path, content);
@@ -134,6 +185,53 @@ export async function formatFilesInSubtree(
     }
   } catch {
     // Silently skip formatting failures
+  }
+}
+
+interface BiomeCommand {
+  command: string;
+  args: string[];
+}
+
+/**
+ * Resolve the `@biomejs/biome` CLI from the user's workspace, falling back to a
+ * `biome` binary on the PATH.
+ */
+const _biomeCommands = new Map<string, BiomeCommand | null>();
+function getBiomeCommand(root: string): BiomeCommand | undefined {
+  if (_biomeCommands.has(root)) {
+    return _biomeCommands.get(root) ?? undefined;
+  }
+
+  // Run via node for cross-platform execution of the bin shim.
+  try {
+    const pkgJsonPath = require.resolve('@biomejs/biome/package.json', {
+      paths: [root, __dirname],
+    });
+    const pkgJson = require(pkgJsonPath);
+    const binRelative =
+      typeof pkgJson.bin === 'string' ? pkgJson.bin : pkgJson.bin?.biome;
+    if (binRelative) {
+      const binPath = path.join(path.dirname(pkgJsonPath), binRelative);
+      const command = { command: process.execPath, args: [binPath] };
+      _biomeCommands.set(root, command);
+      return command;
+    }
+  } catch {
+    // Fall back to a biome binary on the PATH
+  }
+
+  try {
+    execSync('biome --version', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const command = { command: 'biome', args: [] };
+    _biomeCommands.set(root, command);
+    return command;
+  } catch {
+    _biomeCommands.set(root, null);
+    return undefined;
   }
 }
 
