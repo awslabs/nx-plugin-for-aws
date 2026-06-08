@@ -7,6 +7,7 @@ import {
   readNxJson,
   readProjectConfiguration,
   type Tree,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tsLibGenerator from '../../ts/lib/generator';
@@ -478,6 +479,27 @@ describe('terraformProjectGenerator', () => {
       expect(
         tree.read('packages/my-terraform-project/src/main.tf', 'utf-8'),
       ).toEqual(mainTfAfterFirstRun);
+    });
+
+    it('should preserve project.json customisations when re-run', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const config = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      config.targets = {
+        ...config.targets,
+        custom: { executor: 'nx:noop' },
+      };
+      updateProjectConfiguration(tree, '@proj/my-terraform-project', config);
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(
+        readProjectConfiguration(tree, '@proj/my-terraform-project').targets
+          ?.custom,
+      ).toEqual({ executor: 'nx:noop' });
     });
 
     it('should create an independent project when run with a different name', async () => {

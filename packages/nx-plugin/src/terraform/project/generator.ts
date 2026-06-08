@@ -16,7 +16,6 @@ import {
   type Tree,
   updateJson,
   updateNxJson,
-  updateProjectConfiguration,
 } from '@nx/devkit';
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
@@ -241,12 +240,9 @@ export async function terraformProjectGenerator(
     }),
   };
 
-  if (projectExists(tree, lib.fullyQualifiedName)) {
-    updateProjectConfiguration(tree, lib.fullyQualifiedName, {
-      ...projectConfiguration,
-      name: lib.fullyQualifiedName,
-    });
-  } else {
+  // Only create the project configuration on first run; skip it on re-run so
+  // existing project.json customisations are preserved.
+  if (!projectExists(tree, lib.fullyQualifiedName)) {
     addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
   }
   addGeneratorMetadata(
