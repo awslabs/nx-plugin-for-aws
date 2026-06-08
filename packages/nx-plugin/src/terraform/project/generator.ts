@@ -12,7 +12,6 @@ import {
   joinPathFragments,
   OverwriteStrategy,
   readNxJson,
-  readProjectConfiguration,
   type TargetConfiguration,
   type Tree,
   updateJson,
@@ -28,6 +27,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { uvxCommand } from '../../utils/py';
@@ -241,15 +241,7 @@ export async function terraformProjectGenerator(
     }),
   };
 
-  let projectExists: boolean;
-  try {
-    readProjectConfiguration(tree, lib.fullyQualifiedName);
-    projectExists = true;
-  } catch {
-    projectExists = false;
-  }
-
-  if (projectExists) {
+  if (projectExists(tree, lib.fullyQualifiedName)) {
     updateProjectConfiguration(tree, lib.fullyQualifiedName, {
       ...projectConfiguration,
       name: lib.fullyQualifiedName,

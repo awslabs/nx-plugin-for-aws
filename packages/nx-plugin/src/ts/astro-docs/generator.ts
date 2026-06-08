@@ -7,10 +7,8 @@ import {
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
-  getProjects,
   installPackagesTask,
   joinPathFragments,
-  logger,
   OverwriteStrategy,
   type ProjectConfiguration,
   type Tree,
@@ -23,6 +21,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { type ITsDepVersion, withVersions } from '../../utils/versions';
@@ -46,12 +45,7 @@ export const tsAstroDocsGenerator = async (
     schema.subDirectory || docsNameKebabCase,
   );
 
-  if (getProjects(tree).has(fullyQualifiedName)) {
-    logger.info(
-      `Project ${fullyQualifiedName} already exists, skipping ts#astro-docs generator.`,
-    );
-    return () => {};
-  }
+  const alreadyExists = projectExists(tree, fullyQualifiedName);
 
   const targets: ProjectConfiguration['targets'] = {
     build: {
@@ -96,13 +90,15 @@ export const tsAstroDocsGenerator = async (
     };
   }
 
-  addProjectConfiguration(tree, fullyQualifiedName, {
-    name: fullyQualifiedName,
-    root: dir,
-    sourceRoot: joinPathFragments(dir, 'src'),
-    projectType: 'application',
-    targets,
-  });
+  if (!alreadyExists) {
+    addProjectConfiguration(tree, fullyQualifiedName, {
+      name: fullyQualifiedName,
+      root: dir,
+      sourceRoot: joinPathFragments(dir, 'src'),
+      projectType: 'application',
+      targets,
+    });
+  }
 
   const templateOptions = {
     fullyQualifiedName,

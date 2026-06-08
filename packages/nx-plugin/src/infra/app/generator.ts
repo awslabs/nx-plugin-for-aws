@@ -26,6 +26,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
@@ -50,15 +51,7 @@ export async function tsInfraGenerator(
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
 
-  let projectExists: boolean;
-  try {
-    readProjectConfiguration(tree, lib.fullyQualifiedName);
-    projectExists = true;
-  } catch {
-    projectExists = false;
-  }
-
-  if (!projectExists) {
+  if (!projectExists(tree, lib.fullyQualifiedName)) {
     await tsProjectGenerator(tree, schema);
   }
 

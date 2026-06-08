@@ -8,7 +8,6 @@ import {
   generateFiles,
   installPackagesTask,
   joinPathFragments,
-  readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
 import { getTsLibDetails } from '../../ts/lib/generator';
@@ -22,6 +21,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
@@ -38,15 +38,7 @@ export const smithyProjectGenerator = async (
   // Create project.json
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);
 
-  let projectExists: boolean;
-  try {
-    readProjectConfiguration(tree, fullyQualifiedName);
-    projectExists = true;
-  } catch {
-    projectExists = false;
-  }
-
-  if (!projectExists) {
+  if (!projectExists(tree, fullyQualifiedName)) {
     addProjectConfiguration(tree, fullyQualifiedName, {
       name: fullyQualifiedName,
       root: dir,

@@ -229,6 +229,31 @@ describe('ts#astro-docs generator', () => {
     );
   });
 
+  it('should add the blog when re-run with the blog enabled', async () => {
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      noBlog: true,
+      skipInstall: true,
+    });
+
+    expect(
+      tree.exists('docs/src/content/docs/en/blog/welcome.mdx'),
+    ).toBeFalsy();
+
+    await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
+
+    expect(
+      tree.exists('docs/src/content/docs/en/blog/welcome.mdx'),
+    ).toBeTruthy();
+
+    const packageJson = readJson(tree, 'package.json');
+    const deps = {
+      ...(packageJson.dependencies ?? {}),
+      ...(packageJson.devDependencies ?? {}),
+    };
+    expect(deps).toHaveProperty('starlight-blog');
+  });
+
   it('should create a second independent project when run with a different name', async () => {
     await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
     await tsAstroDocsGenerator(tree, {
