@@ -1,6 +1,6 @@
 ---
-title: "UIの構築"
-description: "@aws/nx-pluginを使用したエージェント型AI搭載のダンジョン冒険ゲームの作り方チュートリアル"
+title: UIを構築する
+description: '@aws/nx-pluginを使用してエージェント型AI駆動のダンジョンアドベンチャーゲームを構築する方法のチュートリアル。'
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -21,99 +21,142 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## タスク1: すべてをローカルで実行
+## タスク1: すべてをローカルで実行する
 
-フルローカルスタック — game-ui開発サーバー、ローカルGame API、ローカルAG-UI Story Agent（これがInventory MCPサーバーを起動します）— を1つのコマンドで起動します:
+完全なローカルスタック — game-ui開発サーバーとローカルGame API、そしてローカルAG-UI Story Agent（これがInventory MCPサーバーを起動します）— を1つのコマンドで起動します：
 
 <NxCommands commands={["serve-local game-ui"]} />
 
-`game-ui:serve-local`は`game-api:serve-local`と`dungeon_adventure.story:agent-serve-local`に`dependsOn`しているため、Nxは各プロジェクトのローカルサーバーを並行して起動します。ブラウザで開発サーバーを開き、新規ユーザー作成のプロンプトに従います。
+`game-ui:serve-local`は`game-api:serve-local`と`dungeon_adventure.story:agent-serve-local`に`dependsOn`しているため、Nxは各プロジェクトのローカルサーバーを並列で起動します。モジュール1で設定した接続を通じて、これらはInventory MCPサーバーとDynamoDB Localを起動します。コンテナエンジンが実行されていることを確認してから、ブラウザで開発サーバーを開いてください。
 
-<Aside type="caution" title="開発サーバーを起動したまま">
-このモジュールの残りの作業中は開発サーバーを起動したままにしてください。以下のすべての変更がホットリロードされます。
+<Aside type="tip" title="ローカルではログイン不要">
+`serve-local`モードでは、`CognitoAuth`コンポーネントはCognitoログインフローをスキップします（ローカルで実行されているユーザープールがないため）。そのため、サインインせずにゲームに直接アクセスできます。このモジュールの最後にAWSにデプロイする際に、実際のアカウントを作成します。
 </Aside>
 
-<Aside type="tip" title="代わりにデプロイ済みバックエンドを指す">
-ローカル開発サーバーを既にデプロイされたAPI + エージェントと通信させたい場合は、デプロイされたランタイム設定を一度取得してから、通常の`serve`ターゲットを使用します:
-
-<NxCommands commands={["run game-ui:load:runtime-config"]} />
-<NxCommands commands={["serve game-ui"]} />
-
-これは、UIコードのみを反復処理していて、実際のバックエンドに対してテストしたい場合に便利です。
+<Aside type="caution" title="開発サーバーを実行し続ける">
+このモジュールの残りの部分では開発サーバーを実行したままにしてください — 以下のすべての変更がホットリロードされます。
 </Aside>
 
-## タスク2: CopilotKitが既に配線されている場所
+## タスク2: CopilotKitがすでに配線されている場所
 
-<Link path="get_started/tutorials/dungeon-game/1">モジュール1</Link>で`game-ui → story`の`connection`ジェネレータを実行したとき、ShadcnウェブサイトのAG-UI統合が自動生成されました。簡単に確認してみましょう:
+<Link path="get_started/tutorials/dungeon-game/1">モジュール1</Link>で`game-ui → story`の`connection`ジェネレーターを実行したとき、ShadcnウェブサイトのAG-UI統合が自動生成されました。簡単に見てみる価値があります：
 
 <FileTree>
 - packages/game-ui/src/
   - components/
     - AguiProvider.tsx すべてのAG-UIエージェントに登録された単一の`CopilotKitProvider`。
     - copilot/
-      - index.tsx テーマ化された`CopilotChat` / `CopilotSidebar` / `CopilotPopup`を再エクスポート。
+      - index.tsx テーマ付きの`CopilotChat` / `CopilotSidebar` / `CopilotPopup`を再エクスポート。
       - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
   - hooks/
-    - useAguiStoryAgent.tsx デプロイされたStory Agentを指す`@ag-ui/client`の`HttpAgent`をインスタンス化し、`threadId`をAgentCoreの最小セッションID長である33文字にパディング。
-  - main.tsx `<App />`を`<AguiProvider>`でラップ
+    - useAguiStoryAgent.tsx デプロイされたStory Agentを指す`@ag-ui/client` `HttpAgent`をインスタンス化し、`threadId`をAgentCoreの33文字の最小セッションIDにパディングします。
+  - main.tsx `<App />`を`<AguiProvider>`でラップします
 </FileTree>
 
-必要なのは、ルートに`<CopilotChat agentId="agent" threadId={...} />`を配置するだけです。統合の詳細については、<Link path="guides/connection/react-agui">React → AG-UI接続ガイド</Link>を参照してください。
+必要なのは、ルートに`<CopilotChat agentId="agent" threadId={...} />`をドロップするだけです。統合がどのように構成されているかの詳細については、<Link path="guides/connection/react-agui">React → AG-UI接続ガイド</Link>を参照してください。
 
-## タスク3: ダンジョン用のスタイル変更
+## タスク3: ダンジョン用にスタイルを変更する
 
-`packages/game-ui/src/styles.css`を置き換えます。これはスタイリングのために変更する*唯一*のファイルです。共有のShadcnグローバルをインポートし、パレットを松明で照らされたダンジョンテーマに上書きし、CopilotKitがそれらの色を継承するようにします:
+`packages/game-ui/src/styles.css`を置き換えます — これはスタイリングのために変更する*唯一*のファイルです。共有Shadcnグローバルをインポートし、パレットをたいまつで照らされたダンジョンテーマにオーバーライドし、CopilotKitがそれらの色を継承するようにします：
 
 <E2ECode lang="css" path="dungeon-adventure/4/styles.css.template" />
 
-## タスク4: ゲームルートの作成
+## タスク4: ゲームルートを作成する
 
-2つのルートが必要です。1つはヒーローを選ぶため、もう1つはプレイするためです。どちらもshadcnコンポーネントとCopilotKitチャットを使用します。手作りのチャットUIはありません。
+2つのルートが必要です — 1つはヒーローを選ぶため、もう1つはプレイするためです。両方ともshadcnコンポーネントとCopilotKitチャットを使用します。手作りのチャットUIはありません。
 
 <Tabs>
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-これはゲームピッカーです: 新規ゲームフォーム（shadcnの`Input` + `Button` + `Card`）と、`useInfiniteQuery`を使用した`useGameApi().games.query`によって供給される「続きから」リスト — 下部のセンチネル`<div>`が`IntersectionObserver`によって監視され、ビューにスクロールされると自動的に`fetchNextPage()`を呼び出し、見出しの横とリストの下のスピナーがローディング状態を表示します。ゲームを開始すると`(playerName, genre)`ペアを`saveGame`し（次回表示されるように）、プレイルートに移動します。
+これはゲームピッカーです：新規ゲームフォーム（shadcnの`Input` + `Button` + `Card`）と、`useGameApi().games.query`と`useInfiniteQuery`によって供給される「続ける」リスト — 下部のセンチネル`<div>`が`IntersectionObserver`によって監視され、ビューにスクロールされると自動的に`fetchNextPage()`を呼び出し、見出しの横とリストの下のスピナーがローディング状態を表示します。ゲームを開始すると、`(playerName, genre)`ペアを`saveGame`し（次回表示されるように）、プレイルートに移動します。
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-これはプレイルートです。決定論的な`threadId`（``{player}-{genre}``を33文字にパディング — AG-UIフックはこれをそのままAgentCoreセッションIDとして送信）を構築し、`<CopilotChat agentId="agent" threadId={threadId} />`をレンダリングし、`useGameApi().inventory.query`からのインベントリを上にオーバーレイします。マウント時に、`useGameApi().actions.query({ sessionId: threadId })`がエージェントがS3に保存した会話履歴を読み取り — 履歴がある場合は — `agent.setMessages(...)`を呼び出してチャットを再ハイドレートします。履歴がない場合は、ストーリーを開始するための1つのプライミングユーザーメッセージを送信します。`agent.messages`は`useAgent({ updates: [OnMessagesChanged] })`を介してサブスクライブされているため、新しいターンごとにインベントリクエリも再フェッチされます（MCPツール呼び出しはDynamoDBを直接変更します）。
+これはプレイルートです。決定論的な`threadId`（``{player}-{genre}``を33文字にパディング — AG-UIフックはこれをAgentCoreセッションIDとしてそのまま送信します）を構築し、`<CopilotChat agentId="agent" threadId={threadId} />`をレンダリングし、`useGameApi().inventory.query`からのインベントリを上にオーバーレイします。マウント時に、`useGameApi().actions.query({ sessionId: threadId })`がエージェントがS3に保存した会話履歴を読み取り — もしあれば — `agent.setMessages(...)`を呼び出してチャットを再ハイドレートします。そうでなければ、ストーリーを開始するために1つのプライミングユーザーメッセージを送信します。`agent.messages`は`useAgent({ updates: [OnMessagesChanged] })`を介してサブスクライブされているため、新しいターンごとにインベントリクエリも再フェッチされます（MCPツール呼び出しはDynamoDBを直接変更します）。
 
 <Aside type="tip" title="`isLoading`ではなく`isFetching`を待つ">
-React Queryのデフォルトキャッシュは最初の結果を5分間保持するため、再訪問時には最初のロードからの古い空のリストが最初に表示されます。`staleTime: 0` + `refetchOnMount: 'always'`を設定し、ハイドレーション`useEffect`を`!isFetching && isSuccess`でガードすることで、再プライムパスが本当に空のスレッドでのみ実行されるようにします。
+React Queryのデフォルトキャッシュは最初の結果を5分間保持するため、再訪問時には最初のロード時の古い空のリストが最初に表示されます。`staleTime: 0` + `refetchOnMount: 'always'`を設定し、ハイドレーション`useEffect`を`!isFetching && isSuccess`でガードすることで、再プライムパスは本当に空のスレッドでのみ発火します。
 </Aside>
 
-<Aside type="tip" title="決定論的なthreadIdにより/game/$playerName?genre=...が共有可能に">
-同じURLを再訪問すると — リロード後、再デプロイ後、または別のデバイスでも — 同じ`threadId`に解決されるため、エージェントは同じストーリーを語り続けます。
+<Aside type="tip" title="決定論的なthreadIdは/game/$playerName?genre=...を共有可能にする">
+同じURLを再訪問すると — リロード後、再デプロイ後、または別のデバイスで — 同じ`threadId`に解決されるため、エージェントは同じストーリーを語り続けます。
 </Aside>
 
 <Aside type="tip" title="パスパラメータ">
-`$playerName`構文は`@tanstack/react-router`に`playerName`を[パスパラメータ](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)として扱うよう指示します。`validateSearch`は`genre`を列挙型に対して厳密に型付けします。
+`$playerName`構文は、`@tanstack/react-router`に`playerName`を[パスパラメータ](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)として扱うように指示します。`validateSearch`は`genre`を列挙型に対して強く型付けします。
 </Aside>
 </TabItem>
 </Tabs>
 
 保存すると、`http://localhost:4200/`の開発サーバーで冒険を開始し、Story Agentとチャットできるようになります。
 
-<Drawer title="ビルドとデプロイ" trigger="CloudFrontへのコードのビルド＆デプロイも可能です">
-
-## タスク5: ビルドとデプロイ
-
-### コードのビルド
-<PackageManagerShortCommand commands={["build"]} />
-
-### アプリケーションのデプロイ
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
-
-デプロイ後、CloudFront URL（CDK出力の`GameUIDistributionDomainName`）に移動します。
-
-</Drawer>
-
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
 <Image src={gameConversationPng} alt="game-conversation.png" width="600" height="310" />
 </div>
 
-おめでとうございます。エージェント型ダンジョンアドベンチャーゲームの構築とデプロイが完了しました! 🎉🎉🎉
+## タスク5: AWSにデプロイする
+
+ゲームが完成し、すべての部分をローカルでテストしました。次に、どこからでもプレイできるようにAWSにデプロイしましょう。
+
+### コードをビルドする
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### アプリケーションをデプロイする
+
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+
+:::caution[ブートストラップが必要]
+AWSアカウント/リージョンで初めてCDKデプロイを行う場合は、まずブートストラップしてください：
+
+<NxCommands commands={['bootstrap infra']} />
+:::
+
+最初のデプロイは完了まで約8分かかります。その後のデプロイはより高速です。
+
+デプロイが完了すると、次のような出力が表示されます：
+
+```bash
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox-Application
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+CloudFront URL（CDK出力の`GameUIDistributionDomainName`）に移動し、新しいアカウントにサインアップして、完全にAWS上で実行されているゲームをプレイしてください！
+
+## タスク6: ローカルとデプロイされたコンポーネントを混在させる
+
+スペクトラムの両端を見てきました：すべてローカル（`serve-local`）とすべてデプロイ済み。日常的な開発では、2つを混在させることがよく役立ちます — たとえば、*実際の*デプロイされたAPIとエージェントに対してウェブサイトコードを反復したり、*実際の*DynamoDBテーブルに対してAPIをローカルで実行したりします。
+
+鍵は`RUNTIME_CONFIG_APP_ID`環境変数です。プロジェクトが`SERVE_LOCAL=true`**なし**で実行される場合、ランタイム設定ルックアップは、このアプリケーションIDを使用してAWS AppConfigから設定を取得します — CDK出力の`RuntimeConfigApplicationId`値です。
+
+各ウェブサイトには、デプロイされた`runtime-config.json`（Cognitoプール、APIエンドポイント、エージェントARN）をローカル開発サーバーにダウンロードする`load:runtime-config`ターゲットがあります。いくつかの便利な組み合わせ：
+
+- **ローカルウェブサイト → デプロイされたバックエンド。** デプロイされた設定を一度プルしてから、プレーンな`serve`ターゲットを実行して、UIがデプロイされたAPIとエージェントと通信するようにします：
+
+  <NxCommands commands={["run game-ui:load:runtime-config"]} />
+  <NxCommands commands={["serve game-ui"]} />
+
+- **ローカルAPI → 実際のDynamoDBテーブル。** デプロイされたアプリケーションIDに設定された`RUNTIME_CONFIG_APP_ID`でプレーンな`serve`ターゲットを実行します：
+
+  <NxCommands env={{RUNTIME_CONFIG_APP_ID:"<RuntimeConfigApplicationId from CDK outputs>"}} commands={["serve game-api"]} />
+
+この柔軟性により、作業している正確なスライスを、意味のあるコンポーネント — ローカルまたはデプロイ済み — に対してテストできます。
+
+おめでとうございます。エージェント型ダンジョンアドベンチャーゲームを構築、テスト、デプロイしました！ 🎉🎉🎉�テスト、デプロイしました！ 🎉🎉🎉

@@ -27,19 +27,14 @@ Start the full local stack — the game-ui dev server together with a local Game
 
 <NxCommands commands={["serve-local game-ui"]} />
 
-`game-ui:serve-local` has `dependsOn` on `game-api:serve-local` and `dungeon_adventure.story:agent-serve-local`, so Nx spins up every project's local server in parallel. Open the dev server in a browser and follow the prompts to create a new user.
+`game-ui:serve-local` has `dependsOn` on `game-api:serve-local` and `dungeon_adventure.story:agent-serve-local`, so Nx spins up every project's local server in parallel. Through the connections we set up in Module 1, those in turn boot the Inventory MCP server and DynamoDB Local. Make sure your container engine is running, then open the dev server in a browser.
+
+<Aside type="tip" title="No login locally">
+In `serve-local` mode the `CognitoAuth` component skips the Cognito login flow (there's no user pool running locally), so you'll land straight on the game without signing in. You'll create a real account when we deploy to AWS at the end of this module.
+</Aside>
 
 <Aside type="caution" title="Keep Dev Server Running">
 Leave the dev server running for the rest of this module — it hot-reloads every change below.
-</Aside>
-
-<Aside type="tip" title="Pointing at the deployed backend instead">
-If you'd prefer your local dev server to talk to the already-deployed APIs + agent, pull the deployed runtime config once and then use the plain `serve` target:
-
-<NxCommands commands={["run game-ui:load:runtime-config"]} />
-<NxCommands commands={["serve game-ui"]} />
-
-This is handy when you're only iterating on UI code and want to test against the real backend.
 </Aside>
 
 ## Task 2: Where CopilotKit is already wired up
@@ -97,23 +92,71 @@ The `$playerName` syntax tells `@tanstack/react-router` to treat `playerName` as
 
 Once saved, the dev server at `http://localhost:4200/` should now let you start an adventure and chat with the Story Agent.
 
-<Drawer title="Build and Deploy" trigger="You can also build & deploy your code to CloudFront if you prefer.">
-
-## Task 5: Build and deploy
-
-### Build your code
-<PackageManagerShortCommand commands={["build"]} />
-
-### Deploy your application
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
-
-Once deployed, navigate to your CloudFront URL (`GameUIDistributionDomainName` from the CDK outputs).
-
-</Drawer>
-
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
 <Image src={gameConversationPng} alt="game-conversation.png" width="600" height="310" />
 </div>
 
-Congratulations. You have built and deployed your Agentic Dungeon Adventure Game!  🎉🎉🎉
+## Task 5: Deploy to AWS
+
+Your game is complete and you've tested every piece locally. Now let's deploy it to AWS so you can play it from anywhere.
+
+### Build your code
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Deploy your application
+
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+
+:::caution[Bootstrap Required]
+If this is the first CDK deployment in your AWS account/region, bootstrap it first:
+
+<NxCommands commands={['bootstrap infra']} />
+:::
+
+Your first deployment will take around 8 minutes to complete. Subsequent deployments are faster.
+
+Once the deployment completes, you will see outputs similar to the following:
+
+```bash
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox-Application
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+Navigate to your CloudFront URL (`GameUIDistributionDomainName` from the CDK outputs), sign up for a new account, and play your game running entirely on AWS!
+
+## Task 6: Mixing local and deployed components
+
+You've seen two ends of the spectrum: everything local (`serve-local`) and everything deployed. During day-to-day development it's often useful to mix the two — for example, iterate on website code against the *real* deployed API and agent, or run the API locally against the *real* DynamoDB table.
+
+The key is the `RUNTIME_CONFIG_APP_ID` environment variable. When a project runs **without** `SERVE_LOCAL=true`, the runtime config lookups fetch their configuration from AWS AppConfig using this application id — the `RuntimeConfigApplicationId` value from your CDK outputs.
+
+Each website has a `load:runtime-config` target that downloads the deployed `runtime-config.json` (Cognito pool, API endpoints, agent ARN) into the local dev server. Some useful combinations:
+
+- **Local website → deployed backend.** Pull the deployed config once, then run the plain `serve` target so the UI talks to the deployed API and agent:
+
+  <NxCommands commands={["run game-ui:load:runtime-config"]} />
+  <NxCommands commands={["serve game-ui"]} />
+
+- **Local API → real DynamoDB table.** Run the plain `serve` target with `RUNTIME_CONFIG_APP_ID` set to the deployed application id:
+
+  <NxCommands env={{RUNTIME_CONFIG_APP_ID:"<RuntimeConfigApplicationId from CDK outputs>"}} commands={["serve game-api"]} />
+
+This flexibility lets you test exactly the slice you're working on, against whichever components — local or deployed — make sense.
+
+Congratulations. You have built, tested, and deployed your Agentic Dungeon Adventure Game!  🎉🎉🎉

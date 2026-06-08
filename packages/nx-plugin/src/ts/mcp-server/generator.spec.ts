@@ -106,8 +106,16 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['mcp-server-inspect'].executor).toBe(
       'nx:run-commands',
     );
+    expect(projectConfig.targets['mcp-server-inspect'].dependsOn).toContain(
+      'mcp-server-serve-local',
+    );
     expect(
       projectConfig.targets['mcp-server-inspect'].options.commands[0],
+    ).toContain(
+      'mcp-inspector --transport http --server-url http://localhost:',
+    );
+    expect(
+      projectConfig.targets['mcp-server-inspect-stdio'].options.commands[0],
     ).toContain('mcp-inspector -- tsx --watch ./src/mcp-server/stdio.ts');
   });
 
@@ -148,8 +156,16 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
     expect(projectConfig.targets['custom-server-serve']).toBeDefined();
     expect(projectConfig.targets['custom-server-inspect']).toBeDefined();
+    expect(projectConfig.targets['custom-server-inspect'].dependsOn).toContain(
+      'custom-server-serve-local',
+    );
     expect(
       projectConfig.targets['custom-server-inspect'].options.commands[0],
+    ).toContain(
+      'mcp-inspector --transport http --server-url http://localhost:',
+    );
+    expect(
+      projectConfig.targets['custom-server-inspect-stdio'].options.commands[0],
     ).toContain('mcp-inspector -- tsx --watch ./src/custom-server/stdio.ts');
   });
 

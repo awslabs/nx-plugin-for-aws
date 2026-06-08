@@ -1,6 +1,6 @@
 ---
-title: "实现和配置Story代理"
-description: "使用 @aws/nx-plugin 构建代理式AI驱动的地牢冒险游戏的演练"
+title: 实现和配置 Story 代理
+description: 使用 @aws/nx-plugin 构建基于 AI 代理的地牢冒险游戏的演练。
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -21,13 +21,13 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## 任务 1：实现故事代理
+## 任务 1：实现 Story 代理
 
-故事代理是一个在 <Link path="get_started/tutorials/dungeon-game/1">模块 1</Link> 中使用 `--protocol=AG-UI` 生成的 [Strands](https://strandsagents.com/) 代理，因此 UI 可以通过 CopilotKit 以 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol)从中流式传输数据。它使用库存管理控制协议（MCP）服务器来管理玩家的物品，并使用 Strands 内置的 [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) 将对话历史持久化到我们在模块 2 中配置的会话存储桶中。
+Story 代理是一个在<Link path="get_started/tutorials/dungeon-game/1">模块 1</Link>中使用 `--protocol=AG-UI` 生成的 [Strands](https://strandsagents.com/) 代理，因此 UI 可以通过 CopilotKit 使用 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol)从中进行流式传输。它使用 Inventory MCP Server 来管理玩家的物品，并使用 Strands 内置的 [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) 将对话历史持久化到我们在模块 2 中配置的会话存储桶中。
 
 ### 代理实现
 
-更新 `packages/story/dungeon_adventure_story/agent` 目录下的以下文件：
+更新 `packages/story/dungeon_adventure_story/agent` 中的以下文件：
 
 <Tabs>
   <TabItem label="main.py">
@@ -38,12 +38,12 @@ import gameConversationPng from '@assets/game-conversation.png'
   </TabItem>
 </Tabs>
 
-更改内容包括：
+更改内容如下：
 
-- `main.py` 添加了一个 `session_manager_provider`，在部署时为每个 `thread_id` 创建一个 `S3SessionManager`，在 `agent-serve-local`（`SERVE_LOCAL=true`）下运行时则回退到 `/tmp/strands-sessions` 下的磁盘 `FileSessionManager`。部署时，S3 存储桶与 Game API 的 `queryActions` 读取的存储桶相同，因此浏览器可以在重新访问时重建对话记录；在本地，代理完全离线运行，针对本地 MCP 服务器，无需调用 AWS。
-- `agent.py` 删除了示例 `subtract` 工具，并将系统提示替换为地牢主持人提示，该提示邀请第一条用户消息说明玩家的姓名和类型，并使用库存 MCP 服务器的工具。
+- `main.py` 添加了一个 `session_manager_provider`，在部署时为每个 `thread_id` 创建一个 `S3SessionManager`，并在 `agent-serve-local` 下运行时（`SERVE_LOCAL=true`）回退到 `/tmp/strands-sessions` 下的磁盘 `FileSessionManager`。在部署时，S3 存储桶与 Game API 的 `queryActions` 读取的存储桶相同，因此浏览器可以在重新访问时重建记录；在本地，代理将会话持久化到磁盘并与本地 MCP 服务器通信，无需部署。
+- `agent.py` 删除了示例 `subtract` 工具，并将系统提示替换为地牢主持人提示，邀请第一条用户消息说明玩家的名字和类型，并使用 Inventory MCP Server 的工具。
 
-## 任务 2：部署与测试
+## 任务 2：在本地测试您的代理
 
 ### 构建代码
 
@@ -51,153 +51,22 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 <PackageManagerShortCommand commands={["build"]} />
 
-<Aside type="tip" title="修复Lint错误">
-若遇到 lint 错误，可运行以下命令自动修复。
+<Aside type="tip" title="修复 Lint 错误">
+如果遇到任何 lint 错误，请运行以下命令自动修复它们。
 
 <PackageManagerShortCommand commands={["lint"]} />
 </Aside>
 
-### 部署应用程序
-要部署应用程序，请运行以下命令：
+### 与您的代理聊天
 
-<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+使用生成的 `agent-chat` 目标针对本地服务的 AG-UI 代理副本打开交互式 REPL：
 
-部署过程约需 2 分钟完成。
+<NxCommands commands={["agent-chat story"]} />
 
-部署完成后，将看到类似以下输出（部分值已脱敏）：
+您的第一条消息应该告诉代理您的英雄名字和类型（例如：`My name is Alice. Start my zombie adventure.`），故事将流式返回。
 
-```bash
-dungeon-adventure-infra-sandbox-Application
-dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+<Aside type="caution" title="需要 AWS 凭证">
+尽管代理在本地运行，但它会调用 [Amazon Bedrock](https://aws.amazon.com/bedrock/) 来使用 LLM。您需要在环境中配置 AWS 凭证，并具有访问 [Strands 默认模型](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/)的权限。有关详细信息，请参阅 [Strands 模型提供程序文档](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/)。
+</Aside>
 
- ✅  dungeon-adventure-infra-sandbox-Application
-
-✨  部署时间：354秒
-
-输出：
-dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
-dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
-dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
-```
-
-### 测试代理
-
-可通过以下方式测试代理：
-<ul>
-<li>启动代理服务器本地实例并通过生成的 `agent-chat` 目标与其聊天，或</li>
-<li>使用携带 JWT 令牌的 curl 调用已部署 API。</li>
-</ul>
-
-<Tabs>
-  <TabItem label="本地">
-    使用生成的 `agent-chat` 目标打开针对本地服务的 AG-UI 代理副本的交互式 REPL：
-
-    <NxCommands commands={["agent-chat story"]} />
-
-    `agent-chat` 具有 `dependsOn: ['agent-serve-local']`，因此无需单独启动代理服务器 —— Nx 将生成 `agent-serve-local`（它会在本地启动库存 MCP 服务器），然后针对 `http://localhost:8081/invocations` 启动 [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) AG-UI REPL。您的第一条消息应该告诉代理您的英雄姓名和类型（例如：`My name is Alice. Start my zombie adventure.`），故事将流式返回。
-
-    <Aside type="tip" title="原始 curl">
-    如果您更喜欢针对本地服务器的原始 HTTP 调用，AG-UI `RunAgentInput` 格式为：
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -H "Content-Type: application/json" \
-      -d '{
-        "threadId": "Alice-zombie00000000000000000000000",
-        "runId": "run-1",
-        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
-        "tools": [], "context": [], "state": {}, "forwardedProps": {}
-      }'
-    ```
-    在后续调用中重用相同的 `threadId` 将继续相同的故事 —— `S3SessionManager` 会重放之前的消息。
-    </Aside>
-  </TabItem>
-  <TabItem label="已部署">
-    测试已部署代理需通过 Cognito 认证获取 JWT 令牌。首先设置环境变量：
-
-    ```bash
-    # 从 CDK 输出中设置 Cognito 用户池 ID 和客户端 ID
-    export POOL_ID="<CDK 输出的 UserPoolId>"
-    export CLIENT_ID="<CDK 输出的 UserPoolClientId>"
-    export REGION="<区域>"
-    ```
-
-    创建测试用户并获取认证令牌：
-
-    ```bash
-    # 禁用 MFA 以简化用户创建
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # 创建用户
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # 设置永久密码（请替换为更安全的密码！）
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # 用户认证并获取访问令牌
-    export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
-      --client-id "$CLIENT_ID" \
-      --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
-      --region $REGION \
-      --query "AuthenticationResult.AccessToken" \
-      --output text)
-    ```
-
-    通过 Bedrock AgentCore 运行时 URL 调用已部署代理：
-
-    ```bash
-    # 设置 CDK 输出的 Story Agent ARN
-    export AGENT_ARN="<CDK 输出的 StoryAgentArn>"
-
-    # URL 编码 ARN
-    export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
-
-    # 构造调用 URL
-    export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
-
-    # 使用 AG-UI RunAgentInput 负载调用代理
-    curl -N -X POST "$AGENT_URL" \
-      -H "authorization: Bearer $BEARER_TOKEN" \
-      -H "Content-Type: application/json" \
-      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: Alice-zombie00000000000000000000000" \
-      -d '{
-        "threadId": "Alice-zombie00000000000000000000000",
-        "runId": "run-1",
-        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
-        "tools": [], "context": [], "state": {}, "forwardedProps": {}
-      }'
-    ```
-
-    :::note[URL 编码]
-    URL 编码是正确格式化 Bedrock AgentCore API 端点 ARN 的必要步骤。
-    :::
-  </TabItem>
-</Tabs>
-
-若命令运行成功，将开始看到故事以 [AG-UI 事件流](https://docs.copilotkit.ai/aws-strands/protocol/events)（Server-Sent Events）的形式流式返回 —— `RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` 块包装实际的故事令牌：
-
-```
-data: {"type":"RUN_STARTED","threadId":"Alice-zombie00000000000000000000000",...}
-data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
-data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Greetings, Alice. "}
-data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"The moans grow louder beyond the barricaded door..."}
-```
-
-恭喜！您已成功在 Bedrock AgentCore 运行时上构建并部署首个 Strands 代理！🎉🎉🎉
+恭喜。您已经在本地构建并测试了您的第一个 Strands 代理！🎉🎉🎉
