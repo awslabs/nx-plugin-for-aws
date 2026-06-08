@@ -7,8 +7,10 @@ import {
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
+  getProjects,
   installPackagesTask,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type ProjectConfiguration,
   type Tree,
@@ -43,6 +45,13 @@ export const tsAstroDocsGenerator = async (
     schema.directory || '.',
     schema.subDirectory || docsNameKebabCase,
   );
+
+  if (getProjects(tree).has(fullyQualifiedName)) {
+    logger.info(
+      `Project ${fullyQualifiedName} already exists, skipping ts#astro-docs generator.`,
+    );
+    return () => {};
+  }
 
   const targets: ProjectConfiguration['targets'] = {
     build: {

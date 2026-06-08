@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, type Tree } from '@nx/devkit';
+import { getProjects, readJson, type Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -208,5 +208,39 @@ describe('ts#astro-docs generator', () => {
     });
 
     expectHasMetricTags(tree, TS_ASTRO_DOCS_GENERATOR_INFO.metric);
+  });
+
+  it('should be idempotent when re-run with the same options', async () => {
+    await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
+
+    const projectCountAfterFirstRun = getProjects(tree).size;
+    const indexAfterFirstRun = tree.read(
+      'docs/src/content/docs/en/index.mdx',
+      'utf-8',
+    );
+
+    await expect(
+      tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true }),
+    ).resolves.toBeDefined();
+
+    expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+    expect(tree.read('docs/src/content/docs/en/index.mdx', 'utf-8')).toEqual(
+      indexAfterFirstRun,
+    );
+  });
+
+  it('should create a second independent project when run with a different name', async () => {
+    await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
+    await tsAstroDocsGenerator(tree, {
+      name: 'other-docs',
+      skipInstall: true,
+    });
+
+    expect(tree.exists('docs/project.json')).toBeTruthy();
+    expect(tree.exists('other-docs/project.json')).toBeTruthy();
+    expect(readJson(tree, 'docs/project.json').name).toBe('@proj/docs');
+    expect(readJson(tree, 'other-docs/project.json').name).toBe(
+      '@proj/other-docs',
+    );
   });
 });
