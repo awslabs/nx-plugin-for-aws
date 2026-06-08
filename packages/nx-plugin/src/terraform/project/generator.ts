@@ -12,10 +12,12 @@ import {
   joinPathFragments,
   OverwriteStrategy,
   readNxJson,
+  readProjectConfiguration,
   type TargetConfiguration,
   type Tree,
   updateJson,
   updateNxJson,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
@@ -229,7 +231,7 @@ export async function terraformProjectGenerator(
     },
   };
 
-  addProjectConfiguration(tree, lib.fullyQualifiedName, {
+  const projectConfiguration = {
     root: lib.dir,
     projectType: schema.type,
     sourceRoot: joinPathFragments(lib.dir, 'src'),
@@ -237,7 +239,24 @@ export async function terraformProjectGenerator(
       ...libTargets,
       ...(schema.type === 'application' ? applicationTargets : {}),
     }),
-  });
+  };
+
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, lib.fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (projectExists) {
+    updateProjectConfiguration(tree, lib.fullyQualifiedName, {
+      ...projectConfiguration,
+      name: lib.fullyQualifiedName,
+    });
+  } else {
+    addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
+  }
   addGeneratorMetadata(
     tree,
     lib.fullyQualifiedName,
