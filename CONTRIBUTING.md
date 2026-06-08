@@ -62,7 +62,7 @@ Users re-run generators all the time: to add a second API, to recover from a fai
 **Not idempotent by design** — scaffolding generators that intentionally produce new output each run, or that own files the user is expected to take ownership of.
 
 - Examples: `ts#nx-generator` (creates a new generator each run), and the initial scaffold of user-owned files (agents, MCP servers).
-- Even these must re-run safely: a same-name re-run must not corrupt shared config (e.g. `generators.json`, `project.json`) or churn metadata, and user-owned files must be preserved (use `OverwriteStrategy.KeepExisting`).
+- Even these must re-run safely: a same-name re-run must not corrupt shared config (e.g. `generators.json`, `project.json`) or churn metadata — for instance `ts#nx-generator` reuses an entry's existing metric on re-run rather than reallocating one — and user-owned files must be preserved (use `OverwriteStrategy.KeepExisting`).
 
 #### Choosing a tier
 
@@ -75,8 +75,9 @@ Users re-run generators all the time: to add a second API, to recover from a fai
 - **Guard project creation.** Wrap `addProjectConfiguration`/`libraryGenerator` in an existence check — read the project config in a `try/catch` and skip creation if it already exists, rather than letting Nx throw "a project already exists".
 - **Preserve user-owned files.** Generate handlers, components, and other user-editable files with `OverwriteStrategy.KeepExisting`. Reserve `OverwriteStrategy.Overwrite` for framework-owned, fully-generated files (e.g. OpenAPI clients).
 - **Dedup config additions.** Use `addDependencyToTargetIfNotPresent` for `dependsOn` entries, and filter-then-append for arrays. Never push onto a `commands`/`dependsOn`/`ports` array without checking for the existing entry first.
+- **Guard target transforms.** When a generator rewrites an existing target (e.g. wrapping a single `command` into a `commands` array), check whether the target is already in its transformed shape and skip, so a re-run doesn't mangle it.
 - **Guard AST mutations.** GritQL transforms that inject imports, providers, route entries, or config statements must carry a `where { ... <: not contains ... }` clause so a re-run does not append a second copy.
-- **Reuse assigned ports.** Port assignment must return a project's already-assigned port on re-run rather than allocating a fresh one.
+- **Reuse assigned ports.** Assign local dev ports with the `assignPort` / `assignSharedPort` helpers in `utils/port.ts` rather than rolling your own. They return a project's already-assigned port on re-run instead of allocating a fresh one; for a project that hosts a port per component (e.g. one per agent or MCP server), pass `assignPort`'s `component` option so the right port is reused.
 - **Skip or no-op gracefully.** Single-use generators should detect an existing result up front and return early with an informative log, not throw.
 - **Log what was skipped.** When a generator skips work because state already exists, log it clearly so the user understands the no-op.
 
