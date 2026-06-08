@@ -1023,4 +1023,25 @@ describe('trpc backend generator', () => {
     );
     expect(updatedProjectJson.targets['bundle']).toBeDefined();
   });
+
+  it('should be idempotent when re-run with same options', async () => {
+    const options: TsTrpcApiGeneratorSchema = {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'http-lambda',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    };
+    await tsTrpcApiGenerator(tree, options);
+    const firstProjectJson = tree.read('apps/test-api/project.json', 'utf-8');
+
+    await tsTrpcApiGenerator(tree, options);
+    const secondProjectJson = tree.read('apps/test-api/project.json', 'utf-8');
+
+    expect(secondProjectJson).toEqual(firstProjectJson);
+
+    const projectConfig = JSON.parse(secondProjectJson);
+    expect(projectConfig.metadata.ports).toEqual([2022]);
+  });
 });

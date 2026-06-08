@@ -28,7 +28,7 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { assignPort } from '../../utils/port';
+import { assignPort, getExistingProjectPort } from '../../utils/port';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import type { TsTrpcApiGeneratorSchema } from './schema';
@@ -82,7 +82,12 @@ export async function tsTrpcApiGenerator(
   );
   const backendRoot = projectConfig.root;
 
-  const port = assignPort(tree, projectConfig, 2022);
+  const port = assignPort(
+    tree,
+    projectConfig,
+    2022,
+    getExistingProjectPort(projectConfig),
+  );
 
   const enhancedOptions = {
     backendProjectName,

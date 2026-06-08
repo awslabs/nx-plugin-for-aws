@@ -918,6 +918,34 @@ dev-dependencies = []
     expect(tree.exists('packages/common/terraform')).toBeFalsy();
   });
 
+  it('should be idempotent when re-run with same options', async () => {
+    const options = {
+      project: 'test-project',
+      infra: 'none' as const,
+      iac: 'cdk' as const,
+    };
+    await pyMcpServerGenerator(tree, options);
+    const firstProjectJson = tree.read(
+      'apps/test-project/project.json',
+      'utf-8',
+    );
+
+    await pyMcpServerGenerator(tree, options);
+    const secondProjectJson = tree.read(
+      'apps/test-project/project.json',
+      'utf-8',
+    );
+
+    const projectConfig = JSON.parse(secondProjectJson);
+
+    // Port metadata should not grow on re-run
+    expect(projectConfig.metadata.ports).toHaveLength(1);
+    // The MCP server component should not be duplicated
+    expect(projectConfig.metadata.components).toHaveLength(1);
+
+    expect(secondProjectJson).toEqual(firstProjectJson);
+  });
+
   it('should add component generator metadata with default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',

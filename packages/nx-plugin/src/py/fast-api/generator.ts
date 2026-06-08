@@ -28,7 +28,7 @@ import {
 } from '../../utils/nx';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
-import { assignPort } from '../../utils/port';
+import { assignPort, getExistingProjectPort } from '../../utils/port';
 import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
@@ -81,7 +81,12 @@ export const pyFastApiProjectGenerator = async (
   }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
-  const port = assignPort(tree, projectConfig, 8000);
+  const port = assignPort(
+    tree,
+    projectConfig,
+    8000,
+    getExistingProjectPort(projectConfig),
+  );
 
   const { bundleOutputDir, bundleTargetName } =
     addPythonBundleTarget(projectConfig);
@@ -89,13 +94,16 @@ export const pyFastApiProjectGenerator = async (
   // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
   const fs = new FsCommands(tree);
   const bundleTarget = projectConfig.targets[bundleTargetName];
-  bundleTarget.options.commands = [
-    ...bundleTarget.options.commands,
-    fs.cp(
-      `{projectRoot}/run.sh`,
-      `dist/{projectRoot}/${bundleTargetName}/run.sh`,
-    ),
-  ];
+  const copyRunShCommand = fs.cp(
+    `{projectRoot}/run.sh`,
+    `dist/{projectRoot}/${bundleTargetName}/run.sh`,
+  );
+  if (!bundleTarget.options.commands.includes(copyRunShCommand)) {
+    bundleTarget.options.commands = [
+      ...bundleTarget.options.commands,
+      copyRunShCommand,
+    ];
+  }
 
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',

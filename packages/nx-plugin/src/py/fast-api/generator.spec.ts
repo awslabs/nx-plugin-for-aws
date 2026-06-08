@@ -460,6 +460,33 @@ describe('fastapi project generator', () => {
     );
   });
 
+  it('should be idempotent when re-run with same options', async () => {
+    const options = {
+      name: 'test-api',
+      directory: 'apps',
+      infra: 'http-lambda' as const,
+      auth: 'iam' as const,
+      iac: 'cdk' as const,
+    };
+    await pyFastApiProjectGenerator(tree, options);
+    const firstProjectJson = tree.read('apps/test_api/project.json', 'utf-8');
+
+    await pyFastApiProjectGenerator(tree, options);
+    const secondProjectJson = tree.read('apps/test_api/project.json', 'utf-8');
+
+    const projectConfig = JSON.parse(secondProjectJson);
+
+    // Port metadata should not grow on re-run
+    expect(projectConfig.metadata.ports).toHaveLength(1);
+
+    // The run.sh copy command should appear exactly once
+    const bundleCommands = projectConfig.targets['bundle-x86'].options
+      .commands as string[];
+    expect(bundleCommands.filter((c) => c.includes('run.sh'))).toHaveLength(1);
+
+    expect(secondProjectJson).toEqual(firstProjectJson);
+  });
+
   describe('terraform iac', () => {
     it('should generate terraform files for HTTP API with IAM auth and snapshot them', async () => {
       await pyFastApiProjectGenerator(tree, {

@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Iac } from '../iac';
+import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -46,16 +47,11 @@ export const addDynamoDBInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
+      addDependencyToTargetIfNotPresent(
+        config,
+        'build',
         `${options.projectName}:build`,
-      ];
+      );
       return config;
     },
   );

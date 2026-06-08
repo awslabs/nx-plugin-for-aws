@@ -25,6 +25,7 @@ import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
+  getExistingComponentPort,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -200,7 +201,17 @@ export const pyMcpServerGenerator = async (
     });
   }
 
-  const localDevPort = assignPort(tree, project, 8000);
+  const localDevPort = assignPort(
+    tree,
+    project,
+    8000,
+    getExistingComponentPort(
+      tree,
+      project.name,
+      PY_MCP_SERVER_GENERATOR_INFO,
+      mcpTargetPrefix,
+    ),
+  );
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

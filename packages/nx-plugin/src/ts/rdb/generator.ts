@@ -30,7 +30,7 @@ import {
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort } from '../../utils/port';
+import { assignPort, getExistingProjectPort } from '../../utils/port';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
@@ -80,6 +80,7 @@ export const tsRdbGenerator = async (
     tree,
     projectConfig,
     options.engine === 'mysql' ? 3306 : 5432,
+    getExistingProjectPort(projectConfig),
   );
   const localDbHost = 'localhost';
   const localDbUser = options.engine === 'mysql' ? 'root' : 'dbadmin';
@@ -134,7 +135,13 @@ export const tsRdbGenerator = async (
       bundleOutputDir: 'create-db-user',
     });
     const bundleTarget = projectConfig.targets['bundle'];
-    const rolldownCommand = bundleTarget.options.command;
+    // On a re-run the bundle target has already been transformed into a commands
+    // array (with the rolldown invocation as the last entry and no `command`),
+    // so fall back to that command to keep the transform idempotent.
+    const rolldownCommand =
+      bundleTarget.options.command ??
+      (bundleTarget.options.commands ?? []).at(-1) ??
+      'rolldown -c rolldown.config.ts';
     delete bundleTarget.options.command;
     bundleTarget.options = {
       ...bundleTarget.options,

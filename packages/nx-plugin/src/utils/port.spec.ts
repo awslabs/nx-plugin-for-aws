@@ -4,7 +4,7 @@
  */
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { assignPort } from './port';
+import { assignPort, getExistingProjectPort } from './port';
 
 describe('port utilities', () => {
   let tree: Tree;
@@ -163,6 +163,46 @@ describe('port utilities', () => {
       expect(port).toBe(3000);
       expect((project.metadata as any)?.ports).toEqual([4000, 4001, 3000]);
       expect((project.metadata as any)?.someOtherData).toBe('preserved');
+    });
+
+    it('should return reusePort without appending when provided', () => {
+      const project = {
+        ...mockProject,
+        metadata: { ports: [4000] } as any,
+      };
+
+      const port = assignPort(tree, project, 3000, 4000);
+
+      expect(port).toBe(4000);
+      // No duplicate is appended when reusing the existing port
+      expect((project.metadata as any)?.ports).toEqual([4000]);
+    });
+
+    it('should be idempotent when re-run with reusePort from existing metadata', () => {
+      const project = { ...mockProject };
+      delete project.metadata;
+
+      const firstPort = assignPort(tree, project, 3000);
+      // Persist project into the tree as a real generator would
+      tree.write(
+        'apps/test-project/project.json',
+        JSON.stringify({ name: 'test-project', metadata: project.metadata }),
+      );
+
+      const rerunProject = {
+        ...mockProject,
+        metadata: { ...(project.metadata as any) },
+      };
+      const secondPort = assignPort(
+        tree,
+        rerunProject,
+        3000,
+        getExistingProjectPort(rerunProject),
+      );
+
+      expect(secondPort).toBe(firstPort);
+      expect((rerunProject.metadata as any)?.ports).toEqual([firstPort]);
+      expect((rerunProject.metadata as any)?.ports).toHaveLength(1);
     });
 
     it('should find next available port when start port is taken', () => {

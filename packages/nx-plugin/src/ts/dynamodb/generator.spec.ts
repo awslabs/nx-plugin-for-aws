@@ -194,6 +194,25 @@ describe('ts#dynamodb generator', () => {
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
   });
 
+  it('should be idempotent when re-run with same options', async () => {
+    await tsDynamoDBGenerator(tree, defaultOptions);
+    await tsDynamoDBGenerator(tree, defaultOptions);
+
+    const projectConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/my-table',
+    );
+    expect((projectConfig.metadata as any).ports).toHaveLength(1);
+
+    const sharedConstructsConfig = JSON.parse(
+      tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
+    );
+    const buildDeps = sharedConstructsConfig.targets.build.dependsOn as any[];
+    expect(buildDeps.filter((d) => d === '@proj/my-table:build')).toHaveLength(
+      1,
+    );
+  });
+
   it('should use custom tableName when provided', async () => {
     await tsDynamoDBGenerator(tree, {
       ...defaultOptions,
