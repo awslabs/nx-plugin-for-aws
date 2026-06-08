@@ -23,6 +23,23 @@ permissions:
   id-token: write
 
 jobs:
+  package:
+    name: Package
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/init-monorepo
+        with:
+          aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
+      - name: Package plugins
+        run: pnpm nx run-many --target compile,post-compile,copy-assets,generate-3p-license --projects @aws/nx-plugin,@aws/nx-plugin-mcp,@aws/create-nx-workspace --output-style=stream
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: build-artifact
+          path: dist
   build:
     name: Build
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
@@ -43,11 +60,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
       - name: Check for mutations
         run: git diff --ignore-space-at-eol --exit-code -- ':!**/LICENSE-THIRD-PARTY'
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: build-artifact
-          path: dist
       - name: Upload docs artifact
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -56,7 +68,7 @@ jobs:
   smoke_tests:
     name: Smoke Tests - ${{matrix.smoke_test}}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
-    needs: build
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -108,7 +120,7 @@ jobs:
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
     runs-on: windows-latest
-    needs: build
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -139,7 +151,7 @@ jobs:
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
   release:
     name: Release
-    needs: [build, smoke_tests, smoke_tests_windows]
+    needs: [package, build, smoke_tests, smoke_tests_windows]
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}
