@@ -506,6 +506,30 @@ describe('tsSmithyApiGenerator', () => {
     );
   });
 
+  it('should be idempotent when re-run with same options', async () => {
+    const options = {
+      name: 'test-api',
+      infra: 'rest-lambda' as const,
+      auth: 'custom' as const,
+      iac: 'cdk' as const,
+    };
+    await tsSmithyApiGenerator(tree, options);
+    const firstBackendJson = tree.read(
+      'test-api/backend/project.json',
+      'utf-8',
+    );
+
+    await tsSmithyApiGenerator(tree, options);
+    const secondBackendJson = tree.read(
+      'test-api/backend/project.json',
+      'utf-8',
+    );
+
+    const backendConfig = JSON.parse(secondBackendJson);
+    expect(backendConfig.metadata.ports).toHaveLength(1);
+    expect(secondBackendJson).toEqual(firstBackendJson);
+  });
+
   it('should configure OpenAPI metadata generation target', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',

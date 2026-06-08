@@ -297,4 +297,30 @@ describe('ts#rdb generator', () => {
     );
     expect(updatedProjectJson.targets['bundle']).toBeDefined();
   });
+
+  it('should be idempotent when re-run with same options', async () => {
+    await tsRdbGenerator(tree, defaultOptions);
+    await tsRdbGenerator(tree, defaultOptions);
+
+    const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
+
+    // Port metadata should not grow on re-run
+    expect((projectConfig.metadata as any).ports).toHaveLength(1);
+
+    // The rolldown command must survive the re-run and not be lost or duplicated
+    const bundleCommands = projectConfig.targets.bundle.options
+      .commands as string[];
+    expect(bundleCommands).toContain('rolldown -c rolldown.config.ts');
+    expect(
+      bundleCommands.filter((c) => c === 'rolldown -c rolldown.config.ts'),
+    ).toHaveLength(1);
+    expect(bundleCommands.every((c) => c !== undefined)).toBe(true);
+
+    // The shared constructs build dependency must not be duplicated
+    const sharedConstructsConfig = JSON.parse(
+      tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
+    );
+    const buildDeps = sharedConstructsConfig.targets.build.dependsOn as any[];
+    expect(buildDeps.filter((d) => d === '@proj/db:build')).toHaveLength(1);
+  });
 });

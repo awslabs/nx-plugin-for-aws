@@ -13,6 +13,7 @@ import {
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
 import type { Iac } from '../iac';
+import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -53,16 +54,11 @@ export const addRdbInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
+      addDependencyToTargetIfNotPresent(
+        config,
+        'build',
         `${options.projectName}:build`,
-      ];
+      );
       return config;
     },
   );
