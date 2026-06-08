@@ -26,6 +26,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { uvxCommand } from '../../utils/py';
@@ -229,7 +230,7 @@ export async function terraformProjectGenerator(
     },
   };
 
-  addProjectConfiguration(tree, lib.fullyQualifiedName, {
+  const projectConfiguration = {
     root: lib.dir,
     projectType: schema.type,
     sourceRoot: joinPathFragments(lib.dir, 'src'),
@@ -237,7 +238,13 @@ export async function terraformProjectGenerator(
       ...libTargets,
       ...(schema.type === 'application' ? applicationTargets : {}),
     }),
-  });
+  };
+
+  // Only create the project configuration on first run; skip it on re-run so
+  // existing project.json customisations are preserved.
+  if (!projectExists(tree, lib.fullyQualifiedName)) {
+    addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
+  }
   addGeneratorMetadata(
     tree,
     lib.fullyQualifiedName,

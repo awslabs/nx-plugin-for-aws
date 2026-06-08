@@ -26,6 +26,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
@@ -49,7 +50,10 @@ export async function tsInfraGenerator(
   schema: TsInfraGeneratorSchema,
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
-  await tsProjectGenerator(tree, schema);
+
+  if (!projectExists(tree, lib.fullyQualifiedName)) {
+    await tsProjectGenerator(tree, schema);
+  }
 
   // CDK shells out to a container engine to build image assets. Default
   // (docker) needs no env override; finch is set via CDK_DOCKER per

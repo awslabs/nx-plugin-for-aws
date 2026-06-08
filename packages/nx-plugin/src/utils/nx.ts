@@ -69,6 +69,19 @@ export const readProjectConfigurationUnqualified = (
 };
 
 /**
+ * Returns whether a project with the given name already exists in the workspace.
+ * The project name may be unqualified (ie may omit the scope prefix).
+ */
+export const projectExists = (tree: Tree, projectName: string): boolean => {
+  try {
+    readProjectConfigurationUnqualified(tree, projectName);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Add metadata about the generator that generated the project to the project.json
  */
 export const addGeneratorMetadata = (

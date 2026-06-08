@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import {
+  getProjects,
+  readJson,
+  readProjectConfiguration,
+  type Tree,
+} from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import {
   createTreeUsingTsSolutionSetup,
@@ -448,5 +453,28 @@ describe('infra generator', () => {
     expect(tree.exists('packages/infra')).toBeTruthy();
     expect(tree.exists('packages/infra/src')).toBeTruthy();
     expect(tree.exists('packages/infra/cdk.json')).toBeTruthy();
+  });
+
+  it('should be idempotent when re-run with same options', async () => {
+    await tsInfraGenerator(tree, options);
+
+    const projectCountAfterFirstRun = getProjects(tree).size;
+    const mainTsAfterFirstRun = tree.read('packages/test/src/main.ts', 'utf-8');
+
+    await expect(tsInfraGenerator(tree, options)).resolves.toBeDefined();
+
+    expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+    expect(tree.read('packages/test/src/main.ts', 'utf-8')).toEqual(
+      mainTsAfterFirstRun,
+    );
+  });
+
+  it('should create an independent project when run with a different name', async () => {
+    await tsInfraGenerator(tree, options);
+    await tsInfraGenerator(tree, { ...options, name: 'other' });
+
+    expect(readProjectConfiguration(tree, '@proj/test')).toBeDefined();
+    expect(readProjectConfiguration(tree, '@proj/other')).toBeDefined();
+    expect(tree.exists('packages/other/cdk.json')).toBeTruthy();
   });
 });
