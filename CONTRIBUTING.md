@@ -43,6 +43,61 @@ GitHub provides additional document on [forking a repository](https://help.githu
 
 For a detailed guide on contributing a generator, check out the [Contributing a Generator tutorial here](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/contribute-generator).
 
+### Generator Idempotency
+
+Users re-run generators all the time: to add a second API, to recover from a failed run, to pick up updated templates, or to escalate a project from no infrastructure to deployed infrastructure. Every generator must therefore behave predictably on re-run. Before writing a generator, decide which tier it belongs to and meet that tier's expectations.
+
+#### Idempotency tiers
+
+**Strictly idempotent** — re-running with the same options produces the exact same workspace, with no duplicates, no errors, and no clobbered user edits. Most sync generators and connection generators belong here.
+
+- Examples: `license`, `license#sync`, `ts#sync`, `ts#trpc-api#react-connection`, the `connection` generators.
+- Connection generators must detect existing wiring and skip it rather than appending a second provider wrapper, route, dependency, or runtime-config override.
+
+**Conditionally idempotent** — re-running with the _same_ name is a clean no-op (or updates framework-owned config in place); re-running with a _different_ name is additive (creates a new, independent project). This is the default tier for project- and infrastructure-vending generators.
+
+- Examples: `ts#trpc-api`, `py#fast-api`, `ts#smithy-api`, `ts#react-website`, `ts#lambda-function`, `py#lambda-function`, `ts#infra`, `terraform#project`, `ts#dynamodb`, `ts#rdb`.
+- These generators must also support **infrastructure escalation**: running with `--infra none` first and later re-running with an infra option (e.g. `--infra rest-lambda`) must add the infrastructure cleanly — no duplicate constructs, no duplicate `dependsOn` entries, no errors.
+
+**Not idempotent by design** — scaffolding generators that intentionally produce new output each run, or that own files the user is expected to take ownership of.
+
+- Examples: `ts#nx-generator` (creates a new generator each run), and the initial scaffold of user-owned files (agents, MCP servers).
+- Even these must re-run safely: a same-name re-run must not corrupt shared config (e.g. `generators.json`, `project.json`) or churn metadata, and user-owned files must be preserved (use `OverwriteStrategy.KeepExisting`).
+
+#### Choosing a tier
+
+- Does the generator only update framework-owned config in place (no project creation)? → **Strictly idempotent**.
+- Does it create a named project or vend infrastructure? → **Conditionally idempotent**.
+- Does it intentionally scaffold something new each run, or hand a file over to the user? → **Not idempotent by design**, but still re-run-safe.
+
+#### Patterns for achieving idempotency
+
+- **Guard project creation.** Wrap `addProjectConfiguration`/`libraryGenerator` in an existence check — read the project config in a `try/catch` and skip creation if it already exists, rather than letting Nx throw "a project already exists".
+- **Preserve user-owned files.** Generate handlers, components, and other user-editable files with `OverwriteStrategy.KeepExisting`. Reserve `OverwriteStrategy.Overwrite` for framework-owned, fully-generated files (e.g. OpenAPI clients).
+- **Dedup config additions.** Use `addDependencyToTargetIfNotPresent` for `dependsOn` entries, and filter-then-append for arrays. Never push onto a `commands`/`dependsOn`/`ports` array without checking for the existing entry first.
+- **Guard AST mutations.** GritQL transforms that inject imports, providers, route entries, or config statements must carry a `where { ... <: not contains ... }` clause so a re-run does not append a second copy.
+- **Reuse assigned ports.** Port assignment must return a project's already-assigned port on re-run rather than allocating a fresh one.
+- **Skip or no-op gracefully.** Single-use generators should detect an existing result up front and return early with an informative log, not throw.
+- **Log what was skipped.** When a generator skips work because state already exists, log it clearly so the user understands the no-op.
+
+#### Testing expectations per tier
+
+Every generator that vends projects, infrastructure, or wiring must have an idempotency test using this pattern:
+
+```ts
+it('should be idempotent when re-run with same options', async () => {
+  await myGenerator(tree, options);
+  await myGenerator(tree, options);
+
+  // assert no duplication: ports unchanged, dependsOn entries appear once,
+  // imports/providers/routes appear once, file content unchanged
+});
+```
+
+- **Strictly idempotent**: run twice with the same options and assert the tree is unchanged after the second run (no duplicate wiring).
+- **Conditionally idempotent**: add the same-name no-op test above, and — for infra-vending generators — an escalation test that runs with `--infra none` then re-runs with an infra option and asserts the infrastructure is added exactly once.
+- **Not idempotent by design**: assert that a same-name re-run does not corrupt shared config or wipe user-owned files. If a generator is deliberately not re-runnable, document why in its guide and assert the intended behaviour (graceful skip, or a clear error).
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
