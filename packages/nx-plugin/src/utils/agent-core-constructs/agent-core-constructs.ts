@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -18,6 +19,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
+import { withVersions } from '../versions';
 
 type IACProvider = { iac: Iac };
 
@@ -221,4 +223,157 @@ export const addAgentInfra = async (
     auth: options.auth,
     containers: options.containers,
   });
+};
+
+export interface AddAgentCoreGatewayInfraProps {
+  gatewayNameClassName: string;
+  gatewayNameKebabCase: string;
+  projectName: string;
+  projectDirectory: string;
+}
+
+export const addAgentCoreGatewayInfra = async (
+  tree: Tree,
+  options: AddAgentCoreGatewayInfraProps & IACProvider,
+) => {
+  switch (options.iac) {
+    case 'cdk':
+      await addAgentCoreGatewayCDKInfra(tree, options);
+      break;
+    case 'terraform':
+      addAgentCoreGatewayTerraformInfra(tree, options);
+      break;
+  }
+
+  updateJson(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      'project.json',
+    ),
+    (config: ProjectConfiguration) => {
+      if (!config.targets) {
+        config.targets = {};
+      }
+      if (!config.targets.build) {
+        config.targets.build = {};
+      }
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []).filter(
+          (t) => t !== `${options.projectName}:build`,
+        ),
+        `${options.projectName}:build`,
+      ];
+      return config;
+    },
+  );
+};
+
+const addAgentCoreGatewayCDKInfra = async (
+  tree: Tree,
+  options: AddAgentCoreGatewayInfraProps,
+) => {
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(['@aws-cdk/aws-bedrock-agentcore-alpha']),
+  );
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'agentcore-gateway'),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'gateways',
+    ),
+    {
+      nameClassName: options.gatewayNameClassName,
+      nameKebabCase: options.gatewayNameKebabCase,
+      projectDirectory: options.projectDirectory,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'gateways',
+      'index.ts',
+    ),
+    `./${options.gatewayNameKebabCase}/${options.gatewayNameKebabCase}.js`,
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'index.ts',
+    ),
+    './gateways/index.js',
+  );
+};
+
+const addAgentCoreGatewayTerraformInfra = (
+  tree: Tree,
+  options: AddAgentCoreGatewayInfraProps,
+) => {
+  generateFiles(
+    tree,
+    joinPathFragments(
+      __dirname,
+      'files',
+      'terraform',
+      'core',
+      'agentcore-gateway',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'core',
+      'agentcore-gateway',
+    ),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  generateFiles(
+    tree,
+    joinPathFragments(
+      __dirname,
+      'files',
+      'terraform',
+      'app',
+      'agentcore-gateway',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'app',
+      'gateways',
+    ),
+    {
+      nameClassName: options.gatewayNameClassName,
+      nameKebabCase: options.gatewayNameKebabCase,
+      projectDirectory: options.projectDirectory,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
 };

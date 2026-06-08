@@ -1,0 +1,46 @@
+import { McpClient } from '@strands-agents/sdk';
+import { AgentCoreGatewayMcpClient } from '../core/agentcore-gateway-mcp-client.js';
+import {
+  AgentCoreGatewayMcpLocalMultiplexClient,
+  LocalMcpServerBinding,
+} from '../core/agentcore-gateway-mcp-local-client.js';
+import { getConnectedGatewayUrl } from '../core/runtime-config.js';
+
+/**
+ * List of MCP servers attached to <%- gatewayClassName %>.
+ * Populated by the `agentcore-gateway#mcp-connection` generator on each run
+ * — every connected MCP server is back-propagated into this list so local
+ * dev can multiplex to every attached server without hitting the real
+ * gateway.
+ */
+const ATTACHED_MCP_SERVERS: LocalMcpServerBinding[] = [];
+
+/**
+ * Client for connecting to the <%- gatewayClassName %> AgentCore Gateway.
+ *
+ * - Deployed mode: single MCP client pointing at the gateway URL,
+ *   SigV4-signed.
+ * - Local mode (`SERVE_LOCAL=true`): multiplexed MCP clients pointing at
+ *   each attached MCP server's local serve-local port.
+ *
+ * Either way the underlying client forwards the current async-context
+ * session via the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header;
+ * AgentCore Gateway then propagates the header to downstream MCP-server
+ * targets.
+ *
+ * Env var escape hatch: `GATEWAY_URL_OVERRIDE` points the deployed-mode
+ * client at an alternate gateway (e.g. staging) without redeploying.
+ */
+export class <%- gatewayClassName %>Client {
+  static async create(): Promise<McpClient | McpClient[]> {
+    if (process.env.SERVE_LOCAL === 'true') {
+      return AgentCoreGatewayMcpLocalMultiplexClient.create(
+        ATTACHED_MCP_SERVERS,
+      );
+    }
+    const gatewayUrl =
+      process.env.GATEWAY_URL_OVERRIDE ??
+      (await getConnectedGatewayUrl('<%- gatewayClassName %>'));
+    return AgentCoreGatewayMcpClient.withIamAuth({ gatewayUrl });
+  }
+}

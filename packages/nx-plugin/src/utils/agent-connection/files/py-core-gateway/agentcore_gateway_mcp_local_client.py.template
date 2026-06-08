@@ -1,0 +1,96 @@
+from contextlib import ExitStack
+from dataclasses import dataclass
+from types import TracebackType
+
+import httpx
+from mcp.client.streamable_http import streamablehttp_client
+from strands.tools.mcp.mcp_agent_tool import MCPAgentTool
+from strands.tools.mcp.mcp_client import MCPClient
+
+from .session_context import get_current_session_id
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class _SessionHeaderAuth(httpx.Auth):
+    """Forwards the current async-context session on every request."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        yield request
+
+
+@dataclass
+class LocalMcpServerBinding:
+    """Describes one MCP server attached to a gateway, for local development use."""
+
+    name: str
+    local_url: str
+
+
+class AgentCoreGatewayLocalMultiplexClient:
+    """Multiplexed gateway-like MCP access for local development.
+
+    Behaves like a single ``MCPClient`` (it implements the context-manager
+    and ``list_tools_sync`` surface that ``Agent`` consumes), but internally
+    fans calls out to one underlying ``MCPClient`` per attached MCP server.
+    Each underlying client:
+
+    - forwards the current async-context session via the
+      ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` header
+    - exposes tools as ``<target>___<tool>`` to match the deployed gateway's
+      tool-name prefixing, so agents see identical tool names locally and
+      deployed, and the same MCP server can be attached to multiple gateways
+      without name collisions in the agent's tool registry
+
+    Strands' ``MCPClient`` joins the configured prefix and tool name with a
+    single underscore (``f"{prefix}_{tool.name}"``), so to produce the
+    ``<target>___<tool>`` triple-underscore form used by the deployed
+    gateway, the prefix supplied here ends with two underscores.
+
+    Remaining fidelity gaps vs the real gateway:
+
+    - No Cedar policy evaluation
+    - No semantic tool search
+
+    Use ``GATEWAY_URL_OVERRIDE`` with a deployed gateway to test those behaviors.
+    """
+
+    def __init__(self, servers: list[LocalMcpServerBinding]) -> None:
+        self._clients: list[MCPClient] = [
+            MCPClient(
+                # ``s`` captured by reference closure, snapshot to avoid the
+                # late-binding pitfall when iterating ``servers``.
+                (lambda binding=s: streamablehttp_client(
+                    binding.local_url,
+                    auth=_SessionHeaderAuth(),
+                    timeout=120,
+                    terminate_on_close=False,
+                )),
+                prefix=f"{s.name}__",
+            )
+            for s in servers
+        ]
+        self._stack = ExitStack()
+
+    def __enter__(self) -> "AgentCoreGatewayLocalMultiplexClient":
+        self._stack.__enter__()
+        for client in self._clients:
+            self._stack.enter_context(client)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
+        return self._stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def list_tools_sync(self) -> list[MCPAgentTool]:
+        return [tool for client in self._clients for tool in client.list_tools_sync()]

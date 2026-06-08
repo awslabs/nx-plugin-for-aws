@@ -1,0 +1,205 @@
+---
+title: AgentCore Gateway
+description: Create an AgentCore Gateway project with Cedar policy engine
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Generate an [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) project. An AgentCore Gateway is a managed entry point that aggregates one or more MCP server targets behind a single MCP endpoint, evaluates every tool call against a [Cedar policy engine](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), and signs outbound traffic to MCP servers with IAM SigV4.
+
+## Usage
+
+### Generate an AgentCore Gateway
+
+<RunGenerator generator="cedar#agentcore-gateway" />
+
+### Options
+
+<GeneratorParameters generator="cedar#agentcore-gateway" />
+
+## Generator Output
+
+The generator creates a new project at `packages/<name>/` containing the Cedar policy source files, plus a CDK construct or Terraform module for the infrastructure:
+
+<FileTree>
+  - packages/\<name>/
+    - policies/
+      - permit-all.cedar Default Cedar policy that permits everything
+      - README.md Reference for writing Cedar policies
+    - project.json Adds the \<name>-serve-local aggregator target
+</FileTree>
+
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.ts CDK construct for deploying the Gateway
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.tf Terraform module for deploying the Gateway
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+The generated construct creates the following AWS resources:
+
+- An `AgentCore::Gateway` configured for the MCP protocol with `GatewayAuthorizer.usingAwsIam()` (inbound IAM authentication)
+- An `AgentCore::PolicyEngine` running in `ENFORCE` mode, attached to the Gateway
+- One `AgentCore::Policy` per `.cedar` file in `policies/`
+
+The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> so agents can discover it at runtime.
+
+## Writing Policies
+
+Cedar is the policy language used by AgentCore Gateway to authorize tool calls. Every `tools/list` and `tools/call` request flowing through the Gateway is evaluated against the attached policy set, and the caller must have at least one matching `permit` statement (and no matching `forbid`) for the request to succeed.
+
+Refer to the [AWS documentation on AgentCore Gateway policies](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) for the full reference, including [common policy patterns](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html).
+
+### Adding a policy
+
+To add a policy, create a new `.cedar` file alongside `permit-all.cedar`. Each `.cedar` file in `policies/` must contain exactly **one** `permit` or `forbid` statement and is deployed as a single `AWS::BedrockAgentCore::Policy` resource. The policy resource's name is derived from the filename: `permit-all.cedar` becomes `PermitAll` (kebab/snake-case is converted to PascalCase). Files containing multiple statements produce `unexpected token 'forbid'` errors at deploy time — split them into separate files.
+
+For example, to permit only a specific TypeScript agent role to invoke a particular tool, create:
+
+```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"${gateway_arn}"
+) when {
+  principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
+};
+```
+
+Re-synth or re-plan to deploy the new policy.
+
+### Placeholder substitution
+
+The generator substitutes the following placeholders at synth/plan time so policies stay portable across accounts and Gateway redeploys:
+
+| Placeholder      | Substituted with                              |
+| ---------------- | --------------------------------------------- |
+| `${gateway_arn}` | The deployed Gateway's ARN                    |
+| `${account_id}`  | The AWS account this Gateway is deployed into |
+
+Always reference these placeholders rather than hard-coding values.
+
+### ENFORCE mode and default-deny
+
+The `PolicyEngine` runs in `ENFORCE` mode, which means **default-deny** semantics apply: if no `permit` statement matches the (principal, action, resource) tuple, the request is denied. Tool calls that are denied return:
+
+```
+Tool Execution Denied: Tool call not allowed due to policy enforcement
+[No policy applies to the request (denied by default).]
+```
+
+Additionally, the Gateway filters the response of `tools/list` so that callers only see tools they have at least one matching `permit` for: if an agent lacks permission for a given tool, the tool is hidden entirely rather than appearing and failing at call time.
+
+### Default `permit-all.cedar`
+
+The generator ships a default policy that permits any IAM caller from the AWS account the Gateway is deployed into:
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action,
+  resource == AgentCore::Gateway::"${gateway_arn}"
+) when {
+  principal.id like "arn:aws:*::${account_id}:*"
+};
+```
+
+To lock things down further, add narrower policies alongside it. Always retain at least one matching `permit` in the policy set, otherwise default-deny will block every call.
+
+### Policy scope reference
+
+For Gateways generated by this plugin, all callers are IAM principals (the Gateway is configured with `GatewayAuthorizer.usingAwsIam()`):
+
+```
+principal is AgentCore::IamEntity
+```
+
+The principal's `id` attribute holds the caller's IAM ARN. Execution roles are typically assumed by STS, so callers usually arrive as STS assumed-role ARNs containing a generated session suffix:
+
+```
+arn:aws:sts::<account-id>:assumed-role/<role-name>/<session-name>
+```
+
+Match these with `like` and a wildcard:
+
+```cedar
+principal.id like "arn:aws:sts::*:assumed-role/*MyAgentExecutionRole*"
+```
+
+Tool invocations reach the policy engine as actions with the form:
+
+```
+AgentCore::Action::"<target-name>___<tool-name>"
+```
+
+where `<target-name>` is the Gateway target name passed to `gateway.addMcpServerTarget(...)`, `<tool-name>` is the MCP tool's name, and the separator is `___` (three underscores). Cedar does not support wildcards on actions — match exact actions, or omit `action ==` to match all actions.
+
+The resource is always the Gateway itself:
+
+```cedar
+resource == AgentCore::Gateway::"${gateway_arn}"
+```
+
+### Validation considerations
+
+AgentCore's policy engine rejects policies it considers too broad or too narrow, even when the CDK construct sets `PolicyValidationMode.IGNORE_ALL_FINDINGS`. CloudFormation surfaces these rejections as opaque `Resource stabilization failed` errors. The most common patterns the validator rejects are:
+
+1. **Unrestricted permits** — `permit (principal, action, resource == ...);` is rejected as "Overly Permissive". Add a `when { ... }` clause that scopes by principal type, account, or role. The default `permit-all.cedar` shows the minimal acceptable shape.
+2. **Unrestricted forbids** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);` is rejected as "Overly Restrictive". Either scope it with `when { ... }`, or pair it with a sufficiently narrow `permit` so the validator can see callers it would still allow.
+3. **Principal-type checks alone** — `principal is AgentCore::IamEntity` with no `when` clause is also rejected as "Overly Permissive". Always include a condition that further constrains the principal.
+
+If you encounter a `Resource stabilization failed` error during deployment, run `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` to retrieve the validator's `statusReasons`, which contain the actual rejection.
+
+### Example: forbid one tool while keeping a broader permit
+
+Pair a narrow `forbid` with a broader `permit` (Cedar evaluates `forbid` over `permit`):
+
+```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
+forbid (
+  principal is AgentCore::IamEntity,
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"${gateway_arn}"
+) when {
+  principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
+};
+```
+
+This denies the Python agent role from calling `ts-mcp___divide` while leaving the broader `permit-all.cedar` in place for all other callers.
+
+## Local Development
+
+The generator adds a `<name>-serve-local` target to the Gateway project. This target is a continuous aggregator: when connected to MCP servers via the <Link path="guides/connection/agentcore-gateway-mcp">`cedar#agentcore-gateway#mcp-connection` generator</Link>, running it starts all attached MCP servers together for local multiplexing.
+
+<NxCommands commands={["<name>-serve-local"]} />
+
+See the connection guide for the full local development story.
+
+## Next steps
+
+- Connect an MCP server: <Link path="guides/connection/agentcore-gateway-mcp">`cedar#agentcore-gateway#mcp-connection`</Link>
+- Connect a TypeScript Agent: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
+- Connect a Python Agent: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

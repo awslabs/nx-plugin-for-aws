@@ -71,11 +71,13 @@ export function getPythonAgentConnectionPackageName(tree: Tree): string {
 export const TS_CORE_TEMPLATES = {
   mcp: 'core-mcp',
   a2a: 'core-a2a',
+  gateway: 'core-gateway',
 } as const;
 
 export const PY_CORE_TEMPLATES = {
   mcp: 'py-core-mcp',
   a2a: 'py-core-a2a',
+  gateway: 'py-core-gateway',
   /** Shared SigV4 `httpx.Auth` used by both MCP and A2A clients. */
   auth: 'py-core-auth',
 } as const;

@@ -1,0 +1,113 @@
+import { McpClient } from '@strands-agents/sdk';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { getCurrentSessionId } from './session-context.js';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+/**
+ * Common options for creating a gateway MCP client.
+ */
+export interface AgentCoreGatewayMcpClientOptions {
+  /**
+   * The MCP URL of the AgentCore Gateway.
+   * Typically of the form
+   *   https://<gatewayId>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
+   */
+  gatewayUrl: string;
+}
+
+export interface AgentCoreGatewayMcpClientIamOptions
+  extends AgentCoreGatewayMcpClientOptions {
+  /** Optional AWS region override; by default parsed from `gatewayUrl`. */
+  region?: string;
+  /** Optional AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+export type AgentCoreGatewayMcpClientNoAuthOptions =
+  AgentCoreGatewayMcpClientOptions;
+
+interface CreateOptions {
+  url: string;
+  buildHeaders?: () => Promise<Record<string, string>>;
+  fetch?: typeof fetch;
+}
+
+/**
+ * Factory for MCP clients that connect to an AgentCore Gateway.
+ * Forwards the current async-context session via the
+ * `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header on every request;
+ * AgentCore Gateway then propagates the header to downstream MCP-server
+ * targets.
+ */
+export class AgentCoreGatewayMcpClient {
+  private static create(options: CreateOptions): McpClient {
+    const {
+      url,
+      buildHeaders = async (): Promise<Record<string, string>> => ({}),
+      fetch: customFetch,
+    } = options;
+    const fetchWithHeaders: typeof fetch = async (input, init) => {
+      const headers = new Headers(init?.headers);
+      const sessionId = getCurrentSessionId();
+      if (sessionId) headers.set(SESSION_HEADER, sessionId);
+      const extra = await buildHeaders();
+      for (const k of Object.keys(extra)) {
+        headers.set(k, extra[k]);
+      }
+      return (customFetch ?? fetch)(input, { ...init, headers });
+    };
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      fetch: fetchWithHeaders,
+    });
+    return new McpClient({ transport });
+  }
+
+  /** Create a gateway MCP client authenticated with IAM SigV4. */
+  static withIamAuth(options: AgentCoreGatewayMcpClientIamOptions): McpClient {
+    const credentialProvider =
+      options.credentialProvider ?? fromNodeProviderChain();
+    const region =
+      options.region ?? parseRegionFromGatewayUrl(options.gatewayUrl);
+
+    const sigv4Fetch: typeof fetch = async (...args) => {
+      const client = new AwsClient({
+        ...(await credentialProvider()),
+        service: 'bedrock-agentcore',
+        region,
+      });
+      return client.fetch(...args);
+    };
+    return AgentCoreGatewayMcpClient.create({
+      url: options.gatewayUrl,
+      fetch: sigv4Fetch,
+    });
+  }
+
+  /**
+   * Plain-HTTP gateway client. Intended for custom gateway inbound authz
+   * flows (e.g. a developer-supplied token in `buildHeaders`). Prefer
+   * `withIamAuth` for IAM-auth gateways.
+   */
+  static withoutAuth(
+    options: AgentCoreGatewayMcpClientNoAuthOptions,
+  ): McpClient {
+    return AgentCoreGatewayMcpClient.create({ url: options.gatewayUrl });
+  }
+}
+
+/**
+ * Extract the AWS region from a gateway URL of the form
+ *   https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
+ */
+const parseRegionFromGatewayUrl = (gatewayUrl: string): string => {
+  const match = /\.bedrock-agentcore\.([^.]+)\.amazonaws\.com/.exec(gatewayUrl);
+  if (!match) {
+    throw new Error(
+      `Cannot determine region from gateway URL '${gatewayUrl}'. Pass region explicitly.`,
+    );
+  }
+  return match[1];
+};

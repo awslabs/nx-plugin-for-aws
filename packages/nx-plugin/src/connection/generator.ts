@@ -7,7 +7,9 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import agentcoreGatewayMcpConnectionGenerator from '../cedar/agentcore-gateway/mcp-connection/generator';
 import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
+import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator';
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator';
 import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
@@ -16,6 +18,7 @@ import smithyReactConnectionGenerator from '../smithy/react-connection/generator
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
 import trpcReactGenerator from '../trpc/react/generator';
 import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator';
+import tsAgentGatewayConnectionGenerator from '../ts/agent/gateway-connection/generator';
 import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator';
 import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator';
 import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator';
@@ -96,6 +99,10 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'ts#agent', target: 'py#agent' },
   { source: 'py#agent', target: 'ts#agent' },
   { source: 'py#agent', target: 'py#agent' },
+  { source: 'ts#agent', target: 'cedar#agentcore-gateway' },
+  { source: 'py#agent', target: 'cedar#agentcore-gateway' },
+  { source: 'cedar#agentcore-gateway', target: 'ts#mcp-server' },
+  { source: 'cedar#agentcore-gateway', target: 'py#mcp-server' },
 ] as const satisfies readonly Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -169,6 +176,14 @@ const CONNECTION_GENERATORS = {
     pyAgentA2aConnectionGenerator(tree, options),
   'py#agent -> py#agent': (tree, options) =>
     pyAgentA2aConnectionGenerator(tree, options),
+  'ts#agent -> cedar#agentcore-gateway': (tree, options) =>
+    tsAgentGatewayConnectionGenerator(tree, options),
+  'py#agent -> cedar#agentcore-gateway': (tree, options) =>
+    pyAgentGatewayConnectionGenerator(tree, options),
+  'cedar#agentcore-gateway -> ts#mcp-server': (tree, options) =>
+    agentcoreGatewayMcpConnectionGenerator(tree, options),
+  'cedar#agentcore-gateway -> py#mcp-server': (tree, options) =>
+    agentcoreGatewayMcpConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>

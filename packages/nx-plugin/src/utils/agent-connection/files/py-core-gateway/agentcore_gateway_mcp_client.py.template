@@ -1,0 +1,84 @@
+import re
+
+import boto3
+import httpx
+from mcp.client.streamable_http import streamablehttp_client
+from strands.tools.mcp.mcp_client import MCPClient
+
+from .auth import SigV4HTTPXAuth
+from .session_context import get_current_session_id
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class _SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, inner: httpx.Auth | None = None):
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
+
+
+def _parse_region_from_gateway_url(gateway_url: str) -> str:
+    """Extract the AWS region from a gateway URL of the form
+    https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
+    """
+    match = re.search(r"\.bedrock-agentcore\.([^.]+)\.amazonaws\.com", gateway_url)
+    if not match:
+        raise ValueError(
+            f"Cannot determine region from gateway URL '{gateway_url}'. "
+            "Pass region explicitly."
+        )
+    return match.group(1)
+
+
+class AgentCoreGatewayMCPClient:
+    """Factory for MCP clients that connect to an AgentCore Gateway.
+
+    Forwards the current async-context session via the
+    ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` header on every
+    request; AgentCore Gateway then propagates the header to downstream
+    MCP-server targets.
+    """
+
+    @staticmethod
+    def with_iam_auth(
+        gateway_url: str,
+        region: str | None = None,
+    ) -> MCPClient:
+        """Create a gateway MCP client authenticated with IAM SigV4."""
+        resolved_region = region or _parse_region_from_gateway_url(gateway_url)
+        credentials = boto3.Session(region_name=resolved_region).get_credentials()
+        return MCPClient(
+            lambda: streamablehttp_client(
+                gateway_url,
+                auth=_SessionHeaderAuth(
+                    SigV4HTTPXAuth(credentials, "bedrock-agentcore", resolved_region),
+                ),
+                timeout=120,
+                terminate_on_close=False,
+            )
+        )
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> MCPClient:
+        """Plain-HTTP gateway client. For local dev / custom authz headers."""
+        return MCPClient(
+            lambda: streamablehttp_client(
+                gateway_url,
+                auth=_SessionHeaderAuth(),
+                timeout=120,
+                terminate_on_close=False,
+            )
+        )

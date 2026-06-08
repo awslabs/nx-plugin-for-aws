@@ -403,6 +403,10 @@ export default defineConfig({
             },
             { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
             { label: 'py#agent', link: '/guides/py-agent' },
+            {
+              label: 'cedar#agentcore-gateway',
+              link: '/guides/agentcore-gateway',
+            },
             { label: 'terraform#project', link: '/guides/terraform-project' },
             {
               label: 'connection',
@@ -496,6 +500,18 @@ export default defineConfig({
                 {
                   label: 'MCP Server → DynamoDB',
                   link: '/guides/connection/ts-mcp-server-dynamodb',
+                },
+                {
+                  label: 'AgentCore Gateway → MCP Server',
+                  link: '/guides/connection/agentcore-gateway-mcp',
+                },
+                {
+                  label: 'TypeScript Agent → AgentCore Gateway',
+                  link: '/guides/connection/ts-agent-gateway',
+                },
+                {
+                  label: 'Python Agent → AgentCore Gateway',
+                  link: '/guides/connection/py-agent-gateway',
                 },
               ],
             },

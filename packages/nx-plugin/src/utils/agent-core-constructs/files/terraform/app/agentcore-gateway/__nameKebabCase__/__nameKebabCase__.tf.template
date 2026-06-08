@@ -1,0 +1,189 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.23"
+    }
+    awscc = {
+      source  = "hashicorp/awscc"
+      version = ">= 1.52"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
+  }
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the gateway service role. Connection generators (e.g. agentcore-gateway#mcp-connection) append `InvokeAgentRuntime*` entries here."
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.id
+  policies_dir   = "${path.module}/../../../../../../<%- projectDirectory %>/policies"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+# IAM role for the gateway service
+resource "aws_iam_role" "gateway_role" {
+  name = "<%- nameClassName %>-GatewayRole-${random_id.unique_suffix.hex}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AgentCoreGatewayAssumeRolePolicy"
+        Effect = "Allow"
+        Principal = {
+          Service = "bedrock-agentcore.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.aws_account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:bedrock-agentcore:${local.aws_region}:${local.aws_account_id}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# Inline policy giving the gateway role the permissions it needs:
+#   - CheckAuthorizePermissions: required by the gateway CFN readiness probe
+#   - Additional statements appended by connection generators (e.g. InvokeAgentRuntime*)
+resource "aws_iam_role_policy" "gateway_role_policy" {
+  name = "<%- nameClassName %>-GatewayPolicy"
+  role = aws_iam_role.gateway_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      {
+        Sid      = "CheckAuthorizePermissions"
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:CheckAuthorizePermissions"]
+        Resource = ["*"]
+      }
+    ], var.additional_iam_policy_statements)
+  })
+}
+
+# Gateway (native aws provider)
+resource "aws_bedrockagentcore_gateway" "this" {
+  name          = "<%- nameClassName %>-${random_id.unique_suffix.hex}"
+  description   = "AgentCore Gateway for <%- nameClassName %>"
+  role_arn      = aws_iam_role.gateway_role.arn
+  protocol_type = "MCP"
+
+  protocol_configuration = {
+    mcp = {
+      search_type        = "SEMANTIC"
+      supported_versions = ["2025-03-26"]
+    }
+  }
+
+  authorizer_type = "AWS_IAM"
+
+  policy_engine_configuration = {
+    policy_engine_arn = awscc_bedrockagentcore_policy_engine.this.policy_engine_arn
+    mode              = "ENFORCE"
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_iam_role_policy.gateway_role_policy]
+}
+
+# Policy engine (awscc provider)
+resource "awscc_bedrockagentcore_policy_engine" "this" {
+  name        = "<%- nameClassName %>-PolicyEngine-${random_id.unique_suffix.hex}"
+  description = "Cedar policy engine for <%- nameClassName %>"
+}
+
+# One Policy per .cedar file in the project's policies/ directory.
+#
+# The ${gateway_arn} and ${account_id} placeholders are substituted at apply
+# time so policies stay scoped to this gateway and the deploying account.
+#
+# Policy resource names are derived from the file basename and normalised
+# to PascalCase (matching the CDK template). The AgentCore Policy resource
+# `name` regex requires `^[A-Za-z][A-Za-z0-9_]*$` — no hyphens — so the
+# join() reassembles the basename with each segment Title-cased.
+resource "awscc_bedrockagentcore_policy" "policies" {
+  for_each = fileset(local.policies_dir, "*.cedar")
+
+  policy_engine_identifier = awscc_bedrockagentcore_policy_engine.this.policy_engine_id
+  name = join("", [
+    for word in split("-", replace(trimsuffix(each.value, ".cedar"), "_", "-")) :
+    "${upper(substr(word, 0, 1))}${substr(word, 1, length(word))}"
+  ])
+  description     = "Policy loaded from ${each.value}"
+  validation_mode = "IGNORE_ALL_FINDINGS"
+  definition = replace(
+    replace(
+      file("${local.policies_dir}/${each.value}"),
+      "$${gateway_arn}",
+      aws_bedrockagentcore_gateway.this.gateway_arn,
+    ),
+    "$${account_id}",
+    local.aws_account_id,
+  )
+}
+
+# Add gateway URL to runtime config
+module "add_gateway_url_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "gateways"
+  value     = { "<%- nameClassName %>" = aws_bedrockagentcore_gateway.this.gateway_url }
+
+  depends_on = [aws_bedrockagentcore_gateway.this]
+}
+
+output "gateway_id" {
+  description = "ID of the Bedrock AgentCore Gateway"
+  value       = aws_bedrockagentcore_gateway.this.gateway_id
+}
+
+output "gateway_arn" {
+  description = "ARN of the Bedrock AgentCore Gateway"
+  value       = aws_bedrockagentcore_gateway.this.gateway_arn
+}
+
+output "gateway_url" {
+  description = "MCP endpoint URL of the Bedrock AgentCore Gateway"
+  value       = aws_bedrockagentcore_gateway.this.gateway_url
+}
+
+output "gateway_role_arn" {
+  description = "ARN of the IAM role assumed by the gateway service"
+  value       = aws_iam_role.gateway_role.arn
+}

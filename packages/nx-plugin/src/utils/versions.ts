@@ -71,6 +71,7 @@ export const TS_VERSIONS = {
   '@astrojs/starlight': '0.39.3',
   astro: '6.4.4',
   aws4fetch: '1.0.20',
+  '@aws-cdk/aws-bedrock-agentcore-alpha': '2.258.0-alpha.0',
   'aws-cdk': '2.1126.0',
   'aws-cdk-lib': '2.258.0',
   'aws-xray-sdk-core': '3.12.0',

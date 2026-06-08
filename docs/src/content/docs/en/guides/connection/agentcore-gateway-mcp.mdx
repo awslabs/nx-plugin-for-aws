@@ -1,0 +1,128 @@
+---
+title: AgentCore Gateway to MCP Server
+description: Connect an AgentCore Gateway to an MCP server
+when:
+  sourceType: cedar#agentcore-gateway
+  targetType:
+    - ts#mcp-server
+    - py#mcp-server
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator can register an MCP server (either <Link path="guides/ts-mcp-server">TypeScript</Link> or <Link path="guides/py-mcp-server">Python</Link>) as a target of an <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
+
+Once connected, the Gateway aggregates the MCP server's tools into its single MCP endpoint, evaluates calls against its Cedar policy engine, and signs outbound traffic to the MCP server with IAM SigV4.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/agentcore-gateway">`cedar#agentcore-gateway`</Link> project
+2. An MCP server component (<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> or <Link path="guides/py-mcp-server">`py#mcp-server`</Link>) created with `infra: agentcore` and `auth: iam`
+
+The Gateway must have `protocol: mcp` and the MCP server must have `auth: iam` — the generator validates both. Non-IAM MCP servers cannot be attached because the Gateway signs outbound traffic with SigV4.
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select the Gateway project as the source and the MCP server project as the target. If the MCP server project contains multiple components, specify `targetComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator wires existing projects together rather than emitting new source files. The following files are modified:
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json `<gateway>-serve-local` gains a dependency on the MCP server's `<mcp>-serve-local`
+- packages/common/agent-connection (TypeScript, if a TS gateway client exists)
+  - src/app
+    - \<gateway-kebab>-client.ts `ATTACHED_MCP_SERVERS` updated to include the MCP server
+- packages/common/agent\_connection (Python, if a Py gateway client exists)
+  - \<scope>\_agent\_connection/app
+    - \<gateway\_snake>\_client.py `ATTACHED_MCP_SERVERS` updated to include the MCP server
+
+</FileTree>
+
+The Gateway project's `<gateway>-serve-local` aggregator target gains a dependency on the MCP server's `<mcp>-serve-local` target, so running the Gateway locally also starts the MCP server. Any existing `<Gateway>Client.ts` / `_client.py` files (emitted by the <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> or <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection generators) have their `ATTACHED_MCP_SERVERS` list updated to include this MCP server so local multiplexing picks it up.
+
+## Adding the MCP server target to your stack
+
+The generator **cannot** automatically wire the MCP server target into your infrastructure because it doesn't know which stack or module instantiates the Gateway. Add a single call to `gateway.addMcpServer(server)` yourself.
+
+<Infrastructure>
+<Fragment slot="cdk">
+In the stack where you instantiate the Gateway, register the MCP server as a target:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// Register the MCP server as a target of the Gateway. The target name
+// defaults to the MCP server construct's id in kebab-case (`my-mcp-server`).
+myGateway.addMcpServer(myMcpServer);
+```
+
+The Gateway target name (the kebab-cased construct id by default) is used as the prefix for Cedar action names — the action format is ``AgentCore::Action::"<targetName>___<toolName>"``. See the <Link path="guides/agentcore-gateway">Writing Policies section</Link>. Keep the target name short and stable; changing it later invalidates any Cedar policies that reference the old name.
+
+To override the default target name, pass `gatewayTargetName`:
+
+```ts
+myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
+```
+
+The construct configures the target with `iamCredentialProvider.service = 'bedrock-agentcore'` so the Gateway signs outbound calls using its own execution role.
+</Fragment>
+<Fragment slot="terraform">
+In the Terraform file where you instantiate the Gateway, wire the MCP server target in:
+
+```hcl title="packages/infra/src/main.tf" {10-16}
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+}
+
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+# Register the MCP server as a target of the Gateway
+resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
+  gateway_identifier    = module.my_gateway.gateway_id
+  name                  = "my-mcp-server"
+  mcp_server_runtime_arn = module.my_mcp_server.agent_core_runtime_arn
+
+  credential_provider_configuration {
+    credential_provider_type = "GATEWAY_IAM_ROLE"
+  }
+}
+```
+
+The target `name` (`my-mcp-server` above) is used as the prefix for Cedar action names — see the <Link path="guides/agentcore-gateway">Writing Policies section</Link>.
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+Running the Gateway locally with:
+
+<NxCommands commands={["<gateway-name>-serve-local"]} />
+
+starts every attached MCP server on its assigned local port. Agents connected to the Gateway via the <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> or <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection generators multiplex directly to the MCP servers using their client's local fallback path.
+
+:::caution[Local fidelity]
+Local development **bypasses the Gateway entirely** — the generated gateway client detects `SERVE_LOCAL=true` and connects directly to each attached MCP server over plain HTTP. As a consequence, **Cedar policies are not evaluated locally**. Every agent sees every tool on every attached MCP server. To exercise Cedar policies, set `GATEWAY_URL_OVERRIDE` (see the <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> agent-connection guides) so the locally-running agent calls the deployed Gateway instead.
+
+Tool names are still prefixed locally as `<target-name>___<tool-name>` to match the deployed Gateway's namespacing, so an agent's system prompt and the Cedar action names you reference remain consistent across local and deployed runs.
+:::
