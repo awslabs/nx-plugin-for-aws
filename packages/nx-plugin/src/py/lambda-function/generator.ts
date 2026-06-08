@@ -170,7 +170,7 @@ export const pyLambdaFunctionGenerator = async (
     joinPathFragments(__dirname, 'files', 'handler'), // path to the file templates
     joinPathFragments(projectConfig.sourceRoot, schema.functionPath ?? ''),
     enhancedOptions,
-    { overwriteStrategy: OverwriteStrategy.Overwrite },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
   // Generate the lambda handler test file
@@ -179,7 +179,7 @@ export const pyLambdaFunctionGenerator = async (
     joinPathFragments(__dirname, 'files', 'tests'),
     joinPathFragments(dir, 'tests'),
     enhancedOptions,
-    { overwriteStrategy: OverwriteStrategy.Overwrite },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
   addDependenciesToPyProjectToml(tree, dir, [

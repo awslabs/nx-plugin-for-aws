@@ -207,6 +207,45 @@ describe('nx-generator generator', () => {
       expect(generatorsJson.generators['empty#test'].metric).toBe('g1');
     });
 
+    it('should preserve the metric on same-name re-run', async () => {
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      const generatorsJsonAfterFirstRun = JSON.parse(
+        tree.read('packages/nx-plugin/generators.json', 'utf-8'),
+      );
+      const metricAfterFirstRun =
+        generatorsJsonAfterFirstRun.generators['foo#bar'].metric;
+      expect(metricAfterFirstRun).toBe('g42');
+
+      // Re-run with the same name
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      const generatorsJsonAfterSecondRun = JSON.parse(
+        tree.read('packages/nx-plugin/generators.json', 'utf-8'),
+      );
+
+      // The metric should be unchanged on re-run
+      expect(generatorsJsonAfterSecondRun.generators['foo#bar'].metric).toBe(
+        metricAfterFirstRun,
+      );
+
+      // Other entries should not be corrupted
+      expect(generatorsJsonAfterSecondRun.generators['existing']).toEqual(
+        generatorsJsonAfterFirstRun.generators['existing'],
+      );
+      expect(generatorsJsonAfterSecondRun.generators['another']).toEqual(
+        generatorsJsonAfterFirstRun.generators['another'],
+      );
+    });
+
     it('should support a nested directory', async () => {
       await tsNxGeneratorGenerator(tree, {
         project: NxPluginForAwsProjectJson.name,

@@ -143,6 +143,12 @@ export const tsNxGeneratorGenerator = async (
   const existingGenerators = Object.values(
     generatorsJson?.generators ?? {},
   ) as any[];
+  // Reuse the existing metric for a same-name re-run, otherwise allocate a new one
+  const metric =
+    generatorsJson?.generators?.[name]?.metric ??
+    (existingGenerators.length > 0
+      ? incrementMetric(existingGenerators.map((g) => g.metric))
+      : 'g1');
   writeJson(tree, generatorsJsonPath, {
     ...generatorsJson,
     generators: sortObjectKeys({
@@ -152,16 +158,7 @@ export const tsNxGeneratorGenerator = async (
         schema: `${factoryBasePath}/schema.json`,
         description:
           description ?? 'TODO: Add short description of the generator',
-        ...(isNxPluginForAws
-          ? {
-              metric:
-                existingGenerators.length > 0
-                  ? incrementMetric(
-                      Object.values(existingGenerators).map((g) => g.metric),
-                    )
-                  : 'g1',
-            }
-          : {}),
+        ...(isNxPluginForAws ? { metric } : {}),
       },
     }),
   });
