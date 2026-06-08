@@ -13,6 +13,21 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Raise inotify limits
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
+      # `serve-local` smoke tests run several watch-mode dev servers in
+      # parallel (Vite, tsx --watch, uvicorn/watchfiles), which can exhaust the
+      # runner's default inotify limits. Raise them to dev-machine levels. Try
+      # as the current user (CodeBuild runs as root) then fall back to sudo.
+      run: |
+        raise() {
+          sysctl -w "$1" 2>/dev/null || sudo sysctl -w "$1" 2>/dev/null || true
+        }
+        raise fs.inotify.max_user_instances=1024
+        raise fs.inotify.max_user_watches=1048576
+        echo "max_user_instances=$(cat /proc/sys/fs/inotify/max_user_instances)"
+        echo "max_user_watches=$(cat /proc/sys/fs/inotify/max_user_watches)"
     - name: Docker login credentials
       if: ${{ inputs.aws-docker-login-role-arn != '' }}
       uses: aws-actions/configure-aws-credentials@v5

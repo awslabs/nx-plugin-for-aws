@@ -2,11 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-
+import { type ChildProcess, execSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { getPackageManagerCommand } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
+import type { MockServer } from 'llm-mock-server';
 import {
   buildCreateNxWorkspaceCommand,
   buildPackageManagerShortCommand,
@@ -14,6 +16,11 @@ import {
   runCLI,
   tmpProjPath,
 } from '../utils';
+import { startLlmMock } from '../utils/llm-mock';
+
+const LLM_MOCK_PORT = 19824;
+const STARTUP_TIMEOUT_MS = 120_000;
+const HEALTH_CHECK_INTERVAL_MS = 2_000;
 
 const isUpdateSnapshot = () =>
   (globalThis as any).__vitest_worker__?.config?.snapshotOptions
@@ -40,12 +47,164 @@ const expectFileMatchesOldTemplate = (
   }
 };
 
+const dungeonFile = (...segments: string[]) =>
+  join(__dirname, '../files/dungeon-adventure', ...segments);
+
+const writeFromTemplate = (
+  destination: string,
+  ...templateSegments: string[]
+) =>
+  writeFileSync(
+    destination,
+    readFileSync(dungeonFile(...templateSegments), 'utf-8'),
+  );
+
+function waitForPort(port: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const attempt = () => {
+      if (Date.now() > deadline) {
+        reject(new Error(`Port ${port} not ready within ${timeoutMs}ms`));
+        return;
+      }
+      const socket = createConnection({ port, host: '127.0.0.1' }, () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.on('error', () => {
+        socket.destroy();
+        setTimeout(attempt, HEALTH_CHECK_INTERVAL_MS);
+      });
+    };
+    attempt();
+  });
+}
+
+// Poll a URL until the JSON response satisfies `predicate`. Used to wait out
+// the gap between DynamoDB Local's port opening and the local table being
+// created (the serve-local cascade does both, but not atomically).
+async function waitForJson(
+  url: string,
+  predicate: (body: any) => boolean,
+  timeoutMs = STARTUP_TIMEOUT_MS,
+): Promise<any> {
+  const deadline = Date.now() + timeoutMs;
+  let last: any;
+  for (;;) {
+    try {
+      last = await fetch(url).then((r) => r.json());
+      if (predicate(last)) return last;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Timed out waiting for ${url}: ${JSON.stringify(last)?.slice(0, 500)}`,
+      );
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, HEALTH_CHECK_INTERVAL_MS),
+    );
+  }
+}
+
+function startServer(
+  cwd: string,
+  target: string,
+  env?: Record<string, string>,
+): ChildProcess {
+  const child = spawn('pnpm', ['exec', 'nx', 'run', target], {
+    cwd,
+    detached: true,
+    env: { ...process.env, NX_DAEMON: 'true', ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout?.on('data', (d: Buffer) =>
+    process.stdout.write(`[${target}] ${d}`),
+  );
+  child.stderr?.on('data', (d: Buffer) =>
+    process.stderr.write(`[${target}] ${d}`),
+  );
+  return child;
+}
+
+function killProcess(child: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (!child.pid) {
+      resolve();
+      return;
+    }
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      // already dead
+    }
+    const timeout = setTimeout(() => {
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {
+        // already dead
+      }
+      resolve();
+    }, 5000);
+    child.on('exit', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+function getPortFromProjectJson(
+  projectRoot: string,
+  relPath: string,
+  targetName: string,
+): number {
+  const fullPath = `${projectRoot}/${relPath}`;
+  const pj = JSON.parse(readFileSync(fullPath, 'utf-8'));
+  const target = pj.targets?.[targetName];
+  if (!target)
+    throw new Error(`Target "${targetName}" not found in ${relPath}`);
+
+  const envPort = target.options?.env?.PORT;
+  if (envPort) return Number(envPort);
+
+  const cmd: string =
+    target.options?.command ?? target.options?.commands?.[0] ?? '';
+  const m = cmd.match(/--port\s+(\d+)/);
+  if (m) return Number(m[1]);
+
+  const ports = pj.metadata?.ports;
+  if (Array.isArray(ports) && ports.length > 0) return Number(ports[0]);
+
+  throw new Error(`Cannot determine port for "${targetName}" in ${relPath}`);
+}
+
 /**
  * This test runs through the dungeon adventure tutorial from the docs
  */
 describe('smoke test - dungeon-adventure', () => {
   const pkgMgr = 'pnpm';
   const targetDir = `${tmpProjPath()}/dungeon-adventure-${pkgMgr}`;
+  const projectRoot = `${targetDir}/dungeon-adventure`;
+  const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
+  const runningProcesses: ChildProcess[] = [];
+  let llmMock: MockServer | undefined;
+
+  // DynamoDB Local persists to a named volume keyed on the workspace scope, so
+  // remove the container and its volume between runs to guarantee a fresh table
+  // (otherwise a previous run's data leaks into this one's assertions).
+  const cleanupDynamoLocal = () => {
+    for (const cmd of [
+      'docker rm -f dungeon-adventure-dynamodb',
+      'docker volume rm dungeon-adventure-dynamodb-data',
+    ]) {
+      try {
+        execSync(cmd, { stdio: 'ignore' });
+      } catch {
+        // not present
+      }
+    }
+  };
 
   beforeEach(() => {
     console.log(`Cleaning target directory ${targetDir}`);
@@ -53,7 +212,34 @@ describe('smoke test - dungeon-adventure', () => {
       rmSync(targetDir, { force: true, recursive: true });
     }
     ensureDirSync(targetDir);
+    cleanupDynamoLocal();
   });
+
+  afterEach(async () => {
+    await Promise.all(runningProcesses.map(killProcess));
+    runningProcesses.length = 0;
+    if (llmMock) {
+      await llmMock.stop();
+      llmMock = undefined;
+    }
+    cleanupDynamoLocal();
+  });
+
+  async function startAndWait(
+    target: string,
+    port: number,
+    env?: Record<string, string>,
+  ) {
+    const child = startServer(projectRoot, target, env);
+    runningProcesses.push(child);
+    await waitForPort(port, STARTUP_TIMEOUT_MS);
+    return child;
+  }
+
+  async function stopAll() {
+    await Promise.all(runningProcesses.map(killProcess));
+    runningProcesses.length = 0;
+  }
 
   it('should generate and build', async () => {
     // 1. Monorepo Setup
@@ -66,8 +252,6 @@ describe('smoke test - dungeon-adventure', () => {
         redirectStderr: true,
       },
     );
-    const projectRoot = `${targetDir}/dungeon-adventure`;
-    const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await runCLI(
       `generate @aws/nx-plugin:ts#api --name=GameApi --no-interactive`,
@@ -87,6 +271,12 @@ describe('smoke test - dungeon-adventure', () => {
     );
     await runCLI(
       `generate @aws/nx-plugin:ts#mcp-server --project=inventory --no-interactive`,
+      opts,
+    );
+    // The DynamoDB table backing the game's state, with local development
+    // support via DynamoDB Local
+    await runCLI(
+      `generate @aws/nx-plugin:ts#dynamodb --name=DungeonDb --no-interactive`,
       opts,
     );
     await runCLI(
@@ -110,6 +300,16 @@ describe('smoke test - dungeon-adventure', () => {
       `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=story --no-interactive`,
       opts,
     );
+    // Wire the Game API and the Inventory MCP server to the DynamoDB table so
+    // their serve-local targets boot DynamoDB Local automatically
+    await runCLI(
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-api --targetProject=@dungeon-adventure/dungeon-db --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/inventory --targetProject=@dungeon-adventure/dungeon-db --no-interactive`,
+      opts,
+    );
     await runCLI(
       `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
       opts,
@@ -119,22 +319,10 @@ describe('smoke test - dungeon-adventure', () => {
     const applicationStackPath = `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`;
     expectFileMatchesOldTemplate(
       applicationStackPath,
-      join(
-        __dirname,
-        '../files/dungeon-adventure/1/application-stack.ts.original.template',
-      ),
+      dungeonFile('1/application-stack.ts.original.template'),
     );
 
-    writeFileSync(
-      applicationStackPath,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/1/application-stack.ts.template',
-        ),
-        'utf-8',
-      ),
-    );
+    writeFromTemplate(applicationStackPath, '1/application-stack.ts.template');
     await runCLI(`sync --verbose`, opts);
     await runCLI(
       `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --skip-nx-cache --verbose`,
@@ -152,111 +340,49 @@ describe('smoke test - dungeon-adventure', () => {
       },
     );
 
+    // Model the Game and Inventory entities in the DynamoDB project
+    writeFromTemplate(
+      `${opts.cwd}/packages/dungeon-db/src/entities/index.ts`,
+      '2/dungeon-db/entities/index.ts.template',
+    );
+    rmSync(`${opts.cwd}/packages/dungeon-db/src/entities/example.ts`);
+
+    // Game API schema
     ensureDirSync(`${opts.cwd}/packages/game-api/src/schema`);
-
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/game-api/src/schema/index.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/schema/index.ts.template',
-        ),
-        'utf-8',
-      ),
+      '2/schema/index.ts.template',
     );
 
-    ensureDirSync(`${opts.cwd}/packages/game-api/src/entities`);
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/entities/index.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/entities/index.ts.template',
-        ),
-        'utf-8',
-      ),
-    );
-
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/game-api/src/procedures/actions.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/actions.ts.template',
-        ),
-        'utf-8',
-      ),
+      '2/procedures/actions.ts.template',
     );
-
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/game-api/src/procedures/games.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/games.ts.template',
-        ),
-        'utf-8',
-      ),
+      '2/procedures/games.ts.template',
     );
-
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/game-api/src/procedures/inventory.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/inventory.ts.template',
-        ),
-        'utf-8',
-      ),
+      '2/procedures/inventory.ts.template',
     );
-
     rmSync(`${opts.cwd}/packages/game-api/src/procedures/echo.ts`);
 
     // Check router.ts matches router.ts.old.template before modification
     const routerPath = `${opts.cwd}/packages/game-api/src/router.ts`;
     expectFileMatchesOldTemplate(
       routerPath,
-      join(__dirname, '../files/dungeon-adventure/2/router.ts.old.template'),
+      dungeonFile('2/router.ts.old.template'),
     );
-    writeFileSync(
-      routerPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/2/router.ts.template'),
-        'utf-8',
-      ),
-    );
-
-    // Check index.ts matches index.ts.old.template before modification
-    const indexPath = `${opts.cwd}/packages/game-api/src/index.ts`;
-    expectFileMatchesOldTemplate(
-      indexPath,
-      join(__dirname, '../files/dungeon-adventure/2/index.ts.old.template'),
-    );
-    writeFileSync(
-      indexPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/2/index.ts.template'),
-        'utf-8',
-      ),
-    );
+    writeFromTemplate(routerPath, '2/router.ts.template');
 
     // Check mcp server.ts matches server.ts.old.template before modification
     const mcpServerPath = `${opts.cwd}/packages/inventory/src/mcp-server/server.ts`;
     expectFileMatchesOldTemplate(
       mcpServerPath,
-      join(
-        __dirname,
-        '../files/dungeon-adventure/2/mcp/server.ts.old.template',
-      ),
+      dungeonFile('2/mcp/server.ts.old.template'),
     );
-    writeFileSync(
-      mcpServerPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/2/mcp/server.ts.template'),
-        'utf-8',
-      ),
-    );
+    writeFromTemplate(mcpServerPath, '2/mcp/server.ts.template');
 
     rmSync(`${opts.cwd}/packages/inventory/src/mcp-server/tools`, {
       recursive: true,
@@ -267,28 +393,9 @@ describe('smoke test - dungeon-adventure', () => {
       force: true,
     });
 
-    ensureDirSync(`${opts.cwd}/packages/infra/src/constructs`);
-
-    writeFileSync(
-      `${opts.cwd}/packages/infra/src/constructs/electrodb-table.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/constructs/electrodb-table.ts.template',
-        ),
-        'utf-8',
-      ),
-    );
-
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/stacks/application-stack.ts.template',
-        ),
-        'utf-8',
-      ),
+      '2/stacks/application-stack.ts.template',
     );
 
     await runCLI(`sync --verbose`, opts);
@@ -301,37 +408,23 @@ describe('smoke test - dungeon-adventure', () => {
       { ...opts, prefixWithPackageManagerCmd: false },
     );
 
-    // TODO: consider deploy!
-
     // Module 3: Story Agent
 
     // Check main.py matches main.py.old.template before modification
     const mainPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/main.py`;
     expectFileMatchesOldTemplate(
       mainPyPath,
-      join(__dirname, '../files/dungeon-adventure/3/main.py.old.template'),
+      dungeonFile('3/main.py.old.template'),
     );
-    writeFileSync(
-      mainPyPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/main.py.template'),
-        'utf-8',
-      ),
-    );
+    writeFromTemplate(mainPyPath, '3/main.py.template');
 
     // Check agent.py matches agent.py.old.template before modification
     const agentPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`;
     expectFileMatchesOldTemplate(
       agentPyPath,
-      join(__dirname, '../files/dungeon-adventure/3/agent.py.old.template'),
+      dungeonFile('3/agent.py.old.template'),
     );
-    writeFileSync(
-      agentPyPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/agent.py.template'),
-        'utf-8',
-      ),
-    );
+    writeFromTemplate(agentPyPath, '3/agent.py.template');
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
@@ -346,46 +439,25 @@ describe('smoke test - dungeon-adventure', () => {
     // Module 4: UI
 
     // Single global styles file — dungeon theme + CopilotKit colour reset
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/game-ui/src/styles.css`,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/4/styles.css.template'),
-        'utf-8',
-      ),
+      '4/styles.css.template',
     );
 
     // Game route: CopilotChat for the AG-UI agent with deterministic threadId
     ensureDirSync(`${opts.cwd}/packages/game-ui/src/routes/game`);
-    writeFileSync(
+    writeFromTemplate(
       `${opts.cwd}/packages/game-ui/src/routes/game/$playerName.tsx`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/4/routes/game/$playerName.tsx.template',
-        ),
-        'utf-8',
-      ),
+      '4/routes/game/$playerName.tsx.template',
     );
 
     // Root route: new-game picker + continue list
     const routesIndexPath = `${opts.cwd}/packages/game-ui/src/routes/index.tsx`;
     expectFileMatchesOldTemplate(
       routesIndexPath,
-      join(
-        __dirname,
-        '../files/dungeon-adventure/4/routes/index.tsx.old.template',
-      ),
+      dungeonFile('4/routes/index.tsx.old.template'),
     );
-    writeFileSync(
-      routesIndexPath,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/4/routes/index.tsx.template',
-        ),
-        'utf-8',
-      ),
-    );
+    writeFromTemplate(routesIndexPath, '4/routes/index.tsx.template');
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
@@ -396,5 +468,146 @@ describe('smoke test - dungeon-adventure', () => {
       `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
       { ...opts, prefixWithPackageManagerCmd: false },
     );
+
+    // 5. Local end-to-end validation against DynamoDB Local
+    //
+    // Every component runs fully offline: serve-local boots DynamoDB Local via
+    // the connection generators, and the Story Agent's LLM is pointed at a mock
+    // OpenAI server (same strategy as the serve-local smoke test).
+    //
+    // This part drives long-lived dev servers via detached process groups and
+    // POSIX signals, so it only runs on non-Windows (matching the serve-local
+    // smoke test, which is Linux-only). On Windows we stop after verifying
+    // generation and build above.
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    // Point the Story Agent at the mock LLM
+    llmMock = await startLlmMock(LLM_MOCK_PORT);
+    const agentFile = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`;
+    let agentContent = readFileSync(agentFile, 'utf-8');
+    agentContent = `from strands.models.openai import OpenAIModel\n${agentContent}`;
+    agentContent = agentContent.replace(
+      /Agent\(\s*\n/,
+      `Agent(\n            model=OpenAIModel(model_id="mock", client_args={"api_key": "test", "base_url": "http://127.0.0.1:${LLM_MOCK_PORT}/v1"}),\n`,
+    );
+    writeFileSync(agentFile, agentContent);
+    await runCLI(`run dungeon_adventure.story:add -- openai`, opts);
+
+    const gameApiPort = getPortFromProjectJson(
+      projectRoot,
+      'packages/game-api/project.json',
+      'serve-local',
+    );
+    const mcpPort = getPortFromProjectJson(
+      projectRoot,
+      'packages/inventory/project.json',
+      'mcp-server-serve-local',
+    );
+    const agentPort = getPortFromProjectJson(
+      projectRoot,
+      'packages/story/project.json',
+      'agent-serve-local',
+    );
+    const dynamoPort = getPortFromProjectJson(
+      projectRoot,
+      'packages/dungeon-db/project.json',
+      'serve-local',
+    );
+
+    // Bring the whole stack up with the one command the tutorial documents:
+    // game-ui:serve-local cascades through the Game API, the Story Agent (which
+    // boots the Inventory MCP server) and DynamoDB Local.
+    const UI_PORT = 4200;
+    await startAndWait('@dungeon-adventure/game-ui:serve-local', UI_PORT);
+    await waitForPort(dynamoPort, STARTUP_TIMEOUT_MS);
+    await waitForPort(gameApiPort, STARTUP_TIMEOUT_MS);
+    await waitForPort(mcpPort, STARTUP_TIMEOUT_MS);
+    await waitForPort(agentPort, STARTUP_TIMEOUT_MS);
+
+    // Website dev server serves HTML
+    const uiRes = await fetch(`http://127.0.0.1:${UI_PORT}/`);
+    const uiHtml = await uiRes.text();
+    console.log(`game-ui (${uiRes.status}, ${uiHtml.length} bytes)`);
+    expect(uiRes.status).toBe(200);
+    expect(uiHtml).toContain('<');
+
+    // Game API procedures against DynamoDB Local. Poll the first read until the
+    // local table has finished being created by the serve-local cascade.
+    const emptyGames: any = await waitForJson(
+      `http://127.0.0.1:${gameApiPort}/games.query?input=${encodeURIComponent('{}')}`,
+      (b) => Array.isArray(b?.result?.data?.items),
+    );
+    console.log('games.query (empty):', JSON.stringify(emptyGames));
+    expect(emptyGames.result.data.items).toEqual([]);
+
+    const saved: any = await fetch(
+      `http://127.0.0.1:${gameApiPort}/games.save`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerName: 'Alice', genre: 'zombie' }),
+      },
+    ).then((r) => r.json());
+    console.log('games.save:', JSON.stringify(saved));
+    expect(saved.result.data.playerName).toBe('Alice');
+
+    const games: any = await fetch(
+      `http://127.0.0.1:${gameApiPort}/games.query?input=${encodeURIComponent('{}')}`,
+    ).then((r) => r.json());
+    console.log('games.query (after save):', JSON.stringify(games));
+    expect(games.result.data.items).toHaveLength(1);
+    expect(games.result.data.items[0].playerName).toBe('Alice');
+
+    // Inventory MCP server initialize handshake
+    const mcpRes = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'initialize',
+        id: 1,
+        params: {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '1.0.0' },
+        },
+      }),
+    });
+    console.log('Inventory MCP initialize:', mcpRes.status);
+    expect(mcpRes.status).toBe(200);
+
+    // Story Agent AG-UI invocation (uses the mock LLM + the Inventory MCP server)
+    const agentRes = await fetch(`http://127.0.0.1:${agentPort}/invocations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        threadId: 'Alice-zombie00000000000000000000000',
+        runId: 'run-1',
+        messages: [
+          {
+            id: 'm1',
+            role: 'user',
+            content: 'My name is Alice. Start my zombie adventure.',
+          },
+        ],
+        tools: [],
+        context: [],
+        state: {},
+        forwardedProps: {},
+      }),
+    });
+    const agentBody = await agentRes.text();
+    console.log(
+      `Story Agent AG-UI (${agentRes.status}, ${agentBody.length} bytes):`,
+      agentBody.slice(0, 200),
+    );
+    expect(agentRes.status).toBe(200);
+    expect(agentBody).toContain('data:');
+    await stopAll();
   });
 });

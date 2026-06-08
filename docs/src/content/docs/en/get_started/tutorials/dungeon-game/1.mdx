@@ -620,7 +620,51 @@ The `ts#mcp-server` generator generates these files.
 
 </Drawer>
 
-## Task 5: Create the User Interface (UI)
+## Task 5: Create the game database
+
+Our game state — saved games and each player's inventory — lives in [Amazon DynamoDB](https://aws.amazon.com/dynamodb/). Create a DynamoDB project called `DungeonDb` with the `ts#dynamodb` generator:
+
+<RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
+
+:::tip[Local-first development]
+The `ts#dynamodb` generator vends a `serve-local` target that runs [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) in a container. Combined with the `connection` generator (which we run below), this means **the entire game runs on your machine without a deployment** until the end of the tutorial.
+:::
+
+You will see some new files appear in your file tree.
+<Drawer title="ts#dynamodb updated files" trigger="Click here to examine these files in more detail.">
+The `ts#dynamodb` generator generates these files.
+
+<FileTree>
+- packages/
+  - dungeon-db/
+    - scripts/
+      - create-local-table.ts creates the table in DynamoDB Local
+      - pull-image.ts pulls the DynamoDB Local image
+      - start-container.ts starts the DynamoDB Local container
+    - src/
+      - index.ts entry point and exports
+      - constants.ts local development constants and runtime config key
+      - client.ts DynamoDB client singleton and table name resolution
+      - gsi.ts source of truth for Global Secondary Indexes
+      - entities/
+        - example.ts example ElectroDB entity (we will replace this)
+        - index.ts entity exports
+    - project.json adds the `serve-local` and `pull-image` targets
+  - common/constructs/
+    - src/
+      - app/dynamodb/
+        - dungeon-db.ts construct for provisioning your table
+      - core/
+        - dynamodb.ts generic DynamoDB table construct
+</FileTree>
+
+The generated `src/client.ts` exports `getDynamoDBClient()` and `resolveTableName()`. When `SERVE_LOCAL=true` (set automatically by the `serve-local` targets) these connect to DynamoDB Local; otherwise they connect to AWS and resolve the deployed table name from <Link path="guides/runtime-config">Runtime Configuration</Link>. We'll model our `Game` and `Inventory` entities in this project in <Link path="get_started/tutorials/dungeon-game/2">Module 2</Link>.
+
+For more details, refer to the <Link path="guides/ts-dynamodb">ts#dynamodb generator guide</Link>.
+
+</Drawer>
+
+## Task 6: Create the User Interface (UI)
 
 In this task, we will create the UI which will allow you to interact with the game.
 
@@ -631,7 +675,7 @@ To create the UI, create a website called `GameUI` using these steps:
 <RunGenerator generator="ts#website" requiredParameters={{name:"GameUI", ux:"shadcn"}} noInteractive />
 
 :::note[Shadcn UI]
-We select `--uxProvider=Shadcn` so the generated website uses [shadcn/ui](https://ui.shadcn.com/) components styled with Tailwind — all our route code uses shadcn primitives like `Card`, `Button`, and `Input`, and the `connection` generator later wires a matching shadcn-themed [CopilotKit](https://docs.copilotkit.ai/) chat surface.
+We select `--ux=shadcn` so the generated website uses [shadcn/ui](https://ui.shadcn.com/) components styled with Tailwind — all our route code uses shadcn primitives like `Card`, `Button`, and `Input`, and the `connection` generator later wires a matching shadcn-themed [CopilotKit](https://docs.copilotkit.ai/) chat surface.
 :::
 
 You will see some new files appear in your file tree.
@@ -991,6 +1035,18 @@ The generator:
 For more details, refer to the <Link path="guides/connection/react-agui">React to AG-UI connection guide</Link>.
 </Drawer>
 
+### Connect the Game API and Inventory MCP server to the database
+
+Both the Game API and the Inventory MCP server read and write our DynamoDB table, so let us connect them to the `DungeonDb` project. The `connection` generator detects that the target is a `ts#dynamodb` project and wires each source project's `serve-local` target to start DynamoDB Local automatically.
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<Aside type="tip" title="One command boots the whole stack locally">
+Because the Story Agent's `agent-serve-local` already depends on the Inventory MCP server's `mcp-server-serve-local` (via the `story → inventory` connection above), and both the Game API and MCP server now depend on `dungeon-db:serve-local`, running any one project's `serve-local` target starts every dependency it needs in the right order.
+</Aside>
+
 ### Game UI: Infrastructure
 
 Let us create the final sub-project for the CDK infrastructure.
@@ -1067,7 +1123,7 @@ Let us instantiate our CDK constructs to build our dungeon adventure game.
 
 </Drawer>
 
-## Task 6: Update our infrastructure
+## Task 7: Update our infrastructure
 
 Let's update `packages/infra/src/stacks/application-stack.ts` to instantiate some of our generated constructs:
 
@@ -1077,7 +1133,7 @@ Let's update `packages/infra/src/stacks/application-stack.ts` to instantiate som
 We supply default integrations for our Game API. By default, each operation in our API is mapped to an individual Lambda function to handle that operation.
 :::
 
-## Task 7: Build the code
+## Task 8: Build the code
 
 <Drawer title="Nx commands" trigger="Now it's time for us to build our code for the first time">
 

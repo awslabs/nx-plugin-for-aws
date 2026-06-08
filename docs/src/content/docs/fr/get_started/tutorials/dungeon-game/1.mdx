@@ -1,6 +1,6 @@
 ---
-title: "Configurer un monorepo"
-description: "Un guide pas à pas pour construire un jeu d'aventure de donjon alimenté par une IA agentique en utilisant le @aws/nx-plugin."
+title: Configurer un monorepo
+description: Un guide pas à pas pour construire un jeu d'aventure de donjon alimenté par une IA agentique en utilisant le @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -28,7 +28,7 @@ Pour créer un nouveau monorepo, depuis le répertoire de votre choix, exécutez
 <CreateNxWorkspaceCommand workspace="dungeon-adventure" iac="cdk" />
 
 :::note[CDK comme fournisseur IaC]
-Nous utilisons `--iac=cdk` car nous utiliserons CDK pour l'infrastructure as code dans ce tutoriel. Le plugin Nx pour AWS supporte également `Terraform`.
+Nous utilisons `--iac=cdk` car nous utiliserons CDK pour l'infrastructure as code dans ce tutoriel. Le Nx Plugin pour AWS supporte également `terraform`.
 :::
 
 Cela configurera un monorepo NX dans le répertoire `dungeon-adventure`. Lorsque vous ouvrez le répertoire dans VSCode, vous verrez cette structure de fichiers :
@@ -69,8 +69,8 @@ Le `package.json` racine est maintenant configuré avec un `type` à `module`, c
 Pour plus de détails sur le travail avec les projets TypeScript, consultez le <Link path="guides/typescript-project">guide du générateur ts#project</Link>.
 </Aside>
 
-<Drawer title="Fichiers modifiés par ts#trpc-api" trigger="Cliquez ici pour examiner ces fichiers en détail.">
-Voici la liste de tous les fichiers générés par le générateur `ts#trpc-api`. Nous allons examiner certains des fichiers clés mis en évidence dans l'arborescence :
+<Drawer title="Fichiers modifiés par ts#api" trigger="Cliquez ici pour examiner ces fichiers en détail.">
+Voici la liste de tous les fichiers générés par le générateur `ts#api`. Nous allons examiner certains des fichiers clés mis en évidence dans l'arborescence :
 <FileTree>
 - packages/
   - common/
@@ -394,7 +394,7 @@ Cela a configuré un projet Python et un [UV Workspace](https://docs.astral.sh/u
 
 </Drawer>
 
-### Agent de narration : Agent Strands
+### Agent de narration
 
 Pour ajouter un agent Strands au projet avec le générateur `py#agent` :
 
@@ -444,9 +444,9 @@ def get_agent():
         name="StoryAgent",
         description="StoryAgent Agent",
         system_prompt="""
-Vous êtes un sorcier mathématique.
-Utilisez vos outils pour les tâches mathématiques.
-Référez-vous aux outils comme votre 'grimoire'.
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
     )
@@ -477,7 +477,7 @@ _agent = _agent_ctx.__enter__()
 agui_agent = StrandsAgent(
     agent=_agent,
     name="StoryAgent",
-    description="A Agent exposed via the AG-UI protocol.",
+    description="An Agent exposed via the AG-UI protocol.",
 )
 
 
@@ -621,7 +621,51 @@ Le générateur `ts#mcp-server` génère ces fichiers.
 
 </Drawer>
 
-## Tâche 5 : Créer l'interface utilisateur (UI)
+## Tâche 5 : Créer la base de données du jeu
+
+L'état de notre jeu — les parties sauvegardées et l'inventaire de chaque joueur — réside dans [Amazon DynamoDB](https://aws.amazon.com/dynamodb/). Créez un projet DynamoDB appelé `DungeonDb` avec le générateur `ts#dynamodb` :
+
+<RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
+
+:::tip[Développement local d'abord]
+Le générateur `ts#dynamodb` fournit une cible `serve-local` qui exécute [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) dans un conteneur. Combiné avec le générateur `connection` (que nous exécutons ci-dessous), cela signifie que **le jeu entier s'exécute sur votre machine sans déploiement** jusqu'à la fin du tutoriel.
+:::
+
+Vous verrez de nouveaux fichiers apparaître dans votre arborescence de fichiers.
+<Drawer title="Fichiers modifiés par ts#dynamodb" trigger="Cliquez ici pour examiner ces fichiers en détail.">
+Le générateur `ts#dynamodb` génère ces fichiers.
+
+<FileTree>
+- packages/
+  - dungeon-db/
+    - scripts/
+      - create-local-table.ts crée la table dans DynamoDB Local
+      - pull-image.ts récupère l'image DynamoDB Local
+      - start-container.ts démarre le conteneur DynamoDB Local
+    - src/
+      - index.ts point d'entrée et exports
+      - constants.ts constantes de développement local et clé de configuration runtime
+      - client.ts singleton du client DynamoDB et résolution du nom de table
+      - gsi.ts source de vérité pour les index secondaires globaux
+      - entities/
+        - example.ts entité ElectroDB d'exemple (nous la remplacerons)
+        - index.ts exports d'entités
+    - project.json ajoute les cibles `serve-local` et `pull-image`
+  - common/constructs/
+    - src/
+      - app/dynamodb/
+        - dungeon-db.ts construct pour provisionner votre table
+      - core/
+        - dynamodb.ts construct générique de table DynamoDB
+</FileTree>
+
+Le `src/client.ts` généré exporte `getDynamoDBClient()` et `resolveTableName()`. Lorsque `SERVE_LOCAL=true` (défini automatiquement par les cibles `serve-local`), ceux-ci se connectent à DynamoDB Local ; sinon ils se connectent à AWS et résolvent le nom de table déployé depuis <Link path="guides/runtime-config">Runtime Configuration</Link>. Nous modéliserons nos entités `Game` et `Inventory` dans ce projet dans le <Link path="get_started/tutorials/dungeon-game/2">Module 2</Link>.
+
+Pour plus de détails, consultez le <Link path="guides/ts-dynamodb">guide du générateur ts#dynamodb</Link>.
+
+</Drawer>
+
+## Tâche 6 : Créer l'interface utilisateur (UI)
 
 Dans cette tâche, nous allons créer l'interface utilisateur qui vous permettra d'interagir avec le jeu.
 
@@ -632,7 +676,7 @@ Pour créer l'interface utilisateur, créez un site web appelé `GameUI` en suiv
 <RunGenerator generator="ts#website" requiredParameters={{name:"GameUI", ux:"shadcn"}} noInteractive />
 
 :::note[Shadcn UI]
-Nous sélectionnons `--uxProvider=Shadcn` pour que le site web généré utilise les composants [shadcn/ui](https://ui.shadcn.com/) stylisés avec Tailwind — tout notre code de route utilise des primitives shadcn comme `Card`, `Button` et `Input`, et le générateur `connection` câblera plus tard une surface de chat [CopilotKit](https://docs.copilotkit.ai/) thématisée shadcn correspondante.
+Nous sélectionnons `--ux=shadcn` pour que le site web généré utilise les composants [shadcn/ui](https://ui.shadcn.com/) stylisés avec Tailwind — tout notre code de route utilise des primitives shadcn comme `Card`, `Button` et `Input`, et le générateur `connection` câblera plus tard une surface de chat [CopilotKit](https://docs.copilotkit.ai/) thématisée shadcn correspondante.
 :::
 
 Vous verrez de nouveaux fichiers apparaître dans votre arborescence de fichiers.
@@ -807,7 +851,7 @@ import './styles.css';
 +  routeTree,
 +  context: { runtimeConfig: undefined, auth: undefined },
 +});
-// Enregistrer l'instance du routeur pour la sécurité des types
+// Register the router instance for type safety
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
@@ -992,6 +1036,18 @@ Le générateur :
 Pour plus de détails, consultez le <Link path="guides/connection/react-agui">guide de connexion React vers AG-UI</Link>.
 </Drawer>
 
+### Connecter l'API de jeu et le serveur MCP d'inventaire à la base de données
+
+L'API de jeu et le serveur MCP d'inventaire lisent et écrivent tous deux dans notre table DynamoDB, connectons-les donc au projet `DungeonDb`. Le générateur `connection` détecte que la cible est un projet `ts#dynamodb` et câble la cible `serve-local` de chaque projet source pour démarrer automatiquement DynamoDB Local.
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+
+<Aside type="tip" title="Une commande démarre toute la pile localement">
+Comme la cible `agent-serve-local` de l'agent Story dépend déjà de la cible `mcp-server-serve-local` du serveur MCP d'inventaire (via la connexion `story → inventory` ci-dessus), et que l'API de jeu et le serveur MCP dépendent maintenant de `dungeon-db:serve-local`, l'exécution de la cible `serve-local` de n'importe quel projet démarre toutes les dépendances dont il a besoin dans le bon ordre.
+</Aside>
+
 ### Interface utilisateur du jeu : Infrastructure
 
 Créons le sous-projet final pour l'infrastructure CDK.
@@ -1035,7 +1091,7 @@ import { App } from ':dungeon-adventure/common-constructs';
 
 const app = new App();
 
-// Utilisez ceci pour déployer votre propre environnement sandbox (suppose vos informations d'identification CLI)
+// Use this to deploy your own sandbox environment (assumes your CLI credentials)
 new ApplicationStage(app, 'dungeon-adventure-infra-sandbox', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
@@ -1059,7 +1115,7 @@ export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // Le code qui définit votre stack va ici
+    // The code that defines your stack goes here
   }
 }
 ```
@@ -1068,7 +1124,7 @@ Instancions nos constructs CDK pour construire notre jeu d'aventure de donjon.
 
 </Drawer>
 
-## Tâche 6 : Mettre à jour notre infrastructure
+## Tâche 7 : Mettre à jour notre infrastructure
 
 Mettons à jour `packages/infra/src/stacks/application-stack.ts` pour instancier certains de nos constructs générés :
 
@@ -1078,7 +1134,7 @@ Mettons à jour `packages/infra/src/stacks/application-stack.ts` pour instancier
 Nous fournissons des intégrations par défaut pour notre API GameApi. Par défaut, chaque opération dans notre API est mappée à une fonction Lambda individuelle pour gérer cette opération.
 :::
 
-## Tâche 7 : Construire le code
+## Tâche 8 : Construire le code
 
 <Drawer title="Commandes Nx" trigger="Il est maintenant temps de construire notre code pour la première fois">
 
@@ -1127,18 +1183,18 @@ Vous serez invité avec le message suivant :
 ```bash
  NX   The workspace is out of sync
 
-[@nx/js:typescript-sync]: Certains fichiers de configuration TypeScript manquent de références de projet aux projets dont ils dépendent ou contiennent des références de projet obsolètes.
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
 
-Cela entraînera une erreur en CI.
+This will result in an error in CI.
 
-? Souhaitez-vous synchroniser les changements identifiés pour mettre à jour votre workspace ? …
-Oui, synchroniser les changements et exécuter les tâches
-Non, exécuter les tâches sans synchroniser les changements
+? Would you like to sync the identified changes to get your workspace up to date? …
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
 ```
 
 Ce message indique que NX a détecté certains fichiers qui peuvent être mis à jour automatiquement pour vous. Dans ce cas, il fait référence aux fichiers `tsconfig.json` qui n'ont pas de références TypeScript configurées sur les projets référencés.
 
-Sélectionnez l'option **Oui, synchroniser les changements et exécuter les tâches** pour continuer. Vous devriez remarquer que toutes vos erreurs d'importation liées à l'IDE sont automatiquement résolues car le générateur de synchronisation ajoutera automatiquement les références TypeScript manquantes !
+Sélectionnez l'option **Yes, sync the changes and run the tasks** pour continuer. Vous devriez remarquer que toutes vos erreurs d'importation liées à l'IDE sont automatiquement résolues car le générateur de synchronisation ajoutera automatiquement les références TypeScript manquantes !
 
 Tous les artefacts construits sont maintenant disponibles dans le dossier `dist/` situé à la racine du monorepo. C'est une pratique standard lors de l'utilisation de projets générés par le `@aws/nx-plugin` car cela ne pollue pas votre arborescence de fichiers avec des fichiers générés. Si vous souhaitez nettoyer vos fichiers, supprimez le dossier `dist/` sans vous soucier des artefacts de build dispersés dans l'arborescence de fichiers.
 

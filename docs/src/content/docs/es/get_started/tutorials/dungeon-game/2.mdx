@@ -76,7 +76,7 @@ item: Item {
 game -> item: 1..*
 ```
 
-Implementaremos nuestra base de datos en DynamoDB y usaremos la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) para simplificar las cosas. El `queryActions` de la Game API también necesita el cliente S3 para leer los turnos de conversación que el agente ha escrito. Instálalos todos con:
+El generador `ts#dynamodb` configuró [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/), que usaremos para modelar nuestros datos. Persistiremos el historial de conversación en S3, por lo que agregamos una dependencia en el cliente S3:
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
@@ -84,27 +84,15 @@ Implementaremos nuestra base de datos en DynamoDB y usaremos la biblioteca clien
 Todas las dependencias se agregan al `package.json` raíz ya que el `@aws/nx-plugin` sigue el principio de [política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy). Para más información, consulta la <Link path="guides/typescript-project#dependencies">guía de proyectos TypeScript</Link>.
 </Aside>
 
-Para definir nuestras entidades ElectroDB a partir del diagrama ER, creemos el archivo `packages/game-api/src/entities/index.ts`:
+Reemplaza la entidad de ejemplo generada en `packages/dungeon-db/src/entities/index.ts` con nuestras entidades `Game` e `Inventory`, y elimina `packages/dungeon-db/src/entities/example.ts`:
 
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/index.ts.template" />
+<E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
 
 ElectroDB nos permite no solo definir nuestros tipos, sino también proporcionar valores predeterminados para ciertos campos como timestamps. Además, ElectroDB sigue el [diseño de tabla única](https://electrodb.dev/en/core-concepts/single-table-relationships/), que es la mejor práctica al usar DynamoDB.
 
 <Aside title="Colecciones de ElectroDB">
 Aunque ElectroDB soporta [colecciones](https://electrodb.dev/en/modeling/collections/), hemos optado por no usarlas en este tutorial para simplificar.
 </Aside>
-
-Para preparar la interacción del servidor MCP con el inventario, asegurémonos de exportar la entidad de inventario en `packages/game-api/src/index.ts`:
-
-<Tabs>
-<TabItem label="packages/game-api/src/index.ts">
-<E2EDiff lang="typescript" before="dungeon-adventure/2/index.ts.old.template" after="dungeon-adventure/2/index.ts.template" />
-</TabItem>
-</Tabs>
-
-:::note[Estructura del paquete]
-La estructura del paquete sería mejor si refactorizamos las entidades en su propio proyecto compartido, para que el servidor MCP no dependa de la API.
-:::
 
 ### Definiendo nuestros procedimientos
 
@@ -158,14 +146,8 @@ Elimina los directorios `tools` y `resources` en `packages/inventory/src/mcp-ser
 
 ## Tarea 3: Actualizar la infraestructura
 
-El paso final es actualizar nuestra infraestructura para crear la tabla DynamoDB y otorgar permisos para realizar operaciones desde la Game API.
-Para esto, actualiza `packages/infra/src` como sigue:
+El constructo `DungeonDb` generado por `ts#dynamodb` ya aprovisiona nuestra tabla, así que solo necesitamos instanciarlo en nuestro stack y otorgar a la Game API y al servidor MCP de Inventario los permisos que necesitan. Actualiza `packages/infra/src/stacks/application-stack.ts` como sigue:
 
-<Tabs>
-  <TabItem label="constructs/electrodb-table.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/constructs/electrodb-table.ts.template" />
-  </TabItem>
-  <TabItem label="stacks/application-stack.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note[Procedimientos aislados]
@@ -173,12 +155,12 @@ Nota que como cada procedimiento es atendido por una función lambda individual,
 :::
 
 :::tip[Configuración de Runtime]
-El nombre de la tabla DynamoDB se registra en <Link path="guides/runtime-config">Runtime Configuration</Link> bajo el namespace `tables`, almacenado en AWS AppConfig. Las funciones Lambda y el servidor MCP lo recuperan en tiempo de ejecución usando Lambda Powertools, en lugar de necesitar que se pase como variable de entorno. Una ventaja de este enfoque es que a medida que crece el número de tablas u otros identificadores de infraestructura, solo necesitas una única variable de entorno `RUNTIME_CONFIG_APP_ID` cuando ejecutas localmente.
+El constructo `DungeonDb` registra el nombre de la tabla desplegada en <Link path="guides/runtime-config">Runtime Configuration</Link> bajo el namespace `dynamodb`, almacenado en AWS AppConfig. La Game API y el servidor MCP de Inventario lo recuperan en tiempo de ejecución usando Lambda Powertools, en lugar de necesitar que se pase como variable de entorno. Una ventaja de este enfoque es que a medida que crece el número de tablas u otros identificadores de infraestructura, solo necesitas una única variable de entorno `RUNTIME_CONFIG_APP_ID` cuando ejecutas contra infraestructura desplegada.
 :::
-  </TabItem>
-</Tabs>
 
-## Tarea 4: Despliegue y pruebas
+## Tarea 4: Probar la Game API localmente
+
+No es necesario desplegar en AWS para probar nuestra API — el target `serve-local` ejecuta la Game API contra [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html). Como conectamos la Game API al proyecto `DungeonDb` en el Módulo 1, este target también inicia DynamoDB Local automáticamente.
 
 Primero, corrige cualquier problema de linting:
 
@@ -188,92 +170,68 @@ Luego construye la base de código:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-### Despliega tu aplicación
-Para desplegar tu aplicación, ejecuta el siguiente comando:
+### Iniciar el servidor local
 
-<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+Inicia la Game API localmente con el target `serve-local`, que también arranca DynamoDB Local:
 
-:::caution[Bootstrap requerido]
-Para hacer bootstrap de tu cuenta AWS primero, ejecuta:
+<NxCommands commands={["serve-local game-api"]} />
 
-<NxCommands commands={['bootstrap infra']} />
-:::
+<Aside type="tip" title="Primera ejecución">
+La primera ejecución descarga la imagen del contenedor de DynamoDB Local, lo que puede tomar un momento. Deja el servidor ejecutándose en esta terminal y abre una segunda terminal para los comandos `curl` a continuación.
+</Aside>
 
-Tu primer despliegue tomará aproximadamente 8 minutos. Los despliegues posteriores tomarán alrededor de 2 minutos.
+### Probar la API
 
-:::tip[Iteración rápida]
-Si estás iterando en cambios de código de funciones Lambda, puedes desplegar con el flag `--hotswap` después de construir la base de código para un tiempo de despliegue mucho menor (2-3 segundos).
-
-<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*" --hotswap']} />
-:::
-
-Una vez completado el despliegue, verás salidas similares a las siguientes _(algunos valores han sido omitidos)_:
+Una vez que tu servidor esté en funcionamiento, consulta la lista (vacía) de juegos:
 
 ```bash
-dungeon-adventure-infra-sandbox-Application
-dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
-
- ✅  dungeon-adventure-infra-sandbox-Application
-
-✨  Deployment time: 354s
-
-Outputs:
-dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
-dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
-dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 ```
-### Prueba la API
-Puedes probar la API de dos formas:
-<ul>
-<li>Iniciando una instancia local del backend tRPC e invocando las APIs con `curl`.</li>
-<li>
-<Drawer title="curl con Sigv4 habilitado" trigger="Llamar a la API desplegada usando curl con sigv4 habilitado">
-<Snippet name="tools/acurl" />
-</Drawer>
-</li>
-</ul>
-
-
-<Tabs>
-  <TabItem label="Local">
-    Para iniciar tu servidor local `game-api`, ejecuta el siguiente comando:
-
-    <NxCommands highlights={['xxxx']} env={{RUNTIME_CONFIG_APP_ID:"xxxx"}} commands={["serve game-api"]} />
-
-    <Aside type="caution" title="Usar valores de salida de CDK">
-    Usa el valor de salida de CDK `dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId` para reemplazar el marcador de posición resaltado.
-    </Aside>
-
-    Una vez que tu servidor esté en funcionamiento, puedes llamarlo ejecutando el siguiente comando:
-
-    ```bash
-    curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
-    ```
-  </TabItem>
-  <TabItem label="Desplegado">
-```bash "https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/" "ap-southeast-2"
-acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
-```
-    <Aside type="caution" title="Usar valores de salida de CDK">
-    Usa el valor de salida de CDK `dungeon-adventure-infra-sandbox-Application.GameApiGameApiEndpointXXX` para reemplazar el marcador de posición resaltado y establece la región correspondiente.
-    </Aside>
-  </TabItem>
-</Tabs>
 
 :::note[Codificación de URL]
 El `%7B%7D` que pasamos para probar la API es un objeto JSON vacío codificado en URI (`{}`).
 :::
 
-Si el comando se ejecuta correctamente, verás una respuesta como:
+Verás una lista vacía:
 
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}
 ```
 
-¡Felicidades, has construido y desplegado tu primera API usando tRPC!  🎉🎉🎉
+Ahora guarda un juego:
+
+```bash
+curl -X POST 'http://localhost:2022/games.save' \
+  -H 'Content-Type: application/json' \
+  -d '{"playerName":"Alice","genre":"zombie"}'
+```
+
+El guardado devuelve el juego persistido (con el timestamp `lastUpdated` que la entidad establece por ti):
+
+```json
+{"result":{"data":{"playerName":"Alice","genre":"zombie","lastUpdated":"..."}}}
+```
+
+Consulta nuevamente para confirmar que está persistido en DynamoDB Local:
+
+```bash
+curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
+```
+
+Esta respuesta ahora incluye el juego guardado:
+
+```json
+{"result":{"data":{"items":[{"playerName":"Alice","genre":"zombie","lastUpdated":"..."}],"cursor":null}}}
+```
+
+Puedes detener el servidor local (`Ctrl+C`) una vez que hayas terminado.
+
+## Tarea 5: Probar el servidor MCP de Inventario localmente
+
+Podemos probar las herramientas del servidor MCP con el [MCP Inspector](https://github.com/modelcontextprotocol/inspector) usando el target `mcp-server-inspect` generado:
+
+<NxCommands commands={["mcp-server-inspect inventory"]} />
+
+Esto sirve el servidor MCP localmente (arrancando DynamoDB Local también) y lanza el MCP Inspector en `http://localhost:6274` preconfigurado para conectarse a él. Haz clic en **Connect**, cambia a la pestaña **Tools**, haz clic en **List Tools**, y prueba `add-to-inventory` (por ejemplo, `playerName: Alice`, `itemName: Rusty Sword`, `emoji: ⚔️`) seguido de `list-inventory-items` para verlo persistido en DynamoDB Local. Detén el servidor (`Ctrl+C`) cuando hayas terminado.
+
+¡Felicidades, has construido y probado tu primera API tRPC y servidor MCP contra una tabla DynamoDB local!  🎉🎉🎉

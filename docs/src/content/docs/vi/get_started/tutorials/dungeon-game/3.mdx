@@ -40,10 +40,10 @@ Cập nhật các file sau trong `packages/story/dungeon_adventure_story/agent`:
 
 Các thay đổi là:
 
-- `main.py` thêm một `session_manager_provider` tạo ra một `S3SessionManager` cho mỗi `thread_id` khi được triển khai, và quay về sử dụng `FileSessionManager` trên đĩa tại `/tmp/strands-sessions` khi chạy dưới `agent-serve-local` (`SERVE_LOCAL=true`). Khi triển khai, S3 bucket là cùng một bucket mà `queryActions` của Game API đọc từ đó, do đó trình duyệt có thể xây dựng lại bản ghi khi truy cập lại; ở cục bộ, agent chạy hoàn toàn offline với local MCP server mà không có bất kỳ lời gọi AWS nào.
+- `main.py` thêm một `session_manager_provider` tạo ra một `S3SessionManager` cho mỗi `thread_id` khi được triển khai, và quay về sử dụng `FileSessionManager` trên đĩa tại `/tmp/strands-sessions` khi chạy dưới `agent-serve-local` (`SERVE_LOCAL=true`). Khi triển khai, S3 bucket là cùng một bucket mà `queryActions` của Game API đọc từ đó, do đó trình duyệt có thể xây dựng lại bản ghi khi truy cập lại; ở cục bộ, agent lưu trữ các session vào đĩa và giao tiếp với local MCP server, mà không cần triển khai.
 - `agent.py` loại bỏ sample tool `subtract` và thay thế system prompt bằng một prompt dungeon-master mời tin nhắn đầu tiên của người dùng nêu tên người chơi và thể loại, đồng thời sử dụng các tool của Inventory MCP Server.
 
-## Nhiệm vụ 2: Triển khai và kiểm thử
+## Nhiệm vụ 2: Kiểm thử Agent của bạn ở cục bộ
 
 ### Build code
 
@@ -57,147 +57,16 @@ Nếu bạn gặp bất kỳ lỗi lint nào, hãy chạy lệnh sau để tự 
 <PackageManagerShortCommand commands={["lint"]} />
 </Aside>
 
-### Triển khai ứng dụng của bạn
-Để triển khai ứng dụng của bạn, chạy lệnh sau:
+### Trò chuyện với Agent của bạn
 
-<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+Mở một REPL tương tác với bản sao được phục vụ cục bộ của AG-UI agent bằng cách sử dụng target `agent-chat` được tạo ra:
 
-Quá trình triển khai này sẽ mất khoảng 2 phút để hoàn thành.
+<NxCommands commands={["agent-chat story"]} />
 
-Khi quá trình triển khai hoàn tất, bạn sẽ thấy các output tương tự như sau _(một số giá trị đã được ẩn)_:
+Tin nhắn đầu tiên của bạn nên cho agent biết tên anh hùng của bạn và thể loại (ví dụ: `My name is Alice. Start my zombie adventure.`) và câu chuyện sẽ được stream trả về.
 
-```bash
-dungeon-adventure-infra-sandbox-Application
-dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+<Aside type="caution" title="Yêu cầu thông tin xác thực AWS">
+Mặc dù agent chạy cục bộ, nó gọi [Amazon Bedrock](https://aws.amazon.com/bedrock/) cho LLM. Bạn sẽ cần thông tin xác thực AWS trong môi trường của mình với quyền truy cập vào [Strands default model](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/). Xem [tài liệu model provider của Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) để biết chi tiết.
+</Aside>
 
- ✅  dungeon-adventure-infra-sandbox-Application
-
-✨  Deployment time: 354s
-
-Outputs:
-dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
-dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
-dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
-dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
-```
-
-### Kiểm thử Agent của bạn
-
-Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
-<ul>
-<li>Khởi động một instance cục bộ của Agent server và trò chuyện với nó thông qua target `agent-chat` được tạo ra, hoặc</li>
-<li>Gọi API đã triển khai bằng curl với JWT token.</li>
-</ul>
-
-<Tabs>
-  <TabItem label="Local">
-    Mở một REPL tương tác với bản sao được phục vụ cục bộ của AG-UI agent bằng cách sử dụng target `agent-chat` được tạo ra:
-
-    <NxCommands commands={["agent-chat story"]} />
-
-    `agent-chat` có `dependsOn: ['agent-serve-local']`, do đó không cần khởi động agent server riêng biệt — Nx sẽ spawn `agent-serve-local` (lần lượt khởi động Inventory MCP server cục bộ), sau đó khởi chạy [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) AG-UI REPL với `http://localhost:8081/invocations`. Tin nhắn đầu tiên của bạn nên cho agent biết tên anh hùng của bạn và thể loại (ví dụ: `My name is Alice. Start my zombie adventure.`) và câu chuyện sẽ được stream trả về.
-
-    <Aside type="tip" title="Raw curl">
-    Nếu bạn muốn một HTTP call thô với local server, cấu trúc `RunAgentInput` của AG-UI là:
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -H "Content-Type: application/json" \
-      -d '{
-        "threadId": "Alice-zombie00000000000000000000000",
-        "runId": "run-1",
-        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
-        "tools": [], "context": [], "state": {}, "forwardedProps": {}
-      }'
-    ```
-    Sử dụng lại cùng một `threadId` trong các lần gọi tiếp theo sẽ tiếp tục cùng một câu chuyện — `S3SessionManager` phát lại các tin nhắn trước đó.
-    </Aside>
-  </TabItem>
-  <TabItem label="Deployed">
-    Để kiểm thử agent đã triển khai, bạn cần xác thực với Cognito và lấy JWT token. Đầu tiên, thiết lập các biến môi trường của bạn:
-
-    ```bash
-    # Đặt Cognito User Pool ID và Client ID từ các output của CDK
-    export POOL_ID="<UserPoolId từ CDK outputs>"
-    export CLIENT_ID="<UserPoolClientId từ CDK outputs>"
-    export REGION="<your-region>"
-    ```
-
-    Tạo một test user và lấy authentication token:
-
-    ```bash
-    # Vô hiệu hóa MFA để đơn giản hóa việc tạo user
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Tạo User
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Đặt Permanent Password (thay thế bằng một mật khẩu an toàn hơn!)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Xác thực User và lấy Access Token
-    export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
-      --client-id "$CLIENT_ID" \
-      --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
-      --region $REGION \
-      --query "AuthenticationResult.AccessToken" \
-      --output text)
-    ```
-
-    Gọi agent đã triển khai bằng URL runtime của Bedrock AgentCore:
-
-    ```bash
-    # Đặt Story Agent ARN từ CDK outputs
-    export AGENT_ARN="<StoryAgentArn từ CDK outputs>"
-
-    # URL-encode ARN
-    export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
-
-    # Xây dựng invocation URL
-    export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
-
-    # Gọi agent với payload AG-UI RunAgentInput
-    curl -N -X POST "$AGENT_URL" \
-      -H "authorization: Bearer $BEARER_TOKEN" \
-      -H "Content-Type: application/json" \
-      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: Alice-zombie00000000000000000000000" \
-      -d '{
-        "threadId": "Alice-zombie00000000000000000000000",
-        "runId": "run-1",
-        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
-        "tools": [], "context": [], "state": {}, "forwardedProps": {}
-      }'
-    ```
-
-    :::note[URL Encoding]
-    URL encoding là cần thiết để định dạng đúng ARN cho endpoint API của Bedrock AgentCore.
-    :::
-  </TabItem>
-</Tabs>
-
-Nếu lệnh chạy thành công, bạn sẽ bắt đầu thấy câu chuyện được stream trả về dưới dạng một [AG-UI event stream](https://docs.copilotkit.ai/aws-strands/protocol/events) (Server-Sent Events) — các chunk `RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` bao bọc các token câu chuyện thực tế:
-
-```
-data: {"type":"RUN_STARTED","threadId":"Alice-zombie00000000000000000000000",...}
-data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
-data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Greetings, Alice. "}
-data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"The moans grow louder beyond the barricaded door..."}
-```
-
-Chúc mừng. Bạn đã xây dựng và triển khai Agent đầu tiên của mình trên Bedrock AgentCore Runtime!  🎉🎉🎉
+Chúc mừng. Bạn đã xây dựng và kiểm thử Strands Agent đầu tiên của mình ở cục bộ!  🎉🎉🎉

@@ -27,19 +27,14 @@ Avvia lo stack locale completo — il server di sviluppo game-ui insieme a una G
 
 <NxCommands commands={["serve-local game-ui"]} />
 
-`game-ui:serve-local` ha `dependsOn` su `game-api:serve-local` e `dungeon_adventure.story:agent-serve-local`, quindi Nx avvia il server locale di ogni progetto in parallelo. Apri il server di sviluppo in un browser e segui le istruzioni per creare un nuovo utente.
+`game-ui:serve-local` ha `dependsOn` su `game-api:serve-local` e `dungeon_adventure.story:agent-serve-local`, quindi Nx avvia il server locale di ogni progetto in parallelo. Attraverso le connessioni che abbiamo configurato nel Modulo 1, questi a loro volta avviano il server MCP Inventory e DynamoDB Local — l'**intero gioco viene eseguito sulla tua macchina senza chiamate AWS**. Assicurati che il tuo motore di container sia in esecuzione, quindi apri il server di sviluppo in un browser.
+
+<Aside type="tip" title="Nessun login localmente">
+In modalità `serve-local` il componente `CognitoAuth` salta il flusso di login Cognito (non c'è un user pool in esecuzione localmente), quindi atterrerai direttamente sul gioco senza effettuare l'accesso. Creerai un account reale quando distribuiremo su AWS alla fine di questo modulo.
+</Aside>
 
 <Aside type="caution" title="Mantieni il server di sviluppo attivo">
 Lascia il server di sviluppo in esecuzione per il resto di questo modulo — ricarica automaticamente ogni modifica qui sotto.
-</Aside>
-
-<Aside type="tip" title="Puntare al backend distribuito invece">
-Se preferisci che il tuo server di sviluppo locale comunichi con le API + agente già distribuiti, scarica la configurazione runtime distribuita una volta e poi usa il target `serve` semplice:
-
-<NxCommands commands={["run game-ui:load:runtime-config"]} />
-<NxCommands commands={["serve game-ui"]} />
-
-Questo è utile quando stai solo iterando sul codice UI e vuoi testare contro il backend reale.
 </Aside>
 
 ## Task 2: Dove CopilotKit è già configurato
@@ -97,23 +92,73 @@ La sintassi `$playerName` indica a `@tanstack/react-router` di trattare `playerN
 
 Una volta salvato, il server di sviluppo su `http://localhost:4200/` dovrebbe ora permetterti di iniziare un'avventura e chattare con lo Story Agent.
 
-<Drawer title="Costruisci e Distribuisci" trigger="Puoi anche compilare e distribuire il codice su CloudFront se preferisci.">
-
-## Task 5: Compilare e distribuire
-
-### Compila il codice
-<PackageManagerShortCommand commands={["build"]} />
-
-### Distribuisci l'applicazione
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
-
-Una volta distribuito, naviga verso l'URL di CloudFront (`GameUIDistributionDomainName` dagli output CDK).
-
-</Drawer>
-
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
 <Image src={gameConversationPng} alt="game-conversation.png" width="600" height="310" />
 </div>
 
-Complimenti. Hai costruito e distribuito il tuo Gioco di Avventura Agentico nel Dungeon!  🎉🎉🎉
+## Task 5: Distribuire su AWS
+
+Il tuo gioco è completo e hai testato ogni componente localmente. Ora distribuiamolo su AWS in modo da poterci giocare da qualsiasi luogo.
+
+### Compila il codice
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Distribuisci l'applicazione
+
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+
+:::caution[Bootstrap Richiesto]
+Se questa è la prima distribuzione CDK nel tuo account/regione AWS, esegui prima il bootstrap:
+
+<NxCommands commands={['bootstrap infra']} />
+:::
+
+La tua prima distribuzione richiederà circa 8 minuti per completarsi. Le distribuzioni successive sono più veloci.
+
+Una volta completata la distribuzione, vedrai output simili ai seguenti:
+
+```bash
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox-Application
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+Naviga verso l'URL di CloudFront (`GameUIDistributionDomainName` dagli output CDK), registrati per un nuovo account e gioca al tuo gioco in esecuzione interamente su AWS!
+
+## Task 6: Combinare componenti locali e distribuiti
+
+Hai visto i due estremi dello spettro: tutto locale (`serve-local`) e tutto distribuito. Durante lo sviluppo quotidiano è spesso utile combinare i due — ad esempio, iterare sul codice del sito web contro l'API e l'agente *reali* distribuiti, o eseguire l'API localmente contro la tabella DynamoDB *reale*.
+
+La chiave è la variabile d'ambiente `RUNTIME_CONFIG_APP_ID`. Quando un progetto viene eseguito **senza** `SERVE_LOCAL=true`, il `resolveTableName()` generato (e le ricerche della configurazione runtime dell'agente / API) recuperano la loro configurazione da AWS AppConfig utilizzando questo id applicazione — il valore `RuntimeConfigApplicationId` dagli output CDK.
+
+Ogni sito web ha un target `load:runtime-config` che scarica il `runtime-config.json` distribuito (pool Cognito, endpoint API, ARN agente) nel server di sviluppo locale. Alcune combinazioni utili:
+
+- **Sito web locale → backend distribuito.** Scarica la configurazione distribuita una volta, quindi esegui il target `serve` semplice (non `serve-local`) in modo che l'UI comunichi con l'API e l'agente distribuiti:
+
+  <NxCommands commands={["run game-ui:load:runtime-config"]} />
+  <NxCommands commands={["serve game-ui"]} />
+
+- **API locale → tabella DynamoDB reale.** Esegui il target `serve` semplice con `RUNTIME_CONFIG_APP_ID` impostato sull'id applicazione distribuito, in modo che `resolveTableName()` risolva la tabella distribuita invece di DynamoDB Local:
+
+  <NxCommands env={{RUNTIME_CONFIG_APP_ID:"<RuntimeConfigApplicationId dagli output CDK>"}} commands={["serve game-api"]} />
+
+Questa flessibilità ti permette di testare esattamente la porzione su cui stai lavorando, contro qualsiasi componente — locale o distribuito — abbia senso.
+
+Complimenti. Hai costruito, testato e distribuito il tuo Gioco di Avventura Agentico nel Dungeon!  🎉🎉🎉
+ nel Dungeon!  🎉🎉🎉
+ribuito il tuo Gioco di Avventura Agentico nel Dungeon!  🎉🎉🎉

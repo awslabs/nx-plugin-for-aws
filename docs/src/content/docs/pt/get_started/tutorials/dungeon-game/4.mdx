@@ -27,19 +27,14 @@ Inicie a pilha local completa — o servidor de desenvolvimento game-ui junto co
 
 <NxCommands commands={["serve-local game-ui"]} />
 
-`game-ui:serve-local` tem `dependsOn` em `game-api:serve-local` e `dungeon_adventure.story:agent-serve-local`, então o Nx inicia o servidor local de cada projeto em paralelo. Abra o servidor de desenvolvimento em um navegador e siga as instruções para criar um novo usuário.
+`game-ui:serve-local` tem `dependsOn` em `game-api:serve-local` e `dungeon_adventure.story:agent-serve-local`, então o Nx inicia o servidor local de cada projeto em paralelo. Através das conexões que configuramos no Módulo 1, elas por sua vez inicializam o servidor Inventory MCP e o DynamoDB Local. Certifique-se de que seu mecanismo de contêiner está em execução e então abra o servidor de desenvolvimento em um navegador.
+
+<Aside type="tip" title="Sem login localmente">
+No modo `serve-local`, o componente `CognitoAuth` pula o fluxo de login do Cognito (não há pool de usuários rodando localmente), então você chegará direto ao jogo sem fazer login. Você criará uma conta real quando implantarmos na AWS no final deste módulo.
+</Aside>
 
 <Aside type="caution" title="Manter o servidor de dev ativo">
 Deixe o servidor de desenvolvimento em execução durante o restante deste módulo — ele recarrega automaticamente cada alteração abaixo.
-</Aside>
-
-<Aside type="tip" title="Apontando para o backend implantado">
-Se você preferir que seu servidor de desenvolvimento local se comunique com as APIs + agente já implantados, baixe a configuração de runtime implantada uma vez e então use o target `serve` simples:
-
-<NxCommands commands={["run game-ui:load:runtime-config"]} />
-<NxCommands commands={["serve game-ui"]} />
-
-Isso é útil quando você está apenas iterando no código da UI e quer testar contra o backend real.
 </Aside>
 
 ## Tarefa 2: Onde o CopilotKit já está configurado
@@ -97,23 +92,71 @@ A sintaxe `$playerName` diz ao `@tanstack/react-router` para tratar `playerName`
 
 Após salvar, o servidor de desenvolvimento em `http://localhost:4200/` deve agora permitir que você inicie uma aventura e converse com o Story Agent.
 
-<Drawer title="Compilar e Implantar" trigger="Você também pode compilar e implantar seu código no CloudFront se preferir.">
-
-## Tarefa 5: Compilar e implantar
-
-### Compilar seu código
-<PackageManagerShortCommand commands={["build"]} />
-
-### Implantar sua aplicação
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
-
-Após a implantação, navegue até sua URL do CloudFront (`GameUIDistributionDomainName` das saídas do CDK).
-
-</Drawer>
-
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
 <Image src={gameConversationPng} alt="game-conversation.png" width="600" height="310" />
 </div>
 
-Parabéns. Você construiu e implantou seu Jogo de Aventura em Masmorra com Agentes!  🎉🎉🎉
+## Tarefa 5: Implantar na AWS
+
+Seu jogo está completo e você testou cada parte localmente. Agora vamos implantá-lo na AWS para que você possa jogá-lo de qualquer lugar.
+
+### Compilar seu código
+
+<PackageManagerShortCommand commands={["build"]} />
+
+### Implantar sua aplicação
+
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+
+:::caution[Bootstrap Necessário]
+Se esta for a primeira implantação CDK na sua conta/região AWS, faça o bootstrap primeiro:
+
+<NxCommands commands={['bootstrap infra']} />
+:::
+
+Sua primeira implantação levará cerca de 8 minutos para ser concluída. Implantações subsequentes são mais rápidas.
+
+Após a conclusão da implantação, você verá saídas semelhantes às seguintes:
+
+```bash
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox-Application
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+Navegue até sua URL do CloudFront (`GameUIDistributionDomainName` das saídas do CDK), cadastre-se para uma nova conta e jogue seu jogo rodando inteiramente na AWS!
+
+## Tarefa 6: Misturando componentes locais e implantados
+
+Você viu os dois extremos do espectro: tudo local (`serve-local`) e tudo implantado. Durante o desenvolvimento do dia a dia, muitas vezes é útil misturar os dois — por exemplo, iterar no código do site contra a API e agente *reais* implantados, ou executar a API localmente contra a tabela DynamoDB *real*.
+
+A chave é a variável de ambiente `RUNTIME_CONFIG_APP_ID`. Quando um projeto é executado **sem** `SERVE_LOCAL=true`, o `resolveTableName()` gerado (e as buscas de configuração de runtime do agente / API) buscam sua configuração do AWS AppConfig usando este id de aplicação — o valor `RuntimeConfigApplicationId` das suas saídas do CDK.
+
+Cada site tem um target `load:runtime-config` que baixa o `runtime-config.json` implantado (pool do Cognito, endpoints da API, ARN do agente) para o servidor de desenvolvimento local. Algumas combinações úteis:
+
+- **Site local → backend implantado.** Baixe a configuração implantada uma vez e então execute o target `serve` simples (não `serve-local`) para que a UI se comunique com a API e agente implantados:
+
+  <NxCommands commands={["run game-ui:load:runtime-config"]} />
+  <NxCommands commands={["serve game-ui"]} />
+
+- **API local → tabela DynamoDB real.** Execute o target `serve` simples com `RUNTIME_CONFIG_APP_ID` definido para o id de aplicação implantado, para que `resolveTableName()` resolva a tabela implantada em vez do DynamoDB Local:
+
+  <NxCommands env={{RUNTIME_CONFIG_APP_ID:"<RuntimeConfigApplicationId from CDK outputs>"}} commands={["serve game-api"]} />
+
+Essa flexibilidade permite que você teste exatamente a parte em que está trabalhando, contra quaisquer componentes — locais ou implantados — que façam sentido.
+
+Parabéns. Você construiu, testou e implantou seu Jogo de Aventura em Masmorra com Agentes!  🎉🎉🎉a em Masmorra com Agentes!  🎉🎉🎉
