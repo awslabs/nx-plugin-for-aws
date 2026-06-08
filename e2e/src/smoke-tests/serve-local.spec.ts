@@ -2,13 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { ChildProcess, spawn } from 'child_process';
+import { type ChildProcess, spawn } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
+import type { MockServer } from 'llm-mock-server';
 import { createConnection } from 'net';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
-import type { MockServer } from 'llm-mock-server';
 
 const STARTUP_TIMEOUT_MS = 120_000;
 const HEALTH_CHECK_INTERVAL_MS = 2_000;
