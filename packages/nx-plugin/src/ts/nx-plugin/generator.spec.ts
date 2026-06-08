@@ -9,11 +9,7 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import {
-  blankNxPluginIndexIfTemplate,
-  TS_NX_PLUGIN_GENERATOR_INFO,
-  tsNxPluginGenerator,
-} from './generator';
+import { TS_NX_PLUGIN_GENERATOR_INFO, tsNxPluginGenerator } from './generator';
 
 describe('ts#nx-plugin generator', () => {
   let tree: Tree;
@@ -76,27 +72,12 @@ describe('ts#nx-plugin generator', () => {
     expect(project.targets?.build?.dependsOn).toContain('package');
   });
 
-  it('should clear the index.ts file', async () => {
+  it('should leave index.ts as created by the ts#project generator', async () => {
     await tsNxPluginGenerator(tree, { name: 'test-plugin' });
 
-    const indexContent = tree.read('test-plugin/src/index.ts')?.toString();
-    expect(indexContent).toBe('');
-  });
-
-  it('should not blank index.ts when it already contains user content', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
-
-    // The generator only blanks the hello-world template; pre-existing user
-    // content (e.g. from a prior run) must be preserved.
-    const userContent = `export * from './my-generator';\n`;
-    tree.write('test-plugin/src/index.ts', userContent);
-    blankNxPluginIndexIfTemplate(tree, 'test-plugin/src/index.ts');
-    expect(tree.read('test-plugin/src/index.ts')?.toString()).toBe(userContent);
-
-    // The template content is still blanked
-    tree.write('test-plugin/src/index.ts', '// Export your library code here');
-    blankNxPluginIndexIfTemplate(tree, 'test-plugin/src/index.ts');
-    expect(tree.read('test-plugin/src/index.ts')?.toString()).toBe('');
+    expect(tree.read('test-plugin/src/index.ts')?.toString()?.trim()).toBe(
+      '// Export your library code here',
+    );
   });
 
   it('should configure TypeScript project as Nx Plugin', async () => {

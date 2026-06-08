@@ -29,7 +29,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { assignPort, getExistingProjectPort } from '../../../utils/port';
+import { assignPort } from '../../../utils/port';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { withVersions } from '../../../utils/versions';
 import smithyProjectGenerator from '../../project/generator';
@@ -113,12 +113,7 @@ export const tsSmithyApiGenerator = async (
     tree,
     backendFullyQualifiedName,
   );
-  const port = assignPort(
-    tree,
-    backendProjectConfig,
-    3001,
-    getExistingProjectPort(backendProjectConfig),
-  );
+  const port = assignPort(tree, backendProjectConfig, 3001);
 
   // Delete default index.ts with "hello" function
   tree.delete(joinPathFragments(backendProjectConfig.sourceRoot, 'index.ts'));

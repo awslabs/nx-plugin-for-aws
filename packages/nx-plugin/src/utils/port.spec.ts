@@ -4,7 +4,7 @@
  */
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { assignPort, getExistingProjectPort } from './port';
+import { assignPort } from './port';
 
 describe('port utilities', () => {
   let tree: Tree;
@@ -149,7 +149,7 @@ describe('port utilities', () => {
       expect((project.metadata as any)?.ports).toEqual([8001]);
     });
 
-    it('should add port to existing ports array', () => {
+    it('should reuse the project own port without appending a duplicate', () => {
       const project = {
         ...mockProject,
         metadata: {
@@ -160,49 +160,70 @@ describe('port utilities', () => {
 
       const port = assignPort(tree, project, 3000);
 
-      expect(port).toBe(3000);
-      expect((project.metadata as any)?.ports).toEqual([4000, 4001, 3000]);
+      // The project already has a port, so it is reused on re-run
+      expect(port).toBe(4000);
+      expect((project.metadata as any)?.ports).toEqual([4000, 4001]);
       expect((project.metadata as any)?.someOtherData).toBe('preserved');
     });
 
-    it('should return reusePort without appending when provided', () => {
-      const project = {
-        ...mockProject,
-        metadata: { ports: [4000] } as any,
-      };
-
-      const port = assignPort(tree, project, 3000, 4000);
-
-      expect(port).toBe(4000);
-      // No duplicate is appended when reusing the existing port
-      expect((project.metadata as any)?.ports).toEqual([4000]);
-    });
-
-    it('should be idempotent when re-run with reusePort from existing metadata', () => {
+    it('should be idempotent when re-run with the same project', () => {
       const project = { ...mockProject };
-      delete project.metadata;
 
       const firstPort = assignPort(tree, project, 3000);
-      // Persist project into the tree as a real generator would
-      tree.write(
-        'apps/test-project/project.json',
-        JSON.stringify({ name: 'test-project', metadata: project.metadata }),
-      );
-
-      const rerunProject = {
-        ...mockProject,
-        metadata: { ...(project.metadata as any) },
-      };
-      const secondPort = assignPort(
-        tree,
-        rerunProject,
-        3000,
-        getExistingProjectPort(rerunProject),
-      );
+      const secondPort = assignPort(tree, project, 3000);
 
       expect(secondPort).toBe(firstPort);
-      expect((rerunProject.metadata as any)?.ports).toEqual([firstPort]);
-      expect((rerunProject.metadata as any)?.ports).toHaveLength(1);
+      expect((project.metadata as any)?.ports).toEqual([firstPort]);
+      expect((project.metadata as any)?.ports).toHaveLength(1);
+    });
+
+    it('should reuse a port previously assigned to the same component', () => {
+      const info = { id: 'my-generator' };
+      const project = {
+        ...mockProject,
+        metadata: {
+          components: [{ generator: info.id, name: 'first', port: 8000 }],
+        } as any,
+      };
+
+      const port = assignPort(tree, project, 8000, {
+        component: { info, name: 'first' },
+      });
+
+      // The component already has a port, so it is reused without appending
+      expect(port).toBe(8000);
+      expect((project.metadata as any)?.ports).toBeUndefined();
+    });
+
+    it('should assign a fresh port for a new component on the same project', () => {
+      const info = { id: 'my-generator' };
+      // The project (with its first component port) is already in the tree
+      tree.write(
+        'apps/test-project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          metadata: {
+            ports: [8000],
+            components: [{ generator: info.id, name: 'first', port: 8000 }],
+          },
+        }),
+      );
+
+      const project = {
+        ...mockProject,
+        metadata: {
+          ports: [8000],
+          components: [{ generator: info.id, name: 'first', port: 8000 }],
+        } as any,
+      };
+
+      const port = assignPort(tree, project, 8000, {
+        component: { info, name: 'second' },
+      });
+
+      // A new component does not have a recorded port, so a fresh one is assigned
+      expect(port).toBe(8001);
+      expect((project.metadata as any)?.ports).toEqual([8000, 8001]);
     });
 
     it('should find next available port when start port is taken', () => {

@@ -101,24 +101,6 @@ export interface ComponentMetadata {
 /**
  * Add metadata about the generator that generated the component to the project.json
  */
-/**
- * Return the port previously recorded for a component (matched by generator id
- * and name) so it can be reused on a re-run, or undefined if not present.
- */
-export const getExistingComponentPort = (
-  tree: Tree,
-  projectName: string,
-  info: { id: string },
-  componentName?: string,
-): number | undefined => {
-  const config = readProjectConfigurationUnqualified(tree, projectName);
-  const existingComponents = (config?.metadata as any)?.components ?? [];
-  const match = existingComponents.find(
-    (c: any) => c.generator === info.id && c.name === componentName,
-  );
-  return typeof match?.port === 'number' ? match.port : undefined;
-};
-
 export const addComponentGeneratorMetadata = (
   tree: Tree,
   projectName: string,

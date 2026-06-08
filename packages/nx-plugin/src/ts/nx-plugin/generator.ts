@@ -28,18 +28,6 @@ import { configureTsProjectAsNxPlugin } from './utils';
 export const TS_NX_PLUGIN_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-const TS_LIB_INDEX_TEMPLATE = '// Export your library code here';
-
-/**
- * Blank the index.ts only when it still holds the default ts#lib template,
- * so that user content added on a previous run is preserved.
- */
-export const blankNxPluginIndexIfTemplate = (tree: Tree, indexPath: string) => {
-  if (tree.read(indexPath, 'utf-8')?.trim() === TS_LIB_INDEX_TEMPLATE) {
-    tree.write(indexPath, '');
-  }
-};
-
 export const tsNxPluginGenerator = async (
   tree: Tree,
   options: TsNxPluginGeneratorSchema,
@@ -99,13 +87,6 @@ export const tsNxPluginGenerator = async (
     },
   };
   updateProjectConfiguration(tree, fullyQualifiedName, project);
-
-  // Remove the hello world example from index.ts on first scaffold only,
-  // preserving any user content when the generator is re-run.
-  blankNxPluginIndexIfTemplate(
-    tree,
-    joinPathFragments(project.sourceRoot, 'index.ts'),
-  );
 
   // Add an MCP Server
   await tsMcpServerGenerator(tree, {

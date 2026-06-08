@@ -30,7 +30,7 @@ import {
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort, getExistingProjectPort } from '../../utils/port';
+import { assignPort } from '../../utils/port';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
@@ -80,7 +80,6 @@ export const tsRdbGenerator = async (
     tree,
     projectConfig,
     options.engine === 'mysql' ? 3306 : 5432,
-    getExistingProjectPort(projectConfig),
   );
   const localDbHost = 'localhost';
   const localDbUser = options.engine === 'mysql' ? 'root' : 'dbadmin';
@@ -135,35 +134,34 @@ export const tsRdbGenerator = async (
       bundleOutputDir: 'create-db-user',
     });
     const bundleTarget = projectConfig.targets['bundle'];
-    // On a re-run the bundle target has already been transformed into a commands
-    // array (with the rolldown invocation as the last entry and no `command`),
-    // so fall back to that command to keep the transform idempotent.
-    const rolldownCommand =
-      bundleTarget.options.command ??
-      (bundleTarget.options.commands ?? []).at(-1) ??
-      'rolldown -c rolldown.config.ts';
-    delete bundleTarget.options.command;
-    bundleTarget.options = {
-      ...bundleTarget.options,
-      commands: [
-        fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-        fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-        fs.cp(
-          'prisma',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
-        ),
-        fs.cp(
-          'prisma.config.ts',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
-        ),
-        fs.cp(
-          'Dockerfile',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
-        ),
-        rolldownCommand,
-      ],
-      parallel: false,
-    };
+    // The bundle target starts with a single rolldown `command`. Wrap it with
+    // the migration asset copy steps, unless it has already been transformed
+    // into a `commands` array on a previous run.
+    if (!bundleTarget.options.commands) {
+      const rolldownCommand = bundleTarget.options.command;
+      delete bundleTarget.options.command;
+      bundleTarget.options = {
+        ...bundleTarget.options,
+        commands: [
+          fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+          fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+          fs.cp(
+            'prisma',
+            `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
+          ),
+          fs.cp(
+            'prisma.config.ts',
+            `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
+          ),
+          fs.cp(
+            'Dockerfile',
+            `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
+          ),
+          rolldownCommand,
+        ],
+        parallel: false,
+      };
+    }
   }
 
   projectConfig.targets.generate = {

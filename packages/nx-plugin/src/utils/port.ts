@@ -8,7 +8,7 @@ import { getProjects, type ProjectConfiguration, type Tree } from '@nx/devkit';
  * Return the first port already registered in a project's own metadata, if any.
  * Supports both the metadata.ports array and the legacy metadata.port.
  */
-export const getExistingProjectPort = (
+const getExistingProjectPort = (
   project: ProjectConfiguration,
 ): number | undefined => {
   const metadata = project.metadata as any;
@@ -22,9 +22,38 @@ export const getExistingProjectPort = (
 };
 
 /**
+ * Return the port previously assigned to a particular component within a
+ * project, if any. Projects which host multiple components (e.g. one agent or
+ * MCP server per component) record a port per component in metadata.components.
+ */
+const getExistingComponentPort = (
+  project: ProjectConfiguration,
+  component: { info: { id: string }; name?: string },
+): number | undefined => {
+  const components = (project.metadata as any)?.components ?? [];
+  const match = components.find(
+    (c: any) => c.generator === component.info.id && c.name === component.name,
+  );
+  return typeof match?.port === 'number' ? match.port : undefined;
+};
+
+/**
+ * Options for assigning a port to a target within a project.
+ */
+export interface AssignPortOptions {
+  /**
+   * Identifies the component the port is being assigned for. When provided, a
+   * port already assigned to this component is reused so re-runs are
+   * idempotent. Use this for projects which host a port per component.
+   */
+  component?: { info: { id: string }; name?: string };
+}
+
+/**
  * Assign a port shared across all projects created by the same generator.
- * If a sibling project already has a port assigned, reuse it; otherwise assign a fresh one.
- * Mutates the project to register the port in its metadata.ports.
+ * If this project already has a port, or a sibling project created by the same
+ * generator has one, reuse it; otherwise assign a fresh one. Mutates the
+ * project to register the port in its metadata.ports.
  */
 export const assignSharedPort = (
   tree: Tree,
@@ -32,24 +61,28 @@ export const assignSharedPort = (
   generatorId: string,
   startPort: number,
 ): number => {
-  // Reuse the project's own port if it already has one (idempotent on re-run)
+  // Reuse this project's own port if it already has one (idempotent on re-run)
   const ownPort = getExistingProjectPort(project);
   if (ownPort !== undefined) {
     return ownPort;
   }
 
-  const existingPort = [...getProjects(tree).values()].find(
-    (p) => (p.metadata as any)?.generator === generatorId,
-  )?.metadata as any;
+  // Otherwise reuse a sibling project's shared port if one exists
+  const siblingPort = [...getProjects(tree).values()]
+    .filter((p) => p.name !== project.name)
+    .map((p) => ({
+      generator: (p.metadata as any)?.generator,
+      port: getExistingProjectPort(p),
+    }))
+    .find((p) => p.generator === generatorId && p.port !== undefined)?.port;
 
-  if (existingPort?.ports?.[0] !== undefined) {
-    const port = existingPort.ports[0] as number;
+  if (siblingPort !== undefined) {
     project.metadata ??= {};
     (project.metadata as any).ports = [
       ...((project.metadata as any).ports ?? []),
-      port,
+      siblingPort,
     ];
-    return port;
+    return siblingPort;
   }
 
   return assignPort(tree, project, startPort);
@@ -59,19 +92,22 @@ export const assignSharedPort = (
  * Assign a port for a particular target within a project.
  * Mutates the project to add/update its metadata.ports with the newly assigned port.
  *
- * Pass `reusePort` to make re-runs idempotent: when a port previously assigned
- * for the same target is provided, it is returned as-is without registering a
- * duplicate. This allows projects which host multiple ports (e.g. one per
- * component) to reuse the correct port for the target being (re-)generated.
+ * Re-runs are idempotent: a port previously assigned to this project (or, when
+ * `options.component` is provided, to this component) is returned as-is without
+ * registering a duplicate.
  */
 export const assignPort = (
   tree: Tree,
   project: ProjectConfiguration,
   startPort: number,
-  reusePort?: number,
+  options?: AssignPortOptions,
 ) => {
-  if (reusePort !== undefined) {
-    return reusePort;
+  // Reuse a port already assigned to this project/component on re-run
+  const existingPort = options?.component
+    ? getExistingComponentPort(project, options.component)
+    : getExistingProjectPort(project);
+  if (existingPort !== undefined) {
+    return existingPort;
   }
 
   // Find all existing ports

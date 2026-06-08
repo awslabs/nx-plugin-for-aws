@@ -28,7 +28,7 @@ import {
 } from '../../utils/nx';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
-import { assignPort, getExistingProjectPort } from '../../utils/port';
+import { assignPort } from '../../utils/port';
 import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
@@ -81,12 +81,7 @@ export const pyFastApiProjectGenerator = async (
   }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
-  const port = assignPort(
-    tree,
-    projectConfig,
-    8000,
-    getExistingProjectPort(projectConfig),
-  );
+  const port = assignPort(tree, projectConfig, 8000);
 
   const { bundleOutputDir, bundleTargetName } =
     addPythonBundleTarget(projectConfig);
