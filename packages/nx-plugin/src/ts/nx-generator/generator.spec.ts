@@ -246,6 +246,29 @@ describe('nx-generator generator', () => {
       );
     });
 
+    it('should preserve user-implemented files on same-name re-run', async () => {
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      // Simulate the user implementing the scaffolded generator
+      const generatorPath = 'packages/nx-plugin/src/foo-bar/generator.ts';
+      const userContent = '// my implemented generator\n';
+      tree.write(generatorPath, userContent);
+
+      // Re-run with the same name
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      // The user's implementation must be preserved, not overwritten by the scaffold
+      expect(tree.read(generatorPath, 'utf-8')).toBe(userContent);
+    });
+
     it('should support a nested directory', async () => {
       await tsNxGeneratorGenerator(tree, {
         project: NxPluginForAwsProjectJson.name,
@@ -618,6 +641,29 @@ describe('nx-generator generator', () => {
       expect(indexContent).toContain(
         "export * from './export-test/generator';",
       );
+    });
+
+    it('should preserve user-implemented files on same-name re-run', async () => {
+      await tsNxGeneratorGenerator(tree, {
+        project: '@test/plugin',
+        name: 'my#generator',
+        description: 'Some description',
+      });
+
+      // Simulate the user implementing the scaffolded generator
+      const generatorPath = 'tools/plugin/src/my-generator/generator.ts';
+      const userContent = '// my implemented generator\n';
+      tree.write(generatorPath, userContent);
+
+      // Re-run with the same name
+      await tsNxGeneratorGenerator(tree, {
+        project: '@test/plugin',
+        name: 'my#generator',
+        description: 'Some description',
+      });
+
+      // The user's implementation must be preserved, not overwritten by the scaffold
+      expect(tree.read(generatorPath, 'utf-8')).toBe(userContent);
     });
 
     it('should add generator metric to app.ts', async () => {
