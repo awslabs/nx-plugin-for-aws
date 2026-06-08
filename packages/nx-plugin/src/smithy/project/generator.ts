@@ -8,6 +8,7 @@ import {
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
 import { getTsLibDetails } from '../../ts/lib/generator';
@@ -36,31 +37,42 @@ export const smithyProjectGenerator = async (
 
   // Create project.json
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);
-  addProjectConfiguration(tree, fullyQualifiedName, {
-    name: fullyQualifiedName,
-    root: dir,
-    sourceRoot: joinPathFragments(dir, 'src'),
-    projectType: 'library',
-    targets: {
-      build: {
-        dependsOn: ['compile'],
-      },
-      compile: {
-        cache: true,
-        outputs: ['{workspaceRoot}/dist/{projectRoot}/build'],
-        executor: 'nx:run-commands',
-        options: {
-          commands: [
-            cmd.rm('dist/{projectRoot}/build'),
-            cmd.mkdir('dist/{projectRoot}/build'),
-            `${containers} build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
-          ],
-          parallel: false,
-          cwd: '{workspaceRoot}',
+
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    addProjectConfiguration(tree, fullyQualifiedName, {
+      name: fullyQualifiedName,
+      root: dir,
+      sourceRoot: joinPathFragments(dir, 'src'),
+      projectType: 'library',
+      targets: {
+        build: {
+          dependsOn: ['compile'],
+        },
+        compile: {
+          cache: true,
+          outputs: ['{workspaceRoot}/dist/{projectRoot}/build'],
+          executor: 'nx:run-commands',
+          options: {
+            commands: [
+              cmd.rm('dist/{projectRoot}/build'),
+              cmd.mkdir('dist/{projectRoot}/build'),
+              `${containers} build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
+            ],
+            parallel: false,
+            cwd: '{workspaceRoot}',
+          },
         },
       },
-    },
-  });
+    });
+  }
 
   const serviceName = options.serviceName ?? options.name;
   const serviceNameClassName = toClassName(serviceName);

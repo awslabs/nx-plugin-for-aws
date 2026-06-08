@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, type Tree } from '@nx/devkit';
+import { getProjects, readJson, type Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -252,5 +252,34 @@ describe('smithyProjectGenerator', () => {
     expect(mainSmithy).toContain('service MyService');
     expect(mainSmithy).toContain('@title("MyService")');
     expect(mainSmithy).toMatchSnapshot('default-service-name-main.smithy');
+  });
+
+  it('should be idempotent when re-run with same options', async () => {
+    await smithyProjectGenerator(tree, { name: 'test-api' });
+
+    const projectCountAfterFirstRun = getProjects(tree).size;
+    const mainSmithyAfterFirstRun = tree.read(
+      'test-api/src/main.smithy',
+      'utf-8',
+    );
+
+    await expect(
+      smithyProjectGenerator(tree, { name: 'test-api' }),
+    ).resolves.toBeDefined();
+
+    expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+    expect(tree.read('test-api/src/main.smithy', 'utf-8')).toEqual(
+      mainSmithyAfterFirstRun,
+    );
+  });
+
+  it('should create an independent project when run with a different name', async () => {
+    await smithyProjectGenerator(tree, { name: 'test-api' });
+    await smithyProjectGenerator(tree, { name: 'other-api' });
+
+    expect(readJson(tree, 'test-api/project.json').name).toBe('@proj/test-api');
+    expect(readJson(tree, 'other-api/project.json').name).toBe(
+      '@proj/other-api',
+    );
   });
 });
