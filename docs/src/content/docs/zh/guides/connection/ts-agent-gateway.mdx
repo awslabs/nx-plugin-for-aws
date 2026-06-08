@@ -1,0 +1,157 @@
+---
+title: TypeScript Agent 到 Gateway
+description: 将 TypeScript Agent 连接到 AgentCore Gateway
+when:
+  sourceType: ts#agent
+  targetType: cedar#agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器可以将您的 <Link path="guides/ts-agent">TypeScript Agent</Link> 连接到 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>。
+
+该生成器会配置 agent，使其在部署时使用 IAM SigV4 向 Gateway 进行身份验证，并在本地运行时直接多路复用到附加的 MCP 服务器。
+
+## 前提条件
+
+在使用此生成器之前，请确保您具有：
+
+1. 一个包含 <Link path="guides/ts-agent">Agent</Link> 组件的 TypeScript 项目（`infra: agentcore`）
+2. 一个 <Link path="guides/agentcore-gateway">`cedar#agentcore-gateway`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择 agent 项目作为源，Gateway 项目作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会将共享的核心客户端文件输出到您的 `agent-connection` 包中，加上每个 Gateway 的包装器，并修改您的 agent：
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - core/
+      - agentcore-gateway-mcp-client.ts 用于已部署 Gateway 的 SigV4 MCP 客户端
+      - agentcore-gateway-mcp-local-client.ts 扇出到附加 MCP 服务器的本地多路复用客户端
+    - app/
+      - \<gateway-kebab>-client.ts 带有 `ATTACHED_MCP_SERVERS` 列表的每个 Gateway 包装器
+    - index.ts 重新导出 Gateway 客户端
+
+</FileTree>
+
+此外，生成器还会：
+
+- 修改您的 agent 的 `agent.ts` 以导入 Gateway 客户端类，调用 `<Gateway>Client.create()`，并在 `tools` 数组中注册返回的客户端
+- 将 agent 的 `<agent>-serve-local` 目标配置为依赖于 Gateway 的 `<gateway>-serve-local` 聚合器
+- 安装所需的 SigV4 / MCP 依赖项
+
+## 使用已连接的 Gateway
+
+生成器会转换您的 agent 的 `agent.ts` 以使用 Gateway 客户端：
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
+import { Agent } from '@strands-agents/sdk';
+import { MyGatewayClient } from ':my-scope/agent-connection';
+
+export const getAgent = async () => {
+  const myGateway = await MyGatewayClient.create();
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myGateway],
+  });
+};
+```
+
+当部署时（未设置 `SERVE_LOCAL`），`create()` 返回一个指向 Gateway 的 MCP 端点并使用 SigV4 进行身份验证的单个 `McpClient`。当 `SERVE_LOCAL=true` 时，它返回一个 `McpClient` 数组——客户端的 `ATTACHED_MCP_SERVERS` 列表中的每个 MCP 服务器对应一个。Strands 的 `Agent.tools` 接受任一形式（它透明地展平嵌套的工具数组），因此相同的 `agent.ts` 在两种模式下都能统一工作。
+
+会话 ID 会自动传播到下游 MCP 服务器：底层传输通过 [Strands TS 会话上下文](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) 读取请求范围的会话，并将其作为 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 标头转发到 Gateway。
+
+## 基础设施
+
+运行生成器后，您必须授予 agent 调用 Gateway 的权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const gateway = new MyGateway(this, 'MyGateway');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent permissions to invoke the Gateway
+gateway.grantInvokeAccess(myAgent);
+```
+
+Gateway URL 会由生成的 CDK 构造自动注册到 <Link path="guides/runtime-config">运行时配置</Link> 的 `agentcore.gateways.<ClassName>` 命名空间中，以便 agent 可以在运行时发现它。
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the agent permission to invoke the Gateway
+resource "aws_iam_policy" "agent_invoke_gateway" {
+  name = "AgentInvokeGatewayPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeGateway"
+      Resource = module.my_gateway.gateway_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_gateway" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_gateway.arn
+}
+```
+
+Gateway URL 会由生成的 Terraform 模块自动注册到 <Link path="guides/runtime-config">运行时配置</Link> 的 `agentcore.gateways.<ClassName>` 命名空间中，以便 agent 可以在运行时发现它。
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+生成器会将 agent 的 `serve-local` 目标配置为：
+
+1. 启动连接到已连接 Gateway 的每个 MCP 服务器
+2. 设置 `SERVE_LOCAL=true`，以便生成的客户端扇出到这些本地 MCP 服务器，而不是调用已部署的 Gateway
+
+使用以下命令在本地运行 agent：
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+### `GATEWAY_URL_OVERRIDE`
+
+要在本地运行 agent **针对已部署的 Gateway**（例如，为了测试 Cedar 策略），请设置：
+
+```bash
+export GATEWAY_URL_OVERRIDE=https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
+```
+
+设置后，客户端会使用已部署的 Gateway URL，并使用您的本地 AWS 凭证对请求进行 SigV4 签名，而不是回退到本地多路复用。
+
+### 本地保真度
+
+本地多路复用模式会绕过 Gateway 本身，因此：
+
+- **没有 Cedar 策略评估。** 无论策略如何，agent 都可以看到每个工具。使用 `GATEWAY_URL_OVERRIDE` 针对已部署的 Gateway 测试策略。
+- **保留工具名称前缀。** 每个本地 MCP 服务器的工具都被包装以公开 `<target-name>___<tool-name>` 形式的名称，与已部署的 Gateway 发出的名称相匹配。这使得 agent 的系统提示和您引用的 Cedar 操作名称在本地和已部署运行中保持一致。

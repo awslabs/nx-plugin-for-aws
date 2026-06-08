@@ -1,0 +1,128 @@
+---
+title: AgentCore Gateway에서 MCP Server로
+description: AgentCore Gateway를 MCP 서버에 연결
+when:
+  sourceType: cedar#agentcore-gateway
+  targetType:
+    - ts#mcp-server
+    - py#mcp-server
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 MCP 서버(<Link path="guides/ts-mcp-server">TypeScript</Link> 또는 <Link path="guides/py-mcp-server">Python</Link>)를 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>의 대상으로 등록할 수 있습니다.
+
+연결되면 Gateway는 MCP 서버의 도구를 단일 MCP 엔드포인트로 집계하고, Cedar 정책 엔진에 대해 호출을 평가하며, IAM SigV4로 MCP 서버로의 아웃바운드 트래픽에 서명합니다.
+
+## 전제 조건
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/agentcore-gateway">`cedar#agentcore-gateway`</Link> 프로젝트
+2. `infra: agentcore` 및 `auth: iam`으로 생성된 MCP 서버 컴포넌트(<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 또는 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+
+Gateway는 `protocol: mcp`를 가져야 하고 MCP 서버는 `auth: iam`을 가져야 합니다 — 생성기가 둘 다 검증합니다. Gateway가 SigV4로 아웃바운드 트래픽에 서명하기 때문에 비-IAM MCP 서버는 연결할 수 없습니다.
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+Gateway 프로젝트를 소스로, MCP 서버 프로젝트를 대상으로 선택합니다. MCP 서버 프로젝트에 여러 컴포넌트가 포함된 경우 `targetComponent`를 지정하여 명확히 구분합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 새 소스 파일을 생성하는 대신 기존 프로젝트를 연결합니다. 다음 파일이 수정됩니다:
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json `<gateway>-serve-local`이 MCP 서버의 `<mcp>-serve-local`에 대한 종속성을 얻음
+- packages/common/agent-connection (TypeScript, TS gateway 클라이언트가 존재하는 경우)
+  - src/app
+    - \<gateway-kebab>-client.ts `ATTACHED_MCP_SERVERS`가 MCP 서버를 포함하도록 업데이트됨
+- packages/common/agent\_connection (Python, Py gateway 클라이언트가 존재하는 경우)
+  - \<scope>\_agent\_connection/app
+    - \<gateway\_snake>\_client.py `ATTACHED_MCP_SERVERS`가 MCP 서버를 포함하도록 업데이트됨
+
+</FileTree>
+
+Gateway 프로젝트의 `<gateway>-serve-local` 집계 대상이 MCP 서버의 `<mcp>-serve-local` 대상에 대한 종속성을 얻으므로, Gateway를 로컬에서 실행하면 MCP 서버도 시작됩니다. 기존 `<Gateway>Client.ts` / `_client.py` 파일(<Link path="guides/connection/ts-agent-gateway">TypeScript</Link> 또는 <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection 생성기에서 생성됨)의 `ATTACHED_MCP_SERVERS` 목록이 이 MCP 서버를 포함하도록 업데이트되어 로컬 멀티플렉싱이 이를 인식합니다.
+
+## 스택에 MCP 서버 대상 추가하기
+
+생성기는 Gateway를 인스턴스화하는 스택이나 모듈을 알 수 없기 때문에 MCP 서버 대상을 인프라에 **자동으로** 연결할 수 없습니다. `gateway.addMcpServer(server)` 호출을 직접 추가해야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Gateway를 인스턴스화하는 스택에서 MCP 서버를 대상으로 등록합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// MCP 서버를 Gateway의 대상으로 등록합니다. 대상 이름은
+// 기본적으로 MCP 서버 구성의 id를 kebab-case로 변환한 것입니다 (`my-mcp-server`).
+myGateway.addMcpServer(myMcpServer);
+```
+
+Gateway 대상 이름(기본적으로 kebab-case로 변환된 구성 id)은 Cedar 액션 이름의 접두사로 사용됩니다 — 액션 형식은 ``AgentCore::Action::"<targetName>___<toolName>"``입니다. <Link path="guides/agentcore-gateway">정책 작성 섹션</Link>을 참조하세요. 대상 이름을 짧고 안정적으로 유지하세요. 나중에 변경하면 이전 이름을 참조하는 모든 Cedar 정책이 무효화됩니다.
+
+기본 대상 이름을 재정의하려면 `gatewayTargetName`을 전달합니다:
+
+```ts
+myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
+```
+
+구성은 `iamCredentialProvider.service = 'bedrock-agentcore'`로 대상을 구성하므로 Gateway가 자체 실행 역할을 사용하여 아웃바운드 호출에 서명합니다.
+</Fragment>
+<Fragment slot="terraform">
+Gateway를 인스턴스화하는 Terraform 파일에서 MCP 서버 대상을 연결합니다:
+
+```hcl title="packages/infra/src/main.tf" {10-16}
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+}
+
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+# MCP 서버를 Gateway의 대상으로 등록
+resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
+  gateway_identifier    = module.my_gateway.gateway_id
+  name                  = "my-mcp-server"
+  mcp_server_runtime_arn = module.my_mcp_server.agent_core_runtime_arn
+
+  credential_provider_configuration {
+    credential_provider_type = "GATEWAY_IAM_ROLE"
+  }
+}
+```
+
+대상 `name`(위의 `my-mcp-server`)은 Cedar 액션 이름의 접두사로 사용됩니다 — <Link path="guides/agentcore-gateway">정책 작성 섹션</Link>을 참조하세요.
+</Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+다음 명령으로 Gateway를 로컬에서 실행하면:
+
+<NxCommands commands={["<gateway-name>-serve-local"]} />
+
+할당된 로컬 포트에서 연결된 모든 MCP 서버가 시작됩니다. <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> 또는 <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection 생성기를 통해 Gateway에 연결된 에이전트는 클라이언트의 로컬 폴백 경로를 사용하여 MCP 서버에 직접 멀티플렉싱합니다.
+
+:::caution[로컬 충실도]
+로컬 개발은 **Gateway를 완전히 우회합니다** — 생성된 gateway 클라이언트가 `SERVE_LOCAL=true`를 감지하고 일반 HTTP를 통해 각 연결된 MCP 서버에 직접 연결합니다. 결과적으로 **Cedar 정책은 로컬에서 평가되지 않습니다**. 모든 에이전트가 연결된 모든 MCP 서버의 모든 도구를 볼 수 있습니다. Cedar 정책을 실행하려면 `GATEWAY_URL_OVERRIDE`를 설정하여(<Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> agent-connection 가이드 참조) 로컬에서 실행 중인 에이전트가 배포된 Gateway를 대신 호출하도록 합니다.
+
+도구 이름은 배포된 Gateway의 네임스페이싱과 일치하도록 로컬에서도 `<target-name>___<tool-name>`으로 접두사가 붙으므로, 에이전트의 시스템 프롬프트와 참조하는 Cedar 액션 이름이 로컬 및 배포된 실행 전반에 걸쳐 일관성을 유지합니다.
+:::

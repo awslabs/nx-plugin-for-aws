@@ -1,0 +1,165 @@
+---
+title: Python Agent tới Gateway
+description: Kết nối Python Agent với AgentCore Gateway
+when:
+  sourceType: py#agent
+  targetType: cedar#agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` có thể kết nối <Link path="guides/py-agent">Python Agent</Link> của bạn với <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
+
+Trình tạo sẽ cấu hình agent để xác thực với Gateway bằng IAM SigV4 (thông qua ký yêu cầu `httpx`) khi triển khai, và ghép kênh trực tiếp đến các máy chủ MCP được đính kèm khi chạy cục bộ.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án Python với thành phần <Link path="guides/py-agent">Agent</Link> (`infra: agentcore`)
+2. Một dự án <Link path="guides/agentcore-gateway">`cedar#agentcore-gateway`</Link>
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án agent làm nguồn và dự án Gateway làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả đầu ra của trình tạo
+
+Trình tạo tạo ra các module core-gateway được chia sẻ vào dự án Python `agent_connection` của bạn, cộng với một wrapper cho mỗi Gateway, và sửa đổi agent của bạn:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - core/
+      - agentcore\_gateway\_mcp\_client.py SigV4 MCP client sử dụng `httpx`
+      - agentcore\_gateway\_mcp\_local\_client.py Local multiplex client cho các máy chủ MCP được đính kèm
+    - app/
+      - \<gateway\_snake>\_client.py Wrapper cho mỗi Gateway với danh sách `ATTACHED_MCP_SERVERS`
+    - \_\_init\_\_.py Xuất lại Gateway client
+
+</FileTree>
+
+Ngoài ra, trình tạo:
+
+- Sửa đổi `agent.py` của agent để import Gateway client, vào nó thông qua khối `with`, và đăng ký các công cụ của nó trong `tools`
+- Thêm `agent_connection` làm phụ thuộc workspace của agent
+- Kết nối target `<agent>-serve-local` của agent để phụ thuộc vào aggregator `<gateway>-serve-local` của Gateway
+
+## Sử dụng Gateway đã kết nối
+
+Trình tạo chuyển đổi `agent.py` của agent để sử dụng Gateway client:
+
+```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
+from contextlib import contextmanager
+from strands import Agent
+
+from my_scope_agent_connection import MyGatewayClient
+
+@contextmanager
+def get_agent():
+    my_gateway = MyGatewayClient.create()
+    with (
+        my_gateway,
+    ):
+        yield Agent(
+            system_prompt="...",
+            tools=[*my_gateway.list_tools_sync()],
+        )
+```
+
+`MyGatewayClient.create()` trả về một client có thể quản lý ngữ cảnh duy nhất mà `list_tools_sync()` của nó cung cấp mọi công cụ có sẵn thông qua Gateway:
+
+- **Chế độ triển khai** (`SERVE_LOCAL` không được đặt): một `MCPClient` duy nhất trỏ đến điểm cuối MCP của Gateway, được ký SigV4.
+- **Chế độ cục bộ** (`SERVE_LOCAL=true`): một `AgentCoreGatewayLocalMultiplexClient` phân tán đến từng máy chủ MCP được đính kèm và trình bày tập hợp các công cụ của chúng.
+
+Session ID được truyền tự động đến các máy chủ MCP downstream: transport `httpx` bên dưới đọc `get_current_session_id()` (được đặt bởi middleware runtime Strands) và chuyển tiếp nó đến Gateway dưới dạng header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
+
+## Cơ sở hạ tầng
+
+Sau khi chạy trình tạo, bạn phải cấp quyền cho agent để gọi Gateway.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const gateway = new MyGateway(this, 'MyGateway');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent permissions to invoke the Gateway
+gateway.grantInvokeAccess(myAgent);
+```
+
+URL Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi CDK construct được tạo, để agent có thể khám phá nó tại runtime.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the agent permission to invoke the Gateway
+resource "aws_iam_policy" "agent_invoke_gateway" {
+  name = "AgentInvokeGatewayPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeGateway"
+      Resource = module.my_gateway.gateway_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_gateway" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_gateway.arn
+}
+```
+
+URL Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi module Terraform được tạo, để agent có thể khám phá nó tại runtime.
+</Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+Trình tạo cấu hình target `serve-local` của agent để:
+
+1. Khởi động mọi máy chủ MCP được đính kèm với Gateway đã kết nối
+2. Đặt `SERVE_LOCAL=true` để client được tạo phân tán đến các máy chủ MCP cục bộ đó thay vì gọi Gateway đã triển khai
+
+Chạy agent cục bộ với:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+### `GATEWAY_URL_OVERRIDE`
+
+Để chạy agent cục bộ **với Gateway đã triển khai** (ví dụ: để thực thi các chính sách Cedar), hãy đặt:
+
+```bash
+export GATEWAY_URL_OVERRIDE=https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
+```
+
+Khi được đặt, client sử dụng URL Gateway đã triển khai và ký SigV4 các yêu cầu với thông tin xác thực AWS cục bộ của bạn thay vì quay lại ghép kênh cục bộ.
+
+### Độ trung thực cục bộ
+
+Chế độ ghép kênh cục bộ bỏ qua chính Gateway, do đó:
+
+- **Không đánh giá chính sách Cedar.** Mọi công cụ đều hiển thị với agent bất kể chính sách. Sử dụng `GATEWAY_URL_OVERRIDE` để thực thi chính sách với Gateway đã triển khai.
+- **Tiền tố tên công cụ được giữ nguyên.** Các công cụ của mỗi máy chủ MCP cục bộ được hiển thị dưới dạng `<target-name>___<tool-name>`, khớp với những gì Gateway đã triển khai phát ra. Điều này giữ cho system prompt của agent và tên hành động Cedar mà bạn tham chiếu nhất quán giữa các lần chạy cục bộ và đã triển khai.

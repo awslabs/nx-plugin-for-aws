@@ -1,0 +1,205 @@
+---
+title: AgentCore Gateway
+description: Tạo dự án AgentCore Gateway với công cụ chính sách Cedar
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Tạo một dự án [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). AgentCore Gateway là một điểm vào được quản lý, tập hợp một hoặc nhiều mục tiêu MCP server phía sau một endpoint MCP duy nhất, đánh giá mọi lời gọi công cụ dựa trên [công cụ chính sách Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), và ký lưu lượng truy cập đi ra đến các MCP server bằng IAM SigV4.
+
+## Cách sử dụng
+
+### Tạo một AgentCore Gateway
+
+<RunGenerator generator="cedar#agentcore-gateway" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="cedar#agentcore-gateway" />
+
+## Kết quả của Generator
+
+Generator tạo một dự án mới tại `packages/<name>/` chứa các tệp nguồn chính sách Cedar, cùng với một CDK construct hoặc Terraform module cho cơ sở hạ tầng:
+
+<FileTree>
+  - packages/\<name>/
+    - policies/
+      - permit-all.cedar Chính sách Cedar mặc định cho phép mọi thứ
+      - README.md Tài liệu tham khảo để viết chính sách Cedar
+    - project.json Thêm target aggregator \<name>-serve-local
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.ts CDK construct để triển khai Gateway
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.tf Terraform module để triển khai Gateway
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Construct được tạo ra sẽ tạo các tài nguyên AWS sau:
+
+- Một `AgentCore::Gateway` được cấu hình cho giao thức MCP với `GatewayAuthorizer.usingAwsIam()` (xác thực IAM đầu vào)
+- Một `AgentCore::PolicyEngine` chạy ở chế độ `ENFORCE`, được gắn vào Gateway
+- Một `AgentCore::Policy` cho mỗi tệp `.cedar` trong `policies/`
+
+URL của Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> để các agent có thể khám phá nó tại runtime.
+
+## Viết chính sách
+
+Cedar là ngôn ngữ chính sách được AgentCore Gateway sử dụng để ủy quyền các lời gọi công cụ. Mọi yêu cầu `tools/list` và `tools/call` đi qua Gateway đều được đánh giá dựa trên tập chính sách đính kèm, và người gọi phải có ít nhất một câu lệnh `permit` khớp (và không có `forbid` khớp) để yêu cầu thành công.
+
+Tham khảo [tài liệu AWS về chính sách AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) để biết tài liệu tham khảo đầy đủ, bao gồm [các mẫu chính sách phổ biến](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html).
+
+### Thêm một chính sách
+
+Để thêm một chính sách, hãy tạo một tệp `.cedar` mới bên cạnh `permit-all.cedar`. Mỗi tệp `.cedar` trong `policies/` phải chứa chính xác **một** câu lệnh `permit` hoặc `forbid` và được triển khai dưới dạng một tài nguyên `AWS::BedrockAgentCore::Policy` duy nhất. Tên của tài nguyên chính sách được lấy từ tên tệp: `permit-all.cedar` trở thành `PermitAll` (kebab/snake-case được chuyển đổi thành PascalCase). Các tệp chứa nhiều câu lệnh sẽ tạo ra lỗi `unexpected token 'forbid'` tại thời điểm triển khai — hãy tách chúng thành các tệp riêng biệt.
+
+Ví dụ, để chỉ cho phép một vai trò agent TypeScript cụ thể gọi một công cụ cụ thể, hãy tạo:
+
+```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"${gateway_arn}"
+) when {
+  principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
+};
+```
+
+Chạy lại synth hoặc plan để triển khai chính sách mới.
+
+### Thay thế placeholder
+
+Generator thay thế các placeholder sau tại thời điểm synth/plan để chính sách có thể di chuyển giữa các tài khoản và triển khai lại Gateway:
+
+| Placeholder      | Được thay thế bằng                                   |
+| ---------------- | ---------------------------------------------------- |
+| `${gateway_arn}` | ARN của Gateway đã triển khai                        |
+| `${account_id}`  | Tài khoản AWS mà Gateway này được triển khai vào     |
+
+Luôn tham chiếu các placeholder này thay vì hard-code các giá trị.
+
+### Chế độ ENFORCE và default-deny
+
+`PolicyEngine` chạy ở chế độ `ENFORCE`, có nghĩa là ngữ nghĩa **default-deny** được áp dụng: nếu không có câu lệnh `permit` nào khớp với bộ ba (principal, action, resource), yêu cầu sẽ bị từ chối. Các lời gọi công cụ bị từ chối sẽ trả về:
+
+```
+Tool Execution Denied: Tool call not allowed due to policy enforcement
+[No policy applies to the request (denied by default).]
+```
+
+Ngoài ra, Gateway lọc phản hồi của `tools/list` để người gọi chỉ thấy các công cụ mà họ có ít nhất một `permit` khớp: nếu một agent thiếu quyền cho một công cụ nhất định, công cụ đó sẽ bị ẩn hoàn toàn thay vì xuất hiện và thất bại tại thời điểm gọi.
+
+### `permit-all.cedar` mặc định
+
+Generator cung cấp một chính sách mặc định cho phép bất kỳ người gọi IAM nào từ tài khoản AWS mà Gateway được triển khai vào:
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action,
+  resource == AgentCore::Gateway::"${gateway_arn}"
+) when {
+  principal.id like "arn:aws:*::${account_id}:*"
+};
+```
+
+Để khóa chặt hơn, hãy thêm các chính sách hẹp hơn bên cạnh nó. Luôn giữ lại ít nhất một `permit` khớp trong tập chính sách, nếu không default-deny sẽ chặn mọi lời gọi.
+
+### Tài liệu tham khảo phạm vi chính sách
+
+Đối với các Gateway được tạo bởi plugin này, tất cả người gọi đều là IAM principal (Gateway được cấu hình với `GatewayAuthorizer.usingAwsIam()`):
+
+```
+principal is AgentCore::IamEntity
+```
+
+Thuộc tính `id` của principal chứa IAM ARN của người gọi. Các vai trò thực thi thường được STS assume, vì vậy người gọi thường đến dưới dạng STS assumed-role ARN chứa hậu tố session được tạo:
+
+```
+arn:aws:sts::<account-id>:assumed-role/<role-name>/<session-name>
+```
+
+Khớp chúng với `like` và wildcard:
+
+```cedar
+principal.id like "arn:aws:sts::*:assumed-role/*MyAgentExecutionRole*"
+```
+
+Các lời gọi công cụ đến policy engine dưới dạng action với định dạng:
+
+```
+AgentCore::Action::"<target-name>___<tool-name>"
+```
+
+trong đó `<target-name>` là tên target Gateway được truyền cho `gateway.addMcpServerTarget(...)`, `<tool-name>` là tên công cụ MCP, và dấu phân cách là `___` (ba dấu gạch dưới). Cedar không hỗ trợ wildcard trên action — khớp chính xác action, hoặc bỏ qua `action ==` để khớp tất cả action.
+
+Resource luôn là chính Gateway:
+
+```cedar
+resource == AgentCore::Gateway::"${gateway_arn}"
+```
+
+### Các cân nhắc về xác thực
+
+Policy engine của AgentCore từ chối các chính sách mà nó coi là quá rộng hoặc quá hẹp, ngay cả khi CDK construct đặt `PolicyValidationMode.IGNORE_ALL_FINDINGS`. CloudFormation hiển thị các từ chối này dưới dạng lỗi `Resource stabilization failed` không rõ ràng. Các mẫu phổ biến nhất mà validator từ chối là:
+
+1. **Permit không hạn chế** — `permit (principal, action, resource == ...);` bị từ chối là "Overly Permissive". Thêm mệnh đề `when { ... }` giới hạn theo loại principal, tài khoản hoặc vai trò. `permit-all.cedar` mặc định cho thấy hình dạng tối thiểu có thể chấp nhận được.
+2. **Forbid không hạn chế** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);` bị từ chối là "Overly Restrictive". Hoặc giới hạn nó với `when { ... }`, hoặc ghép nó với một `permit` đủ hẹp để validator có thể thấy người gọi mà nó vẫn cho phép.
+3. **Chỉ kiểm tra loại principal** — `principal is AgentCore::IamEntity` không có mệnh đề `when` cũng bị từ chối là "Overly Permissive". Luôn bao gồm một điều kiện hạn chế thêm principal.
+
+Nếu bạn gặp lỗi `Resource stabilization failed` trong quá trình triển khai, hãy chạy `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` để lấy `statusReasons` của validator, chứa từ chối thực tế.
+
+### Ví dụ: forbid một công cụ trong khi giữ permit rộng hơn
+
+Ghép một `forbid` hẹp với một `permit` rộng hơn (Cedar đánh giá `forbid` trước `permit`):
+
+```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
+forbid (
+  principal is AgentCore::IamEntity,
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"${gateway_arn}"
+) when {
+  principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
+};
+```
+
+Điều này từ chối vai trò agent Python gọi `ts-mcp___divide` trong khi vẫn giữ `permit-all.cedar` rộng hơn cho tất cả người gọi khác.
+
+## Phát triển cục bộ
+
+Generator thêm target `<name>-serve-local` vào dự án Gateway. Target này là một aggregator liên tục: khi được kết nối với các MCP server thông qua <Link path="guides/connection/agentcore-gateway-mcp">generator `cedar#agentcore-gateway#mcp-connection`</Link>, chạy nó sẽ khởi động tất cả các MCP server đính kèm cùng nhau để multiplexing cục bộ.
+
+<NxCommands commands={["<name>-serve-local"]} />
+
+Xem hướng dẫn kết nối để biết toàn bộ câu chuyện phát triển cục bộ.
+
+## Các bước tiếp theo
+
+- Kết nối một MCP server: <Link path="guides/connection/agentcore-gateway-mcp">`cedar#agentcore-gateway#mcp-connection`</Link>
+- Kết nối một TypeScript Agent: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
+- Kết nối một Python Agent: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
