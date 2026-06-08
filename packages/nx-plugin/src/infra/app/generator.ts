@@ -49,7 +49,18 @@ export async function tsInfraGenerator(
   schema: TsInfraGeneratorSchema,
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
-  await tsProjectGenerator(tree, schema);
+
+  let projectExists: boolean;
+  try {
+    readProjectConfiguration(tree, lib.fullyQualifiedName);
+    projectExists = true;
+  } catch {
+    projectExists = false;
+  }
+
+  if (!projectExists) {
+    await tsProjectGenerator(tree, schema);
+  }
 
   // CDK shells out to a container engine to build image assets. Default
   // (docker) needs no env override; finch is set via CDK_DOCKER per
