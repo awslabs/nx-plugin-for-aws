@@ -26,6 +26,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import {
@@ -125,50 +126,55 @@ export const pyProjectGenerator = async (
 
   updateNxJson(tree, nxJson);
 
-  if (!tree.exists('uv.lock')) {
-    await migrateToSharedVenvGenerator(tree, {
-      autoActivate: true,
-      packageManager: 'uv',
-      moveDevDependencies: false,
+  // Only scaffold the project when it does not already exist so re-running with
+  // the same name does not throw. The rest of the generator still runs to apply
+  // any changed options to the existing project.
+  if (!projectExists(tree, fullyQualifiedName)) {
+    if (!tree.exists('uv.lock')) {
+      await migrateToSharedVenvGenerator(tree, {
+        autoActivate: true,
+        packageManager: 'uv',
+        moveDevDependencies: false,
+        pyenvPythonVersion: '3.14.0',
+        pyprojectPythonDependency: '>=3.14',
+      });
+    }
+
+    await uvProjectGenerator(tree, {
+      name: fullyQualifiedName,
+      publishable: false,
+      buildLockedVersions: true,
+      buildBundleLocalDependencies: true,
+      linter: 'ruff',
+      rootPyprojectDependencyGroup: 'main',
       pyenvPythonVersion: '3.14.0',
       pyprojectPythonDependency: '>=3.14',
+      projectType: schema.type,
+      projectNameAndRootFormat: 'as-provided',
+      moduleName: normalizedModuleName,
+      directory: dir,
+      unitTestRunner: 'pytest',
+      codeCoverage: true,
+      codeCoverageHtmlReport: true,
+      codeCoverageXmlReport: true,
+      unitTestHtmlReport: true,
+      unitTestJUnitReport: true,
+      buildSystem: 'hatch',
+      srcDir: false,
     });
+
+    // Remove generated hello.py and test_hello.py as they are not needed
+    [
+      joinPathFragments(dir, normalizedModuleName, 'hello.py'),
+      joinPathFragments(dir, 'tests', 'test_hello.py'),
+    ].forEach((f) => tree.delete(f));
+
+    // Add a placeholder test so pytest doesn't fail with "no tests collected"
+    tree.write(
+      joinPathFragments(dir, 'tests', 'test_noop.py'),
+      'def test_noop():\n    pass\n',
+    );
   }
-
-  await uvProjectGenerator(tree, {
-    name: fullyQualifiedName,
-    publishable: false,
-    buildLockedVersions: true,
-    buildBundleLocalDependencies: true,
-    linter: 'ruff',
-    rootPyprojectDependencyGroup: 'main',
-    pyenvPythonVersion: '3.14.0',
-    pyprojectPythonDependency: '>=3.14',
-    projectType: schema.type,
-    projectNameAndRootFormat: 'as-provided',
-    moduleName: normalizedModuleName,
-    directory: dir,
-    unitTestRunner: 'pytest',
-    codeCoverage: true,
-    codeCoverageHtmlReport: true,
-    codeCoverageXmlReport: true,
-    unitTestHtmlReport: true,
-    unitTestJUnitReport: true,
-    buildSystem: 'hatch',
-    srcDir: false,
-  });
-
-  // Remove generated hello.py and test_hello.py as they are not needed
-  [
-    joinPathFragments(dir, normalizedModuleName, 'hello.py'),
-    joinPathFragments(dir, 'tests', 'test_hello.py'),
-  ].forEach((f) => tree.delete(f));
-
-  // Add a placeholder test so pytest doesn't fail with "no tests collected"
-  tree.write(
-    joinPathFragments(dir, 'tests', 'test_noop.py'),
-    'def test_noop():\n    pass\n',
-  );
 
   const outputPath = '{workspaceRoot}/dist/{projectRoot}';
   const buildOutputPath = joinPathFragments(outputPath, 'build');
