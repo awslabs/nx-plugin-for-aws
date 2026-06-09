@@ -29,6 +29,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
@@ -266,7 +267,9 @@ export const tsAgentGenerator = async (
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
-    targets: {
+    // Sort targets so their order is stable regardless of insertion order on
+    // first run vs re-run.
+    targets: sortObjectKeys({
       ...project.targets,
       [`${agentTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
@@ -302,7 +305,7 @@ export const tsAgentGenerator = async (
         },
         dependsOn: [`${agentTargetPrefix}-serve-local`],
       },
-    },
+    }),
   });
 
   addComponentGeneratorMetadata(

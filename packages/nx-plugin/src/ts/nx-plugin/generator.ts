@@ -15,11 +15,13 @@ import {
 import { formatFilesInSubtree } from '../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
+  addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import tsMcpServerGenerator from '../mcp-server/generator';
 import type { TsNxPluginGeneratorSchema } from './schema';
@@ -78,14 +80,14 @@ export const tsNxPluginGenerator = async (
       },
     },
     build: {
-      dependsOn: [
-        ...(project.targets?.build?.dependsOn ?? []).filter(
-          (d) => typeof d !== 'string' || d !== 'package',
-        ),
-        'package',
-      ],
+      ...project.targets?.build,
     },
   };
+  // Append the package dependency without moving an existing entry, so re-runs
+  // do not reorder the build dependencies.
+  addDependencyToTargetIfNotPresent(project, 'build', 'package');
+  // Sort targets so their order is stable regardless of insertion order.
+  project.targets = sortObjectKeys(project.targets);
   updateProjectConfiguration(tree, fullyQualifiedName, project);
 
   // Add an MCP Server
