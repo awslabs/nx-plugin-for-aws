@@ -183,16 +183,35 @@ export const pyProjectGenerator = async (
     fullyQualifiedName,
   );
   projectConfiguration.name = fullyQualifiedName;
-  const buildTarget = projectConfiguration.targets.build;
-  projectConfiguration.targets.compile = {
-    ...buildTarget,
-    inputs: ['default', '^production'],
-    outputs: [buildOutputPath],
-    options: {
-      ...buildTarget.options,
-      outputPath: buildOutputPath,
-    },
-  };
+  // Derive the compile target from the uv build target, and rewrite build to
+  // orchestrate the other targets. This only runs on first creation: on re-run
+  // build has already been transformed, so re-deriving would corrupt compile
+  // and duplicate the build dependencies.
+  if (!projectConfiguration.targets.compile) {
+    const buildTarget = projectConfiguration.targets.build;
+    projectConfiguration.targets.compile = {
+      ...buildTarget,
+      inputs: ['default', '^production'],
+      outputs: [buildOutputPath],
+      options: {
+        ...buildTarget.options,
+        outputPath: buildOutputPath,
+      },
+    };
+    projectConfiguration.targets.build = {
+      inputs: ['default', '^production'],
+      dependsOn: [
+        'lint',
+        'compile',
+        'test',
+        'typecheck',
+        ...(buildTarget.dependsOn ?? []),
+      ],
+      options: {
+        outputPath,
+      },
+    };
+  }
   projectConfiguration.targets.typecheck = {
     cache: true,
     inputs: ['default', '^production'],
@@ -200,19 +219,6 @@ export const pyProjectGenerator = async (
     options: {
       command: 'uv run ty check',
       cwd: '{projectRoot}',
-    },
-  };
-  projectConfiguration.targets.build = {
-    inputs: ['default', '^production'],
-    dependsOn: [
-      'lint',
-      'compile',
-      'test',
-      'typecheck',
-      ...(buildTarget.dependsOn ?? []),
-    ],
-    options: {
-      outputPath,
     },
   };
 

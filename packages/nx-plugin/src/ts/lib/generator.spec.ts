@@ -236,4 +236,25 @@ describe('ts lib generator', () => {
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, TS_LIB_GENERATOR_INFO.metric);
   });
+
+  it('should be idempotent when re-run with same options', async () => {
+    await tsProjectGenerator(tree, { name: 'test-lib', skipInstall: true });
+
+    // User edits the generated source
+    const indexPath = 'test-lib/src/index.ts';
+    tree.write(indexPath, '// my code\n');
+
+    const targetsBefore = readJson(tree, 'test-lib/project.json').targets;
+
+    // Re-running with the same options must not throw, must preserve user code,
+    // and must not change the project's targets.
+    await expect(
+      tsProjectGenerator(tree, { name: 'test-lib', skipInstall: true }),
+    ).resolves.toBeDefined();
+
+    expect(tree.read(indexPath, 'utf-8')).toBe('// my code\n');
+    expect(readJson(tree, 'test-lib/project.json').targets).toEqual(
+      targetsBefore,
+    );
+  });
 });

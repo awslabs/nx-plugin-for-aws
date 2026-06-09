@@ -307,6 +307,17 @@ describe('python project generator', () => {
     ).resolves.toBeDefined();
 
     expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+
+    // The compile and build targets must not be corrupted on re-run: compile
+    // keeps its python build executor, and build's dependsOn is not duplicated.
+    const config = readJson(tree, 'apps/test_project/project.json');
+    expect(config.targets.compile.executor).toBe('@nxlv/python:build');
+    expect(config.targets.build.dependsOn).toEqual([
+      'lint',
+      'compile',
+      'test',
+      'typecheck',
+    ]);
   });
 
   it('should create an independent project with a different name', async () => {
