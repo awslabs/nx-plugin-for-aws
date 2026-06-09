@@ -10,6 +10,7 @@ import {
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { addAgentCoreGatewayInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -21,6 +22,8 @@ import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
+  readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
@@ -45,12 +48,6 @@ export const agentcoreGatewayGenerator = async (
   // are non-breaking).
   const protocol = options.protocol ?? 'mcp';
   const auth = options.auth ?? 'iam';
-
-  if (tree.exists(joinPathFragments(projectRoot, 'project.json'))) {
-    throw new Error(
-      `A project already exists at ${projectRoot}. Choose a different name or remove the existing project first.`,
-    );
-  }
 
   // Scaffold the gateway project: policies/ + README.md + project.json
   generateFiles(
@@ -79,7 +76,7 @@ export const agentcoreGatewayGenerator = async (
   // resource, so its `serve` has no `SERVE_LOCAL=true`. Connection
   // generators wire agent-side `<agent>-serve` to this target so a
   // `serve`-mode agent talks to the deployed Gateway via runtime config.
-  const keepAliveAggregator = {
+  const keepAliveAggregator = () => ({
     executor: 'nx:run-commands' as const,
     continuous: true,
     options: {
@@ -88,21 +85,35 @@ export const agentcoreGatewayGenerator = async (
       commands: ['node -e "setInterval(() => {}, 1 << 30)"'],
     },
     dependsOn: [] as Array<string | { projects: string[]; target: string }>,
-  };
-  addProjectConfiguration(tree, fullyQualifiedName, {
-    name: fullyQualifiedName,
-    root: projectRoot,
-    projectType: 'library',
-    sourceRoot: projectRoot,
-    tags: [],
-    targets: {
-      [`${name}-serve`]: { ...keepAliveAggregator, dependsOn: [] },
-      [`${name}-serve-local`]: { ...keepAliveAggregator, dependsOn: [] },
-    },
-    metadata: {
-      generator: AGENTCORE_GATEWAY_GENERATOR_INFO.id,
-    } as any,
   });
+  if (projectExists(tree, fullyQualifiedName)) {
+    // Re-run: keep the existing targets (their dependsOn may have been
+    // populated by the mcp-connection generator), just ensure both
+    // aggregators exist.
+    const config = readProjectConfigurationUnqualified(
+      tree,
+      fullyQualifiedName,
+    );
+    config.targets ??= {};
+    config.targets[`${name}-serve`] ??= keepAliveAggregator();
+    config.targets[`${name}-serve-local`] ??= keepAliveAggregator();
+    updateProjectConfiguration(tree, config.name, config);
+  } else {
+    addProjectConfiguration(tree, fullyQualifiedName, {
+      name: fullyQualifiedName,
+      root: projectRoot,
+      projectType: 'library',
+      sourceRoot: projectRoot,
+      tags: [],
+      targets: {
+        [`${name}-serve`]: keepAliveAggregator(),
+        [`${name}-serve-local`]: keepAliveAggregator(),
+      },
+      metadata: {
+        generator: AGENTCORE_GATEWAY_GENERATOR_INFO.id,
+      } as any,
+    });
+  }
 
   addComponentGeneratorMetadata(
     tree,

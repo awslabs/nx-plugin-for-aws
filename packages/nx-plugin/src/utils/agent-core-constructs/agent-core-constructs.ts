@@ -247,18 +247,11 @@ export const addAgentCoreGatewayInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []).filter(
-          (t) => t !== `${options.projectName}:build`,
-        ),
+      addDependencyToTargetIfNotPresent(
+        config,
+        'build',
         `${options.projectName}:build`,
-      ];
+      );
       return config;
     },
   );

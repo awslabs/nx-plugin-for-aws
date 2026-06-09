@@ -88,17 +88,47 @@ describe('cedar#agentcore-gateway generator', () => {
       ).toBe(true);
     });
 
-    it('rejects re-generation into an existing project directory', async () => {
+    it('is idempotent: re-running preserves user policies and serve-local wiring', async () => {
       await agentcoreGatewayGenerator(tree, {
         name: 'my-gateway',
         iac: 'cdk',
       });
-      await expect(
-        agentcoreGatewayGenerator(tree, {
-          name: 'my-gateway',
-          iac: 'cdk',
-        }),
-      ).rejects.toThrow(/already exists/);
+
+      // Simulate user edits + connection wiring between runs.
+      tree.write(
+        'packages/my-gateway/policies/custom.cedar',
+        'permit (principal, action, resource);',
+      );
+      tree.write(
+        'packages/my-gateway/policies/permit-all.cedar',
+        '// user-edited',
+      );
+      const config = readProjectConfiguration(tree, '@proj/my-gateway');
+      config.targets!['my-gateway-serve-local'].dependsOn = [
+        { projects: ['@proj/some-mcp'], target: 'some-mcp-serve-local' },
+      ];
+      const { updateProjectConfiguration } = await import('@nx/devkit');
+      updateProjectConfiguration(tree, '@proj/my-gateway', config);
+
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+      });
+
+      expect(tree.exists('packages/my-gateway/policies/custom.cedar')).toBe(
+        true,
+      );
+      expect(
+        tree.read('packages/my-gateway/policies/permit-all.cedar')!.toString(),
+      ).toContain('user-edited');
+      const rerunConfig = readProjectConfiguration(tree, '@proj/my-gateway');
+      expect(
+        rerunConfig.targets?.['my-gateway-serve-local'].dependsOn,
+      ).toContainEqual(
+        expect.objectContaining({ target: 'some-mcp-serve-local' }),
+      );
+      // Component metadata is not duplicated on re-run
+      expect((rerunConfig.metadata as any).components).toHaveLength(1);
     });
 
     it('kebab-cases class-style names and pascal-cases runtime config keys', async () => {
