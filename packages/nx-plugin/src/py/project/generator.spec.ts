@@ -296,6 +296,7 @@ describe('python project generator', () => {
     });
 
     const projectCountAfterFirstRun = getProjects(tree).size;
+    const nxJsonAfterFirstRun = tree.read('nx.json', 'utf-8');
 
     // Re-running with the same options must not throw
     await expect(
@@ -307,6 +308,10 @@ describe('python project generator', () => {
     ).resolves.toBeDefined();
 
     expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+
+    // nx.json must not be rewritten on re-run (the @nxlv/python plugin is
+    // already registered), which would otherwise reserialize/reformat it.
+    expect(tree.read('nx.json', 'utf-8')).toBe(nxJsonAfterFirstRun);
 
     // The compile and build targets must not be corrupted on re-run: compile
     // keeps its python build executor, and build's dependsOn is not duplicated.

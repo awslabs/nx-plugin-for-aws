@@ -107,6 +107,8 @@ export const pyProjectGenerator = async (
 
   const nxJson = readNxJson(tree);
 
+  // Only rewrite nx.json when the plugin needs adding, so re-running does not
+  // reserialize (and reformat) the file when nothing has changed.
   if (
     !nxJson.plugins?.find((p) =>
       typeof p === 'string'
@@ -123,9 +125,8 @@ export const pyProjectGenerator = async (
         },
       },
     ];
+    updateNxJson(tree, nxJson);
   }
-
-  updateNxJson(tree, nxJson);
 
   // Only scaffold the project when it does not already exist so re-running with
   // the same name does not throw. The rest of the generator still runs to apply
