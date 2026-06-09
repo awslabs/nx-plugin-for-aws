@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addGeneratorMetadata,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from './nx';
@@ -83,6 +84,78 @@ describe('readProjectConfigurationUnqualified', () => {
     expect(() =>
       readProjectConfigurationUnqualified(tree, 'non-existent-project'),
     ).toThrow(/Cannot find configuration for 'non-existent-project'/);
+  });
+});
+
+describe('addGeneratorMetadata', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+    tree.write(
+      'package.json',
+      JSON.stringify({ name: '@my-scope/monorepo', version: '1.0.0' }),
+    );
+  });
+
+  it('should add generator metadata to the project', () => {
+    tree.write(
+      'apps/test-project/project.json',
+      JSON.stringify({
+        name: 'test-project',
+        root: 'apps/test-project',
+        targets: { build: { executor: 'nx:noop' } },
+      }),
+    );
+
+    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.metadata).toEqual({ generator: 'ts#foo' });
+  });
+
+  it('should not rewrite project.json when re-run with the same metadata', () => {
+    tree.write(
+      'apps/test-project/project.json',
+      JSON.stringify({
+        name: 'test-project',
+        root: 'apps/test-project',
+        targets: { build: { executor: 'nx:noop' } },
+      }),
+    );
+
+    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' });
+    const first = tree.read('apps/test-project/project.json', 'utf-8');
+
+    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' });
+    const second = tree.read('apps/test-project/project.json', 'utf-8');
+
+    // Re-running must leave the file byte-identical (no key reorder)
+    expect(second).toEqual(first);
+  });
+
+  it('should update metadata when additional metadata changes', () => {
+    tree.write(
+      'apps/test-project/project.json',
+      JSON.stringify({
+        name: 'test-project',
+        root: 'apps/test-project',
+        targets: {},
+      }),
+    );
+
+    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' });
+    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' }, { port: 4200 });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.metadata).toEqual({
+      generator: 'ts#foo',
+      port: 4200,
+    });
   });
 });
 
@@ -447,6 +520,30 @@ describe('addDependencyToTargetIfNotPresent', () => {
     expect(project.targets?.build?.dependsOn).toEqual([
       'compile',
       { projects: ['other'], target: 'build' },
+    ]);
+  });
+
+  it('should not reorder existing dependencies when re-adding one in the middle', () => {
+    const project = makeProject();
+    project.targets = {
+      build: {
+        dependsOn: [
+          '@e2e/website:build',
+          '@e2e/website-no-router:build',
+          '^build',
+        ],
+      },
+    };
+    addDependencyToTargetIfNotPresent(project, 'build', '@e2e/website:build');
+    addDependencyToTargetIfNotPresent(
+      project,
+      'build',
+      '@e2e/website-no-router:build',
+    );
+    expect(project.targets.build.dependsOn).toEqual([
+      '@e2e/website:build',
+      '@e2e/website-no-router:build',
+      '^build',
     ]);
   });
 });
