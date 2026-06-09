@@ -13,6 +13,7 @@ import * as path from 'path';
 import PackageJson from '../../package.json';
 import { toSnakeCase } from './names';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
+import { deepEquals } from './object';
 
 export type { GeneratorInfo, NxGeneratorInfo } from './generators';
 export { buildGeneratorInfoList } from './generators';
@@ -91,13 +92,19 @@ export const addGeneratorMetadata = (
   additionalMetadata?: { [key: string]: any },
 ) => {
   const config = readProjectConfigurationUnqualified(tree, projectName);
+  const metadata = {
+    ...config?.metadata,
+    generator: info.id,
+    ...additionalMetadata,
+  };
+  // Skip the write entirely when the metadata is unchanged so re-running does
+  // not reorder keys in the serialized project.json.
+  if (deepEquals(config?.metadata, metadata)) {
+    return;
+  }
   updateProjectConfiguration(tree, config.name, {
     ...config,
-    metadata: {
-      ...config?.metadata,
-      generator: info.id,
-      ...additionalMetadata,
-    } as any,
+    metadata: metadata as any,
   });
 };
 
@@ -196,10 +203,11 @@ export const addDependencyToTargetIfNotPresent = (
 ) => {
   project.targets ??= {};
   project.targets[target] ??= {};
-  project.targets[target].dependsOn = [
-    ...(project.targets[target].dependsOn ?? []).filter(
-      (d) => !targetDependencyEquals(d, dependency),
-    ),
-    dependency,
-  ];
+  project.targets[target].dependsOn ??= [];
+  const dependsOn = project.targets[target].dependsOn;
+  // Leave existing dependencies in place so re-running does not reorder them;
+  // only append when the dependency is genuinely absent.
+  if (!dependsOn.some((d) => targetDependencyEquals(d, dependency))) {
+    dependsOn.push(dependency);
+  }
 };
