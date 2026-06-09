@@ -10,6 +10,30 @@ import { configureBiomeLint } from './biome';
 import type { ConfigureProjectOptions } from './types';
 import { configureVitest } from './vitest';
 
+interface TsConfigReference {
+  path: string;
+}
+
+/**
+ * Merges new TypeScript project references into existing ones, deduplicating by
+ * path and preserving the order of existing references so re-running a
+ * generator neither duplicates nor reorders references.
+ */
+export const mergeTsReferences = (
+  existing: TsConfigReference[] | undefined,
+  toAdd: TsConfigReference[],
+): TsConfigReference[] => {
+  const references = [...(existing ?? [])];
+  const existingPaths = new Set(references.map((ref) => ref.path));
+  for (const ref of toAdd) {
+    if (!existingPaths.has(ref.path)) {
+      references.push(ref);
+      existingPaths.add(ref.path);
+    }
+  }
+  return references;
+};
+
 /**
  * Updates typescript projects
  */
@@ -71,15 +95,10 @@ export const configureTsProject = async (
   if (tree.exists('tsconfig.json')) {
     updateJson(tree, 'tsconfig.json', (tsConfig) => ({
       ...tsConfig,
-      references: [
-        // Add project references, ensuring no duplication
-        ...(tsConfig.references ?? []).filter(
-          (ref) => ref.path !== `./${options.dir}`,
-        ),
-        {
-          path: `./${options.dir}`,
-        },
-      ],
+      // Add project references, deduplicating and preserving existing order
+      references: mergeTsReferences(tsConfig.references, [
+        { path: `./${options.dir}` },
+      ]),
     }));
   }
   // Update the root package.json
