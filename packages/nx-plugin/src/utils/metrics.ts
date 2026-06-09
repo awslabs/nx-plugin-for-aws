@@ -37,61 +37,112 @@ export const TERRAFORM_METRICS_FILE_PATH = joinPathFragments(
 const WITHIN_METRICS_ASPECT =
   '$old <: within `class MetricsAspect implements $_ { $_ }`';
 
+// Extracts the existing metric tags from the CDK MetricsAspect tags array
+const readCdkMetricTags = (tree: Tree): string[] => {
+  if (!tree.exists(METRICS_ASPECT_FILE_PATH)) {
+    return [];
+  }
+  const content = tree.read(METRICS_ASPECT_FILE_PATH, 'utf-8') ?? '';
+  const match = content.match(/const tags:\s*string\[\]\s*=\s*\[([^\]]*)\]/);
+  if (!match) {
+    return [];
+  }
+  return (match[1].match(/'([^']*)'/g) ?? []).map((t) => t.slice(1, -1));
+};
+
+// Extracts the existing metric tags from the Terraform metric_tags array
+const readTerraformMetricTags = (tree: Tree): string[] => {
+  if (!tree.exists(TERRAFORM_METRICS_FILE_PATH)) {
+    return [];
+  }
+  const content = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8') ?? '';
+  const match = content.match(/metric_tags\s*=\s*\[([^\]]*)\]/);
+  if (!match) {
+    return [];
+  }
+  return (match[1].match(/"([^"]*)"/g) ?? []).map((t) => t.slice(1, -1));
+};
+
 /**
  * Instruments metrics by updating the MetricsAspect in common/constructs/src/core/app.ts if the file exists,
- * or updating the Terraform metrics CloudFormation stack if it exists
+ * and/or updating the Terraform metrics CloudFormation stack if it exists.
+ *
+ * Both files are converged to the same tag set (the union of tags already
+ * present in either file plus the incoming generators). This keeps the tag set
+ * deterministic regardless of the order in which metrics files are created
+ * across a multi-generator run, so re-running the same set of generators does
+ * not grow the tags.
  */
 export const addGeneratorMetricsIfApplicable = async (
   tree: Tree,
   generatorInfo: NxGeneratorInfo[],
 ) => {
-  // Handle CDK metrics
-  if (tree.exists(METRICS_ASPECT_FILE_PATH)) {
-    // Update the id
-    await applyGritQL(
-      tree,
-      METRICS_ASPECT_FILE_PATH,
-      `\`const id = $old\` => \`const id = '${METRIC_ID}'\`` +
-        ` where { ${WITHIN_METRICS_ASPECT} }`,
-    );
+  const cdkExists = tree.exists(METRICS_ASPECT_FILE_PATH);
+  const terraformExists = tree.exists(TERRAFORM_METRICS_FILE_PATH);
 
-    // Update the version
-    await applyGritQL(
-      tree,
-      METRICS_ASPECT_FILE_PATH,
-      `\`const version = $old\` => \`const version = '${getPackageVersion()}'\`` +
-        ` where { ${WITHIN_METRICS_ASPECT} }`,
-    );
-
-    // Add each generator as a tag
-    for (const info of generatorInfo) {
-      await applyGritQL(
-        tree,
-        METRICS_ASPECT_FILE_PATH,
-        `\`const tags: string[] = $old\`` +
-          ` where { ${WITHIN_METRICS_ASPECT},` +
-          ` if ($old <: \`[]\`) { $old => \`['${info.metric}']\` }` +
-          ` else { $old <: \`[$items]\` where { $items += \`, '${info.metric}'\` } },` +
-          ` $old <: not contains \`'${info.metric}'\` }`,
-      );
-    }
-
-    await formatFilesInSubtree(tree, METRICS_ASPECT_FILE_PATH);
+  if (!cdkExists && !terraformExists) {
+    return;
   }
 
-  // Handle Terraform metrics
-  if (tree.exists(TERRAFORM_METRICS_FILE_PATH)) {
-    await updateTerraformMetrics(tree, generatorInfo);
+  // Converge both files to the union of all known tags so the set is stable
+  // regardless of when each metrics file was created.
+  const tags = [
+    ...new Set([
+      ...readCdkMetricTags(tree),
+      ...readTerraformMetricTags(tree),
+      ...generatorInfo.map((info) => info.metric),
+    ]),
+  ];
+
+  if (cdkExists) {
+    await updateCdkMetrics(tree, tags);
+  }
+
+  if (terraformExists) {
+    await updateTerraformMetrics(tree, tags);
   }
 };
 
 /**
- * Updates the Terraform metrics CloudFormation stack with generator information
+ * Updates the CDK MetricsAspect with the metric id, version and tags
  */
-const updateTerraformMetrics = async (
-  tree: Tree,
-  generatorInfo: NxGeneratorInfo[],
-) => {
+const updateCdkMetrics = async (tree: Tree, tags: string[]) => {
+  // Update the id
+  await applyGritQL(
+    tree,
+    METRICS_ASPECT_FILE_PATH,
+    `\`const id = $old\` => \`const id = '${METRIC_ID}'\`` +
+      ` where { ${WITHIN_METRICS_ASPECT} }`,
+  );
+
+  // Update the version
+  await applyGritQL(
+    tree,
+    METRICS_ASPECT_FILE_PATH,
+    `\`const version = $old\` => \`const version = '${getPackageVersion()}'\`` +
+      ` where { ${WITHIN_METRICS_ASPECT} }`,
+  );
+
+  // Add each tag, leaving existing tags in place to keep re-runs stable
+  for (const tag of tags) {
+    await applyGritQL(
+      tree,
+      METRICS_ASPECT_FILE_PATH,
+      `\`const tags: string[] = $old\`` +
+        ` where { ${WITHIN_METRICS_ASPECT},` +
+        ` if ($old <: \`[]\`) { $old => \`['${tag}']\` }` +
+        ` else { $old <: \`[$items]\` where { $items += \`, '${tag}'\` } },` +
+        ` $old <: not contains \`'${tag}'\` }`,
+    );
+  }
+
+  await formatFilesInSubtree(tree, METRICS_ASPECT_FILE_PATH);
+};
+
+/**
+ * Updates the Terraform metrics CloudFormation stack with the metric id, version and tags
+ */
+const updateTerraformMetrics = async (tree: Tree, tags: string[]) => {
   // Update metric_id
   await applyGritQL(
     tree,
@@ -106,14 +157,14 @@ const updateTerraformMetrics = async (
     `\`metric_version = $old\` => \`metric_version = "${getPackageVersion()}"\``,
   );
 
-  // Update metric_tags
-  for (const info of generatorInfo) {
+  // Add each tag, leaving existing tags in place to keep re-runs stable
+  for (const tag of tags) {
     await applyGritQL(
       tree,
       TERRAFORM_METRICS_FILE_PATH,
-      `or { \`metric_tags = []\` => \`metric_tags = ["${info.metric}"]\`,` +
-        ` \`metric_tags = [$items]\` where { $items += \`, "${info.metric}"\` }` +
-        ` where { $items <: not contains \`"${info.metric}"\` } }`,
+      `or { \`metric_tags = []\` => \`metric_tags = ["${tag}"]\`,` +
+        ` \`metric_tags = [$items]\` where { $items += \`, "${tag}"\` }` +
+        ` where { $items <: not contains \`"${tag}"\` } }`,
     );
   }
 };

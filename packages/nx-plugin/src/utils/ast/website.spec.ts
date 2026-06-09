@@ -226,6 +226,50 @@ export default App;`;
       expect(updatedContent).toContain('context={{ auth }}');
     });
 
+    it('should be a no-op when re-run with the context prop already present', async () => {
+      tree.write('main.tsx', baseMainTsxContent);
+
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
+
+      const afterFirstRun = tree.read('main.tsx', 'utf-8');
+
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
+
+      const afterSecondRun = tree.read('main.tsx', 'utf-8');
+
+      expect(afterSecondRun).toEqual(afterFirstRun);
+      // No duplicate context attribute on the RouterProvider
+      expect((afterSecondRun!.match(/context=\{\{/g) || []).length).toBe(1);
+    });
+
+    it('should not add a duplicate context attribute when context already contains the prop', async () => {
+      const contentWithExistingContext = baseMainTsxContent.replace(
+        "<RouterProvider router={router} context={{ existingContext: 'value' }} />",
+        '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+      );
+
+      tree.write('main.tsx', contentWithExistingContext);
+
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
+
+      const updatedContent = tree.read('main.tsx', 'utf-8');
+      // Exactly one context attribute, with no duplicate auth prop
+      expect((updatedContent!.match(/context=\{\{/g) || []).length).toBe(1);
+      expect(updatedContent).toContain('context={{ runtimeConfig, auth }}');
+    });
+
     it('should not make changes if RouterProviderContext interface is missing', async () => {
       const contentWithoutInterface = baseMainTsxContent.replace(
         /type RouterProviderContext = \{[\s\S]*?\};/,
