@@ -56,13 +56,6 @@ export async function tsReactWebsiteAuthGenerator(
     options.project,
   );
   const srcRoot = projectConfig.sourceRoot;
-  if (
-    tree.exists(joinPathFragments(srcRoot, 'components/CognitoAuth/index.tsx'))
-  ) {
-    throw new Error(
-      `This generator has already been run on ${options.project}.`,
-    );
-  }
 
   const cognitoDomain =
     options.cognitoDomain && options.cognitoDomain.length > 0

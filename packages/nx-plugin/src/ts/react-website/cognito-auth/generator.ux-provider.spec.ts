@@ -244,6 +244,50 @@ export default AppLayout;
       // Create snapshot of the modified AppLayout.tsx
       expect(appLayoutContent).toMatchSnapshot('app-layout-with-auth');
     });
+
+    it('should be idempotent when re-run with same options', async () => {
+      tree.write(
+        'packages/test-project/src/components/AppLayout/index.tsx',
+        `
+        import Config from '../../config';
+
+        const AppLayout = ({ children }: { children: React.ReactNode }) => {
+          return (
+            <div className="app-shell">
+              <header className="app-header">
+                <div className="app-header-inner">
+                  <span className="brand-name">{Config.applicationName}</span>
+                </div>
+              </header>
+              <main className="app-main">{children}</main>
+            </div>
+          );
+        };
+
+        export default AppLayout;
+        `,
+      );
+
+      await tsReactWebsiteAuthGenerator(tree, options);
+      const afterFirstRun = tree
+        .read('packages/test-project/src/components/AppLayout/index.tsx')
+        .toString();
+
+      await expect(
+        tsReactWebsiteAuthGenerator(tree, options),
+      ).resolves.toBeDefined();
+      const afterSecondRun = tree
+        .read('packages/test-project/src/components/AppLayout/index.tsx')
+        .toString();
+
+      // Re-run must leave the file byte-identical
+      expect(afterSecondRun).toEqual(afterFirstRun);
+
+      // The user greeting and sign out wiring must appear exactly once
+      expect(afterSecondRun.match(/className="user-greeting"/g)).toHaveLength(1);
+      expect(afterSecondRun.match(/className="signout-link"/g)).toHaveLength(1);
+      expect(afterSecondRun.match(/= useAuth\(\)/g)).toHaveLength(1);
+    });
   });
 
   describe('Cloudscape', () => {
@@ -443,6 +487,56 @@ export default AppLayout;
       // Create snapshot of the modified AppLayout.tsx
       expect(appLayoutContent).toMatchSnapshot('app-layout-with-auth');
     });
+
+    it('should be idempotent when re-run with same options', async () => {
+      tree.write(
+        'packages/test-project/src/components/AppLayout/index.tsx',
+        `
+        import * as React from 'react';
+        import Config from '../../config';
+        import { TopNavigation } from '@cloudscape-design/components';
+        import { Outlet } from '@tanstack/react-router';
+
+        const AppLayout: React.FC = () => {
+          return (
+            <>
+              <TopNavigation
+                identity={{
+                  href: '/',
+                  title: Config.applicationName,
+                }}
+              />
+              <Outlet />
+            </>
+          );
+        };
+
+        export default AppLayout;
+        `,
+      );
+
+      await tsReactWebsiteAuthGenerator(tree, options);
+      const afterFirstRun = tree
+        .read('packages/test-project/src/components/AppLayout/index.tsx')
+        .toString();
+
+      await expect(
+        tsReactWebsiteAuthGenerator(tree, options),
+      ).resolves.toBeDefined();
+      const afterSecondRun = tree
+        .read('packages/test-project/src/components/AppLayout/index.tsx')
+        .toString();
+
+      // Re-run must leave the file byte-identical
+      expect(afterSecondRun).toEqual(afterFirstRun);
+
+      // The TopNavigation utilities menu and useAuth wiring must appear exactly once
+      expect(
+        afterSecondRun.match(/iconName: 'user-profile-active'/g),
+      ).toHaveLength(1);
+      expect(afterSecondRun.match(/utilities=\{\[/g)).toHaveLength(1);
+      expect(afterSecondRun.match(/= useAuth\(\)/g)).toHaveLength(1);
+    });
   });
 
   describe('Shadcn', () => {
@@ -506,6 +600,55 @@ export default AppLayout;
       expect(appLayoutContent).toContain('clearStaleState()');
 
       expect(appLayoutContent).toMatchSnapshot('app-layout-with-auth');
+    });
+
+    it('should be idempotent when re-run with same options', async () => {
+      tree.write(
+        'packages/test-project/src/components/AppLayout/index.tsx',
+        `
+        import * as React from "react";
+        import Config from "../../config";
+
+        const AppLayout = ({ children }: { children: React.ReactNode }) => {
+          return (
+            <div>
+              <header className="app-header">
+                <span className="text-sm font-semibold">
+                  {Config.applicationName}
+                </span>
+              </header>
+              <div>{children}</div>
+            </div>
+          );
+        };
+
+        export default AppLayout;
+        `,
+      );
+
+      await tsReactWebsiteAuthGenerator(tree, options);
+      const afterFirstRun = tree
+        .read('packages/test-project/src/components/AppLayout/index.tsx')
+        .toString();
+
+      await expect(
+        tsReactWebsiteAuthGenerator(tree, options),
+      ).resolves.toBeDefined();
+      const afterSecondRun = tree
+        .read('packages/test-project/src/components/AppLayout/index.tsx')
+        .toString();
+
+      // Re-run must leave the file byte-identical
+      expect(afterSecondRun).toEqual(afterFirstRun);
+
+      // The user menu, state declarations and useAuth wiring must appear exactly once
+      expect(afterSecondRun.match(/aria-label="Open user menu"/g)).toHaveLength(
+        1,
+      );
+      expect(
+        afterSecondRun.match(/const \[menuOpen, setMenuOpen\] = useState/g),
+      ).toHaveLength(1);
+      expect(afterSecondRun.match(/= useAuth\(\)/g)).toHaveLength(1);
     });
   });
 });
