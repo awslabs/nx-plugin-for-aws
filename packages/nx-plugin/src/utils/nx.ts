@@ -13,7 +13,6 @@ import * as path from 'path';
 import PackageJson from '../../package.json';
 import { toSnakeCase } from './names';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
-import { deepEquals } from './object';
 
 export type { GeneratorInfo, NxGeneratorInfo } from './generators';
 export { buildGeneratorInfoList } from './generators';
@@ -97,14 +96,14 @@ export const addGeneratorMetadata = (
     generator: info.id,
     ...additionalMetadata,
   };
-  // Skip the write entirely when the metadata is unchanged so re-running does
-  // not reorder keys in the serialized project.json.
-  if (deepEquals(config?.metadata, metadata)) {
-    return;
-  }
+  // Place metadata immediately before targets so the serialized key order is
+  // identical whether or not metadata already existed, keeping re-runs free of
+  // spurious diffs (this matches the order Nx normalizes a read config to).
+  const { targets, ...rest } = config;
   updateProjectConfiguration(tree, config.name, {
-    ...config,
+    ...rest,
     metadata: metadata as any,
+    ...(targets ? { targets } : {}),
   });
 };
 
@@ -143,12 +142,15 @@ export const addComponentGeneratorMetadata = (
       ...(componentName ? { name: componentName } : {}),
       ...additionalMetadata,
     };
+    // Place metadata before targets for a stable serialized key order.
+    const { targets, ...rest } = config;
     updateProjectConfiguration(tree, config.name, {
-      ...config,
+      ...rest,
       metadata: {
         ...config?.metadata,
         components: [...existingComponents, componentMetadata],
       } as any,
+      ...(targets ? { targets } : {}),
     });
   }
 };

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
-import { applyGritQL } from './ast';
+import { applyGritQL, captureAllGritQL } from './ast';
 import { formatFilesInSubtree } from './format';
 import { getPackageVersion, type NxGeneratorInfo } from './nx';
 import {
@@ -37,31 +37,28 @@ export const TERRAFORM_METRICS_FILE_PATH = joinPathFragments(
 const WITHIN_METRICS_ASPECT =
   '$old <: within `class MetricsAspect implements $_ { $_ }`';
 
+// Strip the surrounding quotes from a captured string literal (eg 'g1' or "g1")
+const unquote = (literal: string): string => literal.slice(1, -1);
+
 // Extracts the existing metric tags from the CDK MetricsAspect tags array
-const readCdkMetricTags = (tree: Tree): string[] => {
-  if (!tree.exists(METRICS_ASPECT_FILE_PATH)) {
-    return [];
-  }
-  const content = tree.read(METRICS_ASPECT_FILE_PATH, 'utf-8') ?? '';
-  const match = content.match(/const tags:\s*string\[\]\s*=\s*\[([^\]]*)\]/);
-  if (!match) {
-    return [];
-  }
-  return (match[1].match(/'([^']*)'/g) ?? []).map((t) => t.slice(1, -1));
-};
+const readCdkMetricTags = async (tree: Tree): Promise<string[]> =>
+  (
+    await captureAllGritQL(
+      tree,
+      METRICS_ASPECT_FILE_PATH,
+      `\`$tag\` where { $tag <: string(), $tag <: within \`const tags: string[] = $_\` }`,
+    )
+  ).map(unquote);
 
 // Extracts the existing metric tags from the Terraform metric_tags array
-const readTerraformMetricTags = (tree: Tree): string[] => {
-  if (!tree.exists(TERRAFORM_METRICS_FILE_PATH)) {
-    return [];
-  }
-  const content = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8') ?? '';
-  const match = content.match(/metric_tags\s*=\s*\[([^\]]*)\]/);
-  if (!match) {
-    return [];
-  }
-  return (match[1].match(/"([^"]*)"/g) ?? []).map((t) => t.slice(1, -1));
-};
+const readTerraformMetricTags = async (tree: Tree): Promise<string[]> =>
+  (
+    await captureAllGritQL(
+      tree,
+      TERRAFORM_METRICS_FILE_PATH,
+      '`"$tag"` where { $tag <: within `metric_tags = $_` }',
+    )
+  ).map(unquote);
 
 /**
  * Instruments metrics by updating the MetricsAspect in common/constructs/src/core/app.ts if the file exists,
@@ -88,8 +85,8 @@ export const addGeneratorMetricsIfApplicable = async (
   // regardless of when each metrics file was created.
   const tags = [
     ...new Set([
-      ...readCdkMetricTags(tree),
-      ...readTerraformMetricTags(tree),
+      ...(await readCdkMetricTags(tree)),
+      ...(await readTerraformMetricTags(tree)),
       ...generatorInfo.map((info) => info.metric),
     ]),
   ];
