@@ -96,9 +96,15 @@ export const addGeneratorMetadata = (
     generator: info.id,
     ...additionalMetadata,
   };
+  // Skip the write when nothing changed so re-running doesn't reserialize
+  // project.json. metadata is plain JSON built in a fixed key order, so a
+  // stringify comparison is exact here.
+  if (JSON.stringify(config?.metadata) === JSON.stringify(metadata)) {
+    return;
+  }
   // Place metadata immediately before targets so the serialized key order is
-  // identical whether or not metadata already existed, keeping re-runs free of
-  // spurious diffs (this matches the order Nx normalizes a read config to).
+  // identical whether or not metadata already existed (matching the order Nx
+  // normalizes a read config to), keeping the change a pure metadata insert.
   const { targets, ...rest } = config;
   updateProjectConfiguration(tree, config.name, {
     ...rest,
