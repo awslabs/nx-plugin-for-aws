@@ -15,6 +15,7 @@ import {
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
+  getAttachedMcpServerBindings,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
@@ -108,6 +109,14 @@ export const pyAgentGatewayConnectionGenerator = async (
     agentConnectionModuleName,
     'app',
   );
+  // Seed ATTACHED_MCP_SERVERS with any MCP servers already attached to the
+  // gateway (the mcp-connection generator back-propagates servers attached
+  // later).
+  const attachedMcpServers = getAttachedMcpServerBindings(
+    tree,
+    targetProject,
+    gatewayServeLocalTargetName,
+  );
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
@@ -116,6 +125,7 @@ export const pyAgentGatewayConnectionGenerator = async (
       gatewaySnakeCase,
       gatewayClassName,
       agentConnectionModuleName,
+      attachedMcpServers,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );

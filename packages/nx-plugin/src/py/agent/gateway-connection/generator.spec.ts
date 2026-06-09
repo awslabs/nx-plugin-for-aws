@@ -157,6 +157,47 @@ dependencies = ["strands-agents"]
     expect(client).toContain('ATTACHED_MCP_SERVERS');
   });
 
+  it('seeds ATTACHED_MCP_SERVERS from MCP servers already attached to the gateway', async () => {
+    setupProjects();
+    // Simulate a prior `cedar#agentcore-gateway#mcp-connection` run: the
+    // gateway's serve-local aggregator depends on an MCP server target.
+    tree.write(
+      'packages/my-mcp/project.json',
+      JSON.stringify({
+        name: 'my_scope.my_mcp',
+        root: 'packages/my-mcp',
+        sourceRoot: 'packages/my-mcp/my_scope_my_mcp',
+        metadata: {
+          components: [
+            { generator: 'py#mcp-server', name: 'my-mcp', port: 8123 },
+          ],
+        },
+      }),
+    );
+    const gatewayConfig = JSON.parse(
+      tree.read('packages/my-gateway/project.json')!.toString(),
+    );
+    gatewayConfig.targets['my-gateway-serve-local'].dependsOn = [
+      { projects: ['my_scope.my_mcp'], target: 'my-mcp-serve-local' },
+    ];
+    tree.write(
+      'packages/my-gateway/project.json',
+      JSON.stringify(gatewayConfig),
+    );
+
+    await pyAgentGatewayConnectionGenerator(tree, fullOptions());
+
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    const client = tree
+      .read(
+        `packages/common/agent_connection/${moduleName}/app/my_gateway_client.py`,
+      )!
+      .toString();
+    expect(client).toContain('LocalMcpServerBinding(name="my-mcp"');
+    expect(client).toContain('local_url="http://localhost:8123/mcp"');
+  });
+
   it('defines get_connected_gateway_url in the shared runtime-config helper', async () => {
     setupProjects();
     await pyAgentGatewayConnectionGenerator(tree, fullOptions());

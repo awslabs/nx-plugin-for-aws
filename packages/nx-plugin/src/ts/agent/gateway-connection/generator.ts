@@ -16,6 +16,7 @@ import {
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
+  getAttachedMcpServerBindings,
 } from '../../../utils/agent-connection/agent-connection';
 import {
   addDestructuredImport,
@@ -88,7 +89,15 @@ export const tsAgentGatewayConnectionGenerator = async (
   await ensureTypeScriptAgentConnectionProject(tree);
   addTypeScriptCoreClient(tree, 'gateway');
 
-  // 2. Generate the per-connection <Gateway>Client into app/
+  // 2. Generate the per-connection <Gateway>Client into app/, seeding
+  //    ATTACHED_MCP_SERVERS with any MCP servers already attached to the
+  //    gateway (the mcp-connection generator back-propagates servers
+  //    attached later).
+  const attachedMcpServers = getAttachedMcpServerBindings(
+    tree,
+    targetProject,
+    gatewayServeLocalTargetName,
+  );
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
@@ -96,6 +105,7 @@ export const tsAgentGatewayConnectionGenerator = async (
     {
       gatewayKebabCase,
       gatewayClassName,
+      attachedMcpServers,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
