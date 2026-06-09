@@ -681,6 +681,45 @@ describe('react-website generator', () => {
     expect(tree.exists('packages/websites/src/main.tsx')).toBeTruthy();
   });
 
+  describe('idempotency', () => {
+    it('should preserve user edits to main.tsx, AppLayout and styles.css on re-run', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+
+      const mainPath = 'test-app/src/main.tsx';
+      const appLayoutPath = 'test-app/src/components/AppLayout/index.tsx';
+      const stylesPath = 'test-app/src/styles.css';
+      const rootRoutePath = 'test-app/src/routes/__root.tsx';
+      const indexRoutePath = 'test-app/src/routes/index.tsx';
+      const configPath = 'test-app/src/config.ts';
+
+      const userMain = '// user edited main\nexport const MAIN = true;\n';
+      const userAppLayout =
+        '// user edited app layout\nexport const LAYOUT = true;\n';
+      const userStyles = "@import 'tailwindcss';\n/* user edited styles */\n";
+      const userRootRoute =
+        '// user edited root route\nexport const ROOT = true;\n';
+      const userIndexRoute =
+        '// user edited index route\nexport const INDEX = true;\n';
+      const userConfig = '// user edited config\nexport const CONFIG = true;\n';
+
+      tree.write(mainPath, userMain);
+      tree.write(appLayoutPath, userAppLayout);
+      tree.write(stylesPath, userStyles);
+      tree.write(rootRoutePath, userRootRoute);
+      tree.write(indexRoutePath, userIndexRoute);
+      tree.write(configPath, userConfig);
+
+      await tsReactWebsiteGenerator(tree, options);
+
+      expect(tree.read(mainPath, 'utf-8')).toBe(userMain);
+      expect(tree.read(appLayoutPath, 'utf-8')).toBe(userAppLayout);
+      expect(tree.read(stylesPath, 'utf-8')).toBe(userStyles);
+      expect(tree.read(rootRoutePath, 'utf-8')).toBe(userRootRoute);
+      expect(tree.read(indexRoutePath, 'utf-8')).toBe(userIndexRoute);
+      expect(tree.read(configPath, 'utf-8')).toBe(userConfig);
+    });
+  });
+
   describe('infra=none idempotency', () => {
     it('should generate with infra=none then upgrade to infra=cloudfront-s3', async () => {
       await tsReactWebsiteGenerator(tree, { ...options, infra: 'none' });
