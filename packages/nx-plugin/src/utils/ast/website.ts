@@ -110,7 +110,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
         $cprops <: not some \`${contextProp}\`
       },
       \`<RouterProvider $attrs />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\` where {
-        $attrs <: not some \`context\`
+        $attrs <: not some \`context={$_}\`
       }
     }`,
   );

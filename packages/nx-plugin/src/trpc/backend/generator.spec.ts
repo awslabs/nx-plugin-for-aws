@@ -211,6 +211,41 @@ describe('trpc backend generator', () => {
     });
   });
 
+  it('should preserve serve-local dependsOn added by connection generators when re-run', async () => {
+    const options: TsTrpcApiGeneratorSchema = {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'http-lambda',
+      auth: 'iam',
+      integrationPattern: 'isolated',
+      iac: 'cdk',
+    };
+
+    await tsTrpcApiGenerator(tree, options);
+
+    // Simulate a connection generator adding a dependsOn to serve-local
+    const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+    projectConfig.targets!['serve-local']!.dependsOn = [
+      {
+        projects: ['@proj/my-table'],
+        target: 'serve-local',
+      },
+    ];
+    const { updateProjectConfiguration } = await import('@nx/devkit');
+    updateProjectConfiguration(tree, '@proj/test-api', projectConfig);
+
+    // Re-run the generator
+    await tsTrpcApiGenerator(tree, options);
+
+    const updatedConfig = readProjectConfiguration(tree, '@proj/test-api');
+    expect(updatedConfig.targets!['serve-local']!.dependsOn).toEqual([
+      {
+        projects: ['@proj/my-table'],
+        target: 'serve-local',
+      },
+    ]);
+  });
+
   it('should add rolldown bundle target', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
