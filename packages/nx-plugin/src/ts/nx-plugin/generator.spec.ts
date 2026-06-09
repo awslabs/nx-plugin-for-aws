@@ -72,11 +72,12 @@ describe('ts#nx-plugin generator', () => {
     expect(project.targets?.build?.dependsOn).toContain('package');
   });
 
-  it('should clear the index.ts file', async () => {
+  it('should leave index.ts as created by the ts#project generator', async () => {
     await tsNxPluginGenerator(tree, { name: 'test-plugin' });
 
-    const indexContent = tree.read('test-plugin/src/index.ts')?.toString();
-    expect(indexContent).toBe('');
+    expect(tree.read('test-plugin/src/index.ts')?.toString()?.trim()).toBe(
+      '// Export your library code here',
+    );
   });
 
   it('should configure TypeScript project as Nx Plugin', async () => {

@@ -133,20 +133,20 @@ Create a workspace and start adding components — zero configuration required:
 
 ```bash
 # Create a new workspace
-pnpm create @aws/nx-workspace my-project
+pnpm create @aws/nx-workspace@next my-project
 cd my-project
 
 # Add a tRPC API
-pnpm nx g @aws/nx-plugin:ts#trpc-api
+pnpm nx g @aws/nx-plugin:ts#api --framework=trpc
 
 # Add a Strands AI agent (Python)
 pnpm nx g @aws/nx-plugin:py#agent
 
 # Add a React website
-pnpm nx g @aws/nx-plugin:ts#react-website
+pnpm nx g @aws/nx-plugin:ts#website --framework=react
 
 # Add authentication to your website
-pnpm nx g @aws/nx-plugin:ts#react-website#auth
+pnpm nx g @aws/nx-plugin:ts#website#auth
 
 # Connect your website to your API and agent
 pnpm nx g @aws/nx-plugin:connection
@@ -162,17 +162,17 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | Generator               | Description                                                                                                       |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `ts#project`            | TypeScript library                                                                                                |
-| `ts#trpc-api`           | tRPC API with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
+| `ts#api`                | TypeScript API (tRPC or Smithy) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
 | `ts#rdb`                | Relational databases with Aurora RDS                                                                              |
-| `ts#react-website`      | React app (Vite)                                                                                                  |
-| `ts#react-website#auth` | Add Cognito auth to a React website                                                                               |
+| `ts#website`            | React app (Vite)                                                                                                  |
+| `ts#website#auth`       | Add Cognito auth to a website                                                                                     |
 | `ts#infra`              | AWS CDK infrastructure project                                                                                    |
 | `ts#lambda-function`    | TypeScript Lambda with type-safe event sources                                                                    |
 | `ts#mcp-server`         | MCP server (TypeScript)                                                                                           |
 | `ts#agent`              | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
 | `ts#nx-generator`       | Nx generator scaffold                                                                                             |
 | `py#project`            | Python project (uv)                                                                                               |
-| `py#fast-api`           | FastAPI with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
+| `py#api`                | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
 | `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |
 | `py#mcp-server`         | MCP server (Python)                                                                                               |
 | `py#agent`              | [Strands Agent](https://strandsagents.com/) (Python)                                                              |

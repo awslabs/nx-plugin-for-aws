@@ -134,29 +134,34 @@ export const tsRdbGenerator = async (
       bundleOutputDir: 'create-db-user',
     });
     const bundleTarget = projectConfig.targets['bundle'];
-    const rolldownCommand = bundleTarget.options.command;
-    delete bundleTarget.options.command;
-    bundleTarget.options = {
-      ...bundleTarget.options,
-      commands: [
-        fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-        fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-        fs.cp(
-          'prisma',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
-        ),
-        fs.cp(
-          'prisma.config.ts',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
-        ),
-        fs.cp(
-          'Dockerfile',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
-        ),
-        rolldownCommand,
-      ],
-      parallel: false,
-    };
+    // The bundle target starts with a single rolldown `command`. Wrap it with
+    // the migration asset copy steps, unless it has already been transformed
+    // into a `commands` array on a previous run.
+    if (!bundleTarget.options.commands) {
+      const rolldownCommand = bundleTarget.options.command;
+      delete bundleTarget.options.command;
+      bundleTarget.options = {
+        ...bundleTarget.options,
+        commands: [
+          fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+          fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+          fs.cp(
+            'prisma',
+            `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
+          ),
+          fs.cp(
+            'prisma.config.ts',
+            `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
+          ),
+          fs.cp(
+            'Dockerfile',
+            `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
+          ),
+          rolldownCommand,
+        ],
+        parallel: false,
+      };
+    }
   }
 
   projectConfig.targets.generate = {

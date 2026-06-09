@@ -223,7 +223,9 @@ export const tsAgentGenerator = async (
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
   const localDevPortStart = protocol === 'a2a' ? 9000 : 8081;
-  const localDevPort = assignPort(tree, project, localDevPortStart);
+  const localDevPort = assignPort(tree, project, localDevPortStart, {
+    component: { info: TS_AGENT_GENERATOR_INFO, name: agentTargetPrefix },
+  });
 
   // HTTP chat needs a tiny generated script to wrap the project's tRPC
   // WebSocket client in a `ChatAdapter`. A2A speaks the standard A2A

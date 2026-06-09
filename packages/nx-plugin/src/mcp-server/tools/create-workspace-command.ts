@@ -27,7 +27,7 @@ export const addCreateWorkspaceCommandTool = (server: McpServer) => {
           text: `Run the following command to create a workspace:
 
 \`\`\`bash
-${buildCreateNxWorkspaceCommand(packageManager, '<workspace-name>')} --no-interactive
+${buildCreateNxWorkspaceCommand(packageManager, '<workspace-name>', undefined, 'next')} --no-interactive
 \`\`\`
 
 This will create a new workspace within the \`<workspace-name>\` directory.
@@ -35,7 +35,7 @@ This will create a new workspace within the \`<workspace-name>\` directory.
 If you are already inside an empty directory intended for this project, you can pass \`.\` as the workspace name to create the workspace in the current directory:
 
 \`\`\`bash
-${buildCreateNxWorkspaceCommand(packageManager, '.')} --no-interactive
+${buildCreateNxWorkspaceCommand(packageManager, '.', undefined, 'next')} --no-interactive
 \`\`\`
 
 Note that this will prompt for an Infrastructure as Code provider (${IAC_PROVIDERS.join(', ')}).

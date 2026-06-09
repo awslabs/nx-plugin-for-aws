@@ -455,4 +455,41 @@ describe('ts strands agent react connection with real projects', () => {
     expect(runtimeConfigContent).toContain('http://localhost:8081/invocations');
     expect(runtimeConfigContent).not.toContain('ws://localhost:8081/ws');
   });
+
+  it('should be idempotent when re-run with same options', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'agent-project',
+      type: 'application',
+    });
+
+    await tsAgentGenerator(tree, {
+      project: 'agent-project',
+      infra: 'none',
+    });
+
+    const options = {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'ts#agent',
+        name: 'agent',
+        path: 'src/agent',
+        port: 8081,
+        rc: 'AgentProject',
+      },
+    };
+
+    await tsAgentReactConnectionGenerator(tree, options);
+    await tsAgentReactConnectionGenerator(tree, options);
+
+    const runtimeConfigContent =
+      tree.read('frontend/src/components/RuntimeConfig/index.tsx', 'utf-8') ??
+      '';
+
+    // The runtime config override should appear exactly once after re-run
+    const occurrences =
+      runtimeConfigContent.split('runtimeConfig.agentRuntimes.AgentProject')
+        .length - 1;
+    expect(occurrences).toBe(1);
+  });
 });

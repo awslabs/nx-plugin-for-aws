@@ -730,6 +730,34 @@ describe('ts#agent generator', () => {
     expect(projectConfig.targets['second-agent-docker']).toBeDefined();
   });
 
+  it('should be idempotent when re-run with same options', async () => {
+    const options = {
+      project: 'test-project',
+      infra: 'none' as const,
+      iac: 'cdk' as const,
+    };
+    await tsAgentGenerator(tree, options);
+    const firstProjectJson = tree.read(
+      'apps/test-project/project.json',
+      'utf-8',
+    );
+
+    await tsAgentGenerator(tree, options);
+    const secondProjectJson = tree.read(
+      'apps/test-project/project.json',
+      'utf-8',
+    );
+
+    const projectConfig = JSON.parse(secondProjectJson);
+
+    // Port metadata should not grow on re-run
+    expect(projectConfig.metadata.ports).toHaveLength(1);
+    // The agent component should not be duplicated
+    expect(projectConfig.metadata.components).toHaveLength(1);
+
+    expect(secondProjectJson).toEqual(firstProjectJson);
+  });
+
   it('should add component generator metadata with default name', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',

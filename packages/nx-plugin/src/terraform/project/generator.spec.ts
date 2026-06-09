@@ -2,7 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readNxJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import {
+  getProjects,
+  readNxJson,
+  readProjectConfiguration,
+  type Tree,
+  updateProjectConfiguration,
+} from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tsLibGenerator from '../../ts/lib/generator';
 import * as gitUtils from '../../utils/git';
@@ -447,6 +453,69 @@ describe('terraformProjectGenerator', () => {
     expect(tree.exists('packages/infra')).toBeTruthy();
     expect(tree.exists('packages/infra/src')).toBeTruthy();
     expect(tree.exists('packages/infra/src/main.tf')).toBeTruthy();
+  });
+
+  describe('idempotency', () => {
+    const applicationSchema: TerraformProjectGeneratorSchema = {
+      name: 'my-terraform-project',
+      type: 'application',
+      directory: 'packages',
+    };
+
+    it('should be idempotent when re-run with same options', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectCountAfterFirstRun = getProjects(tree).size;
+      const mainTfAfterFirstRun = tree.read(
+        'packages/my-terraform-project/src/main.tf',
+        'utf-8',
+      );
+
+      await expect(
+        terraformProjectGenerator(tree, applicationSchema),
+      ).resolves.toBeDefined();
+
+      expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+      expect(
+        tree.read('packages/my-terraform-project/src/main.tf', 'utf-8'),
+      ).toEqual(mainTfAfterFirstRun);
+    });
+
+    it('should preserve project.json customisations when re-run', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const config = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      config.targets = {
+        ...config.targets,
+        custom: { executor: 'nx:noop' },
+      };
+      updateProjectConfiguration(tree, '@proj/my-terraform-project', config);
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(
+        readProjectConfiguration(tree, '@proj/my-terraform-project').targets
+          ?.custom,
+      ).toEqual({ executor: 'nx:noop' });
+    });
+
+    it('should create an independent project when run with a different name', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+      await terraformProjectGenerator(tree, {
+        ...applicationSchema,
+        name: 'other-terraform-project',
+      });
+
+      expect(
+        readProjectConfiguration(tree, '@proj/my-terraform-project'),
+      ).toBeDefined();
+      expect(
+        readProjectConfiguration(tree, '@proj/other-terraform-project'),
+      ).toBeDefined();
+    });
   });
 
   describe('error handling', () => {

@@ -64,6 +64,51 @@ describe('lambda-handler project generator', () => {
     ).toBeTruthy();
   });
 
+  it('should not overwrite an existing handler when re-run', async () => {
+    tree.write(
+      'apps/test_project/project.json',
+      JSON.stringify({
+        name: 'test-project',
+        root: 'apps/test_project',
+        sourceRoot: 'apps/test_project/test_project',
+        targets: {},
+      }),
+    );
+
+    tree.write(
+      'apps/test_project/pyproject.toml',
+      `[project]
+          dependencies = []
+      `,
+    );
+
+    const options = {
+      project: 'test-project',
+      name: 'test-function',
+      event: 'Any' as const,
+      iac: 'cdk' as const,
+    };
+
+    await pyLambdaFunctionGenerator(tree, options);
+
+    const handlerPath = 'apps/test_project/test_project/test_function.py';
+    const testPath = 'apps/test_project/tests/test_test_function.py';
+
+    // Simulate user edits to the handler and its test
+    const customHandler =
+      '# my custom handler\ndef lambda_handler(event, context):\n    return "custom"\n';
+    const customTest = '# my custom test\n';
+    tree.write(handlerPath, customHandler);
+    tree.write(testPath, customTest);
+
+    // Re-run with the same options
+    await pyLambdaFunctionGenerator(tree, options);
+
+    // User edits should be preserved
+    expect(tree.read(handlerPath, 'utf-8')).toBe(customHandler);
+    expect(tree.read(testPath, 'utf-8')).toBe(customTest);
+  });
+
   it('should set up project configuration with Lambda Function targets', async () => {
     tree.write(
       'apps/test_project/project.json',

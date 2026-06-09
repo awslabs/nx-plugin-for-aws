@@ -124,6 +124,11 @@ export async function ensureTypeScriptAgentConnectionProject(
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
     './core/with-session-id.js',
   );
+  await addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
+    './core/model-errors.js',
+  );
 }
 
 /**
@@ -211,9 +216,19 @@ export async function ensurePythonAgentConnectionProject(
     '.core.with_session_id',
     'with_session_id',
   );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.model_errors',
+    'log_model_errors',
+  );
 
-  // Shared core helpers depend on aws-lambda-powertools for AppConfig access.
-  addDependenciesToPyProjectToml(tree, projectDir, ['aws-lambda-powertools']);
+  // Shared core helpers depend on aws-lambda-powertools for AppConfig access
+  // and strands-agents for the model error-logging hook.
+  addDependenciesToPyProjectToml(tree, projectDir, [
+    'aws-lambda-powertools',
+    'strands-agents',
+  ]);
 }
 
 /**

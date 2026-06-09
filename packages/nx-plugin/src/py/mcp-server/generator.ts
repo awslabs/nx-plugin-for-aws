@@ -200,7 +200,9 @@ export const pyMcpServerGenerator = async (
     });
   }
 
-  const localDevPort = assignPort(tree, project, 8000);
+  const localDevPort = assignPort(tree, project, 8000, {
+    component: { info: PY_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
+  });
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

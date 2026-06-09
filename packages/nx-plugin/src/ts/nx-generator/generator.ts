@@ -7,6 +7,7 @@ import {
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
   readJson,
   type Tree,
   writeJson,
@@ -63,7 +64,7 @@ export const tsNxGeneratorGenerator = async (
     generatorSubDir,
   };
 
-  // Add the common files
+  // Add the common files, preserving any the user has already implemented
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'common'),
@@ -71,6 +72,7 @@ export const tsNxGeneratorGenerator = async (
     {
       ...enhancedOptions,
     },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
   // Add the files specific to this repo vs a local generator in another project
@@ -90,6 +92,7 @@ export const tsNxGeneratorGenerator = async (
       {
         ...enhancedOptions,
       },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
     // Generate guide page in docs
@@ -100,6 +103,7 @@ export const tsNxGeneratorGenerator = async (
       {
         ...enhancedOptions,
       },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
     // Update the docs config to add the page entry to the Generator guides sidebar section
@@ -117,6 +121,7 @@ export const tsNxGeneratorGenerator = async (
       {
         ...enhancedOptions,
       },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
     const indexPath = joinPathFragments(sourceRoot, 'index.ts');
@@ -140,9 +145,17 @@ export const tsNxGeneratorGenerator = async (
   const generatorsJson = tree.exists(generatorsJsonPath)
     ? readJson(tree, generatorsJsonPath)
     : { generators: {} };
-  const existingGenerators = Object.values(
-    generatorsJson?.generators ?? {},
-  ) as any[];
+  // Metrics are only tracked within the @aws/nx-plugin repo. Reuse the existing
+  // metric for a same-name re-run, otherwise allocate a new one.
+  let metric: string | undefined;
+  if (isNxPluginForAws) {
+    const existingMetrics = Object.values(generatorsJson?.generators ?? {})
+      .map((g: any) => g.metric)
+      .filter((m): m is string => typeof m === 'string');
+    metric =
+      generatorsJson?.generators?.[name]?.metric ??
+      (existingMetrics.length > 0 ? incrementMetric(existingMetrics) : 'g1');
+  }
   writeJson(tree, generatorsJsonPath, {
     ...generatorsJson,
     generators: sortObjectKeys({
@@ -152,16 +165,7 @@ export const tsNxGeneratorGenerator = async (
         schema: `${factoryBasePath}/schema.json`,
         description:
           description ?? 'TODO: Add short description of the generator',
-        ...(isNxPluginForAws
-          ? {
-              metric:
-                existingGenerators.length > 0
-                  ? incrementMetric(
-                      Object.values(existingGenerators).map((g) => g.metric),
-                    )
-                  : 'g1',
-            }
-          : {}),
+        ...(isNxPluginForAws ? { metric } : {}),
       },
     }),
   });

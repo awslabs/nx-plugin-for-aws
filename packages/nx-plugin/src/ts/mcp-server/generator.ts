@@ -215,7 +215,9 @@ export const tsMcpServerGenerator = async (
     });
   }
 
-  const localDevPort = assignPort(tree, project, 8000);
+  const localDevPort = assignPort(tree, project, 8000, {
+    component: { info: TS_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
+  });
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

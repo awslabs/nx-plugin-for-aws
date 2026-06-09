@@ -88,9 +88,6 @@ export const tsNxPluginGenerator = async (
   };
   updateProjectConfiguration(tree, fullyQualifiedName, project);
 
-  // Remove the hello world example from index.ts
-  tree.write(joinPathFragments(project.sourceRoot, 'index.ts'), '');
-
   // Add an MCP Server
   await tsMcpServerGenerator(tree, {
     project: fullyQualifiedName,
