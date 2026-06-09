@@ -25,6 +25,7 @@ import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
+  addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -163,25 +164,8 @@ export const pyMcpServerGenerator = async (
       dependsOn: [bundleTargetName],
     };
 
-    project.targets.docker = {
-      ...project.targets.docker,
-      dependsOn: [
-        ...(project.targets.docker?.dependsOn ?? []).filter(
-          (t) => t !== dockerTargetName,
-        ),
-        dockerTargetName,
-      ],
-    };
-
-    project.targets.build = {
-      ...project.targets.build,
-      dependsOn: [
-        ...(project.targets.build?.dependsOn ?? []).filter(
-          (t) => t !== 'docker',
-        ),
-        'docker',
-      ],
-    };
+    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);

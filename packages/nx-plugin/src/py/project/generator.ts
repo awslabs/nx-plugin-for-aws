@@ -23,6 +23,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -242,12 +243,6 @@ export const pyProjectGenerator = async (
     ...projectConfiguration.targets.lint,
     cache: true,
     inputs: ['default', '^production'],
-    dependsOn: [
-      ...(projectConfiguration.targets.lint?.dependsOn ?? []).filter(
-        (d) => d !== 'format',
-      ),
-      'format',
-    ],
     configurations: {
       ...projectConfiguration.targets.lint?.configurations,
       fix: {
@@ -258,6 +253,9 @@ export const pyProjectGenerator = async (
       },
     },
   };
+  // Append `format` without moving an existing entry, so re-running does not
+  // reorder lint dependencies (e.g. relative to a later-added license-check).
+  addDependencyToTargetIfNotPresent(projectConfiguration, 'lint', 'format');
 
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
