@@ -135,6 +135,30 @@ describe('metrics', () => {
     expectHasMetricTags(tree, 'g1', 'g2', 'g3');
   });
 
+  it('should produce a byte-identical app.ts when re-run with the same generators', async () => {
+    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+
+    const generatorInfo = ['g23', 'g8', 'g5', 'g37'].map((metric, i) => ({
+      id: `gen#${i}`,
+      metric,
+      resolvedFactoryPath: '/path/to/factory',
+      resolvedSchemaPath: '/path/to/schema',
+      description: `Generator ${i}`,
+    }));
+
+    for (const info of generatorInfo) {
+      await addGeneratorMetricsIfApplicable(tree, [info]);
+    }
+    const firstRun = tree.read(METRICS_ASPECT_FILE_PATH, 'utf-8');
+
+    for (const info of generatorInfo) {
+      await addGeneratorMetricsIfApplicable(tree, [info]);
+    }
+    const secondRun = tree.read(METRICS_ASPECT_FILE_PATH, 'utf-8');
+
+    expect(secondRun).toEqual(firstRun);
+  });
+
   it('should not throw when no app.ts exists', async () => {
     await addGeneratorMetricsIfApplicable(tree, [
       {
@@ -355,6 +379,32 @@ describe('metrics', () => {
       expect(result).not.toContain(',,');
       expect(result).toContain('"tf4"');
       expectHasTerraformMetricTags(tree, 'tf1', 'tf2', 'tf3', 'tf4');
+    });
+
+    it('should produce a byte-identical metrics.tf when re-run with the same generators', async () => {
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+
+      const generatorInfo = ['g23', 'g8', 'g5', 'g37'].map((metric, i) => ({
+        id: `gen#${i}`,
+        metric,
+        resolvedFactoryPath: '/path/to/factory',
+        resolvedSchemaPath: '/path/to/schema',
+        description: `Generator ${i}`,
+      }));
+
+      // First run: each generator adds its tag individually
+      for (const info of generatorInfo) {
+        await addGeneratorMetricsIfApplicable(tree, [info]);
+      }
+      const firstRun = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8');
+
+      // Re-run with the same generators must not duplicate, reorder or grow tags
+      for (const info of generatorInfo) {
+        await addGeneratorMetricsIfApplicable(tree, [info]);
+      }
+      const secondRun = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8');
+
+      expect(secondRun).toEqual(firstRun);
     });
 
     it('should work with both CDK and Terraform metrics simultaneously', async () => {
