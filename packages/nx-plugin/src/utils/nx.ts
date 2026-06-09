@@ -91,13 +91,25 @@ export const addGeneratorMetadata = (
   additionalMetadata?: { [key: string]: any },
 ) => {
   const config = readProjectConfigurationUnqualified(tree, projectName);
+  const metadata = {
+    ...config?.metadata,
+    generator: info.id,
+    ...additionalMetadata,
+  };
+  // Skip the write when nothing changed so re-running doesn't reserialize
+  // project.json. metadata is plain JSON built in a fixed key order, so a
+  // stringify comparison is exact here.
+  if (JSON.stringify(config?.metadata) === JSON.stringify(metadata)) {
+    return;
+  }
+  // Place metadata immediately before targets so the serialized key order is
+  // identical whether or not metadata already existed (matching the order Nx
+  // normalizes a read config to), keeping the change a pure metadata insert.
+  const { targets, ...rest } = config;
   updateProjectConfiguration(tree, config.name, {
-    ...config,
-    metadata: {
-      ...config?.metadata,
-      generator: info.id,
-      ...additionalMetadata,
-    } as any,
+    ...rest,
+    metadata: metadata as any,
+    ...(targets ? { targets } : {}),
   });
 };
 
@@ -136,12 +148,15 @@ export const addComponentGeneratorMetadata = (
       ...(componentName ? { name: componentName } : {}),
       ...additionalMetadata,
     };
+    // Place metadata before targets for a stable serialized key order.
+    const { targets, ...rest } = config;
     updateProjectConfiguration(tree, config.name, {
-      ...config,
+      ...rest,
       metadata: {
         ...config?.metadata,
         components: [...existingComponents, componentMetadata],
       } as any,
+      ...(targets ? { targets } : {}),
     });
   }
 };
@@ -196,10 +211,11 @@ export const addDependencyToTargetIfNotPresent = (
 ) => {
   project.targets ??= {};
   project.targets[target] ??= {};
-  project.targets[target].dependsOn = [
-    ...(project.targets[target].dependsOn ?? []).filter(
-      (d) => !targetDependencyEquals(d, dependency),
-    ),
-    dependency,
-  ];
+  project.targets[target].dependsOn ??= [];
+  const dependsOn = project.targets[target].dependsOn;
+  // Leave existing dependencies in place so re-running does not reorder them;
+  // only append when the dependency is genuinely absent.
+  if (!dependsOn.some((d) => targetDependencyEquals(d, dependency))) {
+    dependsOn.push(dependency);
+  }
 };

@@ -16,6 +16,7 @@ import {
 } from '@nx/devkit';
 import path from 'path';
 import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
+import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
 import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -223,8 +224,7 @@ export async function tsInfraGenerator(
 
   updateJson(tree, `${libraryRoot}/tsconfig.lib.json`, (tsConfig) => ({
     ...tsConfig,
-    references: [
-      ...(tsConfig.references || []),
+    references: mergeTsReferences(tsConfig.references, [
       {
         path: `${path.relative(
           libraryRoot,
@@ -241,7 +241,7 @@ export async function tsInfraGenerator(
             },
           ]
         : []),
-    ],
+    ]),
   }));
 
   await addGeneratorMetricsIfApplicable(tree, [INFRA_APP_GENERATOR_INFO]);

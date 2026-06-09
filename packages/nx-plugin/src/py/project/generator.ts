@@ -23,9 +23,11 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import {
@@ -105,6 +107,8 @@ export const pyProjectGenerator = async (
 
   const nxJson = readNxJson(tree);
 
+  // Only rewrite nx.json when the plugin needs adding, so re-running does not
+  // reserialize (and reformat) the file when nothing has changed.
   if (
     !nxJson.plugins?.find((p) =>
       typeof p === 'string'
@@ -121,54 +125,58 @@ export const pyProjectGenerator = async (
         },
       },
     ];
+    updateNxJson(tree, nxJson);
   }
 
-  updateNxJson(tree, nxJson);
+  // Only scaffold the project when it does not already exist so re-running with
+  // the same name does not throw. The rest of the generator still runs to apply
+  // any changed options to the existing project.
+  if (!projectExists(tree, fullyQualifiedName)) {
+    if (!tree.exists('uv.lock')) {
+      await migrateToSharedVenvGenerator(tree, {
+        autoActivate: true,
+        packageManager: 'uv',
+        moveDevDependencies: false,
+        pyenvPythonVersion: '3.14.0',
+        pyprojectPythonDependency: '>=3.14',
+      });
+    }
 
-  if (!tree.exists('uv.lock')) {
-    await migrateToSharedVenvGenerator(tree, {
-      autoActivate: true,
-      packageManager: 'uv',
-      moveDevDependencies: false,
+    await uvProjectGenerator(tree, {
+      name: fullyQualifiedName,
+      publishable: false,
+      buildLockedVersions: true,
+      buildBundleLocalDependencies: true,
+      linter: 'ruff',
+      rootPyprojectDependencyGroup: 'main',
       pyenvPythonVersion: '3.14.0',
       pyprojectPythonDependency: '>=3.14',
+      projectType: schema.type,
+      projectNameAndRootFormat: 'as-provided',
+      moduleName: normalizedModuleName,
+      directory: dir,
+      unitTestRunner: 'pytest',
+      codeCoverage: true,
+      codeCoverageHtmlReport: true,
+      codeCoverageXmlReport: true,
+      unitTestHtmlReport: true,
+      unitTestJUnitReport: true,
+      buildSystem: 'hatch',
+      srcDir: false,
     });
+
+    // Remove generated hello.py and test_hello.py as they are not needed
+    [
+      joinPathFragments(dir, normalizedModuleName, 'hello.py'),
+      joinPathFragments(dir, 'tests', 'test_hello.py'),
+    ].forEach((f) => tree.delete(f));
+
+    // Add a placeholder test so pytest doesn't fail with "no tests collected"
+    tree.write(
+      joinPathFragments(dir, 'tests', 'test_noop.py'),
+      'def test_noop():\n    pass\n',
+    );
   }
-
-  await uvProjectGenerator(tree, {
-    name: fullyQualifiedName,
-    publishable: false,
-    buildLockedVersions: true,
-    buildBundleLocalDependencies: true,
-    linter: 'ruff',
-    rootPyprojectDependencyGroup: 'main',
-    pyenvPythonVersion: '3.14.0',
-    pyprojectPythonDependency: '>=3.14',
-    projectType: schema.type,
-    projectNameAndRootFormat: 'as-provided',
-    moduleName: normalizedModuleName,
-    directory: dir,
-    unitTestRunner: 'pytest',
-    codeCoverage: true,
-    codeCoverageHtmlReport: true,
-    codeCoverageXmlReport: true,
-    unitTestHtmlReport: true,
-    unitTestJUnitReport: true,
-    buildSystem: 'hatch',
-    srcDir: false,
-  });
-
-  // Remove generated hello.py and test_hello.py as they are not needed
-  [
-    joinPathFragments(dir, normalizedModuleName, 'hello.py'),
-    joinPathFragments(dir, 'tests', 'test_hello.py'),
-  ].forEach((f) => tree.delete(f));
-
-  // Add a placeholder test so pytest doesn't fail with "no tests collected"
-  tree.write(
-    joinPathFragments(dir, 'tests', 'test_noop.py'),
-    'def test_noop():\n    pass\n',
-  );
 
   const outputPath = '{workspaceRoot}/dist/{projectRoot}';
   const buildOutputPath = joinPathFragments(outputPath, 'build');
@@ -177,16 +185,35 @@ export const pyProjectGenerator = async (
     fullyQualifiedName,
   );
   projectConfiguration.name = fullyQualifiedName;
-  const buildTarget = projectConfiguration.targets.build;
-  projectConfiguration.targets.compile = {
-    ...buildTarget,
-    inputs: ['default', '^production'],
-    outputs: [buildOutputPath],
-    options: {
-      ...buildTarget.options,
-      outputPath: buildOutputPath,
-    },
-  };
+  // Derive the compile target from the uv build target, and rewrite build to
+  // orchestrate the other targets. This only runs on first creation: on re-run
+  // build has already been transformed, so re-deriving would corrupt compile
+  // and duplicate the build dependencies.
+  if (!projectConfiguration.targets.compile) {
+    const buildTarget = projectConfiguration.targets.build;
+    projectConfiguration.targets.compile = {
+      ...buildTarget,
+      inputs: ['default', '^production'],
+      outputs: [buildOutputPath],
+      options: {
+        ...buildTarget.options,
+        outputPath: buildOutputPath,
+      },
+    };
+    projectConfiguration.targets.build = {
+      inputs: ['default', '^production'],
+      dependsOn: [
+        'lint',
+        'compile',
+        'test',
+        'typecheck',
+        ...(buildTarget.dependsOn ?? []),
+      ],
+      options: {
+        outputPath,
+      },
+    };
+  }
   projectConfiguration.targets.typecheck = {
     cache: true,
     inputs: ['default', '^production'],
@@ -194,19 +221,6 @@ export const pyProjectGenerator = async (
     options: {
       command: 'uv run ty check',
       cwd: '{projectRoot}',
-    },
-  };
-  projectConfiguration.targets.build = {
-    inputs: ['default', '^production'],
-    dependsOn: [
-      'lint',
-      'compile',
-      'test',
-      'typecheck',
-      ...(buildTarget.dependsOn ?? []),
-    ],
-    options: {
-      outputPath,
     },
   };
 
@@ -230,12 +244,6 @@ export const pyProjectGenerator = async (
     ...projectConfiguration.targets.lint,
     cache: true,
     inputs: ['default', '^production'],
-    dependsOn: [
-      ...(projectConfiguration.targets.lint?.dependsOn ?? []).filter(
-        (d) => d !== 'format',
-      ),
-      'format',
-    ],
     configurations: {
       ...projectConfiguration.targets.lint?.configurations,
       fix: {
@@ -246,6 +254,9 @@ export const pyProjectGenerator = async (
       },
     },
   };
+  // Append `format` without moving an existing entry, so re-running does not
+  // reorder lint dependencies (e.g. relative to a later-added license-check).
+  addDependencyToTargetIfNotPresent(projectConfiguration, 'lint', 'format');
 
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);

@@ -4,7 +4,7 @@
  */
 
 import { parse } from '@iarna/toml';
-import { readJson, type Tree } from '@nx/devkit';
+import { getProjects, readJson, type Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -286,5 +286,63 @@ describe('python project generator', () => {
     });
     expect(tree.exists('packages/libs')).toBeTruthy();
     expect(tree.exists('packages/libs/pyproject.toml')).toBeTruthy();
+  });
+
+  it('should be idempotent when re-run with same options', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const projectCountAfterFirstRun = getProjects(tree).size;
+    const nxJsonAfterFirstRun = tree.read('nx.json', 'utf-8');
+
+    // Re-running with the same options must not throw
+    await expect(
+      pyProjectGenerator(tree, {
+        name: 'test-project',
+        directory: 'apps',
+        type: 'application',
+      }),
+    ).resolves.toBeDefined();
+
+    expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+
+    // nx.json must not be rewritten on re-run (the @nxlv/python plugin is
+    // already registered), which would otherwise reserialize/reformat it.
+    expect(tree.read('nx.json', 'utf-8')).toBe(nxJsonAfterFirstRun);
+
+    // The compile and build targets must not be corrupted on re-run: compile
+    // keeps its python build executor, and build's dependsOn is not duplicated.
+    const config = readJson(tree, 'apps/test_project/project.json');
+    expect(config.targets.compile.executor).toBe('@nxlv/python:build');
+    expect(config.targets.build.dependsOn).toEqual([
+      'lint',
+      'compile',
+      'test',
+      'typecheck',
+    ]);
+  });
+
+  it('should create an independent project with a different name', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    await pyProjectGenerator(tree, {
+      name: 'other-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    expect(tree.exists('apps/test_project/pyproject.toml')).toBeTruthy();
+    expect(tree.exists('apps/other_project/pyproject.toml')).toBeTruthy();
+
+    const projectNames = [...getProjects(tree).keys()];
+    expect(projectNames).toContain('proj.test_project');
+    expect(projectNames).toContain('proj.other_project');
   });
 });

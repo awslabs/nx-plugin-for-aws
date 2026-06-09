@@ -5,6 +5,7 @@
 import {
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   type ProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
@@ -25,13 +26,17 @@ export const addOpenApiGeneration = (
 ): { specPath: string } => {
   const moduleName = getFastApiModuleName(project);
 
-  // Add OpenAPI spec generation script to FastAPI spec (if it does not exist already)
+  // Add OpenAPI spec generation script to FastAPI spec, preserving an existing
+  // copy so re-running does not reformat it nondeterministically
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files/fast-api'),
     project.root,
     {
       moduleName,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
