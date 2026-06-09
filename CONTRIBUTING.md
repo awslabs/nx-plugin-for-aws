@@ -45,7 +45,7 @@ For a detailed guide on contributing a generator, check out the [Contributing a 
 
 ### Generator Idempotency
 
-Users re-run generators all the time: to add a second API, to recover from a failed run, to pick up updated templates, or to escalate a project from no infrastructure to deployed infrastructure. **Every generator must be idempotent** — there is no such thing as a generator that is exempt because it is "just scaffolding". All of our generators scaffold; that is not a reason to clobber a user's work on the second run.
+Users re-run generators all the time: to add a second API, to recover from a failed run, to pick up updated templates, or to escalate a project from no infrastructure to deployed infrastructure. **Every generator must be idempotent.**
 
 #### The principle
 
