@@ -25,11 +25,20 @@ const mergeDeps = (
   existing: readonly string[] | undefined,
   deps: IPyDepVersion[],
 ): string[] => {
-  const incomingKeys = new Set(deps.map(depKey));
-  return [
-    ...(existing ?? []).filter((dep) => !incomingKeys.has(depKey(dep))),
-    ...withPyVersions(deps),
-  ];
+  // Update deps in place by key so re-running does not reorder the list:
+  // existing deps keep their position (with their version refreshed), and only
+  // genuinely-new deps are appended.
+  const incoming = new Map(withPyVersions(deps).map((d) => [depKey(d), d]));
+  const merged = (existing ?? []).map(
+    (dep) => incoming.get(depKey(dep)) ?? dep,
+  );
+  const existingKeys = new Set((existing ?? []).map(depKey));
+  for (const [key, dep] of incoming) {
+    if (!existingKeys.has(key)) {
+      merged.push(dep);
+    }
+  }
+  return merged;
 };
 
 /**

@@ -117,6 +117,39 @@ describe('addDependenciesToPyProjectToml', () => {
     expect(updatedToml.project.dependencies).not.toContain('fastapi>=0.100.0');
   });
 
+  it('should not reorder dependencies when re-adding existing ones', () => {
+    // First add fastapi and uvicorn, alongside a pre-existing dep.
+    tree.write(
+      'test-project/pyproject.toml',
+      stringify({
+        project: {
+          name: 'test-project',
+          version: '0.1.0',
+          dependencies: ['requests>=2.25.0'],
+        },
+      }),
+    );
+    addDependenciesToPyProjectToml(tree, 'test-project', ['fastapi', 'uvicorn']);
+
+    const afterFirstAdd = (
+      parse(
+        tree.read('test-project/pyproject.toml', 'utf-8'),
+      ) as UVPyprojectToml
+    ).project.dependencies;
+
+    // Re-adding the same deps must leave the list byte-identical, not move the
+    // entries to the end.
+    addDependenciesToPyProjectToml(tree, 'test-project', ['fastapi', 'uvicorn']);
+
+    const afterSecondAdd = (
+      parse(
+        tree.read('test-project/pyproject.toml', 'utf-8'),
+      ) as UVPyprojectToml
+    ).project.dependencies;
+
+    expect(afterSecondAdd).toEqual(afterFirstAdd);
+  });
+
   it('should handle pyproject.toml without existing dependencies array', () => {
     // Setup: Create pyproject.toml without dependencies array
     const initialToml = {
