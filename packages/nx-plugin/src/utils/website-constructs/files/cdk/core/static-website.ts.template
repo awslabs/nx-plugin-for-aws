@@ -1,5 +1,11 @@
-import { CfnOutput, CfnResource, Lazy, RemovalPolicy, Stack } from 'aws-cdk-lib';
-import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
+import { CfnOutput, CfnResource, Duration, Lazy, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import {
+  Distribution,
+  HeadersFrameOption,
+  HeadersReferrerPolicy,
+  ResponseHeadersPolicy,
+  ViewerProtocolPolicy,
+} from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -8,7 +14,11 @@ import {
   IBucket,
   ObjectOwnership,
 } from 'aws-cdk-lib/aws-s3';
-import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
+import {
+  BucketDeployment,
+  CacheControl,
+  Source,
+} from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
@@ -108,6 +118,31 @@ export class StaticWebsite extends Construct {
       'Distribution log bucket does not need versioning enabled',
     );
 
+    // Security headers applied to all responses. A Content-Security-Policy is
+    // intentionally omitted as it is application specific - add one for your app.
+    const responseHeadersPolicy = new ResponseHeadersPolicy(
+      this,
+      'ResponseHeadersPolicy',
+      {
+        securityHeadersBehavior: {
+          strictTransportSecurity: {
+            accessControlMaxAge: Duration.days(730),
+            includeSubdomains: true,
+            override: true,
+          },
+          contentTypeOptions: { override: true },
+          frameOptions: {
+            frameOption: HeadersFrameOption.DENY,
+            override: true,
+          },
+          referrerPolicy: {
+            referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+            override: true,
+          },
+        },
+      },
+    );
+
     const defaultRootObject = 'index.html';
     this.cloudFrontDistribution = new Distribution(
       this,
@@ -119,6 +154,7 @@ export class StaticWebsite extends Construct {
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          responseHeadersPolicy,
         },
         defaultRootObject,
         errorResponses: [
@@ -143,8 +179,17 @@ export class StaticWebsite extends Construct {
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
+      sources: [Source.asset(websiteFilePath)],
+      destinationBucket: this.websiteBucket,
+      // Files in the distribution's edge caches will be invalidated after files are uploaded to the destination bucket.
+      distribution: this.cloudFrontDistribution,
+      memoryLimit: 1024,
+    });
+
+    // Deploy runtime-config.json separately so it is never cached - clients
+    // must always fetch the latest configuration.
+    new BucketDeployment(this, 'RuntimeConfigDeployment', {
       sources: [
-        Source.asset(websiteFilePath),
         Source.data(
           DEFAULT_RUNTIME_CONFIG_FILENAME,
           Lazy.string({
@@ -156,8 +201,9 @@ export class StaticWebsite extends Construct {
         ),
       ],
       destinationBucket: this.websiteBucket,
-      // Files in the distribution's edge caches will be invalidated after files are uploaded to the destination bucket.
       distribution: this.cloudFrontDistribution,
+      cacheControl: [CacheControl.noCache()],
+      prune: false,
       memoryLimit: 1024,
     });
 
