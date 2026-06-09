@@ -134,7 +134,7 @@ Add `generator: <id>` to the page's frontmatter. This wires the page into the op
 ---
 title: tRPC API
 description: Reference documentation for the tRPC API generator
-generator: ts#trpc-api
+generator: ts#api
 ---
 ```
 
