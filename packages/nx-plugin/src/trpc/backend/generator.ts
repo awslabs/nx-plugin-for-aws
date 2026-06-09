@@ -146,6 +146,7 @@ export async function tsTrpcApiGenerator(
   };
 
   projectConfig.targets['serve-local'] = {
+    ...projectConfig.targets['serve-local'],
     ...projectConfig.targets.serve,
     options: {
       ...projectConfig.targets.serve.options,

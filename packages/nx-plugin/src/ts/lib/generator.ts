@@ -23,6 +23,7 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
@@ -69,30 +70,35 @@ export const tsProjectGenerator = async (
   schema: TsProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
-  await libraryGenerator(tree, {
-    ...schema,
-    name: fullyQualifiedName,
-    directory: dir,
-    skipPackageJson: true,
-    bundler: 'tsc', // TODO: consider supporting others
-    linter: 'none',
-    unitTestRunner: 'vitest',
-  });
 
-  // Replace with simpler sample source code
-  tree.delete(joinPathFragments(dir, 'src'));
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files'),
-    joinPathFragments(dir),
-    {
-      fullyQualifiedName,
-      pkgMgrCmd: getPackageManagerDisplayCommands().exec,
-    },
-    {
-      overwriteStrategy: OverwriteStrategy.KeepExisting,
-    },
-  );
+  // Only scaffold the project on first run; on re-run skip creation so user
+  // edits are preserved, but continue to (re)apply the configuration below.
+  if (!projectExists(tree, fullyQualifiedName)) {
+    await libraryGenerator(tree, {
+      ...schema,
+      name: fullyQualifiedName,
+      directory: dir,
+      skipPackageJson: true,
+      bundler: 'tsc', // TODO: consider supporting others
+      linter: 'none',
+      unitTestRunner: 'vitest',
+    });
+
+    // Replace with simpler sample source code
+    tree.delete(joinPathFragments(dir, 'src'));
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files'),
+      joinPathFragments(dir),
+      {
+        fullyQualifiedName,
+        pkgMgrCmd: getPackageManagerDisplayCommands().exec,
+      },
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
+  }
   await configureTsProject(tree, {
     dir,
     fullyQualifiedName,

@@ -9,6 +9,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
 import type { ConfigureProjectOptions } from './types';
 
 export const configureBiomeLint = async (
@@ -44,10 +45,12 @@ export const configureBiomeLint = async (
 
   updateProjectConfiguration(tree, options.fullyQualifiedName, {
     ...projectJson,
-    targets: {
+    // Sort targets so the lint target lands in a deterministic position
+    // regardless of whether it already existed (keeps re-runs stable)
+    targets: sortObjectKeys({
       ...projectJson?.targets,
       lint: lintTarget,
-    },
+    }),
   });
 
   // Register the `biome` named input so lint targets are cache-invalidated when

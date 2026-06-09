@@ -33,10 +33,17 @@ export const configureTsProjectAsNxPlugin = (
   // Nx Plugins must use commonjs as a limitation of nx
   // https://github.com/nrwl/nx/issues/15682
   updateJson(tree, tsConfigPath, (tsConfig) => {
-    tsConfig.compilerOptions ??= {};
-    tsConfig.compilerOptions.module ??= 'commonjs';
+    const { module, moduleResolution, ...rest } =
+      tsConfig.compilerOptions ?? {};
+    // Reassign module/moduleResolution last in a fixed order so re-running
+    // produces a stable key order regardless of whether a prior step removed
+    // `module` (eg configureTsProject drops a conflicting commonjs module).
     // TypeScript 6 allows bundler + commonjs together, avoiding deprecated node/node10
-    tsConfig.compilerOptions.moduleResolution ??= 'bundler';
+    tsConfig.compilerOptions = {
+      ...rest,
+      module: module ?? 'commonjs',
+      moduleResolution: moduleResolution ?? 'bundler',
+    };
     return tsConfig;
   });
 

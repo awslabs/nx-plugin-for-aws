@@ -110,6 +110,7 @@ export const pyFastApiProjectGenerator = async (
   };
 
   projectConfig.targets['serve-local'] = {
+    ...projectConfig.targets['serve-local'],
     ...projectConfig.targets.serve,
     options: {
       ...projectConfig.targets.serve.options,
@@ -137,6 +138,8 @@ export const pyFastApiProjectGenerator = async (
     joinPathFragments(dir, 'tests', 'test_hello.py'),
   ].forEach((f) => tree.delete(f));
 
+  // User-owned source files: preserve any existing copies so re-running does
+  // not clobber user edits (and does not reformat them nondeterministically).
   generateFiles(
     tree, // the virtual file system
     joinPathFragments(__dirname, 'files', 'app'), // path to the file templates
@@ -147,7 +150,7 @@ export const pyFastApiProjectGenerator = async (
       infra: schema.infra,
     },
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 

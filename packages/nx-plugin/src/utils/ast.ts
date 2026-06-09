@@ -300,6 +300,31 @@ export const captureGritQL = async (
 };
 
 /**
+ * Return the text of every node matching the GritQL pattern, in document order.
+ */
+export const captureAllGritQL = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<string[]> => {
+  if (!tree.exists(filePath)) return [];
+  ensureGritDir(tree);
+  const source = tree.read(filePath)!.toString();
+  const captured: string[] = [];
+  try {
+    const query = new QueryBuilder(pattern);
+    query.filter((node) => {
+      captured.push(node.text());
+      return true;
+    });
+    await query.applyToFile({ path: filePath, content: source });
+  } catch {
+    return [];
+  }
+  return captured;
+};
+
+/**
  * A unique token that is a valid identifier, so it can stand in for an array
  * element or object property inside a GritQL rewrite.
  */

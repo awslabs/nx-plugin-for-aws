@@ -356,7 +356,7 @@ describe('cognito-auth generator', () => {
     });
   });
 
-  it('should not be able to run the generator multiple times', async () => {
+  it('should be idempotent when re-run with same options', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
       'packages/test-project/src/main.tsx',
@@ -378,10 +378,26 @@ describe('cognito-auth generator', () => {
     );
     // First run to create files
     await tsReactWebsiteAuthGenerator(tree, options);
-    // Run generator again
+
+    const mainTsxAfterFirstRun = tree
+      .read('packages/test-project/src/main.tsx')
+      .toString();
+
+    // Re-running with the same options must not throw
     await expect(
-      async () => await tsReactWebsiteAuthGenerator(tree, options),
-    ).rejects.toThrowErrorMatchingSnapshot();
+      tsReactWebsiteAuthGenerator(tree, options),
+    ).resolves.toBeDefined();
+
+    const mainTsxAfterSecondRun = tree
+      .read('packages/test-project/src/main.tsx')
+      .toString();
+
+    // The wiring must be byte-identical after re-run
+    expect(mainTsxAfterSecondRun).toEqual(mainTsxAfterFirstRun);
+
+    // The CognitoAuth wrapper must appear exactly once
+    const wrapperMatches = mainTsxAfterSecondRun.match(/<CognitoAuth>/g) ?? [];
+    expect(wrapperMatches).toHaveLength(1);
   });
 
   it('should allow an unqualified name to be specified', async () => {

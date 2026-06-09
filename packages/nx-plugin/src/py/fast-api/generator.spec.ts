@@ -470,6 +470,11 @@ describe('fastapi project generator', () => {
     };
     await pyFastApiProjectGenerator(tree, options);
     const firstProjectJson = tree.read('apps/test_api/project.json', 'utf-8');
+    const firstInitPy = tree.read('apps/test_api/proj_test_api/init.py', 'utf-8');
+    const firstGenerateOpenApi = tree.read(
+      'apps/test_api/scripts/generate_open_api.py',
+      'utf-8',
+    );
 
     await pyFastApiProjectGenerator(tree, options);
     const secondProjectJson = tree.read('apps/test_api/project.json', 'utf-8');
@@ -485,6 +490,14 @@ describe('fastapi project generator', () => {
     expect(bundleCommands.filter((c) => c.includes('run.sh'))).toHaveLength(1);
 
     expect(secondProjectJson).toEqual(firstProjectJson);
+
+    // User-owned and generated Python files must be byte-identical on re-run
+    expect(tree.read('apps/test_api/proj_test_api/init.py', 'utf-8')).toEqual(
+      firstInitPy,
+    );
+    expect(
+      tree.read('apps/test_api/scripts/generate_open_api.py', 'utf-8'),
+    ).toEqual(firstGenerateOpenApi);
   });
 
   describe('terraform iac', () => {

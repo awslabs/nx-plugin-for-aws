@@ -263,8 +263,14 @@ export const tsSmithyApiGenerator = async (
     dependsOn: ['copy-ssdk', 'watch-copy-ssdk'],
   };
 
+  const existingServeLocalDependsOn =
+    backendProjectConfig.targets['serve-local']?.dependsOn ?? [];
+
   backendProjectConfig.targets['serve-local'] = {
     ...backendProjectConfig.targets.serve,
+    // Own copy of dependsOn so adding serve-local dependencies below doesn't
+    // mutate the shared array referenced by the serve target.
+    dependsOn: [...(backendProjectConfig.targets.serve.dependsOn ?? [])],
     options: {
       ...backendProjectConfig.targets.serve.options,
       env: {
@@ -272,6 +278,15 @@ export const tsSmithyApiGenerator = async (
       },
     },
   };
+
+  // Preserve any dependencies added to serve-local by connection generators
+  for (const dependency of existingServeLocalDependsOn) {
+    addDependencyToTargetIfNotPresent(
+      backendProjectConfig,
+      'serve-local',
+      dependency,
+    );
+  }
 
   // Ignore generated code
   updateGitIgnore(tree, backendProjectConfig.root, (patterns) => [

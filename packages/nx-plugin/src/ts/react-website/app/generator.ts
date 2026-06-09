@@ -280,7 +280,8 @@ export async function tsReactWebsiteGenerator(
     libraryRoot, // destination path of the files
     templateOptions, // config object to replace variable in file templates
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      // User-editable source - preserve any edits on re-run
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
@@ -290,7 +291,8 @@ export async function tsReactWebsiteGenerator(
     libraryRoot, // destination path of the files
     templateOptions, // config object to replace variable in file templates
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      // User-editable source - preserve any edits on re-run
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
@@ -310,7 +312,8 @@ export async function tsReactWebsiteGenerator(
       libraryRoot,
       templateOptions,
       {
-        overwriteStrategy: OverwriteStrategy.Overwrite,
+        // User-editable source (and the TanStack-managed route tree) - preserve on re-run
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
     );
 
@@ -320,7 +323,8 @@ export async function tsReactWebsiteGenerator(
       libraryRoot,
       templateOptions, // config object to replace variable in file templates
       {
-        overwriteStrategy: OverwriteStrategy.Overwrite,
+        // User-editable source - preserve any edits on re-run
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
     );
     tree.delete(joinPathFragments(websiteContentPath, 'src', 'app.tsx'));
