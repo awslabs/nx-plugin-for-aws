@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 `connection`ジェネレーターは、<Link path="guides/ts-agent">TypeScript Agent</Link>を<Link path="guides/agentcore-gateway">AgentCore Gateway</Link>に接続できます。
 
-このジェネレーターは、デプロイ時にIAM SigV4でGatewayに認証し、ローカル実行時には接続されたMCPサーバーに直接多重化するようにエージェントを構成します。
+このジェネレーターは、デプロイ時にIAM SigV4でGatewayに認証し、ローカル実行時にはGatewayプロジェクトによって起動されたローカルゲートウェイに接続するようにエージェントを構成します。
 
 ## 前提条件
 
@@ -45,9 +45,8 @@ import Infrastructure from '@components/infrastructure.astro';
   - src
     - core/
       - agentcore-gateway-mcp-client.ts デプロイされたGateway用のSigV4 MCPクライアント
-      - agentcore-gateway-mcp-local-client.ts 接続されたMCPサーバーに展開するローカル多重化クライアント
     - app/
-      - \<gateway-kebab>-client.ts `ATTACHED_MCP_SERVERS`リストを持つGateway毎のラッパー
+      - \<gateway-kebab>-client.ts Gateway毎のクライアントラッパー
     - index.ts Gatewayクライアントを再エクスポート
 
 </FileTree>
@@ -75,7 +74,7 @@ export const getAgent = async () => {
 };
 ```
 
-デプロイ時（`SERVE_LOCAL`が未設定）、`create()`はGatewayのMCPエンドポイントを指し、SigV4で認証された単一の`McpClient`を返します。`SERVE_LOCAL=true`の場合、クライアントの`ATTACHED_MCP_SERVERS`リスト内のMCPサーバー毎に1つの`McpClient`の配列を返します。Strandsの`Agent.tools`はどちらの形式も受け入れる（ネストされたツール配列を透過的にフラット化する）ため、同じ`agent.ts`が両方のモードで統一的に動作します。
+`create()`は常に単一の`McpClient`を返します。デプロイ時（`SERVE_LOCAL`が未設定）、それはGatewayのMCPエンドポイントを指し、SigV4で認証します。`SERVE_LOCAL=true`の場合、それはGatewayプロジェクトの`serve-local`ターゲットによって起動されたローカルゲートウェイを指すため、同じ`agent.ts`が両方のモードで統一的に動作します。
 
 セッションIDは下流のMCPサーバーに自動的に伝播されます：基盤となるトランスポートは[Strands TSセッションコンテキスト](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)を介してリクエストスコープのセッションを読み取り、`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`ヘッダーとしてGatewayに転送します。
 
@@ -132,8 +131,8 @@ Gateway URLは、生成されたTerraformモジュールによって<Link path="
 
 ジェネレーターは、エージェントの`serve-local`ターゲットを次のように構成します：
 
-1. 接続されたGatewayに接続されているすべてのMCPサーバーを起動
-2. `SERVE_LOCAL=true`を設定して、生成されたクライアントがデプロイされたGatewayを呼び出す代わりに、それらのローカルMCPサーバーに展開するようにします
+1. 接続されたGatewayのローカルゲートウェイとすべての接続されたMCPサーバーを起動
+2. `SERVE_LOCAL=true`を設定して、生成されたクライアントがデプロイされたGatewayの代わりにローカルゲートウェイを指すようにします
 
 エージェントをローカルで実行するには：
 
@@ -145,7 +144,8 @@ Gateway URLは、生成されたTerraformモジュールによって<Link path="
 
 ### ローカルの忠実性
 
-ローカル多重化モードはGateway自体をバイパスするため：
+ローカルゲートウェイはデプロイされたGatewayの代わりとなるため：
 
 - **Cedarポリシー評価なし。** ポリシーに関係なく、すべてのツールがエージェントに表示されます。デプロイされたGatewayに対してポリシーを実行するには、`serve`ターゲットを使用してください。
 - **ツール名のプレフィックスは保持されます。** 各ローカルMCPサーバーのツールは、`<target-name>___<tool-name>`の形式の名前を公開するようにラップされ、デプロイされたGatewayが出力するものと一致します。これにより、エージェントのシステムプロンプトと参照するCedarアクション名がローカル実行とデプロイ実行で一貫性を保ちます。
+

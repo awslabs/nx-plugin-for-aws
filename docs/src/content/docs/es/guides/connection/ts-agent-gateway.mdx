@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 El generador `connection` puede conectar tu <Link path="guides/ts-agent">Agente TypeScript</Link> a un <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
 
-El generador configura el agente para que se autentique en el Gateway con IAM SigV4 cuando se despliega, y multiplexa directamente a los servidores MCP adjuntos cuando se ejecuta localmente.
+El generador configura el agente para que se autentique en el Gateway con IAM SigV4 cuando se despliega, y se conecta al gateway local iniciado por el proyecto Gateway cuando se ejecuta localmente.
 
 ## Requisitos previos
 
@@ -45,9 +45,8 @@ El generador emite archivos de cliente compartidos en tu paquete `agent-connecti
   - src
     - core/
       - agentcore-gateway-mcp-client.ts Cliente MCP SigV4 para el Gateway desplegado
-      - agentcore-gateway-mcp-local-client.ts Cliente multiplex local que se distribuye a los servidores MCP adjuntos
     - app/
-      - \<gateway-kebab>-client.ts Wrapper por Gateway con lista `ATTACHED_MCP_SERVERS`
+      - \<gateway-kebab>-client.ts Wrapper de cliente por Gateway
     - index.ts Re-exporta el cliente Gateway
 
 </FileTree>
@@ -75,7 +74,7 @@ export const getAgent = async () => {
 };
 ```
 
-`create()` siempre devuelve un único `McpClient`. Cuando se despliega (`SERVE_LOCAL` no establecido), apunta al endpoint MCP del Gateway y se autentica con SigV4. Cuando `SERVE_LOCAL=true`, es un cliente multiplex que se distribuye a cada servidor MCP en `ATTACHED_MCP_SERVERS`, por lo que el mismo `agent.ts` funciona uniformemente en ambos modos.
+`create()` siempre devuelve un único `McpClient`. Cuando se despliega (`SERVE_LOCAL` no establecido), apunta al endpoint MCP del Gateway y se autentica con SigV4. Cuando `SERVE_LOCAL=true`, apunta al gateway local iniciado por el target `serve-local` del proyecto Gateway, por lo que el mismo `agent.ts` funciona uniformemente en ambos modos.
 
 El ID de sesión se propaga automáticamente a los servidores MCP descendentes: el transporte subyacente lee la sesión con alcance de solicitud a través del [contexto de sesión TS de Strands](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) y lo reenvía al Gateway como el encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
@@ -132,8 +131,8 @@ La URL del Gateway se registra automáticamente en el namespace `agentcore.gatew
 
 El generador configura el target `serve-local` del agente para:
 
-1. Iniciar cada servidor MCP adjunto al Gateway conectado
-2. Establecer `SERVE_LOCAL=true` para que el cliente generado se distribuya a esos servidores MCP locales en lugar de llamar al Gateway desplegado
+1. Iniciar el gateway local del Gateway conectado y cada servidor MCP adjunto
+2. Establecer `SERVE_LOCAL=true` para que el cliente generado apunte al gateway local en lugar del Gateway desplegado
 
 Ejecuta el agente localmente con:
 
@@ -145,7 +144,8 @@ Para ejecutar el agente localmente **contra el Gateway desplegado** en su lugar 
 
 ### Fidelidad local
 
-El modo multiplex local omite el Gateway en sí, por lo que:
+El gateway local sustituye al Gateway desplegado, por lo que:
 
 - **Sin evaluación de políticas Cedar.** Cada herramienta es visible para el agente independientemente de las políticas. Usa el objetivo `serve` para ejercitar políticas contra el Gateway desplegado.
 - **Se preserva el prefijo de nombres de herramientas.** Las herramientas de cada servidor MCP local se envuelven para exponer nombres de la forma `<target-name>___<tool-name>`, coincidiendo con lo que emite el Gateway desplegado. Esto mantiene el prompt del sistema de un agente y los nombres de acción Cedar que referencias consistentes entre ejecuciones locales y desplegadas.
+

@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 El generador `connection` puede conectar tu <Link path="guides/py-agent">Agente Python</Link> a un <Link path="guides/agentcore-gateway">Gateway AgentCore</Link>.
 
-El generador configura el agente para que se autentique en el Gateway con IAM SigV4 (mediante firma de solicitudes `httpx`) cuando se despliega, y multiplexa directamente a los servidores MCP adjuntos cuando se ejecuta localmente.
+El generador configura el agente para que se autentique en el Gateway con IAM SigV4 (mediante firma de solicitudes `httpx`) cuando se despliega, y se conecta al gateway local iniciado por el proyecto Gateway cuando se ejecuta localmente.
 
 ## Requisitos previos
 
@@ -45,9 +45,8 @@ El generador emite módulos compartidos de core-gateway en tu proyecto Python `a
   - \<scope>\_agent\_connection
     - core/
       - agentcore\_gateway\_mcp\_client.py Cliente MCP SigV4 usando `httpx`
-      - agentcore\_gateway\_mcp\_local\_client.py Cliente multiplex local para servidores MCP adjuntos
     - app/
-      - \<gateway\_snake>\_client.py Envoltorio por Gateway con lista `ATTACHED_MCP_SERVERS`
+      - \<gateway\_snake>\_client.py Envoltorio de cliente por Gateway
     - \_\_init\_\_.py Re-exporta el cliente del Gateway
 
 </FileTree>
@@ -83,7 +82,7 @@ def get_agent():
 `MyGatewayClient.create()` devuelve un único cliente administrable por contexto cuyo `list_tools_sync()` produce cada herramienta disponible a través del Gateway:
 
 - **Modo desplegado** (`SERVE_LOCAL` no establecido): un único `MCPClient` apuntando al endpoint MCP del Gateway, firmado con SigV4.
-- **Modo local** (`SERVE_LOCAL=true`): un `AgentCoreGatewayLocalMultiplexClient` que se distribuye a cada servidor MCP adjunto y presenta la unión de sus herramientas.
+- **Modo local** (`SERVE_LOCAL=true`): un `MCPClient` HTTP simple apuntando al gateway local iniciado por el objetivo `serve-local` del proyecto Gateway.
 
 El ID de sesión se propaga automáticamente a los servidores MCP descendentes: el transporte `httpx` subyacente lee `get_current_session_id()` (establecido por el middleware de tiempo de ejecución de Strands) y lo reenvía al Gateway como el encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
@@ -140,8 +139,8 @@ La URL del Gateway se registra automáticamente en el espacio de nombres `agentc
 
 El generador configura el objetivo `serve-local` del agente para:
 
-1. Iniciar cada servidor MCP adjunto al Gateway conectado
-2. Establecer `SERVE_LOCAL=true` para que el cliente generado se distribuya a esos servidores MCP locales en lugar de llamar al Gateway desplegado
+1. Iniciar el gateway local del Gateway conectado y cada servidor MCP adjunto
+2. Establecer `SERVE_LOCAL=true` para que el cliente generado apunte al gateway local en lugar del Gateway desplegado
 
 Ejecuta el agente localmente con:
 
@@ -153,7 +152,7 @@ Para ejecutar el agente localmente **contra el Gateway desplegado** en su lugar 
 
 ### Fidelidad local
 
-El modo multiplex local omite el Gateway en sí, por lo que:
+El gateway local sustituye al Gateway desplegado, por lo que:
 
 - **Sin evaluación de políticas Cedar.** Cada herramienta es visible para el agente independientemente de las políticas. Usa el objetivo `serve` para ejercitar políticas contra el Gateway desplegado.
 - **Se preserva el prefijo de nombres de herramientas.** Las herramientas de cada servidor MCP local se exponen como `<target-name>___<tool-name>`, coincidiendo con lo que emite el Gateway desplegado. Esto mantiene el prompt del sistema del agente y los nombres de acción Cedar que referencias consistentes entre ejecuciones locales y desplegadas.
