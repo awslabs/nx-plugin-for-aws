@@ -29,6 +29,7 @@ describe('cedar#agentcore-gateway generator', () => {
         true,
       );
       expect(tree.exists('packages/my-gateway/policies/README.md')).toBe(true);
+      expect(tree.exists('packages/my-gateway/serve.ts')).toBe(true);
 
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
       // Both `serve` and `serve-local` exist as continuous keep-alive
@@ -37,16 +38,12 @@ describe('cedar#agentcore-gateway generator', () => {
       // `nx:noop`) so that when this aggregator is itself a dependency of an
       // agent's continuous `serve-local`, Nx does not consider it "done" and
       // tear down its continuous MCP-server dependencies.
-      expect(config.targets?.['my-gateway-serve']).toBeDefined();
-      expect(config.targets?.['my-gateway-serve'].executor).toBe(
-        'nx:run-commands',
-      );
-      expect(config.targets?.['my-gateway-serve'].continuous).toBe(true);
-      expect(config.targets?.['my-gateway-serve-local']).toBeDefined();
-      expect(config.targets?.['my-gateway-serve-local'].executor).toBe(
-        'nx:run-commands',
-      );
-      expect(config.targets?.['my-gateway-serve-local'].continuous).toBe(true);
+      for (const target of ['my-gateway-serve', 'my-gateway-serve-local']) {
+        expect(config.targets?.[target]).toBeDefined();
+        expect(config.targets?.[target].executor).toBe('nx:run-commands');
+        expect(config.targets?.[target].continuous).toBe(true);
+        expect(config.targets?.[target].options.command).toBe('tsx serve.ts');
+      }
     });
 
     it('registers component metadata with rc/protocol/auth fields', async () => {

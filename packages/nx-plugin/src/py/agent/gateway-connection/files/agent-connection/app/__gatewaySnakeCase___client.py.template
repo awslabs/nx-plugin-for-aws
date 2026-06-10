@@ -13,50 +13,29 @@ from <%- agentConnectionModuleName %>.core.runtime_config import (
     get_connected_gateway_url,
 )
 
-# Tools-providing client surface satisfied by both the deployed-mode
-# ``MCPClient`` and the local-mode ``AgentCoreGatewayLocalMultiplexClient``.
-# Both are context managers exposing ``list_tools_sync()``, so callers can
-# treat the result of ``create()`` uniformly.
+# Both client modes are context managers exposing ``list_tools_sync()``, so
+# callers can treat the result of ``create()`` uniformly.
 GatewayToolsClient = MCPClient | AgentCoreGatewayLocalMultiplexClient
 
-# List of MCP servers attached to <%- gatewayClassName %>.
-# Populated by the `agentcore-gateway#mcp-connection` generator on each run
-# — every connected MCP server is back-propagated into this list so local
-# dev can multiplex to every attached server without hitting the real
-# gateway.
+# MCP servers attached to <%- gatewayClassName %>, maintained by the
+# `agentcore-gateway#mcp-connection` generator for local development.
 ATTACHED_MCP_SERVERS: list[LocalMcpServerBinding] = [<% attachedMcpServers.forEach((s) => { %>
     LocalMcpServerBinding(name="<%- s.name %>", local_url="http://localhost:<%- s.port %>/mcp"),<% }); %>
 ]
 
 
 class <%- gatewayClassName %>Client:
-    """Client for connecting to the <%- gatewayClassName %> AgentCore Gateway.
+    """Client for the <%- gatewayClassName %> AgentCore Gateway.
 
-    Returns a single ``with``-able client whose ``list_tools_sync()`` yields
-    every tool the agent should see:
-
-    - Deployed mode: a single ``MCPClient`` pointing at the gateway URL,
-      SigV4-signed.
-    - Local mode (``SERVE_LOCAL=true``): an
-      ``AgentCoreGatewayLocalMultiplexClient`` that fans out to each
-      attached MCP server's local serve-local port and presents the union
-      of their tools (prefixed with ``<target>___`` to mirror the deployed
-      Gateway's tool-name namespacing).
-
-    Either way the underlying client forwards the current async-context
-    session via the ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` header;
-    AgentCore Gateway then propagates the header to downstream MCP-server
-    targets.
-
-    Env var escape hatch: ``GATEWAY_URL_OVERRIDE`` points the deployed-mode
-    client at an alternate gateway (e.g. staging) without redeploying.
+    Deployed: a SigV4-signed MCP client pointing at the gateway URL.
+    Local (``SERVE_LOCAL=true``): multiplexes directly to each attached MCP
+    server, bypassing the gateway (Cedar policies are not evaluated).
     """
 
     @staticmethod
     def create() -> GatewayToolsClient:
         if os.environ.get("SERVE_LOCAL") == "true":
             return AgentCoreGatewayLocalMultiplexClient(ATTACHED_MCP_SERVERS)
-        gateway_url = os.environ.get(
-            "GATEWAY_URL_OVERRIDE"
-        ) or get_connected_gateway_url("<%- gatewayClassName %>")
-        return AgentCoreGatewayMCPClient.with_iam_auth(gateway_url=gateway_url)
+        return AgentCoreGatewayMCPClient.with_iam_auth(
+            gateway_url=get_connected_gateway_url("<%- gatewayClassName %>")
+        )

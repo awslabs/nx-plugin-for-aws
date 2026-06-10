@@ -129,8 +129,9 @@ export const getAgent = async (sessionId: string) =>
     expect(client).toContain('export class MyGatewayClient');
     expect(client).toContain("getConnectedGatewayUrl('MyGateway')");
     expect(client).toContain('SERVE_LOCAL');
-    expect(client).toContain('GATEWAY_URL_OVERRIDE');
     expect(client).toContain('ATTACHED_MCP_SERVERS');
+    // create() returns a single McpClient in both modes
+    expect(client).toContain('Promise<McpClient>');
   });
 
   it('seeds ATTACHED_MCP_SERVERS from MCP servers already attached to the gateway', async () => {

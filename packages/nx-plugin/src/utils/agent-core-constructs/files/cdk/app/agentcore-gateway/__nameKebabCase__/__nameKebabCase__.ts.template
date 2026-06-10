@@ -149,8 +149,9 @@ export class <%- nameClassName %> extends Construct implements IGrantable {
       gatewayTargetName?: string;
     },
   ): CfnGatewayTarget {
-    return this.addMcpServerTarget(`${server.node.id}Target`, {
-      gatewayTargetName: props?.gatewayTargetName ?? toKebabCase(server.node.id),
+    return this.addMcpServerTarget({
+      gatewayTargetName:
+        props?.gatewayTargetName ?? toKebabCase(server.node.id),
       mcpServerRuntimeArn: server.agentCoreRuntime.agentRuntimeArn,
     });
   }
@@ -159,13 +160,10 @@ export class <%- nameClassName %> extends Construct implements IGrantable {
    * Register an MCP server runtime ARN as a Gateway target. Prefer
    * {@link addMcpServer} when the construct is in scope.
    */
-  public addMcpServerTarget(
-    id: string,
-    props: {
-      gatewayTargetName: string;
-      mcpServerRuntimeArn: string;
-    },
-  ): CfnGatewayTarget {
+  public addMcpServerTarget(props: {
+    gatewayTargetName: string;
+    mcpServerRuntimeArn: string;
+  }): CfnGatewayTarget {
     const region = Stack.of(this).region;
     // The endpoint must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
     // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
@@ -175,27 +173,34 @@ export class <%- nameClassName %> extends Construct implements IGrantable {
       Fn.split('/', Fn.join('%3A', Fn.split(':', arn))),
     );
     const endpoint = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations?qualifier=DEFAULT`;
-    const target = new CfnGatewayTarget(this, id, {
-      gatewayIdentifier: this.gateway.gatewayId,
-      name: props.gatewayTargetName,
-      targetConfiguration: {
-        mcp: {
-          mcpServer: {
-            endpoint,
-          },
-        },
-      },
-      credentialProviderConfigurations: [
-        {
-          credentialProviderType: 'GATEWAY_IAM_ROLE',
-          credentialProvider: {
-            iamCredentialProvider: {
-              service: 'bedrock-agentcore',
+    // The construct id is derived from the target name so the two change
+    // together — target names are unique per gateway, and replacing a target
+    // under an unchanged name fails with AlreadyExists.
+    const target = new CfnGatewayTarget(
+      this,
+      `${toPascalCase(props.gatewayTargetName)}Target`,
+      {
+        gatewayIdentifier: this.gateway.gatewayId,
+        name: props.gatewayTargetName,
+        targetConfiguration: {
+          mcp: {
+            mcpServer: {
+              endpoint,
             },
           },
         },
-      ],
-    });
+        credentialProviderConfigurations: [
+          {
+            credentialProviderType: 'GATEWAY_IAM_ROLE',
+            credentialProvider: {
+              iamCredentialProvider: {
+                service: 'bedrock-agentcore',
+              },
+            },
+          },
+        ],
+      },
+    );
 
     // Grant the gateway role invoke access to the target runtime before the
     // target is created — AgentCore probes the target during creation, which

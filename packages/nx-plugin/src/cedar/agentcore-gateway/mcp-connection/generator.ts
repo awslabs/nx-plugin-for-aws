@@ -37,7 +37,7 @@ export const AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
  *    `*#strands-agent#gateway-connection` generator, so local-mode
  *    multiplexing sees the new server.
  *
- * Users must still call `gateway.addMcpServerTarget(...)` in their
+ * Users must still call `gateway.addMcpServer(...)` in their
  * application stack to create the actual CDK/Terraform resource. The
  * generator logs instructions on completion.
  */

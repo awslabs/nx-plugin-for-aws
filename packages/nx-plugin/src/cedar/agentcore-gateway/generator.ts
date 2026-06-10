@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  addDependenciesToPackageJson,
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
@@ -26,6 +27,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
 export const AGENTCORE_GATEWAY_GENERATOR_INFO: NxGeneratorInfo =
@@ -49,7 +51,7 @@ export const agentcoreGatewayGenerator = async (
   const protocol = options.protocol ?? 'mcp';
   const auth = options.auth ?? 'iam';
 
-  // Scaffold the gateway project: policies/ + README.md + project.json
+  // Scaffold the gateway project: policies/ + README.md + serve.ts
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'project'),
@@ -65,11 +67,11 @@ export const agentcoreGatewayGenerator = async (
   // `nx run <agent>:<agent>-serve-local` boots every attached MCP server
   // alongside the agent.
   //
-  // It must be a `continuous` keep-alive process rather than `nx:noop`:
-  // when this aggregator is itself a dependency of an agent's continuous
-  // `serve-local`, a non-continuous task would be considered "done" and Nx
-  // would tear down its continuous MCP-server dependencies. Staying alive
-  // keeps them running for the lifetime of the agent.
+  // The vended serve.ts is a `continuous` keep-alive process rather than
+  // `nx:noop`: when this aggregator is itself a dependency of an agent's
+  // continuous `serve-local`, a non-continuous task would be considered
+  // "done" and Nx would tear down its continuous MCP-server dependencies.
+  // Staying alive keeps them running for the lifetime of the agent.
   //
   // `serve` exists for parity with other generators (every project has both
   // `serve` and `serve-local`); the Gateway itself is a managed AWS
@@ -80,9 +82,8 @@ export const agentcoreGatewayGenerator = async (
     executor: 'nx:run-commands' as const,
     continuous: true,
     options: {
-      // Idle keep-alive: the aggregator owns no server of its own, it only
-      // holds its continuous MCP-server dependencies open.
-      commands: ['node -e "setInterval(() => {}, 1 << 30)"'],
+      command: 'tsx serve.ts',
+      cwd: '{projectRoot}',
     },
     dependsOn: [] as Array<string | { projects: string[]; target: string }>,
   });
@@ -123,6 +124,9 @@ export const agentcoreGatewayGenerator = async (
     name,
     { rc: nameClassName, protocol, auth },
   );
+
+  // serve.ts runs via tsx
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   // Wire up infra (CDK or Terraform)
   const iac = await resolveIac(tree, options.iac);

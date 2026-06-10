@@ -12,35 +12,21 @@ import { getCurrentSessionId } from './session-context.js';
 
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 
-/**
- * Separator used by AgentCore Gateway when prefixing tool names from a
- * target. Local mode mirrors this so that agents see the same tool names
- * locally and deployed.
- */
+type McpTool = Awaited<ReturnType<McpClient['listTools']>>[number];
+
+/** Separator AgentCore Gateway uses to prefix tool names with their target name. */
 const PREFIX_SEPARATOR = '___';
 
-/**
- * Describes one MCP server attached to a gateway, for local development use.
- * The `name` matches the gateway target name that production will use, and
- * is also used as the local tool-name prefix so agents see identical tool
- * names whether running locally or against the deployed gateway.
- */
+/** An MCP server attached to a gateway, for local development use. */
 export interface LocalMcpServerBinding {
   name: string;
   localUrl: string;
 }
 
 /**
- * A `Transport` proxy that mirrors the deployed gateway's tool-name
- * prefixing for one MCP server target. Tool names appear to the agent as
- * `<target>___<tool>` in `tools/list` responses, and the prefix is stripped
- * from outgoing `tools/call` requests before they reach the upstream MCP
- * server.
- *
- * Wrapping the transport (rather than subclassing `McpClient` or `McpTool`)
- * keeps the rewrite invisible to Strands' tool registry — the agent's
- * registered tool names are namespaced and never collide across multiple
- * MCP servers, even when the same server is attached to multiple gateways.
+ * Transport proxy that mirrors the deployed gateway's tool-name prefixing:
+ * tools are listed as `<target>___<tool>` and the prefix is stripped from
+ * outgoing calls, so agents see identical tool names locally and deployed.
  */
 class PrefixingTransport implements Transport {
   private readonly _prefix: string;
@@ -81,7 +67,6 @@ class PrefixingTransport implements Transport {
     return this._inner.close();
   }
 
-  /** Strip the prefix from outgoing `tools/call` requests. */
   private _rewriteOutgoing(message: JSONRPCMessage): JSONRPCMessage {
     const m = message as unknown as {
       method?: string;
@@ -100,7 +85,6 @@ class PrefixingTransport implements Transport {
     return message;
   }
 
-  /** Add the prefix to tool names in incoming `tools/list` responses. */
   private _rewriteIncoming<T extends JSONRPCMessage>(message: T): T {
     const m = message as unknown as {
       result?: { tools?: Array<{ name?: string }> };
@@ -121,31 +105,25 @@ class PrefixingTransport implements Transport {
   }
 }
 
+/** Placeholder transport for the multiplex client; never connected. */
+const NOOP_TRANSPORT: Transport = {
+  start: async () => {},
+  send: async () => {},
+  close: async () => {},
+};
+
 /**
- * Factory for gateway-like MCP access during local development.
- *
- * Returns an array of `McpClient` instances, one per attached MCP server.
- * Strands' `Agent` accepts nested tool arrays, so the array can be spread
- * directly into `tools: [...]` — the agent aggregates tools from every
- * backing client transparently.
- *
- * Each underlying client:
- * - forwards the current async-context session via the
- *   `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header
- * - exposes tools as `<target>___<tool>` to match the deployed gateway's
- *   tool-name prefixing (so agents see identical tool names locally and
- *   deployed, and the same MCP server can be attached to multiple gateways
- *   without name collisions in the agent's tool registry)
- *
- * Remaining fidelity gaps vs the real gateway:
- * - No Cedar policy evaluation
- * - No semantic tool search
- *
- * Use `GATEWAY_URL_OVERRIDE` with a deployed gateway to test those behaviors.
+ * Gateway stand-in for local development: one `McpClient` that fans out to
+ * every attached MCP server, exposing tools as `<target>___<tool>` to match
+ * the deployed gateway. Unlike the real gateway, Cedar policies are not
+ * evaluated and there is no semantic tool search.
  */
-export class AgentCoreGatewayMcpLocalMultiplexClient {
-  static create(servers: LocalMcpServerBinding[]): McpClient[] {
-    return servers.map((s) => {
+export class AgentCoreGatewayMcpLocalMultiplexClient extends McpClient {
+  private readonly _servers: McpClient[];
+
+  constructor(servers: LocalMcpServerBinding[]) {
+    super({ transport: NOOP_TRANSPORT });
+    this._servers = servers.map((s) => {
       const fetchWithSession: typeof fetch = async (input, init) => {
         const headers = new Headers(init?.headers);
         const sessionId = getCurrentSessionId();
@@ -156,8 +134,30 @@ export class AgentCoreGatewayMcpLocalMultiplexClient {
         new URL(s.localUrl),
         { fetch: fetchWithSession },
       );
-      const transport = new PrefixingTransport(innerTransport, s.name);
-      return new McpClient({ transport });
+      return new McpClient({
+        transport: new PrefixingTransport(innerTransport, s.name),
+      });
     });
+  }
+
+  override async connect(reconnect?: boolean): Promise<void> {
+    await Promise.all(this._servers.map((c) => c.connect(reconnect)));
+  }
+
+  override async disconnect(): Promise<void> {
+    await Promise.all(this._servers.map((c) => c.disconnect()));
+  }
+
+  override async listTools(): Promise<McpTool[]> {
+    const tools = await Promise.all(this._servers.map((c) => c.listTools()));
+    return tools.flat();
+  }
+
+  override set onToolsChanged(
+    callback: ((oldTools: string[], newTools: McpTool[]) => void) | undefined,
+  ) {
+    for (const client of this._servers) {
+      client.onToolsChanged = callback;
+    }
   }
 }

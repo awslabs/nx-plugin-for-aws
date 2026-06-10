@@ -153,7 +153,6 @@ dependencies = ["strands-agents"]
     expect(client).toContain('class MyGatewayClient');
     expect(client).toContain('get_connected_gateway_url("MyGateway")');
     expect(client).toContain('SERVE_LOCAL');
-    expect(client).toContain('GATEWAY_URL_OVERRIDE');
     expect(client).toContain('ATTACHED_MCP_SERVERS');
   });
 

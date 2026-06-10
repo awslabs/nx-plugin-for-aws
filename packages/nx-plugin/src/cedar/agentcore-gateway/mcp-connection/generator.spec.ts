@@ -102,7 +102,7 @@ const ATTACHED_MCP_SERVERS: LocalMcpServerBinding[] = [
 ];
 
 export class MyGatewayClient {
-  static async create(sessionId: string): Promise<McpClient | McpClient[]> {
+  static async create(): Promise<McpClient> {
     return null as any;
   }
 }

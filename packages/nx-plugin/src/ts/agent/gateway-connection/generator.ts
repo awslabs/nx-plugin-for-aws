@@ -117,10 +117,8 @@ export const tsAgentGatewayConnectionGenerator = async (
     `./app/${gatewayKebabCase}-client.js`,
   );
 
-  // 3. AST-transform agent.ts to add the gateway client to the agent's tools.
-  //    `Agent.tools` accepts `(Tool | McpClient | Agent | ToolList)[]`, so
-  //    we can pass either a single McpClient (deployed) or an array of them
-  //    (local multiplex) — the client method returns `McpClient | McpClient[]`.
+  // 3. AST-transform agent.ts to add the gateway client (an McpClient in
+  //    both deployed and local modes) to the agent's tools.
   const agentSourceDir = joinPathFragments(
     sourceProject.root,
     agentComponent.path ?? 'src',

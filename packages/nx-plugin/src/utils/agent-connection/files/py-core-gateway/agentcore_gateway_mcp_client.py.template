@@ -31,9 +31,6 @@ class _SessionHeaderAuth(httpx.Auth):
 
 
 def _parse_region_from_gateway_url(gateway_url: str) -> str:
-    """Extract the AWS region from a gateway URL of the form
-    https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
-    """
     match = re.search(r"\.bedrock-agentcore\.([^.]+)\.amazonaws\.com", gateway_url)
     if not match:
         raise ValueError(
@@ -44,12 +41,9 @@ def _parse_region_from_gateway_url(gateway_url: str) -> str:
 
 
 class AgentCoreGatewayMCPClient:
-    """Factory for MCP clients that connect to an AgentCore Gateway.
-
-    Forwards the current async-context session via the
-    ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` header on every
-    request; AgentCore Gateway then propagates the header to downstream
-    MCP-server targets.
+    """Factory for MCP clients that connect to an AgentCore Gateway. Forwards
+    the current async-context session via the AgentCore session header, which
+    the gateway propagates to downstream MCP server targets.
     """
 
     @staticmethod
@@ -66,18 +60,6 @@ class AgentCoreGatewayMCPClient:
                 auth=_SessionHeaderAuth(
                     SigV4HTTPXAuth(credentials, "bedrock-agentcore", resolved_region),
                 ),
-                timeout=120,
-                terminate_on_close=False,
-            )
-        )
-
-    @staticmethod
-    def without_auth(gateway_url: str) -> MCPClient:
-        """Plain-HTTP gateway client. For local dev / custom authz headers."""
-        return MCPClient(
-            lambda: streamablehttp_client(
-                gateway_url,
-                auth=_SessionHeaderAuth(),
                 timeout=120,
                 terminate_on_close=False,
             )

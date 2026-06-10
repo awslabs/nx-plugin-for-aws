@@ -75,7 +75,7 @@ export const getAgent = async () => {
 };
 ```
 
-When deployed (`SERVE_LOCAL` unset), `create()` returns a single `McpClient` pointed at the Gateway's MCP endpoint and authenticated with SigV4. When `SERVE_LOCAL=true`, it returns an array of `McpClient`s — one per MCP server in the client's `ATTACHED_MCP_SERVERS` list. Strands' `Agent.tools` accepts either shape (it transparently flattens nested tool arrays), so the same `agent.ts` works uniformly in both modes.
+`create()` always returns a single `McpClient`. When deployed (`SERVE_LOCAL` unset), it points at the Gateway's MCP endpoint and authenticates with SigV4. When `SERVE_LOCAL=true`, it is a multiplex client that fans out to every MCP server in `ATTACHED_MCP_SERVERS`, so the same `agent.ts` works uniformly in both modes.
 
 The session ID is propagated to downstream MCP servers automatically: the underlying transport reads the request-scoped session via the [Strands TS session context](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) and forwards it to the Gateway as the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header.
 
@@ -139,19 +139,13 @@ Run the agent locally with:
 
 <NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
 
-### `GATEWAY_URL_OVERRIDE`
+To run the agent locally **against the deployed Gateway** instead (for example, to exercise Cedar policies), use the agent's `serve` target. Without `SERVE_LOCAL` set, the client resolves the deployed Gateway URL from runtime configuration and SigV4-signs requests with your local AWS credentials:
 
-To run the agent locally **against a deployed Gateway** (for example, to exercise Cedar policies), set:
-
-```bash
-export GATEWAY_URL_OVERRIDE=https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
-```
-
-When set, the client uses the deployed Gateway URL and SigV4-signs requests with your local AWS credentials instead of falling back to local multiplexing.
+<NxCommands commands={["<agent-name>-serve <project-name>"]} />
 
 ### Local fidelity
 
 Local multiplex mode bypasses the Gateway itself, so:
 
-- **No Cedar policy evaluation.** Every tool is visible to the agent regardless of policies. Use `GATEWAY_URL_OVERRIDE` to exercise policies against a deployed Gateway.
+- **No Cedar policy evaluation.** Every tool is visible to the agent regardless of policies. Use the `serve` target to exercise policies against the deployed Gateway.
 - **Tool-name prefixing is preserved.** Each local MCP server's tools are wrapped to expose names of the form `<target-name>___<tool-name>`, matching what the deployed Gateway emits. This keeps an agent's system prompt and the Cedar action names you reference consistent across local and deployed runs.
