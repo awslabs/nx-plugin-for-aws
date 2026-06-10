@@ -387,6 +387,8 @@ describe('tsSmithyApiGenerator', () => {
 
     // Verify dev dependencies
     expect(packageJson.devDependencies).toHaveProperty('@types/aws-lambda');
+    // tsx is used by the serve and serve-local targets to run the local server
+    expect(packageJson.devDependencies).toHaveProperty('tsx');
   });
 
   it('should configure git ignores for generated code', async () => {
