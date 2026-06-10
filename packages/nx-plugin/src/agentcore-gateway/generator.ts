@@ -53,8 +53,9 @@ export const agentcoreGatewayGenerator = async (
   const protocol = options.protocol ?? 'mcp';
   const auth = options.auth ?? 'iam';
   const cedarPolicy = options.cedarPolicy ?? true;
+  const infra = options.infra ?? 'agentcore';
 
-  // serve.ts is the local gateway: a continuous MCP aggregator chaining
+  // serve-local.ts is the local gateway: a continuous MCP aggregator chaining
   // onto attached MCP servers' serve-local targets (added by the
   // mcp-connection generator), so a single `nx run <agent>:<agent>-serve-local`
   // boots the gateway and every attached MCP server together.
@@ -66,7 +67,7 @@ export const agentcoreGatewayGenerator = async (
     executor: 'nx:run-commands' as const,
     continuous: true,
     options: {
-      command: 'tsx serve.ts',
+      command: 'tsx serve-local.ts',
       cwd: '{projectRoot}',
       env: { PORT: `${port}` },
     },
@@ -99,7 +100,7 @@ export const agentcoreGatewayGenerator = async (
   project.targets[`${name}-serve-local`] ??= localGatewayTarget(port);
   updateProjectConfiguration(tree, project.name, project);
 
-  // Scaffold the gateway project: serve.ts (+ Cedar policies if requested)
+  // Scaffold the gateway project: serve-local.ts (+ Cedar policies if requested)
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'project'),
@@ -126,7 +127,7 @@ export const agentcoreGatewayGenerator = async (
     { rc: nameClassName, protocol, auth, port },
   );
 
-  // serve.ts dependencies (+ ejs for Cedar policy rendering in the construct)
+  // serve-local.ts dependencies (+ ejs for Cedar policy rendering in the construct)
   addDependenciesToPackageJson(
     tree,
     withVersions(['@modelcontextprotocol/sdk', 'express']),
@@ -137,18 +138,21 @@ export const agentcoreGatewayGenerator = async (
     ]),
   );
 
-  // Wire up infra (CDK or Terraform)
-  const iac = await resolveIac(tree, options.iac);
-  await sharedConstructsGenerator(tree, { iac });
+  // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
+  // the infrastructure to a previously infra-less gateway.
+  if (infra === 'agentcore') {
+    const iac = await resolveIac(tree, options.iac);
+    await sharedConstructsGenerator(tree, { iac });
 
-  await addAgentCoreGatewayInfra(tree, {
-    gatewayNameClassName: nameClassName,
-    gatewayNameKebabCase: name,
-    projectName: fullyQualifiedName,
-    projectDirectory: projectRoot,
-    cedarPolicy,
-    iac,
-  });
+    await addAgentCoreGatewayInfra(tree, {
+      gatewayNameClassName: nameClassName,
+      gatewayNameKebabCase: name,
+      projectName: fullyQualifiedName,
+      projectDirectory: projectRoot,
+      cedarPolicy,
+      iac,
+    });
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [
     AGENTCORE_GATEWAY_GENERATOR_INFO,

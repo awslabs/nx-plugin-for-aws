@@ -27,7 +27,7 @@ export const AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
  * Connect an AgentCore Gateway to an MCP server.
  *
  * Chains the gateway's serve-local target to the MCP server's serve-local
- * target, and registers the server in the gateway's local serve.ts so the
+ * target, and registers the server in the gateway's local serve-local.ts so the
  * local gateway aggregates its tools.
  *
  * Users must still call `gateway.addMcpServer(...)` in their application
@@ -94,8 +94,8 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  // 2. Register the MCP server in the gateway's local serve.ts
-  const serveTsPath = joinPathFragments(sourceProject.root, 'serve.ts');
+  // 2. Register the MCP server in the gateway's local serve-local.ts
+  const serveTsPath = joinPathFragments(sourceProject.root, 'serve-local.ts');
   if (tree.exists(serveTsPath)) {
     const content = tree.read(serveTsPath)!.toString();
     if (!content.includes(`'${mcpComponentName}'`)) {

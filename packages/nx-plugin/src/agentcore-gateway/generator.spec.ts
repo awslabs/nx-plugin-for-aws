@@ -29,7 +29,7 @@ describe('agentcore-gateway generator', () => {
         true,
       );
       expect(tree.exists('packages/my-gateway/policies/README.md')).toBe(true);
-      expect(tree.exists('packages/my-gateway/serve.ts')).toBe(true);
+      expect(tree.exists('packages/my-gateway/serve-local.ts')).toBe(true);
 
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
       // Both `serve` and `serve-local` exist as continuous keep-alive
@@ -42,7 +42,9 @@ describe('agentcore-gateway generator', () => {
         expect(config.targets?.[target]).toBeDefined();
         expect(config.targets?.[target].executor).toBe('nx:run-commands');
         expect(config.targets?.[target].continuous).toBe(true);
-        expect(config.targets?.[target].options.command).toBe('tsx serve.ts');
+        expect(config.targets?.[target].options.command).toBe(
+          'tsx serve-local.ts',
+        );
       }
     });
 
@@ -297,6 +299,21 @@ describe('agentcore-gateway generator', () => {
         ),
       ).toBe(false);
     });
+
+    it('renders Cedar policies via the ejs render script', () => {
+      expect(
+        tree.exists(
+          'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
+        ),
+      ).toBe(true);
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      expect(module).toContain('data "external" "rendered_policies"');
+      expect(module).toContain('render-cedar.cjs');
+    });
   });
 
   describe('Cedar policy templates', () => {
@@ -336,7 +353,7 @@ describe('agentcore-gateway generator', () => {
 
     it('omits the policies directory', () => {
       expect(tree.exists('packages/my-gateway/policies')).toBe(false);
-      expect(tree.exists('packages/my-gateway/serve.ts')).toBe(true);
+      expect(tree.exists('packages/my-gateway/serve-local.ts')).toBe(true);
     });
 
     it('omits the policy engine from the CDK construct', () => {
@@ -358,7 +375,7 @@ describe('agentcore-gateway generator', () => {
   });
 
   describe('cedarPolicy: false (terraform)', () => {
-    it('omits the policy engine from the terraform module', async () => {
+    it('omits the policy engine and render script from the terraform module', async () => {
       await agentcoreGatewayGenerator(tree, {
         name: 'my-gateway',
         iac: 'terraform',
@@ -370,8 +387,45 @@ describe('agentcore-gateway generator', () => {
         )!
         .toString();
       expect(module).not.toContain('policy_engine');
-      expect(module).not.toContain('awscc');
-      expect(module).toContain('aws_bedrockagentcore_gateway');
+      expect(module).not.toContain('render-cedar');
+      expect(module).toContain('awscc_bedrockagentcore_gateway');
+      expect(
+        tree.exists(
+          'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
+        ),
+      ).toBe(false);
+    });
+  });
+
+  describe('infra: none', () => {
+    it('skips all infrastructure, then adds it on re-run with infra=agentcore', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+        infra: 'none',
+      });
+
+      expect(tree.exists('packages/my-gateway/serve-local.ts')).toBe(true);
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        ),
+      ).toBe(false);
+
+      // Upgrade: re-run with infra=agentcore vends the construct
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+        infra: 'agentcore',
+      });
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        ),
+      ).toBe(true);
+      // Component metadata is not duplicated by the upgrade
+      const config = readProjectConfiguration(tree, '@proj/my-gateway');
+      expect((config.metadata as any).components).toHaveLength(1);
     });
   });
 });

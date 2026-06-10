@@ -11,5 +11,6 @@ export interface AgentcoreGatewayGeneratorSchema {
   protocol?: 'mcp';
   auth?: 'iam';
   cedarPolicy?: boolean;
+  infra?: 'agentcore' | 'none';
   iac: IacOption;
 }

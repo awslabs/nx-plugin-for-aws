@@ -86,12 +86,12 @@ describe('agentcore-gateway#mcp-connection generator', () => {
     );
   });
 
-  it('registers the MCP server in the gateway serve.ts', async () => {
+  it('registers the MCP server in the gateway serve-local.ts', async () => {
     const gw = addGateway();
     const mcp = addMcp('other-mcp', 'OtherMcp', 8001);
 
     tree.write(
-      'packages/my-gateway/serve.ts',
+      'packages/my-gateway/serve-local.ts',
       `const ATTACHED_MCP_SERVERS = [
   { name: 'already-there', url: 'http://localhost:8000/mcp' },
 ];
@@ -105,19 +105,19 @@ describe('agentcore-gateway#mcp-connection generator', () => {
       targetComponent: mcpComponent(mcp) as any,
     });
 
-    const serveTs = tree.read('packages/my-gateway/serve.ts')!.toString();
+    const serveTs = tree.read('packages/my-gateway/serve-local.ts')!.toString();
     expect(serveTs).toContain("name: 'other-mcp'");
     expect(serveTs).toContain("url: 'http://localhost:8001/mcp'");
     // The existing entry is preserved
     expect(serveTs).toContain('already-there');
   });
 
-  it('serve.ts registration is idempotent for the same MCP server', async () => {
+  it('serve-local.ts registration is idempotent for the same MCP server', async () => {
     const gw = addGateway();
     const mcp = addMcp('other-mcp', 'OtherMcp', 8001);
 
     tree.write(
-      'packages/my-gateway/serve.ts',
+      'packages/my-gateway/serve-local.ts',
       `const ATTACHED_MCP_SERVERS = [
 ];
 `,
@@ -136,7 +136,7 @@ describe('agentcore-gateway#mcp-connection generator', () => {
       targetComponent: mcpComponent(mcp) as any,
     });
 
-    const serveTs = tree.read('packages/my-gateway/serve.ts')!.toString();
+    const serveTs = tree.read('packages/my-gateway/serve-local.ts')!.toString();
     const occurrences = (serveTs.match(/'other-mcp'/g) ?? []).length;
     expect(occurrences).toBe(1);
   });

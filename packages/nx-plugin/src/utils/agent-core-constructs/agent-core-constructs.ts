@@ -370,4 +370,20 @@ const addAgentCoreGatewayTerraformInfra = (
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
+
+  // The Cedar render script is only needed when policies are enabled
+  if (!options.cedarPolicy) {
+    const renderScript = joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'app',
+      'gateways',
+      options.gatewayNameKebabCase,
+      'render-cedar.cjs',
+    );
+    if (tree.exists(renderScript)) {
+      tree.delete(renderScript);
+    }
+  }
 };

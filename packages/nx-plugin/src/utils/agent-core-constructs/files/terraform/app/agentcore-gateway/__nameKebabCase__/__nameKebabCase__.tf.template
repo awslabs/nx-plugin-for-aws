@@ -6,10 +6,14 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.23"
     }
-<%_ if (cedarPolicy) { _%>
     awscc = {
       source  = "hashicorp/awscc"
       version = ">= 1.52"
+    }
+<%_ if (cedarPolicy) { _%>
+    external = {
+      source  = "hashicorp/external"
+      version = ">= 2.0"
     }
 <%_ } _%>
     random = {
@@ -29,12 +33,6 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
-variable "tags" {
-  description = "Tags to apply to resources"
-  type        = map(string)
-  default     = {}
-}
-
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
@@ -42,7 +40,7 @@ locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region     = data.aws_region.current.id
 <%_ if (cedarPolicy) { _%>
-  policies_dir   = "${path.module}/../../../../../../<%- projectDirectory %>/policies"
+  policies_dir   = "${path.module}/../../../../../../../<%- projectDirectory %>/policies"
 <%_ } _%>
 }
 
@@ -75,8 +73,6 @@ resource "aws_iam_role" "gateway_role" {
       }
     ]
   })
-
-  tags = var.tags
 }
 
 <%_ if (cedarPolicy) { _%>
@@ -107,8 +103,7 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
 }
 <%_ } else { _%>
 # Inline policy for statements appended by connection generators
-# (e.g. InvokeAgentRuntime*). Created even when empty so connection
-# generators have a stable attachment point.
+# (e.g. InvokeAgentRuntime*)
 resource "aws_iam_role_policy" "gateway_role_policy" {
   count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
   name  = "<%- nameClassName %>-GatewayPolicy"
@@ -120,13 +115,19 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
   })
 }
 <%_ } _%>
+<%_ if (cedarPolicy) { _%>
 
-# Gateway (native aws provider)
-resource "aws_bedrockagentcore_gateway" "this" {
-  name          = "<%- nameClassName %>-${random_id.unique_suffix.hex}"
-  description   = "AgentCore Gateway for <%- nameClassName %>"
-  role_arn      = aws_iam_role.gateway_role.arn
-  protocol_type = "MCP"
+# Policy engine (name must match ^[A-Za-z][A-Za-z0-9_]*$ — no hyphens)
+resource "awscc_bedrockagentcore_policy_engine" "this" {
+  name        = "<%- nameClassName %>_PolicyEngine_${random_id.unique_suffix.hex}"
+  description = "Cedar policy engine for <%- nameClassName %>"
+}
+<%_ } _%>
+
+resource "awscc_bedrockagentcore_gateway" "this" {
+  name        = "<%- nameClassName %>-${random_id.unique_suffix.hex}"
+  description = "AgentCore Gateway for <%- nameClassName %>"
+  role_arn    = aws_iam_role.gateway_role.arn
 
   protocol_configuration = {
     mcp = {
@@ -139,28 +140,29 @@ resource "aws_bedrockagentcore_gateway" "this" {
 <%_ if (cedarPolicy) { _%>
 
   policy_engine_configuration = {
-    policy_engine_arn = awscc_bedrockagentcore_policy_engine.this.policy_engine_arn
-    mode              = "ENFORCE"
+    arn  = awscc_bedrockagentcore_policy_engine.this.policy_engine_arn
+    mode = "ENFORCE"
   }
-<%_ } _%>
-
-  tags = var.tags
-<%_ if (cedarPolicy) { _%>
 
   depends_on = [aws_iam_role_policy.gateway_role_policy]
 <%_ } _%>
 }
 <%_ if (cedarPolicy) { _%>
 
-# Policy engine (awscc provider)
-resource "awscc_bedrockagentcore_policy_engine" "this" {
-  name        = "<%- nameClassName %>-PolicyEngine-${random_id.unique_suffix.hex}"
-  description = "Cedar policy engine for <%- nameClassName %>"
+# Policies are EJS templates rendered by render-cedar.cjs with `gatewayArn`
+# and `accountId` in scope.
+data "external" "rendered_policies" {
+  for_each = fileset(local.policies_dir, "*.cedar")
+
+  program = ["node", "${path.module}/render-cedar.cjs"]
+  query = {
+    template   = "${local.policies_dir}/${each.value}"
+    gatewayArn = awscc_bedrockagentcore_gateway.this.gateway_arn
+    accountId  = local.aws_account_id
+  }
 }
 
-# One Policy per .cedar file in the project's policies/ directory. Policies
-# are EJS templates; the `<%%= gatewayArn %>` and `<%%= accountId %>` tokens
-# are substituted at apply time.
+# One Policy per .cedar file in the project's policies/ directory.
 #
 # Policy resource names are derived from the file basename and normalised
 # to PascalCase (matching the CDK template). The AgentCore Policy resource
@@ -169,22 +171,18 @@ resource "awscc_bedrockagentcore_policy_engine" "this" {
 resource "awscc_bedrockagentcore_policy" "policies" {
   for_each = fileset(local.policies_dir, "*.cedar")
 
-  policy_engine_identifier = awscc_bedrockagentcore_policy_engine.this.policy_engine_id
+  policy_engine_id = awscc_bedrockagentcore_policy_engine.this.policy_engine_id
   name = join("", [
     for word in split("-", replace(trimsuffix(each.value, ".cedar"), "_", "-")) :
     "${upper(substr(word, 0, 1))}${substr(word, 1, length(word))}"
   ])
   description     = "Policy loaded from ${each.value}"
   validation_mode = "IGNORE_ALL_FINDINGS"
-  definition = replace(
-    replace(
-      file("${local.policies_dir}/${each.value}"),
-      "<%%= gatewayArn %>",
-      aws_bedrockagentcore_gateway.this.gateway_arn,
-    ),
-    "<%%= accountId %>",
-    local.aws_account_id,
-  )
+  definition = {
+    cedar = {
+      statement = data.external.rendered_policies[each.value].result.rendered
+    }
+  }
 }
 <%_ } _%>
 
@@ -194,24 +192,24 @@ module "add_gateway_url_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "gateways"
-  value     = { "<%- nameClassName %>" = aws_bedrockagentcore_gateway.this.gateway_url }
+  value     = { "<%- nameClassName %>" = awscc_bedrockagentcore_gateway.this.gateway_url }
 
-  depends_on = [aws_bedrockagentcore_gateway.this]
+  depends_on = [awscc_bedrockagentcore_gateway.this]
 }
 
 output "gateway_id" {
   description = "ID of the Bedrock AgentCore Gateway"
-  value       = aws_bedrockagentcore_gateway.this.gateway_id
+  value       = awscc_bedrockagentcore_gateway.this.gateway_identifier
 }
 
 output "gateway_arn" {
   description = "ARN of the Bedrock AgentCore Gateway"
-  value       = aws_bedrockagentcore_gateway.this.gateway_arn
+  value       = awscc_bedrockagentcore_gateway.this.gateway_arn
 }
 
 output "gateway_url" {
   description = "MCP endpoint URL of the Bedrock AgentCore Gateway"
-  value       = aws_bedrockagentcore_gateway.this.gateway_url
+  value       = awscc_bedrockagentcore_gateway.this.gateway_url
 }
 
 output "gateway_role_arn" {
