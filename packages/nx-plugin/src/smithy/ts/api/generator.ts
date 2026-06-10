@@ -315,7 +315,7 @@ export const tsSmithyApiGenerator = async (
         ? (['@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
-    withVersions(['@types/aws-lambda']),
+    withVersions(['@types/aws-lambda', 'tsx']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_SMITHY_API_GENERATOR_INFO]);
