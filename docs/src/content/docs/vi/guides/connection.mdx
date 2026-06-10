@@ -6,6 +6,7 @@ import Astro from '@astrojs/react';
 import { CardGrid, LinkButton } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import ConnectionCard from '@components/connection-card.astro';
+import NxCommands from '@components/nx-commands.astro';
 
 Generator này được sử dụng để kết nối các dự án với nhau, chẳng hạn như các trang web gọi API. Chỉ cần chọn dự án nguồn (ví dụ: dự án sẽ gọi API của bạn) và dự án đích (ví dụ: dự án API của bạn), và generator này sẽ xử lý việc tích hợp hai dự án đó.
 
@@ -153,3 +154,98 @@ Generator Connection hỗ trợ các kết nối sau:
 :::note[Cấu Hình Runtime]
 Generator connection sử dụng <Link path="guides/runtime-config">Runtime Configuration</Link> để truyền các giá trị tại thời điểm triển khai (chẳng hạn như URL API, cài đặt Cognito và ARN runtime của agent) giữa các dự án và component được tạo ra tại runtime để chúng có thể khám phá và kết nối với nhau.
 :::
+
+## Phát Triển Cục Bộ
+
+Các dự án được kết nối cung cấp hai target để chạy chúng trên máy của bạn: `serve` và `serve-local`. Sự khác biệt là về **phạm vi** — bao nhiêu phần của ứng dụng chạy cục bộ so với việc trỏ đến cơ sở hạ tầng AWS đã triển khai.
+
+Xem xét một workspace với các kết nối sau: một website gọi một tRPC `api`, và cũng gọi một `agent` mà lần lượt gọi một `mcp` server.
+
+### `serve`
+
+Target `serve` chỉ chạy **dự án được chỉ định** cục bộ. Mọi dự án khác mà nó kết nối đến được mong đợi là **đã triển khai**, và được truy cập tại URL AWS thực của chúng.
+
+<NxCommands commands={['serve website']} />
+
+Vì dự án được chỉ định giao tiếp với các tài nguyên đã triển khai, nó cần biết chúng ở đâu. Đối với một website, điều này được cung cấp bởi `runtime-config.json` của nó (xem <Link path="guides/react-website#local-runtime-config">Local Runtime Config</Link>), mà bạn tải từ một ứng dụng đã triển khai. Đối với các dự án phía server (API và agent) đọc <Link path="guides/runtime-config">Runtime Configuration</Link>, đặt biến môi trường `RUNTIME_CONFIG_APP_ID` để trỏ đến ứng dụng AppConfig đã triển khai của bạn.
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+}
+api: api {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+agent: agent {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+mcp: mcp {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+
+website -> api
+website -> agent
+agent -> mcp
+
+local: "Local" {
+  style.fill: "#c8e6c9"
+}
+remote: "Deployed (AWS)" {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+```
+
+Sử dụng `serve` khi bạn muốn lặp lại trên một dự án duy nhất so với các phiên bản "thực", đã triển khai của mọi thứ mà nó phụ thuộc vào.
+
+### `serve-local`
+
+Target `serve-local` chạy dự án được chỉ định **và mọi dự án được kết nối với nó một cách bắc cầu**, tất cả trên máy của bạn. Generator connection tự động thiết lập điều này — chạy `serve-local` trên website cũng khởi động các server cục bộ cho `api`, `agent`, và `mcp` server mà nó truy cập thông qua agent.
+
+<NxCommands commands={['serve-local website']} />
+
+Khi chạy theo cách này, `runtime-config.json` của website được tự động ghi đè (thông qua [Vite's `MODE`](https://vite.dev/guide/env-and-mode), được đặt thành `serve-local`) để nó trỏ đến các server đang chạy cục bộ của bạn thay vì các URL đã triển khai.
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+}
+api: api {
+  style.fill: "#c8e6c9"
+}
+agent: agent {
+  style.fill: "#c8e6c9"
+}
+mcp: mcp {
+  style.fill: "#c8e6c9"
+}
+
+website -> api
+website -> agent
+agent -> mcp
+
+local: "Local" {
+  style.fill: "#c8e6c9"
+}
+remote: "Deployed (AWS)" {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+```
+
+Sử dụng `serve-local` khi bạn đang làm việc trên nhiều dự án được kết nối cùng một lúc và muốn lặp lại nhanh chóng mà không cần triển khai cơ sở hạ tầng của bạn.
+
+:::note[Tài nguyên AWS trong `serve-local`]
+Các server cục bộ của bạn chạy với thông tin xác thực AWS mà bạn đã cấu hình cục bộ, vì vậy chúng vẫn có thể truy cập các tài nguyên AWS đã triển khai (chẳng hạn như bảng DynamoDB hoặc mô hình Bedrock) khi cần thiết. Bạn có thể cung cấp bất kỳ biến môi trường nào mà các server cục bộ của bạn cần, ví dụ:
+
+<NxCommands env={{RUNTIME_CONFIG_APP_ID: 'xxxxx'}} commands={['serve-local website']} />
+:::
+
+Để biết thêm chi tiết về server phát triển cục bộ của từng loại dự án, hãy xem hướng dẫn liên quan — ví dụ như hướng dẫn <Link path="guides/react-website#local-development-server">React Website</Link>.

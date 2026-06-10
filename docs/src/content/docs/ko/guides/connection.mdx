@@ -6,6 +6,7 @@ import Astro from '@astrojs/react';
 import { CardGrid, LinkButton } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import ConnectionCard from '@components/connection-card.astro';
+import NxCommands from '@components/nx-commands.astro';
 
 이 생성기는 웹사이트가 API를 호출하는 것과 같이 프로젝트들을 서로 연결하는 데 사용됩니다. 소스 프로젝트(예: API를 호출할 프로젝트)와 타겟 프로젝트(예: API 프로젝트)를 선택하기만 하면 이 생성기가 두 프로젝트의 통합을 처리합니다.
 
@@ -153,3 +154,98 @@ import ConnectionCard from '@components/connection-card.astro';
 :::note[런타임 구성]
 연결 생성기는 <Link path="guides/runtime-config">런타임 구성</Link>을 사용하여 배포 시점의 값들(예: API URL, Cognito 설정, 에이전트 런타임 ARN)을 생성된 프로젝트와 컴포넌트 간에 런타임에 전달함으로써 서로를 발견하고 연결할 수 있도록 합니다.
 :::
+
+## 로컬 개발
+
+연결된 프로젝트는 로컬 머신에서 실행하기 위한 두 가지 타겟을 제공합니다: `serve`와 `serve-local`. 차이점은 **범위**입니다 — 애플리케이션의 얼마나 많은 부분이 로컬에서 실행되는지, 배포된 AWS 인프라를 가리키는지의 차이입니다.
+
+tRPC `api`를 호출하고, 또한 `mcp` 서버를 호출하는 `agent`를 호출하는 웹사이트가 있는 워크스페이스를 생각해 보세요.
+
+### `serve`
+
+`serve` 타겟은 **대상 프로젝트만** 로컬에서 실행합니다. 연결된 다른 모든 프로젝트는 **배포된** 상태로 예상되며, 실제 AWS URL에서 접근됩니다.
+
+<NxCommands commands={['serve website']} />
+
+대상 프로젝트가 배포된 리소스와 통신하기 때문에, 그것들이 어디에 있는지 알아야 합니다. 웹사이트의 경우 이는 `runtime-config.json`에 의해 제공됩니다(<Link path="guides/react-website#local-runtime-config">로컬 런타임 구성</Link> 참조). 이는 배포된 애플리케이션에서 로드합니다. <Link path="guides/runtime-config">런타임 구성</Link>을 읽는 서버 사이드 프로젝트(API 및 에이전트)의 경우, `RUNTIME_CONFIG_APP_ID` 환경 변수를 설정하여 배포된 AppConfig 애플리케이션을 가리키도록 합니다.
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+}
+api: api {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+agent: agent {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+mcp: mcp {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+
+website -> api
+website -> agent
+agent -> mcp
+
+local: "Local" {
+  style.fill: "#c8e6c9"
+}
+remote: "Deployed (AWS)" {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+```
+
+의존하는 모든 것의 "실제" 배포된 버전에 대해 단일 프로젝트를 반복 작업하려는 경우 `serve`를 사용하세요.
+
+### `serve-local`
+
+`serve-local` 타겟은 대상 프로젝트 **및 전이적으로 연결된 모든 프로젝트**를 모두 로컬 머신에서 실행합니다. 연결 생성기가 이를 자동으로 연결합니다 — 웹사이트에서 `serve-local`을 실행하면 `api`, `agent`, 그리고 에이전트를 통해 도달하는 `mcp` 서버에 대한 로컬 서버도 시작됩니다.
+
+<NxCommands commands={['serve-local website']} />
+
+이 방식으로 실행하면, 웹사이트의 `runtime-config.json`이 자동으로 재정의되어([Vite의 `MODE`](https://vite.dev/guide/env-and-mode)를 통해 `serve-local`로 설정됨) 배포된 URL 대신 로컬에서 실행 중인 서버를 가리킵니다.
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+}
+api: api {
+  style.fill: "#c8e6c9"
+}
+agent: agent {
+  style.fill: "#c8e6c9"
+}
+mcp: mcp {
+  style.fill: "#c8e6c9"
+}
+
+website -> api
+website -> agent
+agent -> mcp
+
+local: "Local" {
+  style.fill: "#c8e6c9"
+}
+remote: "Deployed (AWS)" {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+```
+
+여러 연결된 프로젝트를 동시에 작업하고 인프라를 배포하지 않고 빠르게 반복하려는 경우 `serve-local`을 사용하세요.
+
+:::note[`serve-local`의 AWS 리소스]
+로컬 서버는 로컬에 구성된 AWS 자격 증명으로 실행되므로, 필요한 경우 배포된 AWS 리소스(예: DynamoDB 테이블 또는 Bedrock 모델)에 여전히 접근할 수 있습니다. 로컬 서버에 필요한 환경 변수를 제공할 수 있습니다. 예를 들어:
+
+<NxCommands env={{RUNTIME_CONFIG_APP_ID: 'xxxxx'}} commands={['serve-local website']} />
+:::
+
+각 프로젝트 유형의 로컬 개발 서버에 대한 자세한 내용은 관련 가이드를 참조하세요 — 예를 들어 <Link path="guides/react-website#local-development-server">React Website</Link> 가이드를 참조하세요.

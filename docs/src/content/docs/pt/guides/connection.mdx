@@ -6,6 +6,7 @@ import Astro from '@astrojs/react';
 import { CardGrid, LinkButton } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import ConnectionCard from '@components/connection-card.astro';
+import NxCommands from '@components/nx-commands.astro';
 
 Este gerador é usado para conectar projetos entre si, como sites chamando APIs. Basta selecionar o projeto de origem (por exemplo, o projeto que irá chamar sua API) e o projeto de destino (por exemplo, seu projeto de API), e este gerador cuidará da integração entre os dois.
 
@@ -153,4 +154,99 @@ O gerador de Conexão suporta as seguintes conexões:
 :::note[Configuração de Runtime]
 O gerador de conexão utiliza <Link path="guides/runtime-config">Configuração de Runtime</Link> para passar valores de tempo de implantação (como URLs de API, configurações do Cognito e ARNs de runtime de agentes) entre projetos e componentes gerados em tempo de execução para que possam se descobrir e conectar uns aos outros.
 :::
+
+## Desenvolvimento Local
+
+Projetos conectados expõem dois alvos para executá-los em sua máquina: `serve` e `serve-local`. A diferença é uma questão de **escopo** — quanto da sua aplicação é executado localmente versus apontando para infraestrutura AWS implantada.
+
+Considere um workspace com as seguintes conexões: um site que chama uma `api` tRPC, e também chama um `agent` que por sua vez chama um servidor `mcp`.
+
+### `serve`
+
+O alvo `serve` executa **apenas o projeto alvo** localmente. Todos os outros projetos aos quais ele se conecta devem estar **implantados**, e são acessados em suas URLs reais da AWS.
+
+<NxCommands commands={['serve website']} />
+
+Como o projeto alvo se comunica com recursos implantados, ele precisa saber onde eles estão. Para um site, isso é fornecido por seu `runtime-config.json` (veja <Link path="guides/react-website#local-runtime-config">Configuração de Runtime Local</Link>), que você carrega de uma aplicação implantada. Para projetos do lado do servidor (APIs e agentes) que leem <Link path="guides/runtime-config">Configuração de Runtime</Link>, defina a variável de ambiente `RUNTIME_CONFIG_APP_ID` para apontar para sua aplicação AppConfig implantada.
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+}
+api: api {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+agent: agent {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+mcp: mcp {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+
+website -> api
+website -> agent
+agent -> mcp
+
+local: "Local" {
+  style.fill: "#c8e6c9"
+}
+remote: "Deployed (AWS)" {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+```
+
+Use `serve` quando você quiser iterar em um único projeto contra as versões "reais" implantadas de tudo de que ele depende.
+
+### `serve-local`
+
+O alvo `serve-local` executa o projeto alvo **e todos os projetos conectados a ele transitivamente**, todos em sua máquina. O gerador de conexão configura isso automaticamente — executar `serve-local` no site também inicia servidores locais para a `api`, o `agent` e o servidor `mcp` que ele alcança através do agente.
+
+<NxCommands commands={['serve-local website']} />
+
+Quando executado dessa forma, o `runtime-config.json` do site é automaticamente sobrescrito (via [`MODE` do Vite](https://vite.dev/guide/env-and-mode), definido como `serve-local`) para que aponte para seus servidores em execução local em vez de URLs implantadas.
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+}
+api: api {
+  style.fill: "#c8e6c9"
+}
+agent: agent {
+  style.fill: "#c8e6c9"
+}
+mcp: mcp {
+  style.fill: "#c8e6c9"
+}
+
+website -> api
+website -> agent
+agent -> mcp
+
+local: "Local" {
+  style.fill: "#c8e6c9"
+}
+remote: "Deployed (AWS)" {
+  style.fill: "#eceff1"
+  style.stroke-dash: 3
+}
+```
+
+Use `serve-local` quando estiver trabalhando em vários projetos conectados ao mesmo tempo e quiser iterar rapidamente sem implantar sua infraestrutura.
+
+:::note[Recursos AWS em `serve-local`]
+Seus servidores locais são executados com as credenciais AWS que você configurou localmente, então eles ainda podem acessar recursos AWS implantados (como tabelas DynamoDB ou modelos Bedrock) quando necessário. Você pode fornecer quaisquer variáveis de ambiente que seus servidores locais precisem, por exemplo:
+
+<NxCommands env={{RUNTIME_CONFIG_APP_ID: 'xxxxx'}} commands={['serve-local website']} />
+:::
+
+Para mais detalhes sobre o servidor de desenvolvimento local de cada tipo de projeto, consulte o guia relevante — por exemplo, o guia <Link path="guides/react-website#local-development-server">React Website</Link>.
 
