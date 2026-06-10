@@ -6,10 +6,12 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.23"
     }
+<%_ if (cedarPolicy) { _%>
     awscc = {
       source  = "hashicorp/awscc"
       version = ">= 1.52"
     }
+<%_ } _%>
     random = {
       source  = "hashicorp/random"
       version = ">= 3.0"
@@ -39,7 +41,9 @@ data "aws_region" "current" {}
 locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region     = data.aws_region.current.id
+<%_ if (cedarPolicy) { _%>
   policies_dir   = "${path.module}/../../../../../../<%- projectDirectory %>/policies"
+<%_ } _%>
 }
 
 resource "random_id" "unique_suffix" {
@@ -75,8 +79,10 @@ resource "aws_iam_role" "gateway_role" {
   tags = var.tags
 }
 
+<%_ if (cedarPolicy) { _%>
 # Inline policy giving the gateway role the permissions it needs:
-#   - CheckAuthorizePermissions: required by the gateway CFN readiness probe
+#   - Policy evaluation permissions, including CheckAuthorizePermissions
+#     which the gateway readiness probe requires during creation
 #   - Additional statements appended by connection generators (e.g. InvokeAgentRuntime*)
 resource "aws_iam_role_policy" "gateway_role_policy" {
   name = "<%- nameClassName %>-GatewayPolicy"
@@ -86,14 +92,34 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
     Version = "2012-10-17"
     Statement = concat([
       {
-        Sid      = "CheckAuthorizePermissions"
-        Effect   = "Allow"
-        Action   = ["bedrock-agentcore:CheckAuthorizePermissions"]
+        Sid    = "PolicyEvaluation"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:GetPolicyEngine",
+          "bedrock-agentcore:AuthorizeAction",
+          "bedrock-agentcore:PartiallyAuthorizeActions",
+          "bedrock-agentcore:CheckAuthorizePermissions",
+        ]
         Resource = ["*"]
       }
     ], var.additional_iam_policy_statements)
   })
 }
+<%_ } else { _%>
+# Inline policy for statements appended by connection generators
+# (e.g. InvokeAgentRuntime*). Created even when empty so connection
+# generators have a stable attachment point.
+resource "aws_iam_role_policy" "gateway_role_policy" {
+  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  name  = "<%- nameClassName %>-GatewayPolicy"
+  role  = aws_iam_role.gateway_role.id
+
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = var.additional_iam_policy_statements
+  })
+}
+<%_ } _%>
 
 # Gateway (native aws provider)
 resource "aws_bedrockagentcore_gateway" "this" {
@@ -110,16 +136,21 @@ resource "aws_bedrockagentcore_gateway" "this" {
   }
 
   authorizer_type = "AWS_IAM"
+<%_ if (cedarPolicy) { _%>
 
   policy_engine_configuration = {
     policy_engine_arn = awscc_bedrockagentcore_policy_engine.this.policy_engine_arn
     mode              = "ENFORCE"
   }
+<%_ } _%>
 
   tags = var.tags
+<%_ if (cedarPolicy) { _%>
 
   depends_on = [aws_iam_role_policy.gateway_role_policy]
+<%_ } _%>
 }
+<%_ if (cedarPolicy) { _%>
 
 # Policy engine (awscc provider)
 resource "awscc_bedrockagentcore_policy_engine" "this" {
@@ -127,10 +158,9 @@ resource "awscc_bedrockagentcore_policy_engine" "this" {
   description = "Cedar policy engine for <%- nameClassName %>"
 }
 
-# One Policy per .cedar file in the project's policies/ directory.
-#
-# The ${gateway_arn} and ${account_id} placeholders are substituted at apply
-# time so policies stay scoped to this gateway and the deploying account.
+# One Policy per .cedar file in the project's policies/ directory. Policies
+# are EJS templates; the `<%%= gatewayArn %>` and `<%%= accountId %>` tokens
+# are substituted at apply time.
 #
 # Policy resource names are derived from the file basename and normalised
 # to PascalCase (matching the CDK template). The AgentCore Policy resource
@@ -149,13 +179,14 @@ resource "awscc_bedrockagentcore_policy" "policies" {
   definition = replace(
     replace(
       file("${local.policies_dir}/${each.value}"),
-      "$${gateway_arn}",
+      "<%%= gatewayArn %>",
       aws_bedrockagentcore_gateway.this.gateway_arn,
     ),
-    "$${account_id}",
+    "<%%= accountId %>",
     local.aws_account_id,
   )
 }
+<%_ } _%>
 
 # Add gateway URL to runtime config
 module "add_gateway_url_to_runtime_config" {

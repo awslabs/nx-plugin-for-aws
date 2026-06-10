@@ -54,13 +54,25 @@ class AgentCoreGatewayMCPClient:
         """Create a gateway MCP client authenticated with IAM SigV4."""
         resolved_region = region or _parse_region_from_gateway_url(gateway_url)
         credentials = boto3.Session(region_name=resolved_region).get_credentials()
-        return MCPClient(
-            lambda: streamablehttp_client(
-                gateway_url,
-                auth=_SessionHeaderAuth(
-                    SigV4HTTPXAuth(credentials, "bedrock-agentcore", resolved_region),
-                ),
-                timeout=120,
-                terminate_on_close=False,
-            )
+        return _create_client(
+            gateway_url,
+            _SessionHeaderAuth(
+                SigV4HTTPXAuth(credentials, "bedrock-agentcore", resolved_region),
+            ),
         )
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> MCPClient:
+        """Plain-HTTP gateway client, for the local gateway started by serve-local."""
+        return _create_client(gateway_url, _SessionHeaderAuth())
+
+
+def _create_client(gateway_url: str, auth: httpx.Auth) -> MCPClient:
+    return MCPClient(
+        lambda: streamablehttp_client(
+            gateway_url,
+            auth=auth,
+            timeout=120,
+            terminate_on_close=False,
+        )
+    )

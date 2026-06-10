@@ -404,7 +404,7 @@ export default defineConfig({
             { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
             { label: 'py#agent', link: '/guides/py-agent' },
             {
-              label: 'cedar#agentcore-gateway',
+              label: 'agentcore-gateway',
               link: '/guides/agentcore-gateway',
             },
             { label: 'terraform#project', link: '/guides/terraform-project' },

@@ -15,7 +15,6 @@ import {
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
-  getAttachedMcpServerBindings,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
@@ -63,7 +62,7 @@ export const pyAgentGatewayConnectionGenerator = async (
 
   if (!agentComponent || !gatewayComponent) {
     throw new Error(
-      'Both sourceComponent and targetComponent must be provided for py#agent -> cedar#agentcore-gateway connections',
+      'Both sourceComponent and targetComponent must be provided for py#agent -> agentcore-gateway connections',
     );
   }
 
@@ -109,14 +108,7 @@ export const pyAgentGatewayConnectionGenerator = async (
     agentConnectionModuleName,
     'app',
   );
-  // Seed ATTACHED_MCP_SERVERS with any MCP servers already attached to the
-  // gateway (the mcp-connection generator back-propagates servers attached
-  // later).
-  const attachedMcpServers = getAttachedMcpServerBindings(
-    tree,
-    targetProject,
-    gatewayServeLocalTargetName,
-  );
+  // Local mode points at the gateway project's local gateway port.
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
@@ -125,7 +117,7 @@ export const pyAgentGatewayConnectionGenerator = async (
       gatewaySnakeCase,
       gatewayClassName,
       agentConnectionModuleName,
-      attachedMcpServers,
+      gatewayPort: gatewayComponent.port ?? 8100,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -293,10 +285,7 @@ const addGatewayClientToGetAgent = async (
   }
 
   // First connection — wrap the existing `def get_agent` body in a single
-  // `with (<var>,):` block. The Gateway client (whether the deployed-mode
-  // ``MCPClient`` or the local-mode ``AgentCoreGatewayLocalMultiplexClient``)
-  // is a context manager, so this is the same pattern mcp-connection uses
-  // and matches what the reviewer asked for.
+  // `with (<var>,):` block, the same pattern mcp-connection uses.
   await applyGritQL(
     tree,
     filePath,

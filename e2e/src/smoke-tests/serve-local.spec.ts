@@ -243,7 +243,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:cedar#agentcore-gateway --name=my-gateway --no-interactive`,
+        `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive`,
         opts,
       );
 
@@ -517,14 +517,14 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     await stopLast();
   });
 
-  it('TS HTTP Agent - AgentCore Gateway local multiplex across multiple MCP servers', async () => {
+  it('TS HTTP Agent - AgentCore Gateway local gateway across multiple MCP servers', async () => {
     // The gateway fronts two MCP servers (TypeScript `gw-mcp` and Python
     // `gw-py-mcp`). Drive the LLM mock to call a gateway-prefixed tool
     // (`<target>___<tool>`) from each, and echo the tool result. A successful
-    // round-trip for both proves the local multiplex client booted under
-    // SERVE_LOCAL, aggregated tools from every attached MCP server, and routed
-    // each call to the right upstream server. This exercises the gateway's
-    // core job: multiplexing across multiple (heterogeneous) MCP servers.
+    // round-trip for both proves the local gateway booted under SERVE_LOCAL,
+    // aggregated tools from every attached MCP server, and routed each call
+    // to the right upstream server. This exercises the gateway's core job:
+    // aggregating multiple (heterogeneous) MCP servers behind one endpoint.
     type MockReq = {
       lastMessage: string;
       messages: { role: string; content: string }[];

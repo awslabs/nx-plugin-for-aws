@@ -229,7 +229,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   // shared mcp-connection prepend pattern when subsequent appends run on
   // the resulting multi-line array.
   await runCLI(
-    `generate @aws/nx-plugin:cedar#agentcore-gateway --name=my-gateway --no-interactive`,
+    `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive`,
     opts,
   );
   await runCLI(

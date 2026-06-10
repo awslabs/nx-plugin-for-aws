@@ -93,7 +93,7 @@ dependencies = ["strands-agents"]
       auth: 'iam',
     } as any,
     targetComponent: {
-      generator: 'cedar#agentcore-gateway',
+      generator: 'agentcore-gateway',
       name: 'my-gateway',
       rc: 'MyGateway',
       protocol: 'mcp',
@@ -126,11 +126,6 @@ dependencies = ["strands-agents"]
         `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_client.py`,
       ),
     ).toBe(true);
-    expect(
-      tree.exists(
-        `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_local_client.py`,
-      ),
-    ).toBe(true);
     // Per-connection app client
     expect(
       tree.exists(
@@ -153,38 +148,17 @@ dependencies = ["strands-agents"]
     expect(client).toContain('class MyGatewayClient');
     expect(client).toContain('get_connected_gateway_url("MyGateway")');
     expect(client).toContain('SERVE_LOCAL');
-    expect(client).toContain('ATTACHED_MCP_SERVERS');
   });
 
-  it('seeds ATTACHED_MCP_SERVERS from MCP servers already attached to the gateway', async () => {
+  it('points local mode at the gateway component port', async () => {
     setupProjects();
-    // Simulate a prior `cedar#agentcore-gateway#mcp-connection` run: the
-    // gateway's serve-local aggregator depends on an MCP server target.
-    tree.write(
-      'packages/my-mcp/project.json',
-      JSON.stringify({
-        name: 'my_scope.my_mcp',
-        root: 'packages/my-mcp',
-        sourceRoot: 'packages/my-mcp/my_scope_my_mcp',
-        metadata: {
-          components: [
-            { generator: 'py#mcp-server', name: 'my-mcp', port: 8123 },
-          ],
-        },
-      }),
-    );
-    const gatewayConfig = JSON.parse(
-      tree.read('packages/my-gateway/project.json')!.toString(),
-    );
-    gatewayConfig.targets['my-gateway-serve-local'].dependsOn = [
-      { projects: ['my_scope.my_mcp'], target: 'my-mcp-serve-local' },
-    ];
-    tree.write(
-      'packages/my-gateway/project.json',
-      JSON.stringify(gatewayConfig),
-    );
-
-    await pyAgentGatewayConnectionGenerator(tree, fullOptions());
+    await pyAgentGatewayConnectionGenerator(tree, {
+      ...fullOptions(),
+      targetComponent: {
+        ...fullOptions().targetComponent,
+        port: 8123,
+      } as any,
+    });
 
     const moduleDirs = tree.children('packages/common/agent_connection');
     const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
@@ -193,8 +167,8 @@ dependencies = ["strands-agents"]
         `packages/common/agent_connection/${moduleName}/app/my_gateway_client.py`,
       )!
       .toString();
-    expect(client).toContain('LocalMcpServerBinding(name="my-mcp"');
-    expect(client).toContain('local_url="http://localhost:8123/mcp"');
+    expect(client).toContain('gateway_url="http://localhost:8123/mcp"');
+    expect(client).toContain('without_auth');
   });
 
   it('defines get_connected_gateway_url in the shared runtime-config helper', async () => {
@@ -234,8 +208,7 @@ dependencies = ["strands-agents"]
 
     expect(agent).toContain('MyGatewayClient');
     expect(agent).toContain('my_gateway = MyGatewayClient.create()');
-    // The gateway client (MCPClient or AgentCoreGatewayLocalMultiplexClient)
-    // is itself a context manager — it's entered directly, no list resolution.
+    // The gateway client is an MCPClient context manager — entered directly.
     expect(agent).toMatch(/with \([\s\S]*?my_gateway[\s\S]*?\):/);
     // Tools array spreads list_tools_sync() — the same shape mcp-connection uses.
     expect(agent).toContain('*my_gateway.list_tools_sync()');

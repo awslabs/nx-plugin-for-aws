@@ -17,22 +17,22 @@ Generate an [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedro
 
 ### Generate an AgentCore Gateway
 
-<RunGenerator generator="cedar#agentcore-gateway" />
+<RunGenerator generator="agentcore-gateway" />
 
 ### Options
 
-<GeneratorParameters generator="cedar#agentcore-gateway" />
+<GeneratorParameters generator="agentcore-gateway" />
 
 ## Generator Output
 
-The generator creates a new project at `packages/<name>/` containing the Cedar policy source files, plus a CDK construct or Terraform module for the infrastructure:
+The generator creates a new project at `packages/<name>/`, plus a CDK construct or Terraform module for the infrastructure:
 
 <FileTree>
   - packages/\<name>/
-    - policies/
+    - policies/ Cedar policy source files (omitted when `cedarPolicy: false`)
       - permit-all.cedar Default Cedar policy that permits everything
       - README.md Reference for writing Cedar policies
-    - serve.ts Keep-alive for the serve targets, holding attached MCP servers open
+    - serve.ts Local gateway aggregating attached MCP servers for local development
     - project.json Adds the \<name>-serve and \<name>-serve-local aggregator targets
 </FileTree>
 
@@ -64,12 +64,16 @@ The generator creates a new project at `packages/<name>/` containing the Cedar p
 The generated construct creates the following AWS resources:
 
 - An `AgentCore::Gateway` configured for the MCP protocol with `GatewayAuthorizer.usingAwsIam()` (inbound IAM authentication)
-- An `AgentCore::PolicyEngine` running in `ENFORCE` mode, attached to the Gateway
+- An `AgentCore::PolicyEngine` running in `ENFORCE` mode, attached to the Gateway (omitted when `cedarPolicy: false`)
 - One `AgentCore::Policy` per `.cedar` file in `policies/`
 
 The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> so agents can discover it at runtime.
 
 ## Writing Policies
+
+:::note
+This section applies when the gateway is generated with `cedarPolicy: true` (the default). With `cedarPolicy: false` the gateway performs no policy evaluation — any caller with IAM access can invoke any tool.
+:::
 
 Cedar is the policy language used by AgentCore Gateway to authorize tool calls. Every `tools/list` and `tools/call` request flowing through the Gateway is evaluated against the attached policy set, and the caller must have at least one matching `permit` statement (and no matching `forbid`) for the request to succeed.
 
@@ -85,7 +89,7 @@ For example, to permit only a specific TypeScript agent role to invoke a particu
 permit (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
   principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
 };
@@ -93,16 +97,16 @@ permit (
 
 Re-synth or re-plan to deploy the new policy.
 
-### Placeholder substitution
+### Template variables
 
-The generator substitutes the following placeholders at synth/plan time so policies stay portable across accounts and Gateway redeploys:
+Policies are [EJS](https://ejs.co/) templates rendered at synth/plan time so they stay portable across accounts and Gateway redeploys:
 
-| Placeholder      | Substituted with                              |
-| ---------------- | --------------------------------------------- |
-| `${gateway_arn}` | The deployed Gateway's ARN                    |
-| `${account_id}`  | The AWS account this Gateway is deployed into |
+| Variable             | Substituted with                              |
+| -------------------- | --------------------------------------------- |
+| `<%= gatewayArn %>`  | The deployed Gateway's ARN                    |
+| `<%= accountId %>`   | The AWS account this Gateway is deployed into |
 
-Always reference these placeholders rather than hard-coding values.
+Always reference these variables rather than hard-coding values.
 
 ### ENFORCE mode and default-deny
 
@@ -123,9 +127,9 @@ The generator ships a default policy that permits any IAM caller from the AWS ac
 permit (
   principal is AgentCore::IamEntity,
   action,
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:*::${account_id}:*"
+  principal.id like "arn:aws:*::<%= accountId %>:*"
 };
 ```
 
@@ -162,7 +166,7 @@ where `<target-name>` is the Gateway target name (the kebab-cased construct id b
 The resource is always the Gateway itself:
 
 ```cedar
-resource == AgentCore::Gateway::"${gateway_arn}"
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
 ### Validation considerations
@@ -183,7 +187,7 @@ Pair a narrow `forbid` with a broader `permit` (Cedar evaluates `forbid` over `p
 forbid (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
   principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
 };
@@ -193,7 +197,7 @@ This denies the Python agent role from calling `ts-mcp___divide` while leaving t
 
 ## Local Development
 
-The generator adds a `<name>-serve-local` target to the Gateway project. This target is a continuous aggregator: when connected to MCP servers via the <Link path="guides/connection/agentcore-gateway-mcp">`cedar#agentcore-gateway#mcp-connection` generator</Link>, running it starts all attached MCP servers together for local multiplexing.
+The generator adds a `<name>-serve-local` target to the Gateway project, which runs `serve.ts`: a local gateway exposing a single MCP endpoint that aggregates every attached MCP server (connected via the <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` generator</Link>), with tools prefixed `<target>___<tool>` to match the deployed Gateway. Running it starts the local gateway and all attached MCP servers together.
 
 <NxCommands commands={["<name>-serve-local"]} />
 
@@ -201,6 +205,6 @@ See the connection guide for the full local development story.
 
 ## Next steps
 
-- Connect an MCP server: <Link path="guides/connection/agentcore-gateway-mcp">`cedar#agentcore-gateway#mcp-connection`</Link>
+- Connect an MCP server: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - Connect a TypeScript Agent: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
 - Connect a Python Agent: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

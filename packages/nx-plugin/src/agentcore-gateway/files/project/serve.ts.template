@@ -1,0 +1,126 @@
+// Local gateway for <%- nameClassName %>: a single MCP endpoint aggregating
+// every attached MCP server, with tools exposed as `<target>___<tool>` to
+// match the deployed AgentCore Gateway. Unlike the real gateway, Cedar
+// policies are not evaluated and there is no semantic tool search.
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import express from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const PORT = parseInt(process.env.PORT || '<%- port %>');
+const PREFIX_SEPARATOR = '___';
+const SESSION_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
+
+// MCP servers attached to this gateway, maintained by the
+// `agentcore-gateway#mcp-connection` generator.
+const ATTACHED_MCP_SERVERS = [<% attachedMcpServers.forEach((s) => { %>
+  { name: '<%- s.name %>', url: 'http://localhost:<%- s.port %>/mcp' },<% }); %>
+];
+
+// Forwards the inbound request's AgentCore session header to upstream calls
+const sessionContext = new AsyncLocalStorage<string | undefined>();
+
+const createUpstreamClient = async (url: string): Promise<Client> => {
+  const fetchWithSession: typeof fetch = async (input, init) => {
+    const headers = new Headers(init?.headers);
+    const sessionId = sessionContext.getStore();
+    if (sessionId) headers.set(SESSION_HEADER, sessionId);
+    return fetch(input, { ...init, headers });
+  };
+  const client = new Client({ name: '<%- nameKebabCase %>', version: '1.0.0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(url), {
+      fetch: fetchWithSession,
+    }),
+  );
+  return client;
+};
+
+const createServer = async (): Promise<Server> => {
+  const server = new Server(
+    { name: '<%- nameKebabCase %>', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const lists = await Promise.all(
+      ATTACHED_MCP_SERVERS.map(async (s) => {
+        const client = await createUpstreamClient(s.url);
+        try {
+          const { tools } = await client.listTools();
+          return tools.map((t) => ({
+            ...t,
+            name: `${s.name}${PREFIX_SEPARATOR}${t.name}`,
+          }));
+        } finally {
+          await client.close();
+        }
+      }),
+    );
+    return { tools: lists.flat() };
+  });
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const upstream = ATTACHED_MCP_SERVERS.find((s) =>
+      name.startsWith(`${s.name}${PREFIX_SEPARATOR}`),
+    );
+    if (!upstream) {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+    const client = await createUpstreamClient(upstream.url);
+    try {
+      return await client.callTool({
+        ...request.params,
+        name: name.slice(upstream.name.length + PREFIX_SEPARATOR.length),
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  return server;
+};
+
+const app = express();
+app.use(express.json());
+
+app.post('/mcp', async (req, res) => {
+  const sessionId = req.headers[SESSION_HEADER];
+  await sessionContext.run(
+    typeof sessionId === 'string' ? sessionId : undefined,
+    async () => {
+      try {
+        const server = await createServer();
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
+        res.on('close', () => {
+          transport.close();
+          server.close();
+        });
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        console.error('Error handling MCP request:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: 'Internal server error' },
+            id: null,
+          });
+        }
+      }
+    },
+  );
+});
+
+app.listen(PORT, () => {
+  console.log(`<%- nameKebabCase %>: local gateway listening on port ${PORT}`);
+});

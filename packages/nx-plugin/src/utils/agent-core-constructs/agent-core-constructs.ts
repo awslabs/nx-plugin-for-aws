@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -20,7 +19,6 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { withVersions } from '../versions';
 
 type IACProvider = { iac: Iac };
 
@@ -224,6 +222,7 @@ export interface AddAgentCoreGatewayInfraProps {
   gatewayNameKebabCase: string;
   projectName: string;
   projectDirectory: string;
+  cedarPolicy: boolean;
 }
 
 export const addAgentCoreGatewayInfra = async (
@@ -261,12 +260,6 @@ const addAgentCoreGatewayCDKInfra = async (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
 ) => {
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(['@aws-cdk/aws-bedrock-agentcore-alpha']),
-  );
-
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'cdk', 'app', 'agentcore-gateway'),
@@ -281,12 +274,25 @@ const addAgentCoreGatewayCDKInfra = async (
       nameClassName: options.gatewayNameClassName,
       nameKebabCase: options.gatewayNameKebabCase,
       projectDirectory: options.projectDirectory,
+      cedarPolicy: options.cedarPolicy,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'gateways',
+      'index.ts',
+    ),
+    './mcp-server-construct.js',
+  );
   await addStarExport(
     tree,
     joinPathFragments(
@@ -358,6 +364,7 @@ const addAgentCoreGatewayTerraformInfra = (
       nameClassName: options.gatewayNameClassName,
       nameKebabCase: options.gatewayNameKebabCase,
       projectDirectory: options.projectDirectory,
+      cedarPolicy: options.cedarPolicy,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

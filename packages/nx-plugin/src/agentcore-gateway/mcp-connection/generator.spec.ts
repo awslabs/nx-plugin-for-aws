@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO,
   agentcoreGatewayMcpConnectionGenerator,
 } from './generator';
 
-describe('cedar#agentcore-gateway#mcp-connection generator', () => {
+describe('agentcore-gateway#mcp-connection generator', () => {
   let tree: Tree;
 
   const addGateway = (name = 'my-gateway', rc = 'MyGateway') => {
@@ -45,7 +45,7 @@ describe('cedar#agentcore-gateway#mcp-connection generator', () => {
   };
 
   const gwComponent = (gw: { name: string; rc: string }) => ({
-    generator: 'cedar#agentcore-gateway',
+    generator: 'agentcore-gateway',
     name: gw.name,
     rc: gw.rc,
     protocol: 'mcp',
@@ -86,26 +86,15 @@ describe('cedar#agentcore-gateway#mcp-connection generator', () => {
     );
   });
 
-  it('back-propagates MCP server into an existing TS gateway client', async () => {
+  it('registers the MCP server in the gateway serve.ts', async () => {
     const gw = addGateway();
     const mcp = addMcp('other-mcp', 'OtherMcp', 8001);
 
-    // Simulate a TS gateway client generated earlier by the
-    // `ts#strands-agent#gateway-connection` generator.
     tree.write(
-      'packages/common/agent-connection/src/app/my-gateway-client.ts',
-      `import { McpClient } from '@strands-agents/sdk';
-import { LocalMcpServerBinding } from '../core/agentcore-gateway-mcp-local-client.js';
-
-const ATTACHED_MCP_SERVERS: LocalMcpServerBinding[] = [
-  { name: 'already-there', localUrl: 'http://localhost:8000/mcp' },
+      'packages/my-gateway/serve.ts',
+      `const ATTACHED_MCP_SERVERS = [
+  { name: 'already-there', url: 'http://localhost:8000/mcp' },
 ];
-
-export class MyGatewayClient {
-  static async create(): Promise<McpClient> {
-    return null as any;
-  }
-}
 `,
     );
 
@@ -116,24 +105,20 @@ export class MyGatewayClient {
       targetComponent: mcpComponent(mcp) as any,
     });
 
-    const client = tree
-      .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
-      .toString();
-    expect(client).toContain("name: 'other-mcp'");
-    expect(client).toContain("localUrl: 'http://localhost:8001/mcp'");
+    const serveTs = tree.read('packages/my-gateway/serve.ts')!.toString();
+    expect(serveTs).toContain("name: 'other-mcp'");
+    expect(serveTs).toContain("url: 'http://localhost:8001/mcp'");
     // The existing entry is preserved
-    expect(client).toContain('already-there');
+    expect(serveTs).toContain('already-there');
   });
 
-  it('back-propagation is idempotent for the same MCP server', async () => {
+  it('serve.ts registration is idempotent for the same MCP server', async () => {
     const gw = addGateway();
     const mcp = addMcp('other-mcp', 'OtherMcp', 8001);
 
     tree.write(
-      'packages/common/agent-connection/src/app/my-gateway-client.ts',
-      `import { LocalMcpServerBinding } from '../core/agentcore-gateway-mcp-local-client.js';
-
-const ATTACHED_MCP_SERVERS: LocalMcpServerBinding[] = [
+      'packages/my-gateway/serve.ts',
+      `const ATTACHED_MCP_SERVERS = [
 ];
 `,
     );
@@ -151,45 +136,9 @@ const ATTACHED_MCP_SERVERS: LocalMcpServerBinding[] = [
       targetComponent: mcpComponent(mcp) as any,
     });
 
-    const client = tree
-      .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
-      .toString();
-    const occurrences = (client.match(/'other-mcp'/g) ?? []).length;
+    const serveTs = tree.read('packages/my-gateway/serve.ts')!.toString();
+    const occurrences = (serveTs.match(/'other-mcp'/g) ?? []).length;
     expect(occurrences).toBe(1);
-  });
-
-  it('back-propagates MCP server into an existing Python gateway client', async () => {
-    const gw = addGateway();
-    const mcp = addMcp('py-mcp-x', 'PyMcpX', 8001);
-
-    tree.write(
-      'packages/common/agent_connection/my_mod/app/my_gateway_client.py',
-      `from .core.agentcore_gateway_mcp_local_client import LocalMcpServerBinding
-
-ATTACHED_MCP_SERVERS: list[LocalMcpServerBinding] = [
-]
-
-
-class MyGatewayClient:
-    @staticmethod
-    def create(session_id: str):
-        return None
-`,
-    );
-
-    await agentcoreGatewayMcpConnectionGenerator(tree, {
-      sourceProject: `@proj/${gw.name}`,
-      targetProject: `@proj/${mcp.name}`,
-      sourceComponent: gwComponent(gw) as any,
-      targetComponent: mcpComponent(mcp) as any,
-    });
-
-    const client = tree
-      .read('packages/common/agent_connection/my_mod/app/my_gateway_client.py')!
-      .toString();
-    expect(client).toContain('LocalMcpServerBinding(');
-    expect(client).toContain('name="py-mcp-x"');
-    expect(client).toContain('local_url="http://localhost:8001/mcp"');
   });
 
   it('fails when source is missing metadata', async () => {
@@ -252,7 +201,7 @@ class MyGatewayClient:
     const gw = addGateway();
     const mcp = addMcp();
     const { sharedConstructsGenerator } = await import(
-      '../../../utils/shared-constructs'
+      '../../utils/shared-constructs'
     );
     await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
@@ -271,7 +220,7 @@ class MyGatewayClient:
 
   it('exposes stable generator info id', () => {
     expect(AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO.id).toBe(
-      'cedar#agentcore-gateway#mcp-connection',
+      'agentcore-gateway#mcp-connection',
     );
   });
 });

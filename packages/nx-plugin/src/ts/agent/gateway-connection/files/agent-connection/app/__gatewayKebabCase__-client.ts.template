@@ -1,28 +1,22 @@
 import { McpClient } from '@strands-agents/sdk';
 import { AgentCoreGatewayMcpClient } from '../core/agentcore-gateway-mcp-client.js';
-import {
-  AgentCoreGatewayMcpLocalMultiplexClient,
-  LocalMcpServerBinding,
-} from '../core/agentcore-gateway-mcp-local-client.js';
 import { getConnectedGatewayUrl } from '../core/runtime-config.js';
-
-// MCP servers attached to <%- gatewayClassName %>, maintained by the
-// `agentcore-gateway#mcp-connection` generator for local development.
-const ATTACHED_MCP_SERVERS: LocalMcpServerBinding[] = [<% attachedMcpServers.forEach((s) => { %>
-  { name: '<%- s.name %>', localUrl: 'http://localhost:<%- s.port %>/mcp' },<% }); %>
-];
 
 /**
  * Client for the <%- gatewayClassName %> AgentCore Gateway.
  *
  * Deployed: a SigV4-signed MCP client pointing at the gateway URL.
- * Local (`SERVE_LOCAL=true`): multiplexes directly to each attached MCP
- * server, bypassing the gateway (Cedar policies are not evaluated).
+ * Local (`SERVE_LOCAL=true`): a plain-HTTP client pointing at the local
+ * gateway started by the gateway project's serve-local target. The local
+ * gateway aggregates every attached MCP server but does not evaluate
+ * Cedar policies.
  */
 export class <%- gatewayClassName %>Client {
   static async create(): Promise<McpClient> {
     if (process.env.SERVE_LOCAL === 'true') {
-      return new AgentCoreGatewayMcpLocalMultiplexClient(ATTACHED_MCP_SERVERS);
+      return AgentCoreGatewayMcpClient.withoutAuth({
+        gatewayUrl: 'http://localhost:<%- gatewayPort %>/mcp',
+      });
     }
     const gatewayUrl = await getConnectedGatewayUrl('<%- gatewayClassName %>');
     return AgentCoreGatewayMcpClient.withIamAuth({ gatewayUrl });

@@ -5,37 +5,27 @@ from strands.tools.mcp.mcp_client import MCPClient
 from <%- agentConnectionModuleName %>.core.agentcore_gateway_mcp_client import (
     AgentCoreGatewayMCPClient,
 )
-from <%- agentConnectionModuleName %>.core.agentcore_gateway_mcp_local_client import (
-    AgentCoreGatewayLocalMultiplexClient,
-    LocalMcpServerBinding,
-)
 from <%- agentConnectionModuleName %>.core.runtime_config import (
     get_connected_gateway_url,
 )
-
-# Both client modes are context managers exposing ``list_tools_sync()``, so
-# callers can treat the result of ``create()`` uniformly.
-GatewayToolsClient = MCPClient | AgentCoreGatewayLocalMultiplexClient
-
-# MCP servers attached to <%- gatewayClassName %>, maintained by the
-# `agentcore-gateway#mcp-connection` generator for local development.
-ATTACHED_MCP_SERVERS: list[LocalMcpServerBinding] = [<% attachedMcpServers.forEach((s) => { %>
-    LocalMcpServerBinding(name="<%- s.name %>", local_url="http://localhost:<%- s.port %>/mcp"),<% }); %>
-]
 
 
 class <%- gatewayClassName %>Client:
     """Client for the <%- gatewayClassName %> AgentCore Gateway.
 
     Deployed: a SigV4-signed MCP client pointing at the gateway URL.
-    Local (``SERVE_LOCAL=true``): multiplexes directly to each attached MCP
-    server, bypassing the gateway (Cedar policies are not evaluated).
+    Local (``SERVE_LOCAL=true``): a plain-HTTP client pointing at the local
+    gateway started by the gateway project's serve-local target. The local
+    gateway aggregates every attached MCP server but does not evaluate
+    Cedar policies.
     """
 
     @staticmethod
-    def create() -> GatewayToolsClient:
+    def create() -> MCPClient:
         if os.environ.get("SERVE_LOCAL") == "true":
-            return AgentCoreGatewayLocalMultiplexClient(ATTACHED_MCP_SERVERS)
+            return AgentCoreGatewayMCPClient.without_auth(
+                gateway_url="http://localhost:<%- gatewayPort %>/mcp"
+            )
         return AgentCoreGatewayMCPClient.with_iam_auth(
             gateway_url=get_connected_gateway_url("<%- gatewayClassName %>")
         )

@@ -16,7 +16,6 @@ import {
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
-  getAttachedMcpServerBindings,
 } from '../../../utils/agent-connection/agent-connection';
 import {
   addDestructuredImport,
@@ -57,7 +56,7 @@ export const tsAgentGatewayConnectionGenerator = async (
 
   if (!agentComponent || !gatewayComponent) {
     throw new Error(
-      'Both sourceComponent and targetComponent must be provided for ts#agent -> cedar#agentcore-gateway connections',
+      'Both sourceComponent and targetComponent must be provided for ts#agent -> agentcore-gateway connections',
     );
   }
 
@@ -85,19 +84,12 @@ export const tsAgentGatewayConnectionGenerator = async (
   const npmScope = getNpmScope(tree);
 
   // 1. Ensure the shared agent-connection project exists + has the gateway
-  //    core client templates (SigV4 MCP client + local multiplex client).
+  //    core client template.
   await ensureTypeScriptAgentConnectionProject(tree);
   addTypeScriptCoreClient(tree, 'gateway');
 
-  // 2. Generate the per-connection <Gateway>Client into app/, seeding
-  //    ATTACHED_MCP_SERVERS with any MCP servers already attached to the
-  //    gateway (the mcp-connection generator back-propagates servers
-  //    attached later).
-  const attachedMcpServers = getAttachedMcpServerBindings(
-    tree,
-    targetProject,
-    gatewayServeLocalTargetName,
-  );
+  // 2. Generate the per-connection <Gateway>Client into app/. Local mode
+  //    points at the gateway project's local gateway port.
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
@@ -105,7 +97,7 @@ export const tsAgentGatewayConnectionGenerator = async (
     {
       gatewayKebabCase,
       gatewayClassName,
-      attachedMcpServers,
+      gatewayPort: gatewayComponent.port ?? 8100,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );

@@ -83,7 +83,7 @@ export const getAgent = async (sessionId: string) =>
       auth: 'iam',
     } as any,
     targetComponent: {
-      generator: 'cedar#agentcore-gateway',
+      generator: 'agentcore-gateway',
       name: 'my-gateway',
       rc: 'MyGateway',
       protocol: 'mcp',
@@ -109,11 +109,6 @@ export const getAgent = async (sessionId: string) =>
     ).toBe(true);
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/core/agentcore-gateway-mcp-local-client.ts',
-      ),
-    ).toBe(true);
-    expect(
-      tree.exists(
         'packages/common/agent-connection/src/app/my-gateway-client.ts',
       ),
     ).toBe(true);
@@ -129,46 +124,25 @@ export const getAgent = async (sessionId: string) =>
     expect(client).toContain('export class MyGatewayClient');
     expect(client).toContain("getConnectedGatewayUrl('MyGateway')");
     expect(client).toContain('SERVE_LOCAL');
-    expect(client).toContain('ATTACHED_MCP_SERVERS');
     // create() returns a single McpClient in both modes
     expect(client).toContain('Promise<McpClient>');
   });
 
-  it('seeds ATTACHED_MCP_SERVERS from MCP servers already attached to the gateway', async () => {
+  it('points local mode at the gateway component port', async () => {
     setupProjects();
-    // Simulate a prior `cedar#agentcore-gateway#mcp-connection` run: the
-    // gateway's serve-local aggregator depends on an MCP server target.
-    tree.write(
-      'packages/my-mcp/project.json',
-      JSON.stringify({
-        name: '@test/my-mcp',
-        root: 'packages/my-mcp',
-        sourceRoot: 'packages/my-mcp/src',
-        metadata: {
-          components: [
-            { generator: 'ts#mcp-server', name: 'my-mcp', port: 8123 },
-          ],
-        },
-      }),
-    );
-    const gatewayConfig = JSON.parse(
-      tree.read('packages/my-gateway/project.json')!.toString(),
-    );
-    gatewayConfig.targets['my-gateway-serve-local'].dependsOn = [
-      { projects: ['@test/my-mcp'], target: 'my-mcp-serve-local' },
-    ];
-    tree.write(
-      'packages/my-gateway/project.json',
-      JSON.stringify(gatewayConfig),
-    );
-
-    await tsAgentGatewayConnectionGenerator(tree, fullOptions());
+    await tsAgentGatewayConnectionGenerator(tree, {
+      ...fullOptions(),
+      targetComponent: {
+        ...fullOptions().targetComponent,
+        port: 8123,
+      } as any,
+    });
 
     const client = tree
       .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
       .toString();
-    expect(client).toContain("name: 'my-mcp'");
-    expect(client).toContain("localUrl: 'http://localhost:8123/mcp'");
+    expect(client).toContain("gatewayUrl: 'http://localhost:8123/mcp'");
+    expect(client).toContain('withoutAuth');
   });
 
   it('defines getConnectedGatewayUrl in the shared runtime-config helper', async () => {

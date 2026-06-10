@@ -6,7 +6,6 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
 import pyProjectGenerator, {
@@ -14,7 +13,6 @@ import pyProjectGenerator, {
 } from '../../py/project/generator';
 import tsProjectGenerator from '../../ts/lib/generator';
 import { addStarExport, applyGritQL, matchGritQL } from '../ast';
-import { readProjectConfigurationUnqualified } from '../nx';
 import { addDependenciesToPyProjectToml } from '../py';
 
 /** Prefix a GritQL pattern with `language python` */
@@ -63,54 +61,6 @@ export function getPythonAgentConnectionPackageName(tree: Tree): string {
     directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
   });
   return fullyQualifiedName;
-}
-
-/**
- * An MCP server attached to a gateway, as listed in a generated gateway
- * client's `ATTACHED_MCP_SERVERS` for local-mode multiplexing.
- */
-export interface AttachedMcpServerBinding {
-  name: string;
-  port: number;
-}
-
-/**
- * Resolve the MCP servers already attached to a gateway by reading the
- * gateway's `<gateway>-serve-local` aggregator dependencies (added by the
- * `cedar#agentcore-gateway#mcp-connection` generator) and looking up each
- * MCP server component's port. Used to seed `ATTACHED_MCP_SERVERS` in
- * agent-side gateway clients generated after the MCP servers were attached.
- */
-export function getAttachedMcpServerBindings(
-  tree: Tree,
-  gatewayProject: ProjectConfiguration,
-  gatewayServeLocalTargetName: string,
-): AttachedMcpServerBinding[] {
-  const dependsOn =
-    gatewayProject.targets?.[gatewayServeLocalTargetName]?.dependsOn ?? [];
-  const bindings: AttachedMcpServerBinding[] = [];
-  for (const dep of dependsOn) {
-    if (typeof dep === 'string' || !dep.target.endsWith('-serve-local')) {
-      continue;
-    }
-    const mcpName = dep.target.slice(0, -'-serve-local'.length);
-    const projects = Array.isArray(dep.projects)
-      ? dep.projects
-      : dep.projects
-        ? [dep.projects]
-        : [];
-    for (const projectName of projects) {
-      const components =
-        ((
-          readProjectConfigurationUnqualified(tree, projectName).metadata as any
-        )?.components as Array<{ name?: string; port?: number }>) ?? [];
-      const component = components.find((c) => c.name === mcpName);
-      if (component?.port) {
-        bindings.push({ name: mcpName, port: component.port });
-      }
-    }
-  }
-  return bindings;
 }
 
 /**

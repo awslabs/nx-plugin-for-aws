@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { expectHasMetricTags } from '../utils/metrics.spec';
+import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import {
   AGENTCORE_GATEWAY_GENERATOR_INFO,
   agentcoreGatewayGenerator,
 } from './generator';
 
-describe('cedar#agentcore-gateway generator', () => {
+describe('agentcore-gateway generator', () => {
   let tree: Tree;
 
   beforeEach(() => {
@@ -128,6 +128,22 @@ describe('cedar#agentcore-gateway generator', () => {
       expect((rerunConfig.metadata as any).components).toHaveLength(1);
     });
 
+    it('supports a gateway named "gateway" — vended class must not clash with CDK imports', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'gateway',
+        iac: 'cdk',
+      });
+
+      const construct = tree
+        .read('packages/common/constructs/src/app/gateways/gateway/gateway.ts')!
+        .toString();
+      expect(construct).toContain('export class Gateway extends Construct');
+      // The CDK Gateway class must be referenced via a namespace so the
+      // vended `Gateway` class does not collide with it.
+      expect(construct).toContain('new agentcore.Gateway(');
+      expect(construct).not.toMatch(/import \{[^}]*\bGateway\b[^}]*\} from/);
+    });
+
     it('kebab-cases class-style names and pascal-cases runtime config keys', async () => {
       await agentcoreGatewayGenerator(tree, {
         name: 'ShopFront Gateway',
@@ -169,12 +185,27 @@ describe('cedar#agentcore-gateway generator', () => {
         .toString();
       expect(construct).toContain('class MyGateway');
       expect(construct).toContain(
-        'protocolConfiguration: new McpProtocolConfiguration',
+        'protocolConfiguration: new agentcore.McpProtocolConfiguration',
       );
       expect(construct).toContain(
-        'authorizerConfiguration: GatewayAuthorizer.usingAwsIam()',
+        'authorizerConfiguration: agentcore.GatewayAuthorizer.usingAwsIam()',
       );
-      expect(construct).toContain('PolicyEngineMode.ENFORCE');
+      expect(construct).toContain("mode: 'ENFORCE'");
+    });
+
+    it('uses only stable aws-cdk-lib modules — no alpha imports, no bare-named CDK imports', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      expect(construct).not.toContain('@aws-cdk/aws-bedrock-agentcore-alpha');
+      // Namespace imports avoid clashes between the CDK `Gateway` class and a
+      // vended gateway class named `Gateway` (a gateway generated as "gateway")
+      expect(construct).toContain(
+        "import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore'",
+      );
+      expect(construct).not.toMatch(/import \{[^}]*\bGateway\b[^}]*\} from/);
     });
 
     it('uses IAM SigV4 outbound (iamCredentialProvider) for MCP server targets', () => {
@@ -187,12 +218,13 @@ describe('cedar#agentcore-gateway generator', () => {
       expect(construct).toContain("service: 'bedrock-agentcore'");
     });
 
-    it('includes the CheckAuthorizePermissions workaround until the alpha L2 adds it', () => {
+    it('grants the gateway role policy evaluation permissions', () => {
       const construct = tree
         .read(
           'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
         )!
         .toString();
+      expect(construct).toContain('bedrock-agentcore:AuthorizeAction');
       expect(construct).toContain(
         'bedrock-agentcore:CheckAuthorizePermissions',
       );
@@ -275,12 +307,12 @@ describe('cedar#agentcore-gateway generator', () => {
       });
     });
 
-    it('ships a permit-all.cedar scoped to the gateway ARN via token substitution', () => {
+    it('ships a permit-all.cedar scoped to the gateway ARN via ejs tokens', () => {
       const permitAll = tree
         .read('packages/my-gateway/policies/permit-all.cedar')!
         .toString();
       expect(permitAll).toMatch(/permit\s*\(/);
-      expect(permitAll).toContain('${gateway_arn}');
+      expect(permitAll).toContain('<%= gatewayArn %>');
       expect(permitAll).toContain('AgentCore::Gateway');
     });
 
@@ -290,6 +322,56 @@ describe('cedar#agentcore-gateway generator', () => {
         .toString();
       expect(readme).toContain('ENFORCE');
       expect(readme.toLowerCase()).toContain('cedar');
+    });
+  });
+
+  describe('cedarPolicy: false', () => {
+    beforeEach(async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+        cedarPolicy: false,
+      });
+    });
+
+    it('omits the policies directory', () => {
+      expect(tree.exists('packages/my-gateway/policies')).toBe(false);
+      expect(tree.exists('packages/my-gateway/serve.ts')).toBe(true);
+    });
+
+    it('omits the policy engine from the CDK construct', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      expect(construct).not.toContain('PolicyEngine');
+      expect(construct).not.toContain('ejs');
+      expect(construct).toContain('new agentcore.Gateway(');
+      expect(construct).toContain('addMcpServer');
+    });
+
+    it('omits ejs from the workspace dependencies', () => {
+      const pkg = JSON.parse(tree.read('package.json')!.toString());
+      expect(pkg.devDependencies?.ejs).toBeUndefined();
+    });
+  });
+
+  describe('cedarPolicy: false (terraform)', () => {
+    it('omits the policy engine from the terraform module', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'terraform',
+        cedarPolicy: false,
+      });
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      expect(module).not.toContain('policy_engine');
+      expect(module).not.toContain('awscc');
+      expect(module).toContain('aws_bedrockagentcore_gateway');
     });
   });
 });

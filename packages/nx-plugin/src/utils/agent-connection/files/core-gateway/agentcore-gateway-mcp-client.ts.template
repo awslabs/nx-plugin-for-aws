@@ -37,18 +37,35 @@ export class AgentCoreGatewayMcpClient {
         service: 'bedrock-agentcore',
         region,
       });
-      const headers = new Headers(init?.headers);
-      const sessionId = getCurrentSessionId();
-      if (sessionId) headers.set(SESSION_HEADER, sessionId);
-      return client.fetch(input, { ...init, headers });
+      return client.fetch(input, {
+        ...init,
+        headers: withSessionHeader(init?.headers),
+      });
     };
-    const transport = new StreamableHTTPClientTransport(
-      new URL(options.gatewayUrl),
-      { fetch: sigv4Fetch },
-    );
+    return AgentCoreGatewayMcpClient.create(options.gatewayUrl, sigv4Fetch);
+  }
+
+  /** Plain-HTTP gateway client, for the local gateway started by serve-local. */
+  static withoutAuth(options: { gatewayUrl: string }): McpClient {
+    const plainFetch: typeof fetch = async (input, init) =>
+      fetch(input, { ...init, headers: withSessionHeader(init?.headers) });
+    return AgentCoreGatewayMcpClient.create(options.gatewayUrl, plainFetch);
+  }
+
+  private static create(gatewayUrl: string, fetchFn: typeof fetch): McpClient {
+    const transport = new StreamableHTTPClientTransport(new URL(gatewayUrl), {
+      fetch: fetchFn,
+    });
     return new McpClient({ transport });
   }
 }
+
+const withSessionHeader = (init?: RequestInit['headers']): Headers => {
+  const headers = new Headers(init);
+  const sessionId = getCurrentSessionId();
+  if (sessionId) headers.set(SESSION_HEADER, sessionId);
+  return headers;
+};
 
 const parseRegionFromGatewayUrl = (gatewayUrl: string): string => {
   const match = /\.bedrock-agentcore\.([^.]+)\.amazonaws\.com/.exec(gatewayUrl);

@@ -17,12 +17,13 @@ gateway will deny every request** — Cedar uses a default-deny evaluation
 model, so every request requires at least one matching `permit` to be
 allowed.
 
-## Placeholder tokens
+## Template variables
 
-These strings are substituted at synth/plan time:
+Policies are [EJS](https://ejs.co/) templates rendered at synth/plan time
+with the following variables in scope:
 
-- `${gateway_arn}` — this gateway's ARN
-- `${account_id}` — the AWS account this gateway is deployed into
+- `<%%= gatewayArn %>` — this gateway's ARN
+- `<%%= accountId %>` — the AWS account this gateway is deployed into
 
 ## Adding a new policy
 
