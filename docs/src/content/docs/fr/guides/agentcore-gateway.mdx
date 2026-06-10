@@ -29,14 +29,16 @@ Le générateur crée un nouveau projet dans `packages/<name>/` contenant les fi
 
 <FileTree>
   - packages/\<name>/
-    - policies/
+    - policies/ Fichiers source de politiques Cedar (omis lorsque `cedarPolicy: false`)
       - permit-all.cedar Politique Cedar par défaut qui autorise tout
       - README.md Référence pour écrire des politiques Cedar
-    - serve.ts Keep-alive pour les cibles serve, maintenant les serveurs MCP attachés ouverts
+    - serve-local.ts Gateway locale agrégeant les serveurs MCP attachés pour le développement local
     - project.json Ajoute les cibles d'agrégation \<name>-serve et \<name>-serve-local
 </FileTree>
 
 ### Infrastructure
+
+L'infrastructure est générée lorsque `infra` est `agentcore` (la valeur par défaut). Avec `infra: none`, aucune infrastructure n'est générée — réexécutez le générateur avec `infra: agentcore` plus tard pour l'ajouter.
 
 <Snippet name="shared-constructs" />
 
@@ -64,12 +66,16 @@ Le générateur crée un nouveau projet dans `packages/<name>/` contenant les fi
 Le construct généré crée les ressources AWS suivantes :
 
 - Une `AgentCore::Gateway` configurée pour le protocole MCP avec `GatewayAuthorizer.usingAwsIam()` (authentification IAM entrante)
-- Un `AgentCore::PolicyEngine` fonctionnant en mode `ENFORCE`, attaché à la Gateway
+- Un `AgentCore::PolicyEngine` fonctionnant en mode `ENFORCE`, attaché à la Gateway (omis lorsque `cedarPolicy: false`)
 - Une `AgentCore::Policy` par fichier `.cedar` dans `policies/`
 
 L'URL de la Gateway est automatiquement enregistrée dans l'espace de noms `agentcore.gateways.<ClassName>` de la <Link path="guides/runtime-config">Configuration d'exécution</Link> afin que les agents puissent la découvrir au moment de l'exécution.
 
 ## Écriture de politiques
+
+:::note
+Cette section s'applique lorsque la gateway est générée avec `cedarPolicy: true` (la valeur par défaut). Avec `cedarPolicy: false`, la gateway n'effectue aucune évaluation de politique — tout appelant avec un accès IAM peut invoquer n'importe quel outil.
+:::
 
 Cedar est le langage de politique utilisé par AgentCore Gateway pour autoriser les appels d'outils. Chaque requête `tools/list` et `tools/call` transitant par la Gateway est évaluée par rapport à l'ensemble de politiques attaché, et l'appelant doit avoir au moins une instruction `permit` correspondante (et aucune `forbid` correspondante) pour que la requête réussisse.
 
@@ -193,7 +199,7 @@ Cela refuse au rôle d'agent Python d'appeler `ts-mcp___divide` tout en laissant
 
 ## Développement local
 
-Le générateur ajoute une cible `<name>-serve-local` au projet Gateway. Cette cible est un agrégateur continu : lorsqu'elle est connectée à des serveurs MCP via le <Link path="guides/connection/agentcore-gateway-mcp">générateur `agentcore-gateway#mcp-connection`</Link>, son exécution démarre tous les serveurs MCP attachés ensemble pour le multiplexage local.
+Le générateur ajoute une cible `<name>-serve-local` au projet Gateway, qui exécute `serve-local.ts` : une gateway locale exposant un seul point de terminaison MCP qui agrège chaque serveur MCP attaché (connecté via le <Link path="guides/connection/agentcore-gateway-mcp">générateur `agentcore-gateway#mcp-connection`</Link>), avec des outils préfixés `<target>___<tool>` pour correspondre à la Gateway déployée. Son exécution démarre la gateway locale et tous les serveurs MCP attachés ensemble.
 
 <NxCommands commands={["<name>-serve-local"]} />
 

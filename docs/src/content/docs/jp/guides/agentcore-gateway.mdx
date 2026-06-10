@@ -29,10 +29,10 @@ import NxCommands from '@components/nx-commands.astro';
 
 <FileTree>
   - packages/\<name>/
-    - policies/
+    - policies/ Cedarポリシーソースファイル（`cedarPolicy: false`の場合は省略）
       - permit-all.cedar すべてを許可するデフォルトのCedarポリシー
       - README.md Cedarポリシーの記述に関するリファレンス
-    - serve.ts serveターゲットのキープアライブ、アタッチされたMCPサーバーを開いたまま保持
+    - serve-local.ts ローカル開発用にアタッチされたMCPサーバーを集約するローカルゲートウェイ
     - project.json \<name>-serveおよび\<name>-serve-localアグリゲーターターゲットを追加
 </FileTree>
 
@@ -93,16 +93,16 @@ permit (
 
 新しいポリシーをデプロイするには、再synthまたは再planを実行します。
 
-### プレースホルダーの置換
+### テンプレート変数
 
-ジェネレーターは、synth/plan時に以下のプレースホルダーを置換するため、ポリシーはアカウント間およびGatewayの再デプロイ間で移植可能なままです：
+ポリシーは[EJS](https://ejs.co/)テンプレートであり、synth/plan時にレンダリングされるため、アカウント間およびGatewayの再デプロイ間で移植可能なままです：
 
-| プレースホルダー | 置換される値                                  |
-| ---------------- | --------------------------------------------- |
-| `${gateway_arn}` | デプロイされたGatewayのARN                    |
-| `${account_id}`  | このGatewayがデプロイされるAWSアカウント      |
+| 変数                 | 置換される値                                  |
+| -------------------- | --------------------------------------------- |
+| `<%= gatewayArn %>`  | デプロイされたGatewayのARN                    |
+| `<%= accountId %>`   | このGatewayがデプロイされるAWSアカウント      |
 
-値をハードコーディングするのではなく、常にこれらのプレースホルダーを参照してください。
+値をハードコーディングするのではなく、常にこれらの変数を参照してください。
 
 ### ENFORCEモードとデフォルト拒否
 
@@ -123,9 +123,9 @@ Tool Execution Denied: Tool call not allowed due to policy enforcement
 permit (
   principal is AgentCore::IamEntity,
   action,
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:*::${account_id}:*"
+  principal.id like "arn:aws:*::<%= accountId %>:*"
 };
 ```
 
@@ -162,7 +162,7 @@ AgentCore::Action::"<target-name>___<tool-name>"
 リソースは常にGateway自体です：
 
 ```cedar
-resource == AgentCore::Gateway::"${gateway_arn}"
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
 ### 検証の考慮事項
@@ -193,7 +193,7 @@ forbid (
 
 ## ローカル開発
 
-ジェネレーターは、Gatewayプロジェクトに`<name>-serve-local`ターゲットを追加します。このターゲットは継続的なアグリゲーターです：<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`ジェネレーター</Link>を介してMCPサーバーに接続されている場合、それを実行すると、ローカル多重化のためにアタッチされたすべてのMCPサーバーが一緒に起動します。
+ジェネレーターは、Gatewayプロジェクトに`<name>-serve-local`ターゲットを追加します。このターゲットは`serve-local.ts`を実行します：デプロイされたGatewayに一致するように、ツールに`<target>___<tool>`のプレフィックスが付けられた、アタッチされたすべてのMCPサーバー（<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`ジェネレーター</Link>を介して接続）を集約する単一のMCPエンドポイントを公開するローカルゲートウェイです。これを実行すると、ローカルゲートウェイとアタッチされたすべてのMCPサーバーが一緒に起動します。
 
 <NxCommands commands={["<name>-serve-local"]} />
 
@@ -204,3 +204,4 @@ forbid (
 - MCPサーバーを接続する：<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - TypeScriptエージェントを接続する：<Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
 - Pythonエージェントを接続する：<Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
+ージェントを接続する：<Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

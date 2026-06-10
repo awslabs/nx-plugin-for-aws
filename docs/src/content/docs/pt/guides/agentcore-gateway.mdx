@@ -25,14 +25,14 @@ Gere um projeto [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/b
 
 ## Saída do Gerador
 
-O gerador cria um novo projeto em `packages/<name>/` contendo os arquivos de origem de política Cedar, além de um construto CDK ou módulo Terraform para a infraestrutura:
+O gerador cria um novo projeto em `packages/<name>/`, além de um construto CDK ou módulo Terraform para a infraestrutura:
 
 <FileTree>
   - packages/\<name>/
-    - policies/
+    - policies/ Arquivos de origem de política Cedar (omitidos quando `cedarPolicy: false`)
       - permit-all.cedar Política Cedar padrão que permite tudo
       - README.md Referência para escrever políticas Cedar
-    - serve.ts Keep-alive para os alvos serve, mantendo os servidores MCP anexados abertos
+    - serve-local.ts Gateway local agregando servidores MCP anexados para desenvolvimento local
     - project.json Adiciona os alvos agregadores \<name>-serve e \<name>-serve-local
 </FileTree>
 
@@ -85,7 +85,7 @@ Por exemplo, para permitir apenas que uma função de agente TypeScript específ
 permit (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
   principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
 };
@@ -93,16 +93,16 @@ permit (
 
 Execute re-synth ou re-plan para implantar a nova política.
 
-### Substituição de placeholders
+### Variáveis de template
 
-O gerador substitui os seguintes placeholders no momento do synth/plan para que as políticas permaneçam portáveis entre contas e reimplantações do Gateway:
+As políticas são templates [EJS](https://ejs.co/) renderizados no momento do synth/plan para que permaneçam portáveis entre contas e reimplantações do Gateway:
 
-| Placeholder      | Substituído por                                    |
-| ---------------- | -------------------------------------------------- |
-| `${gateway_arn}` | O ARN do Gateway implantado                        |
-| `${account_id}`  | A conta AWS na qual este Gateway está implantado   |
+| Variável             | Substituída por                               |
+| -------------------- | --------------------------------------------- |
+| `<%= gatewayArn %>`  | O ARN do Gateway implantado                   |
+| `<%= accountId %>`   | A conta AWS na qual este Gateway está implantado |
 
-Sempre referencie esses placeholders em vez de codificar valores diretamente.
+Sempre referencie essas variáveis em vez de codificar valores diretamente.
 
 ### Modo ENFORCE e negação padrão
 
@@ -123,9 +123,9 @@ O gerador fornece uma política padrão que permite qualquer chamador IAM da con
 permit (
   principal is AgentCore::IamEntity,
   action,
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:*::${account_id}:*"
+  principal.id like "arn:aws:*::<%= accountId %>:*"
 };
 ```
 
@@ -183,7 +183,7 @@ Emparelhe um `forbid` estreito com um `permit` mais amplo (Cedar avalia `forbid`
 forbid (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
   principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
 };
@@ -193,7 +193,7 @@ Isso nega à função de agente Python a chamada de `ts-mcp___divide` enquanto m
 
 ## Desenvolvimento Local
 
-O gerador adiciona um alvo `<name>-serve-local` ao projeto Gateway, que executa `serve.ts`: um gateway local expondo um único endpoint MCP que agrega cada servidor MCP anexado (conectado via o <Link path="guides/connection/agentcore-gateway-mcp">gerador `agentcore-gateway#mcp-connection`</Link>), com ferramentas prefixadas `<target>___<tool>` para corresponder ao Gateway implantado. Executá-lo inicia o gateway local e todos os servidores MCP anexados juntos.
+O gerador adiciona um alvo `<name>-serve-local` ao projeto Gateway, que executa `serve-local.ts`: um gateway local expondo um único endpoint MCP que agrega cada servidor MCP anexado (conectado via o <Link path="guides/connection/agentcore-gateway-mcp">gerador `agentcore-gateway#mcp-connection`</Link>), com ferramentas prefixadas `<target>___<tool>` para corresponder ao Gateway implantado. Executá-lo inicia o gateway local e todos os servidores MCP anexados juntos.
 
 <NxCommands commands={["<name>-serve-local"]} />
 
@@ -202,5 +202,8 @@ Consulte o guia de conexão para a história completa de desenvolvimento local.
 ## Próximos passos
 
 - Conectar um servidor MCP: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
+- Conectar um Agente TypeScript: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
+- Conectar um Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
+/Link>
 - Conectar um Agente TypeScript: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
 - Conectar um Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
