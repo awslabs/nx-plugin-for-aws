@@ -159,10 +159,19 @@ variable "tags" {
   default     = {}
 }
 
+# Suffix appended to physical resource names so that multiple deployments
+# (e.g. separate environments in the same account and region) don't collide.
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 locals {
   default_port           = var.engine == "aurora-mysql" ? 3306 : 5432
   default_engine_version = var.engine == "aurora-mysql" ? "8.0.mysql_aurora.3.12.0" : "17.7"
   parameter_group_family = var.engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql${split(".", coalesce(var.engine_version, local.default_engine_version))[0]}"
+  cluster_name           = "${var.name}-aurora-${random_string.suffix.result}"
 }
 
 resource "aws_rds_cluster_parameter_group" "database" {
@@ -260,7 +269,7 @@ resource "aws_security_group" "database" {
 }
 
 resource "aws_db_subnet_group" "database" {
-  name       = "${var.name}-aurora"
+  name       = local.cluster_name
   subnet_ids = var.subnet_ids
 
   tags = merge(var.tags, {
@@ -300,7 +309,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 resource "aws_rds_cluster" "database" {
   #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
-  cluster_identifier                  = "${var.name}-aurora"
+  cluster_identifier                  = local.cluster_name
   engine                              = var.engine
   engine_version                      = coalesce(var.engine_version, local.default_engine_version)
   database_name                       = var.database_name
@@ -314,7 +323,7 @@ resource "aws_rds_cluster" "database" {
   kms_key_id                          = aws_kms_key.database.arn
   deletion_protection                 = var.deletion_protection
   skip_final_snapshot                 = var.skip_final_snapshot
-  final_snapshot_identifier           = var.skip_final_snapshot ? null : "${var.name}-aurora-final-snapshot"
+  final_snapshot_identifier           = var.skip_final_snapshot ? null : "${local.cluster_name}-final-snapshot"
   iam_database_authentication_enabled = true
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
@@ -334,7 +343,7 @@ resource "aws_rds_cluster" "database" {
 resource "aws_rds_cluster_instance" "database" {
   count = var.instance_count
 
-  identifier           = "${var.name}-aurora-${count.index + 1}"
+  identifier           = "${local.cluster_name}-${count.index + 1}"
   cluster_identifier   = aws_rds_cluster.database.id
   instance_class       = "db.serverless"
   engine               = aws_rds_cluster.database.engine
@@ -388,7 +397,7 @@ resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
 resource "aws_cloudformation_stack" "credentials_rotation" {
   #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
   count = var.enable_credential_rotation ? 1 : 0
-  name  = "${var.name}-aurora-credentials-rotation"
+  name  = "${local.cluster_name}-credentials-rotation"
 
   capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
 
@@ -402,7 +411,7 @@ resource "aws_cloudformation_stack" "credentials_rotation" {
           SecretId = aws_secretsmanager_secret.credentials.arn
           HostedRotationLambda = {
             RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
-            RotationLambdaName  = "${var.name}-aurora-credentials-rotation"
+            RotationLambdaName  = "${local.cluster_name}-credentials-rotation"
             VpcSecurityGroupIds = aws_security_group.rotation[0].id
             VpcSubnetIds        = join(",", var.lambda_subnet_ids)
           }
@@ -482,7 +491,7 @@ resource "aws_security_group" "proxy" {
 resource "aws_db_proxy" "aurora" {
   count = var.enable_rds_proxy ? 1 : 0
 
-  name                   = "${var.name}-proxy"
+  name                   = "${var.name}-proxy-${random_string.suffix.result}"
   default_auth_scheme    = "IAM_AUTH"
   engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
   role_arn               = aws_iam_role.proxy[0].arn
@@ -628,7 +637,7 @@ resource "aws_iam_role_policy_attachment" "backup" {
 resource "aws_backup_vault" "database" {
   count = var.enable_backup ? 1 : 0
 
-  name        = "${var.name}-aurora-backup"
+  name        = "${local.cluster_name}-backup"
   kms_key_arn = aws_kms_key.database.arn
   tags        = var.tags
 }
@@ -636,7 +645,7 @@ resource "aws_backup_vault" "database" {
 resource "aws_backup_plan" "database" {
   count = var.enable_backup ? 1 : 0
 
-  name = "${var.name}-aurora-backup"
+  name = "${local.cluster_name}-backup"
 
   rule {
     rule_name         = "daily-backup"
