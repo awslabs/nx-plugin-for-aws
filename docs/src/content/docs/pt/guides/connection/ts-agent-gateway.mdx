@@ -75,7 +75,7 @@ export const getAgent = async () => {
 };
 ```
 
-Quando implantado (`SERVE_LOCAL` não definido), `create()` retorna um único `McpClient` apontado para o endpoint MCP do Gateway e autenticado com SigV4. Quando `SERVE_LOCAL=true`, ele retorna um array de `McpClient`s — um por servidor MCP na lista `ATTACHED_MCP_SERVERS` do cliente. O `Agent.tools` do Strands aceita qualquer formato (ele achata transparentemente arrays de ferramentas aninhados), então o mesmo `agent.ts` funciona uniformemente em ambos os modos.
+`create()` sempre retorna um único `McpClient`. Quando implantado (`SERVE_LOCAL` não definido), ele aponta para o endpoint MCP do Gateway e autentica com SigV4. Quando `SERVE_LOCAL=true`, é um cliente multiplex que distribui para todos os servidores MCP em `ATTACHED_MCP_SERVERS`, então o mesmo `agent.ts` funciona uniformemente em ambos os modos.
 
 O ID da sessão é propagado automaticamente para os servidores MCP downstream: o transporte subjacente lê a sessão com escopo de solicitação através do [contexto de sessão TS do Strands](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) e o encaminha para o Gateway como o cabeçalho `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
@@ -139,19 +139,13 @@ Execute o agente localmente com:
 
 <NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
 
-### `GATEWAY_URL_OVERRIDE`
+Para executar o agente localmente **contra o Gateway implantado** (por exemplo, para exercitar políticas Cedar), use o target `serve` do agente. Sem `SERVE_LOCAL` definido, o cliente resolve a URL do Gateway implantado a partir da configuração de runtime e assina solicitações SigV4 com suas credenciais AWS locais:
 
-Para executar o agente localmente **contra um Gateway implantado** (por exemplo, para exercitar políticas Cedar), defina:
-
-```bash
-export GATEWAY_URL_OVERRIDE=https://<gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
-```
-
-Quando definido, o cliente usa a URL do Gateway implantado e assina solicitações SigV4 com suas credenciais AWS locais em vez de recorrer à multiplexação local.
+<NxCommands commands={["<agent-name>-serve <project-name>"]} />
 
 ### Fidelidade local
 
 O modo multiplex local ignora o próprio Gateway, então:
 
-- **Sem avaliação de política Cedar.** Todas as ferramentas são visíveis para o agente, independentemente das políticas. Use `GATEWAY_URL_OVERRIDE` para exercitar políticas contra um Gateway implantado.
+- **Sem avaliação de política Cedar.** Todas as ferramentas são visíveis para o agente, independentemente das políticas. Use o target `serve` para exercitar políticas contra o Gateway implantado.
 - **A prefixação de nomes de ferramentas é preservada.** As ferramentas de cada servidor MCP local são encapsuladas para expor nomes no formato `<target-name>___<tool-name>`, correspondendo ao que o Gateway implantado emite. Isso mantém o prompt do sistema de um agente e os nomes de ação Cedar que você referencia consistentes entre execuções locais e implantadas.
