@@ -12,21 +12,21 @@ import InstallCommand from '@components/install-command.astro';
 
 El `CloudscapeReactTsWebsiteProject` utilizado en la aplicación de lista de compras configuró un sitio web React con CloudScape y autenticación Cognito integrada.
 
-Este tipo de proyecto utilizaba [`create-react-app`](https://github.com/facebook/create-react-app), que ahora está obsoleto. Para migrar el sitio web en esta guía, usaremos el <Link path="/guides/react-website">generador `ts#react-website`</Link>, que emplea tecnologías más modernas y soportadas, específicamente [Vite](https://vite.dev/).
+Este tipo de proyecto utilizaba [`create-react-app`](https://github.com/facebook/create-react-app), que ahora está obsoleto. Para migrar el sitio web en esta guía, usaremos el <Link path="/guides/react-website">generador `ts#website`</Link>, que emplea tecnologías más modernas y soportadas, específicamente [Vite](https://vite.dev/).
 
 Como parte de la migración, también cambiaremos del React Router configurado por PDK a [TanStack Router](https://tanstack.com/router), que añade mayor seguridad de tipos al enrutamiento del sitio web.
 
 #### Generar un sitio web React
 
-Ejecuta el <Link path="/guides/react-website">generador `ts#react-website`</Link> para configurar tu proyecto de sitio web en `packages/website`:
+Ejecuta el <Link path="/guides/react-website">generador `ts#website`</Link> con `framework` establecido en `react` para configurar tu proyecto de sitio web en `packages/website`:
 
-<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react' }} />
 
 #### Añadir autenticación Cognito
 
-El generador de sitios web React anterior no incluye autenticación Cognito por defecto como `CloudscapeReactTsWebsiteProject`, en su lugar se añade explícitamente mediante el <Link path="/guides/react-website-auth">generador `ts#react-website#auth`</Link>.
+El generador de sitios web React anterior no incluye autenticación Cognito por defecto como `CloudscapeReactTsWebsiteProject`, en su lugar se añade explícitamente mediante el <Link path="/guides/react-website-auth">generador `ts#website#auth`</Link>.
 
-<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
 
 Esto añade componentes React que gestionan las redirecciones necesarias para asegurar que los usuarios inicien sesión usando la interfaz alojada de Cognito. También añade un constructo CDK para desplegar los recursos de Cognito en `packages/common/constructs`, llamado `UserIdentity`.
 
@@ -62,6 +62,23 @@ El `CloudscapeReactTsWebsiteProject` incluía automáticamente una dependencia d
 
 <InstallCommand pkg="@aws-northstar/ui" />
 
+`@aws-northstar/ui` incluye un componente de editor de código que depende de `ace-builds`, usando una importación específica de webpack que Vite no puede resolver. Como nuestra aplicación de lista de compras no usa este componente, lo excluimos del bundle añadiéndolo a la configuración `external` dentro de las opciones `build` existentes en `packages/website/vite.config.mts`:
+
+```diff lang="ts"
+// packages/website/vite.config.mts
+  build: {
+    outDir: '../../dist/packages/website',
+    emptyOutDir: true,
+    reportCompressedSize: true,
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
++    rollupOptions: {
++      external: ['ace-builds/webpack-resolver'],
++    },
+  },
+```
+
 #### Mover componentes y páginas
 
 La [aplicación de lista de compras](https://aws.github.io/aws-pdk/getting_started/shopping_list_app.html#create-new-pages-components) tiene un componente llamado `CreateItem`, y dos páginas, `ShoppingList` y `ShoppingLists`. Migraremos estos elementos al nuevo sitio web, haciendo ajustes por el uso de TanStack Router y el generador de código cliente TypeScript del Plugin Nx para AWS.
@@ -80,7 +97,13 @@ Notarás algunos errores de compilación en tu IDE, necesitaremos hacer algunos 
 
 #### Migrar de React Router a TanStack Router
 
-Al usar [enrutamiento basado en archivos](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing), podemos usar el servidor de desarrollo local para generar automáticamente la configuración de rutas. Iniciemos el servidor local:
+Al usar [enrutamiento basado en archivos](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing), podemos usar el servidor de desarrollo local del sitio web para gestionar la generación automática de la configuración de rutas.
+
+El servidor local de la API Smithy se ejecuta con [`tsx`](https://github.com/privatenumber/tsx), así que añadámoslo como dependencia de desarrollo antes de iniciar los servidores locales:
+
+<InstallCommand dev pkg="tsx" />
+
+Ahora iniciemos el servidor local del sitio web:
 
 <NxCommands commands={["serve-local website"]} />
 
