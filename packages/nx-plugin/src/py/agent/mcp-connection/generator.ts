@@ -222,7 +222,11 @@ const addMcpToolsToAgent = async (
   clientVarName: string,
 ): Promise<void> => {
   if (
-    await matchGritQL(tree, filePath, `\`${clientVarName}.list_tools_sync()\``)
+    await matchGritQL(
+      tree,
+      filePath,
+      py(`\`${clientVarName}.list_tools_sync()\``),
+    )
   ) {
     return;
   }
@@ -254,7 +258,9 @@ const addMcpClientToGetAgent = async (
   clientClassName: string,
   clientVarName: string,
 ): Promise<void> => {
-  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create($_)\``)) {
+  if (
+    await matchGritQL(tree, filePath, py(`\`${clientClassName}.create()\``))
+  ) {
     return;
   }
 
@@ -270,14 +276,18 @@ const addMcpClientToGetAgent = async (
   );
 
   if (addedToWith) {
-    // Subsequent connection — also add creation line after the existing one
+    // Subsequent connection — prepend the creation line to the function body
+    // (a single anchor, so the line is inserted exactly once).
     await applyGritQL(
       tree,
       filePath,
-      py(`\`$var = $cls.create()\` as $stmt where {
-  $program <: not contains \`${clientClassName}.create\`,
-  $stmt += \`\n${clientVarName} = ${clientClassName}.create()\`
-}`),
+      py(`\`def get_agent($params):
+    $body\` where {
+  $body <: contains \`yield Agent($_)\`,
+  $body <: not contains \`${clientClassName}.create\`
+} => \`def get_agent($params):
+    ${clientVarName} = ${clientClassName}.create()
+    $body\``),
     );
     return;
   }

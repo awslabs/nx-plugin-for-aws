@@ -229,7 +229,11 @@ const addGatewayToolsToAgent = async (
   // Same shape mcp-connection uses: spread the gateway client's
   // list_tools_sync() into the existing tools array.
   if (
-    await matchGritQL(tree, filePath, `\`${clientVarName}.list_tools_sync()\``)
+    await matchGritQL(
+      tree,
+      filePath,
+      py(`\`${clientVarName}.list_tools_sync()\``),
+    )
   ) {
     return;
   }
@@ -254,7 +258,9 @@ const addGatewayClientToGetAgent = async (
   clientVarName: string,
 ): Promise<void> => {
   // Already wired? Nothing to do.
-  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create()\``)) {
+  if (
+    await matchGritQL(tree, filePath, py(`\`${clientClassName}.create()\``))
+  ) {
     return;
   }
 
@@ -270,14 +276,18 @@ const addGatewayClientToGetAgent = async (
   );
 
   if (addedToWith) {
-    // Insert `<var> = <Class>.create()` after the most recent `<var> = <_>.create()`.
+    // Subsequent connection — prepend the creation line to the function body
+    // (a single anchor, so the line is inserted exactly once).
     await applyGritQL(
       tree,
       filePath,
-      py(`\`$var = $cls.create()\` as $stmt where {
-  $program <: not contains \`${clientClassName}.create\`,
-  $stmt += \`\n${clientVarName} = ${clientClassName}.create()\`
-}`),
+      py(`\`def get_agent($params):
+    $body\` where {
+  $body <: contains \`yield Agent($_)\`,
+  $body <: not contains \`${clientClassName}.create\`
+} => \`def get_agent($params):
+    ${clientVarName} = ${clientClassName}.create()
+    $body\``),
     );
     return;
   }

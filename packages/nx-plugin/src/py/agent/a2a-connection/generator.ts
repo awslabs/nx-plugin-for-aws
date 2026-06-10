@@ -263,7 +263,7 @@ const addClientToolToGetAgent = async (
   toolName: string,
   targetAgentClassName: string,
 ): Promise<void> => {
-  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create\``)) {
+  if (await matchGritQL(tree, filePath, py(`\`${clientClassName}.create\``))) {
     return;
   }
 
