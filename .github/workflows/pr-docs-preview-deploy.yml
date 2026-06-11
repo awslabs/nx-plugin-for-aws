@@ -1,0 +1,120 @@
+name: PR Docs Preview - Deploy
+
+# Publishes the docs artifact produced by the "Build" workflow to S3/CloudFront
+# and comments the preview link on the PR. Runs via workflow_run so its
+# definition always comes from the default branch.
+#
+# The deploy job uses the "docs-preview" environment, which is configured with
+# required reviewers: a maintainer approves the deployment before the preview is
+# published.
+
+on:
+  workflow_run:
+    workflows: ['PR Docs Preview - Build']
+    types:
+      - completed
+
+concurrency:
+  group: pr-docs-preview-deploy-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read # download artifacts from the triggering run
+  pull-requests: write # comment the preview link
+  id-token: write # OIDC for AWS
+
+jobs:
+  deploy:
+    name: Deploy Docs Preview
+    runs-on: ubuntu-latest
+    environment: docs-preview
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Resolve PR number
+        id: pr
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        with:
+          script: |
+            // Look the PR up by its head SHA via the API rather than trusting
+            // anything from the build artifact. workflow_run.pull_requests is
+            // empty for forks, so query by head ref.
+            const { data } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${process.env.HEAD_OWNER}:${process.env.HEAD_BRANCH}`,
+            });
+            const pr = data.find(
+              (p) => p.head.sha === process.env.HEAD_SHA,
+            );
+            if (!pr) {
+              core.setFailed('Could not resolve a PR for this run.');
+              return;
+            }
+            core.setOutput('number', String(pr.number));
+
+      - name: Download docs artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: docs-preview
+          path: docs-dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.DOCS_PREVIEW_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync docs-dist "s3://${{ secrets.DOCS_PREVIEW_BUCKET }}/pr-${{ steps.pr.outputs.number }}/" \
+            --delete --cache-control "public, max-age=300"
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.DOCS_PREVIEW_DISTRIBUTION_ID }}" \
+            --paths "/pr-${{ steps.pr.outputs.number }}/*"
+
+      - name: Comment preview link
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PREVIEW_DOMAIN: ${{ secrets.DOCS_PREVIEW_DOMAIN }}
+        with:
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            const url = `https://${process.env.PREVIEW_DOMAIN}/pr-${prNumber}/`;
+            const marker = '<!-- docs-preview -->';
+            const body = `${marker}\n### 📖 Documentation preview\n\nYour documentation preview for this PR is ready:\n\n**${url}**\n\n_Updated for commit ${context.payload.workflow_run.head_sha.slice(0, 7)}. This preview is removed when the PR is closed._`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

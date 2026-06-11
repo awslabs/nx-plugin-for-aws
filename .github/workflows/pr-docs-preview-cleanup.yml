@@ -1,0 +1,67 @@
+name: PR Docs Preview - Cleanup
+
+# Removes a PR's docs preview from S3 when the PR is closed. Deletes only the
+# prefix derived from the PR number; performs no checkout.
+
+on:
+  pull_request_target:
+    types:
+      - closed
+
+concurrency:
+  group: pr-docs-preview-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC for AWS
+  pull-requests: write # update the preview comment
+
+jobs:
+  cleanup:
+    name: Cleanup Docs Preview
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.DOCS_PREVIEW_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Remove preview from S3
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          aws s3 rm "s3://${{ secrets.DOCS_PREVIEW_BUCKET }}/pr-${PR_NUMBER}/" --recursive
+
+      - name: Invalidate CloudFront
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.DOCS_PREVIEW_DISTRIBUTION_ID }}" \
+            --paths "/pr-${PR_NUMBER}/*"
+
+      - name: Update preview comment
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            const marker = '<!-- docs-preview -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: `${marker}\n### 📖 Documentation preview\n\nThis PR is closed - the documentation preview has been removed.`,
+              });
+            }

@@ -1,0 +1,45 @@
+name: PR Docs Preview - Build
+
+# Builds the documentation site for a pull request and uploads it as an
+# artifact. The companion "Deploy" workflow publishes the artifact and comments
+# the preview link on the PR.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pr-docs-preview.yml'
+
+concurrency:
+  group: pr-docs-preview-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Docs Preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Use PNPM
+        uses: pnpm/action-setup@v6
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm i --frozen-lockfile --prefer-offline
+      - name: Build docs
+        env:
+          # Scope every asset and link to this PR's preview subpath.
+          DOCS_BASE_PATH: /pr-${{ github.event.pull_request.number }}
+        run: pnpm nx run docs:build --output-style=stream
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: docs-preview
+          path: docs/dist
+          retention-days: 1
