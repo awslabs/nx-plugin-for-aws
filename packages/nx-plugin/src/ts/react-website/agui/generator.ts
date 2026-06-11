@@ -143,7 +143,6 @@ export const addAgUiReactConnection = async (
             'aws4fetch',
             '@aws-sdk/credential-provider-cognito-identity',
             'react-oidc-context',
-            'rxjs',
           ]
         : []) as any),
       ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
