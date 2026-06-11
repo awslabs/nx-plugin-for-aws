@@ -3,25 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import * as ts from 'typescript';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 import tsProjectGenerator from './generator';
 import { configureVitest } from './vitest';
 
-// Returns the syntax errors produced when parsing the given TypeScript source.
-const syntaxErrors = (content: string): string[] => {
-  const sourceFile = ts.createSourceFile(
-    'vitest.config.mts',
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  return (
-    (sourceFile as unknown as { parseDiagnostics?: ts.Diagnostic[] })
-      .parseDiagnostics ?? []
-  ).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
-};
+// A local defineConfig stub keeps the generated config self-contained so it can
+// be type-checked without loading the vite/vitest dependencies. The grit
+// transform only requires the test block to be within a `defineConfig(...)`
+// call, so this exercises the same code path as a real vite config.
+const wrapConfig = (testBlock: string) =>
+  `const defineConfig = (fn: () => unknown): unknown => fn();
+export default defineConfig(() => ({
+  ${testBlock}
+}));
+`;
 
 describe('vitest utils', () => {
   let tree: Tree;
@@ -52,73 +48,56 @@ describe('vitest utils', () => {
   });
 
   // The grit transform splices `passWithNoTests` into the existing `test`
-  // block. Appending it after the final property only stays valid when that
-  // property has a trailing comma, so verify the result parses cleanly across
-  // a variety of test block shapes regardless of trailing commas.
+  // block. Verify the result still compiles across a variety of test block
+  // shapes regardless of trailing commas — a missing comma between properties
+  // would not produce a double comma, so it could otherwise slip through.
   it.each([
     {
       name: 'trailing comma on last property',
-      config: `import { defineConfig } from 'vitest/config';
-export default defineConfig(() => ({
-  test: {
+      testBlock: `test: {
     name: '@proj/test',
     watch: false,
-  },
-}));
-`,
+  },`,
     },
     {
       name: 'no trailing comma on last property',
-      config: `import { defineConfig } from 'vitest/config';
-export default defineConfig(() => ({
-  test: {
+      testBlock: `test: {
     name: '@proj/test',
     watch: false
-  },
-}));
-`,
+  },`,
     },
     {
       name: 'single line test block',
-      config: `import { defineConfig } from 'vitest/config';
-export default defineConfig(() => ({
-  test: { globals: true },
-}));
-`,
+      testBlock: `test: { globals: true },`,
     },
     {
       name: 'empty test block',
-      config: `import { defineConfig } from 'vitest/config';
-export default defineConfig(() => ({
-  test: {},
-}));
-`,
+      testBlock: `test: {},`,
     },
-  ])('should add passWithNoTests producing valid syntax: $name', async ({
-    config,
-  }) => {
-    tree.write('test/vitest.config.mts', config);
+  ])(
+    'should add passWithNoTests producing compilable config: $name',
+    async ({ testBlock }) => {
+      tree.write('test/vitest.config.mts', wrapConfig(testBlock));
 
-    await configureVitest(tree, {
-      dir: 'test',
-      fullyQualifiedName: 'test',
-    });
+      await configureVitest(tree, {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      });
 
-    const content = tree.read('test/vitest.config.mts', 'utf8')!;
-    expect(content).toContain('passWithNoTests: true');
-    expect(syntaxErrors(content)).toEqual([]);
-  });
+      const content = tree.read('test/vitest.config.mts', 'utf8')!;
+      expect(content).toContain('passWithNoTests: true');
+      expectTypeScriptToCompile(tree, ['test/vitest.config.mts']);
+    },
+  );
 
   it('should not add passWithNoTests when it is already present', async () => {
-    const config = `import { defineConfig } from 'vitest/config';
-export default defineConfig(() => ({
-  test: {
+    tree.write(
+      'test/vitest.config.mts',
+      wrapConfig(`test: {
     passWithNoTests: true,
     name: '@proj/test',
-  },
-}));
-`;
-    tree.write('test/vitest.config.mts', config);
+  },`),
+    );
 
     await configureVitest(tree, {
       dir: 'test',
@@ -127,6 +106,6 @@ export default defineConfig(() => ({
 
     const content = tree.read('test/vitest.config.mts', 'utf8')!;
     expect(content.match(/passWithNoTests/g)).toHaveLength(1);
-    expect(syntaxErrors(content)).toEqual([]);
+    expectTypeScriptToCompile(tree, ['test/vitest.config.mts']);
   });
 });
