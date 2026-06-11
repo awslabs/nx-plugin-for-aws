@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as triggers from 'aws-cdk-lib/triggers';
 import { Construct } from 'constructs';
 <%_ if (cedarPolicy) { _%>
 import ejs from 'ejs';
@@ -33,7 +35,10 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
   public readonly gateway: agentcore.Gateway;
 <%_ if (cedarPolicy) { _%>
   public readonly policyEngine: agentcore.CfnPolicyEngine;
+  private readonly policies: agentcore.CfnPolicy[] = [];
 <%_ } _%>
+  private targetReadinessProbe?: triggers.TriggerFunction;
+  private readonly targetRuntimeArns: string[] = [];
 
   constructor(scope: Construct, id: string, _props?: <%- nameClassName %>Props) {
     super(scope, id);
@@ -123,6 +128,7 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
         // Policy names are unique account-wide, so derive the name from the
         // construct path to avoid collisions with other gateways.
         policy.name = cdk.Names.uniqueResourceName(policy, { maxLength: 48 });
+        this.policies.push(policy);
       }
     }
 <%_ } _%>
@@ -234,9 +240,89 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       target.node.addDependency(grant.policyDependable);
     }
 
+    // Create the target only after the readiness probe has confirmed the
+    // runtime serves MCP.
+    this.targetRuntimeArns.push(props.mcpServerRuntimeArn);
+    const probe = this.getOrCreateTargetReadinessProbe();
+    const probeGrant = probe.grantPrincipal.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+        resources: [
+          props.mcpServerRuntimeArn,
+          `${props.mcpServerRuntimeArn}/*`,
+        ],
+      }),
+    );
+    if (probeGrant.policyDependable) {
+      probe.trigger.node.addDependency(probeGrant.policyDependable);
+    }
+    target.node.addDependency(probe.trigger);
+<%_ if (cedarPolicy) { _%>
+
+    // Policies referencing this target's actions (e.g.
+    // AgentCore::Action::"<targetName>___<tool>") only validate once the
+    // target has registered them, so create policies after targets.
+    for (const policy of this.policies) {
+      policy.node.addDependency(target);
+    }
+<%_ } _%>
+
     return target;
   }
+
+  /**
+   * AgentCore fetches each target's tools during target creation, which can
+   * race the MCP runtime's first cold start on a fresh deploy and fail the
+   * target. This trigger probes each runtime until it serves MCP, and targets
+   * are created after it succeeds.
+   */
+  private getOrCreateTargetReadinessProbe(): triggers.TriggerFunction {
+    this.targetReadinessProbe ??= new triggers.TriggerFunction(
+      this,
+      'TargetReadinessProbe',
+      {
+        runtime: lambda.Runtime.NODEJS_22_X,
+        handler: 'index.handler',
+        timeout: cdk.Duration.minutes(10),
+        code: lambda.Code.fromInline(READINESS_PROBE_CODE),
+        environment: {
+          RUNTIME_ARNS: cdk.Lazy.string({
+            produce: () => this.targetRuntimeArns.join(','),
+          }),
+        },
+      },
+    );
+    return this.targetReadinessProbe;
+  }
 }
+
+// Invokes each runtime with an MCP initialize request until it responds,
+// retrying through the cold start. A successful invoke means the runtime is
+// serving MCP, so target creation's tool discovery will succeed.
+const READINESS_PROBE_CODE = `
+const { BedrockAgentCoreClient, InvokeAgentRuntimeCommand } = require('@aws-sdk/client-bedrock-agentcore');
+const client = new BedrockAgentCoreClient();
+const INITIALIZE = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'readiness-probe', version: '1.0' } } });
+exports.handler = async () => {
+  const arns = (process.env.RUNTIME_ARNS ?? '').split(',').filter(Boolean);
+  await Promise.all(arns.map(async (arn) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await client.send(new InvokeAgentRuntimeCommand({
+          agentRuntimeArn: arn,
+          runtimeSessionId: \`readiness-probe-\${crypto.randomUUID()}\`,
+          contentType: 'application/json',
+          accept: 'application/json, text/event-stream',
+          payload: Buffer.from(INITIALIZE),
+        }));
+      } catch (e) {
+        if (attempt >= 50) throw e;
+        await new Promise((resolve) => setTimeout(resolve, 10000));
+      }
+    }
+  }));
+};
+`;
 
 const toPascalCase = (s: string): string =>
   s

@@ -83,28 +83,38 @@ The construct configures the target with `iamCredentialProvider.service = 'bedro
 <Fragment slot="terraform">
 In the Terraform file where you instantiate the Gateway, wire the MCP server target in:
 
-```hcl title="packages/infra/src/main.tf" {10-16}
+```hcl title="packages/infra/src/main.tf" {7,11-27}
 module "my_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
 }
 
 module "my_gateway" {
-  source = "../../common/terraform/src/app/gateways/my-gateway"
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 # Register the MCP server as a target of the Gateway
 resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
-  gateway_identifier    = module.my_gateway.gateway_id
-  name                  = "my-mcp-server"
-  mcp_server_runtime_arn = module.my_mcp_server.agent_core_runtime_arn
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
 
   credential_provider_configuration {
-    credential_provider_type = "GATEWAY_IAM_ROLE"
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
   }
 }
 ```
 
-The target `name` (`my-mcp-server` above) is used as the prefix for Cedar action names — see the <Link path="guides/agentcore-gateway">Writing Policies section</Link>.
+The target `name` (`my-mcp-server` above) is used as the prefix for Cedar action names — see the <Link path="guides/agentcore-gateway">Writing Policies section</Link>. `policy_dependencies` ensures Cedar policies referencing this target's actions are created after the target has registered them.
 </Fragment>
 </Infrastructure>
 

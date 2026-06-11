@@ -28,6 +28,14 @@ variable "additional_iam_policy_statements" {
   }))
   default = []
 }
+<%_ if (cedarPolicy) { _%>
+
+variable "policy_dependencies" {
+  description = "Values the Cedar policies must wait for, e.g. gateway target ids. Policies referencing a target's actions only validate once the target has registered them."
+  type        = list(string)
+  default     = []
+}
+<%_ } _%>
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
@@ -152,6 +160,12 @@ resource "aws_bedrockagentcore_gateway" "this" {
 }
 <%_ if (cedarPolicy) { _%>
 
+# Anchor for the policy_dependencies variable — depends_on only accepts
+# static references, so the policies depend on this resource instead.
+resource "terraform_data" "policy_dependencies" {
+  input = var.policy_dependencies
+}
+
 # Policies are EJS templates rendered by render-cedar.cjs with `gatewayArn`
 # and `accountId` in scope.
 data "external" "rendered_policies" {
@@ -191,6 +205,8 @@ resource "aws_bedrockagentcore_policy" "policies" {
       statement = data.external.rendered_policies[each.value].result.rendered
     }
   }
+
+  depends_on = [terraform_data.policy_dependencies]
 }
 <%_ } _%>
 

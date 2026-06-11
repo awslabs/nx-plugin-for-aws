@@ -593,6 +593,37 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
   ]
 }
 
+# MCP consumers (e.g. gateway targets, which fetch tools at creation) can race
+# the runtime's first cold start, so probe it until it serves MCP. The ARN
+# output is routed through this resource so consumers wait for readiness.
+resource "null_resource" "runtime_ready" {
+  count = var.server_protocol == "MCP" ? 1 : 0
+
+  triggers = {
+    runtime_arn = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      payload=$(printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"readiness-probe","version":"1.0"}}}' | base64 | tr -d '\\n')
+      for attempt in $(seq 1 50); do
+        if aws bedrock-agentcore invoke-agent-runtime \\
+          --agent-runtime-arn '\${self.triggers.runtime_arn}' \\
+          --runtime-session-id "readiness-probe-attempt-$attempt-$(date +%s%N)" \\
+          --content-type application/json \\
+          --accept 'application/json, text/event-stream' \\
+          --payload "$payload" \\
+          /dev/null > /dev/null 2>&1; then
+          exit 0
+        fi
+        sleep 10
+      done
+      echo "Runtime \${self.triggers.runtime_arn} did not become ready" >&2
+      exit 1
+    EOT
+  }
+}
+
 # Outputs
 output "agent_core_runtime_role_arn" {
   description = "ARN of the Agent Core Runtime IAM role"
@@ -610,8 +641,8 @@ output "agent_runtime_name" {
 }
 
 output "agent_core_runtime_arn" {
-  description = "ARN of the Bedrock Agent Core runtime"
-  value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+  description = "ARN of the Bedrock Agent Core runtime. For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = var.server_protocol == "MCP" ? null_resource.runtime_ready[0].triggers.runtime_arn : aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
 }
 
 output "agent_runtime_id" {
