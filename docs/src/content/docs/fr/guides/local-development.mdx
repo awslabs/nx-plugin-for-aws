@@ -1,0 +1,76 @@
+---
+title: Développement Local
+description: Comment fonctionne le développement local avec les cibles serve et serve-local
+---
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+
+Les projets connectés exposent deux cibles pour les exécuter sur votre machine : `serve` et `serve-local`. La différence réside dans la **portée** — quelle partie de votre application s'exécute localement par rapport à celle qui pointe vers l'infrastructure AWS déployée.
+
+Considérez un espace de travail avec les connexions suivantes : un site web qui appelle une `api` tRPC, et qui appelle également un `agent` qui à son tour appelle un serveur `mcp`.
+
+## `serve`
+
+La cible `serve` exécute **uniquement le projet ciblé** localement. Tous les autres projets auxquels il se connecte sont censés être **déployés**, et sont accessibles à leur URL AWS réelle.
+
+<NxCommands commands={['serve website']} />
+
+Étant donné que le projet ciblé communique avec des ressources déployées, il doit savoir où elles se trouvent. Pour un site web, cela est fourni par son `runtime-config.json` (voir <Link path="guides/react-website#local-runtime-config">Local Runtime Config</Link>), que vous chargez depuis une application déployée. Pour les projets côté serveur (API et agents) qui lisent la <Link path="guides/runtime-config">Runtime Configuration</Link>, définissez la variable d'environnement `RUNTIME_CONFIG_APP_ID` pour pointer vers votre application AppConfig déployée.
+
+```d2
+direction: right
+
+local: Local {
+  style.stroke-dash: 3
+  website: website
+}
+deployed: Deployed {
+  style.stroke-dash: 3
+  api: api
+  agent: agent
+  mcp: mcp
+}
+
+local.website -> deployed.api
+local.website -> deployed.agent
+deployed.agent -> deployed.mcp
+```
+
+Utilisez `serve` lorsque vous souhaitez itérer sur un seul projet par rapport aux versions « réelles » déployées de tout ce dont il dépend.
+
+## `serve-local`
+
+La cible `serve-local` exécute le **projet ciblé** et **tous les projets qui y sont connectés de manière transitive**, tous sur votre machine. Le générateur de connexion configure cela automatiquement — l'exécution de `serve-local` sur le site web démarre également des serveurs locaux pour l'`api`, l'`agent` et le serveur `mcp` qu'il atteint via l'agent.
+
+<NxCommands commands={['serve-local website']} />
+
+Lorsqu'il est exécuté de cette manière, le `runtime-config.json` du site web est automatiquement remplacé (via le [`MODE` de Vite](https://vite.dev/guide/env-and-mode), défini sur `serve-local`) de sorte qu'il pointe vers vos serveurs s'exécutant localement au lieu des URL déployées.
+
+```d2
+direction: right
+
+local: Local {
+  style.stroke-dash: 3
+  website: website
+  api: api
+  agent: agent
+  mcp: mcp
+
+  website -> api
+  website -> agent
+  agent -> mcp
+}
+```
+
+Tous les projets s'exécutent localement, il n'y a donc pas de dépendances déployées.
+
+Utilisez `serve-local` lorsque vous travaillez sur plusieurs projets connectés à la fois et que vous souhaitez itérer rapidement sans déployer votre infrastructure.
+
+:::tip[Raccourci `dev`]
+Un script `dev` racine est ajouté comme raccourci pour le premier site web que vous générez dans votre espace de travail, vous pouvez donc démarrer le site web et tous les composants connectés avec :
+
+<PackageManagerShortCommand commands={["dev"]} />
+:::
+
+Pour plus de détails sur le serveur de développement local de chaque type de projet, consultez le guide correspondant — par exemple le guide <Link path="guides/react-website#local-development-server">React Website</Link>.

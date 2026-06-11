@@ -1,0 +1,74 @@
+---
+title: ローカル開発
+description: serve および serve-local ターゲットを使用したローカル開発の仕組み
+---
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+
+接続されたプロジェクトは、マシン上で実行するための2つのターゲットを公開します：`serve` と `serve-local` です。違いは**スコープ**です — アプリケーションのどの部分をローカルで実行し、どの部分をデプロイされた AWS インフラストラクチャを指すかという点です。
+
+次のような接続を持つワークスペースを考えてみましょう：tRPC `api` を呼び出すウェブサイトがあり、さらに `agent` を呼び出し、その `agent` が `mcp` サーバーを呼び出します。
+
+## `serve`
+
+`serve` ターゲットは、**対象のプロジェクトのみ**をローカルで実行します。接続されている他のすべてのプロジェクトは**デプロイ済み**であることが期待され、実際の AWS URL でアクセスされます。
+
+<NxCommands commands={['serve website']} />
+
+対象のプロジェクトはデプロイされたリソースと通信するため、それらがどこにあるかを知る必要があります。ウェブサイトの場合、これは `runtime-config.json` によって提供されます（<Link path="guides/react-website#local-runtime-config">Local Runtime Config</Link> を参照）。これはデプロイされたアプリケーションから読み込みます。<Link path="guides/runtime-config">Runtime Configuration</Link> を読み取るサーバーサイドプロジェクト（API とエージェント）の場合は、`RUNTIME_CONFIG_APP_ID` 環境変数を設定して、デプロイされた AppConfig アプリケーションを指すようにします。
+
+```d2
+direction: right
+
+local: Local {
+  style.stroke-dash: 3
+  website: website
+}
+deployed: Deployed {
+  style.stroke-dash: 3
+  api: api
+  agent: agent
+  mcp: mcp
+}
+
+local.website -> deployed.api
+local.website -> deployed.agent
+deployed.agent -> deployed.mcp
+```
+
+`serve` は、依存するすべてのものの「実際の」デプロイ済みバージョンに対して、単一のプロジェクトを反復処理したい場合に使用します。
+
+## `serve-local`
+
+`serve-local` ターゲットは、**対象のプロジェクト**と**それに推移的に接続されているすべてのプロジェクト**を、すべてマシン上で実行します。接続ジェネレーターがこれを自動的に配線します — ウェブサイトで `serve-local` を実行すると、`api`、`agent`、およびエージェントを通じて到達する `mcp` サーバーのローカルサーバーも起動します。
+
+<NxCommands commands={['serve-local website']} />
+
+この方法で実行すると、ウェブサイトの `runtime-config.json` は自動的にオーバーライドされ（[Vite の `MODE`](https://vite.dev/guide/env-and-mode) を介して `serve-local` に設定）、デプロイされた URL の代わりにローカルで実行されているサーバーを指すようになります。
+
+```d2
+direction: right
+
+local: Local {
+  style.stroke-dash: 3
+  website: website
+  api: api
+  agent: agent
+  mcp: mcp
+
+  website -> api
+  website -> agent
+  agent -> mcp
+}
+```
+
+`serve-local` は、複数の接続されたプロジェクトを同時に作業していて、インフラストラクチャをデプロイせずに素早く反復処理したい場合に使用します。
+
+各プロジェクトタイプのローカル開発サーバーの詳細については、関連するガイドを参照してください — たとえば、<Link path="guides/react-website#local-development-server">React Website</Link> ガイドなどです。
+スクリプトが追加されるため、次のコマンドでウェブサイトと接続されているすべてのコンポーネントを起動できます：
+
+<PackageManagerShortCommand commands={["dev"]} />
+:::
+
+各プロジェクトタイプのローカル開発サーバーの詳細については、関連するガイドを参照してください — たとえば、<Link path="guides/react-website#local-development-server">React Website</Link> ガイドなどです。
