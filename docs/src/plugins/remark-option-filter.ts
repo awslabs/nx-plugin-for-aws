@@ -10,11 +10,12 @@ import {
   walkJsx,
 } from '../../../packages/nx-plugin/src/mcp-server/mdx-ast';
 import {
-  parseWhenExpression,
   type Predicate,
+  parseWhenExpression,
 } from '../../../packages/nx-plugin/src/mcp-server/option-filter';
 import {
   createSchemaLookup,
+  filterableValuesForProperty,
   type GeneratorSchema,
 } from '../../../packages/nx-plugin/src/mcp-server/schema-registry';
 
@@ -98,16 +99,16 @@ const remarkOptionFilter = () => {
             `[remark-option-filter] ${pagePath}: OptionFilter references unknown option '${key}' for generator '${generatorId}'. Known options: ${Object.keys(props).join(', ')}`,
           );
         }
-        if (!Array.isArray(prop.enum) || prop.enum.length === 0) {
+        const allowed = filterableValuesForProperty(prop);
+        if (!allowed) {
           throw new Error(
-            `[remark-option-filter] ${pagePath}: OptionFilter references option '${key}' for generator '${generatorId}', but that option is not an enum — only enum options can be filtered on.`,
+            `[remark-option-filter] ${pagePath}: OptionFilter references option '${key}' for generator '${generatorId}', but that option is not an enum or boolean — only enum and boolean options can be filtered on.`,
           );
         }
-        const enumStrs = prop.enum.map((v) => String(v));
         for (const v of values) {
-          if (!enumStrs.includes(v)) {
+          if (!allowed.includes(v)) {
             throw new Error(
-              `[remark-option-filter] ${pagePath}: OptionFilter uses value '${v}' for option '${key}' of generator '${generatorId}', but the schema enum is [${enumStrs.join(', ')}]`,
+              `[remark-option-filter] ${pagePath}: OptionFilter uses value '${v}' for option '${key}' of generator '${generatorId}', but valid values are [${allowed.join(', ')}]`,
             );
           }
         }

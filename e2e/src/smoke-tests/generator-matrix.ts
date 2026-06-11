@@ -223,11 +223,6 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   // AgentCore Gateway + the four connection edges (ts/py agent -> gateway,
   // gateway -> ts/py mcp-server) so each smoke test exercises a deployable
   // gateway with multiple MCP server targets fronting both agent runtimes.
-  // Wired after the agent <-> MCP and a2a connections so the gateway client
-  // is the last entry prepended to the agent's tools array — placing it
-  // earlier surfaces a pre-existing GritQL/prettier interaction in the
-  // shared mcp-connection prepend pattern when subsequent appends run on
-  // the resulting multi-line array.
   await runCLI(
     `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive`,
     opts,

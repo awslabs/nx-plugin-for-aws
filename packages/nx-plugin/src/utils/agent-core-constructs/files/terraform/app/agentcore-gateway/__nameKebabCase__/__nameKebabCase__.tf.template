@@ -78,7 +78,10 @@ resource "aws_iam_role" "gateway_role" {
 <%_ if (cedarPolicy) { _%>
 # Inline policy giving the gateway role the permissions it needs:
 #   - Policy evaluation permissions, including CheckAuthorizePermissions
-#     which the gateway readiness probe requires during creation
+#     which the gateway readiness probe requires during creation.
+#     Authorization actions are evaluated against both the policy engine ARN
+#     and the gateway's own ARN (which cannot be referenced here without a
+#     dependency cycle, so it is scoped to this account and region's gateways)
 #   - Additional statements appended by connection generators (e.g. InvokeAgentRuntime*)
 resource "aws_iam_role_policy" "gateway_role_policy" {
   name = "<%- nameClassName %>-GatewayPolicy"
@@ -96,7 +99,10 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
           "bedrock-agentcore:PartiallyAuthorizeActions",
           "bedrock-agentcore:CheckAuthorizePermissions",
         ]
-        Resource = ["*"]
+        Resource = [
+          awscc_bedrockagentcore_policy_engine.this.policy_engine_arn,
+          "arn:aws:bedrock-agentcore:${local.aws_region}:${local.aws_account_id}:gateway/*",
+        ]
       }
     ], var.additional_iam_policy_statements)
   })
@@ -129,6 +135,8 @@ resource "awscc_bedrockagentcore_gateway" "this" {
   description = "AgentCore Gateway for <%- nameClassName %>"
   role_arn    = aws_iam_role.gateway_role.arn
 
+  # The awscc provider represents enum-typed attributes as raw JSON values
+  protocol_type = jsonencode("MCP")
   protocol_configuration = {
     mcp = {
       search_type        = "SEMANTIC"
@@ -152,7 +160,7 @@ resource "awscc_bedrockagentcore_gateway" "this" {
 # Policies are EJS templates rendered by render-cedar.cjs with `gatewayArn`
 # and `accountId` in scope.
 data "external" "rendered_policies" {
-  for_each = fileset(local.policies_dir, "*.cedar")
+  for_each = fileset(local.policies_dir, "**/*.cedar")
 
   program = ["node", "${path.module}/render-cedar.cjs"]
   query = {
@@ -169,14 +177,19 @@ data "external" "rendered_policies" {
 # `name` regex requires `^[A-Za-z][A-Za-z0-9_]*$` — no hyphens — so the
 # join() reassembles the basename with each segment Title-cased.
 resource "awscc_bedrockagentcore_policy" "policies" {
-  for_each = fileset(local.policies_dir, "*.cedar")
+  for_each = fileset(local.policies_dir, "**/*.cedar")
 
   policy_engine_id = awscc_bedrockagentcore_policy_engine.this.policy_engine_id
-  name = join("", [
-    for word in split("-", replace(trimsuffix(each.value, ".cedar"), "_", "-")) :
+  # Policy names are unique account-wide, so append this gateway's unique
+  # suffix to avoid collisions with other gateways.
+  name = join("", concat([
+    for word in split("-", replace(replace(trimsuffix(each.value, ".cedar"), "_", "-"), "/", "-")) :
     "${upper(substr(word, 0, 1))}${substr(word, 1, length(word))}"
-  ])
-  description     = "Policy loaded from ${each.value}"
+  ], ["_${random_id.unique_suffix.hex}"]))
+  description = "Policy loaded from ${each.value}"
+  # Validation modes are FAIL_ON_ANY_FINDINGS | IGNORE_ALL_FINDINGS (enforcement
+  # is configured on the policy engine). The Cedar analyzer flags legitimate
+  # scoped policies as findings, so deploy regardless and rely on ENFORCE mode.
   validation_mode = "IGNORE_ALL_FINDINGS"
   definition = {
     cedar = {

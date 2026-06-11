@@ -14,14 +14,11 @@ import {
 } from '@nx/devkit';
 import {
   AGENT_CONNECTION_PROJECT_DIR,
+  addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
-import {
-  addDestructuredImport,
-  addStarExport,
-  applyGritQL,
-} from '../../../utils/ast';
+import { addDestructuredImport, addStarExport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase } from '../../../utils/names';
@@ -117,28 +114,11 @@ export const tsAgentMcpConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create();`;
-
-    // Transform the arrow function that contains `new Agent`:
-    // - Expression body: wrap in block with client creation and return
-    // - Block body: prepend client creation statement
-    await applyGritQL(
+    await addTypeScriptClientToAgent(
       tree,
       agentFilePath,
-      `or { \`async ($p) => new Agent($args)\` => raw\`async ($p) => {
-  ${clientCreationStmt}
-  return new Agent($args);
-}\` where { $program <: not contains \`${clientClassName}.create\` }, \`async ($p) => { $body }\` => raw\`async ($p) => {
-  ${clientCreationStmt}
-  $body
-}\` where { $body <: contains \`new Agent($_)\`, $program <: not contains \`${clientClassName}.create\` } }`,
-    );
-
-    // Prepend client to the tools array
-    await applyGritQL(
-      tree,
-      agentFilePath,
-      `\`tools: [$items]\` => \`tools: [${clientVarName}, $items]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${clientVarName}\` }`,
+      clientClassName,
+      clientVarName,
     );
   }
 

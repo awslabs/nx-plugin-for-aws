@@ -216,30 +216,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
         opts,
       );
-      // Isolated AgentCore Gateway topology: a dedicated agent plus dedicated
-      // TypeScript and Python MCP servers, all wired only to the gateway. Kept
-      // separate from the agents/MCP servers above so the gateway's serve-local
-      // chain never shares (and re-starts) an MCP server that another agent's
-      // chain also starts. The two MCP servers exercise the gateway's core job:
-      // aggregating multiple (heterogeneous) MCP servers behind one endpoint.
+      // AgentCore Gateway: a dedicated agent fronted only by the gateway,
+      // which aggregates the same TS and Python MCP servers used by the
+      // direct-connection tests above (Nx dedupes the shared continuous
+      // serve-local targets within a single task graph).
       await runCLI(
-        `generate @aws/nx-plugin:ts#project --name=gw-project --no-interactive`,
-        opts,
-      );
-      await runCLI(
-        `generate @aws/nx-plugin:ts#agent --project=gw-project --name=gw-agent --infra=none --no-interactive`,
-        opts,
-      );
-      await runCLI(
-        `generate @aws/nx-plugin:ts#mcp-server --project=gw-project --name=gw-mcp --infra=none --no-interactive`,
-        opts,
-      );
-      await runCLI(
-        `generate @aws/nx-plugin:py#project --name=gw-py-project --projectType=application --no-interactive`,
-        opts,
-      );
-      await runCLI(
-        `generate @aws/nx-plugin:py#mcp-server --project=gw_py_project --name=gw-py-mcp --infra=none --no-interactive`,
+        `generate @aws/nx-plugin:ts#agent --project=ts-project --name=gw-agent --infra=none --no-interactive`,
         opts,
       );
       await runCLI(
@@ -272,19 +254,19 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
         opts,
       );
-      // Isolated gateway wiring: gw-agent -> gateway -> {gw-mcp, gw-py-mcp}.
-      // The agent's serve-local boots the gateway, which boots both MCP
-      // servers, and the agent's local multiplex client fans out to both.
+      // Gateway wiring: gw-agent -> gateway -> {my-mcp, my-py-mcp}. The
+      // agent's serve-local boots the local gateway, which aggregates both
+      // MCP servers behind one endpoint.
       await runCLI(
-        `generate @aws/nx-plugin:connection --sourceProject=gw-project --sourceComponent=gw-agent --targetProject=my-gateway --no-interactive`,
+        `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=gw-agent --targetProject=my-gateway --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:connection --sourceProject=my-gateway --targetProject=gw-project --targetComponent=gw-mcp --no-interactive`,
+        `generate @aws/nx-plugin:connection --sourceProject=my-gateway --targetProject=ts-project --targetComponent=my-mcp --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:connection --sourceProject=my-gateway --targetProject=gw_py_project --targetComponent=gw-py-mcp --no-interactive`,
+        `generate @aws/nx-plugin:connection --sourceProject=my-gateway --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
         opts,
       );
 
@@ -304,7 +286,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         { project: 'ts-project', dir: 'my-agent' },
         { project: 'ts-project', dir: 'my-a2a-agent' },
         { project: 'ts-project', dir: 'my-agui-agent' },
-        { project: 'gw-project', dir: 'gw-agent' },
+        { project: 'ts-project', dir: 'gw-agent' },
       ]) {
         const file = `${projectRoot}/packages/${project}/src/${dir}/agent.ts`;
         let content = readFileSync(file, 'utf-8');
@@ -334,10 +316,6 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
 
       // Install openai dep for agents
       await runCLI(`pnpm add openai --filter=@serve-local-test/ts-project`, {
-        cwd: projectRoot,
-        prefixWithPackageManagerCmd: false,
-      });
-      await runCLI(`pnpm add openai --filter=@serve-local-test/gw-project`, {
         cwd: projectRoot,
         prefixWithPackageManagerCmd: false,
       });
@@ -407,7 +385,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         ),
         gwAgent: getPortFromProjectJson(
           projectRoot,
-          'packages/gw-project/project.json',
+          'packages/ts-project/project.json',
           'gw-agent-serve-local',
         ),
       };
@@ -518,8 +496,8 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
   });
 
   it('TS HTTP Agent - AgentCore Gateway local gateway across multiple MCP servers', async () => {
-    // The gateway fronts two MCP servers (TypeScript `gw-mcp` and Python
-    // `gw-py-mcp`). Drive the LLM mock to call a gateway-prefixed tool
+    // The gateway fronts the TypeScript `my-mcp` and Python `my-py-mcp`
+    // servers. Drive the LLM mock to call a gateway-prefixed tool
     // (`<target>___<tool>`) from each, and echo the tool result. A successful
     // round-trip for both proves the local gateway booted under SERVE_LOCAL,
     // aggregated tools from every attached MCP server, and routed each call
@@ -543,7 +521,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       return { tools: [{ name: tool, args: { a: 6, b: 2 } }] };
     };
     const isGatewayTurn = (req: MockReq) =>
-      req.lastMessage.startsWith('call gw-') ||
+      req.lastMessage.startsWith('call my-') ||
       req.messages.some((m) => m.role === 'tool');
     llmMock!
       .when(isGatewayTurn as never)
@@ -551,11 +529,11 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       .first()
       .times(4);
 
-    // gw-agent-serve-local chains the gateway's serve-local, which starts both
-    // attached MCP servers. No other agent shares them, so there is no
-    // overlapping serve-local aggregator path.
+    // gw-agent-serve-local chains the gateway's serve-local, which starts
+    // both attached MCP servers (deduped with any other serve-local chains
+    // in the same task graph).
     await startAndWait(
-      '@serve-local-test/gw-project:gw-agent-serve-local',
+      '@serve-local-test/ts-project:gw-agent-serve-local',
       ports.gwAgent,
     );
 
@@ -597,12 +575,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       });
 
     // TypeScript MCP server: divide(6, 2) = 3
-    const tsResult = await invokeGatewayTool('gw-mcp___divide');
+    const tsResult = await invokeGatewayTool('my-mcp___divide');
     console.log('Gateway -> TS MCP (divide) stream:', tsResult);
     expect(tsResult).toContain('3');
 
     // Python MCP server: add(6, 2) = 8
-    const pyResult = await invokeGatewayTool('gw-py-mcp___add');
+    const pyResult = await invokeGatewayTool('my-py-mcp___add');
     console.log('Gateway -> Py MCP (add) stream:', pyResult);
     expect(pyResult).toContain('8');
 

@@ -48,15 +48,14 @@ describe('agentcore-gateway generator', () => {
       }
     });
 
-    it('registers component metadata with rc/protocol/auth fields', async () => {
+    it('registers project metadata with rc/protocol/auth fields', async () => {
       await agentcoreGatewayGenerator(tree, {
         name: 'my-gateway',
         iac: 'cdk',
       });
 
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
-      expect((config.metadata as any).components).toHaveLength(1);
-      expect((config.metadata as any).components[0]).toMatchObject({
+      expect(config.metadata as any).toMatchObject({
         generator: AGENTCORE_GATEWAY_GENERATOR_INFO.id,
         name: 'my-gateway',
         rc: 'MyGateway',
@@ -126,8 +125,10 @@ describe('agentcore-gateway generator', () => {
       ).toContainEqual(
         expect.objectContaining({ target: 'some-mcp-serve-local' }),
       );
-      // Component metadata is not duplicated on re-run
-      expect((rerunConfig.metadata as any).components).toHaveLength(1);
+      // Project metadata is unchanged on re-run
+      expect((rerunConfig.metadata as any).generator).toBe(
+        AGENTCORE_GATEWAY_GENERATOR_INFO.id,
+      );
     });
 
     it('supports a gateway named "gateway" — vended class must not clash with CDK imports', async () => {
@@ -153,9 +154,9 @@ describe('agentcore-gateway generator', () => {
       });
 
       const config = readProjectConfiguration(tree, '@proj/shop-front-gateway');
-      const component = (config.metadata as any).components[0];
-      expect(component.name).toBe('shop-front-gateway');
-      expect(component.rc).toBe('ShopFrontGateway');
+      const metadata = config.metadata as any;
+      expect(metadata.name).toBe('shop-front-gateway');
+      expect(metadata.rc).toBe('ShopFrontGateway');
       expect(config.targets?.['shop-front-gateway-serve-local']).toBeDefined();
     });
   });
@@ -423,9 +424,11 @@ describe('agentcore-gateway generator', () => {
           'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
         ),
       ).toBe(true);
-      // Component metadata is not duplicated by the upgrade
+      // Project metadata is intact after the upgrade
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
-      expect((config.metadata as any).components).toHaveLength(1);
+      expect((config.metadata as any).generator).toBe(
+        AGENTCORE_GATEWAY_GENERATOR_INFO.id,
+      );
     });
   });
 });

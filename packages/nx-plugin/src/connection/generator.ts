@@ -7,6 +7,7 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator';
 import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator';
 import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
 import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator';
@@ -51,6 +52,7 @@ const SUPPORTED_PROJECT_TYPES = [
   'smithy',
   'ts#rdb',
   'ts#dynamodb',
+  'agentcore-gateway',
 ] as const;
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
@@ -450,6 +452,10 @@ const determineProjectTypeFromConfig = async (
     return 'ts#dynamodb';
   }
 
+  if (isAgentCoreGateway(projectConfiguration)) {
+    return 'agentcore-gateway';
+  }
+
   return undefined;
 };
 
@@ -557,5 +563,11 @@ const isRdb = (projectConfiguration: ProjectConfiguration): boolean =>
 const isDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===
   TS_DYNAMODB_GENERATOR_INFO.id;
+
+const isAgentCoreGateway = (
+  projectConfiguration: ProjectConfiguration,
+): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  AGENTCORE_GATEWAY_GENERATOR_INFO.id;
 
 export default connectionGenerator;

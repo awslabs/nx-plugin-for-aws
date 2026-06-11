@@ -64,8 +64,11 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
 
     // Permissions the gateway role needs to evaluate policies, including
     // CheckAuthorizePermissions, which the CloudFormation handler's readiness
-    // probe requires during gateway creation. The gateway must depend on the
-    // policy update — AgentCore validates GetPolicyEngine access at creation.
+    // probe requires during gateway creation. Authorization actions are
+    // evaluated against both the policy engine ARN and the gateway's own ARN
+    // (which cannot be referenced here without a circular dependency, so it
+    // is scoped to this account and region's gateways). The gateway must
+    // depend on the policy update — access is validated at creation.
     const policyGrant = this.gateway.role.addToPrincipalPolicy(
       new iam.PolicyStatement({
         actions: [
@@ -74,23 +77,31 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
           'bedrock-agentcore:PartiallyAuthorizeActions',
           'bedrock-agentcore:CheckAuthorizePermissions',
         ],
-        resources: ['*'],
+        resources: [
+          this.policyEngine.attrPolicyEngineArn,
+          cdk.Stack.of(this).formatArn({
+            service: 'bedrock-agentcore',
+            resource: 'gateway',
+            resourceName: '*',
+          }),
+        ],
       }),
     );
     if (policyGrant.policyDependable) {
       cfnGateway.node.addDependency(policyGrant.policyDependable);
     }
 
-    // Each .cedar file under <%- projectDirectory %>/policies/ becomes a
-    // Policy. Files are EJS templates rendered at synth time with
-    // `gatewayArn` and `accountId` in scope.
+    // Each .cedar file under <%- projectDirectory %>/policies/ (including
+    // nested folders) becomes a Policy. Files are EJS templates rendered at
+    // synth time with `gatewayArn` and `accountId` in scope.
     const policiesDir = path.join(
       findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
       '<%- projectDirectory %>/policies',
     );
     if (fs.existsSync(policiesDir)) {
-      for (const file of fs.readdirSync(policiesDir)) {
-        if (!file.endsWith('.cedar')) continue;
+      for (const file of fs
+        .readdirSync(policiesDir, { recursive: true, encoding: 'utf-8' })
+        .filter((f) => f.endsWith('.cedar'))) {
         const raw = fs.readFileSync(path.join(policiesDir, file), 'utf-8');
         const statement = cdk.Lazy.string({
           produce: () =>
@@ -100,13 +111,18 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
             }),
         });
         const policyId = toPascalCase(file.replace(/\.cedar$/, ''));
-        new agentcore.CfnPolicy(this, policyId, {
+        const policy = new agentcore.CfnPolicy(this, policyId, {
           name: policyId,
           policyEngineId: this.policyEngine.attrPolicyEngineId,
           definition: { cedar: { statement } },
           description: `Policy loaded from ${file}`,
+          // The Cedar analyzer flags legitimate scoped policies as findings,
+          // so deploy regardless and rely on the engine's ENFORCE mode.
           validationMode: 'IGNORE_ALL_FINDINGS',
         });
+        // Policy names are unique account-wide, so derive the name from the
+        // construct path to avoid collisions with other gateways.
+        policy.name = cdk.Names.uniqueResourceName(policy, { maxLength: 48 });
       }
     }
 <%_ } _%>
@@ -224,7 +240,7 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
 
 const toPascalCase = (s: string): string =>
   s
-    .split(/[-_\s]+/)
+    .split(/[-_\s/\\]+/)
     .filter(Boolean)
     .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
     .join('');

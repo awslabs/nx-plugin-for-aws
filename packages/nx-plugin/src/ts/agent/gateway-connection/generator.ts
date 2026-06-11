@@ -12,16 +12,14 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generator';
 import {
   AGENT_CONNECTION_PROJECT_DIR,
+  addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
-import {
-  addDestructuredImport,
-  addStarExport,
-  applyGritQL,
-} from '../../../utils/ast';
+import { addDestructuredImport, addStarExport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase } from '../../../utils/names';
@@ -52,22 +50,21 @@ export const tsAgentGatewayConnectionGenerator = async (
   );
 
   const agentComponent = options.sourceComponent;
-  const gatewayComponent = options.targetComponent;
-
-  if (!agentComponent || !gatewayComponent) {
+  if (!agentComponent) {
     throw new Error(
-      'Both sourceComponent and targetComponent must be provided for ts#agent -> agentcore-gateway connections',
+      'sourceComponent must be provided for ts#agent -> agentcore-gateway connections',
     );
   }
+  const gateway = readAgentCoreGatewayMetadata(targetProject);
 
-  if (gatewayComponent.protocol !== 'mcp') {
+  if (gateway.protocol !== 'mcp') {
     throw new Error(
-      `Gateway '${gatewayComponent.name}' has protocol='${gatewayComponent.protocol}'. Only MCP-protocol gateways are supported.`,
+      `Gateway '${gateway.name}' has protocol='${gateway.protocol}'. Only MCP-protocol gateways are supported.`,
     );
   }
-  if (gatewayComponent.auth !== 'iam') {
+  if (gateway.auth !== 'iam') {
     throw new Error(
-      `Gateway '${gatewayComponent.name}' uses auth='${gatewayComponent.auth}'. Only IAM-authenticated gateways are supported in v1.`,
+      `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Only IAM-authenticated gateways are supported in v1.`,
     );
   }
   if (agentComponent.auth && agentComponent.auth !== 'iam') {
@@ -76,7 +73,7 @@ export const tsAgentGatewayConnectionGenerator = async (
     );
   }
 
-  const gatewayClassName = gatewayComponent.rc as string;
+  const gatewayClassName = gateway.rc;
   const gatewayKebabCase = kebabCase(gatewayClassName);
   const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
@@ -97,7 +94,7 @@ export const tsAgentGatewayConnectionGenerator = async (
     {
       gatewayKebabCase,
       gatewayClassName,
-      gatewayPort: gatewayComponent.port ?? 8100,
+      gatewayPort: gateway.port,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -128,28 +125,11 @@ export const tsAgentGatewayConnectionGenerator = async (
       [clientClassName],
       `:${npmScope}/agent-connection`,
     );
-
-    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create();`;
-
-    // Wrap / prepend client creation inside the arrow function that builds
-    // the Agent — same pattern as mcp-connection / a2a-connection.
-    await applyGritQL(
+    await addTypeScriptClientToAgent(
       tree,
       agentFilePath,
-      `or { \`async ($p) => new Agent($args)\` => raw\`async ($p) => {
-  ${clientCreationStmt}
-  return new Agent($args);
-}\` where { $program <: not contains \`${clientClassName}.create\` }, \`async ($p) => { $body }\` => raw\`async ($p) => {
-  ${clientCreationStmt}
-  $body
-}\` where { $body <: contains \`new Agent($_)\`, $program <: not contains \`${clientClassName}.create\` } }`,
-    );
-
-    // Prepend the gateway client to the tools array
-    await applyGritQL(
-      tree,
-      agentFilePath,
-      `\`tools: [$items]\` => \`tools: [${clientVarName}, $items]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${clientVarName}\` }`,
+      clientClassName,
+      clientVarName,
     );
   }
 
@@ -194,19 +174,6 @@ export const tsAgentGatewayConnectionGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [
     TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
   ]);
-
-  // Guidance for the stack wiring the user still has to do themselves.
-  console.log('');
-  console.log(
-    `✔ Connected ${agentComponent.name} agent to ${gatewayClassName} gateway.`,
-  );
-  console.log('');
-  console.log('Add to the stack that instantiates your agent + gateway:');
-  console.log('');
-  console.log(
-    `  ${gatewayClassName.charAt(0).toLowerCase()}${gatewayClassName.slice(1)}.grantInvokeAccess(agent);`,
-  );
-  console.log('');
 
   await formatFilesInSubtree(tree);
   return () => {

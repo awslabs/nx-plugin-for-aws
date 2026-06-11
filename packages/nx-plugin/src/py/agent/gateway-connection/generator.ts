@@ -11,7 +11,9 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generator';
 import {
+  addPythonClientToAgent,
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
@@ -19,11 +21,7 @@ import {
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
 } from '../../../utils/agent-connection/agent-connection';
-import {
-  addPythonDestructuredImport,
-  applyGritQL,
-  matchGritQL,
-} from '../../../utils/ast';
+import { addPythonDestructuredImport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
@@ -38,8 +36,6 @@ import {
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
 import type { PyAgentGatewayConnectionGeneratorSchema } from './schema';
-
-const py = (pattern: string) => `language python\n${pattern}`;
 
 export const PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -58,22 +54,21 @@ export const pyAgentGatewayConnectionGenerator = async (
   );
 
   const agentComponent = options.sourceComponent;
-  const gatewayComponent = options.targetComponent;
-
-  if (!agentComponent || !gatewayComponent) {
+  if (!agentComponent) {
     throw new Error(
-      'Both sourceComponent and targetComponent must be provided for py#agent -> agentcore-gateway connections',
+      'sourceComponent must be provided for py#agent -> agentcore-gateway connections',
     );
   }
+  const gateway = readAgentCoreGatewayMetadata(targetProject);
 
-  if (gatewayComponent.protocol !== 'mcp') {
+  if (gateway.protocol !== 'mcp') {
     throw new Error(
-      `Gateway '${gatewayComponent.name}' has protocol='${gatewayComponent.protocol}'. Only MCP-protocol gateways are supported.`,
+      `Gateway '${gateway.name}' has protocol='${gateway.protocol}'. Only MCP-protocol gateways are supported.`,
     );
   }
-  if (gatewayComponent.auth !== 'iam') {
+  if (gateway.auth !== 'iam') {
     throw new Error(
-      `Gateway '${gatewayComponent.name}' uses auth='${gatewayComponent.auth}'. Only IAM-authenticated gateways are supported in v1.`,
+      `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Only IAM-authenticated gateways are supported in v1.`,
     );
   }
   if (agentComponent.auth && agentComponent.auth !== 'iam') {
@@ -82,7 +77,7 @@ export const pyAgentGatewayConnectionGenerator = async (
     );
   }
 
-  const gatewayClassName = gatewayComponent.rc as string;
+  const gatewayClassName = gateway.rc;
   const gatewaySnakeCase = snakeCase(gatewayClassName);
   const gatewayKebabCase = gatewaySnakeCase.replace(/_/g, '-');
   const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
@@ -117,7 +112,7 @@ export const pyAgentGatewayConnectionGenerator = async (
       gatewaySnakeCase,
       gatewayClassName,
       agentConnectionModuleName,
-      gatewayPort: gatewayComponent.port ?? 8100,
+      gatewayPort: gateway.port,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -155,8 +150,7 @@ export const pyAgentGatewayConnectionGenerator = async (
       [clientClassName],
       agentConnectionModuleName,
     );
-    await addGatewayToolsToAgent(tree, agentFilePath, clientVarName);
-    await addGatewayClientToGetAgent(
+    await addPythonClientToAgent(
       tree,
       agentFilePath,
       clientClassName,
@@ -196,110 +190,10 @@ export const pyAgentGatewayConnectionGenerator = async (
     PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
   ]);
 
-  console.log('');
-  console.log(
-    `✔ Connected ${agentComponent.name} agent to ${gatewayClassName} gateway.`,
-  );
-  console.log('');
-  console.log('Add to the stack that instantiates your agent + gateway:');
-  console.log(
-    `  ${gatewayClassName.charAt(0).toLowerCase()}${gatewayClassName.slice(1)}.grantInvokeAccess(agent);`,
-  );
-  console.log('');
-
   await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);
   };
-};
-
-const addGatewayToolsToAgent = async (
-  tree: Tree,
-  filePath: string,
-  clientVarName: string,
-): Promise<void> => {
-  // Same shape mcp-connection uses: spread the gateway client's
-  // list_tools_sync() into the existing tools array.
-  if (
-    await matchGritQL(
-      tree,
-      filePath,
-      py(`\`${clientVarName}.list_tools_sync()\``),
-    )
-  ) {
-    return;
-  }
-  await applyGritQL(
-    tree,
-    filePath,
-    py(`\`tools=$old\` where {
-  $old <: not contains \`${clientVarName}\`,
-  if ($old <: \`[]\`) {
-    $old => \`[*${clientVarName}.list_tools_sync()]\`
-  } else {
-    $old <: \`[$items]\` where { $items += \`, *${clientVarName}.list_tools_sync()\` }
-  }
-}`),
-  );
-};
-
-const addGatewayClientToGetAgent = async (
-  tree: Tree,
-  filePath: string,
-  clientClassName: string,
-  clientVarName: string,
-): Promise<void> => {
-  // Already wired? Nothing to do.
-  if (
-    await matchGritQL(tree, filePath, py(`\`${clientClassName}.create()\``))
-  ) {
-    return;
-  }
-
-  // Existing `with (clients,):` block from a previous mcp/gateway connection
-  // — extend it in place. This mirrors the pattern used by mcp-connection.
-  const addedToWith = await applyGritQL(
-    tree,
-    filePath,
-    py(`\`with ($items,): $body\` where {
-  $items <: not contains \`${clientVarName}\`,
-  $items += \`, ${clientVarName}\`
-}`),
-  );
-
-  if (addedToWith) {
-    // Subsequent connection — prepend the creation line to the function body
-    // (a single anchor, so the line is inserted exactly once).
-    await applyGritQL(
-      tree,
-      filePath,
-      py(`\`def get_agent($params):
-    $body\` where {
-  $body <: contains \`yield Agent($_)\`,
-  $body <: not contains \`${clientClassName}.create\`
-} => \`def get_agent($params):
-    ${clientVarName} = ${clientClassName}.create()
-    $body\``),
-    );
-    return;
-  }
-
-  // First connection — wrap the existing `def get_agent` body in a single
-  // `with (<var>,):` block, the same pattern mcp-connection uses.
-  await applyGritQL(
-    tree,
-    filePath,
-    py(`\`def get_agent($params):
-    $body\` where {
-  $body <: contains \`yield Agent($_)\`,
-  $body <: not contains \`${clientClassName}.create\`
-} => \`def get_agent($params):
-    ${clientVarName} = ${clientClassName}.create()
-    with (
-        ${clientVarName},
-    ):
-        $body\``),
-  );
 };
 
 export default pyAgentGatewayConnectionGenerator;

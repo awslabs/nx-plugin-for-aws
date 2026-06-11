@@ -25,6 +25,14 @@ with the following variables in scope:
 - `<%%= gatewayArn %>` — this gateway's ARN
 - `<%%= accountId %>` — the AWS account this gateway is deployed into
 
+Add your own variables (e.g. an agent's exact role ARN) where the policies
+are rendered:
+
+- CDK: the `ejs.render` call in
+  `packages/common/constructs/src/app/gateways/<name>/<name>.ts`
+- Terraform: the `query` of the `rendered_policies` data source in
+  `packages/common/terraform/src/app/gateways/<name>/<name>.tf`
+
 ## Adding a new policy
 
 1. Create `policies/<my-policy>.cedar` alongside the existing files.
@@ -34,7 +42,8 @@ with the following variables in scope:
 3. Re-synth / plan your infrastructure to deploy the new policy.
 
 Policy names are derived from file names: `my-policy.cedar` becomes the
-policy `MyPolicy`. Keep file names unique within this directory.
+policy `MyPolicy` (plus a unique suffix, since policy names must be unique
+account-wide). Keep file names unique within this directory.
 
 ## Further reading
 

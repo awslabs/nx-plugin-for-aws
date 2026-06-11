@@ -67,6 +67,14 @@ dependencies = ["strands-agents"]
         name: '@test/my-gateway',
         root: 'packages/my-gateway',
         sourceRoot: 'packages/my-gateway',
+        metadata: {
+          generator: 'agentcore-gateway',
+          name: 'my-gateway',
+          rc: 'MyGateway',
+          protocol: 'mcp',
+          auth: 'iam',
+          port: 8100,
+        },
         targets: {
           'my-gateway-serve-local': {
             executor: 'nx:run-commands',
@@ -90,13 +98,6 @@ dependencies = ["strands-agents"]
       path: 'my_scope_my_agent/agent',
       port: 8081,
       rc: 'MyAgent',
-      auth: 'iam',
-    } as any,
-    targetComponent: {
-      generator: 'agentcore-gateway',
-      name: 'my-gateway',
-      rc: 'MyGateway',
-      protocol: 'mcp',
       auth: 'iam',
     } as any,
   });
@@ -150,15 +151,17 @@ dependencies = ["strands-agents"]
     expect(client).toContain('SERVE_LOCAL');
   });
 
-  it('points local mode at the gateway component port', async () => {
+  it('points local mode at the gateway port from project metadata', async () => {
     setupProjects();
-    await pyAgentGatewayConnectionGenerator(tree, {
-      ...fullOptions(),
-      targetComponent: {
-        ...fullOptions().targetComponent,
-        port: 8123,
-      } as any,
-    });
+    const gatewayConfig = JSON.parse(
+      tree.read('packages/my-gateway/project.json')!.toString(),
+    );
+    gatewayConfig.metadata.port = 8123;
+    tree.write(
+      'packages/my-gateway/project.json',
+      JSON.stringify(gatewayConfig),
+    );
+    await pyAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const moduleDirs = tree.children('packages/common/agent_connection');
     const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
@@ -242,41 +245,43 @@ dependencies = ["strands-agents"]
     expect(createCount).toBe(1);
   });
 
-  it('rejects missing component refs', async () => {
+  it('rejects a missing source component ref', async () => {
     setupProjects();
     await expect(
       pyAgentGatewayConnectionGenerator(tree, {
         sourceProject: 'my_scope.my_agent',
         targetProject: '@test/my-gateway',
       }),
-    ).rejects.toThrow(
-      /Both sourceComponent and targetComponent must be provided/,
-    );
+    ).rejects.toThrow(/sourceComponent must be provided/);
   });
 
   it('rejects non-MCP gateway protocol', async () => {
     setupProjects();
+    const gatewayConfig = JSON.parse(
+      tree.read('packages/my-gateway/project.json')!.toString(),
+    );
+    gatewayConfig.metadata.protocol = 'Runtime';
+    tree.write(
+      'packages/my-gateway/project.json',
+      JSON.stringify(gatewayConfig),
+    );
     await expect(
-      pyAgentGatewayConnectionGenerator(tree, {
-        ...fullOptions(),
-        targetComponent: {
-          ...fullOptions().targetComponent,
-          protocol: 'Runtime',
-        } as any,
-      }),
+      pyAgentGatewayConnectionGenerator(tree, fullOptions()),
     ).rejects.toThrow(/Only MCP-protocol gateways are supported/);
   });
 
   it('rejects gateway with non-IAM inbound auth', async () => {
     setupProjects();
+    const gatewayConfig = JSON.parse(
+      tree.read('packages/my-gateway/project.json')!.toString(),
+    );
+    gatewayConfig.metadata.auth = 'Cognito';
+    tree.write(
+      'packages/my-gateway/project.json',
+      JSON.stringify(gatewayConfig),
+    );
     await expect(
-      pyAgentGatewayConnectionGenerator(tree, {
-        ...fullOptions(),
-        targetComponent: {
-          ...fullOptions().targetComponent,
-          auth: 'Cognito',
-        } as any,
-      }),
+      pyAgentGatewayConnectionGenerator(tree, fullOptions()),
     ).rejects.toThrow(/Only IAM-authenticated gateways/);
   });
 
