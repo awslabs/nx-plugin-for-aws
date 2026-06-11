@@ -83,27 +83,38 @@ myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
 <Fragment slot="terraform">
 在实例化 Gateway 的 Terraform 文件中，连接 MCP 服务器目标：
 
-```hcl title="packages/infra/src/main.tf" {10-16}
+```hcl title="packages/infra/src/main.tf" {7,11-27}
 module "my_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
 }
 
 module "my_gateway" {
-  source = "../../common/terraform/src/app/gateways/my-gateway"
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 # Register the MCP server as a target of the Gateway
 resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
-  gateway_identifier    = module.my_gateway.gateway_id
-  name                  = "my-mcp-server"
-  mcp_server_runtime_arn = module.my_mcp_server.agent_core_runtime_arn
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
 
   credential_provider_configuration {
-    credential_provider_type = "GATEWAY_IAM_ROLE"
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
   }
+}
 ```
 
-目标 `name`（上面的 `my-mcp-server`）用作 Cedar 操作名称的前缀 — 请参阅 <Link path="guides/agentcore-gateway">编写策略部分</Link>。
+目标 `name`（上面的 `my-mcp-server`）用作 Cedar 操作名称的前缀 — 请参阅 <Link path="guides/agentcore-gateway">编写策略部分</Link>。`policy_dependencies` 确保引用此目标操作的 Cedar 策略在目标注册它们之后创建。
 </Fragment>
 </Infrastructure>
 

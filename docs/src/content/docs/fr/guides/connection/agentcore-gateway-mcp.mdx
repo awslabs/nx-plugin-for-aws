@@ -83,27 +83,38 @@ La construction configure la cible avec `iamCredentialProvider.service = 'bedroc
 <Fragment slot="terraform">
 Dans le fichier Terraform où vous instanciez la passerelle, câblez la cible du serveur MCP :
 
-```hcl title="packages/infra/src/main.tf" {10-16}
+```hcl title="packages/infra/src/main.tf" {7,11-27}
 module "my_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
 }
 
 module "my_gateway" {
-  source = "../../common/terraform/src/app/gateways/my-gateway"
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 # Register the MCP server as a target of the Gateway
 resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
-  gateway_identifier    = module.my_gateway.gateway_id
-  name                  = "my-mcp-server"
-  mcp_server_runtime_arn = module.my_mcp_server.agent_core_runtime_arn
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
 
   credential_provider_configuration {
-    credential_provider_type = "GATEWAY_IAM_ROLE"
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
   }
+}
 ```
 
-Le `name` de la cible (`my-mcp-server` ci-dessus) est utilisé comme préfixe pour les noms d'action Cedar — voir la <Link path="guides/agentcore-gateway">section Rédaction de politiques</Link>.
+Le `name` de la cible (`my-mcp-server` ci-dessus) est utilisé comme préfixe pour les noms d'action Cedar — voir la <Link path="guides/agentcore-gateway">section Rédaction de politiques</Link>. `policy_dependencies` garantit que les politiques Cedar référençant les actions de cette cible sont créées après que la cible a enregistré ces actions.
 </Fragment>
 </Infrastructure>
 

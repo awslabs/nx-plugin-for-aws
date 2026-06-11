@@ -47,7 +47,7 @@ Trình tạo kết nối các dự án hiện có với nhau thay vì tạo ra c
 
 - packages/\<gateway>
   - project.json `<gateway>-serve-local` có thêm phụ thuộc vào `<mcp>-serve-local` của MCP server
-  - serve.ts `ATTACHED_MCP_SERVERS` được cập nhật để gateway cục bộ tổng hợp MCP server
+  - serve-local.ts `ATTACHED_MCP_SERVERS` được cập nhật để gateway cục bộ tổng hợp MCP server
 
 </FileTree>
 
@@ -83,27 +83,38 @@ Construct cấu hình target với `iamCredentialProvider.service = 'bedrock-age
 <Fragment slot="terraform">
 Trong tệp Terraform nơi bạn khởi tạo Gateway, hãy kết nối target MCP server vào:
 
-```hcl title="packages/infra/src/main.tf" {10-16}
+```hcl title="packages/infra/src/main.tf" {7,11-27}
 module "my_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
 }
 
 module "my_gateway" {
-  source = "../../common/terraform/src/app/gateways/my-gateway"
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 # Register the MCP server as a target of the Gateway
 resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
-  gateway_identifier    = module.my_gateway.gateway_id
-  name                  = "my-mcp-server"
-  mcp_server_runtime_arn = module.my_mcp_server.agent_core_runtime_arn
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
 
   credential_provider_configuration {
-    credential_provider_type = "GATEWAY_IAM_ROLE"
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
   }
+}
 ```
 
-`name` của target (`my-mcp-server` ở trên) được sử dụng làm tiền tố cho tên hành động Cedar — xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>.
+`name` của target (`my-mcp-server` ở trên) được sử dụng làm tiền tố cho tên hành động Cedar — xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>. `policy_dependencies` đảm bảo các chính sách Cedar tham chiếu đến các hành động của target này được tạo sau khi target đã đăng ký chúng.
 </Fragment>
 </Infrastructure>
 
