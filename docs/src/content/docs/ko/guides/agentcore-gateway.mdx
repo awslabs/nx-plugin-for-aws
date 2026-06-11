@@ -1,6 +1,7 @@
 ---
 title: AgentCore Gateway
-description: Cedar 정책 엔진을 사용하는 AgentCore Gateway 프로젝트 생성
+description: AgentCore Gateway 프로젝트 생성
+generator: agentcore-gateway
 ---
 
 import { FileTree } from '@astrojs/starlight/components';
@@ -10,6 +11,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 모든 도구 호출을 평가하며, MCP 서버로의 아웃바운드 트래픽에 IAM SigV4로 서명하는 관리형 진입점입니다.
 
@@ -25,18 +27,20 @@ import NxCommands from '@components/nx-commands.astro';
 
 ## 생성기 출력
 
-생성기는 Cedar 정책 소스 파일을 포함하는 새 프로젝트를 `packages/<name>/`에 생성하며, 인프라를 위한 CDK 구성 요소 또는 Terraform 모듈을 추가합니다:
+생성기는 `packages/<name>/`에 새 프로젝트를 생성하며, 인프라를 위한 CDK 구성 요소 또는 Terraform 모듈을 추가합니다:
 
 <FileTree>
   - packages/\<name>/
     - policies/ Cedar 정책 소스 파일 (`cedarPolicy: false`일 때 생략됨)
-      - permit-all.cedar 모든 것을 허용하는 기본 Cedar 정책
+      - permit-all.cedar 동일한 AWS 계정 내에서 인증된 호출자를 허용하는 기본 Cedar 정책
       - README.md Cedar 정책 작성 참조
     - serve-local.ts 로컬 개발을 위해 연결된 MCP 서버를 집계하는 로컬 게이트웨이
     - project.json \<name>-serve 및 \<name>-serve-local 집계자 대상 추가
 </FileTree>
 
 ### 인프라
+
+인프라는 `infra`가 `agentcore`(기본값)일 때 생성됩니다. `infra: none`을 사용하면 인프라가 생성되지 않습니다 — 나중에 `infra: agentcore`로 생성기를 다시 실행하여 추가할 수 있습니다.
 
 <Snippet name="shared-constructs" />
 
@@ -64,12 +68,14 @@ import NxCommands from '@components/nx-commands.astro';
 생성된 구성 요소는 다음 AWS 리소스를 생성합니다:
 
 - `GatewayAuthorizer.usingAwsIam()`(인바운드 IAM 인증)을 사용하여 MCP 프로토콜용으로 구성된 `AgentCore::Gateway`
-- Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine`
+- Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine` (`cedarPolicy: false`일 때 생략됨)
 - `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy`
 
 Gateway URL은 <Link path="guides/runtime-config">런타임 구성</Link>의 `agentcore.gateways.<ClassName>` 네임스페이스에 자동으로 등록되어 에이전트가 런타임에 이를 발견할 수 있습니다.
 
 ## 정책 작성
+
+<OptionFilter when={{ cedarPolicy: true }} description="Cedar 정책 — cedarPolicy: true 전용">
 
 Cedar는 AgentCore Gateway가 도구 호출을 승인하는 데 사용하는 정책 언어입니다. Gateway를 통과하는 모든 `tools/list` 및 `tools/call` 요청은 연결된 정책 세트에 대해 평가되며, 요청이 성공하려면 호출자에게 최소한 하나의 일치하는 `permit` 문(그리고 일치하는 `forbid`가 없어야 함)이 있어야 합니다.
 
@@ -79,30 +85,60 @@ Cedar는 AgentCore Gateway가 도구 호출을 승인하는 데 사용하는 정
 
 정책을 추가하려면 `permit-all.cedar` 옆에 새 `.cedar` 파일을 생성하세요. `policies/`의 각 `.cedar` 파일은 정확히 **하나**의 `permit` 또는 `forbid` 문을 포함해야 하며 단일 `AWS::BedrockAgentCore::Policy` 리소스로 배포됩니다. 정책 리소스의 이름은 파일 이름에서 파생됩니다: `permit-all.cedar`는 `PermitAll`이 됩니다(kebab/snake-case는 PascalCase로 변환됨). 여러 문을 포함하는 파일은 배포 시 `unexpected token 'forbid'` 오류를 생성하므로 별도의 파일로 분할하세요.
 
-예를 들어, 특정 TypeScript 에이전트 역할만 특정 도구를 호출하도록 허용하려면 다음을 생성하세요:
+예를 들어, 특정 에이전트 역할만 특정 도구를 호출하도록 허용하려면 다음을 생성하세요:
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
+  principal.id like "<%= tsAgentRoleArn %>/*"
 };
 ```
 
-새 정책을 배포하려면 재합성(re-synth) 또는 재계획(re-plan)하세요.
+역할 ARN을 하드코딩하거나 패턴 매칭하는 대신 템플릿 변수로 전달하세요(아래 <a href="#template-variables">템플릿 변수</a> 참조). 새 정책을 배포하려면 재합성(re-synth) 또는 재계획(re-plan)하세요.
 
-### 플레이스홀더 치환
+### 템플릿 변수
 
-생성기는 정책이 계정 및 Gateway 재배포 간에 이식 가능하도록 합성/계획 시점에 다음 플레이스홀더를 치환합니다:
+정책은 계정 및 Gateway 재배포 간에 이식 가능하도록 합성/계획 시점에 렌더링되는 [EJS](https://ejs.co/) 템플릿입니다:
 
-| 플레이스홀더      | 치환 대상                              |
-| ---------------- | ------------------------------------- |
-| `${gateway_arn}` | 배포된 Gateway의 ARN                   |
-| `${account_id}`  | 이 Gateway가 배포된 AWS 계정           |
+| 변수                 | 치환 대상                              |
+| -------------------- | ------------------------------------- |
+| `<%= gatewayArn %>`  | 배포된 Gateway의 ARN                   |
+| `<%= accountId %>`   | 이 Gateway가 배포된 AWS 계정           |
 
-값을 하드코딩하지 말고 항상 이러한 플레이스홀더를 참조하세요.
+값을 하드코딩하지 말고 항상 이러한 변수를 참조하세요.
+
+#### 자체 변수 추가
+
+위의 `ts-agent-divide.cedar` 예제에 에이전트의 실행 역할 ARN을 전달하는 등 정책이 렌더링되는 위치에 새 변수를 추가하세요:
+
+<Infrastructure>
+<Fragment slot="cdk">
+`packages/common/constructs/src/app/gateways/<name>/<name>.ts`에서 `ejs.render`에 전달되는 객체에 추가하세요:
+
+```ts {3}
+ejs.render(raw, {
+  gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
+  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
+  // ...
+}),
+```
+</Fragment>
+<Fragment slot="terraform">
+`packages/common/terraform/src/app/gateways/<name>/<name>.tf`에서 `rendered_policies` 데이터 소스의 `query`에 추가하세요:
+
+```hcl {4}
+query = {
+  template       = "${local.policies_dir}/${each.value}"
+  gatewayArn     = awscc_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleArn = var.ts_agent_role_arn
+  # ...
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### ENFORCE 모드 및 기본 거부
 
@@ -123,9 +159,9 @@ Tool Execution Denied: Tool call not allowed due to policy enforcement
 permit (
   principal is AgentCore::IamEntity,
   action,
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:*::${account_id}:*"
+  principal.id like "arn:aws:*::<%= accountId %>:*"
 };
 ```
 
@@ -139,16 +175,10 @@ permit (
 principal is AgentCore::IamEntity
 ```
 
-주체의 `id` 속성은 호출자의 IAM ARN을 보유합니다. 실행 역할은 일반적으로 STS에 의해 가정되므로 호출자는 일반적으로 생성된 세션 접미사를 포함하는 STS assumed-role ARN으로 도착합니다:
-
-```
-arn:aws:sts::<account-id>:assumed-role/<role-name>/<session-name>
-```
-
-`like`와 와일드카드를 사용하여 이들을 일치시키세요:
+주체의 `id` 속성은 호출자의 IAM ARN을 보유합니다. 호출자는 일반적으로 생성된 세션 접미사가 있는 STS assumed-role ARN으로 도착하므로 정확한 역할 ARN을 템플릿 변수로 전달하고 `like`로 세션 접미사를 일치시키세요:
 
 ```cedar
-principal.id like "arn:aws:sts::*:assumed-role/*MyAgentExecutionRole*"
+principal.id like "<%= myAgentRoleArn %>/*"
 ```
 
 도구 호출은 다음 형식의 작업으로 정책 엔진에 도달합니다:
@@ -162,7 +192,7 @@ AgentCore::Action::"<target-name>___<tool-name>"
 리소스는 항상 Gateway 자체입니다:
 
 ```cedar
-resource == AgentCore::Gateway::"${gateway_arn}"
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
 ### 검증 고려사항
@@ -183,13 +213,15 @@ AgentCore의 정책 엔진은 CDK 구성 요소가 `PolicyValidationMode.IGNORE_
 forbid (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
+  principal.id like "<%= pyAgentRoleArn %>/*"
 };
 ```
 
 이것은 Python 에이전트 역할이 `ts-mcp___divide`를 호출하는 것을 거부하면서 다른 모든 호출자를 위해 더 광범위한 `permit-all.cedar`를 그대로 둡니다.
+
+</OptionFilter>
 
 ## 로컬 개발
 
@@ -203,5 +235,4 @@ forbid (
 
 - MCP 서버 연결: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - TypeScript Agent 연결: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
-- Python Agent 연결: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
 - Python Agent 연결: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

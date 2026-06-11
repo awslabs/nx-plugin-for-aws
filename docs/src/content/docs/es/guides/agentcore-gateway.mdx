@@ -1,6 +1,7 @@
 ---
 title: AgentCore Gateway
-description: Crea un proyecto AgentCore Gateway con motor de políticas Cedar
+description: Crea un proyecto AgentCore Gateway
+generator: agentcore-gateway
 ---
 
 import { FileTree } from '@astrojs/starlight/components';
@@ -10,6 +11,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Genera un proyecto [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Un AgentCore Gateway es un punto de entrada administrado que agrega uno o más destinos de servidor MCP detrás de un único endpoint MCP, evalúa cada llamada de herramienta contra un [motor de políticas Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), y firma el tráfico saliente a servidores MCP con IAM SigV4.
 
@@ -30,13 +32,15 @@ El generador crea un nuevo proyecto en `packages/<name>/`, además de un constru
 <FileTree>
   - packages/\<name>/
     - policies/ Archivos fuente de políticas Cedar (omitidos cuando `cedarPolicy: false`)
-      - permit-all.cedar Política Cedar predeterminada que permite todo
+      - permit-all.cedar Política Cedar predeterminada que permite llamadores autenticados desde dentro de la misma cuenta de AWS
       - README.md Referencia para escribir políticas Cedar
     - serve-local.ts Gateway local que agrega servidores MCP adjuntos para desarrollo local
     - project.json Agrega los destinos agregadores \<name>-serve y \<name>-serve-local
 </FileTree>
 
 ### Infraestructura
+
+La infraestructura se genera cuando `infra` es `agentcore` (el valor predeterminado). Con `infra: none` no se genera infraestructura — vuelve a ejecutar el generador con `infra: agentcore` más tarde para agregarla.
 
 <Snippet name="shared-constructs" />
 
@@ -64,12 +68,14 @@ El generador crea un nuevo proyecto en `packages/<name>/`, además de un constru
 El constructo generado crea los siguientes recursos de AWS:
 
 - Un `AgentCore::Gateway` configurado para el protocolo MCP con `GatewayAuthorizer.usingAwsIam()` (autenticación IAM entrante)
-- Un `AgentCore::PolicyEngine` ejecutándose en modo `ENFORCE`, adjunto al Gateway
+- Un `AgentCore::PolicyEngine` ejecutándose en modo `ENFORCE`, adjunto al Gateway (omitido cuando `cedarPolicy: false`)
 - Una `AgentCore::Policy` por cada archivo `.cedar` en `policies/`
 
 La URL del Gateway se registra automáticamente en el espacio de nombres `agentcore.gateways.<ClassName>` de <Link path="guides/runtime-config">Runtime Configuration</Link> para que los agentes puedan descubrirla en tiempo de ejecución.
 
 ## Escribir Políticas
+
+<OptionFilter when={{ cedarPolicy: true }} description="Cedar policies — cedarPolicy: true only">
 
 Cedar es el lenguaje de políticas utilizado por AgentCore Gateway para autorizar llamadas de herramientas. Cada solicitud `tools/list` y `tools/call` que fluye a través del Gateway se evalúa contra el conjunto de políticas adjunto, y el llamador debe tener al menos una declaración `permit` coincidente (y ninguna `forbid` coincidente) para que la solicitud tenga éxito.
 
@@ -79,30 +85,60 @@ Consulta la [documentación de AWS sobre políticas de AgentCore Gateway](https:
 
 Para agregar una política, crea un nuevo archivo `.cedar` junto a `permit-all.cedar`. Cada archivo `.cedar` en `policies/` debe contener exactamente **una** declaración `permit` o `forbid` y se despliega como un único recurso `AWS::BedrockAgentCore::Policy`. El nombre del recurso de política se deriva del nombre del archivo: `permit-all.cedar` se convierte en `PermitAll` (kebab/snake-case se convierte a PascalCase). Los archivos que contienen múltiples declaraciones producen errores `unexpected token 'forbid'` en tiempo de despliegue — divídelos en archivos separados.
 
-Por ejemplo, para permitir solo que un rol de agente TypeScript específico invoque una herramienta particular, crea:
+Por ejemplo, para permitir solo que un rol de agente específico invoque una herramienta particular, crea:
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
+  principal.id like "<%= tsAgentRoleArn %>/*"
 };
 ```
 
-Vuelve a ejecutar synth o plan para desplegar la nueva política.
+Pasa el ARN del rol como una variable de plantilla (consulta <a href="#template-variables">Variables de plantilla</a> a continuación) en lugar de codificarlo de forma fija o usar coincidencia de patrones. Vuelve a ejecutar synth o plan para desplegar la nueva política.
 
-### Sustitución de marcadores de posición
+### Variables de plantilla
 
-El generador sustituye los siguientes marcadores de posición en tiempo de synth/plan para que las políticas permanezcan portables entre cuentas y redespliegues del Gateway:
+Las políticas son plantillas [EJS](https://ejs.co/) renderizadas en tiempo de synth/plan para que permanezcan portables entre cuentas y redespliegues del Gateway:
 
-| Marcador de posición | Sustituido con                                     |
+| Variable             | Sustituido con                                     |
 | -------------------- | -------------------------------------------------- |
-| `${gateway_arn}`     | El ARN del Gateway desplegado                      |
-| `${account_id}`      | La cuenta de AWS en la que se despliega el Gateway |
+| `<%= gatewayArn %>`  | El ARN del Gateway desplegado                      |
+| `<%= accountId %>`   | La cuenta de AWS en la que se despliega el Gateway |
 
-Siempre referencia estos marcadores de posición en lugar de codificar valores de forma fija.
+Siempre referencia estas variables en lugar de codificar valores de forma fija.
+
+#### Agregar tus propias variables
+
+Agrega nuevas variables donde se renderizan las políticas, por ejemplo para pasar el ARN del rol de ejecución de un agente al ejemplo `ts-agent-divide.cedar` anterior:
+
+<Infrastructure>
+<Fragment slot="cdk">
+En `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, agrega al objeto pasado a `ejs.render`:
+
+```ts {3}
+ejs.render(raw, {
+  gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
+  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
+  // ...
+}),
+```
+</Fragment>
+<Fragment slot="terraform">
+En `packages/common/terraform/src/app/gateways/<name>/<name>.tf`, agrega al `query` de la fuente de datos `rendered_policies`:
+
+```hcl {4}
+query = {
+  template       = "${local.policies_dir}/${each.value}"
+  gatewayArn     = awscc_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleArn = var.ts_agent_role_arn
+  # ...
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### Modo ENFORCE y denegación predeterminada
 
@@ -123,9 +159,9 @@ El generador incluye una política predeterminada que permite cualquier llamador
 permit (
   principal is AgentCore::IamEntity,
   action,
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:*::${account_id}:*"
+  principal.id like "arn:aws:*::<%= accountId %>:*"
 };
 ```
 
@@ -139,16 +175,10 @@ Para los Gateways generados por este plugin, todos los llamadores son principale
 principal is AgentCore::IamEntity
 ```
 
-El atributo `id` del principal contiene el ARN IAM del llamador. Los roles de ejecución generalmente son asumidos por STS, por lo que los llamadores suelen llegar como ARNs de assumed-role de STS que contienen un sufijo de sesión generado:
-
-```
-arn:aws:sts::<account-id>:assumed-role/<role-name>/<session-name>
-```
-
-Coincide con estos usando `like` y un comodín:
+El atributo `id` del principal contiene el ARN IAM del llamador. Los llamadores generalmente llegan como ARNs de assumed-role de STS con un sufijo de sesión generado, así que pasa el ARN exacto del rol como una variable de plantilla y coincide el sufijo de sesión con `like`:
 
 ```cedar
-principal.id like "arn:aws:sts::*:assumed-role/*MyAgentExecutionRole*"
+principal.id like "<%= myAgentRoleArn %>/*"
 ```
 
 Las invocaciones de herramientas llegan al motor de políticas como acciones con la forma:
@@ -162,7 +192,7 @@ donde `<target-name>` es el nombre del destino del Gateway (el id del constructo
 El recurso es siempre el Gateway mismo:
 
 ```cedar
-resource == AgentCore::Gateway::"${gateway_arn}"
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
 ### Consideraciones de validación
@@ -185,11 +215,13 @@ forbid (
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
+  principal.id like "<%= pyAgentRoleArn %>/*"
 };
 ```
 
 Esto deniega al rol del agente Python llamar a `ts-mcp___divide` mientras deja el `permit-all.cedar` más amplio en su lugar para todos los demás llamadores.
+
+</OptionFilter>
 
 ## Desarrollo Local
 
@@ -203,5 +235,4 @@ Consulta la guía de conexión para la historia completa de desarrollo local.
 
 - Conectar un servidor MCP: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - Conectar un Agente TypeScript: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
-- Conectar un Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
 - Conectar un Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

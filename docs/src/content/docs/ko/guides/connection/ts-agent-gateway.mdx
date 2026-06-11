@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 `connection` 생성기는 <Link path="guides/ts-agent">TypeScript Agent</Link>를 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>에 연결할 수 있습니다.
 
-생성기는 배포 시 IAM SigV4로 Gateway에 인증하고, 로컬 실행 시 연결된 MCP 서버에 직접 멀티플렉싱하도록 에이전트를 구성합니다.
+생성기는 배포 시 IAM SigV4로 Gateway에 인증하고, 로컬 실행 시 Gateway 프로젝트에서 시작된 로컬 게이트웨이에 연결하도록 에이전트를 구성합니다.
 
 ## 사전 요구 사항
 
@@ -45,9 +45,8 @@ import Infrastructure from '@components/infrastructure.astro';
   - src
     - core/
       - agentcore-gateway-mcp-client.ts 배포된 Gateway용 SigV4 MCP 클라이언트
-      - agentcore-gateway-mcp-local-client.ts 연결된 MCP 서버로 팬아웃하는 로컬 멀티플렉스 클라이언트
     - app/
-      - \<gateway-kebab>-client.ts `ATTACHED_MCP_SERVERS` 목록이 있는 Gateway별 래퍼
+      - \<gateway-kebab>-client.ts Gateway별 클라이언트 래퍼
     - index.ts Gateway 클라이언트를 재내보냄
 
 </FileTree>
@@ -75,9 +74,9 @@ export const getAgent = async () => {
 };
 ```
 
-`create()`는 항상 단일 `McpClient`를 반환합니다. 배포 시 (`SERVE_LOCAL` 미설정), Gateway의 MCP 엔드포인트를 가리키고 SigV4로 인증합니다. `SERVE_LOCAL=true`일 때는 `ATTACHED_MCP_SERVERS`의 모든 MCP 서버로 팬아웃하는 멀티플렉스 클라이언트이므로 동일한 `agent.ts`가 두 모드에서 균일하게 작동합니다.
+배포 시 (`SERVE_LOCAL` 미설정), 클라이언트는 Gateway의 MCP 엔드포인트를 가리키고 SigV4로 인증합니다. `SERVE_LOCAL=true`일 때는 Gateway 프로젝트의 `serve-local` 타겟에서 시작된 로컬 게이트웨이를 가리키므로 동일한 `agent.ts`가 두 모드에서 균일하게 작동합니다.
 
-세션 ID는 다운스트림 MCP 서버로 자동으로 전파됩니다: 기본 전송은 [Strands TS 세션 컨텍스트](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)를 통해 요청 범위 세션을 읽고 이를 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더로 Gateway에 전달합니다.
+세션 ID는 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더를 통해 다운스트림 MCP 서버로 자동으로 전파됩니다.
 
 ## 인프라
 
@@ -145,7 +144,7 @@ Gateway URL은 생성된 Terraform 모듈에 의해 <Link path="guides/runtime-c
 
 ### 로컬 충실도
 
-로컬 멀티플렉스 모드는 Gateway 자체를 우회하므로:
+로컬 게이트웨이는 배포된 Gateway를 대신하므로:
 
 - **Cedar 정책 평가 없음.** 정책에 관계없이 모든 도구가 에이전트에 표시됩니다. 배포된 Gateway에 대해 정책을 실행하려면 `serve` 타겟을 사용하세요.
 - **도구 이름 접두사는 유지됨.** 각 로컬 MCP 서버의 도구는 `<target-name>___<tool-name>` 형식의 이름을 노출하도록 래핑되어 배포된 Gateway가 내보내는 것과 일치합니다. 이를 통해 에이전트의 시스템 프롬프트와 참조하는 Cedar 액션 이름이 로컬 및 배포된 실행에서 일관되게 유지됩니다.

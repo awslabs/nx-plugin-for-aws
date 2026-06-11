@@ -1,6 +1,7 @@
 ---
 title: AgentCore Gateway
-description: Créer un projet AgentCore Gateway avec le moteur de politiques Cedar
+description: Créer un projet AgentCore Gateway
+generator: agentcore-gateway
 ---
 
 import { FileTree } from '@astrojs/starlight/components';
@@ -10,6 +11,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Générez un projet [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Une AgentCore Gateway est un point d'entrée géré qui agrège un ou plusieurs serveurs MCP cibles derrière un seul point de terminaison MCP, évalue chaque appel d'outil par rapport à un [moteur de politiques Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), et signe le trafic sortant vers les serveurs MCP avec IAM SigV4.
 
@@ -30,7 +32,7 @@ Le générateur crée un nouveau projet dans `packages/<name>/` contenant les fi
 <FileTree>
   - packages/\<name>/
     - policies/ Fichiers source de politiques Cedar (omis lorsque `cedarPolicy: false`)
-      - permit-all.cedar Politique Cedar par défaut qui autorise tout
+      - permit-all.cedar Politique Cedar par défaut qui autorise les appelants authentifiés du même compte AWS
       - README.md Référence pour écrire des politiques Cedar
     - serve-local.ts Gateway locale agrégeant les serveurs MCP attachés pour le développement local
     - project.json Ajoute les cibles d'agrégation \<name>-serve et \<name>-serve-local
@@ -73,9 +75,7 @@ L'URL de la Gateway est automatiquement enregistrée dans l'espace de noms `agen
 
 ## Écriture de politiques
 
-:::note
-Cette section s'applique lorsque la gateway est générée avec `cedarPolicy: true` (la valeur par défaut). Avec `cedarPolicy: false`, la gateway n'effectue aucune évaluation de politique — tout appelant avec un accès IAM peut invoquer n'importe quel outil.
-:::
+<OptionFilter when={{ cedarPolicy: true }} description="Cedar policies — cedarPolicy: true only">
 
 Cedar est le langage de politique utilisé par AgentCore Gateway pour autoriser les appels d'outils. Chaque requête `tools/list` et `tools/call` transitant par la Gateway est évaluée par rapport à l'ensemble de politiques attaché, et l'appelant doit avoir au moins une instruction `permit` correspondante (et aucune `forbid` correspondante) pour que la requête réussisse.
 
@@ -85,30 +85,60 @@ Consultez la [documentation AWS sur les politiques AgentCore Gateway](https://do
 
 Pour ajouter une politique, créez un nouveau fichier `.cedar` à côté de `permit-all.cedar`. Chaque fichier `.cedar` dans `policies/` doit contenir exactement **une** instruction `permit` ou `forbid` et est déployé comme une seule ressource `AWS::BedrockAgentCore::Policy`. Le nom de la ressource de politique est dérivé du nom de fichier : `permit-all.cedar` devient `PermitAll` (kebab/snake-case est converti en PascalCase). Les fichiers contenant plusieurs instructions produisent des erreurs `unexpected token 'forbid'` au moment du déploiement — divisez-les en fichiers séparés.
 
-Par exemple, pour autoriser uniquement un rôle d'agent TypeScript spécifique à invoquer un outil particulier, créez :
+Par exemple, pour autoriser uniquement un rôle d'agent spécifique à invoquer un outil particulier, créez :
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:sts::*:assumed-role/*TsAgentExecutionRole*"
+  principal.id like "<%= tsAgentRoleArn %>/*"
 };
 ```
 
-Resynthétisez ou replanifiez pour déployer la nouvelle politique.
+Passez l'ARN du rôle en tant que variable de modèle (voir <a href="#template-variables">Variables de modèle</a> ci-dessous) plutôt que de le coder en dur ou de le faire correspondre par motif. Resynthétisez ou replanifiez pour déployer la nouvelle politique.
 
-### Substitution de paramètres fictifs
+### Variables de modèle
 
-Le générateur substitue les paramètres fictifs suivants au moment de la synthèse/planification afin que les politiques restent portables entre les comptes et les redéploiements de Gateway :
+Les politiques sont des modèles [EJS](https://ejs.co/) rendus au moment de la synthèse/planification afin qu'elles restent portables entre les comptes et les redéploiements de Gateway :
 
-| Paramètre fictif | Substitué par                                      |
-| ---------------- | -------------------------------------------------- |
-| `${gateway_arn}` | L'ARN de la Gateway déployée                       |
-| `${account_id}`  | Le compte AWS dans lequel cette Gateway est déployée |
+| Variable             | Substitué par                                      |
+| -------------------- | -------------------------------------------------- |
+| `<%= gatewayArn %>`  | L'ARN de la Gateway déployée                       |
+| `<%= accountId %>`   | Le compte AWS dans lequel cette Gateway est déployée |
 
-Référencez toujours ces paramètres fictifs plutôt que de coder en dur les valeurs.
+Référencez toujours ces variables plutôt que de coder en dur les valeurs.
+
+#### Ajouter vos propres variables
+
+Ajoutez de nouvelles variables là où les politiques sont rendues, par exemple pour passer l'ARN du rôle d'exécution d'un agent à l'exemple `ts-agent-divide.cedar` ci-dessus :
+
+<Infrastructure>
+<Fragment slot="cdk">
+Dans `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, ajoutez à l'objet passé à `ejs.render` :
+
+```ts {3}
+ejs.render(raw, {
+  gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
+  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
+  // ...
+}),
+```
+</Fragment>
+<Fragment slot="terraform">
+Dans `packages/common/terraform/src/app/gateways/<name>/<name>.tf`, ajoutez à la `query` de la source de données `rendered_policies` :
+
+```hcl {4}
+query = {
+  template       = "${local.policies_dir}/${each.value}"
+  gatewayArn     = awscc_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleArn = var.ts_agent_role_arn
+  # ...
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### Mode ENFORCE et refus par défaut
 
@@ -145,16 +175,10 @@ Pour les Gateways générées par ce plugin, tous les appelants sont des princip
 principal is AgentCore::IamEntity
 ```
 
-L'attribut `id` du principal contient l'ARN IAM de l'appelant. Les rôles d'exécution sont généralement assumés par STS, donc les appelants arrivent généralement sous forme d'ARN de rôle assumé STS contenant un suffixe de session généré :
-
-```
-arn:aws:sts::<account-id>:assumed-role/<role-name>/<session-name>
-```
-
-Faites correspondre ceux-ci avec `like` et un caractère générique :
+L'attribut `id` du principal contient l'ARN IAM de l'appelant. Les appelants arrivent généralement sous forme d'ARN de rôle assumé STS avec un suffixe de session généré, donc passez l'ARN exact du rôle en tant que variable de modèle et faites correspondre le suffixe de session avec `like` :
 
 ```cedar
-principal.id like "arn:aws:sts::*:assumed-role/*MyAgentExecutionRole*"
+principal.id like "<%= myAgentRoleArn %>/*"
 ```
 
 Les invocations d'outils atteignent le moteur de politiques sous forme d'actions avec la forme :
@@ -189,13 +213,15 @@ Associez un `forbid` étroit avec un `permit` plus large (Cedar évalue `forbid`
 forbid (
   principal is AgentCore::IamEntity,
   action == AgentCore::Action::"ts-mcp___divide",
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:sts::*:assumed-role/*PyAgentExecutionRole*"
+  principal.id like "<%= pyAgentRoleArn %>/*"
 };
 ```
 
 Cela refuse au rôle d'agent Python d'appeler `ts-mcp___divide` tout en laissant le `permit-all.cedar` plus large en place pour tous les autres appelants.
+
+</OptionFilter>
 
 ## Développement local
 
