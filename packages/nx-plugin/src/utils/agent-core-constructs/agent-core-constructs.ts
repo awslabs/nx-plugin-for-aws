@@ -260,6 +260,24 @@ const addAgentCoreGatewayCDKInfra = async (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
 ) => {
+  // Generic gateway construct (readiness probe, policy engine, Cedar policy
+  // loading) shared by all gateways
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'cdk', 'core', 'agentcore-gateway'),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'agentcore-gateway',
+    ),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'cdk', 'app', 'agentcore-gateway'),
@@ -287,11 +305,21 @@ const addAgentCoreGatewayCDKInfra = async (
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
       'src',
-      'app',
-      'gateways',
+      'core',
       'index.ts',
     ),
-    './mcp-server-construct.js',
+    './agentcore-gateway/agentcore-gateway.js',
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'index.ts',
+    ),
+    './agentcore-gateway/mcp-server-construct.js',
   );
   await addStarExport(
     tree,

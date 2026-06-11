@@ -476,21 +476,43 @@ resource "null_resource" "runtime_ready" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      payload=$(printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"readiness-probe","version":"1.0"}}}' | base64 | tr -d '\\n')
-      for attempt in $(seq 1 50); do
-        if aws bedrock-agentcore invoke-agent-runtime \\
-          --agent-runtime-arn '\${self.triggers.runtime_arn}' \\
-          --runtime-session-id "readiness-probe-attempt-$attempt-$(date +%s%N)" \\
-          --content-type application/json \\
-          --accept 'application/json, text/event-stream' \\
-          --payload "$payload" \\
-          /dev/null > /dev/null 2>&1; then
-          exit 0
-        fi
-        sleep 10
-      done
-      echo "Runtime \${self.triggers.runtime_arn} did not become ready" >&2
-      exit 1
+      uv run --with boto3 python -c "
+import boto3
+import json
+import time
+import uuid
+
+runtime_arn = '\${self.triggers.runtime_arn}'
+client = boto3.client('bedrock-agentcore')
+initialize_request = json.dumps({
+    'jsonrpc': '2.0',
+    'id': 1,
+    'method': 'initialize',
+    'params': {
+        'protocolVersion': '2025-03-26',
+        'capabilities': {},
+        'clientInfo': {'name': 'readiness-probe', 'version': '1.0'},
+    },
+})
+
+deadline = time.time() + 3 * 60
+while True:
+    try:
+        client.invoke_agent_runtime(
+            agentRuntimeArn=runtime_arn,
+            runtimeSessionId=f'readiness-probe-{uuid.uuid4()}',
+            contentType='application/json',
+            accept='application/json, text/event-stream',
+            payload=initialize_request,
+        )
+        break
+    except Exception:
+        if time.time() >= deadline:
+            raise
+        time.sleep(5)
+
+print(f'Runtime {runtime_arn} is serving MCP')
+"
     EOT
   }
 }

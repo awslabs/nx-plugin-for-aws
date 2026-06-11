@@ -1,0 +1,55 @@
+/**
+ * Readiness probe for AgentCore Gateway MCP targets.
+ *
+ * AgentCore fetches each target's tools during target creation, which can
+ * race the MCP runtime's first cold start on a fresh deploy. This handler
+ * invokes each runtime with an MCP initialize request — the invocation
+ * blocks through the cold start — retrying for up to 3 minutes.
+ */
+const {
+  BedrockAgentCoreClient,
+  InvokeAgentRuntimeCommand,
+} = require('@aws-sdk/client-bedrock-agentcore');
+
+const client = new BedrockAgentCoreClient();
+
+const DEADLINE_MS = 3 * 60 * 1000;
+const RETRY_INTERVAL_MS = 5 * 1000;
+
+const INITIALIZE_REQUEST = JSON.stringify({
+  jsonrpc: '2.0',
+  id: 1,
+  method: 'initialize',
+  params: {
+    protocolVersion: '2025-03-26',
+    capabilities: {},
+    clientInfo: { name: 'readiness-probe', version: '1.0' },
+  },
+});
+
+const probe = async (agentRuntimeArn) => {
+  const deadline = Date.now() + DEADLINE_MS;
+  for (;;) {
+    try {
+      return await client.send(
+        new InvokeAgentRuntimeCommand({
+          agentRuntimeArn,
+          runtimeSessionId: 'readiness-probe-' + crypto.randomUUID(),
+          contentType: 'application/json',
+          accept: 'application/json, text/event-stream',
+          payload: Buffer.from(INITIALIZE_REQUEST),
+        }),
+      );
+    } catch (e) {
+      if (Date.now() >= deadline) {
+        throw e;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS));
+    }
+  }
+};
+
+exports.handler = async () => {
+  const arns = (process.env.RUNTIME_ARNS ?? '').split(',').filter(Boolean);
+  await Promise.all(arns.map(probe));
+};

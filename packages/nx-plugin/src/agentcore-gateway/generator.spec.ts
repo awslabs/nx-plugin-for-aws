@@ -140,11 +140,18 @@ describe('agentcore-gateway generator', () => {
       const construct = tree
         .read('packages/common/constructs/src/app/gateways/gateway/gateway.ts')!
         .toString();
-      expect(construct).toContain('export class Gateway extends Construct');
-      // The CDK Gateway class must be referenced via a namespace so the
-      // vended `Gateway` class does not collide with it.
-      expect(construct).toContain('new agentcore.Gateway(');
-      expect(construct).not.toMatch(/import \{[^}]*\bGateway\b[^}]*\} from/);
+      expect(construct).toContain(
+        'export class Gateway extends AgentCoreGateway',
+      );
+      // The shared construct references the CDK Gateway class via a
+      // namespace so a vended `Gateway` class does not collide with it.
+      const core = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      expect(core).toContain('new agentcore.Gateway(');
+      expect(core).not.toMatch(/import \{[^}]*\bGateway\b[^}]*\} from/);
     });
 
     it('kebab-cases class-style names and pascal-cases runtime config keys', async () => {
@@ -183,10 +190,9 @@ describe('agentcore-gateway generator', () => {
     it('wires the MCP-protocol Gateway with IAM inbound auth + ENFORCE policy engine', () => {
       const construct = tree
         .read(
-          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
         )!
         .toString();
-      expect(construct).toContain('class MyGateway');
       expect(construct).toContain(
         'protocolConfiguration: new agentcore.McpProtocolConfiguration',
       );
@@ -194,12 +200,19 @@ describe('agentcore-gateway generator', () => {
         'authorizerConfiguration: agentcore.GatewayAuthorizer.usingAwsIam()',
       );
       expect(construct).toContain("mode: 'ENFORCE'");
+      const app = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      expect(app).toContain('class MyGateway extends AgentCoreGateway');
+      expect(app).toContain('cedarPolicyPath');
     });
 
     it('uses only stable aws-cdk-lib modules — no alpha imports, no bare-named CDK imports', () => {
       const construct = tree
         .read(
-          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
         )!
         .toString();
       expect(construct).not.toContain('@aws-cdk/aws-bedrock-agentcore-alpha');
@@ -214,7 +227,7 @@ describe('agentcore-gateway generator', () => {
     it('uses IAM SigV4 outbound (iamCredentialProvider) for MCP server targets', () => {
       const construct = tree
         .read(
-          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
         )!
         .toString();
       expect(construct).toContain('iamCredentialProvider');
@@ -224,7 +237,7 @@ describe('agentcore-gateway generator', () => {
     it('grants the gateway role policy evaluation permissions', () => {
       const construct = tree
         .read(
-          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
         )!
         .toString();
       expect(construct).toContain('bedrock-agentcore:AuthorizeAction');
@@ -246,7 +259,7 @@ describe('agentcore-gateway generator', () => {
     it('exposes grantInvokeAccess + addMcpServerTarget public methods', () => {
       const construct = tree
         .read(
-          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
         )!
         .toString();
       expect(construct).toContain('public grantInvokeAccess');
@@ -256,7 +269,7 @@ describe('agentcore-gateway generator', () => {
     it('URL-encodes the runtime ARN correctly for the MCP target endpoint', () => {
       const construct = tree
         .read(
-          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
         )!
         .toString();
       // Both ':' and '/' must be encoded in the path segment of the
@@ -357,21 +370,14 @@ describe('agentcore-gateway generator', () => {
       expect(tree.exists('packages/my-gateway/serve-local.ts')).toBe(true);
     });
 
-    it('omits the policy engine from the CDK construct', () => {
+    it('omits the cedar policy path from the CDK construct', () => {
       const construct = tree
         .read(
           'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
         )!
         .toString();
-      expect(construct).not.toContain('PolicyEngine');
-      expect(construct).not.toContain('ejs');
-      expect(construct).toContain('new agentcore.Gateway(');
-      expect(construct).toContain('addMcpServer');
-    });
-
-    it('omits ejs from the workspace dependencies', () => {
-      const pkg = JSON.parse(tree.read('package.json')!.toString());
-      expect(pkg.devDependencies?.ejs).toBeUndefined();
+      expect(construct).not.toContain('cedarPolicyPath');
+      expect(construct).toContain('extends AgentCoreGateway');
     });
   });
 

@@ -28,7 +28,7 @@ with the following variables in scope:
 Add your own variables (e.g. an agent's role name) where the policies are
 rendered:
 
-- CDK: the `ejs.render` call in
+- CDK: the `cedarPolicyVariables` prop in
   `packages/common/constructs/src/app/gateways/<name>/<name>.ts`
 - Terraform: the `query` of the `rendered_policies` data source in
   `packages/common/terraform/src/app/gateways/<name>/<name>.tf`

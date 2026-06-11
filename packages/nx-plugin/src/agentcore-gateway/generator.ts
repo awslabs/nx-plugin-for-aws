@@ -129,15 +129,12 @@ export const agentcoreGatewayGenerator = async (
     },
   );
 
-  // serve-local.ts dependencies (+ ejs for Cedar policy rendering in the construct)
+  // serve-local.ts dependencies (+ ejs for Cedar policy rendering in the
+  // shared gateway construct)
   addDependenciesToPackageJson(
     tree,
     withVersions(['@modelcontextprotocol/sdk', 'express']),
-    withVersions([
-      'tsx',
-      '@types/express',
-      ...(cedarPolicy ? (['ejs', '@types/ejs'] as const) : []),
-    ]),
+    withVersions(['tsx', '@types/express', 'ejs', '@types/ejs']),
   );
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
