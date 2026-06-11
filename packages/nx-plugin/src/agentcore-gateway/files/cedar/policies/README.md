@@ -25,8 +25,8 @@ with the following variables in scope:
 - `<%%= gatewayArn %>` — this gateway's ARN
 - `<%%= accountId %>` — the AWS account this gateway is deployed into
 
-Add your own variables (e.g. an agent's exact role ARN) where the policies
-are rendered:
+Add your own variables (e.g. an agent's role name) where the policies are
+rendered:
 
 - CDK: the `ejs.render` call in
   `packages/common/constructs/src/app/gateways/<name>/<name>.ts`
