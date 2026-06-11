@@ -1,0 +1,93 @@
+---
+title: 本地开发
+description: serve 和 serve-local 目标的本地开发工作原理
+---
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+已连接的项目公开了两个目标用于在您的机器上运行它们：`serve` 和 `serve-local`。区别在于**范围** —— 您的应用程序有多少部分在本地运行，以及有多少部分指向已部署的 AWS 基础设施。
+
+考虑一个具有以下连接的工作空间：一个调用 tRPC `api` 的网站，同时还调用一个 `agent`，而该 agent 又调用一个 `mcp` 服务器。
+
+## `serve`
+
+`serve` 目标**仅在本地运行目标项目**。它连接到的所有其他项目都预期是**已部署的**，并通过其真实的 AWS URL 访问。
+
+<NxCommands commands={['serve website']} />
+
+因为目标项目与已部署的资源通信，所以它需要知道这些资源的位置。对于网站，这是通过其 `runtime-config.json` 提供的（参见 <Link path="guides/react-website#local-runtime-config">本地运行时配置</Link>），您可以从已部署的应用程序加载它。对于读取<Link path="guides/runtime-config">运行时配置</Link>的服务器端项目（API 和 agent），请设置 `RUNTIME_CONFIG_APP_ID` 环境变量以指向您已部署的 AppConfig 应用程序。
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+  style.stroke: "#2e7d32"
+  style.font-color: "#1b5e20"
+}
+api: api {
+  style.fill: "#eceff1"
+  style.stroke: "#90a4ae"
+  style.stroke-dash: 3
+  style.font-color: "#455a64"
+}
+agent: agent {
+  style.fill: "#eceff1"
+  style.stroke: "#90a4ae"
+  style.stroke-dash: 3
+  style.font-color: "#455a64"
+}
+mcp: mcp {
+  style.fill: "#eceff1"
+  style.stroke: "#90a4ae"
+  style.stroke-dash: 3
+  style.font-color: "#455a64"
+}
+
+website -> api
+website -> agent
+agent -> mcp
+```
+
+当您想要针对其所依赖的所有内容的"真实"已部署版本迭代单个项目时，请使用 `serve`。
+
+## `serve-local`
+
+`serve-local` 目标运行**目标项目**以及**与其传递连接的每个项目**，全部在您的机器上。连接生成器会自动完成此配置 —— 在网站上运行 `serve-local` 也会为 `api`、`agent` 以及通过 agent 访问的 `mcp` 服务器启动本地服务器。
+
+<NxCommands commands={['serve-local website']} />
+
+以这种方式运行时，网站的 `runtime-config.json` 会自动被覆盖（通过 [Vite 的 `MODE`](https://vite.dev/guide/env-and-mode)，设置为 `serve-local`），使其指向您本地运行的服务器而不是已部署的 URL。
+
+```d2
+direction: right
+
+website: website {
+  style.fill: "#c8e6c9"
+  style.stroke: "#2e7d32"
+  style.font-color: "#1b5e20"
+}
+api: api {
+  style.fill: "#c8e6c9"
+  style.stroke: "#2e7d32"
+  style.font-color: "#1b5e20"
+}
+agent: agent {
+  style.fill: "#c8e6c9"
+  style.stroke: "#2e7d32"
+  style.font-color: "#1b5e20"
+}
+mcp: mcp {
+  style.fill: "#c8e6c9"
+  style.stroke: "#2e7d32"
+  style.font-color: "#1b5e20"
+}
+
+website -> api
+website -> agent
+agent -> mcp
+```
+
+当您同时处理多个已连接的项目并希望快速迭代而无需部署基础设施时，请使用 `serve-local`。
+
+有关每种项目类型的本地开发服务器的更多详细信息，请参阅相关指南 —— 例如 <Link path="guides/react-website#local-development-server">React Website</Link> 指南。
