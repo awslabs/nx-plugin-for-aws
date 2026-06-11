@@ -430,6 +430,10 @@ export default defineConfig({
                   link: '/guides/runtime-config',
                 },
                 {
+                  label: 'Local Development',
+                  link: '/guides/local-development',
+                },
+                {
                   label: 'React → FastAPI',
                   link: '/guides/connection/react-fastapi',
                 },

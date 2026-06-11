@@ -1,0 +1,76 @@
+---
+title: Desarrollo Local
+description: Cómo funciona el desarrollo local con los targets serve y serve-local
+---
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+
+Los proyectos conectados exponen dos targets para ejecutarlos en tu máquina: `serve` y `serve-local`. La diferencia es de **alcance** — cuánto de tu aplicación se ejecuta localmente versus apuntando a la infraestructura de AWS desplegada.
+
+Considera un espacio de trabajo con las siguientes conexiones: un sitio web que llama a una `api` tRPC, y también llama a un `agent` que a su vez llama a un servidor `mcp`.
+
+## `serve`
+
+El target `serve` ejecuta **solo el proyecto objetivo** localmente. Se espera que todos los demás proyectos a los que se conecta estén **desplegados**, y se accede a ellos en su URL real de AWS.
+
+<NxCommands commands={['serve website']} />
+
+Debido a que el proyecto objetivo se comunica con recursos desplegados, necesita saber dónde están. Para un sitio web, esto se proporciona mediante su `runtime-config.json` (consulta <Link path="guides/react-website#local-runtime-config">Local Runtime Config</Link>), que cargas desde una aplicación desplegada. Para proyectos del lado del servidor (APIs y agentes) que leen <Link path="guides/runtime-config">Runtime Configuration</Link>, establece la variable de entorno `RUNTIME_CONFIG_APP_ID` para que apunte a tu aplicación AppConfig desplegada.
+
+```d2
+direction: right
+
+local: Local {
+  style.stroke-dash: 3
+  website: website
+}
+deployed: Deployed {
+  style.stroke-dash: 3
+  api: api
+  agent: agent
+  mcp: mcp
+}
+
+local.website -> deployed.api
+local.website -> deployed.agent
+deployed.agent -> deployed.mcp
+```
+
+Usa `serve` cuando quieras iterar en un solo proyecto contra las versiones "reales" desplegadas de todo aquello de lo que depende.
+
+## `serve-local`
+
+El target `serve-local` ejecuta el **proyecto objetivo** y **cada proyecto conectado a él de forma transitiva**, todo en tu máquina. El generador de conexiones configura esto automáticamente — ejecutar `serve-local` en el sitio web también inicia servidores locales para la `api`, el `agent` y el servidor `mcp` al que accede a través del agente.
+
+<NxCommands commands={['serve-local website']} />
+
+Cuando se ejecuta de esta manera, el `runtime-config.json` del sitio web se anula automáticamente (a través del [`MODE` de Vite](https://vite.dev/guide/env-and-mode), establecido en `serve-local`) para que apunte a tus servidores que se ejecutan localmente en lugar de URLs desplegadas.
+
+```d2
+direction: right
+
+local: Local {
+  style.stroke-dash: 3
+  website: website
+  api: api
+  agent: agent
+  mcp: mcp
+
+  website -> api
+  website -> agent
+  agent -> mcp
+}
+```
+
+Todos los proyectos se ejecutan localmente, por lo que no hay dependencias desplegadas.
+
+Usa `serve-local` cuando estés trabajando en varios proyectos conectados a la vez y quieras iterar rápidamente sin desplegar tu infraestructura.
+
+:::tip[Atajo `dev`]
+Se agrega un script `dev` en la raíz como atajo para el primer sitio web que generes en tu espacio de trabajo, para que puedas iniciar el sitio web y todos los componentes conectados con:
+
+<PackageManagerShortCommand commands={["dev"]} />
+:::
+
+Para más detalles sobre el servidor de desarrollo local de cada tipo de proyecto, consulta la guía relevante — por ejemplo, la guía de <Link path="guides/react-website#local-development-server">React Website</Link>.

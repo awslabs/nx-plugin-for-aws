@@ -383,13 +383,38 @@ resource "aws_cloudfront_origin_access_control" "website_oac" {
   signing_protocol                  = "sigv4"
 }
 
+# Security headers applied to all responses. A Content-Security-Policy is
+# intentionally omitted as it is application specific - add one for your app.
+resource "aws_cloudfront_response_headers_policy" "website" {
+  name = "${aws_s3_bucket.website.bucket}-security-headers"
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 63072000
+      include_subdomains         = true
+      preload                    = true
+      override                   = true
+    }
+    content_type_options {
+      override = true
+    }
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+  }
+}
+
 # CloudFront Distribution
 resource "aws_cloudfront_distribution" "website" {
   #checkov:skip=CKV_AWS_174:Using CloudFront default certificate which does not support TLS v1.2
   #checkov:skip=CKV_AWS_310:Origin failover not required for single S3 origin static website
   #checkov:skip=CKV_AWS_374:Geo restrictions not required for global web application
   #checkov:skip=CKV2_AWS_42:Custom SSL certificate not required for development - using CloudFront default
-  #checkov:skip=CKV2_AWS_32:Response headers policy not required for basic static website
   #checkov:skip=CKV2_AWS_47:WAF includes AWSManagedRulesKnownBadInputsRuleSet which provides Log4j protection
   origin {
     domain_name              = aws_s3_bucket.website.bucket_regional_domain_name
@@ -419,11 +444,12 @@ resource "aws_cloudfront_distribution" "website" {
       }
     }
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-    compress               = true
+    viewer_protocol_policy     = "redirect-to-https"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.website.id
+    min_ttl                    = 0
+    default_ttl                = 3600
+    max_ttl                    = 86400
+    compress                   = true
   }
 
   # Custom error responses for SPA routing
@@ -626,11 +652,12 @@ sync_to_s3('${var.website_file_path}', '${aws_s3_bucket.website.bucket}')
 
 # Upload runtime config file
 resource "aws_s3_object" "runtime_config" {
-  bucket       = aws_s3_bucket.website.id
-  key          = "runtime-config.json"
-  content      = module.runtime_config_reader.config_json
-  content_type = "application/json"
-  etag         = md5(module.runtime_config_reader.config_json)
+  bucket        = aws_s3_bucket.website.id
+  key           = "runtime-config.json"
+  content       = module.runtime_config_reader.config_json
+  content_type  = "application/json"
+  cache_control = "no-cache"
+  etag          = md5(module.runtime_config_reader.config_json)
 
   depends_on = [null_resource.upload_website_files]
 }
