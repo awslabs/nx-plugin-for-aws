@@ -257,7 +257,6 @@ export default AguiProvider;
 exports[`py strands agent react connection generator - AG-UI protocol > should generate a shared AguiProvider and a per-agent hook for AG-UI agents > useAguiTestAgent.tsx 1`] = `
 "import { HttpAgent } from '@ag-ui/client';
 import type { AbstractAgent, RunAgentInput } from '@ag-ui/client';
-import { Observable } from 'rxjs';
 import { useMemo } from 'react';
 import { useRuntimeConfig } from './useRuntimeConfig';
 import { useSigV4, type SigV4Client } from './useSigV4';
@@ -279,7 +278,13 @@ class SigV4HttpAgent extends HttpAgent {
     config: ConstructorParameters<typeof HttpAgent>[0],
     sigV4Client: SigV4Client,
   ) {
-    super(config);
+    super({
+      ...config,
+      fetch: sigV4Client.fetch as (
+        url: string,
+        init: RequestInit,
+      ) => Promise<Response>,
+    });
     this.sigV4Client = sigV4Client;
   }
 
@@ -290,20 +295,6 @@ class SigV4HttpAgent extends HttpAgent {
       'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': agentCoreSessionId(input),
     };
     return init;
-  }
-
-  // Remove this override once https://github.com/ag-ui-protocol/ag-ui/issues/1316 is fixed.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  override run(input: RunAgentInput): any {
-    const sigV4Fetch = this.sigV4Client.fetch as typeof window.fetch;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return new Observable<any>((subscriber) => {
-      const originalFetch = window.fetch;
-      window.fetch = sigV4Fetch;
-      const sub = super.run(input).subscribe(subscriber);
-      window.fetch = originalFetch;
-      return () => sub.unsubscribe();
-    });
   }
 
   override clone(): SigV4HttpAgent {
