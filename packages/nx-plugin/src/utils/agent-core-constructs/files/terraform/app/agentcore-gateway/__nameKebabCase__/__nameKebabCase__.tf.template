@@ -4,11 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 6.23"
-    }
-    awscc = {
-      source  = "hashicorp/awscc"
-      version = ">= 1.52"
+      version = ">= 6.50"
     }
 <%_ if (cedarPolicy) { _%>
     external = {
@@ -100,7 +96,7 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
           "bedrock-agentcore:CheckAuthorizePermissions",
         ]
         Resource = [
-          awscc_bedrockagentcore_policy_engine.this.policy_engine_arn,
+          aws_bedrockagentcore_policy_engine.this.policy_engine_arn,
           "arn:aws:bedrock-agentcore:${local.aws_region}:${local.aws_account_id}:gateway/*",
         ]
       }
@@ -124,21 +120,20 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
 <%_ if (cedarPolicy) { _%>
 
 # Policy engine (name must match ^[A-Za-z][A-Za-z0-9_]*$ — no hyphens)
-resource "awscc_bedrockagentcore_policy_engine" "this" {
+resource "aws_bedrockagentcore_policy_engine" "this" {
   name        = "<%- nameClassName %>_PolicyEngine_${random_id.unique_suffix.hex}"
   description = "Cedar policy engine for <%- nameClassName %>"
 }
 <%_ } _%>
 
-resource "awscc_bedrockagentcore_gateway" "this" {
+resource "aws_bedrockagentcore_gateway" "this" {
   name        = "<%- nameClassName %>-${random_id.unique_suffix.hex}"
   description = "AgentCore Gateway for <%- nameClassName %>"
   role_arn    = aws_iam_role.gateway_role.arn
 
-  # The awscc provider represents enum-typed attributes as raw JSON values
-  protocol_type = jsonencode("MCP")
-  protocol_configuration = {
-    mcp = {
+  protocol_type = "MCP"
+  protocol_configuration {
+    mcp {
       search_type        = "SEMANTIC"
       supported_versions = ["2025-03-26"]
     }
@@ -147,8 +142,8 @@ resource "awscc_bedrockagentcore_gateway" "this" {
   authorizer_type = "AWS_IAM"
 <%_ if (cedarPolicy) { _%>
 
-  policy_engine_configuration = {
-    arn  = awscc_bedrockagentcore_policy_engine.this.policy_engine_arn
+  policy_engine_configuration {
+    arn  = aws_bedrockagentcore_policy_engine.this.policy_engine_arn
     mode = "ENFORCE"
   }
 
@@ -165,7 +160,7 @@ data "external" "rendered_policies" {
   program = ["node", "${path.module}/render-cedar.cjs"]
   query = {
     template   = "${local.policies_dir}/${each.value}"
-    gatewayArn = awscc_bedrockagentcore_gateway.this.gateway_arn
+    gatewayArn = aws_bedrockagentcore_gateway.this.gateway_arn
     accountId  = local.aws_account_id
   }
 }
@@ -176,10 +171,10 @@ data "external" "rendered_policies" {
 # to PascalCase (matching the CDK template). The AgentCore Policy resource
 # `name` regex requires `^[A-Za-z][A-Za-z0-9_]*$` — no hyphens — so the
 # join() reassembles the basename with each segment Title-cased.
-resource "awscc_bedrockagentcore_policy" "policies" {
+resource "aws_bedrockagentcore_policy" "policies" {
   for_each = fileset(local.policies_dir, "**/*.cedar")
 
-  policy_engine_id = awscc_bedrockagentcore_policy_engine.this.policy_engine_id
+  policy_engine_id = aws_bedrockagentcore_policy_engine.this.policy_engine_id
   # Policy names are unique account-wide, so append this gateway's unique
   # suffix to avoid collisions with other gateways.
   name = join("", concat([
@@ -191,8 +186,8 @@ resource "awscc_bedrockagentcore_policy" "policies" {
   # is configured on the policy engine). The Cedar analyzer flags legitimate
   # scoped policies as findings, so deploy regardless and rely on ENFORCE mode.
   validation_mode = "IGNORE_ALL_FINDINGS"
-  definition = {
-    cedar = {
+  definition {
+    cedar {
       statement = data.external.rendered_policies[each.value].result.rendered
     }
   }
@@ -205,24 +200,24 @@ module "add_gateway_url_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "gateways"
-  value     = { "<%- nameClassName %>" = awscc_bedrockagentcore_gateway.this.gateway_url }
+  value     = { "<%- nameClassName %>" = aws_bedrockagentcore_gateway.this.gateway_url }
 
-  depends_on = [awscc_bedrockagentcore_gateway.this]
+  depends_on = [aws_bedrockagentcore_gateway.this]
 }
 
 output "gateway_id" {
   description = "ID of the Bedrock AgentCore Gateway"
-  value       = awscc_bedrockagentcore_gateway.this.gateway_identifier
+  value       = aws_bedrockagentcore_gateway.this.gateway_id
 }
 
 output "gateway_arn" {
   description = "ARN of the Bedrock AgentCore Gateway"
-  value       = awscc_bedrockagentcore_gateway.this.gateway_arn
+  value       = aws_bedrockagentcore_gateway.this.gateway_arn
 }
 
 output "gateway_url" {
   description = "MCP endpoint URL of the Bedrock AgentCore Gateway"
-  value       = awscc_bedrockagentcore_gateway.this.gateway_url
+  value       = aws_bedrockagentcore_gateway.this.gateway_url
 }
 
 output "gateway_role_arn" {

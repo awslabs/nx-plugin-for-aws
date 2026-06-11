@@ -389,7 +389,7 @@ describe('agentcore-gateway generator', () => {
         .toString();
       expect(module).not.toContain('policy_engine');
       expect(module).not.toContain('render-cedar');
-      expect(module).toContain('awscc_bedrockagentcore_gateway');
+      expect(module).toContain('aws_bedrockagentcore_gateway');
       expect(
         tree.exists(
           'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
