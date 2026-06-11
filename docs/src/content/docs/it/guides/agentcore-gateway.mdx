@@ -89,15 +89,13 @@ Ad esempio, per permettere solo a un ruolo agente specifico di invocare un parti
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= tsAgentRoleArn %>/*"
-};
+);
 ```
 
-Passa l'ARN del ruolo come variabile di template (vedi <a href="#template-variables">Variabili di template</a> di seguito) anziché codificarlo in modo fisso o abbinarlo con pattern. Esegui nuovamente synth o plan per distribuire la nuova policy.
+Passa il nome del ruolo come variabile di template (vedi <a href="#template-variables">Variabili di template</a> di seguito) anziché codificarlo in modo fisso. Esegui nuovamente synth o plan per distribuire la nuova policy.
 
 ### Variabili di template
 
@@ -112,7 +110,7 @@ Fai sempre riferimento a queste variabili anziché codificare i valori in modo f
 
 #### Aggiungere le proprie variabili
 
-Aggiungi nuove variabili dove le policy vengono renderizzate, ad esempio per passare l'ARN del ruolo di esecuzione di un agente all'esempio `ts-agent-divide.cedar` sopra:
+Aggiungi nuove variabili dove le policy vengono renderizzate, ad esempio per passare il nome del ruolo di esecuzione di un agente all'esempio `ts-agent-divide.cedar` sopra:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -121,7 +119,7 @@ In `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, aggiungi all'
 ```ts {3}
 ejs.render(raw, {
   gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
-  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
+  tsAgentRoleName: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleName),
   // ...
 }),
 ```
@@ -131,9 +129,9 @@ In `packages/common/terraform/src/app/gateways/<name>/<name>.tf`, aggiungi alla 
 
 ```hcl {4}
 query = {
-  template       = "${local.policies_dir}/${each.value}"
-  gatewayArn     = aws_bedrockagentcore_gateway.this.gateway_arn
-  tsAgentRoleArn = var.ts_agent_role_arn
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
   # ...
 }
 ```
@@ -175,11 +173,13 @@ Per i Gateway generati da questo plugin, tutti i chiamanti sono principal IAM (i
 principal is AgentCore::IamEntity
 ```
 
-L'attributo `id` del principal contiene l'ARN IAM del chiamante. I chiamanti arrivano tipicamente come ARN di assumed-role STS con un suffisso di sessione generato, quindi passa l'ARN esatto del ruolo come variabile di template e abbina il suffisso di sessione con `like`:
+I chiamanti vengono valutati come ARN di assumed-role STS con il nome della sessione rimosso, quindi un ruolo può essere abbinato esattamente — non sono necessari caratteri jolly:
 
 ```cedar
-principal.id like "<%= myAgentRoleArn %>/*"
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
+
+Lo stesso valore è disponibile come `principal.id` per le clausole `when`. Riserva `like` per pattern genuini, come la corrispondenza a livello di account nel `permit-all.cedar` predefinito.
 
 Le invocazioni degli strumenti raggiungono il motore di policy come azioni con la forma:
 
@@ -211,12 +211,10 @@ Abbina un `forbid` ristretto con un `permit` più ampio (Cedar valuta `forbid` s
 
 ```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
 forbid (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= pyAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= pyAgentRoleArn %>/*"
-};
+);
 ```
 
 Questo nega al ruolo agente Python la chiamata a `ts-mcp___divide` lasciando il `permit-all.cedar` più ampio in vigore per tutti gli altri chiamanti.

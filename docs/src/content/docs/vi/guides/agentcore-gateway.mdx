@@ -89,15 +89,13 @@ Ví dụ, để chỉ cho phép một vai trò agent cụ thể gọi một côn
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= tsAgentRoleArn %>/*"
-};
+);
 ```
 
-Truyền role ARN vào dưới dạng biến template (xem <a href="#template-variables">Biến template</a> bên dưới) thay vì hard-code hoặc pattern-matching nó. Chạy lại synth hoặc plan để triển khai chính sách mới.
+Truyền tên vai trò vào dưới dạng biến template (xem <a href="#template-variables">Biến template</a> bên dưới) thay vì hard-code nó. Chạy lại synth hoặc plan để triển khai chính sách mới.
 
 ### Biến template
 
@@ -112,7 +110,7 @@ Luôn tham chiếu các biến này thay vì hard-code các giá trị.
 
 #### Thêm biến của riêng bạn
 
-Thêm biến mới tại nơi các chính sách được render, ví dụ để truyền ARN vai trò thực thi của agent vào ví dụ `ts-agent-divide.cedar` ở trên:
+Thêm biến mới tại nơi các chính sách được render, ví dụ để truyền tên vai trò thực thi của agent vào ví dụ `ts-agent-divide.cedar` ở trên:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -121,7 +119,7 @@ Trong `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, thêm vào
 ```ts {3}
 ejs.render(raw, {
   gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
-  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
+  tsAgentRoleName: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleName),
   // ...
 }),
 ```
@@ -131,9 +129,9 @@ Trong `packages/common/terraform/src/app/gateways/<name>/<name>.tf`, thêm vào 
 
 ```hcl {4}
 query = {
-  template       = "${local.policies_dir}/${each.value}"
-  gatewayArn     = aws_bedrockagentcore_gateway.this.gateway_arn
-  tsAgentRoleArn = var.ts_agent_role_arn
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
   # ...
 }
 ```
@@ -175,11 +173,13 @@ permit (
 principal is AgentCore::IamEntity
 ```
 
-Thuộc tính `id` của principal chứa IAM ARN của người gọi. Người gọi thường đến dưới dạng STS assumed-role ARN với hậu tố session được tạo, vì vậy hãy truyền chính xác role ARN vào dưới dạng biến template và khớp hậu tố session với `like`:
+Người gọi được đánh giá dưới dạng STS assumed-role ARN với tên session bị loại bỏ, vì vậy một vai trò có thể được khớp chính xác — không cần wildcard:
 
 ```cedar
-principal.id like "<%= myAgentRoleArn %>/*"
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
+
+Cùng một giá trị có sẵn dưới dạng `principal.id` cho các mệnh đề `when`. Dành `like` cho các mẫu thực sự, chẳng hạn như khớp toàn tài khoản trong `permit-all.cedar` mặc định.
 
 Các lời gọi công cụ đến policy engine dưới dạng action với định dạng:
 
@@ -211,12 +211,10 @@ Ghép một `forbid` hẹp với một `permit` rộng hơn (Cedar đánh giá `
 
 ```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
 forbid (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= pyAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= pyAgentRoleArn %>/*"
-};
+);
 ```
 
 Điều này từ chối vai trò agent Python gọi `ts-mcp___divide` trong khi vẫn giữ `permit-all.cedar` rộng hơn cho tất cả người gọi khác.
