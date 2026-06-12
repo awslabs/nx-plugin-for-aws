@@ -178,11 +178,13 @@ Para Gateways gerados por este plugin, todos os chamadores são principais IAM (
 principal is AgentCore::IamEntity
 ```
 
-O atributo `id` do principal contém o ARN IAM do chamador. Os chamadores geralmente chegam como ARNs de assumed-role do STS com um sufixo de sessão gerado, então passe o ARN exato da função como uma variável de template e combine o sufixo de sessão com `like`:
+Os chamadores são avaliados como ARNs de assumed-role do STS com o nome da sessão removido, então uma função pode ser correspondida exatamente — sem necessidade de curingas:
 
 ```cedar
-principal.id like "<%= myAgentRoleArn %>/*"
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
+
+O mesmo valor está disponível como `principal.id` para cláusulas `when`. Reserve `like` para padrões genuínos, como a correspondência de toda a conta no `permit-all.cedar` padrão.
 
 Invocações de ferramentas chegam ao motor de políticas como ações com a forma:
 
@@ -195,18 +197,16 @@ onde `<target-name>` é o nome do alvo do Gateway (o id do construto em kebab-ca
 O recurso é sempre o próprio Gateway:
 
 ```cedar
-resource == AgentCore::Gateway::"${gateway_arn}"
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
 ### Considerações de validação
 
-O motor de políticas do AgentCore rejeita políticas que considera muito amplas ou muito estreitas, mesmo quando o construto CDK define `PolicyValidationMode.IGNORE_ALL_FINDINGS`. O CloudFormation apresenta essas rejeições como erros opacos `Resource stabilization failed`. Os padrões mais comuns que o validador rejeita são:
+A infraestrutura gerada cria políticas com `IGNORE_ALL_FINDINGS`: o analisador Cedar do AgentCore (`FAIL_ON_ANY_FINDINGS`, o padrão do serviço) rejeita muitas políticas legítimas — por exemplo, um `forbid` desabilitando uma única ferramenta para todos os chamadores é rejeitado como "Overly Restrictive", mesmo quando delimitado com uma cláusula `when`. A aplicação não é afetada; ela é configurada pelo modo `ENFORCE` do motor de políticas.
 
-1. **Permits irrestritos** — `permit (principal, action, resource == ...);` é rejeitado como "Overly Permissive". Adicione uma cláusula `when { ... }` que delimite por tipo de principal, conta ou função. O `permit-all.cedar` padrão mostra a forma mínima aceitável.
-2. **Forbids irrestritos** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);` é rejeitado como "Overly Restrictive". Ou delimite-o com `when { ... }`, ou emparelhe-o com um `permit` suficientemente estreito para que o validador possa ver os chamadores que ainda permitiria.
-3. **Verificações de tipo de principal sozinhas** — `principal is AgentCore::IamEntity` sem cláusula `when` também é rejeitado como "Overly Permissive". Sempre inclua uma condição que restrinja ainda mais o principal.
+Uma restrição de ordenação ainda se aplica: uma política referenciando `AgentCore::Action::"<target>___<tool>"` só valida depois que o alvo registrou essa ferramenta com o Gateway, razão pela qual a infraestrutura gerada cria políticas após os alvos do Gateway.
 
-Se você encontrar um erro `Resource stabilization failed` durante a implantação, execute `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` para recuperar os `statusReasons` do validador, que contêm a rejeição real.
+Se uma política falhar ao implantar, o CloudFormation apresenta a rejeição como um erro opaco `Resource stabilization failed` — execute `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` para recuperar os `statusReasons` do validador, que contêm o motivo real.
 
 ### Exemplo: proibir uma ferramenta mantendo um permit mais amplo
 
@@ -236,5 +236,4 @@ Consulte o guia de conexão para a história completa de desenvolvimento local.
 
 - Conectar um servidor MCP: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - Conectar um Agente TypeScript: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
-- Conectar um Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
 - Conectar um Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

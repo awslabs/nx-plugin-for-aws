@@ -48,6 +48,8 @@ import OptionFilter from '@components/option-filter.astro';
   <Fragment slot="cdk">
     <FileTree>
       - packages/common/constructs/src
+        - core
+          - agentcore-gateway/ 공유 게이트웨이 구성 요소 (준비 상태 프로브, Cedar 정책 로딩)
         - app
           - gateways
             - \<name>/
@@ -89,15 +91,13 @@ Cedar는 AgentCore Gateway가 도구 호출을 승인하는 데 사용하는 정
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= tsAgentRoleArn %>/*"
-};
+);
 ```
 
-역할 ARN을 하드코딩하거나 패턴 매칭하는 대신 템플릿 변수로 전달하세요(아래 <a href="#template-variables">템플릿 변수</a> 참조). 새 정책을 배포하려면 재합성(re-synth) 또는 재계획(re-plan)하세요.
+역할 이름을 하드코딩하지 말고 템플릿 변수로 전달하세요(아래 <a href="#template-variables">템플릿 변수</a> 참조). 새 정책을 배포하려면 재합성(re-synth) 또는 재계획(re-plan)하세요.
 
 ### 템플릿 변수
 
@@ -112,7 +112,7 @@ permit (
 
 #### 자체 변수 추가
 
-위의 `ts-agent-divide.cedar` 예제에 에이전트의 실행 역할 ARN을 전달하는 등 정책이 렌더링되는 위치에 새 변수를 추가하세요:
+위의 `ts-agent-divide.cedar` 예제에 에이전트의 실행 역할 이름을 전달하는 등 정책이 렌더링되는 위치에 새 변수를 추가하세요:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -134,9 +134,9 @@ super(scope, id, {
 
 ```hcl {4}
 query = {
-  template       = "${local.policies_dir}/${each.value}"
-  gatewayArn     = aws_bedrockagentcore_gateway.this.gateway_arn
-  tsAgentRoleArn = var.ts_agent_role_arn
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
   # ...
 }
 ```
@@ -178,11 +178,13 @@ permit (
 principal is AgentCore::IamEntity
 ```
 
-주체의 `id` 속성은 호출자의 IAM ARN을 보유합니다. 호출자는 일반적으로 생성된 세션 접미사가 있는 STS assumed-role ARN으로 도착하므로 정확한 역할 ARN을 템플릿 변수로 전달하고 `like`로 세션 접미사를 일치시키세요:
+호출자는 세션 이름이 제거된 STS assumed-role ARN으로 평가되므로 역할을 정확히 일치시킬 수 있습니다 — 와일드카드가 필요하지 않습니다:
 
 ```cedar
-principal.id like "<%= myAgentRoleArn %>/*"
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
+
+동일한 값이 `when` 절에서 `principal.id`로 사용 가능합니다. 기본 `permit-all.cedar`의 계정 전체 일치와 같은 실제 패턴에 대해서는 `like`를 예약하세요.
 
 도구 호출은 다음 형식의 작업으로 정책 엔진에 도달합니다:
 
@@ -200,13 +202,11 @@ resource == AgentCore::Gateway::"<%= gatewayArn %>"
 
 ### 검증 고려사항
 
-AgentCore의 정책 엔진은 CDK 구성 요소가 `PolicyValidationMode.IGNORE_ALL_FINDINGS`를 설정하더라도 너무 광범위하거나 너무 좁다고 간주하는 정책을 거부합니다. CloudFormation은 이러한 거부를 불투명한 `Resource stabilization failed` 오류로 표시합니다. 검증기가 거부하는 가장 일반적인 패턴은 다음과 같습니다:
+생성된 인프라는 `IGNORE_ALL_FINDINGS`로 정책을 생성합니다: AgentCore의 Cedar 분석기(서비스 기본값인 `FAIL_ON_ANY_FINDINGS`)는 많은 정당한 정책을 거부합니다 — 예를 들어, 모든 호출자에 대해 단일 도구를 비활성화하는 `forbid`는 `when` 절로 범위가 지정되어 있어도 "Overly Restrictive"로 거부됩니다. 적용(enforcement)은 영향을 받지 않으며, 정책 엔진의 `ENFORCE` 모드로 구성됩니다.
 
-1. **무제한 허용** — `permit (principal, action, resource == ...);`는 "Overly Permissive"로 거부됩니다. 주체 유형, 계정 또는 역할로 범위를 지정하는 `when { ... }` 절을 추가하세요. 기본 `permit-all.cedar`는 최소한으로 허용되는 형태를 보여줍니다.
-2. **무제한 금지** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);`는 "Overly Restrictive"로 거부됩니다. `when { ... }`으로 범위를 지정하거나 검증기가 여전히 허용할 호출자를 볼 수 있도록 충분히 좁은 `permit`과 쌍을 이루세요.
-3. **주체 유형 검사만** — `when` 절이 없는 `principal is AgentCore::IamEntity`도 "Overly Permissive"로 거부됩니다. 주체를 추가로 제약하는 조건을 항상 포함하세요.
+한 가지 순서 제약 조건이 여전히 적용됩니다: `AgentCore::Action::"<target>___<tool>"`을 참조하는 정책은 대상이 Gateway에 해당 도구를 등록한 후에만 검증되므로, 생성된 인프라는 Gateway 대상 이후에 정책을 생성합니다.
 
-배포 중 `Resource stabilization failed` 오류가 발생하면 `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`를 실행하여 실제 거부를 포함하는 검증기의 `statusReasons`를 검색하세요.
+정책 배포가 실패하면 CloudFormation은 거부를 불투명한 `Resource stabilization failed` 오류로 표시합니다 — `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`를 실행하여 실제 이유를 포함하는 검증기의 `statusReasons`를 검색하세요.
 
 ### 예제: 더 광범위한 허용을 유지하면서 하나의 도구 금지
 
@@ -237,5 +237,3 @@ forbid (
 - MCP 서버 연결: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - TypeScript Agent 연결: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
 - Python Agent 연결: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
-- Python Agent 연결: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
-Python Agent 연결: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

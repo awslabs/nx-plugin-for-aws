@@ -48,6 +48,8 @@ La infraestructura se genera cuando `infra` es `agentcore` (el valor predetermin
   <Fragment slot="cdk">
     <FileTree>
       - packages/common/constructs/src
+        - core
+          - agentcore-gateway/ Constructo compartido de gateway (sonda de preparación, carga de políticas Cedar)
         - app
           - gateways
             - \<name>/
@@ -89,15 +91,13 @@ Por ejemplo, para permitir solo que un rol de agente específico invoque una her
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= tsAgentRoleArn %>/*"
-};
+);
 ```
 
-Pasa el ARN del rol como una variable de plantilla (consulta <a href="#template-variables">Variables de plantilla</a> a continuación) en lugar de codificarlo de forma fija o usar coincidencia de patrones. Vuelve a ejecutar synth o plan para desplegar la nueva política.
+Pasa el nombre del rol como una variable de plantilla (consulta <a href="#template-variables">Variables de plantilla</a> a continuación) en lugar de codificarlo de forma fija. Vuelve a ejecutar synth o plan para desplegar la nueva política.
 
 ### Variables de plantilla
 
@@ -112,7 +112,7 @@ Siempre referencia estas variables en lugar de codificar valores de forma fija.
 
 #### Agregar tus propias variables
 
-Agrega nuevas variables donde se renderizan las políticas, por ejemplo para pasar el ARN del rol de ejecución de un agente al ejemplo `ts-agent-divide.cedar` anterior:
+Agrega nuevas variables donde se renderizan las políticas, por ejemplo para pasar el nombre del rol de ejecución de un agente al ejemplo `ts-agent-divide.cedar` anterior:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -134,9 +134,9 @@ En `packages/common/terraform/src/app/gateways/<name>/<name>.tf`, agrega al `que
 
 ```hcl {4}
 query = {
-  template       = "${local.policies_dir}/${each.value}"
-  gatewayArn     = aws_bedrockagentcore_gateway.this.gateway_arn
-  tsAgentRoleArn = var.ts_agent_role_arn
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
   # ...
 }
 ```
@@ -202,13 +202,11 @@ resource == AgentCore::Gateway::"<%= gatewayArn %>"
 
 ### Consideraciones de validación
 
-El motor de políticas de AgentCore rechaza políticas que considera demasiado amplias o demasiado estrictas, incluso cuando el constructo CDK establece `PolicyValidationMode.IGNORE_ALL_FINDINGS`. CloudFormation presenta estos rechazos como errores opacos de `Resource stabilization failed`. Los patrones más comunes que el validador rechaza son:
+La infraestructura generada crea políticas con `IGNORE_ALL_FINDINGS`: el analizador Cedar de AgentCore (`FAIL_ON_ANY_FINDINGS`, el valor predeterminado del servicio) rechaza muchas políticas legítimas — por ejemplo, un `forbid` que deshabilita una sola herramienta para todos los llamadores se rechaza como "Overly Restrictive", incluso cuando está delimitado con una cláusula `when`. La aplicación no se ve afectada; está configurada por el modo `ENFORCE` del motor de políticas.
 
-1. **Permisos sin restricciones** — `permit (principal, action, resource == ...);` se rechaza como "Overly Permissive". Agrega una cláusula `when { ... }` que delimite por tipo de principal, cuenta o rol. El `permit-all.cedar` predeterminado muestra la forma mínima aceptable.
-2. **Prohibiciones sin restricciones** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);` se rechaza como "Overly Restrictive". O delimítalo con `when { ... }`, o emparéjalo con un `permit` suficientemente estrecho para que el validador pueda ver los llamadores que aún permitiría.
-3. **Verificaciones de tipo de principal solas** — `principal is AgentCore::IamEntity` sin cláusula `when` también se rechaza como "Overly Permissive". Siempre incluye una condición que restrinja aún más al principal.
+Una restricción de orden aún se aplica: una política que referencia `AgentCore::Action::"<target>___<tool>"` solo se valida una vez que el destino ha registrado esa herramienta con el Gateway, por lo que la infraestructura generada crea políticas después de los destinos del Gateway.
 
-Si encuentras un error `Resource stabilization failed` durante el despliegue, ejecuta `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` para recuperar los `statusReasons` del validador, que contienen el rechazo real.
+Si una política no se despliega, CloudFormation presenta el rechazo como un error opaco de `Resource stabilization failed` — ejecuta `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` para recuperar los `statusReasons` del validador, que contienen la razón real.
 
 ### Ejemplo: prohibir una herramienta mientras se mantiene un permiso más amplio
 
@@ -216,12 +214,10 @@ Empareja un `forbid` estrecho con un `permit` más amplio (Cedar evalúa `forbid
 
 ```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
 forbid (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= pyAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= pyAgentRoleArn %>/*"
-};
+);
 ```
 
 Esto deniega al rol del agente Python llamar a `ts-mcp___divide` mientras deja el `permit-all.cedar` más amplio en su lugar para todos los demás llamadores.
@@ -241,4 +237,3 @@ Consulta la guía de conexión para la historia completa de desarrollo local.
 - Conectar un servidor MCP: <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
 - Conectar un Agente TypeScript: <Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
 - Conectar un Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>
-un Agente Python: <Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

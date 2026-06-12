@@ -199,13 +199,11 @@ resource == AgentCore::Gateway::"<%= gatewayArn %>"
 
 ### Considérations de validation
 
-Le moteur de politiques d'AgentCore rejette les politiques qu'il considère trop larges ou trop étroites, même lorsque le construct CDK définit `PolicyValidationMode.IGNORE_ALL_FINDINGS`. CloudFormation présente ces rejets sous forme d'erreurs opaques `Resource stabilization failed`. Les modèles les plus courants que le validateur rejette sont :
+L'infrastructure générée crée des politiques avec `IGNORE_ALL_FINDINGS` : l'analyseur Cedar d'AgentCore (`FAIL_ON_ANY_FINDINGS`, la valeur par défaut du service) rejette de nombreuses politiques légitimes — par exemple, un `forbid` désactivant un seul outil pour tous les appelants est rejeté comme "Overly Restrictive", même lorsqu'il est délimité avec une clause `when`. L'application n'est pas affectée ; elle est configurée par le mode `ENFORCE` du moteur de politiques.
 
-1. **Autorisations sans restriction** — `permit (principal, action, resource == ...);` est rejeté comme "Overly Permissive". Ajoutez une clause `when { ... }` qui délimite par type de principal, compte ou rôle. Le `permit-all.cedar` par défaut montre la forme minimale acceptable.
-2. **Interdictions sans restriction** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);` est rejeté comme "Overly Restrictive". Soit délimitez-le avec `when { ... }`, soit associez-le à un `permit` suffisamment étroit pour que le validateur puisse voir les appelants qu'il autoriserait encore.
-3. **Vérifications de type de principal seules** — `principal is AgentCore::IamEntity` sans clause `when` est également rejeté comme "Overly Permissive". Incluez toujours une condition qui contraint davantage le principal.
+Une contrainte d'ordre s'applique toujours : une politique référençant `AgentCore::Action::"<target>___<tool>"` ne se valide qu'une fois que la cible a enregistré cet outil auprès de la Gateway, c'est pourquoi l'infrastructure générée crée les politiques après les cibles de Gateway.
 
-Si vous rencontrez une erreur `Resource stabilization failed` lors du déploiement, exécutez `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` pour récupérer les `statusReasons` du validateur, qui contiennent le rejet réel.
+Si une politique échoue lors du déploiement, CloudFormation présente le rejet sous forme d'erreur opaque `Resource stabilization failed` — exécutez `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` pour récupérer les `statusReasons` du validateur, qui contiennent la raison réelle.
 
 ### Exemple : interdire un outil tout en conservant une autorisation plus large
 

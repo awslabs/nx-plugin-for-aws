@@ -199,13 +199,11 @@ resource == AgentCore::Gateway::"<%= gatewayArn %>"
 
 ### 验证注意事项
 
-AgentCore 的策略引擎会拒绝它认为过于宽泛或过于狭窄的策略，即使 CDK 构造设置了 `PolicyValidationMode.IGNORE_ALL_FINDINGS`。CloudFormation 将这些拒绝显示为不透明的 `Resource stabilization failed` 错误。验证器拒绝的最常见模式是：
+生成的基础设施使用 `IGNORE_ALL_FINDINGS` 创建策略：AgentCore 的 Cedar 分析器（`FAIL_ON_ANY_FINDINGS`，服务默认值）会拒绝许多合法的策略——例如，禁用所有调用者的单个工具的 `forbid` 会被拒绝为"过于限制"，即使使用 `when` 子句限定范围也是如此。执行不受影响；它由策略引擎的 `ENFORCE` 模式配置。
 
-1. **无限制的 permit** — `permit (principal, action, resource == ...);` 被拒绝为"过于宽松"。添加一个 `when { ... }` 子句，按主体类型、账户或角色限定范围。默认的 `permit-all.cedar` 显示了最小可接受的形式。
-2. **无限制的 forbid** — `forbid (principal, action == AgentCore::Action::"...", resource == ...);` 被拒绝为"过于限制"。要么使用 `when { ... }` 限定范围，要么将其与足够窄的 `permit` 配对，以便验证器可以看到它仍然允许的调用者。
-3. **仅主体类型检查** — 没有 `when` 子句的 `principal is AgentCore::IamEntity` 也被拒绝为"过于宽松"。始终包含进一步约束主体的条件。
+仍然适用一个排序约束：引用 `AgentCore::Action::"<target>___<tool>"` 的策略仅在目标向 Gateway 注册该工具后才能验证，这就是为什么生成的基础设施在 Gateway 目标之后创建策略。
 
-如果在部署期间遇到 `Resource stabilization failed` 错误，请运行 `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` 以检索验证器的 `statusReasons`，其中包含实际的拒绝原因。
+如果策略部署失败，CloudFormation 会将拒绝显示为不透明的 `Resource stabilization failed` 错误——运行 `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` 以检索验证器的 `statusReasons`，其中包含实际原因。
 
 ### 示例：禁止一个工具同时保留更广泛的 permit
 
