@@ -207,8 +207,65 @@ module "py_agui_agent" {
 # AgentCore Gateway (Cedar policy engine + IAM-authenticated MCP endpoint)
 # ---------------------------------------------------------------------------
 
+# The gateway signs outbound calls to its MCP server targets with its own
+# role and fetches each target's tools at creation time, so it needs invoke
+# access to both MCP runtimes before the targets are created.
 module "my_gateway" {
   source = "../../common/terraform/src/app/gateways/my-gateway"
+
+  additional_iam_policy_statements = [
+    local.invoke_py_mcp_server_statement,
+    local.invoke_ts_mcp_server_statement,
+  ]
+
+  policy_dependencies = [
+    aws_bedrockagentcore_gateway_target.ts_mcp_server.target_id,
+    aws_bedrockagentcore_gateway_target.py_mcp_server.target_id,
+  ]
+}
+
+# Register both MCP servers as targets of the Gateway — the Terraform
+# analogue of `myGateway.addMcpServer(...)` in the CDK template. Target
+# names match the serve-local registrations (kebab-cased MCP project class
+# name) so Cedar action prefixes are identical locally and deployed. The
+# runtime ARNs flow through each runtime's readiness probe, so targets are
+# created only once the runtimes serve MCP.
+resource "aws_bedrockagentcore_gateway_target" "ts_mcp_server" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "hosted-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${data.aws_region.current.id}.amazonaws.com/runtimes/${urlencode(module.ts_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+
+resource "aws_bedrockagentcore_gateway_target" "py_mcp_server" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${data.aws_region.current.id}.amazonaws.com/runtimes/${urlencode(module.py_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -269,6 +326,14 @@ locals {
       "${module.py_a2a_agent.agent_core_runtime_arn}/*",
     ]
   }
+
+  # Terraform analogue of `myGateway.grantInvokeAccess(...)` in the CDK
+  # template — both HTTP agents fetch the gateway's tools at startup.
+  invoke_my_gateway_statement = {
+    Effect   = "Allow"
+    Action   = ["bedrock-agentcore:InvokeGateway"]
+    Resource = [module.my_gateway.gateway_arn]
+  }
 }
 
 # Python HTTP agent — calls the Python MCP server and both A2A agents.
@@ -282,6 +347,7 @@ module "py_agent" {
     local.invoke_py_mcp_server_statement,
     local.invoke_ts_a2a_agent_statement,
     local.invoke_py_a2a_agent_statement,
+    local.invoke_my_gateway_statement,
   ]
 }
 
@@ -297,6 +363,7 @@ module "ts_agent" {
     local.invoke_ts_mcp_server_statement,
     local.invoke_ts_a2a_agent_statement,
     local.invoke_py_a2a_agent_statement,
+    local.invoke_my_gateway_statement,
   ]
 }
 
