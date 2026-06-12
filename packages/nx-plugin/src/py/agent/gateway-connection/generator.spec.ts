@@ -147,7 +147,7 @@ dependencies = ["strands-agents"]
       )!
       .toString();
     expect(client).toContain('class MyGatewayClient');
-    expect(client).toContain('get_connected_gateway_url("MyGateway")');
+    expect(client).toContain('config.get("gateways", {}).get("MyGateway")');
     expect(client).toContain('SERVE_LOCAL');
   });
 
@@ -174,7 +174,7 @@ dependencies = ["strands-agents"]
     expect(client).toContain('without_auth');
   });
 
-  it('defines get_connected_gateway_url in the shared runtime-config helper', async () => {
+  it('exposes the shared get_agentcore_runtime_config helper', async () => {
     setupProjects();
     await pyAgentGatewayConnectionGenerator(tree, fullOptions());
 
@@ -185,7 +185,7 @@ dependencies = ["strands-agents"]
         `packages/common/agent_connection/${moduleName}/core/runtime_config.py`,
       )!
       .toString();
-    expect(runtimeConfig).toContain('def get_connected_gateway_url');
+    expect(runtimeConfig).toContain('def get_agentcore_runtime_config');
   });
 
   it('re-exports from the module __init__.py', async () => {

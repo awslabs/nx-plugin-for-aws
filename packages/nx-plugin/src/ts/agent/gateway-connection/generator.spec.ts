@@ -123,7 +123,7 @@ export const getAgent = async (sessionId: string) =>
       .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
       .toString();
     expect(client).toContain('export class MyGatewayClient');
-    expect(client).toContain("getConnectedGatewayUrl('MyGateway')");
+    expect(client).toContain("config.gateways?.['MyGateway']");
     expect(client).toContain('SERVE_LOCAL');
     // create() returns a single McpClient in both modes
     expect(client).toContain('Promise<McpClient>');
@@ -148,14 +148,14 @@ export const getAgent = async (sessionId: string) =>
     expect(client).toContain('withoutAuth');
   });
 
-  it('defines getConnectedGatewayUrl in the shared runtime-config helper', async () => {
+  it('exposes the shared getAgentCoreRuntimeConfig helper', async () => {
     setupProjects();
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const runtimeConfig = tree
       .read('packages/common/agent-connection/src/core/runtime-config.ts')!
       .toString();
-    expect(runtimeConfig).toContain('export const getConnectedGatewayUrl');
+    expect(runtimeConfig).toContain('export const getAgentCoreRuntimeConfig');
   });
 
   it('re-exports the gateway client from the agent-connection index', async () => {
