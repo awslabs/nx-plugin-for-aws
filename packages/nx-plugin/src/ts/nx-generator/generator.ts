@@ -112,6 +112,9 @@ export const tsNxGeneratorGenerator = async (
       joinPathFragments('docs', 'astro.config.mjs'),
       `\`items: [$items]\` where { $items <: within \`sidebar: [$_]\`, $items <: contains \`'ts#project'\`, $items <: not contains \`'/guides/${enhancedOptions.nameKebabCase}'\`, $items += \`, { label: '${name}', link: '/guides/${enhancedOptions.nameKebabCase}' }\` }`,
     );
+
+    // Expose the generator from the SDK for known prefixes (ts# / py#)
+    addSdkExport(tree, plugin.root, name, generatorSubDir, enhancedOptions);
   } else {
     // Local generator in a project other than nx-plugin-for-aws
     generateFiles(
@@ -182,6 +185,51 @@ export const tsNxGeneratorGenerator = async (
 const incrementMetric = (metrics: string[]): string => {
   const maxMetric = Math.max(...metrics.map((m) => Number(m.slice(1))));
   return `g${maxMetric + 1}`;
+};
+
+// Maps a generator name prefix to the SDK entry point that should re-export it
+const SDK_EXPORT_PREFIXES: Record<string, string> = {
+  'ts#': 'ts',
+  'py#': 'py',
+};
+
+// Re-exports a generated generator from the matching SDK entry point so it is
+// available programmatically as part of @aws/nx-plugin's SDK
+const addSdkExport = (
+  tree: Tree,
+  pluginRoot: string,
+  name: string,
+  generatorSubDir: string,
+  options: { nameCamelCase: string; namePascalCase: string },
+): void => {
+  const prefix = Object.keys(SDK_EXPORT_PREFIXES).find((p) =>
+    name.startsWith(p),
+  );
+  if (!prefix) {
+    return;
+  }
+
+  const sdkPath = joinPathFragments(
+    pluginRoot,
+    'sdk',
+    `${SDK_EXPORT_PREFIXES[prefix]}.ts`,
+  );
+  const generatorExport = `${options.nameCamelCase}Generator`;
+  const schemaExport = `${options.namePascalCase}GeneratorSchema`;
+  const moduleBase = `../src/${generatorSubDir}`;
+
+  const contents = tree.exists(sdkPath) ? tree.read(sdkPath).toString() : '';
+  // Idempotent: skip if this generator is already exported
+  if (contents.includes(`${moduleBase}/generator`)) {
+    return;
+  }
+
+  const block = `// ${options.namePascalCase} Generator\nexport { ${generatorExport} } from '${moduleBase}/generator';\nexport type { ${schemaExport} } from '${moduleBase}/schema';\n`;
+
+  const prefixContents = contents.trim()
+    ? `${contents.replace(/\s*$/, '')}\n\n`
+    : '';
+  tree.write(sdkPath, `${prefixContents}${block}`);
 };
 
 export default tsNxGeneratorGenerator;

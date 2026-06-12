@@ -297,6 +297,99 @@ describe('nx-generator generator', () => {
       );
     });
 
+    it('should add a ts# generator to the ts sdk', async () => {
+      tree.write(
+        'packages/nx-plugin/sdk/ts.ts',
+        `export { tsProjectGenerator } from '../src/ts/lib/generator';\n`,
+      );
+
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'ts#cool-thing',
+        description: 'Some description',
+      });
+
+      const sdk = tree.read('packages/nx-plugin/sdk/ts.ts', 'utf-8');
+      expect(sdk).toContain(
+        `export { tsCoolThingGenerator } from '../src/ts-cool-thing/generator';`,
+      );
+      expect(sdk).toContain(
+        `export type { TsCoolThingGeneratorSchema } from '../src/ts-cool-thing/schema';`,
+      );
+      // Existing exports preserved
+      expect(sdk).toContain(
+        `export { tsProjectGenerator } from '../src/ts/lib/generator';`,
+      );
+    });
+
+    it('should add a py# generator to the py sdk', async () => {
+      tree.write('packages/nx-plugin/sdk/py.ts', '');
+
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'py#cool-thing',
+        description: 'Some description',
+      });
+
+      const sdk = tree.read('packages/nx-plugin/sdk/py.ts', 'utf-8');
+      expect(sdk).toContain(
+        `export { pyCoolThingGenerator } from '../src/py-cool-thing/generator';`,
+      );
+      expect(sdk).toContain(
+        `export type { PyCoolThingGeneratorSchema } from '../src/py-cool-thing/schema';`,
+      );
+    });
+
+    it('should add a ts# generator to the ts sdk in a nested directory', async () => {
+      tree.write('packages/nx-plugin/sdk/ts.ts', '');
+
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'ts#cool-thing',
+        directory: 'nested/dir',
+        description: 'Some description',
+      });
+
+      const sdk = tree.read('packages/nx-plugin/sdk/ts.ts', 'utf-8');
+      expect(sdk).toContain(
+        `export { tsCoolThingGenerator } from '../src/nested/dir/generator';`,
+      );
+      expect(sdk).toContain(
+        `export type { TsCoolThingGeneratorSchema } from '../src/nested/dir/schema';`,
+      );
+    });
+
+    it('should not duplicate the sdk export on a same-name re-run', async () => {
+      tree.write('packages/nx-plugin/sdk/ts.ts', '');
+
+      const options = {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'ts#cool-thing',
+        description: 'Some description',
+      };
+      await tsNxGeneratorGenerator(tree, options);
+      await tsNxGeneratorGenerator(tree, options);
+
+      const sdk = tree.read('packages/nx-plugin/sdk/ts.ts', 'utf-8');
+      const occurrences =
+        sdk.split(`from '../src/ts-cool-thing/generator';`).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    it('should not add an sdk export for generators without a known prefix', async () => {
+      tree.write('packages/nx-plugin/sdk/ts.ts', '');
+      tree.write('packages/nx-plugin/sdk/py.ts', '');
+
+      await tsNxGeneratorGenerator(tree, {
+        project: NxPluginForAwsProjectJson.name,
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      expect(tree.read('packages/nx-plugin/sdk/ts.ts', 'utf-8')).toBe('');
+      expect(tree.read('packages/nx-plugin/sdk/py.ts', 'utf-8')).toBe('');
+    });
+
     it('should throw if given a project that is not @aws/nx-plugin', async () => {
       // Add a different project configuration
       addProjectConfiguration(tree, 'other-project', {
