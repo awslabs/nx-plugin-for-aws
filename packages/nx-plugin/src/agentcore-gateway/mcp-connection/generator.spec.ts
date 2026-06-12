@@ -111,6 +111,52 @@ describe('agentcore-gateway#mcp-connection generator', () => {
     expect(serveTs).not.toMatch(/,\s*,/);
   });
 
+  it('registers two MCP servers that share a default component name without clashing', async () => {
+    // Both ts#mcp-server and py#mcp-server vend the component as
+    // `name: 'mcp-server'` by default — the registration must use the
+    // project's `rc` to keep them distinct.
+    const gw = addGateway();
+    const tsMcp = { name: 'mcp-server', rc: 'TsMcp', port: 8000 };
+    addProjectConfiguration(tree, '@proj/ts-app', {
+      name: '@proj/ts-app',
+      root: 'packages/ts-app',
+      projectType: 'library',
+      sourceRoot: 'packages/ts-app',
+      targets: { 'mcp-server-serve-local': {} },
+      metadata: {} as any,
+    });
+    const pyMcp = { name: 'mcp-server', rc: 'PyMcp', port: 8001 };
+    addProjectConfiguration(tree, '@proj/py-app', {
+      name: '@proj/py-app',
+      root: 'packages/py-app',
+      projectType: 'library',
+      sourceRoot: 'packages/py-app',
+      targets: { 'mcp-server-serve-local': {} },
+      metadata: {} as any,
+    });
+    tree.write(
+      'packages/my-gateway/serve-local.ts',
+      `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [];\n`,
+    );
+
+    await agentcoreGatewayMcpConnectionGenerator(tree, {
+      sourceProject: `@proj/${gw.name}`,
+      targetProject: '@proj/ts-app',
+      targetComponent: mcpComponent(tsMcp) as any,
+    });
+    await agentcoreGatewayMcpConnectionGenerator(tree, {
+      sourceProject: `@proj/${gw.name}`,
+      targetProject: '@proj/py-app',
+      targetComponent: mcpComponent(pyMcp) as any,
+    });
+
+    const serveTs = tree.read('packages/my-gateway/serve-local.ts')!.toString();
+    expect(serveTs).toContain("name: 'ts-mcp'");
+    expect(serveTs).toContain("name: 'py-mcp'");
+    expect(serveTs).toContain("url: 'http://localhost:8000/mcp'");
+    expect(serveTs).toContain("url: 'http://localhost:8001/mcp'");
+  });
+
   it('serve-local.ts registration is idempotent for the same MCP server', async () => {
     const gw = addGateway();
     const mcp = addMcp('other-mcp', 'OtherMcp', 8001);

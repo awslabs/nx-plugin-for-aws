@@ -70,6 +70,12 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   const gatewayKebabCase = kebabCase(gateway.rc);
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
 
+  // The target name must match what the deployed Gateway uses
+  // (`mcpServerName` on the MCP construct, derived from the project's class
+  // name) so `<target>___<tool>` resolves identically locally and deployed.
+  // Component-level `name` would clash whenever two MCP server projects
+  // both default to `mcp-server`.
+  const mcpTargetName = kebabCase(mcpComponent.rc as string);
   const mcpComponentName = mcpComponent.name ?? 'mcp-server';
   const mcpServeLocalTargetName = `${mcpComponentName}-serve-local`;
   const mcpPort = (mcpComponent.port as number | undefined) ?? 8000;
@@ -90,14 +96,14 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   // 2. Register the MCP server in the gateway's local serve-local.ts
   const serveTsPath = joinPathFragments(sourceProject.root, 'serve-local.ts');
   if (tree.exists(serveTsPath)) {
-    const entry = `{ name: '${mcpComponentName}', url: 'http://localhost:${mcpPort}/mcp' }`;
+    const entry = `{ name: '${mcpTargetName}', url: 'http://localhost:${mcpPort}/mcp' }`;
     await applyGritQL(
       tree,
       serveTsPath,
       `or {
   \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = []\` => \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [${entry}]\`,
   \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [$items]\` => \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [${entry}, $items]\` where {
-    $items <: not contains \`'${mcpComponentName}'\`
+    $items <: not contains \`'${mcpTargetName}'\`
   }
 }`,
     );

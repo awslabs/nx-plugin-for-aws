@@ -147,8 +147,10 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
   /**
    * Add an MCP server construct as a target of this Gateway.
    *
-   * The target name defaults to the construct's `node.id` in kebab-case
-   * (e.g. `MyMcpServer` -> `my-mcp-server`). It prefixes Cedar action names
+   * The target name defaults to the MCP server construct's `mcpServerName`
+   * (its project's class name in kebab-case, e.g. `TsMcp` -> `ts-mcp`),
+   * which is stable across stacks and unique across projects in the
+   * workspace. It prefixes Cedar action names
    * (`AgentCore::Action::"<targetName>___<toolName>"`) and the gateway's
    * tool names (`<targetName>___<toolName>`), so renaming it later is a
    * breaking change for consumers.
@@ -156,14 +158,14 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
   public addMcpServer(
     server: Construct & {
       readonly agentCoreRuntime: agentcore.Runtime;
+      readonly mcpServerName: string;
     },
     props?: {
       gatewayTargetName?: string;
     },
   ): agentcore.CfnGatewayTarget {
     return this.addMcpServerTarget({
-      gatewayTargetName:
-        props?.gatewayTargetName ?? toKebabCase(server.node.id),
+      gatewayTargetName: props?.gatewayTargetName ?? server.mcpServerName,
       mcpServerRuntimeArn: server.agentCoreRuntime.agentRuntimeArn,
     });
   }
@@ -296,13 +298,3 @@ const toPascalCase = (s: string): string =>
     .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
     .join('');
 
-const toKebabCase = (s: string): string =>
-  s
-    // Insert `-` before any uppercase letter that follows a lowercase or digit
-    // (handles `MyMcpServer` -> `My-Mcp-Server`).
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    // Insert `-` between consecutive uppercase letters where the next char is
-    // lowercase (handles `MCPServer` -> `MCP-Server` -> `mcp-server`).
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
-    .toLowerCase()
-    .replace(/[_\s]+/g, '-');
