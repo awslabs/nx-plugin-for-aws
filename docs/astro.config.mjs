@@ -327,87 +327,217 @@ export default defineConfig({
             vi: 'Hướng dẫn trình tạo',
           },
           items: [
-            { label: 'ts#project', link: '/guides/typescript-project' },
-            { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
-            { label: 'ts#rdb', link: '/guides/ts-rdb' },
-            { label: 'ts#dynamodb', link: '/guides/ts-dynamodb' },
             {
-              label: 'ts#api',
+              label: 'Agentic',
+              translations: {
+                jp: 'エージェンティック',
+                ko: '에이전틱',
+                fr: 'Agentique',
+                it: 'Agentico',
+                es: 'Agéntico',
+                pt: 'Agêntico',
+                zh: '智能体',
+                vi: 'Tác nhân',
+              },
               items: [
+                { label: 'ts#agent', link: '/guides/ts-agent' },
+                { label: 'py#agent', link: '/guides/py-agent' },
+                { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
+                { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
                 {
-                  label: 'TypeScript APIs',
-                  link: '/guides/ts-api',
-                },
-                {
-                  label: 'tRPC',
-                  link: '/guides/trpc',
-                },
-                {
-                  label: 'Smithy',
-                  link: '/guides/ts-smithy-api',
+                  label: 'agentcore-gateway',
+                  link: '/guides/agentcore-gateway',
                 },
               ],
             },
             {
-              label: 'ts#website',
+              label: 'API',
+              translations: {
+                jp: 'API',
+                ko: 'API',
+                fr: 'API',
+                it: 'API',
+                es: 'API',
+                pt: 'API',
+                zh: 'API',
+                vi: 'API',
+              },
               items: [
                 {
-                  label: 'Websites',
-                  link: '/guides/website',
+                  label: 'ts#api',
+                  items: [
+                    {
+                      label: 'TypeScript APIs',
+                      link: '/guides/ts-api',
+                    },
+                    {
+                      label: 'tRPC',
+                      link: '/guides/trpc',
+                    },
+                    {
+                      label: 'Smithy',
+                      link: '/guides/ts-smithy-api',
+                    },
+                  ],
                 },
                 {
-                  label: 'React',
-                  link: '/guides/react-website',
-                },
-                {
-                  label: 'Authentication',
-                  link: '/guides/react-website-auth',
+                  label: 'py#api',
+                  items: [
+                    {
+                      label: 'Python APIs',
+                      link: '/guides/py-api',
+                    },
+                    {
+                      label: 'FastAPI',
+                      link: '/guides/fastapi',
+                    },
+                  ],
                 },
               ],
             },
             {
-              label: 'ts#docs',
+              label: 'Events',
+              translations: {
+                jp: 'イベント',
+                ko: '이벤트',
+                fr: 'Événements',
+                it: 'Eventi',
+                es: 'Eventos',
+                pt: 'Eventos',
+                zh: '事件',
+                vi: 'Sự kiện',
+              },
               items: [
                 {
-                  label: 'Documentation',
-                  link: '/guides/docs',
+                  label: 'ts#lambda-function',
+                  link: '/guides/ts-lambda-function',
                 },
                 {
-                  label: 'Astro',
-                  link: '/guides/astro-docs',
-                },
-              ],
-            },
-            { label: 'ts#lambda-function', link: '/guides/ts-lambda-function' },
-            { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
-            { label: 'ts#nx-generator', link: '/guides/nx-generator' },
-            { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
-            { label: 'ts#agent', link: '/guides/ts-agent' },
-            { label: 'py#project', link: '/guides/python-project' },
-            {
-              label: 'py#api',
-              items: [
-                {
-                  label: 'Python APIs',
-                  link: '/guides/py-api',
-                },
-                {
-                  label: 'FastAPI',
-                  link: '/guides/fastapi',
+                  label: 'py#lambda-function',
+                  link: '/guides/python-lambda-function',
                 },
               ],
             },
             {
-              label: 'py#lambda-function',
-              link: '/guides/python-lambda-function',
+              label: 'Database',
+              translations: {
+                jp: 'データベース',
+                ko: '데이터베이스',
+                fr: 'Base de données',
+                it: 'Database',
+                es: 'Base de datos',
+                pt: 'Banco de dados',
+                zh: '数据库',
+                vi: 'Cơ sở dữ liệu',
+              },
+              items: [
+                { label: 'ts#dynamodb', link: '/guides/ts-dynamodb' },
+                { label: 'ts#rdb', link: '/guides/ts-rdb' },
+              ],
             },
-            { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
-            { label: 'py#agent', link: '/guides/py-agent' },
             {
-              label: 'agentcore-gateway',
-              link: '/guides/agentcore-gateway',
+              label: 'Frontend',
+              translations: {
+                jp: 'フロントエンド',
+                ko: '프론트엔드',
+                fr: 'Frontend',
+                it: 'Frontend',
+                es: 'Frontend',
+                pt: 'Frontend',
+                zh: '前端',
+                vi: 'Giao diện',
+              },
+              items: [
+                {
+                  label: 'ts#website',
+                  items: [
+                    {
+                      label: 'Websites',
+                      link: '/guides/website',
+                    },
+                    {
+                      label: 'React',
+                      link: '/guides/react-website',
+                    },
+                    {
+                      label: 'Authentication',
+                      link: '/guides/react-website-auth',
+                    },
+                  ],
+                },
+                {
+                  label: 'ts#docs',
+                  items: [
+                    {
+                      label: 'Documentation',
+                      link: '/guides/docs',
+                    },
+                    {
+                      label: 'Astro',
+                      link: '/guides/astro-docs',
+                    },
+                  ],
+                },
+              ],
             },
-            { label: 'terraform#project', link: '/guides/terraform-project' },
+            {
+              label: 'Infrastructure',
+              translations: {
+                jp: 'インフラストラクチャ',
+                ko: '인프라',
+                fr: 'Infrastructure',
+                it: 'Infrastruttura',
+                es: 'Infraestructura',
+                pt: 'Infraestrutura',
+                zh: '基础设施',
+                vi: 'Hạ tầng',
+              },
+              items: [
+                {
+                  label: 'ts#infra',
+                  link: '/guides/typescript-infrastructure',
+                },
+                {
+                  label: 'terraform#project',
+                  link: '/guides/terraform-project',
+                },
+              ],
+            },
+            {
+              label: 'Tools',
+              translations: {
+                jp: 'ツール',
+                ko: '도구',
+                fr: 'Outils',
+                it: 'Strumenti',
+                es: 'Herramientas',
+                pt: 'Ferramentas',
+                zh: '工具',
+                vi: 'Công cụ',
+              },
+              items: [
+                { label: 'license', link: '/guides/license' },
+                { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
+                { label: 'ts#nx-generator', link: '/guides/nx-generator' },
+              ],
+            },
+            {
+              label: 'Foundation',
+              translations: {
+                jp: '基盤',
+                ko: '기반',
+                fr: 'Fondation',
+                it: 'Fondamenta',
+                es: 'Fundamentos',
+                pt: 'Fundação',
+                zh: '基础',
+                vi: 'Nền tảng',
+              },
+              items: [
+                { label: 'ts#project', link: '/guides/typescript-project' },
+                { label: 'py#project', link: '/guides/python-project' },
+              ],
+            },
             {
               label: 'connection',
               items: [
@@ -518,10 +648,6 @@ export default defineConfig({
                   link: '/guides/connection/py-agent-gateway',
                 },
               ],
-            },
-            {
-              label: 'license',
-              link: '/guides/license',
             },
           ],
         },
