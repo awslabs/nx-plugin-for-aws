@@ -188,6 +188,26 @@ dependencies = ["strands-agents"]
     expect(runtimeConfig).toContain('def get_connected_gateway_url');
   });
 
+  it('refreshes a stale runtime-config helper missing get_connected_gateway_url', async () => {
+    setupProjects();
+    await pyAgentGatewayConnectionGenerator(tree, fullOptions());
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    const runtimeConfigPath = `packages/common/agent_connection/${moduleName}/core/runtime_config.py`;
+    // Simulate an agent-connection project vended by an earlier plugin
+    // version, before the gateway helper existed.
+    tree.write(
+      runtimeConfigPath,
+      'def get_connected_agent_runtime_arn(name): ...',
+    );
+
+    await pyAgentGatewayConnectionGenerator(tree, fullOptions());
+
+    expect(tree.read(runtimeConfigPath)!.toString()).toContain(
+      'def get_connected_gateway_url',
+    );
+  });
+
   it('re-exports from the module __init__.py', async () => {
     setupProjects();
     await pyAgentGatewayConnectionGenerator(tree, fullOptions());

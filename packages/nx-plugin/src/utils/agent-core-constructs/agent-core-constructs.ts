@@ -316,17 +316,6 @@ const addAgentCoreGatewayCDKInfra = async (
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
       'src',
-      'core',
-      'index.ts',
-    ),
-    './agentcore-gateway/mcp-server-construct.js',
-  );
-  await addStarExport(
-    tree,
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
       'app',
       'gateways',
       'index.ts',

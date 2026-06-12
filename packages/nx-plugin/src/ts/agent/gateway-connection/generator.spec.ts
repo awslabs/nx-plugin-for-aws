@@ -158,6 +158,23 @@ export const getAgent = async (sessionId: string) =>
     expect(runtimeConfig).toContain('export const getConnectedGatewayUrl');
   });
 
+  it('refreshes a stale runtime-config helper missing getConnectedGatewayUrl', async () => {
+    setupProjects();
+    // Simulate an agent-connection project vended by an earlier plugin
+    // version, before the gateway helper existed.
+    tree.write(
+      'packages/common/agent-connection/src/core/runtime-config.ts',
+      'export const getConnectedAgentRuntimeArn = async () => "";',
+    );
+
+    await tsAgentGatewayConnectionGenerator(tree, fullOptions());
+
+    const runtimeConfig = tree
+      .read('packages/common/agent-connection/src/core/runtime-config.ts')!
+      .toString();
+    expect(runtimeConfig).toContain('export const getConnectedGatewayUrl');
+  });
+
   it('re-exports the gateway client from the agent-connection index', async () => {
     setupProjects();
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());

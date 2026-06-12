@@ -90,7 +90,7 @@ describe('agentcore-gateway#mcp-connection generator', () => {
 
     tree.write(
       'packages/my-gateway/serve-local.ts',
-      `const ATTACHED_MCP_SERVERS = [
+      `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [
   { name: 'already-there', url: 'http://localhost:8000/mcp' },
 ];
 `,
@@ -117,7 +117,7 @@ describe('agentcore-gateway#mcp-connection generator', () => {
 
     tree.write(
       'packages/my-gateway/serve-local.ts',
-      `const ATTACHED_MCP_SERVERS = [
+      `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [
 ];
 `,
     );

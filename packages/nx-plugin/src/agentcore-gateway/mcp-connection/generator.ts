@@ -95,8 +95,8 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
       tree,
       serveTsPath,
       `or {
-  \`const ATTACHED_MCP_SERVERS = []\` => \`const ATTACHED_MCP_SERVERS = [${entry}]\`,
-  \`const ATTACHED_MCP_SERVERS = [$items]\` => \`const ATTACHED_MCP_SERVERS = [${entry}, $items]\` where {
+  \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = []\` => \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [${entry}]\`,
+  \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [$items]\` => \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [${entry}, $items]\` where {
     $items <: not contains \`'${mcpComponentName}'\`
   }
 }`,
