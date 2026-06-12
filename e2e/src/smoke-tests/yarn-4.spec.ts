@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { appendFileSync } from 'fs';
+import { join } from 'path';
 import { smokeTest } from './smoke-test';
 import { activatePackageManagerViaCorepack } from './corepack';
 
@@ -14,4 +16,10 @@ smokeTest('yarn', {
       YARN_ENABLE_HARDENED_MODE: '0',
       YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
     }),
+  onProjectCreate: (projectRoot) => {
+    appendFileSync(
+      join(projectRoot, '.yarnrc.yml'),
+      '\nnpmMinimalAgeGate: "0"\n',
+    );
+  },
 });
