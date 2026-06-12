@@ -214,6 +214,42 @@ describe('smoke test - cdk-deploy', () => {
         'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
       );
 
+      // AgentCore Gateway — both HTTP agents have the gateway's tools wired in
+      // via the gateway-connection generators, and the gateway fronts both the
+      // TypeScript (`hosted-mcp-server`) and Python (`my-mcp-server`) MCP
+      // servers. Prompt each agent to call a gateway-prefixed tool
+      // (`<target>___<tool>`) for each upstream server and assert the result.
+      // A successful round-trip proves agent -> deployed Gateway (Cedar
+      // ENFORCE + SigV4) -> MCP server works end-to-end for both languages.
+      expect(
+        await invokeTrpcAgentCoreAgent(
+          findOutput('TsAgentArn'),
+          'TS Agent -> Gateway -> TS MCP (hosted-mcp-server___divide)',
+          'Use the hosted-mcp-server___divide tool to divide 6 by 2. Return just the number.',
+        ),
+      ).toContain('3');
+      expect(
+        await invokeTrpcAgentCoreAgent(
+          findOutput('TsAgentArn'),
+          'TS Agent -> Gateway -> PY MCP (my-mcp-server___add)',
+          'Use the my-mcp-server___add tool to add 6 and 2. Return just the number.',
+        ),
+      ).toContain('8');
+      expect(
+        await invokeAgentCoreAgent(
+          findOutput('PyAgentArn'),
+          'PY Agent -> Gateway -> TS MCP (hosted-mcp-server___divide)',
+          'Use the hosted-mcp-server___divide tool to divide 6 by 2. Return just the number.',
+        ),
+      ).toContain('3');
+      expect(
+        await invokeAgentCoreAgent(
+          findOutput('PyAgentArn'),
+          'PY Agent -> Gateway -> PY MCP (my-mcp-server___add)',
+          'Use the my-mcp-server___add tool to add 6 and 2. Return just the number.',
+        ),
+      ).toContain('8');
+
       // Lambda functions
       await invokeLambda(findOutput('PyFunctionArn'), 'Python Function');
       await invokeLambda(findOutput('TsFunctionArn'), 'TypeScript Function');

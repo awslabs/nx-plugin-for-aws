@@ -207,6 +207,42 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
           );
 
+          // AgentCore Gateway — both HTTP agents are granted invoke access to
+          // the gateway, which fronts the TypeScript (`hosted-mcp-server`) and
+          // Python (`my-mcp-server`) MCP servers as targets. Prompt each agent
+          // to call a gateway-prefixed tool (`<target>___<tool>`) for each
+          // upstream server. A successful round-trip proves agent -> deployed
+          // Gateway (Cedar ENFORCE + SigV4) -> MCP server works end-to-end for
+          // both languages.
+          expect(
+            await invokeTrpcAgentCoreAgent(
+              outputs.ts_agent_arn,
+              'TS Agent -> Gateway -> TS MCP (hosted-mcp-server___divide)',
+              'Use the hosted-mcp-server___divide tool to divide 6 by 2. Return just the number.',
+            ),
+          ).toContain('3');
+          expect(
+            await invokeTrpcAgentCoreAgent(
+              outputs.ts_agent_arn,
+              'TS Agent -> Gateway -> PY MCP (my-mcp-server___add)',
+              'Use the my-mcp-server___add tool to add 6 and 2. Return just the number.',
+            ),
+          ).toContain('8');
+          expect(
+            await invokeAgentCoreAgent(
+              outputs.py_agent_arn,
+              'PY Agent -> Gateway -> TS MCP (hosted-mcp-server___divide)',
+              'Use the hosted-mcp-server___divide tool to divide 6 by 2. Return just the number.',
+            ),
+          ).toContain('3');
+          expect(
+            await invokeAgentCoreAgent(
+              outputs.py_agent_arn,
+              'PY Agent -> Gateway -> PY MCP (my-mcp-server___add)',
+              'Use the my-mcp-server___add tool to add 6 and 2. Return just the number.',
+            ),
+          ).toContain('8');
+
           // Lambda functions
           await invokeLambda(outputs.py_function_arn, 'Python Function');
           await invokeLambda(outputs.ts_function_arn, 'TypeScript Function');
