@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { activatePackageManagerViaCorepack } from './corepack';
 import { smokeTest } from './smoke-test';
 
@@ -15,4 +17,10 @@ smokeTest('yarn', {
       YARN_ENABLE_HARDENED_MODE: '0',
       YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
     }),
+  onProjectCreate: (projectRoot) => {
+    appendFileSync(
+      join(projectRoot, '.yarnrc.yml'),
+      '\nnpmMinimalAgeGate: "0"\n',
+    );
+  },
 });
