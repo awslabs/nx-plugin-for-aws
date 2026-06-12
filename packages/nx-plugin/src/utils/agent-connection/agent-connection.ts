@@ -111,17 +111,6 @@ export async function ensureTypeScriptAgentConnectionProject(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // The runtime-config loader is plugin-managed: vended clients import its
-  // helpers (e.g. getConnectedGatewayUrl), so a stale copy from an earlier
-  // plugin version must be refreshed rather than kept.
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'core-runtime-config-managed'),
-    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
-    {},
-    { overwriteStrategy: OverwriteStrategy.Overwrite },
-  );
-
   // Re-export session-context helpers so agent server entry points
   // can set the current session on each inbound request without pulling in
   // the agent-connection internals.
@@ -203,17 +192,6 @@ export async function ensurePythonAgentConnectionProject(
     coreDir,
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
-
-  // The runtime-config loader is plugin-managed: vended clients import its
-  // helpers (e.g. get_connected_gateway_url), so a stale copy from an
-  // earlier plugin version must be refreshed rather than kept.
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'py-core-runtime-config-managed'),
-    coreDir,
-    {},
-    { overwriteStrategy: OverwriteStrategy.Overwrite },
   );
 
   // Re-export session-context helpers so agent server entry points
