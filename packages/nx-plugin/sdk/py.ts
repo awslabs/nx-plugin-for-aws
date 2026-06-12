@@ -9,9 +9,6 @@ export { PyAgentGeneratorSchema } from '../src/py/agent/schema';
 export { pyApiGenerator } from '../src/py/api/generator';
 export { PyApiGeneratorSchema } from '../src/py/api/schema';
 
-export { pyFastApiProjectGenerator } from '../src/py/fast-api/generator';
-export { PyFastApiProjectGeneratorSchema } from '../src/py/fast-api/schema';
-
 export { pyLambdaFunctionGenerator } from '../src/py/lambda-function/generator';
 export { PyLambdaFunctionGeneratorSchema } from '../src/py/lambda-function/schema';
 
