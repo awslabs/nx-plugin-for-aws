@@ -2,14 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-export { DEFAULT_LICENSE_ALLOWLIST } from '../src/license/index';
+export { licenseGenerator } from '../src/license/generator';
 export type {
   AllowlistEntry,
+  CollectedDependency,
   DependencyCheckConfig,
   DependencyCheckException,
-} from '../src/license/index';
-export { npmCollector, pythonCollector } from '../src/license/index';
-export type {
   LicenseCollector,
-  CollectedDependency,
 } from '../src/license/index';
+export {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '../src/license/index';
+export type { LicenseGeneratorSchema } from '../src/license/schema';
