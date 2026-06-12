@@ -1,0 +1,134 @@
+---
+title: Passerelle AgentCore vers serveur MCP
+description: Connecter une passerelle AgentCore à un serveur MCP
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#mcp-server
+    - py#mcp-server
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur `connection` peut enregistrer un serveur MCP (soit <Link path="guides/ts-mcp-server">TypeScript</Link> soit <Link path="guides/py-mcp-server">Python</Link>) comme cible d'une <Link path="guides/agentcore-gateway">passerelle AgentCore</Link>.
+
+Une fois connectée, la passerelle agrège les outils du serveur MCP dans son point de terminaison MCP unique, évalue les appels par rapport à son moteur de politique Cedar, et signe le trafic sortant vers le serveur MCP avec IAM SigV4.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>
+2. Un composant serveur MCP (<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> ou <Link path="guides/py-mcp-server">`py#mcp-server`</Link>) créé avec `infra: agentcore` et `auth: iam`
+
+La passerelle doit avoir `protocol: mcp` et le serveur MCP doit avoir `auth: iam` — le générateur valide les deux. Les serveurs MCP non-IAM ne peuvent pas être attachés car la passerelle signe le trafic sortant avec SigV4.
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez le projet de passerelle comme source et le projet de serveur MCP comme cible. Si le projet de serveur MCP contient plusieurs composants, spécifiez `targetComponent` pour lever l'ambiguïté.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur relie les projets existants ensemble plutôt que d'émettre de nouveaux fichiers source. Les fichiers suivants sont modifiés :
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json `<gateway>-serve-local` gagne une dépendance sur le `<mcp>-serve-local` du serveur MCP
+  - serve.ts `ATTACHED_MCP_SERVERS` mis à jour pour que la passerelle locale agrège le serveur MCP
+
+</FileTree>
+
+La cible `<gateway>-serve-local` du projet de passerelle gagne une dépendance sur la cible `<mcp>-serve-local` du serveur MCP, donc l'exécution de la passerelle localement démarre également le serveur MCP. Le serveur MCP est également enregistré dans le `serve-local.ts` du projet de passerelle afin que la passerelle locale agrège ses outils.
+
+## Ajouter la cible du serveur MCP à votre stack
+
+Le générateur **ne peut pas** câbler automatiquement la cible du serveur MCP dans votre infrastructure car il ne sait pas quelle stack ou quel module instancie la passerelle. Ajoutez vous-même un seul appel à `gateway.addMcpServer(server)`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Dans la stack où vous instanciez la passerelle, enregistrez le serveur MCP comme cible :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// Register the MCP server as a target of the Gateway. The target name
+// defaults to the MCP server's `mcpServerName` (its class name in
+// kebab-case, e.g. `MyMcpServer` -> `my-mcp-server`).
+myGateway.addMcpServer(myMcpServer);
+```
+
+Le nom de cible de la passerelle (l'id de la construction en kebab-case par défaut) est utilisé comme préfixe pour les noms d'action Cedar — le format d'action est ``AgentCore::Action::"<targetName>___<toolName>"``. Voir la <Link path="guides/agentcore-gateway">section Rédaction de politiques</Link>. Gardez le nom de cible court et stable ; le changer ultérieurement invalide toutes les politiques Cedar qui référencent l'ancien nom.
+
+Pour remplacer le nom de cible par défaut, passez `gatewayTargetName` :
+
+```ts
+myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
+```
+
+La construction configure la cible avec `iamCredentialProvider.service = 'bedrock-agentcore'` afin que la passerelle signe les appels sortants en utilisant son propre rôle d'exécution.
+</Fragment>
+<Fragment slot="terraform">
+Dans le fichier Terraform où vous instanciez la passerelle, câblez la cible du serveur MCP :
+
+```hcl title="packages/infra/src/main.tf" {7,11-27}
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+}
+
+module "my_gateway" {
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
+}
+
+# Register the MCP server as a target of the Gateway
+resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+Le `name` de la cible (`my-mcp-server` ci-dessus) est utilisé comme préfixe pour les noms d'action Cedar — voir la <Link path="guides/agentcore-gateway">section Rédaction de politiques</Link>. `policy_dependencies` garantit que les politiques Cedar référençant les actions de cette cible sont créées après que la cible a enregistré ces actions.
+</Fragment>
+</Infrastructure>
+
+## Développement local
+
+L'exécution de la passerelle localement avec :
+
+<NxCommands commands={["<gateway-name>-serve-local"]} />
+
+démarre une passerelle locale plus chaque serveur MCP attaché sur son port local assigné. La passerelle locale expose un point de terminaison MCP unique qui agrège les outils des serveurs attachés. Les agents connectés à la passerelle via les générateurs de connexion de passerelle <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> ou <Link path="guides/connection/py-agent-gateway">Python</Link> pointent vers elle lors de l'exécution avec `SERVE_LOCAL=true`.
+
+:::caution[Fidélité locale]
+Le développement local utilise une **passerelle de substitution locale** — un agrégateur MCP léger démarré par le projet de passerelle, et non le service de passerelle AgentCore. En conséquence, **les politiques Cedar ne sont pas évaluées localement**. Chaque agent voit tous les outils sur chaque serveur MCP attaché. Pour exercer les politiques Cedar, exécutez plutôt la cible `serve` de l'agent (voir les guides de connexion d'agent <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) afin que l'agent s'exécutant localement appelle la passerelle déployée.
+
+Les noms d'outils sont toujours préfixés localement comme `<target-name>___<tool-name>` pour correspondre à l'espacement de noms de la passerelle déployée, de sorte que l'invite système d'un agent et les noms d'action Cedar que vous référencez restent cohérents entre les exécutions locales et déployées.
+:::

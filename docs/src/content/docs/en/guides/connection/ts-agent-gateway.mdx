@@ -1,0 +1,150 @@
+---
+title: TypeScript Agent to Gateway
+description: Connect a TypeScript Agent to an AgentCore Gateway
+when:
+  sourceType: ts#agent
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator can connect your <Link path="guides/ts-agent">TypeScript Agent</Link> to an <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
+
+The generator wires the agent so it authenticates to the Gateway with IAM SigV4 when deployed, and connects to the local gateway started by the Gateway project when running locally.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A TypeScript project with a <Link path="guides/ts-agent">Agent</Link> component (`infra: agentcore`)
+2. A <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select the agent project as the source and the Gateway project as the target.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator emits shared core client files into your `agent-connection` package, plus a per-Gateway wrapper, and modifies your agent:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - core/
+      - agentcore-gateway-mcp-client.ts SigV4 MCP client for the deployed Gateway
+    - app/
+      - \<gateway-kebab>-client.ts Per-Gateway client wrapper
+    - index.ts Re-exports the Gateway client
+
+</FileTree>
+
+Additionally, the generator:
+
+- Modifies your agent's `agent.ts` to import the Gateway client class, call `<Gateway>Client.create()`, and register the returned client in the `tools` array
+- Wires the agent's `<agent>-serve-local` target to depend on the Gateway's `<gateway>-serve-local` aggregator
+- Installs the required SigV4 / MCP dependencies
+
+## Using the connected Gateway
+
+The generator transforms your agent's `agent.ts` to use the Gateway client:
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
+import { Agent } from '@strands-agents/sdk';
+import { MyGatewayClient } from ':my-scope/agent-connection';
+
+export const getAgent = async () => {
+  const myGateway = await MyGatewayClient.create();
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myGateway],
+  });
+};
+```
+
+When deployed (`SERVE_LOCAL` unset), the client points at the Gateway's MCP endpoint and authenticates with SigV4. When `SERVE_LOCAL=true`, it points at the local gateway started by the Gateway project's `serve-local` target, so the same `agent.ts` works uniformly in both modes.
+
+The session ID is propagated to downstream MCP servers automatically via the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header.
+
+## Infrastructure
+
+After running the generator you must grant the agent permission to invoke the Gateway.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const gateway = new MyGateway(this, 'MyGateway');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent permissions to invoke the Gateway
+gateway.grantInvokeAccess(myAgent);
+```
+
+The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> by the generated CDK construct, so the agent can discover it at runtime.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the agent permission to invoke the Gateway
+resource "aws_iam_policy" "agent_invoke_gateway" {
+  name = "AgentInvokeGatewayPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeGateway"
+      Resource = module.my_gateway.gateway_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_gateway" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_gateway.arn
+}
+```
+
+The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> by the generated Terraform module, so the agent can discover it at runtime.
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+The generator configures the agent's `serve-local` target to:
+
+1. Start the connected Gateway's local gateway and every attached MCP server
+2. Set `SERVE_LOCAL=true` so the generated client points at the local gateway instead of the deployed Gateway
+
+Run the agent locally with:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+To run the agent locally **against the deployed Gateway** instead (for example, to exercise Cedar policies), use the agent's `serve` target. Without `SERVE_LOCAL` set, the client resolves the deployed Gateway URL from runtime configuration and SigV4-signs requests with your local AWS credentials:
+
+<NxCommands commands={["<agent-name>-serve <project-name>"]} />
+
+### Local fidelity
+
+The local gateway stands in for the deployed Gateway, so:
+
+- **No Cedar policy evaluation.** Every tool is visible to the agent regardless of policies. Use the `serve` target to exercise policies against the deployed Gateway.
+- **Tool-name prefixing is preserved.** Each local MCP server's tools are wrapped to expose names of the form `<target-name>___<tool-name>`, matching what the deployed Gateway emits. This keeps an agent's system prompt and the Cedar action names you reference consistent across local and deployed runs.

@@ -30,9 +30,26 @@ interface GeneratorsJson {
 }
 
 /**
- * Pull out every enum-valued property as a `FilterableOption`. Shared between
- * the MCP server (deriving options from a generator's schema) and the docs
- * filter bar (mapping user-referenced keys onto their enum values).
+ * The values an option can be filtered on: its enum values, or true/false
+ * for booleans. Returns undefined for non-filterable options.
+ */
+export const filterableValuesForProperty = (
+  prop: SchemaProperty,
+): string[] | undefined => {
+  if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+    return prop.enum.map((v) => String(v));
+  }
+  if (prop.type === 'boolean') {
+    return ['true', 'false'];
+  }
+  return undefined;
+};
+
+/**
+ * Pull out every filterable property (enum or boolean valued) as a
+ * `FilterableOption`. Shared between the MCP server (deriving options from a
+ * generator's schema) and the docs filter bar (mapping user-referenced keys
+ * onto their values).
  */
 export const filterableOptionsFromSchema = (
   schema: GeneratorSchema | undefined,
@@ -40,10 +57,11 @@ export const filterableOptionsFromSchema = (
   const props = schema?.properties ?? {};
   const out: FilterableOption[] = [];
   for (const [key, prop] of Object.entries(props)) {
-    if (!Array.isArray(prop.enum) || prop.enum.length === 0) continue;
+    const values = filterableValuesForProperty(prop);
+    if (!values) continue;
     out.push({
       key,
-      enum: prop.enum.map((v) => String(v)),
+      enum: values,
       default: prop.default !== undefined ? String(prop.default) : undefined,
       description: prop.description,
     });

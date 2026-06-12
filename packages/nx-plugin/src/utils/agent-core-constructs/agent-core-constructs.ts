@@ -216,3 +216,191 @@ export const addAgentInfra = async (
     containers: options.containers,
   });
 };
+
+export interface AddAgentCoreGatewayInfraProps {
+  gatewayNameClassName: string;
+  gatewayNameKebabCase: string;
+  projectName: string;
+  projectDirectory: string;
+  cedarPolicy: boolean;
+}
+
+export const addAgentCoreGatewayInfra = async (
+  tree: Tree,
+  options: AddAgentCoreGatewayInfraProps & IACProvider,
+) => {
+  switch (options.iac) {
+    case 'cdk':
+      await addAgentCoreGatewayCDKInfra(tree, options);
+      break;
+    case 'terraform':
+      addAgentCoreGatewayTerraformInfra(tree, options);
+      break;
+  }
+
+  updateJson(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      options.iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      'project.json',
+    ),
+    (config: ProjectConfiguration) => {
+      addDependencyToTargetIfNotPresent(
+        config,
+        'build',
+        `${options.projectName}:build`,
+      );
+      return config;
+    },
+  );
+};
+
+const addAgentCoreGatewayCDKInfra = async (
+  tree: Tree,
+  options: AddAgentCoreGatewayInfraProps,
+) => {
+  // Generic gateway construct (readiness probe, policy engine, Cedar policy
+  // loading) shared by all gateways
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'cdk', 'core', 'agentcore-gateway'),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'agentcore-gateway',
+    ),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'agentcore-gateway'),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'gateways',
+    ),
+    {
+      nameClassName: options.gatewayNameClassName,
+      nameKebabCase: options.gatewayNameKebabCase,
+      projectDirectory: options.projectDirectory,
+      cedarPolicy: options.cedarPolicy,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'index.ts',
+    ),
+    './agentcore-gateway/agentcore-gateway.js',
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'gateways',
+      'index.ts',
+    ),
+    `./${options.gatewayNameKebabCase}/${options.gatewayNameKebabCase}.js`,
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'index.ts',
+    ),
+    './gateways/index.js',
+  );
+};
+
+const addAgentCoreGatewayTerraformInfra = (
+  tree: Tree,
+  options: AddAgentCoreGatewayInfraProps,
+) => {
+  generateFiles(
+    tree,
+    joinPathFragments(
+      __dirname,
+      'files',
+      'terraform',
+      'core',
+      'agentcore-gateway',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'core',
+      'agentcore-gateway',
+    ),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  generateFiles(
+    tree,
+    joinPathFragments(
+      __dirname,
+      'files',
+      'terraform',
+      'app',
+      'agentcore-gateway',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'app',
+      'gateways',
+    ),
+    {
+      nameClassName: options.gatewayNameClassName,
+      nameKebabCase: options.gatewayNameKebabCase,
+      projectDirectory: options.projectDirectory,
+      cedarPolicy: options.cedarPolicy,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  // The Cedar render script is only needed when policies are enabled
+  if (!options.cedarPolicy) {
+    const renderScript = joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'app',
+      'gateways',
+      options.gatewayNameKebabCase,
+      'render-cedar.cjs',
+    );
+    if (tree.exists(renderScript)) {
+      tree.delete(renderScript);
+    }
+  }
+};

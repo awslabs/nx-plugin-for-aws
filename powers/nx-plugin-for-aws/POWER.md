@@ -121,6 +121,7 @@ Add capabilities to existing projects:
 
 | Generator            | Description                                                                                                        |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `agentcore-gateway`  | Generate an AgentCore Gateway project                                                                              |
 | `connection`         | Integrates a source project with a target project                                                                  |
 | `license`            | Add LICENSE files and configure source code licence headers                                                        |
 | `py#api`             | Create a Python API                                                                                                |

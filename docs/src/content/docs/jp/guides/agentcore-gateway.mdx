@@ -1,0 +1,239 @@
+---
+title: AgentCore Gateway
+description: AgentCore Gatewayプロジェクトの作成
+generator: agentcore-gateway
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)プロジェクトを生成します。AgentCore Gatewayは、1つ以上のMCPサーバーターゲットを単一のMCPエンドポイントの背後に集約し、すべてのツール呼び出しを[Cedarポリシーエンジン](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)に対して評価し、MCPサーバーへのアウトバウンドトラフィックにIAM SigV4で署名するマネージドエントリーポイントです。
+
+## 使用方法
+
+### AgentCore Gatewayの生成
+
+<RunGenerator generator="agentcore-gateway" />
+
+### オプション
+
+<GeneratorParameters generator="agentcore-gateway" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、`packages/<name>/`に新しいプロジェクトを作成し、さらにインフラストラクチャ用のCDKコンストラクトまたはTerraformモジュールを追加します：
+
+<FileTree>
+  - packages/\<name>/
+    - policies/ Cedarポリシーソースファイル（`cedarPolicy: false`の場合は省略）
+      - permit-all.cedar 同じAWSアカウント内の認証された呼び出し元を許可するデフォルトのCedarポリシー
+      - README.md Cedarポリシーの記述に関するリファレンス
+    - serve-local.ts ローカル開発用にアタッチされたMCPサーバーを集約するローカルゲートウェイ
+    - project.json \<name>-serveおよび\<name>-serve-localアグリゲーターターゲットを追加
+</FileTree>
+
+### インフラストラクチャ
+
+インフラストラクチャは、`infra`が`agentcore`（デフォルト）の場合に生成されます。`infra: none`の場合、インフラストラクチャは生成されません — 後で`infra: agentcore`でジェネレーターを再実行して追加できます。
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - core
+          - agentcore-gateway/ 共有ゲートウェイコンストラクト（readinessプローブ、Cedarポリシーロード）
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.ts GatewayをデプロイするためのCDKコンストラクト
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.tf GatewayをデプロイするためのTerraformモジュール
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+生成されたコンストラクトは、以下のAWSリソースを作成します：
+
+- `GatewayAuthorizer.usingAwsIam()`（インバウンドIAM認証）を使用してMCPプロトコル用に構成された`AgentCore::Gateway`
+- `ENFORCE`モードで実行され、Gatewayにアタッチされた`AgentCore::PolicyEngine`（`cedarPolicy: false`の場合は省略）
+- `policies/`内の`.cedar`ファイルごとに1つの`AgentCore::Policy`
+
+Gateway URLは、<Link path="guides/runtime-config">ランタイム設定</Link>の`agentcore.gateways.<ClassName>`名前空間に自動的に登録されるため、エージェントは実行時にそれを検出できます。
+
+## ポリシーの記述
+
+<OptionFilter when={{ cedarPolicy: true }} description="Cedarポリシー — cedarPolicy: trueのみ">
+
+Cedarは、AgentCore Gatewayがツール呼び出しを認可するために使用するポリシー言語です。Gatewayを通過するすべての`tools/list`および`tools/call`リクエストは、アタッチされたポリシーセットに対して評価され、呼び出し元はリクエストが成功するために少なくとも1つの一致する`permit`ステートメント（および一致する`forbid`がないこと）を持つ必要があります。
+
+完全なリファレンスについては、[AgentCore Gatewayポリシーに関するAWSドキュメント](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)を参照してください。[一般的なポリシーパターン](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html)も含まれています。
+
+### ポリシーの追加
+
+ポリシーを追加するには、`permit-all.cedar`と並んで新しい`.cedar`ファイルを作成します。`policies/`内の各`.cedar`ファイルは、正確に**1つ**の`permit`または`forbid`ステートメントを含む必要があり、単一の`AWS::BedrockAgentCore::Policy`リソースとしてデプロイされます。ポリシーリソースの名前はファイル名から派生します：`permit-all.cedar`は`PermitAll`になります（kebab/snake-caseはPascalCaseに変換されます）。複数のステートメントを含むファイルは、デプロイ時に`unexpected token 'forbid'`エラーを生成します — それらを別々のファイルに分割してください。
+
+例えば、特定のエージェントロールのみが特定のツールを呼び出すことを許可するには、以下を作成します：
+
+```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
+permit (
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+);
+```
+
+ロール名をハードコーディングするのではなく、テンプレート変数として渡します（以下の<a href="#template-variables">テンプレート変数</a>を参照）。新しいポリシーをデプロイするには、再synthまたは再planを実行します。
+
+### テンプレート変数
+
+ポリシーは[EJS](https://ejs.co/)テンプレートであり、synth/plan時にレンダリングされるため、アカウント間およびGatewayの再デプロイ間で移植可能なままです：
+
+| 変数                 | 置換される値                                  |
+| -------------------- | --------------------------------------------- |
+| `<%= gatewayArn %>`  | デプロイされたGatewayのARN                    |
+| `<%= accountId %>`   | このGatewayがデプロイされるAWSアカウント      |
+
+値をハードコーディングするのではなく、常にこれらの変数を参照してください。
+
+#### 独自の変数の追加
+
+新しい変数を追加するには、ポリシーがレンダリングされる場所で追加します。例えば、上記の`ts-agent-divide.cedar`の例にエージェントの実行ロール名を渡すには：
+
+<Infrastructure>
+<Fragment slot="cdk">
+`packages/common/constructs/src/app/gateways/<name>/<name>.ts`で、`cedarPolicyVariables`を共有コンストラクトに渡します：
+
+```ts {4-6}
+super(scope, id, {
+  cedarPolicyPath: path.join(
+    ...
+  ),
+  cedarPolicyVariables: {
+    tsAgentRoleName: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleName),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+`packages/common/terraform/src/app/gateways/<name>/<name>.tf`で、`rendered_policies`データソースの`query`に追加します：
+
+```hcl {4}
+query = {
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
+  # ...
+}
+```
+</Fragment>
+</Infrastructure>
+
+### ENFORCEモードとデフォルト拒否
+
+`PolicyEngine`は`ENFORCE`モードで実行されます。これは**デフォルト拒否**セマンティクスが適用されることを意味します：(principal, action, resource)タプルに一致する`permit`ステートメントがない場合、リクエストは拒否されます。拒否されたツール呼び出しは以下を返します：
+
+```
+Tool Execution Denied: Tool call not allowed due to policy enforcement
+[No policy applies to the request (denied by default).]
+```
+
+さらに、Gatewayは`tools/list`のレスポンスをフィルタリングし、呼び出し元が少なくとも1つの一致する`permit`を持つツールのみを表示します：エージェントが特定のツールの権限を持たない場合、ツールは呼び出し時に表示されて失敗するのではなく、完全に非表示になります。
+
+### デフォルトの`permit-all.cedar`
+
+ジェネレーターは、Gatewayがデプロイされる先のAWSアカウントからの任意のIAM呼び出し元を許可するデフォルトポリシーを提供します：
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.id like "arn:aws:*::<%= accountId %>:*"
+};
+```
+
+さらにロックダウンするには、その横により狭いポリシーを追加します。ポリシーセット内に少なくとも1つの一致する`permit`を常に保持してください。そうしないと、デフォルト拒否がすべての呼び出しをブロックします。
+
+### ポリシースコープリファレンス
+
+このプラグインによって生成されたGatewayの場合、すべての呼び出し元はIAMプリンシパルです（Gatewayは`GatewayAuthorizer.usingAwsIam()`で構成されています）：
+
+```
+principal is AgentCore::IamEntity
+```
+
+呼び出し元はセッション名が削除されたSTS assumed-role ARNとして評価されるため、ロールを正確に一致させることができます — ワイルドカードは不要です：
+
+```cedar
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
+```
+
+同じ値は`when`句の`principal.id`として利用できます。`like`は、デフォルトの`permit-all.cedar`のアカウント全体の一致など、真のパターンのために予約してください。
+
+ツール呼び出しは、以下の形式のアクションとしてポリシーエンジンに到達します：
+
+```
+AgentCore::Action::"<target-name>___<tool-name>"
+```
+
+ここで、`<target-name>`はGatewayターゲット名（`gateway.addMcpServer(...)`を使用する場合、デフォルトではMCPサーバーの`mcpServerName`で、MCPプロジェクトのクラス名からケバブケースで派生 — 例：`TsMcp` → `ts-mcp`）、`<tool-name>`はMCPツールの名前、セパレーターは`___`（3つのアンダースコア）です。Cedarはアクションのワイルドカードをサポートしていません — 正確なアクションを一致させるか、すべてのアクションを一致させるために`action ==`を省略します。
+
+リソースは常にGateway自体です：
+
+```cedar
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
+```
+
+### 検証の考慮事項
+
+生成されたインフラストラクチャは`IGNORE_ALL_FINDINGS`でポリシーを作成します：AgentCoreのCedarアナライザー（サービスのデフォルトである`FAIL_ON_ANY_FINDINGS`）は、多くの正当なポリシーを拒否します — たとえば、すべての呼び出し元に対して単一のツールを無効にする`forbid`は、`when`句でスコープされている場合でも「Overly Restrictive」として拒否されます。エンフォースメントは影響を受けません。これはポリシーエンジンの`ENFORCE`モードによって構成されます。
+
+1つの順序制約は依然として適用されます：`AgentCore::Action::"<target>___<tool>"`を参照するポリシーは、ターゲットがそのツールをGatewayに登録した後にのみ検証されます。これが、生成されたインフラストラクチャがGatewayターゲットの後にポリシーを作成する理由です。
+
+ポリシーのデプロイに失敗した場合、CloudFormationは拒否を不透明な`Resource stabilization failed`エラーとして表示します — `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`を実行して、実際の理由を含むバリデーターの`statusReasons`を取得してください。
+
+### 例：より広い許可を維持しながら1つのツールを禁止する
+
+狭い`forbid`をより広い`permit`とペアにします（Cedarは`forbid`を`permit`よりも優先して評価します）：
+
+```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
+forbid (
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= pyAgentRoleName %>",
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+);
+```
+
+これにより、Pythonエージェントロールが`ts-mcp___divide`を呼び出すことを拒否しながら、他のすべての呼び出し元に対してより広い`permit-all.cedar`を残します。
+
+</OptionFilter>
+
+## ローカル開発
+
+ジェネレーターは、Gatewayプロジェクトに`<name>-serve-local`ターゲットを追加します。このターゲットは`serve-local.ts`を実行します：デプロイされたGatewayに一致するように、ツールに`<target>___<tool>`のプレフィックスが付けられた、アタッチされたすべてのMCPサーバー（<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`ジェネレーター</Link>を介して接続）を集約する単一のMCPエンドポイントを公開するローカルゲートウェイです。これを実行すると、ローカルゲートウェイとアタッチされたすべてのMCPサーバーが一緒に起動します。
+
+<NxCommands commands={["<name>-serve-local"]} />
+
+完全なローカル開発ストーリーについては、接続ガイドを参照してください。
+
+## 次のステップ
+
+- MCPサーバーを接続する：<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
+- TypeScriptエージェントを接続する：<Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
+- Pythonエージェントを接続する：<Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

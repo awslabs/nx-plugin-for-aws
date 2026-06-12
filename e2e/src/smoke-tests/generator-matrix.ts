@@ -184,7 +184,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // Strands agent <-> MCP server connections.
+  // Agent <-> MCP server connections.
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive`,
     opts,
@@ -220,7 +220,31 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // Website -> strands agent connections (TypeScript HTTP, TypeScript AG-UI, Python HTTP, Python AG-UI/CopilotKit)
+  // AgentCore Gateway + the four connection edges (ts/py agent -> gateway,
+  // gateway -> ts/py mcp-server) so each smoke test exercises a deployable
+  // gateway with multiple MCP server targets fronting both agent runtimes.
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=@e2e-test/my-gateway --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=@e2e-test/my-gateway --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/my-gateway --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/my-gateway --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
+    opts,
+  );
+
+  // Website -> agent connections (TypeScript HTTP, TypeScript AG-UI, Python HTTP, Python AG-UI/CopilotKit)
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=agent --no-interactive`,
     opts,

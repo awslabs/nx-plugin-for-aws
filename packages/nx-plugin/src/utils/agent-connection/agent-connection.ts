@@ -71,11 +71,13 @@ export function getPythonAgentConnectionPackageName(tree: Tree): string {
 export const TS_CORE_TEMPLATES = {
   mcp: 'core-mcp',
   a2a: 'core-a2a',
+  gateway: 'core-gateway',
 } as const;
 
 export const PY_CORE_TEMPLATES = {
   mcp: 'py-core-mcp',
   a2a: 'py-core-a2a',
+  gateway: 'py-core-gateway',
   /** Shared SigV4 `httpx.Auth` used by both MCP and A2A clients. */
   auth: 'py-core-auth',
 } as const;
@@ -248,6 +250,162 @@ export function addPythonCoreClient(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 }
+
+/**
+ * Patch a TypeScript agent.ts to create a connection client and register it
+ * in the Agent's tools. Used by the MCP and gateway connection generators —
+ * the client class must expose a static async `create()` returning a value
+ * accepted by `Agent.tools` (e.g. an `McpClient`).
+ */
+export async function addTypeScriptClientToAgent(
+  tree: Tree,
+  agentFilePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> {
+  const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create();`;
+
+  // Transform the arrow function that contains `new Agent`:
+  // - Expression body: wrap in block with client creation and return
+  // - Block body: prepend client creation statement
+  await applyGritQL(
+    tree,
+    agentFilePath,
+    `or { \`async ($p) => new Agent($args)\` => raw\`async ($p) => {
+  ${clientCreationStmt}
+  return new Agent($args);
+}\` where { $program <: not contains \`${clientClassName}.create\` }, \`async ($p) => { $body }\` => raw\`async ($p) => {
+  ${clientCreationStmt}
+  $body
+}\` where { $body <: contains \`new Agent($_)\`, $program <: not contains \`${clientClassName}.create\` } }`,
+  );
+
+  // Prepend the client to the tools array
+  await applyGritQL(
+    tree,
+    agentFilePath,
+    `\`tools: [$items]\` => \`tools: [${clientVarName}, $items]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${clientVarName}\` }`,
+  );
+}
+
+/**
+ * Patch a Python agent.py to create a context-managed connection client,
+ * enter it in the `with` block around `yield Agent(...)`, and spread its
+ * `list_tools_sync()` into the Agent's tools. Used by the MCP and gateway
+ * connection generators — the client class must expose a static `create()`
+ * returning a context manager with `list_tools_sync()` (e.g. an `MCPClient`).
+ */
+export async function addPythonClientToAgent(
+  tree: Tree,
+  agentFilePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> {
+  await addPythonClientTools(tree, agentFilePath, clientVarName);
+  await addPythonClientToGetAgent(
+    tree,
+    agentFilePath,
+    clientClassName,
+    clientVarName,
+  );
+}
+
+/**
+ * Append `*<clientVarName>.list_tools_sync()` to the Agent's tools list.
+ */
+const addPythonClientTools = async (
+  tree: Tree,
+  filePath: string,
+  clientVarName: string,
+): Promise<void> => {
+  if (
+    await matchGritQL(
+      tree,
+      filePath,
+      py(`\`${clientVarName}.list_tools_sync()\``),
+    )
+  ) {
+    return;
+  }
+
+  await applyGritQL(
+    tree,
+    filePath,
+    py(`\`tools=$old\` where {
+  $old <: not contains \`${clientVarName}\`,
+  if ($old <: \`[]\`) {
+    $old => \`[*${clientVarName}.list_tools_sync()]\`
+  } else {
+    $old <: \`[$items]\` where { $items += \`, *${clientVarName}.list_tools_sync()\` }
+  }
+}`),
+  );
+};
+
+/**
+ * Create the client in get_agent and enter it in the `with` block.
+ *
+ * First connection: rewrites `def get_agent` to wrap the body in a with
+ * block. Subsequent connections: adds to the existing with items and
+ * prepends the creation line.
+ */
+const addPythonClientToGetAgent = async (
+  tree: Tree,
+  filePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> => {
+  if (
+    await matchGritQL(tree, filePath, py(`\`${clientClassName}.create()\``))
+  ) {
+    return;
+  }
+
+  // Try the "add to existing with block" pattern first.
+  // If it succeeds, there was already a with block from a previous connection.
+  const addedToWith = await applyGritQL(
+    tree,
+    filePath,
+    py(`\`with ($items,): $body\` where {
+  $items <: not contains \`${clientVarName}\`,
+  $items += \`, ${clientVarName}\`
+}`),
+  );
+
+  if (addedToWith) {
+    // Subsequent connection — prepend the creation line to the function body
+    // (a single anchor, so the line is inserted exactly once).
+    await applyGritQL(
+      tree,
+      filePath,
+      py(`\`def get_agent($params):
+    $body\` where {
+  $body <: contains \`yield Agent($_)\`,
+  $body <: not contains \`${clientClassName}.create\`
+} => \`def get_agent($params):
+    ${clientVarName} = ${clientClassName}.create()
+    $body\``),
+    );
+    return;
+  }
+
+  // First connection — wrap the existing `def get_agent` body in a single
+  // `with (<var>,):` block.
+  await applyGritQL(
+    tree,
+    filePath,
+    py(`\`def get_agent($params):
+    $body\` where {
+  $body <: contains \`yield Agent($_)\`,
+  $body <: not contains \`${clientClassName}.create\`
+} => \`def get_agent($params):
+    ${clientVarName} = ${clientClassName}.create()
+    with (
+        ${clientVarName},
+    ):
+        $body\``),
+  );
+};
 
 /**
  * Add a re-export to the Python agent-connection module's __init__.py.

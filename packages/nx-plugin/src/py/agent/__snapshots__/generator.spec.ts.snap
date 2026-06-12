@@ -593,6 +593,59 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
   ]
 }
 
+# MCP consumers (e.g. gateway targets, which fetch tools at creation) can race
+# the runtime's first cold start, so probe it until it serves MCP. The ARN
+# output is routed through this resource so consumers wait for readiness.
+resource "null_resource" "runtime_ready" {
+  count = var.server_protocol == "MCP" ? 1 : 0
+
+  triggers = {
+    runtime_arn = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      uv run --with boto3 python -c "
+import boto3
+import json
+import time
+import uuid
+
+runtime_arn = '\${self.triggers.runtime_arn}'
+client = boto3.client('bedrock-agentcore')
+initialize_request = json.dumps({
+    'jsonrpc': '2.0',
+    'id': 1,
+    'method': 'initialize',
+    'params': {
+        'protocolVersion': '2025-03-26',
+        'capabilities': {},
+        'clientInfo': {'name': 'readiness-probe', 'version': '1.0'},
+    },
+})
+
+deadline = time.time() + 3 * 60
+while True:
+    try:
+        client.invoke_agent_runtime(
+            agentRuntimeArn=runtime_arn,
+            runtimeSessionId=f'readiness-probe-{uuid.uuid4()}',
+            contentType='application/json',
+            accept='application/json, text/event-stream',
+            payload=initialize_request,
+        )
+        break
+    except Exception:
+        if time.time() >= deadline:
+            raise
+        time.sleep(5)
+
+print(f'Runtime {runtime_arn} is serving MCP')
+"
+    EOT
+  }
+}
+
 # Outputs
 output "agent_core_runtime_role_arn" {
   description = "ARN of the Agent Core Runtime IAM role"
@@ -610,8 +663,8 @@ output "agent_runtime_name" {
 }
 
 output "agent_core_runtime_arn" {
-  description = "ARN of the Bedrock Agent Core runtime"
-  value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+  description = "ARN of the Bedrock Agent Core runtime. For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = var.server_protocol == "MCP" ? null_resource.runtime_ready[0].triggers.runtime_arn : aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
 }
 
 output "agent_runtime_id" {

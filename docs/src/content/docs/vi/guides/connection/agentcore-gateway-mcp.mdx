@@ -1,0 +1,134 @@
+---
+title: AgentCore Gateway tới MCP Server
+description: Kết nối AgentCore Gateway với MCP server
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#mcp-server
+    - py#mcp-server
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` có thể đăng ký một MCP server (có thể là <Link path="guides/ts-mcp-server">TypeScript</Link> hoặc <Link path="guides/py-mcp-server">Python</Link>) làm đích của một <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
+
+Sau khi được kết nối, Gateway tổng hợp các công cụ của MCP server vào một điểm cuối MCP duy nhất, đánh giá các lệnh gọi dựa trên công cụ chính sách Cedar của nó, và ký lưu lượng truy cập đi ra tới MCP server bằng IAM SigV4.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>
+2. Một thành phần MCP server (<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> hoặc <Link path="guides/py-mcp-server">`py#mcp-server`</Link>) được tạo với `infra: agentcore` và `auth: iam`
+
+Gateway phải có `protocol: mcp` và MCP server phải có `auth: iam` — trình tạo xác thực cả hai. Các MCP server không sử dụng IAM không thể được gắn kết vì Gateway ký lưu lượng truy cập đi ra bằng SigV4.
+
+## Cách sử dụng
+
+### Chạy Trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án Gateway làm nguồn và dự án MCP server làm đích. Nếu dự án MCP server chứa nhiều thành phần, hãy chỉ định `targetComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Trình tạo
+
+Trình tạo kết nối các dự án hiện có với nhau thay vì tạo ra các tệp nguồn mới. Các tệp sau được sửa đổi:
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json `<gateway>-serve-local` có thêm phụ thuộc vào `<mcp>-serve-local` của MCP server
+  - serve-local.ts `ATTACHED_MCP_SERVERS` được cập nhật để gateway cục bộ tổng hợp MCP server
+
+</FileTree>
+
+Target `<gateway>-serve-local` của dự án Gateway có thêm phụ thuộc vào target `<mcp>-serve-local` của MCP server, do đó khi chạy Gateway cục bộ cũng sẽ khởi động MCP server. MCP server cũng được đăng ký trong `serve-local.ts` của dự án Gateway để gateway cục bộ tổng hợp các công cụ của nó.
+
+## Thêm target MCP server vào stack của bạn
+
+Trình tạo **không thể** tự động kết nối target MCP server vào cơ sở hạ tầng của bạn vì nó không biết stack hoặc module nào khởi tạo Gateway. Hãy tự thêm một lệnh gọi duy nhất `gateway.addMcpServer(server)`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Trong stack nơi bạn khởi tạo Gateway, hãy đăng ký MCP server làm target:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// Register the MCP server as a target of the Gateway. The target name
+// defaults to the MCP server construct's id in kebab-case (`my-mcp-server`).
+myGateway.addMcpServer(myMcpServer);
+```
+
+Tên target của Gateway (mặc định là `mcpServerName` của MCP server) được sử dụng làm tiền tố cho tên hành động Cedar — định dạng hành động là ``AgentCore::Action::"<targetName>___<toolName>"``. Xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>. Giữ tên target ngắn gọn và ổn định; thay đổi nó sau này sẽ làm mất hiệu lực bất kỳ chính sách Cedar nào tham chiếu đến tên cũ.
+
+Để ghi đè tên target mặc định, hãy truyền `gatewayTargetName`:
+
+```ts
+myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
+```
+
+Construct cấu hình target với `iamCredentialProvider.service = 'bedrock-agentcore'` để Gateway ký các lệnh gọi đi ra bằng vai trò thực thi của chính nó.
+</Fragment>
+<Fragment slot="terraform">
+Trong tệp Terraform nơi bạn khởi tạo Gateway, hãy kết nối target MCP server vào:
+
+```hcl title="packages/infra/src/main.tf" {7,11-27}
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+}
+
+module "my_gateway" {
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
+}
+
+# Register the MCP server as a target of the Gateway
+resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+`name` của target (`my-mcp-server` ở trên) được sử dụng làm tiền tố cho tên hành động Cedar — xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>. `policy_dependencies` đảm bảo các chính sách Cedar tham chiếu đến các hành động của target này được tạo sau khi target đã đăng ký chúng.
+</Fragment>
+</Infrastructure>
+
+## Phát triển Cục bộ
+
+Chạy Gateway cục bộ với:
+
+<NxCommands commands={["<gateway-name>-serve-local"]} />
+
+khởi động một gateway cục bộ cùng với mọi MCP server được gắn kết trên cổng cục bộ được chỉ định của nó. Gateway cục bộ cung cấp một điểm cuối MCP duy nhất tổng hợp các công cụ của các server được gắn kết. Các agent được kết nối với Gateway thông qua các trình tạo kết nối gateway <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> hoặc <Link path="guides/connection/py-agent-gateway">Python</Link> sẽ trỏ đến nó khi chạy với `SERVE_LOCAL=true`.
+
+:::caution[Độ chính xác cục bộ]
+Phát triển cục bộ sử dụng một **gateway cục bộ thay thế** — một bộ tổng hợp MCP nhẹ được khởi động bởi dự án Gateway, không phải dịch vụ AgentCore Gateway. Do đó, **các chính sách Cedar không được đánh giá cục bộ**. Mọi agent đều thấy mọi công cụ trên mọi MCP server được gắn kết. Để thực thi các chính sách Cedar, hãy chạy target `serve` của agent thay thế (xem hướng dẫn kết nối agent <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) để agent đang chạy cục bộ gọi Gateway đã triển khai.
+
+Tên công cụ vẫn được thêm tiền tố cục bộ là `<target-name>___<tool-name>` để khớp với cách đặt tên không gian của Gateway đã triển khai, do đó lời nhắc hệ thống của agent và tên hành động Cedar mà bạn tham chiếu vẫn nhất quán giữa các lần chạy cục bộ và đã triển khai.
+:::
+:::

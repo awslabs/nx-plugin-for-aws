@@ -12,6 +12,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
+  addPythonClientToAgent,
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
@@ -19,11 +20,7 @@ import {
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
 } from '../../../utils/agent-connection/agent-connection';
-import {
-  addPythonDestructuredImport,
-  applyGritQL,
-  matchGritQL,
-} from '../../../utils/ast';
+import { addPythonDestructuredImport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
@@ -38,9 +35,6 @@ import {
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
 import type { PyAgentMcpConnectionGeneratorSchema } from './schema';
-
-/** Prefix a GritQL pattern with `language python` */
-const py = (pattern: string) => `language python\n${pattern}`;
 
 export const PY_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -145,14 +139,13 @@ export const pyAgentMcpConnectionGenerator = async (
     const clientClassName = `${mcpServerClassName}Client`;
     const clientVarName = mcpServerSnakeCase;
 
-    await addImportToAgentFile(
+    await addPythonDestructuredImport(
       tree,
       agentFilePath,
+      [clientClassName],
       agentConnectionModuleName,
-      clientClassName,
     );
-    await addMcpToolsToAgent(tree, agentFilePath, clientVarName);
-    await addMcpClientToGetAgent(
+    await addPythonClientToAgent(
       tree,
       agentFilePath,
       clientClassName,
@@ -188,117 +181,6 @@ export const pyAgentMcpConnectionGenerator = async (
   return () => {
     installPackagesTask(tree);
   };
-};
-
-/**
- * Add an import for the MCP client class to agent.py.
- *
- * Delegates to the shared `addPythonDestructuredImport` helper which either
- * appends to an existing `from <module> import ...` line or prepends a new
- * import statement (ruff sorts imports on the next format pass).
- */
-const addImportToAgentFile = async (
-  tree: Tree,
-  filePath: string,
-  agentConnectionModuleName: string,
-  clientClassName: string,
-): Promise<void> => {
-  await addPythonDestructuredImport(
-    tree,
-    filePath,
-    [clientClassName],
-    agentConnectionModuleName,
-  );
-};
-
-/**
- * Add MCP tools to the Agent's tools array using GritQL.
- * Appends `*<clientVarName>.list_tools_sync()` to the tools list.
- * Handles both empty and non-empty arrays using if/else.
- */
-const addMcpToolsToAgent = async (
-  tree: Tree,
-  filePath: string,
-  clientVarName: string,
-): Promise<void> => {
-  if (
-    await matchGritQL(tree, filePath, `\`${clientVarName}.list_tools_sync()\``)
-  ) {
-    return;
-  }
-
-  await applyGritQL(
-    tree,
-    filePath,
-    py(`\`tools=$old\` where {
-  $old <: not contains \`${clientVarName}\`,
-  if ($old <: \`[]\`) {
-    $old => \`[*${clientVarName}.list_tools_sync()]\`
-  } else {
-    $old <: \`[$items]\` where { $items += \`, *${clientVarName}.list_tools_sync()\` }
-  }
-}`),
-  );
-};
-
-/**
- * Add MCP client creation and with-block wrapping to the get_agent function
- * using GritQL transforms.
- *
- * First connection: Rewrites `def get_agent` to wrap $body in a with block.
- * Subsequent connections: Uses += to add to existing with items and creation lines.
- */
-const addMcpClientToGetAgent = async (
-  tree: Tree,
-  filePath: string,
-  clientClassName: string,
-  clientVarName: string,
-): Promise<void> => {
-  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create($_)\``)) {
-    return;
-  }
-
-  // Try the "add to existing with block" pattern first.
-  // If it succeeds, there was already a with block from a previous connection.
-  const addedToWith = await applyGritQL(
-    tree,
-    filePath,
-    py(`\`with ($items,): $body\` where {
-  $items <: not contains \`${clientVarName}\`,
-  $items += \`, ${clientVarName}\`
-}`),
-  );
-
-  if (addedToWith) {
-    // Subsequent connection — also add creation line after the existing one
-    await applyGritQL(
-      tree,
-      filePath,
-      py(`\`$var = $cls.create()\` as $stmt where {
-  $program <: not contains \`${clientClassName}.create\`,
-  $stmt += \`\n${clientVarName} = ${clientClassName}.create()\`
-}`),
-    );
-    return;
-  }
-
-  // First connection — rewrite the function body to include client creation
-  // and wrap $body in a with block. GritQL handles indentation correctly
-  // when the replacement is structured as a proper Python function body.
-  await applyGritQL(
-    tree,
-    filePath,
-    py(`\`def get_agent($params):
-    $body\` where {
-  $body <: contains \`yield Agent($_)\`,
-  $body <: not contains \`with ($_, ): $_\`
-} => \`def get_agent($params):
-    ${clientVarName} = ${clientClassName}.create()
-    with (
-        ${clientVarName},
-    ):
-        $body\``),
-  );
 };
 
 export default pyAgentMcpConnectionGenerator;

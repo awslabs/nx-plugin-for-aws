@@ -1,0 +1,151 @@
+---
+title: TypeScript Agent to Gateway
+description: TypeScript AgentをAgentCore Gatewayに接続する
+when:
+  sourceType: ts#agent
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection`ジェネレーターは、<Link path="guides/ts-agent">TypeScript Agent</Link>を<Link path="guides/agentcore-gateway">AgentCore Gateway</Link>に接続できます。
+
+このジェネレーターは、デプロイ時にIAM SigV4でGatewayに認証し、ローカル実行時にはGatewayプロジェクトによって起動されたローカルゲートウェイに接続するようにエージェントを構成します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. <Link path="guides/ts-agent">Agent</Link>コンポーネント（`infra: agentcore`）を持つTypeScriptプロジェクト
+2. <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+エージェントプロジェクトをソースとして、Gatewayプロジェクトをターゲットとして選択します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、共有コアクライアントファイルを`agent-connection`パッケージに出力し、Gateway毎のラッパーを追加し、エージェントを変更します：
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - core/
+      - agentcore-gateway-mcp-client.ts デプロイされたGateway用のSigV4 MCPクライアント
+    - app/
+      - \<gateway-kebab>-client.ts Gateway毎のクライアントラッパー
+    - index.ts Gatewayクライアントを再エクスポート
+
+</FileTree>
+
+さらに、ジェネレーターは：
+
+- エージェントの`agent.ts`を変更して、Gatewayクライアントクラスをインポートし、`<Gateway>Client.create()`を呼び出し、返されたクライアントを`tools`配列に登録します
+- エージェントの`<agent>-serve-local`ターゲットをGatewayの`<gateway>-serve-local`アグリゲーターに依存するように構成します
+- 必要なSigV4 / MCP依存関係をインストールします
+
+## 接続されたGatewayの使用
+
+ジェネレーターは、エージェントの`agent.ts`をGatewayクライアントを使用するように変換します：
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
+import { Agent } from '@strands-agents/sdk';
+import { MyGatewayClient } from ':my-scope/agent-connection';
+
+export const getAgent = async () => {
+  const myGateway = await MyGatewayClient.create();
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myGateway],
+  });
+};
+```
+
+デプロイ時（`SERVE_LOCAL`が未設定）、クライアントはGatewayのMCPエンドポイントを指し、SigV4で認証します。`SERVE_LOCAL=true`の場合、それはGatewayプロジェクトの`serve-local`ターゲットによって起動されたローカルゲートウェイを指すため、同じ`agent.ts`が両方のモードで統一的に動作します。
+
+セッションIDは`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`ヘッダーを介して下流のMCPサーバーに自動的に伝播されます。
+
+## インフラストラクチャ
+
+ジェネレーターの実行後、エージェントにGatewayを呼び出す権限を付与する必要があります。
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const gateway = new MyGateway(this, 'MyGateway');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// エージェントにGatewayを呼び出す権限を付与
+gateway.grantInvokeAccess(myAgent);
+```
+
+Gateway URLは、生成されたCDKコンストラクトによって<Link path="guides/runtime-config">Runtime Configuration</Link>の`agentcore.gateways.<ClassName>`名前空間に自動的に登録されるため、エージェントは実行時にそれを検出できます。
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# エージェントにGatewayを呼び出す権限を付与
+resource "aws_iam_policy" "agent_invoke_gateway" {
+  name = "AgentInvokeGatewayPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeGateway"
+      Resource = module.my_gateway.gateway_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_gateway" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_gateway.arn
+}
+```
+
+Gateway URLは、生成されたTerraformモジュールによって<Link path="guides/runtime-config">Runtime Configuration</Link>の`agentcore.gateways.<ClassName>`名前空間に自動的に登録されるため、エージェントは実行時にそれを検出できます。
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+ジェネレーターは、エージェントの`serve-local`ターゲットを次のように構成します：
+
+1. 接続されたGatewayのローカルゲートウェイとすべての接続されたMCPサーバーを起動
+2. `SERVE_LOCAL=true`を設定して、生成されたクライアントがデプロイされたGatewayの代わりにローカルゲートウェイを指すようにします
+
+エージェントをローカルで実行するには：
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+エージェントをローカルで**デプロイされたGatewayに対して**実行するには（例えば、Cedarポリシーを実行するため）、エージェントの`serve`ターゲットを使用します。`SERVE_LOCAL`が設定されていない場合、クライアントはランタイム設定からデプロイされたGateway URLを解決し、ローカルのAWS認証情報でリクエストにSigV4署名します：
+
+<NxCommands commands={["<agent-name>-serve <project-name>"]} />
+
+### ローカルの忠実性
+
+ローカルゲートウェイはデプロイされたGatewayの代わりとなるため：
+
+- **Cedarポリシー評価なし。** ポリシーに関係なく、すべてのツールがエージェントに表示されます。デプロイされたGatewayに対してポリシーを実行するには、`serve`ターゲットを使用してください。
+- **ツール名のプレフィックスは保持されます。** 各ローカルMCPサーバーのツールは、`<target-name>___<tool-name>`の形式の名前を公開するようにラップされ、デプロイされたGatewayが出力するものと一致します。これにより、エージェントのシステムプロンプトと参照するCedarアクション名がローカル実行とデプロイ実行で一貫性を保ちます。
+

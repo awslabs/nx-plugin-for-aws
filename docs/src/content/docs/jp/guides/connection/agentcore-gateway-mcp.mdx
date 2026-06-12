@@ -1,0 +1,134 @@
+---
+title: AgentCore Gateway から MCP サーバーへの接続
+description: AgentCore Gateway を MCP サーバーに接続する
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#mcp-server
+    - py#mcp-server
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、MCP サーバー（<Link path="guides/ts-mcp-server">TypeScript</Link> または <Link path="guides/py-mcp-server">Python</Link>）を <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> のターゲットとして登録できます。
+
+接続されると、Gateway は MCP サーバーのツールを単一の MCP エンドポイントに集約し、Cedar ポリシーエンジンに対して呼び出しを評価し、IAM SigV4 を使用して MCP サーバーへのアウトバウンドトラフィックに署名します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> プロジェクト
+2. `infra: agentcore` および `auth: iam` で作成された MCP サーバーコンポーネント（<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> または <Link path="guides/py-mcp-server">`py#mcp-server`</Link>）
+
+Gateway は `protocol: mcp` を持ち、MCP サーバーは `auth: iam` を持つ必要があります — ジェネレーターは両方を検証します。Gateway は SigV4 でアウトバウンドトラフィックに署名するため、非 IAM の MCP サーバーは接続できません。
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+Gateway プロジェクトをソースとして、MCP サーバープロジェクトをターゲットとして選択します。MCP サーバープロジェクトに複数のコンポーネントが含まれている場合は、`targetComponent` を指定して明確にします。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、新しいソースファイルを生成するのではなく、既存のプロジェクトを接続します。以下のファイルが変更されます：
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json `<gateway>-serve-local` が MCP サーバーの `<mcp>-serve-local` への依存関係を取得
+  - serve-local.ts `ATTACHED_MCP_SERVERS` が更新され、ローカル gateway が MCP サーバーを集約
+
+</FileTree>
+
+Gateway プロジェクトの `<gateway>-serve-local` ターゲットは、MCP サーバーの `<mcp>-serve-local` ターゲットへの依存関係を取得するため、Gateway をローカルで実行すると MCP サーバーも起動します。MCP サーバーは Gateway プロジェクトの `serve-local.ts` にも登録されるため、ローカル gateway がそのツールを集約します。
+
+## スタックへの MCP サーバーターゲットの追加
+
+ジェネレーターは、Gateway をインスタンス化するスタックやモジュールを知らないため、MCP サーバーターゲットをインフラストラクチャに自動的に接続**できません**。`gateway.addMcpServer(server)` の呼び出しを自分で追加してください。
+
+<Infrastructure>
+<Fragment slot="cdk">
+Gateway をインスタンス化するスタックで、MCP サーバーをターゲットとして登録します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// MCP サーバーを Gateway のターゲットとして登録します。ターゲット名は
+// デフォルトで MCP サーバーコンストラクトの id をケバブケースにしたもの（`my-mcp-server`）になります。
+myGateway.addMcpServer(myMcpServer);
+```
+
+Gateway ターゲット名（デフォルトでは MCP サーバーの `mcpServerName`）は、Cedar アクション名のプレフィックスとして使用されます — アクション形式は ``AgentCore::Action::"<targetName>___<toolName>"`` です。<Link path="guides/agentcore-gateway">ポリシーの記述セクション</Link>を参照してください。ターゲット名は短く安定したものにしてください。後で変更すると、古い名前を参照する Cedar ポリシーが無効になります。
+
+デフォルトのターゲット名を上書きするには、`gatewayTargetName` を渡します：
+
+```ts
+myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
+```
+
+コンストラクトは `iamCredentialProvider.service = 'bedrock-agentcore'` でターゲットを構成するため、Gateway は自身の実行ロールを使用してアウトバウンド呼び出しに署名します。
+</Fragment>
+<Fragment slot="terraform">
+Gateway をインスタンス化する Terraform ファイルで、MCP サーバーターゲットを接続します：
+
+```hcl title="packages/infra/src/main.tf" {7,11-27}
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+}
+
+module "my_gateway" {
+  source              = "../../common/terraform/src/app/gateways/my-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
+}
+
+# MCP サーバーを Gateway のターゲットとして登録
+resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-mcp-server"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = "https://bedrock-agentcore.${local.aws_region}.amazonaws.com/runtimes/${urlencode(module.my_mcp_server.agent_core_runtime_arn)}/invocations?qualifier=DEFAULT"
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+ターゲット `name`（上記の `my-mcp-server`）は、Cedar アクション名のプレフィックスとして使用されます — <Link path="guides/agentcore-gateway">ポリシーの記述セクション</Link>を参照してください。`policy_dependencies` は、このターゲットのアクションを参照する Cedar ポリシーが、ターゲットがそれらを登録した後に作成されることを保証します。
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+Gateway をローカルで実行するには：
+
+<NxCommands commands={["<gateway-name>-serve-local"]} />
+
+これにより、ローカル gateway と、接続されているすべての MCP サーバーが割り当てられたローカルポートで起動します。ローカル gateway は、接続されたサーバーのツールを集約する単一の MCP エンドポイントを公開します。<Link path="guides/connection/ts-agent-gateway">TypeScript</Link> または <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection ジェネレーターを介して Gateway に接続されたエージェントは、`SERVE_LOCAL=true` で実行する際にそれを参照します。
+
+:::caution[ローカルの忠実性]
+ローカル開発では **ローカル代替 gateway** を使用します — Gateway プロジェクトによって起動される軽量な MCP アグリゲーターであり、AgentCore Gateway サービスではありません。その結果、**Cedar ポリシーはローカルでは評価されません**。すべてのエージェントは、接続されているすべての MCP サーバーのすべてのツールを参照できます。Cedar ポリシーを実行するには、代わりにエージェントの `serve` ターゲットを実行して（<Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> agent-connection ガイドを参照）、ローカルで実行されているエージェントがデプロイされた Gateway を呼び出すようにします。
+
+ツール名は、デプロイされた Gateway の名前空間に合わせて、ローカルでも `<target-name>___<tool-name>` としてプレフィックスが付けられるため、エージェントのシステムプロンプトと参照する Cedar アクション名は、ローカル実行とデプロイ実行の間で一貫性が保たれます。
+:::
+:::

@@ -88,6 +88,8 @@ export const TS_VERSIONS = {
   '@prisma/adapter-mariadb': '7.8.0',
   '@prisma/adapter-pg': '7.8.0',
   '@prisma/client': '7.8.0',
+  ejs: '6.0.1',
+  '@types/ejs': '3.1.5',
   express: '5.2.1',
   'fast-glob': '3.3.3',
   husky: '9.1.7',

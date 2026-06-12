@@ -1,0 +1,150 @@
+---
+title: TypeScript Agent tới Gateway
+description: Kết nối TypeScript Agent với AgentCore Gateway
+when:
+  sourceType: ts#agent
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` có thể kết nối <Link path="guides/ts-agent">TypeScript Agent</Link> của bạn với <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
+
+Trình tạo sẽ kết nối agent để xác thực với Gateway bằng IAM SigV4 khi triển khai, và kết nối với local gateway được khởi động bởi dự án Gateway khi chạy cục bộ.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án TypeScript với thành phần <Link path="guides/ts-agent">Agent</Link> (`infra: agentcore`)
+2. Một dự án <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án agent làm nguồn và dự án Gateway làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả đầu ra của trình tạo
+
+Trình tạo tạo ra các tệp client cốt lõi được chia sẻ vào gói `agent-connection` của bạn, cộng với một wrapper cho mỗi Gateway, và sửa đổi agent của bạn:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - core/
+      - agentcore-gateway-mcp-client.ts SigV4 MCP client cho Gateway đã triển khai
+    - app/
+      - \<gateway-kebab>-client.ts Wrapper client cho mỗi Gateway
+    - index.ts Xuất lại Gateway client
+
+</FileTree>
+
+Ngoài ra, trình tạo:
+
+- Sửa đổi `agent.ts` của agent để import lớp Gateway client, gọi `<Gateway>Client.create()`, và đăng ký client được trả về trong mảng `tools`
+- Kết nối target `<agent>-serve-local` của agent để phụ thuộc vào aggregator `<gateway>-serve-local` của Gateway
+- Cài đặt các phụ thuộc SigV4 / MCP cần thiết
+
+## Sử dụng Gateway đã kết nối
+
+Trình tạo chuyển đổi `agent.ts` của agent để sử dụng Gateway client:
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
+import { Agent } from '@strands-agents/sdk';
+import { MyGatewayClient } from ':my-scope/agent-connection';
+
+export const getAgent = async () => {
+  const myGateway = await MyGatewayClient.create();
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myGateway],
+  });
+};
+```
+
+Khi triển khai (`SERVE_LOCAL` không được đặt), client trỏ tới MCP endpoint của Gateway và xác thực bằng SigV4. Khi `SERVE_LOCAL=true`, nó trỏ tới local gateway được khởi động bởi target `serve-local` của dự án Gateway, vì vậy cùng một `agent.ts` hoạt động đồng nhất trong cả hai chế độ.
+
+Session ID được truyền tới các MCP server downstream tự động thông qua header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
+
+## Cơ sở hạ tầng
+
+Sau khi chạy trình tạo, bạn phải cấp quyền cho agent để gọi Gateway.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const gateway = new MyGateway(this, 'MyGateway');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent permissions to invoke the Gateway
+gateway.grantInvokeAccess(myAgent);
+```
+
+Gateway URL được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi CDK construct được tạo, vì vậy agent có thể khám phá nó tại runtime.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the agent permission to invoke the Gateway
+resource "aws_iam_policy" "agent_invoke_gateway" {
+  name = "AgentInvokeGatewayPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeGateway"
+      Resource = module.my_gateway.gateway_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_gateway" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_gateway.arn
+}
+```
+
+Gateway URL được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi Terraform module được tạo, vì vậy agent có thể khám phá nó tại runtime.
+</Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+Trình tạo cấu hình target `serve-local` của agent để:
+
+1. Khởi động mọi MCP server được đính kèm với Gateway đã kết nối
+2. Đặt `SERVE_LOCAL=true` để client được tạo phân tán tới các MCP server cục bộ đó thay vì gọi Gateway đã triển khai
+
+Chạy agent cục bộ với:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Để chạy agent cục bộ **với Gateway đã triển khai** thay thế (ví dụ: để thực thi các chính sách Cedar), hãy sử dụng target `serve` của agent. Khi không đặt `SERVE_LOCAL`, client sẽ phân giải Gateway URL đã triển khai từ cấu hình runtime và ký các yêu cầu bằng SigV4 với thông tin xác thực AWS cục bộ của bạn:
+
+<NxCommands commands={["<agent-name>-serve <project-name>"]} />
+
+### Độ trung thực cục bộ
+
+Local gateway đóng vai trò thay thế cho Gateway đã triển khai, vì vậy:
+
+- **Không đánh giá chính sách Cedar.** Mọi công cụ đều hiển thị với agent bất kể chính sách. Sử dụng target `serve` để thực thi các chính sách với Gateway đã triển khai.
+- **Tiền tố tên công cụ được bảo toàn.** Các công cụ của mỗi MCP server cục bộ được bọc để hiển thị tên có dạng `<target-name>___<tool-name>`, khớp với những gì Gateway đã triển khai phát ra. Điều này giữ cho system prompt của agent và tên action Cedar mà bạn tham chiếu nhất quán giữa các lần chạy cục bộ và đã triển khai.

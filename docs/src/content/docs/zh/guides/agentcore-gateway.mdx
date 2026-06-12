@@ -1,0 +1,238 @@
+---
+title: AgentCore Gateway
+description: 创建 AgentCore Gateway 项目
+generator: agentcore-gateway
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+生成一个 [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 项目。AgentCore Gateway 是一个托管的入口点，它将一个或多个 MCP 服务器目标聚合在单个 MCP 端点后面，针对 [Cedar 策略引擎](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)评估每个工具调用，并使用 IAM SigV4 对发往 MCP 服务器的出站流量进行签名。
+
+## 用法
+
+### 生成 AgentCore Gateway
+
+<RunGenerator generator="agentcore-gateway" />
+
+### 选项
+
+<GeneratorParameters generator="agentcore-gateway" />
+
+## 生成器输出
+
+生成器在 `packages/<name>/` 创建一个新项目，以及用于基础设施的 CDK 构造或 Terraform 模块：
+
+<FileTree>
+  - packages/\<name>/
+    - policies/ Cedar 策略源文件（当 `cedarPolicy: false` 时省略）
+      - permit-all.cedar 默认的 Cedar 策略，允许来自同一 AWS 账户内的已认证调用者
+      - README.md 编写 Cedar 策略的参考文档
+    - serve-local.ts 用于本地开发的本地网关，聚合附加的 MCP 服务器
+    - project.json 添加 \<name>-serve 和 \<name>-serve-local 聚合器目标
+</FileTree>
+
+### 基础设施
+
+当 `infra` 为 `agentcore`（默认值）时生成基础设施。使用 `infra: none` 时不生成基础设施——稍后使用 `infra: agentcore` 重新运行生成器以添加它。
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - core
+          - agentcore-gateway/ 共享网关构造（就绪探针、Cedar 策略加载）
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.ts 用于部署 Gateway 的 CDK 构造
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - gateways
+            - \<name>/
+              - \<name>.tf 用于部署 Gateway 的 Terraform 模块
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+生成的构造创建以下 AWS 资源：
+
+- 一个为 MCP 协议配置的 `AgentCore::Gateway`，使用 `GatewayAuthorizer.usingAwsIam()`（入站 IAM 身份验证）
+- 一个以 `ENFORCE` 模式运行的 `AgentCore::PolicyEngine`，附加到 Gateway（当 `cedarPolicy: false` 时省略）
+- `policies/` 中每个 `.cedar` 文件对应一个 `AgentCore::Policy`
+
+Gateway URL 会自动注册到 <Link path="guides/runtime-config">运行时配置</Link>的 `agentcore.gateways.<ClassName>` 命名空间中，以便代理可以在运行时发现它。
+
+## 编写策略
+
+<OptionFilter when={{ cedarPolicy: true }} description="Cedar 策略 — 仅限 cedarPolicy: true">
+
+Cedar 是 AgentCore Gateway 用于授权工具调用的策略语言。流经 Gateway 的每个 `tools/list` 和 `tools/call` 请求都会针对附加的策略集进行评估，调用者必须至少有一个匹配的 `permit` 语句（且没有匹配的 `forbid`）才能使请求成功。
+
+有关完整参考，请参阅 [AWS 关于 AgentCore Gateway 策略的文档](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)，包括[常见策略模式](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html)。
+
+### 添加策略
+
+要添加策略，请在 `permit-all.cedar` 旁边创建一个新的 `.cedar` 文件。`policies/` 中的每个 `.cedar` 文件必须恰好包含**一个** `permit` 或 `forbid` 语句，并作为单个 `AWS::BedrockAgentCore::Policy` 资源部署。策略资源的名称派生自文件名：`permit-all.cedar` 变成 `PermitAll`（kebab/snake-case 转换为 PascalCase）。包含多个语句的文件会在部署时产生 `unexpected token 'forbid'` 错误——将它们拆分为单独的文件。
+
+例如，要仅允许特定的代理角色调用特定工具，请创建：
+
+```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.id like "<%= tsAgentRoleArn %>/*"
+};
+```
+
+将角色 ARN 作为模板变量传入（参见下面的<a href="#template-variables">模板变量</a>），而不是硬编码或模式匹配它。重新合成或重新计划以部署新策略。
+
+### 模板变量
+
+策略是在合成/计划时渲染的 [EJS](https://ejs.co/) 模板，以便它们在不同账户和 Gateway 重新部署之间保持可移植性：
+
+| 变量                 | 替换为                          |
+| -------------------- | ------------------------------- |
+| `<%= gatewayArn %>`  | 已部署 Gateway 的 ARN           |
+| `<%= accountId %>`   | 部署此 Gateway 的 AWS 账户      |
+
+始终引用这些变量，而不是硬编码值。
+
+#### 添加您自己的变量
+
+添加新变量到策略渲染的位置，例如将代理的执行角色 ARN 传递给上面的 `ts-agent-divide.cedar` 示例：
+
+<Infrastructure>
+<Fragment slot="cdk">
+在 `packages/common/constructs/src/app/gateways/<name>/<name>.ts` 中，添加到传递给 `ejs.render` 的对象：
+
+```ts {3}
+ejs.render(raw, {
+  gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
+  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
+  // ...
+}),
+```
+</Fragment>
+<Fragment slot="terraform">
+在 `packages/common/terraform/src/app/gateways/<name>/<name>.tf` 中，添加到 `rendered_policies` 数据源的 `query`：
+
+```hcl {4}
+query = {
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
+  # ...
+}
+```
+</Fragment>
+</Infrastructure>
+
+### ENFORCE 模式和默认拒绝
+
+`PolicyEngine` 以 `ENFORCE` 模式运行，这意味着应用**默认拒绝**语义：如果没有 `permit` 语句匹配（principal、action、resource）元组，请求将被拒绝。被拒绝的工具调用返回：
+
+```
+Tool Execution Denied: Tool call not allowed due to policy enforcement
+[No policy applies to the request (denied by default).]
+```
+
+此外，Gateway 会过滤 `tools/list` 的响应，以便调用者只能看到他们至少有一个匹配 `permit` 的工具：如果代理缺少对给定工具的权限，该工具将完全隐藏，而不是显示并在调用时失败。
+
+### 默认 `permit-all.cedar`
+
+生成器提供了一个默认策略，允许来自部署 Gateway 的 AWS 账户的任何 IAM 调用者：
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::IamEntity,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.id like "arn:aws:*::<%= accountId %>:*"
+};
+```
+
+要进一步锁定，请在其旁边添加更窄的策略。始终在策略集中保留至少一个匹配的 `permit`，否则默认拒绝将阻止每个调用。
+
+### 策略范围参考
+
+对于此插件生成的 Gateway，所有调用者都是 IAM 主体（Gateway 配置为 `GatewayAuthorizer.usingAwsIam()`）：
+
+```
+principal is AgentCore::IamEntity
+```
+
+主体的 `id` 属性保存调用者的 IAM ARN。调用者通常以带有生成的会话后缀的 STS assumed-role ARN 到达，因此将确切的角色 ARN 作为模板变量传入，并使用 `like` 匹配会话后缀：
+
+```cedar
+principal.id like "<%= myAgentRoleArn %>/*"
+```
+
+工具调用以以下形式的操作到达策略引擎：
+
+```
+AgentCore::Action::"<target-name>___<tool-name>"
+```
+
+其中 `<target-name>` 是 Gateway 目标名称（使用 `gateway.addMcpServer(...)` 时默认为 MCP 服务器的 `mcpServerName`，派生自 MCP 项目的类名的 kebab-case 格式——例如 `TsMcp` → `ts-mcp`），`<tool-name>` 是 MCP 工具的名称，分隔符是 `___`（三个下划线）。Cedar 不支持操作上的通配符——匹配确切的操作，或省略 `action ==` 以匹配所有操作。
+
+资源始终是 Gateway 本身：
+
+```cedar
+resource == AgentCore::Gateway::"<%= gatewayArn %>"
+```
+
+### 验证注意事项
+
+生成的基础设施使用 `IGNORE_ALL_FINDINGS` 创建策略：AgentCore 的 Cedar 分析器（`FAIL_ON_ANY_FINDINGS`，服务默认值）会拒绝许多合法的策略——例如，禁用所有调用者的单个工具的 `forbid` 会被拒绝为"过于限制"，即使使用 `when` 子句限定范围也是如此。执行不受影响；它由策略引擎的 `ENFORCE` 模式配置。
+
+仍然适用一个排序约束：引用 `AgentCore::Action::"<target>___<tool>"` 的策略仅在目标向 Gateway 注册该工具后才能验证，这就是为什么生成的基础设施在 Gateway 目标之后创建策略。
+
+如果策略部署失败，CloudFormation 会将拒绝显示为不透明的 `Resource stabilization failed` 错误——运行 `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` 以检索验证器的 `statusReasons`，其中包含实际原因。
+
+### 示例：禁止一个工具同时保留更广泛的 permit
+
+将窄的 `forbid` 与更广泛的 `permit` 配对（Cedar 评估 `forbid` 优先于 `permit`）：
+
+```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
+forbid (
+  principal is AgentCore::IamEntity,
+  action == AgentCore::Action::"ts-mcp___divide",
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.id like "<%= pyAgentRoleArn %>/*"
+};
+```
+
+这会拒绝 Python 代理角色调用 `ts-mcp___divide`，同时为所有其他调用者保留更广泛的 `permit-all.cedar`。
+
+</OptionFilter>
+
+## 本地开发
+
+生成器向 Gateway 项目添加一个 `<name>-serve-local` 目标，该目标运行 `serve-local.ts`：一个本地网关，公开单个 MCP 端点，聚合每个附加的 MCP 服务器（通过 <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 生成器</Link>连接），工具前缀为 `<target>___<tool>` 以匹配已部署的 Gateway。运行它会一起启动本地网关和所有附加的 MCP 服务器。
+
+<NxCommands commands={["<name>-serve-local"]} />
+
+有关完整的本地开发故事，请参阅连接指南。
+
+## 后续步骤
+
+- 连接 MCP 服务器：<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection`</Link>
+- 连接 TypeScript 代理：<Link path="guides/connection/ts-agent-gateway">`ts#agent#gateway-connection`</Link>
+- 连接 Python 代理：<Link path="guides/connection/py-agent-gateway">`py#agent#gateway-connection`</Link>

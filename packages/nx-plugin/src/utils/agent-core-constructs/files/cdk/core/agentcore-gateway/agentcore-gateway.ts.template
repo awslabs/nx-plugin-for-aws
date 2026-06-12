@@ -1,0 +1,300 @@
+import * as cdk from 'aws-cdk-lib';
+import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as triggers from 'aws-cdk-lib/triggers';
+import { Construct } from 'constructs';
+import ejs from 'ejs';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+
+/**
+ * Props for the AgentCoreGateway construct.
+ */
+export interface AgentCoreGatewayProps {
+  /**
+   * Directory of Cedar policy files (`.cedar`, nested folders supported).
+   * When set, a `PolicyEngine` running in `ENFORCE` mode is attached to the
+   * gateway, with one `Policy` per file. Files are EJS templates rendered at
+   * synth time with `gatewayArn` and `accountId` in scope.
+   */
+  readonly cedarPolicyPath?: string;
+  /**
+   * Additional variables available to the Cedar policy EJS templates.
+   */
+  readonly cedarPolicyVariables?: Record<string, string>;
+}
+
+/**
+ * AgentCore Gateway wired for MCP protocol with IAM inbound auth, exposing
+ * attached MCP servers' tools under `<targetName>___<toolName>` names.
+ */
+export class AgentCoreGateway extends Construct implements iam.IGrantable {
+  public readonly gateway: agentcore.Gateway;
+  public readonly policyEngine?: agentcore.CfnPolicyEngine;
+  private readonly policies: agentcore.CfnPolicy[] = [];
+  private targetReadinessProbe?: triggers.TriggerFunction;
+  private readonly targetRuntimeArns: string[] = [];
+
+  constructor(scope: Construct, id: string, props?: AgentCoreGatewayProps) {
+    super(scope, id);
+
+    this.gateway = new agentcore.Gateway(this, 'Gateway', {
+      protocolConfiguration: new agentcore.McpProtocolConfiguration({
+        searchType: agentcore.McpGatewaySearchType.SEMANTIC,
+        supportedVersions: [agentcore.MCPProtocolVersion.MCP_2025_03_26],
+      }),
+      authorizerConfiguration: agentcore.GatewayAuthorizer.usingAwsIam(),
+    });
+
+    if (props?.cedarPolicyPath) {
+      this.policyEngine = new agentcore.CfnPolicyEngine(this, 'PolicyEngine', {
+        name: cdk.Names.uniqueResourceName(this, { maxLength: 48 }),
+        description: `Cedar policy engine for ${id}`,
+      });
+
+      // The stable Gateway L2 does not yet expose policy engine
+      // configuration, so attach it via the underlying CloudFormation
+      // resource.
+      const cfnGateway = this.gateway.node.defaultChild as agentcore.CfnGateway;
+      cfnGateway.policyEngineConfiguration = {
+        arn: this.policyEngine.attrPolicyEngineArn,
+        mode: 'ENFORCE',
+      };
+
+      // Permissions the gateway role needs to evaluate policies, including
+      // CheckAuthorizePermissions, which the CloudFormation handler's
+      // readiness probe requires during gateway creation. Authorization
+      // actions are evaluated against both the policy engine ARN and the
+      // gateway's own ARN (which cannot be referenced here without a circular
+      // dependency, so it is scoped to this account and region's gateways).
+      // The gateway must depend on the policy update — access is validated at
+      // creation.
+      const policyGrant = this.gateway.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: [
+            'bedrock-agentcore:GetPolicyEngine',
+            'bedrock-agentcore:AuthorizeAction',
+            'bedrock-agentcore:PartiallyAuthorizeActions',
+            'bedrock-agentcore:CheckAuthorizePermissions',
+          ],
+          resources: [
+            this.policyEngine.attrPolicyEngineArn,
+            cdk.Stack.of(this).formatArn({
+              service: 'bedrock-agentcore',
+              resource: 'gateway',
+              resourceName: '*',
+            }),
+          ],
+        }),
+      );
+      if (policyGrant.policyDependable) {
+        cfnGateway.node.addDependency(policyGrant.policyDependable);
+      }
+
+      const policiesDir = props.cedarPolicyPath;
+      if (fs.existsSync(policiesDir)) {
+        for (const file of fs
+          .readdirSync(policiesDir, { recursive: true, encoding: 'utf-8' })
+          .filter((f) => f.endsWith('.cedar'))) {
+          const raw = fs.readFileSync(path.join(policiesDir, file), 'utf-8');
+          const statement = cdk.Lazy.string({
+            produce: () =>
+              ejs.render(raw, {
+                gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
+                accountId: cdk.Token.asString(cdk.Stack.of(this).account),
+                ...props.cedarPolicyVariables,
+              }),
+          });
+          const policyId = toPascalCase(file.replace(/\.cedar$/, ''));
+          const policy = new agentcore.CfnPolicy(this, policyId, {
+            name: policyId,
+            policyEngineId: this.policyEngine.attrPolicyEngineId,
+            definition: { cedar: { statement } },
+            description: `Policy loaded from ${file}`,
+            // The Cedar analyzer rejects legitimate policies as findings
+            // (e.g. a forbid disabling one tool for every caller is "Overly
+            // Restrictive"), so deploy regardless and rely on the engine's
+            // ENFORCE mode.
+            validationMode: 'IGNORE_ALL_FINDINGS',
+          });
+          // Policy names are unique account-wide, so derive the name from
+          // the construct path to avoid collisions with other gateways.
+          policy.name = cdk.Names.uniqueResourceName(policy, {
+            maxLength: 48,
+          });
+          this.policies.push(policy);
+        }
+      }
+    }
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): iam.IPrincipal {
+    return this.gateway.role.grantPrincipal;
+  }
+
+  /**
+   * Grants an IAM principal permission to invoke this gateway.
+   */
+  public grantInvokeAccess(grantee: iam.IGrantable) {
+    this.gateway.grantInvoke(grantee);
+  }
+
+  /**
+   * Add an MCP server construct as a target of this Gateway.
+   *
+   * The target name defaults to the MCP server construct's `mcpServerName`
+   * (its project's class name in kebab-case, e.g. `TsMcp` -> `ts-mcp`),
+   * which is stable across stacks and unique across projects in the
+   * workspace. It prefixes Cedar action names
+   * (`AgentCore::Action::"<targetName>___<toolName>"`) and the gateway's
+   * tool names (`<targetName>___<toolName>`), so renaming it later is a
+   * breaking change for consumers.
+   */
+  public addMcpServer(
+    server: Construct & {
+      readonly agentCoreRuntime: agentcore.Runtime;
+      readonly mcpServerName: string;
+    },
+    props?: {
+      gatewayTargetName?: string;
+    },
+  ): agentcore.CfnGatewayTarget {
+    return this.addMcpServerTarget({
+      gatewayTargetName: props?.gatewayTargetName ?? server.mcpServerName,
+      mcpServerRuntimeArn: server.agentCoreRuntime.agentRuntimeArn,
+    });
+  }
+
+  /**
+   * Register an MCP server runtime ARN as a Gateway target. Prefer
+   * {@link addMcpServer} when the construct is in scope.
+   */
+  public addMcpServerTarget(props: {
+    gatewayTargetName: string;
+    mcpServerRuntimeArn: string;
+  }): agentcore.CfnGatewayTarget {
+    const region = cdk.Stack.of(this).region;
+    // The endpoint must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const arn = props.mcpServerRuntimeArn;
+    const encodedArn = cdk.Fn.join(
+      '%2F',
+      cdk.Fn.split('/', cdk.Fn.join('%3A', cdk.Fn.split(':', arn))),
+    );
+    const endpoint = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations?qualifier=DEFAULT`;
+    // The construct id is derived from the target name so the two change
+    // together — target names are unique per gateway, and replacing a target
+    // under an unchanged name fails with AlreadyExists.
+    const target = new agentcore.CfnGatewayTarget(
+      this,
+      `${toPascalCase(props.gatewayTargetName)}Target`,
+      {
+        gatewayIdentifier: this.gateway.gatewayId,
+        name: props.gatewayTargetName,
+        targetConfiguration: {
+          mcp: {
+            mcpServer: {
+              endpoint,
+            },
+          },
+        },
+        credentialProviderConfigurations: [
+          {
+            credentialProviderType: 'GATEWAY_IAM_ROLE',
+            credentialProvider: {
+              iamCredentialProvider: {
+                service: 'bedrock-agentcore',
+              },
+            },
+          },
+        ],
+      },
+    );
+
+    // Grant the gateway role invoke access to the target runtime before the
+    // target is created — AgentCore probes the target during creation, which
+    // stalls if the permission is not yet in place.
+    const grant = this.gateway.role.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'bedrock-agentcore:InvokeAgentRuntime',
+          'bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream',
+        ],
+        resources: [
+          props.mcpServerRuntimeArn,
+          `${props.mcpServerRuntimeArn}/*`,
+        ],
+      }),
+    );
+    if (grant.policyDependable) {
+      target.node.addDependency(grant.policyDependable);
+    }
+
+    // Create the target only after the readiness probe has confirmed the
+    // runtime serves MCP.
+    this.targetRuntimeArns.push(props.mcpServerRuntimeArn);
+    const probe = this.getOrCreateTargetReadinessProbe();
+    const probeGrant = probe.grantPrincipal.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+        resources: [
+          props.mcpServerRuntimeArn,
+          `${props.mcpServerRuntimeArn}/*`,
+        ],
+      }),
+    );
+    if (probeGrant.policyDependable) {
+      probe.trigger.node.addDependency(probeGrant.policyDependable);
+    }
+    target.node.addDependency(probe.trigger);
+
+    // Policies referencing this target's actions (e.g.
+    // AgentCore::Action::"<targetName>___<tool>") only validate once the
+    // target has registered them, so create policies after targets.
+    for (const policy of this.policies) {
+      policy.node.addDependency(target);
+    }
+
+    return target;
+  }
+
+  /**
+   * AgentCore fetches each target's tools during target creation, which can
+   * race the MCP runtime's first cold start on a fresh deploy and fail the
+   * target. This trigger probes each runtime until it serves MCP, and targets
+   * are created after it succeeds.
+   */
+  private getOrCreateTargetReadinessProbe(): triggers.TriggerFunction {
+    this.targetReadinessProbe ??= new triggers.TriggerFunction(
+      this,
+      'TargetReadinessProbe',
+      {
+        runtime: lambda.Runtime.NODEJS_22_X,
+        handler: 'index.handler',
+        timeout: cdk.Duration.seconds(210),
+        code: lambda.Code.fromAsset(
+          url.fileURLToPath(new URL('./readiness-probe', import.meta.url)),
+        ),
+        environment: {
+          RUNTIME_ARNS: cdk.Lazy.string({
+            produce: () => this.targetRuntimeArns.join(','),
+          }),
+        },
+      },
+    );
+    return this.targetReadinessProbe;
+  }
+}
+
+const toPascalCase = (s: string): string =>
+  s
+    .split(/[-_\s/\\]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join('');
+

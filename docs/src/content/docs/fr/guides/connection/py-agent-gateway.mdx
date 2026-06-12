@@ -1,0 +1,158 @@
+---
+title: Agent Python vers Gateway
+description: Connecter un Agent Python à une Gateway AgentCore
+when:
+  sourceType: py#agent
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur `connection` peut connecter votre <Link path="guides/py-agent">Agent Python</Link> à une <Link path="guides/agentcore-gateway">Gateway AgentCore</Link>.
+
+Le générateur configure l'agent pour qu'il s'authentifie auprès de la Gateway avec IAM SigV4 (via la signature de requêtes `httpx`) lors du déploiement, et multiplexe directement vers les serveurs MCP attachés lors de l'exécution locale.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet Python avec un composant <Link path="guides/py-agent">Agent</Link> (`infra: agentcore`)
+2. Un projet <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez le projet agent comme source et le projet Gateway comme cible.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur émet des modules core-gateway partagés dans votre projet Python `agent_connection`, plus un wrapper par Gateway, et modifie votre agent :
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - core/
+      - agentcore\_gateway\_mcp\_client.py Client MCP SigV4 utilisant `httpx`
+    - app/
+      - \<gateway\_snake>\_client.py Wrapper client par Gateway
+    - \_\_init\_\_.py Ré-exporte le client Gateway
+
+</FileTree>
+
+De plus, le générateur :
+
+- Modifie le fichier `agent.py` de votre agent pour importer le client Gateway, l'entrer via un bloc `with`, et enregistrer ses outils dans `tools`
+- Ajoute `agent_connection` comme dépendance de workspace de l'agent
+- Configure la cible `<agent>-serve-local` de l'agent pour dépendre de l'agrégateur `<gateway>-serve-local` de la Gateway
+
+## Utiliser la Gateway connectée
+
+Le générateur transforme le fichier `agent.py` de votre agent pour utiliser le client Gateway :
+
+```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
+from contextlib import contextmanager
+from strands import Agent
+
+from my_scope_agent_connection import MyGatewayClient
+
+@contextmanager
+def get_agent():
+    my_gateway = MyGatewayClient.create()
+    with (
+        my_gateway,
+    ):
+        yield Agent(
+            system_prompt="...",
+            tools=[*my_gateway.list_tools_sync()],
+        )
+```
+
+`MyGatewayClient.create()` retourne un client unique gérable par contexte dont `list_tools_sync()` fournit tous les outils disponibles via la Gateway :
+
+- **Mode déployé** (`SERVE_LOCAL` non défini) : un seul `MCPClient` pointant vers le point de terminaison MCP de la Gateway, signé SigV4.
+- **Mode local** (`SERVE_LOCAL=true`) : un `MCPClient` HTTP simple pointant vers la gateway locale démarrée par la cible `serve-local` du projet Gateway.
+
+L'ID de session est propagé automatiquement aux serveurs MCP en aval via l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
+
+## Infrastructure
+
+Après avoir exécuté le générateur, vous devez accorder à l'agent la permission d'invoquer la Gateway.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const gateway = new MyGateway(this, 'MyGateway');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent permissions to invoke the Gateway
+gateway.grantInvokeAccess(myAgent);
+```
+
+L'URL de la Gateway est automatiquement enregistrée dans l'espace de noms `agentcore.gateways.<ClassName>` de la <Link path="guides/runtime-config">Configuration d'exécution</Link> par le construct CDK généré, afin que l'agent puisse la découvrir au moment de l'exécution.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the agent permission to invoke the Gateway
+resource "aws_iam_policy" "agent_invoke_gateway" {
+  name = "AgentInvokeGatewayPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeGateway"
+      Resource = module.my_gateway.gateway_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_gateway" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_gateway.arn
+}
+```
+
+L'URL de la Gateway est automatiquement enregistrée dans l'espace de noms `agentcore.gateways.<ClassName>` de la <Link path="guides/runtime-config">Configuration d'exécution</Link> par le module Terraform généré, afin que l'agent puisse la découvrir au moment de l'exécution.
+</Fragment>
+</Infrastructure>
+
+## Développement local
+
+Le générateur configure la cible `serve-local` de l'agent pour :
+
+1. Démarrer la gateway locale de la Gateway connectée et chaque serveur MCP attaché
+2. Définir `SERVE_LOCAL=true` afin que le client généré pointe vers la gateway locale au lieu de la Gateway déployée
+
+Exécutez l'agent localement avec :
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Pour exécuter l'agent localement **contre la Gateway déployée** (par exemple, pour tester les politiques Cedar), utilisez la cible `serve` de l'agent. Sans `SERVE_LOCAL` défini, le client résout l'URL de la Gateway déployée depuis la configuration d'exécution et signe les requêtes avec SigV4 en utilisant vos identifiants AWS locaux :
+
+<NxCommands commands={["<agent-name>-serve <project-name>"]} />
+
+### Fidélité locale
+
+La gateway locale remplace la Gateway déployée, donc :
+
+- **Aucune évaluation de politique Cedar.** Tous les outils sont visibles par l'agent indépendamment des politiques. Utilisez la cible `serve` pour tester les politiques contre la Gateway déployée.
+- **Le préfixage des noms d'outils est préservé.** Les outils de chaque serveur MCP local sont exposés comme `<target-name>___<tool-name>`, correspondant à ce que la Gateway déployée émet. Cela maintient la cohérence du prompt système de l'agent et des noms d'actions Cedar que vous référencez entre les exécutions locales et déployées.
