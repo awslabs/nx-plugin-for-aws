@@ -94,12 +94,16 @@ export async function formatFilesInSubtree(
     BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)),
   );
 
-  // Format Python files with ruff (lint fixes + formatting)
+  // Format Python files with ruff (lint fixes + formatting). Ruff resolves
+  // its config (and isort defaults like `I`) by walking up from the file
+  // path on disk, and `uv run` resolves the workspace from cwd — both must
+  // be anchored at tree.root for per-project pyproject.toml configs to apply.
   for (const file of pyFiles) {
     try {
       const content = ruffFixAndFormat(
         file.content.toString('utf-8'),
         file.path,
+        tree.root,
       );
       tree.write(file.path, content);
     } catch {
@@ -236,63 +240,94 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
 }
 
 /**
- * Find the ruff command. Tries 'uv run ruff', then 'uvx ruff'.
- * Matches how @nxlv/python runs ruff via the UV provider.
+ * Run a single ruff stdin invocation. Returns the transformed content on
+ * success, or `undefined` if ruff couldn't run cleanly. `ruff check --fix`
+ * exits non-zero on unfixable findings while still emitting fixed content
+ * on stdout, so we accept that case and treat it as success — but distinguish
+ * it from "ruff itself failed to start" (uv couldn't resolve the workspace
+ * and short-circuited before running ruff, leaving the file unchanged on
+ * stdout while a workspace error is on stderr).
+ *
+ * `cwd` must be the workspace root and `stdinFilename` must be the absolute
+ * path to the file: ruff resolves config (and isort defaults like `I`) by
+ * walking up from the file path on disk, and `uv run` resolves the workspace
+ * from `cwd`. Mismatches between these and the in-memory tree state cause
+ * ruff to fall back to default rules (no import sorting), which silently
+ * leaves I001 in the output.
  */
-let _ruffCommand: string | undefined;
-function getRuffCommand(): string | undefined {
-  if (_ruffCommand !== undefined) {
-    return _ruffCommand || undefined;
+const tryRuff = (
+  cmd: string,
+  args: string,
+  input: string,
+  cwd: string,
+  stdinFilename: string,
+): string | undefined => {
+  let stdout = '';
+  let stderr = '';
+  try {
+    stdout = execSync(`${cmd} ${args} --stdin-filename ${stdinFilename} -`, {
+      input,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd,
+    });
+  } catch (e: any) {
+    stdout = (e.stdout ?? '').toString();
+    stderr = (e.stderr ?? '').toString();
   }
-  for (const cmd of ['uv run ruff', 'uvx ruff']) {
-    try {
-      execSync(`${cmd} --version`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      _ruffCommand = cmd;
-      return cmd;
-    } catch {
-      // Try next command
-    }
+  // `uv run` emits a workspace-resolution error to stderr but still passes
+  // the unmodified input through to stdout; treat this as a failure so the
+  // caller can fall back to a workspace-independent invocation (`uvx`).
+  if (/Failed to (build|parse) `/.test(stderr)) {
+    return undefined;
   }
-  _ruffCommand = '';
-  return undefined;
-}
+  return stdout || undefined;
+};
 
 /**
  * Run ruff check --fix and ruff format on Python file content via stdin.
- * Applies all configured lint fixes (including import sorting) and formatting.
+ * Applies all configured lint fixes (including import sorting) and
+ * formatting.
+ *
+ * Tries `uv run ruff` first so the workspace's installed ruff version is
+ * used; falls back to `uvx ruff@<pinned>` when `uv run` can't resolve the
+ * workspace (transient state during generation: the in-memory tree's
+ * workspace pyproject.toml has not yet been flushed, so `uv run` from the
+ * workspace root sees a stale workspace and emits the file unchanged on
+ * stdout). The fallback pins ruff to a known-good version so generator
+ * output is reproducible regardless of the user's `uvx` cache.
+ *
+ * Both invocations still pick up per-project ruff config — they walk up
+ * from the stdin filename's directory on disk, which is what makes import
+ * sorting (`I`) apply.
  */
-function ruffFixAndFormat(content: string, filePath: string): string {
-  const ruff = getRuffCommand();
-  if (!ruff) return content;
+const PINNED_RUFF = 'ruff@0.15.17';
 
-  // First apply lint fixes (import sorting, unused imports, etc.)
-  try {
-    const result = execSync(
-      `${ruff} check --fix --stdin-filename ${filePath} -`,
-      { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+function ruffFixAndFormat(
+  content: string,
+  filePath: string,
+  cwd: string,
+): string {
+  const stdinFilename = path.isAbsolute(filePath)
+    ? filePath
+    : path.join(cwd, filePath);
+  // `--extend-select=I` enables the isort rules even when the file's
+  // project pyproject.toml has not yet been written to disk (a freshly
+  // generated project is still only in the in-memory tree at format time,
+  // so ruff falls back to its default ruleset which excludes `I`).
+  for (const cmd of ['uv run ruff', `uvx ${PINNED_RUFF}`]) {
+    // First apply lint fixes (import sorting, unused imports, etc.)
+    const fixed = tryRuff(
+      cmd,
+      'check --fix --extend-select=I',
+      content,
+      cwd,
+      stdinFilename,
     );
-    content = result;
-  } catch (e: any) {
-    // ruff check exits non-zero when it finds unfixable issues,
-    // but stdout still contains the fixed content
-    if (e.stdout) {
-      content = e.stdout;
-    }
+    if (fixed === undefined) continue;
+    // Then apply formatting
+    const formatted = tryRuff(cmd, 'format', fixed, cwd, stdinFilename);
+    return formatted ?? fixed;
   }
-
-  // Then apply formatting
-  try {
-    content = execSync(`${ruff} format --stdin-filename ${filePath} -`, {
-      input: content,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch {
-    // Fall through with whatever content we have
-  }
-
   return content;
 }
