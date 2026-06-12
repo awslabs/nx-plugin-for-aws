@@ -25,6 +25,7 @@ export interface AddDynamoDBConstructOptions {
   nameKebabCase: string;
   dynamoPackageAlias: string;
   tableName: string;
+  projectRoot: string;
 }
 
 export const addDynamoDBInfra = async (

@@ -11,7 +11,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
-import OptionFilter from '@components/option-filter.astro';
 
 此生成器创建一个由 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) 支持的新 TypeScript 项目，使用 [ElectroDB](https://electrodb.dev/) 进行类型安全的实体建模。它生成应用程序代码和基础设施，用于使用 AWS CDK 或 Terraform 配置和管理 DynamoDB 表，支持单表设计，并通过 DynamoDB Local 内置本地开发功能。
 
@@ -41,6 +40,7 @@ import OptionFilter from '@components/option-filter.astro';
     - entities
       - example.ts 示例 ElectroDB 实体定义
       - index.ts 实体导出
+  - dynamodb.config.json 表的 GSI 定义
   - project.json 项目配置和构建目标
 </FileTree>
 
@@ -84,7 +84,7 @@ import OptionFilter from '@components/option-filter.astro';
 这会自动：
 1. 拉取 DynamoDB Local 镜像（`pull-image` 目标）
 2. 启动容器
-3. 创建带有预定义索引的本地表
+3. 创建包含 `dynamodb.config.json` 中定义的索引的本地表
 
 ### 数据建模
 
@@ -165,11 +165,34 @@ export const createExampleEntity = async () =>
 
 ## 添加/删除全局二级索引
 
-首先更新 `src/gsi.ts` 中的 `GLOBAL_SECONDARY_INDEXES` — 这是您的 GSI 定义的真实来源，在下次 `serve-local` 运行时，脚本将自动在本地表上添加或删除索引以反映新列表。使用 CDK 时，这些更改也会在下次部署时自动反映在您的 AWS 表中。
+GSI 在项目根目录的 `dynamodb.config.json` 中定义。为每个 GSI 添加一个条目到 `globalSecondaryIndexes`，遵循 [单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/) 的 GSI 键命名约定：
 
-<OptionFilter when={{ iac: 'terraform' }}>
-  与 CDK 不同，对 `src/gsi.ts` 的更改不会自动反映在您的 Terraform 模块中。在部署之前，您还必须手动更新 Terraform 模块以添加或删除相应的 GSI 定义。
-</OptionFilter>
+```json title="packages/my-table/dynamodb.config.json"
+{
+  "globalSecondaryIndexes": [
+    {
+      "indexName": "gsi1pk-gsi1sk-index",
+      "partitionKey": "gsi1pk",
+      "sortKey": "gsi1sk"
+    }
+  ]
+}
+```
+
+`sortKey` 字段对于仅哈希键的 GSI 是可选的。
+
+此配置文件由所有使用者直接从项目根目录读取：
+- **本地开发** — `serve-local` 读取 `dynamodb.config.json` 并创建或更新本地表以匹配 GSI 列表
+- **CDK** — 构造在合成时读取 `dynamodb.config.json`，因此 GSI 更改会在下次 `cdk deploy` 时反映
+- **Terraform** — 模块在计划/应用时读取 `dynamodb.config.json`
+
+### 每次部署一个 GSI
+
+:::caution
+DynamoDB [不允许在单次表更新中创建或删除多个 GSI](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.OnlineOps.html)。
+
+每次部署最多可以添加或删除**一个 GSI**。如果您需要添加或删除多个 GSI，请一次执行一个 — 更新 `dynamodb.config.json`，部署堆栈，然后重复下一个更改。
+:::
 
 ## 连接到表
 
@@ -217,7 +240,7 @@ export class ApplicationStack extends Stack {
 
 这将配置一个具有以下特性的 DynamoDB 表：
 - `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
-- 默认 2 个全局二级索引，如 `src/gsi.ts` 中定义
+- 如 `dynamodb.config.json` 中定义的全局二级索引
 - 按需（`PAY_PER_REQUEST`）计费
 - 客户管理的 KMS 加密，具有自动密钥轮换
 - 启用时间点恢复
@@ -235,7 +258,7 @@ module "my_table" {
 
 这将配置一个具有以下特性的 DynamoDB 表：
 - `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
-- 默认 2 个全局二级索引，如 `src/gsi.ts` 中定义
+- 如 `dynamodb.config.json` 中定义的全局二级索引
 - 按需（`PAY_PER_REQUEST`）计费
 - 客户管理的 KMS 加密，具有自动密钥轮换
 - 启用时间点恢复

@@ -11,7 +11,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
-import OptionFilter from '@components/option-filter.astro';
 
 Este generador crea un nuevo proyecto TypeScript respaldado por [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), utilizando [ElectroDB](https://electrodb.dev/) para el modelado de entidades con seguridad de tipos. Genera el código de aplicación y la infraestructura necesaria para aprovisionar y gestionar una tabla DynamoDB usando AWS CDK o Terraform, con soporte para diseño de tabla única y desarrollo local integrado mediante DynamoDB Local.
 
@@ -41,6 +40,7 @@ El generador crea la siguiente estructura de proyecto en el directorio `<directo
     - entities
       - example.ts Definición de entidad ElectroDB de ejemplo
       - index.ts Exportaciones de entidades
+  - dynamodb.config.json Definiciones de GSI para la tabla
   - project.json Configuración del proyecto y objetivos de compilación
 </FileTree>
 
@@ -84,7 +84,7 @@ El generador configura un objetivo `serve-local` que inicia una instancia de [Dy
 Esto automáticamente:
 1. Descarga la imagen de DynamoDB Local (objetivo `pull-image`)
 2. Inicia un contenedor
-3. Crea una tabla local con índices predefinidos
+3. Crea una tabla local con los índices definidos en `dynamodb.config.json`
 
 ### Modelado de Datos
 
@@ -165,11 +165,34 @@ Reemplaza `<engine>` con tu motor de contenedores (`docker` o `finch`) y `<scope
 
 ## Agregar/Eliminar Índices Secundarios Globales
 
-Comienza actualizando `GLOBAL_SECONDARY_INDEXES` en `src/gsi.ts` — esta es la fuente de verdad para tus definiciones de GSI, y en la próxima ejecución de `serve-local` el script agregará o eliminará automáticamente índices en la tabla local para reflejar la nueva lista. Al usar CDK, estos cambios también se reflejan automáticamente en tu tabla de AWS en el próximo despliegue.
+Los GSI se definen en `dynamodb.config.json` en la raíz del proyecto. Agrega una entrada a `globalSecondaryIndexes` para cada GSI, siguiendo la convención de nomenclatura de [diseño de tabla única](https://electrodb.dev/en/core-concepts/single-table-relationships/) para las claves GSI:
 
-<OptionFilter when={{ iac: 'terraform' }}>
-  A diferencia de CDK, los cambios en `src/gsi.ts` no se reflejan automáticamente en tu módulo Terraform. También debes actualizar manualmente tu módulo Terraform para agregar o eliminar las definiciones de GSI correspondientes antes de desplegar.
-</OptionFilter>
+```json title="packages/my-table/dynamodb.config.json"
+{
+  "globalSecondaryIndexes": [
+    {
+      "indexName": "gsi1pk-gsi1sk-index",
+      "partitionKey": "gsi1pk",
+      "sortKey": "gsi1sk"
+    }
+  ]
+}
+```
+
+El campo `sortKey` es opcional para GSI de solo clave hash.
+
+Este archivo de configuración se lee directamente desde la raíz del proyecto por todos los consumidores:
+- **Desarrollo local** — `serve-local` lee `dynamodb.config.json` y crea o actualiza la tabla local para que coincida con la lista de GSI
+- **CDK** — la construcción lee `dynamodb.config.json` en tiempo de síntesis, por lo que los cambios de GSI se reflejan en el próximo `cdk deploy`
+- **Terraform** — el módulo lee `dynamodb.config.json` en tiempo de plan/apply
+
+### Un GSI por Despliegue
+
+:::caution
+DynamoDB [no permite que se cree o elimine más de un GSI en una única actualización de tabla](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.OnlineOps.html).
+
+Cada despliegue puede agregar o eliminar **como máximo un GSI**. Si necesitas agregar o eliminar múltiples GSI, hazlo uno a la vez — actualiza `dynamodb.config.json`, despliega el stack, luego repite para el siguiente cambio.
+:::
 
 ## Conectarse a la Tabla
 
@@ -217,7 +240,7 @@ export class ApplicationStack extends Stack {
 
 Esto aprovisiona una tabla DynamoDB con:
 - `pk` (clave de partición) y `sk` (clave de ordenamiento), ambas de tipo `String`
-- 2 Índices Secundarios Globales por defecto, según se define en `src/gsi.ts`
+- Índices Secundarios Globales según se define en `dynamodb.config.json`
 - Facturación bajo demanda (`PAY_PER_REQUEST`)
 - Cifrado KMS gestionado por el cliente con rotación automática de claves
 - Recuperación point-in-time habilitada
@@ -235,7 +258,7 @@ module "my_table" {
 
 Esto aprovisiona una tabla DynamoDB con:
 - `pk` (clave de partición) y `sk` (clave de ordenamiento), ambas de tipo `String`
-- 2 Índices Secundarios Globales por defecto, según se define en `src/gsi.ts`
+- Índices Secundarios Globales según se define en `dynamodb.config.json`
 - Facturación bajo demanda (`PAY_PER_REQUEST`)
 - Cifrado KMS gestionado por el cliente con rotación automática de claves
 - Recuperación point-in-time habilitada

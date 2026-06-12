@@ -1,10 +1,14 @@
 import { Construct } from 'constructs';
-import { PACKAGE_NAME, GLOBAL_SECONDARY_INDEXES } from '<%= dynamoPackageAlias %>';
+import { PACKAGE_NAME } from '<%= dynamoPackageAlias %>';
 import { AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import {
   DynamoDBTable,
   DynamoDBTableProps,
 } from '../../core/dynamodb.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+import { readFileSync } from 'fs';
+import { join } from "path";
+import { fileURLToPath } from "url";
 
 export type <%= nameClassName %>Props = Omit<
   DynamoDBTableProps,
@@ -18,11 +22,21 @@ export class <%= nameClassName %> extends DynamoDBTable {
       runtimeConfigKey: PACKAGE_NAME,
     });
 
-    for (const gsi of GLOBAL_SECONDARY_INDEXES) {
+    const { globalSecondaryIndexes } = JSON.parse(
+      readFileSync(
+        join(
+          findWorkspaceRoot(fileURLToPath(new URL(import.meta.url))),
+          '<%= projectRoot %>/dynamodb.config.json',
+        ),
+        'utf-8',
+      ),
+    ) as { globalSecondaryIndexes: { indexName: string; partitionKey: string; sortKey?: string }[] };
+
+    for (const gsi of globalSecondaryIndexes) {
       this.table.addGlobalSecondaryIndex({
         indexName: gsi.indexName,
         partitionKey: { name: gsi.partitionKey, type: AttributeType.STRING },
-        sortKey: { name: gsi.sortKey, type: AttributeType.STRING },
+        ...(gsi.sortKey && { sortKey: { name: gsi.sortKey, type: AttributeType.STRING } }),
         projectionType: ProjectionType.ALL,
       });
     }

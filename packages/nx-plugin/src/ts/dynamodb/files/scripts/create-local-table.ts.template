@@ -6,7 +6,14 @@ import {
   ResourceInUseException,
   UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
-import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { globalSecondaryIndexes } = JSON.parse(
+  readFileSync(join(__dirname, '../dynamodb.config.json'), 'utf-8'),
+) as { globalSecondaryIndexes: { indexName: string; partitionKey: string; sortKey?: string }[] };
 
 const [tableName, port] = process.argv.slice(2);
 const endpoint = `http://localhost:${port}`;
@@ -45,11 +52,11 @@ const waitForTableActive = async (
 const ensureTable = async (
   tblClient: DynamoDBClient,
   tblName: string,
-  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+  gsIs: { indexName: string; partitionKey: string; sortKey?: string }[],
 ): Promise<void> => {
   const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
     { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
-    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+    ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }] : []),
   ]);
   const attributeDefinitions = [
     { AttributeName: 'pk', AttributeType: 'S' as const },
@@ -63,7 +70,7 @@ const ensureTable = async (
     IndexName: gsi.indexName,
     KeySchema: [
       { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
-      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+      ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' as const }] : []),
     ],
     Projection: { ProjectionType: 'ALL' as const },
   }));
@@ -130,7 +137,7 @@ const ensureTable = async (
               TableName: tblName,
               AttributeDefinitions: [
                 { AttributeName: gsi.partitionKey, AttributeType: 'S' },
-                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+                ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }] : []),
               ],
               GlobalSecondaryIndexUpdates: [
                 {
@@ -138,7 +145,7 @@ const ensureTable = async (
                     IndexName: gsi.indexName,
                     KeySchema: [
                       { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
-                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                      ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' }] : []),
                     ],
                     Projection: { ProjectionType: 'ALL' },
                   },
@@ -158,4 +165,4 @@ const ensureTable = async (
   }
 };
 
-await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+await ensureTable(client, tableName, globalSecondaryIndexes);

@@ -90,10 +90,19 @@ describe('ts#dynamodb generator', () => {
       '@proj/my-table:build',
     );
 
+    expect(tree.exists('packages/my-table/dynamodb.config.json')).toBe(true);
+
     expect(packageJson.dependencies['@aws-sdk/client-dynamodb']).toBeDefined();
     expect(packageJson.dependencies['electrodb']).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-lambda-powertools/parameters'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
+    ).toBeDefined();
     expect(packageJson.devDependencies['tsx']).toBeDefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
+    expect(packageJson.devDependencies['@types/node']).toBeDefined();
   });
 
   it('should generate scripts for finch engine', async () => {
