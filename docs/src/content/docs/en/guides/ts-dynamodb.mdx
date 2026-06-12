@@ -11,7 +11,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
-import OptionFilter from '@components/option-filter.astro';
 
 This generator creates a new TypeScript project backed by [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), using [ElectroDB](https://electrodb.dev/) for type-safe entity modelling. It generates the application code and infrastructure needed to provision and manage a DynamoDB table using AWS CDK or Terraform, with single-table design support and built-in local development via DynamoDB Local.
 
@@ -41,6 +40,7 @@ The generator creates the following project structure in the `<directory>/<name>
     - entities
       - example.ts Example ElectroDB entity definition
       - index.ts Entity exports
+  - dynamodb.config.json GSI definitions for the table
   - project.json Project configuration and build targets
 </FileTree>
 
@@ -84,7 +84,7 @@ The generator configures a `serve-local` target that starts a [DynamoDB Local](h
 This automatically:
 1. Pulls the DynamoDB Local image (`pull-image` target)
 2. Starts a container
-3. Creates a local table with pre-defined indexes
+3. Creates a local table with the indexes defined in `dynamodb.config.json`
 
 ### Data Modelling
 
@@ -165,11 +165,34 @@ Replace `<engine>` with your container engine (`docker` or `finch`) and `<scope>
 
 ## Adding/Removing Global Secondary Indexes
 
-Start by updating `GLOBAL_SECONDARY_INDEXES` in `src/gsi.ts` — this is the source of truth for your GSI definitions, and on the next `serve-local` run the script will automatically add or remove indexes on the local table to reflect the new list. When using CDK, these changes are also automatically reflected in your AWS table on the next deployment.
+GSIs are defined in `dynamodb.config.json` at the project root. Add an entry to `globalSecondaryIndexes` for each GSI, following the [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) naming convention for GSI keys:
 
-<OptionFilter when={{ iac: 'terraform' }}>
-  Unlike CDK, changes to `src/gsi.ts` are not automatically reflected in your Terraform module. You must also manually update your Terraform module to add or remove the corresponding GSI definitions before deploying.
-</OptionFilter>
+```json title="packages/my-table/dynamodb.config.json"
+{
+  "globalSecondaryIndexes": [
+    {
+      "indexName": "gsi1pk-gsi1sk-index",
+      "partitionKey": "gsi1pk",
+      "sortKey": "gsi1sk"
+    }
+  ]
+}
+```
+
+The `sortKey` field is optional for hash-key-only GSIs.
+
+This config file is read directly from the project root by all consumers:
+- **Local development** — `serve-local` reads `dynamodb.config.json` and creates or updates the local table to match the GSI list
+- **CDK** — the construct reads `dynamodb.config.json` at synth time, so GSI changes are reflected on the next `cdk deploy`
+- **Terraform** — the module reads `dynamodb.config.json` at plan/apply time
+
+### One GSI per Deployment
+
+:::caution
+DynamoDB [does not allow more than one GSI to be created or deleted in a single table update](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.OnlineOps.html).
+
+Each deployment can add or remove **at most one GSI**. If you need to add or remove multiple GSIs, do so one at a time — update `dynamodb.config.json`, deploy the stack, then repeat for the next change.
+:::
 
 ## Connecting to the Table
 
@@ -217,7 +240,7 @@ export class ApplicationStack extends Stack {
 
 This provisions a DynamoDB table with:
 - `pk` (partition key) and `sk` (sort key), both `String` type
-- 2 Global Secondary Indexes by default, as defined in `src/gsi.ts`
+- Global Secondary Indexes as defined in `dynamodb.config.json`
 - On-demand (`PAY_PER_REQUEST`) billing
 - Customer-managed KMS encryption with automatic key rotation
 - Point-in-time recovery enabled
@@ -235,7 +258,7 @@ module "my_table" {
 
 This provisions a DynamoDB table with:
 - `pk` (partition key) and `sk` (sort key), both `String` type
-- 2 Global Secondary Indexes by default, as defined in `src/gsi.ts`
+- Global Secondary Indexes as defined in `dynamodb.config.json`
 - On-demand (`PAY_PER_REQUEST`) billing
 - Customer-managed KMS encryption with automatic key rotation
 - Point-in-time recovery enabled

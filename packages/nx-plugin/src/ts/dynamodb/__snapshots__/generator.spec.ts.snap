@@ -9,7 +9,20 @@ exports[`ts#dynamodb generator > should generate scripts for finch engine > pack
   ResourceInUseException,
   UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
-import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { globalSecondaryIndexes } = JSON.parse(
+  readFileSync(join(__dirname, '../dynamodb.config.json'), 'utf-8'),
+) as {
+  globalSecondaryIndexes: {
+    indexName: string;
+    partitionKey: string;
+    sortKey?: string;
+  }[];
+};
 
 const [tableName, port] = process.argv.slice(2);
 const endpoint = \`http://localhost:\${port}\`;
@@ -48,11 +61,13 @@ const waitForTableActive = async (
 const ensureTable = async (
   tblClient: DynamoDBClient,
   tblName: string,
-  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+  gsIs: { indexName: string; partitionKey: string; sortKey?: string }[],
 ): Promise<void> => {
   const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
     { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
-    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+    ...(gsi.sortKey
+      ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }]
+      : []),
   ]);
   const attributeDefinitions = [
     { AttributeName: 'pk', AttributeType: 'S' as const },
@@ -66,7 +81,9 @@ const ensureTable = async (
     IndexName: gsi.indexName,
     KeySchema: [
       { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
-      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+      ...(gsi.sortKey
+        ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' as const }]
+        : []),
     ],
     Projection: { ProjectionType: 'ALL' as const },
   }));
@@ -133,7 +150,14 @@ const ensureTable = async (
               TableName: tblName,
               AttributeDefinitions: [
                 { AttributeName: gsi.partitionKey, AttributeType: 'S' },
-                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+                ...(gsi.sortKey
+                  ? [
+                      {
+                        AttributeName: gsi.sortKey,
+                        AttributeType: 'S' as const,
+                      },
+                    ]
+                  : []),
               ],
               GlobalSecondaryIndexUpdates: [
                 {
@@ -141,7 +165,9 @@ const ensureTable = async (
                     IndexName: gsi.indexName,
                     KeySchema: [
                       { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
-                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                      ...(gsi.sortKey
+                        ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' }]
+                        : []),
                     ],
                     Projection: { ProjectionType: 'ALL' },
                   },
@@ -161,7 +187,7 @@ const ensureTable = async (
   }
 };
 
-await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+await ensureTable(client, tableName, globalSecondaryIndexes);
 "
 `;
 
@@ -458,6 +484,16 @@ variable "enable_key_rotation" {
   default     = true
 }
 
+locals {
+  dynamodb_config = jsondecode(file("\${path.module}/../../../../../../../packages/my-table/dynamodb.config.json"))
+  global_secondary_indexes = [for gsi in local.dynamodb_config.globalSecondaryIndexes : {
+    name            = gsi.indexName
+    hash_key        = gsi.partitionKey
+    range_key       = try(gsi.sortKey, null)
+    projection_type = "ALL"
+  }]
+}
+
 module "dynamodb_table" {
   source                         = "../../../core/dynamodb"
   name                           = "proj-my-table"
@@ -465,20 +501,7 @@ module "dynamodb_table" {
   point_in_time_recovery_enabled = var.point_in_time_recovery_enabled
   deletion_protection_enabled    = var.deletion_protection_enabled
   enable_key_rotation            = var.enable_key_rotation
-  global_secondary_indexes = [
-    {
-      name            = "gsi1pk-gsi1sk-index"
-      hash_key        = "gsi1pk"
-      range_key       = "gsi1sk"
-      projection_type = "ALL"
-    },
-    {
-      name            = "gsi2pk-gsi2sk-index"
-      hash_key        = "gsi2pk"
-      range_key       = "gsi2sk"
-      projection_type = "ALL"
-    },
-  ]
+  global_secondary_indexes       = local.global_secondary_indexes
 }
 
 module "add_to_runtime_config" {
@@ -502,7 +525,20 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
   ResourceInUseException,
   UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
-import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { globalSecondaryIndexes } = JSON.parse(
+  readFileSync(join(__dirname, '../dynamodb.config.json'), 'utf-8'),
+) as {
+  globalSecondaryIndexes: {
+    indexName: string;
+    partitionKey: string;
+    sortKey?: string;
+  }[];
+};
 
 const [tableName, port] = process.argv.slice(2);
 const endpoint = \`http://localhost:\${port}\`;
@@ -541,11 +577,13 @@ const waitForTableActive = async (
 const ensureTable = async (
   tblClient: DynamoDBClient,
   tblName: string,
-  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+  gsIs: { indexName: string; partitionKey: string; sortKey?: string }[],
 ): Promise<void> => {
   const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
     { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
-    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+    ...(gsi.sortKey
+      ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }]
+      : []),
   ]);
   const attributeDefinitions = [
     { AttributeName: 'pk', AttributeType: 'S' as const },
@@ -559,7 +597,9 @@ const ensureTable = async (
     IndexName: gsi.indexName,
     KeySchema: [
       { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
-      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+      ...(gsi.sortKey
+        ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' as const }]
+        : []),
     ],
     Projection: { ProjectionType: 'ALL' as const },
   }));
@@ -626,7 +666,14 @@ const ensureTable = async (
               TableName: tblName,
               AttributeDefinitions: [
                 { AttributeName: gsi.partitionKey, AttributeType: 'S' },
-                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+                ...(gsi.sortKey
+                  ? [
+                      {
+                        AttributeName: gsi.sortKey,
+                        AttributeType: 'S' as const,
+                      },
+                    ]
+                  : []),
               ],
               GlobalSecondaryIndexUpdates: [
                 {
@@ -634,7 +681,9 @@ const ensureTable = async (
                     IndexName: gsi.indexName,
                     KeySchema: [
                       { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
-                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                      ...(gsi.sortKey
+                        ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' }]
+                        : []),
                     ],
                     Projection: { ProjectionType: 'ALL' },
                   },
@@ -654,7 +703,7 @@ const ensureTable = async (
   }
 };
 
-await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+await ensureTable(client, tableName, globalSecondaryIndexes);
 "
 `;
 
@@ -889,24 +938,6 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
 "
 `;
 
-exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/gsi.ts 1`] = `
-"// GSIs to synchronize on the local table at startup and provision in infrastructure.
-// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
-export const GLOBAL_SECONDARY_INDEXES = [
-  {
-    indexName: 'gsi1pk-gsi1sk-index',
-    partitionKey: 'gsi1pk',
-    sortKey: 'gsi1sk',
-  },
-  {
-    indexName: 'gsi2pk-gsi2sk-index',
-    partitionKey: 'gsi2pk',
-    sortKey: 'gsi2sk',
-  },
-];
-"
-`;
-
 exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/index.ts 1`] = `
 "export {
   PACKAGE_NAME,
@@ -917,7 +948,6 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
   LOCAL_TABLE_NAME,
 } from './constants.js';
 export { getDynamoDBClient, resolveTableName } from './client.js';
-export { GLOBAL_SECONDARY_INDEXES } from './gsi.js';
 export * from './entities/index.js';
 "
 `;
@@ -1036,9 +1066,13 @@ export abstract class DynamoDBTable extends Construct {
 
 exports[`ts#dynamodb generator > should generate the dynamodb project 2`] = `
 "import { Construct } from 'constructs';
-import { PACKAGE_NAME, GLOBAL_SECONDARY_INDEXES } from ':proj/my-table';
+import { PACKAGE_NAME } from ':proj/my-table';
 import { AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import { DynamoDBTable, DynamoDBTableProps } from '../../core/dynamodb.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fileURLToPath } from 'url';
 
 export type MyTableProps = Omit<DynamoDBTableProps, 'runtimeConfigKey'>;
 
@@ -1049,11 +1083,29 @@ export class MyTable extends DynamoDBTable {
       runtimeConfigKey: PACKAGE_NAME,
     });
 
-    for (const gsi of GLOBAL_SECONDARY_INDEXES) {
+    const { globalSecondaryIndexes } = JSON.parse(
+      readFileSync(
+        join(
+          findWorkspaceRoot(fileURLToPath(new URL(import.meta.url))),
+          'packages/my-table/dynamodb.config.json',
+        ),
+        'utf-8',
+      ),
+    ) as {
+      globalSecondaryIndexes: {
+        indexName: string;
+        partitionKey: string;
+        sortKey?: string;
+      }[];
+    };
+
+    for (const gsi of globalSecondaryIndexes) {
       this.table.addGlobalSecondaryIndex({
         indexName: gsi.indexName,
         partitionKey: { name: gsi.partitionKey, type: AttributeType.STRING },
-        sortKey: { name: gsi.sortKey, type: AttributeType.STRING },
+        ...(gsi.sortKey && {
+          sortKey: { name: gsi.sortKey, type: AttributeType.STRING },
+        }),
         projectionType: ProjectionType.ALL,
       });
     }
@@ -1081,7 +1133,20 @@ exports[`ts#dynamodb generator > should generate with infra=none then upgrade to
   ResourceInUseException,
   UpdateTableCommand,
 } from '@aws-sdk/client-dynamodb';
-import { GLOBAL_SECONDARY_INDEXES } from '../src/gsi.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { globalSecondaryIndexes } = JSON.parse(
+  readFileSync(join(__dirname, '../dynamodb.config.json'), 'utf-8'),
+) as {
+  globalSecondaryIndexes: {
+    indexName: string;
+    partitionKey: string;
+    sortKey?: string;
+  }[];
+};
 
 const [tableName, port] = process.argv.slice(2);
 const endpoint = \`http://localhost:\${port}\`;
@@ -1120,11 +1185,13 @@ const waitForTableActive = async (
 const ensureTable = async (
   tblClient: DynamoDBClient,
   tblName: string,
-  gsIs: { indexName: string; partitionKey: string; sortKey: string }[],
+  gsIs: { indexName: string; partitionKey: string; sortKey?: string }[],
 ): Promise<void> => {
   const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
     { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
-    { AttributeName: gsi.sortKey, AttributeType: 'S' as const },
+    ...(gsi.sortKey
+      ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }]
+      : []),
   ]);
   const attributeDefinitions = [
     { AttributeName: 'pk', AttributeType: 'S' as const },
@@ -1138,7 +1205,9 @@ const ensureTable = async (
     IndexName: gsi.indexName,
     KeySchema: [
       { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
-      { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+      ...(gsi.sortKey
+        ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' as const }]
+        : []),
     ],
     Projection: { ProjectionType: 'ALL' as const },
   }));
@@ -1205,7 +1274,14 @@ const ensureTable = async (
               TableName: tblName,
               AttributeDefinitions: [
                 { AttributeName: gsi.partitionKey, AttributeType: 'S' },
-                { AttributeName: gsi.sortKey, AttributeType: 'S' },
+                ...(gsi.sortKey
+                  ? [
+                      {
+                        AttributeName: gsi.sortKey,
+                        AttributeType: 'S' as const,
+                      },
+                    ]
+                  : []),
               ],
               GlobalSecondaryIndexUpdates: [
                 {
@@ -1213,7 +1289,9 @@ const ensureTable = async (
                     IndexName: gsi.indexName,
                     KeySchema: [
                       { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
-                      { AttributeName: gsi.sortKey, KeyType: 'RANGE' },
+                      ...(gsi.sortKey
+                        ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' }]
+                        : []),
                     ],
                     Projection: { ProjectionType: 'ALL' },
                   },
@@ -1233,7 +1311,7 @@ const ensureTable = async (
   }
 };
 
-await ensureTable(client, tableName, GLOBAL_SECONDARY_INDEXES);
+await ensureTable(client, tableName, globalSecondaryIndexes);
 "
 `;
 
@@ -1468,24 +1546,6 @@ exports[`ts#dynamodb generator > should generate with infra=none then upgrade to
 "
 `;
 
-exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/gsi.ts 1`] = `
-"// GSIs to synchronize on the local table at startup and provision in infrastructure.
-// ElectroDB names GSI keys gsi{n}pk / gsi{n}sk — add one entry per index defined in your entities.
-export const GLOBAL_SECONDARY_INDEXES = [
-  {
-    indexName: 'gsi1pk-gsi1sk-index',
-    partitionKey: 'gsi1pk',
-    sortKey: 'gsi1sk',
-  },
-  {
-    indexName: 'gsi2pk-gsi2sk-index',
-    partitionKey: 'gsi2pk',
-    sortKey: 'gsi2sk',
-  },
-];
-"
-`;
-
 exports[`ts#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my-table/src/index.ts 1`] = `
 "export {
   PACKAGE_NAME,
@@ -1496,7 +1556,6 @@ exports[`ts#dynamodb generator > should generate with infra=none then upgrade to
   LOCAL_TABLE_NAME,
 } from './constants.js';
 export { getDynamoDBClient, resolveTableName } from './client.js';
-export { GLOBAL_SECONDARY_INDEXES } from './gsi.js';
 export * from './entities/index.js';
 "
 `;

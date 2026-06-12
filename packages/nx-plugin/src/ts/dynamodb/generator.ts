@@ -125,6 +125,7 @@ export const tsDynamoDBGenerator = async (
       nameKebabCase,
       dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
       tableName: localTableName,
+      projectRoot: dir,
     });
   }
 
@@ -134,8 +135,9 @@ export const tsDynamoDBGenerator = async (
       '@aws-sdk/client-dynamodb',
       'electrodb',
       '@aws-lambda-powertools/parameters',
+      '@aws-sdk/client-appconfigdata',
     ]),
-    withVersions(['tsx', '@types/aws-lambda']),
+    withVersions(['tsx', '@types/aws-lambda', '@types/node']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
