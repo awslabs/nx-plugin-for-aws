@@ -1,0 +1,57 @@
+import os
+
+from pynamodb.attributes import DiscriminatorAttribute, UnicodeAttribute
+from pynamodb.indexes import AllProjection, GlobalSecondaryIndex
+from pynamodb.models import Model
+
+from ..client import _serve_local, get_table_name, is_local
+
+
+class Gsi1Index(GlobalSecondaryIndex):
+    class Meta:
+        index_name = 'gsi1pk-gsi1sk-index'
+        projection = AllProjection()
+
+    gsi1pk = UnicodeAttribute(hash_key=True)
+    gsi1sk = UnicodeAttribute(range_key=True)
+
+
+class Gsi2Index(GlobalSecondaryIndex):
+    class Meta:
+        index_name = 'gsi2pk-gsi2sk-index'
+        projection = AllProjection()
+
+    gsi2pk = UnicodeAttribute(hash_key=True)
+    gsi2sk = UnicodeAttribute(range_key=True)
+
+
+class BaseModel(Model):
+    """Base model for all DynamoDB entities in this table.
+
+    Uses PynamoDB polymorphism to support multiple entity types in a single table.
+    See https://pynamodb.readthedocs.io/en/stable/polymorphism.html
+    """
+
+    class Meta:
+        table_name: str
+        region = os.environ.get("AWS_REGION", _serve_local()['region'] if is_local() else 'us-east-1')
+        host = f"http://localhost:{_serve_local()['port']}" if is_local() else None
+        aws_access_key_id = _serve_local()['accessKeyId'] if is_local() else None
+        aws_secret_access_key = _serve_local()['secretAccessKey'] if is_local() else None
+
+    entity_type = DiscriminatorAttribute()
+
+    pk = UnicodeAttribute(hash_key=True)
+    sk = UnicodeAttribute(range_key=True)
+    gsi1pk = UnicodeAttribute(null=True)
+    gsi1sk = UnicodeAttribute(null=True)
+    gsi2pk = UnicodeAttribute(null=True)
+    gsi2sk = UnicodeAttribute(null=True)
+
+    gsi1_index = Gsi1Index()
+    gsi2_index = Gsi2Index()
+
+    @classmethod
+    def _get_connection(cls):
+        cls.Meta.table_name = get_table_name()
+        return super()._get_connection()

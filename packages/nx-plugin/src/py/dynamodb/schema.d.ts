@@ -4,11 +4,11 @@
  */
 import { IacOption } from '../../utils/iac';
 
-export interface TsDynamoDBGeneratorSchema {
+export interface PyDynamoDBGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  framework: 'electrodb';
+  framework: 'pynamodb';
   tableName?: string;
   infra: 'dynamodb' | 'none';
   iac: IacOption;

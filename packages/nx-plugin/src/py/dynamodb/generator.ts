@@ -5,7 +5,6 @@
 
 import { relative } from 'node:path';
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   installPackagesTask,
@@ -25,48 +24,46 @@ import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  projectExists,
 } from '../../utils/nx';
+import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { assignSharedPort } from '../../utils/port';
+import { addDependenciesToPyProjectToml } from '../../utils/py';
+import { sharedPyDynamoDBScriptsGenerator } from '../../utils/py-dynamodb-scripts/py-dynamodb-scripts';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   DYNAMODB_GENERATOR_IDS,
   PACKAGES_DIR,
-  SHARED_TS_DYNAMODB_SCRIPTS_DIR,
+  SHARED_PY_DYNAMODB_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { sharedTsDynamoDBScriptsGenerator } from '../../utils/ts-dynamodb-scripts/ts-dynamodb-scripts';
-import { withVersions } from '../../utils/versions';
-import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
-import type { TsDynamoDBGeneratorSchema } from './schema';
+import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
+import type { PyDynamoDBGeneratorSchema } from './schema';
 
-export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
+export const PY_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export const tsDynamoDBGenerator = async (
+export const pyDynamoDBGenerator = async (
   tree: Tree,
-  options: TsDynamoDBGeneratorSchema,
+  options: PyDynamoDBGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
   const localTableName = `${getNpmScope(tree)}-${kebabCase(options.tableName ?? options.name)}`;
   const containerEngine = await resolveContainers(tree, 'inherit');
-  const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
-    name: options.name,
-    directory: options.directory,
-    subDirectory: options.subDirectory,
-  });
-
-  let projectExists: boolean;
-  try {
-    readProjectConfiguration(tree, fullyQualifiedName);
-    projectExists = true;
-  } catch {
-    projectExists = false;
-  }
-
-  if (!projectExists) {
-    await tsProjectGenerator(tree, {
+  const { fullyQualifiedName, dir, normalizedModuleName } = getPyProjectDetails(
+    tree,
+    {
       name: options.name,
       directory: options.directory,
+      subDirectory: options.subDirectory,
+    },
+  );
+
+  if (!projectExists(tree, fullyQualifiedName)) {
+    await pyProjectGenerator(tree, {
+      name: options.name,
+      directory: options.directory,
+      subDirectory: options.subDirectory,
+      type: 'library',
     });
   }
 
@@ -82,6 +79,7 @@ export const tsDynamoDBGenerator = async (
   const containerName = `${getNpmScope(tree)}-dynamodb`;
 
   const templateOptions = {
+    name: normalizedModuleName,
     runtimeConfigKey: nameClassName,
     localDynamoDBPort,
     localTableName,
@@ -96,17 +94,17 @@ export const tsDynamoDBGenerator = async (
     templateOptions,
   );
 
-  sharedTsDynamoDBScriptsGenerator(tree);
+  sharedPyDynamoDBScriptsGenerator(tree);
 
   const scriptsDir = relative(
     dir,
-    joinPathFragments(PACKAGES_DIR, SHARED_TS_DYNAMODB_SCRIPTS_DIR),
+    joinPathFragments(PACKAGES_DIR, SHARED_PY_DYNAMODB_SCRIPTS_DIR),
   );
 
   projectConfig.targets['pull-image'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx ${scriptsDir}/pull-image.ts`,
+      command: `uv run python ${scriptsDir}/pull_image.py`,
       cwd: '{projectRoot}',
     },
   };
@@ -116,8 +114,8 @@ export const tsDynamoDBGenerator = async (
     dependsOn: ['pull-image'],
     options: {
       commands: [
-        `tsx ${scriptsDir}/start-container.ts`,
-        `tsx ${scriptsDir}/create-local-table.ts`,
+        `uv run python ${scriptsDir}/start_container.py`,
+        `uv run python ${scriptsDir}/create_local_table.py`,
       ],
       parallel: true,
       cwd: '{projectRoot}',
@@ -125,7 +123,7 @@ export const tsDynamoDBGenerator = async (
   };
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
-  addGeneratorMetadata(tree, fullyQualifiedName, TS_DYNAMODB_GENERATOR_INFO);
+  addGeneratorMetadata(tree, fullyQualifiedName, PY_DYNAMODB_GENERATOR_INFO);
 
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
@@ -134,29 +132,25 @@ export const tsDynamoDBGenerator = async (
       iac,
       projectName: fullyQualifiedName,
       nameClassName,
-      nameKebabCase,
+      nameKebabCase: kebabCase(options.name),
       tableName: localTableName,
       projectRoot: dir,
     });
   }
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      '@aws-sdk/client-dynamodb',
-      'electrodb',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-    ]),
-    withVersions(['tsx', '@types/aws-lambda', '@types/node']),
-  );
+  addDependenciesToPyProjectToml(tree, dir, [
+    'pynamodb',
+    'boto3',
+    'aws-lambda-powertools',
+  ]);
 
-  await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
+  await addGeneratorMetricsIfApplicable(tree, [PY_DYNAMODB_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
+  return async () => {
     installPackagesTask(tree);
+    await new UVProvider(tree.root, new Logger(), tree).install();
   };
 };
 
-export default tsDynamoDBGenerator;
+export default pyDynamoDBGenerator;

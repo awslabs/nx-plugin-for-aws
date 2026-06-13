@@ -11,13 +11,13 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import { TS_DYNAMODB_GENERATOR_INFO, tsDynamoDBGenerator } from './generator';
+import { PY_DYNAMODB_GENERATOR_INFO, pyDynamoDBGenerator } from './generator';
 
 vi.mock('../../utils/containers', () => ({
   resolveContainers: vi.fn(),
 }));
 
-describe('ts#dynamodb generator', () => {
+describe('py#dynamodb generator', () => {
   let tree: Tree;
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
@@ -27,21 +27,21 @@ describe('ts#dynamodb generator', () => {
   const defaultOptions = {
     name: 'MyTable',
     directory: 'packages',
-    framework: 'electrodb' as const,
+    framework: 'pynamodb' as const,
     infra: 'dynamodb' as const,
     iac: 'cdk' as const,
   };
 
   it('should generate the dynamodb project', async () => {
-    await tsDynamoDBGenerator(tree, defaultOptions);
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
+    await pyDynamoDBGenerator(tree, defaultOptions);
+
     const projectConfig = readProjectConfigurationUnqualified(
       tree,
-      '@proj/my-table',
+      'proj.my_table',
     );
 
-    snapshotTreeDir(tree, 'packages/my-table/src');
-    snapshotTreeDir(tree, 'packages/common/ts-dynamodb/scripts');
+    snapshotTreeDir(tree, 'packages/my_table/proj_my_table');
+    snapshotTreeDir(tree, 'packages/common/py-dynamodb/scripts');
 
     expect(
       tree.read('packages/common/constructs/src/core/dynamodb.ts', 'utf-8'),
@@ -65,7 +65,7 @@ describe('ts#dynamodb generator', () => {
     expect(projectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command: 'tsx ../common/ts-dynamodb/scripts/pull-image.ts',
+        command: 'uv run python ../common/py-dynamodb/scripts/pull_image.py',
         cwd: '{projectRoot}',
       },
     });
@@ -75,8 +75,8 @@ describe('ts#dynamodb generator', () => {
       dependsOn: ['pull-image'],
       options: {
         commands: [
-          'tsx ../common/ts-dynamodb/scripts/start-container.ts',
-          'tsx ../common/ts-dynamodb/scripts/create-local-table.ts',
+          'uv run python ../common/py-dynamodb/scripts/start_container.py',
+          'uv run python ../common/py-dynamodb/scripts/create_local_table.py',
         ],
         parallel: true,
         cwd: '{projectRoot}',
@@ -87,34 +87,30 @@ describe('ts#dynamodb generator', () => {
       tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
     );
     expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
-      '@proj/my-table:build',
+      'proj.my_table:build',
     );
 
-    expect(tree.exists('packages/my-table/config.json')).toBe(true);
+    expect(tree.exists('packages/my_table/config.json')).toBe(true);
 
-    expect(packageJson.dependencies['@aws-sdk/client-dynamodb']).toBeDefined();
-    expect(packageJson.dependencies['electrodb']).toBeDefined();
-    expect(
-      packageJson.dependencies['@aws-lambda-powertools/parameters'],
-    ).toBeDefined();
-    expect(
-      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
-    ).toBeDefined();
-    expect(packageJson.devDependencies['tsx']).toBeDefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
-    expect(packageJson.devDependencies['@types/node']).toBeDefined();
+    const pyprojectToml = tree.read(
+      'packages/my_table/pyproject.toml',
+      'utf-8',
+    );
+    expect(pyprojectToml).toContain('pynamodb');
+    expect(pyprojectToml).toContain('boto3');
+    expect(pyprojectToml).toContain('aws-lambda-powertools');
   });
 
   it('should generate scripts for finch engine', async () => {
     vi.mocked(resolveContainers).mockResolvedValue('finch');
-    await tsDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, defaultOptions);
     expect(
-      tree.read('packages/my-table/config.json', 'utf-8'),
+      tree.read('packages/my_table/config.json', 'utf-8'),
     ).toMatchSnapshot();
   });
 
   it('should generate terraform modules when iac is terraform', async () => {
-    await tsDynamoDBGenerator(tree, {
+    await pyDynamoDBGenerator(tree, {
       ...defaultOptions,
       iac: 'terraform',
     });
@@ -134,7 +130,7 @@ describe('ts#dynamodb generator', () => {
       tree.read('packages/common/terraform/project.json', 'utf-8') ?? '{}',
     );
     expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
-      '@proj/my-table:build',
+      'proj.my_table:build',
     );
   });
 
@@ -145,7 +141,7 @@ describe('ts#dynamodb generator', () => {
       '// preserve custom construct',
     );
 
-    await tsDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, defaultOptions);
 
     expect(
       tree
@@ -160,22 +156,22 @@ describe('ts#dynamodb generator', () => {
   it('should add generator metric to app.ts', async () => {
     await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
-    await tsDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, defaultOptions);
 
-    expectHasMetricTags(tree, TS_DYNAMODB_GENERATOR_INFO.metric);
+    expectHasMetricTags(tree, PY_DYNAMODB_GENERATOR_INFO.metric);
   });
 
-  it('should reuse port from existing ts#dynamodb project', async () => {
-    await tsDynamoDBGenerator(tree, defaultOptions);
-    await tsDynamoDBGenerator(tree, { ...defaultOptions, name: 'OtherTable' });
+  it('should reuse port from existing py#dynamodb project', async () => {
+    await pyDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, { ...defaultOptions, name: 'OtherTable' });
 
     const firstConfig = readProjectConfigurationUnqualified(
       tree,
-      '@proj/my-table',
+      'proj.my_table',
     );
     const secondConfig = readProjectConfigurationUnqualified(
       tree,
-      '@proj/other-table',
+      'proj.other_table',
     );
 
     const portOf = (cfg: typeof firstConfig) =>
@@ -183,36 +179,36 @@ describe('ts#dynamodb generator', () => {
 
     expect(portOf(secondConfig)).toBe(portOf(firstConfig));
     const secondConfigJson = JSON.parse(
-      tree.read('packages/other-table/config.json', 'utf-8') ?? '{}',
+      tree.read('packages/other_table/config.json', 'utf-8') ?? '{}',
     );
     expect(secondConfigJson.serveLocal.port).toBe(portOf(firstConfig));
   });
 
   it('should generate with infra=none then upgrade to infra=dynamodb', async () => {
-    await tsDynamoDBGenerator(tree, { ...defaultOptions, infra: 'none' });
+    await pyDynamoDBGenerator(tree, { ...defaultOptions, infra: 'none' });
 
-    snapshotTreeDir(tree, 'packages/my-table/src');
-    snapshotTreeDir(tree, 'packages/common/ts-dynamodb/scripts');
+    snapshotTreeDir(tree, 'packages/my_table/proj_my_table');
+    snapshotTreeDir(tree, 'packages/common/py-dynamodb/scripts');
     expect(tree.exists('packages/common/constructs')).toBeFalsy();
 
     const projectJson = JSON.parse(
-      tree.read('packages/my-table/project.json', 'utf-8'),
+      tree.read('packages/my_table/project.json', 'utf-8'),
     );
     expect(projectJson.targets['pull-image']).toBeDefined();
     expect(projectJson.targets['serve-local']).toBeDefined();
 
-    await tsDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, defaultOptions);
 
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
   });
 
   it('should be idempotent when re-run with same options', async () => {
-    await tsDynamoDBGenerator(tree, defaultOptions);
-    await tsDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, defaultOptions);
+    await pyDynamoDBGenerator(tree, defaultOptions);
 
     const projectConfig = readProjectConfigurationUnqualified(
       tree,
-      '@proj/my-table',
+      'proj.my_table',
     );
     expect((projectConfig.metadata as any).ports).toHaveLength(1);
 
@@ -220,21 +216,21 @@ describe('ts#dynamodb generator', () => {
       tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
     );
     const buildDeps = sharedConstructsConfig.targets.build.dependsOn as any[];
-    expect(buildDeps.filter((d) => d === '@proj/my-table:build')).toHaveLength(
+    expect(buildDeps.filter((d) => d === 'proj.my_table:build')).toHaveLength(
       1,
     );
   });
 
   it('should use custom tableName when provided', async () => {
-    await tsDynamoDBGenerator(tree, {
+    await pyDynamoDBGenerator(tree, {
       ...defaultOptions,
       tableName: 'CustomTableName',
     });
     const configJson = JSON.parse(
-      tree.read('packages/my-table/config.json', 'utf-8') ?? '{}',
+      tree.read('packages/my_table/config.json', 'utf-8') ?? '{}',
     );
     expect(configJson.serveLocal.containerName).toBe('proj-dynamodb');
-    expect(tree.read('packages/my-table/config.json', 'utf-8')).toContain(
+    expect(tree.read('packages/my_table/config.json', 'utf-8')).toContain(
       '"tableName": "proj-custom-table-name"',
     );
   });

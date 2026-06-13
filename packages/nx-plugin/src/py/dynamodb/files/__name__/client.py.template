@@ -1,0 +1,37 @@
+import json
+import os
+from typing import Any, cast
+
+# Generated: must match runtimeConfigKey in config.json
+runtime_config_key = '<%= runtimeConfigKey %>'
+
+def _serve_local() -> dict:
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
+    with open(config_path) as f:
+        return json.load(f)['serveLocal']
+
+
+def is_local() -> bool:
+    return os.environ.get("SERVE_LOCAL") == "true"
+
+
+_table_name: str | None = None
+
+
+def get_table_name() -> str:
+    global _table_name
+    if is_local():
+        return _serve_local()['tableName']
+    if _table_name is None:
+        from aws_lambda_powertools.utilities.parameters import AppConfigProvider
+
+        app_id = os.environ.get("RUNTIME_CONFIG_APP_ID")
+        if not app_id:
+            raise ValueError("RUNTIME_CONFIG_APP_ID environment variable is not set")
+        provider = AppConfigProvider(application=app_id, environment="default")
+        config = cast(dict[str, Any], provider.get("dynamodb", transform="json") or {})
+        table_name = (config.get(runtime_config_key) or {}).get("tableName")
+        if not table_name:
+            raise ValueError("Could not resolve table name from runtime config")
+        _table_name = table_name
+    return _table_name

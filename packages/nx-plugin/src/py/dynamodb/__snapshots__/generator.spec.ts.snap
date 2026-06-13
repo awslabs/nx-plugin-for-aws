@@ -1,0 +1,1450 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py#dynamodb generator > should generate scripts for finch engine 1`] = `
+"{
+  "runtimeConfigKey": "MyTable",
+  "serveLocal": {
+    "port": 8000,
+    "region": "us-east-1",
+    "accessKeyId": "accessKeyId",
+    "secretAccessKey": "secretAccessKey",
+    "tableName": "proj-my-table",
+    "image": "public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest",
+    "containerName": "proj-dynamodb",
+    "containerEngine": "finch",
+    "requestTimeoutMs": 10000
+  },
+  "tableConfig": {
+    "globalSecondaryIndexes": [
+      {
+        "indexName": "gsi1pk-gsi1sk-index",
+        "partitionKey": "gsi1pk",
+        "sortKey": "gsi1sk"
+      },
+      {
+        "indexName": "gsi2pk-gsi2sk-index",
+        "partitionKey": "gsi2pk",
+        "sortKey": "gsi2sk"
+      }
+    ]
+  }
+}
+"
+`;
+
+exports[`py#dynamodb generator > should generate terraform modules when iac is terraform 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+variable "name" {
+  description = "Name for the DynamoDB table."
+  type        = string
+}
+
+variable "billing_mode" {
+  description = "Controls how you are charged for read and write throughput."
+  type        = string
+  default     = "PAY_PER_REQUEST"
+}
+
+variable "point_in_time_recovery_enabled" {
+  description = "Whether to enable point-in-time recovery for the table."
+  type        = bool
+  default     = true
+}
+
+variable "deletion_protection_enabled" {
+  description = "Whether to enable deletion protection on the table."
+  type        = bool
+  default     = true
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table."
+  type        = bool
+  default     = true
+}
+
+variable "global_secondary_indexes" {
+  description = "Global secondary indexes to create on the table. All key attributes must be of type string."
+  type = list(object({
+    name            = string
+    hash_key        = string
+    range_key       = string
+    projection_type = string
+  }))
+  default = []
+}
+
+locals {
+  gsi_attribute_names = distinct(flatten([
+    for gsi in var.global_secondary_indexes : [gsi.hash_key, gsi.range_key]
+  ]))
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
+resource "aws_kms_key" "table" {
+  description         = "KMS key for DynamoDB table \${var.name}"
+  enable_key_rotation = var.enable_key_rotation
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:\${data.aws_partition.current.partition}:iam::\${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowDynamoDBService"
+        Effect = "Allow"
+        Principal = {
+          Service = "dynamodb.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_dynamodb_table" "table" {
+  name                        = var.name
+  billing_mode                = var.billing_mode
+  hash_key                    = "pk"
+  range_key                   = "sk"
+  deletion_protection_enabled = var.deletion_protection_enabled
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  dynamic "attribute" {
+    for_each = toset(local.gsi_attribute_names)
+    content {
+      name = attribute.value
+      type = "S"
+    }
+  }
+
+  dynamic "global_secondary_index" {
+    for_each = var.global_secondary_indexes
+    content {
+      name            = global_secondary_index.value.name
+      hash_key        = global_secondary_index.value.hash_key
+      range_key       = global_secondary_index.value.range_key
+      projection_type = global_secondary_index.value.projection_type
+    }
+  }
+
+  point_in_time_recovery {
+    enabled = var.point_in_time_recovery_enabled
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = aws_kms_key.table.arn
+  }
+}
+
+output "table_name" {
+  description = "Name of the DynamoDB table."
+  value       = aws_dynamodb_table.table.name
+}
+
+output "table_arn" {
+  description = "ARN of the DynamoDB table."
+  value       = aws_dynamodb_table.table.arn
+}
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key used to encrypt the DynamoDB table."
+  value       = aws_kms_key.table.arn
+}
+"
+`;
+
+exports[`py#dynamodb generator > should generate terraform modules when iac is terraform 2`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+variable "billing_mode" {
+  description = "Controls how you are charged for read and write throughput."
+  type        = string
+  default     = "PAY_PER_REQUEST"
+}
+
+variable "point_in_time_recovery_enabled" {
+  description = "Whether to enable point-in-time recovery for the table."
+  type        = bool
+  default     = true
+}
+
+variable "deletion_protection_enabled" {
+  description = "Whether to enable deletion protection on the table."
+  type        = bool
+  default     = true
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table."
+  type        = bool
+  default     = true
+}
+
+locals {
+  dynamodb_config = jsondecode(file("\${path.module}/../../../../../../../packages/my_table/config.json"))
+  global_secondary_indexes = [for gsi in local.dynamodb_config.tableConfig.globalSecondaryIndexes : {
+    name            = gsi.indexName
+    hash_key        = gsi.partitionKey
+    range_key       = try(gsi.sortKey, null)
+    projection_type = "ALL"
+  }]
+}
+
+module "dynamodb_table" {
+  source                         = "../../../core/dynamodb"
+  name                           = "proj-my-table"
+  billing_mode                   = var.billing_mode
+  point_in_time_recovery_enabled = var.point_in_time_recovery_enabled
+  deletion_protection_enabled    = var.deletion_protection_enabled
+  enable_key_rotation            = var.enable_key_rotation
+  global_secondary_indexes       = local.global_secondary_indexes
+}
+
+module "add_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "dynamodb"
+  key       = local.dynamodb_config.runtimeConfigKey
+  value = {
+    tableName = module.dynamodb_table.table_name
+  }
+}
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/common/py-dynamodb/scripts/create_local_table.py 1`] = `
+"import json
+import time
+from typing import Any
+
+import boto3
+from botocore.exceptions import ClientError
+
+with open("config.json") as f:
+    config = json.load(f)
+global_secondary_indexes = config.get("tableConfig", {}).get(
+    "globalSecondaryIndexes", []
+)
+serve_local = config["serveLocal"]
+table_name = serve_local["tableName"]
+port = serve_local["port"]
+region = serve_local["region"]
+access_key_id = serve_local["accessKeyId"]
+secret_access_key = serve_local["secretAccessKey"]
+request_timeout = serve_local["requestTimeoutMs"] / 1000
+
+client = boto3.client(
+    "dynamodb",
+    endpoint_url=f"http://localhost:{port}",
+    region_name=region,
+    aws_access_key_id=access_key_id,
+    aws_secret_access_key=secret_access_key,
+    config=boto3.session.Config(
+        connect_timeout=request_timeout,
+        read_timeout=request_timeout,
+    ),
+)
+
+
+def wait_for_table_active(tbl_name: str) -> None:
+    while True:
+        response = client.describe_table(TableName=tbl_name)
+        table = response["Table"]
+        all_active = table.get("TableStatus") == "ACTIVE" and all(
+            gsi.get("IndexStatus") == "ACTIVE"
+            for gsi in table.get("GlobalSecondaryIndexes", [])
+        )
+        if all_active:
+            return
+        time.sleep(0.5)
+
+
+seen_attr_names: set = set()
+attribute_definitions = [
+    {"AttributeName": "pk", "AttributeType": "S"},
+    {"AttributeName": "sk", "AttributeType": "S"},
+]
+seen_attr_names.update(["pk", "sk"])
+
+for gsi in global_secondary_indexes:
+    for attr_name in [gsi["partitionKey"], gsi.get("sortKey")]:
+        if attr_name and attr_name not in seen_attr_names:
+            seen_attr_names.add(attr_name)
+            attribute_definitions.append(
+                {"AttributeName": attr_name, "AttributeType": "S"}
+            )
+
+gsi_specs = [
+    {
+        "IndexName": gsi["indexName"],
+        "KeySchema": [
+            {"AttributeName": gsi["partitionKey"], "KeyType": "HASH"},
+            *(
+                [{"AttributeName": gsi["sortKey"], "KeyType": "RANGE"}]
+                if gsi.get("sortKey")
+                else []
+            ),
+        ],
+        "Projection": {"ProjectionType": "ALL"},
+    }
+    for gsi in global_secondary_indexes
+]
+
+for attempt in range(30):
+    try:
+        kwargs: dict[str, Any] = {
+            "TableName": table_name,
+            "AttributeDefinitions": attribute_definitions,
+            "KeySchema": [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            "BillingMode": "PAY_PER_REQUEST",
+        }
+        if gsi_specs:
+            kwargs["GlobalSecondaryIndexes"] = gsi_specs
+        client.create_table(**kwargs)
+        print(f"Created table: {table_name}")
+        for gsi in gsi_specs:
+            print(f"Created GSI: {gsi['IndexName']}")
+        break
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceInUseException":
+            # Table already exists — sync GSIs to match desired state.
+            response = client.describe_table(TableName=table_name)
+            existing_gsis = response["Table"].get("GlobalSecondaryIndexes", [])
+            existing_names = {g["IndexName"] for g in existing_gsis}
+            desired_names = {g["indexName"] for g in global_secondary_indexes}
+
+            # DynamoDB Local only allows one GSI to be created or deleted at a time.
+            for existing in existing_gsis:
+                if existing["IndexName"] not in desired_names:
+                    client.update_table(
+                        TableName=table_name,
+                        GlobalSecondaryIndexUpdates=[
+                            {"Delete": {"IndexName": existing["IndexName"]}}
+                        ],
+                    )
+                    print(f"Deleted GSI: {existing['IndexName']}")
+                    wait_for_table_active(table_name)
+
+            for gsi in global_secondary_indexes:
+                if gsi["indexName"] not in existing_names:
+                    attr_defs = [
+                        {"AttributeName": gsi["partitionKey"], "AttributeType": "S"}
+                    ]
+                    if gsi.get("sortKey"):
+                        attr_defs.append(
+                            {"AttributeName": gsi["sortKey"], "AttributeType": "S"}
+                        )
+                    client.update_table(
+                        TableName=table_name,
+                        AttributeDefinitions=attr_defs,
+                        GlobalSecondaryIndexUpdates=[
+                            {
+                                "Create": {
+                                    "IndexName": gsi["indexName"],
+                                    "KeySchema": [
+                                        {
+                                            "AttributeName": gsi["partitionKey"],
+                                            "KeyType": "HASH",
+                                        },
+                                        *(
+                                            [
+                                                {
+                                                    "AttributeName": gsi["sortKey"],
+                                                    "KeyType": "RANGE",
+                                                }
+                                            ]
+                                            if gsi.get("sortKey")
+                                            else []
+                                        ),
+                                    ],
+                                    "Projection": {"ProjectionType": "ALL"},
+                                }
+                            }
+                        ],
+                    )
+                    print(f"Created GSI: {gsi['indexName']}")
+                    wait_for_table_active(table_name)
+            break
+        if attempt == 29:
+            raise
+        time.sleep(1)
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/common/py-dynamodb/scripts/pull_image.py 1`] = `
+"import json
+import subprocess
+import sys
+
+with open("config.json") as f:
+    _sl = json.load(f)["serveLocal"]
+
+container_engine = _sl["containerEngine"]
+image = _sl["image"]
+
+inspect = subprocess.run(
+    [container_engine, "image", "inspect", image], capture_output=True
+)
+if inspect.returncode != 0:
+    pull = subprocess.run([container_engine, "pull", image])
+    if pull.returncode != 0:
+        sys.exit(pull.returncode or 1)
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/common/py-dynamodb/scripts/start_container.py 1`] = `
+"import json
+import signal
+import subprocess
+import sys
+
+with open("config.json") as f:
+    _sl = json.load(f)["serveLocal"]
+
+container_engine = _sl["containerEngine"]
+container_name = _sl["containerName"]
+image = _sl["image"]
+port = str(_sl["port"])
+
+
+def container_exists() -> bool:
+    return (
+        subprocess.run(
+            [container_engine, "container", "inspect", container_name],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def is_running() -> bool:
+    result = subprocess.run(
+        [
+            container_engine,
+            "container",
+            "inspect",
+            "-f",
+            "{{.State.Running}}",
+            container_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+# Multiple dynamo table packages run serve-local in parallel sharing the same
+# container. All processes stream logs, but only the one that created the
+# container stops it on exit — others just detach.
+created = False
+run_retries = 0
+
+while True:
+    if container_exists():
+        if not is_running():
+            # Another process may have started it between our inspect and start — container engine start
+            # exits 0 even if the container is already running, so no special-casing needed.
+            start = subprocess.run([container_engine, "start", container_name])
+            if start.returncode != 0:
+                sys.exit(start.returncode)
+        break
+    run_args = [container_engine, "run"]
+    if container_engine == "docker":
+        run_args.append("--rm")
+    run_args.extend(
+        [
+            "--name",
+            container_name,
+            "-u",
+            "root",
+            "-w",
+            "/home/dynamodblocal",
+            "-p",
+            f"{port}:{port}",
+            "-v",
+            f"{container_name}-data:/home/dynamodblocal/data",
+            "-d",
+            image,
+            "-jar",
+            "DynamoDBLocal.jar",
+            "-sharedDb",
+            "-dbPath",
+            "./data",
+            "-port",
+            port,
+            "-optimizeDbBeforeStartup",
+        ]
+    )
+    create = subprocess.run(run_args, capture_output=True, text=True)
+    if create.returncode == 0:
+        created = True
+        break
+    run_retries += 1
+    if not container_exists() and run_retries > 3:
+        sys.stderr.write(create.stderr)
+        sys.exit(create.returncode)
+
+
+logs = subprocess.Popen(
+    [container_engine, "logs", "-f", container_name],
+    stdin=subprocess.DEVNULL,
+)
+
+exiting = False
+
+
+def cleanup(*_):
+    global exiting
+    if exiting:
+        return
+    exiting = True
+    if created:
+        if container_engine == "docker":
+            subprocess.run(
+                [container_engine, "stop", container_name], capture_output=True
+            )
+        else:
+            subprocess.run(
+                [container_engine, "rm", "-f", container_name], capture_output=True
+            )
+    logs.kill()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, cleanup)
+signal.signal(signal.SIGINT, cleanup)
+signal.signal(signal.SIGHUP, cleanup)
+
+logs.wait()
+if not exiting:
+    sys.exit(logs.returncode or 0)
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/my_table/proj_my_table/__init__.py 1`] = `
+"from .entities import BaseModel, ExampleModel
+
+__all__ = [
+    "BaseModel",
+    "ExampleModel",
+]
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/my_table/proj_my_table/client.py 1`] = `
+"import json
+import os
+from typing import Any, cast
+
+# Generated: must match runtimeConfigKey in config.json
+runtime_config_key = "MyTable"
+
+
+def _serve_local() -> dict:
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+    with open(config_path) as f:
+        return json.load(f)["serveLocal"]
+
+
+def is_local() -> bool:
+    return os.environ.get("SERVE_LOCAL") == "true"
+
+
+_table_name: str | None = None
+
+
+def get_table_name() -> str:
+    global _table_name
+    if is_local():
+        return _serve_local()["tableName"]
+    if _table_name is None:
+        from aws_lambda_powertools.utilities.parameters import AppConfigProvider
+
+        app_id = os.environ.get("RUNTIME_CONFIG_APP_ID")
+        if not app_id:
+            raise ValueError("RUNTIME_CONFIG_APP_ID environment variable is not set")
+        provider = AppConfigProvider(application=app_id, environment="default")
+        config = cast(dict[str, Any], provider.get("dynamodb", transform="json") or {})
+        table_name = (config.get(runtime_config_key) or {}).get("tableName")
+        if not table_name:
+            raise ValueError("Could not resolve table name from runtime config")
+        _table_name = table_name
+    return _table_name
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/my_table/proj_my_table/entities/__init__.py 1`] = `
+"from .base import BaseModel
+from .example import ExampleModel
+
+__all__ = ["BaseModel", "ExampleModel"]
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/my_table/proj_my_table/entities/base.py 1`] = `
+"import os
+
+from pynamodb.attributes import DiscriminatorAttribute, UnicodeAttribute
+from pynamodb.indexes import AllProjection, GlobalSecondaryIndex
+from pynamodb.models import Model
+
+from ..client import _serve_local, get_table_name, is_local
+
+
+class Gsi1Index(GlobalSecondaryIndex):
+    class Meta:
+        index_name = "gsi1pk-gsi1sk-index"
+        projection = AllProjection()
+
+    gsi1pk = UnicodeAttribute(hash_key=True)
+    gsi1sk = UnicodeAttribute(range_key=True)
+
+
+class Gsi2Index(GlobalSecondaryIndex):
+    class Meta:
+        index_name = "gsi2pk-gsi2sk-index"
+        projection = AllProjection()
+
+    gsi2pk = UnicodeAttribute(hash_key=True)
+    gsi2sk = UnicodeAttribute(range_key=True)
+
+
+class BaseModel(Model):
+    """Base model for all DynamoDB entities in this table.
+
+    Uses PynamoDB polymorphism to support multiple entity types in a single table.
+    See https://pynamodb.readthedocs.io/en/stable/polymorphism.html
+    """
+
+    class Meta:
+        table_name: str
+        region = os.environ.get(
+            "AWS_REGION", _serve_local()["region"] if is_local() else "us-east-1"
+        )
+        host = f"http://localhost:{_serve_local()['port']}" if is_local() else None
+        aws_access_key_id = _serve_local()["accessKeyId"] if is_local() else None
+        aws_secret_access_key = (
+            _serve_local()["secretAccessKey"] if is_local() else None
+        )
+
+    entity_type = DiscriminatorAttribute()
+
+    pk = UnicodeAttribute(hash_key=True)
+    sk = UnicodeAttribute(range_key=True)
+    gsi1pk = UnicodeAttribute(null=True)
+    gsi1sk = UnicodeAttribute(null=True)
+    gsi2pk = UnicodeAttribute(null=True)
+    gsi2sk = UnicodeAttribute(null=True)
+
+    gsi1_index = Gsi1Index()
+    gsi2_index = Gsi2Index()
+
+    @classmethod
+    def _get_connection(cls):
+        cls.Meta.table_name = get_table_name()
+        return super()._get_connection()
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project > packages/my_table/proj_my_table/entities/example.py 1`] = `
+"from datetime import UTC, datetime
+from typing import Iterator
+
+from pynamodb.attributes import UnicodeAttribute
+
+from .base import BaseModel
+
+
+# Example entity using PynamoDB - replace with your own entities
+# See https://pynamodb.readthedocs.io/en/stable/tutorial.html for documentation
+class ExampleModel(BaseModel, discriminator="ExampleModel"):
+    """Example entity demonstrating single-table design with GSI access patterns.
+
+    Key design:
+      pk=EXAMPLE#{id}, sk=EXAMPLE#{id}
+      gsi1pk=CATEGORY#{category}, gsi1sk=EXAMPLE#{id}
+      gsi2pk=EXAMPLE, gsi2sk={created_at ISO-8601}
+    """
+
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f"EXAMPLE#{id}"
+
+    # ── Writes ────────────────────────────────────────────────────────────────
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> "ExampleModel":
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f"CATEGORY#{category}",
+            gsi1sk=cls.make_pk(id),
+            gsi2pk="EXAMPLE",
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+
+    @classmethod
+    def get_by_id(cls, id: str) -> "ExampleModel":
+        """Exact lookup by pk + sk."""
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator["ExampleModel"]:
+        """All items in a category."""
+        return cls.gsi1_index.query(f"CATEGORY#{category}")
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+
+    @classmethod
+    def list_by_date(cls, limit: int | None = None) -> Iterator["ExampleModel"]:
+        """All examples, newest first."""
+        return cls.gsi2_index.query("EXAMPLE", limit=limit, scan_index_forward=False)
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project 1`] = `
+"import { Construct } from 'constructs';
+import {
+  AttributeType,
+  BillingMode,
+  Table,
+  TableEncryption,
+  TableProps,
+} from 'aws-cdk-lib/aws-dynamodb';
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { RuntimeConfig } from './runtime-config.js';
+
+type _DynamoDBTableProps = Omit<
+  TableProps,
+  'tableName' | 'partitionKey' | 'sortKey' | 'encryption' | 'encryptionKey'
+>;
+
+export interface DynamoDBTableProps extends _DynamoDBTableProps {
+  /**
+   * The DynamoDB table name. If omitted, CDK auto-generates a unique name
+   * from the stack name and construct path.
+   */
+  readonly tableName?: string;
+
+  /**
+   * RuntimeConfig key used under the \`dynamodb\` namespace.
+   */
+  readonly runtimeConfigKey: string;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the table.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
+}
+
+export abstract class DynamoDBTable extends Construct {
+  public readonly table: Table;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      tableName,
+      runtimeConfigKey,
+      billingMode = BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification = { pointInTimeRecoveryEnabled: true },
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
+      ...rest
+    }: DynamoDBTableProps,
+  ) {
+    super(scope, id);
+
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
+
+    this.table = new Table(this, runtimeConfigKey, {
+      ...rest,
+      ...(tableName !== undefined && { tableName }),
+      partitionKey: { name: 'pk', type: AttributeType.STRING },
+      sortKey: { name: 'sk', type: AttributeType.STRING },
+      billingMode,
+      pointInTimeRecoverySpecification,
+      deletionProtection,
+      encryptionKey: key,
+      encryption: TableEncryption.CUSTOMER_MANAGED,
+      removalPolicy,
+    });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('dynamodb', runtimeConfigKey, { tableName: this.table.tableName });
+  }
+
+  public grantReadData(grantee: IGrantable): Grant {
+    return this.table.grantReadData(grantee);
+  }
+
+  public grantWriteData(grantee: IGrantable): Grant {
+    return this.table.grantWriteData(grantee);
+  }
+
+  public grantReadWriteData(grantee: IGrantable): Grant {
+    return this.table.grantReadWriteData(grantee);
+  }
+
+  public grantFullAccess(grantee: IGrantable): Grant {
+    return this.table.grantFullAccess(grantee);
+  }
+
+  public grantStreamRead(grantee: IGrantable): Grant {
+    return this.table.grantStreamRead(grantee);
+  }
+
+  public grantTableListStreams(grantee: IGrantable): Grant {
+    return this.table.grantTableListStreams(grantee);
+  }
+
+  public grant(grantee: IGrantable, ...actions: string[]): Grant {
+    return this.table.grant(grantee, ...actions);
+  }
+
+  public grantStream(grantee: IGrantable, ...actions: string[]): Grant {
+    return this.table.grantStream(grantee, ...actions);
+  }
+}
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project 2`] = `
+"import { Construct } from 'constructs';
+import { AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
+import { DynamoDBTable, DynamoDBTableProps } from '../../core/dynamodb.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fileURLToPath } from 'url';
+
+const { runtimeConfigKey, tableConfig } = JSON.parse(
+  readFileSync(
+    join(
+      findWorkspaceRoot(fileURLToPath(new URL(import.meta.url))),
+      'packages/my_table/config.json',
+    ),
+    'utf-8',
+  ),
+) as {
+  runtimeConfigKey: string;
+  tableConfig: {
+    globalSecondaryIndexes: {
+      indexName: string;
+      partitionKey: string;
+      sortKey?: string;
+    }[];
+  };
+};
+
+export type MyTableProps = Omit<DynamoDBTableProps, 'runtimeConfigKey'>;
+
+export class MyTable extends DynamoDBTable {
+  constructor(scope: Construct, id: string, props?: MyTableProps) {
+    super(scope, id, {
+      ...props,
+      runtimeConfigKey,
+    });
+
+    for (const gsi of tableConfig.globalSecondaryIndexes) {
+      this.table.addGlobalSecondaryIndex({
+        indexName: gsi.indexName,
+        partitionKey: { name: gsi.partitionKey, type: AttributeType.STRING },
+        ...(gsi.sortKey && {
+          sortKey: { name: gsi.sortKey, type: AttributeType.STRING },
+        }),
+        projectionType: ProjectionType.ALL,
+      });
+    }
+  }
+}
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project 3`] = `
+"export * from './my-table.js';
+"
+`;
+
+exports[`py#dynamodb generator > should generate the dynamodb project 4`] = `
+"export * from './dynamodb/index.js';
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/common/py-dynamodb/scripts/create_local_table.py 1`] = `
+"import json
+import time
+from typing import Any
+
+import boto3
+from botocore.exceptions import ClientError
+
+with open("config.json") as f:
+    config = json.load(f)
+global_secondary_indexes = config.get("tableConfig", {}).get(
+    "globalSecondaryIndexes", []
+)
+serve_local = config["serveLocal"]
+table_name = serve_local["tableName"]
+port = serve_local["port"]
+region = serve_local["region"]
+access_key_id = serve_local["accessKeyId"]
+secret_access_key = serve_local["secretAccessKey"]
+request_timeout = serve_local["requestTimeoutMs"] / 1000
+
+client = boto3.client(
+    "dynamodb",
+    endpoint_url=f"http://localhost:{port}",
+    region_name=region,
+    aws_access_key_id=access_key_id,
+    aws_secret_access_key=secret_access_key,
+    config=boto3.session.Config(
+        connect_timeout=request_timeout,
+        read_timeout=request_timeout,
+    ),
+)
+
+
+def wait_for_table_active(tbl_name: str) -> None:
+    while True:
+        response = client.describe_table(TableName=tbl_name)
+        table = response["Table"]
+        all_active = table.get("TableStatus") == "ACTIVE" and all(
+            gsi.get("IndexStatus") == "ACTIVE"
+            for gsi in table.get("GlobalSecondaryIndexes", [])
+        )
+        if all_active:
+            return
+        time.sleep(0.5)
+
+
+seen_attr_names: set = set()
+attribute_definitions = [
+    {"AttributeName": "pk", "AttributeType": "S"},
+    {"AttributeName": "sk", "AttributeType": "S"},
+]
+seen_attr_names.update(["pk", "sk"])
+
+for gsi in global_secondary_indexes:
+    for attr_name in [gsi["partitionKey"], gsi.get("sortKey")]:
+        if attr_name and attr_name not in seen_attr_names:
+            seen_attr_names.add(attr_name)
+            attribute_definitions.append(
+                {"AttributeName": attr_name, "AttributeType": "S"}
+            )
+
+gsi_specs = [
+    {
+        "IndexName": gsi["indexName"],
+        "KeySchema": [
+            {"AttributeName": gsi["partitionKey"], "KeyType": "HASH"},
+            *(
+                [{"AttributeName": gsi["sortKey"], "KeyType": "RANGE"}]
+                if gsi.get("sortKey")
+                else []
+            ),
+        ],
+        "Projection": {"ProjectionType": "ALL"},
+    }
+    for gsi in global_secondary_indexes
+]
+
+for attempt in range(30):
+    try:
+        kwargs: dict[str, Any] = {
+            "TableName": table_name,
+            "AttributeDefinitions": attribute_definitions,
+            "KeySchema": [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            "BillingMode": "PAY_PER_REQUEST",
+        }
+        if gsi_specs:
+            kwargs["GlobalSecondaryIndexes"] = gsi_specs
+        client.create_table(**kwargs)
+        print(f"Created table: {table_name}")
+        for gsi in gsi_specs:
+            print(f"Created GSI: {gsi['IndexName']}")
+        break
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceInUseException":
+            # Table already exists — sync GSIs to match desired state.
+            response = client.describe_table(TableName=table_name)
+            existing_gsis = response["Table"].get("GlobalSecondaryIndexes", [])
+            existing_names = {g["IndexName"] for g in existing_gsis}
+            desired_names = {g["indexName"] for g in global_secondary_indexes}
+
+            # DynamoDB Local only allows one GSI to be created or deleted at a time.
+            for existing in existing_gsis:
+                if existing["IndexName"] not in desired_names:
+                    client.update_table(
+                        TableName=table_name,
+                        GlobalSecondaryIndexUpdates=[
+                            {"Delete": {"IndexName": existing["IndexName"]}}
+                        ],
+                    )
+                    print(f"Deleted GSI: {existing['IndexName']}")
+                    wait_for_table_active(table_name)
+
+            for gsi in global_secondary_indexes:
+                if gsi["indexName"] not in existing_names:
+                    attr_defs = [
+                        {"AttributeName": gsi["partitionKey"], "AttributeType": "S"}
+                    ]
+                    if gsi.get("sortKey"):
+                        attr_defs.append(
+                            {"AttributeName": gsi["sortKey"], "AttributeType": "S"}
+                        )
+                    client.update_table(
+                        TableName=table_name,
+                        AttributeDefinitions=attr_defs,
+                        GlobalSecondaryIndexUpdates=[
+                            {
+                                "Create": {
+                                    "IndexName": gsi["indexName"],
+                                    "KeySchema": [
+                                        {
+                                            "AttributeName": gsi["partitionKey"],
+                                            "KeyType": "HASH",
+                                        },
+                                        *(
+                                            [
+                                                {
+                                                    "AttributeName": gsi["sortKey"],
+                                                    "KeyType": "RANGE",
+                                                }
+                                            ]
+                                            if gsi.get("sortKey")
+                                            else []
+                                        ),
+                                    ],
+                                    "Projection": {"ProjectionType": "ALL"},
+                                }
+                            }
+                        ],
+                    )
+                    print(f"Created GSI: {gsi['indexName']}")
+                    wait_for_table_active(table_name)
+            break
+        if attempt == 29:
+            raise
+        time.sleep(1)
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/common/py-dynamodb/scripts/pull_image.py 1`] = `
+"import json
+import subprocess
+import sys
+
+with open("config.json") as f:
+    _sl = json.load(f)["serveLocal"]
+
+container_engine = _sl["containerEngine"]
+image = _sl["image"]
+
+inspect = subprocess.run(
+    [container_engine, "image", "inspect", image], capture_output=True
+)
+if inspect.returncode != 0:
+    pull = subprocess.run([container_engine, "pull", image])
+    if pull.returncode != 0:
+        sys.exit(pull.returncode or 1)
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/common/py-dynamodb/scripts/start_container.py 1`] = `
+"import json
+import signal
+import subprocess
+import sys
+
+with open("config.json") as f:
+    _sl = json.load(f)["serveLocal"]
+
+container_engine = _sl["containerEngine"]
+container_name = _sl["containerName"]
+image = _sl["image"]
+port = str(_sl["port"])
+
+
+def container_exists() -> bool:
+    return (
+        subprocess.run(
+            [container_engine, "container", "inspect", container_name],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def is_running() -> bool:
+    result = subprocess.run(
+        [
+            container_engine,
+            "container",
+            "inspect",
+            "-f",
+            "{{.State.Running}}",
+            container_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+# Multiple dynamo table packages run serve-local in parallel sharing the same
+# container. All processes stream logs, but only the one that created the
+# container stops it on exit — others just detach.
+created = False
+run_retries = 0
+
+while True:
+    if container_exists():
+        if not is_running():
+            # Another process may have started it between our inspect and start — container engine start
+            # exits 0 even if the container is already running, so no special-casing needed.
+            start = subprocess.run([container_engine, "start", container_name])
+            if start.returncode != 0:
+                sys.exit(start.returncode)
+        break
+    run_args = [container_engine, "run"]
+    if container_engine == "docker":
+        run_args.append("--rm")
+    run_args.extend(
+        [
+            "--name",
+            container_name,
+            "-u",
+            "root",
+            "-w",
+            "/home/dynamodblocal",
+            "-p",
+            f"{port}:{port}",
+            "-v",
+            f"{container_name}-data:/home/dynamodblocal/data",
+            "-d",
+            image,
+            "-jar",
+            "DynamoDBLocal.jar",
+            "-sharedDb",
+            "-dbPath",
+            "./data",
+            "-port",
+            port,
+            "-optimizeDbBeforeStartup",
+        ]
+    )
+    create = subprocess.run(run_args, capture_output=True, text=True)
+    if create.returncode == 0:
+        created = True
+        break
+    run_retries += 1
+    if not container_exists() and run_retries > 3:
+        sys.stderr.write(create.stderr)
+        sys.exit(create.returncode)
+
+
+logs = subprocess.Popen(
+    [container_engine, "logs", "-f", container_name],
+    stdin=subprocess.DEVNULL,
+)
+
+exiting = False
+
+
+def cleanup(*_):
+    global exiting
+    if exiting:
+        return
+    exiting = True
+    if created:
+        if container_engine == "docker":
+            subprocess.run(
+                [container_engine, "stop", container_name], capture_output=True
+            )
+        else:
+            subprocess.run(
+                [container_engine, "rm", "-f", container_name], capture_output=True
+            )
+    logs.kill()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, cleanup)
+signal.signal(signal.SIGINT, cleanup)
+signal.signal(signal.SIGHUP, cleanup)
+
+logs.wait()
+if not exiting:
+    sys.exit(logs.returncode or 0)
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my_table/proj_my_table/__init__.py 1`] = `
+"from .entities import BaseModel, ExampleModel
+
+__all__ = [
+    "BaseModel",
+    "ExampleModel",
+]
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my_table/proj_my_table/client.py 1`] = `
+"import json
+import os
+from typing import Any, cast
+
+# Generated: must match runtimeConfigKey in config.json
+runtime_config_key = "MyTable"
+
+
+def _serve_local() -> dict:
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+    with open(config_path) as f:
+        return json.load(f)["serveLocal"]
+
+
+def is_local() -> bool:
+    return os.environ.get("SERVE_LOCAL") == "true"
+
+
+_table_name: str | None = None
+
+
+def get_table_name() -> str:
+    global _table_name
+    if is_local():
+        return _serve_local()["tableName"]
+    if _table_name is None:
+        from aws_lambda_powertools.utilities.parameters import AppConfigProvider
+
+        app_id = os.environ.get("RUNTIME_CONFIG_APP_ID")
+        if not app_id:
+            raise ValueError("RUNTIME_CONFIG_APP_ID environment variable is not set")
+        provider = AppConfigProvider(application=app_id, environment="default")
+        config = cast(dict[str, Any], provider.get("dynamodb", transform="json") or {})
+        table_name = (config.get(runtime_config_key) or {}).get("tableName")
+        if not table_name:
+            raise ValueError("Could not resolve table name from runtime config")
+        _table_name = table_name
+    return _table_name
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my_table/proj_my_table/entities/__init__.py 1`] = `
+"from .base import BaseModel
+from .example import ExampleModel
+
+__all__ = ["BaseModel", "ExampleModel"]
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my_table/proj_my_table/entities/base.py 1`] = `
+"import os
+
+from pynamodb.attributes import DiscriminatorAttribute, UnicodeAttribute
+from pynamodb.indexes import AllProjection, GlobalSecondaryIndex
+from pynamodb.models import Model
+
+from ..client import _serve_local, get_table_name, is_local
+
+
+class Gsi1Index(GlobalSecondaryIndex):
+    class Meta:
+        index_name = "gsi1pk-gsi1sk-index"
+        projection = AllProjection()
+
+    gsi1pk = UnicodeAttribute(hash_key=True)
+    gsi1sk = UnicodeAttribute(range_key=True)
+
+
+class Gsi2Index(GlobalSecondaryIndex):
+    class Meta:
+        index_name = "gsi2pk-gsi2sk-index"
+        projection = AllProjection()
+
+    gsi2pk = UnicodeAttribute(hash_key=True)
+    gsi2sk = UnicodeAttribute(range_key=True)
+
+
+class BaseModel(Model):
+    """Base model for all DynamoDB entities in this table.
+
+    Uses PynamoDB polymorphism to support multiple entity types in a single table.
+    See https://pynamodb.readthedocs.io/en/stable/polymorphism.html
+    """
+
+    class Meta:
+        table_name: str
+        region = os.environ.get(
+            "AWS_REGION", _serve_local()["region"] if is_local() else "us-east-1"
+        )
+        host = f"http://localhost:{_serve_local()['port']}" if is_local() else None
+        aws_access_key_id = _serve_local()["accessKeyId"] if is_local() else None
+        aws_secret_access_key = (
+            _serve_local()["secretAccessKey"] if is_local() else None
+        )
+
+    entity_type = DiscriminatorAttribute()
+
+    pk = UnicodeAttribute(hash_key=True)
+    sk = UnicodeAttribute(range_key=True)
+    gsi1pk = UnicodeAttribute(null=True)
+    gsi1sk = UnicodeAttribute(null=True)
+    gsi2pk = UnicodeAttribute(null=True)
+    gsi2sk = UnicodeAttribute(null=True)
+
+    gsi1_index = Gsi1Index()
+    gsi2_index = Gsi2Index()
+
+    @classmethod
+    def _get_connection(cls):
+        cls.Meta.table_name = get_table_name()
+        return super()._get_connection()
+"
+`;
+
+exports[`py#dynamodb generator > should generate with infra=none then upgrade to infra=dynamodb > packages/my_table/proj_my_table/entities/example.py 1`] = `
+"from datetime import UTC, datetime
+from typing import Iterator
+
+from pynamodb.attributes import UnicodeAttribute
+
+from .base import BaseModel
+
+
+# Example entity using PynamoDB - replace with your own entities
+# See https://pynamodb.readthedocs.io/en/stable/tutorial.html for documentation
+class ExampleModel(BaseModel, discriminator="ExampleModel"):
+    """Example entity demonstrating single-table design with GSI access patterns.
+
+    Key design:
+      pk=EXAMPLE#{id}, sk=EXAMPLE#{id}
+      gsi1pk=CATEGORY#{category}, gsi1sk=EXAMPLE#{id}
+      gsi2pk=EXAMPLE, gsi2sk={created_at ISO-8601}
+    """
+
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f"EXAMPLE#{id}"
+
+    # ── Writes ────────────────────────────────────────────────────────────────
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> "ExampleModel":
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f"CATEGORY#{category}",
+            gsi1sk=cls.make_pk(id),
+            gsi2pk="EXAMPLE",
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+
+    @classmethod
+    def get_by_id(cls, id: str) -> "ExampleModel":
+        """Exact lookup by pk + sk."""
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator["ExampleModel"]:
+        """All items in a category."""
+        return cls.gsi1_index.query(f"CATEGORY#{category}")
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+
+    @classmethod
+    def list_by_date(cls, limit: int | None = None) -> Iterator["ExampleModel"]:
+        """All examples, newest first."""
+        return cls.gsi2_index.query("EXAMPLE", limit=limit, scan_index_forward=False)
+"
+`;

@@ -1,6 +1,6 @@
 ---
-title: DynamoDB
-description: Create a DynamoDB project
+title: TypeScript DynamoDB
+description: Create a TypeScript DynamoDB project
 generator: ts#dynamodb
 ---
 
@@ -8,15 +8,13 @@ import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import Infrastructure from '@components/infrastructure.astro';
-import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
 
-This generator creates a new TypeScript project backed by [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), using [ElectroDB](https://electrodb.dev/) for type-safe entity modelling. It generates the application code and infrastructure needed to provision and manage a DynamoDB table using AWS CDK or Terraform, with single-table design support and built-in local development via DynamoDB Local.
+This generator creates a new TypeScript DynamoDB project backed by [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), using [ElectroDB](https://electrodb.dev/) for type-safe entity modelling. It generates the application code and infrastructure needed to provision and manage a DynamoDB table using AWS CDK or Terraform, with single-table design support and built-in local development via DynamoDB Local.
 
 ## Usage
 
-### Generate a DynamoDB Project
+### Generate a TypeScript DynamoDB Project
 
 <RunGenerator generator="ts#dynamodb" />
 
@@ -29,62 +27,34 @@ This generator creates a new TypeScript project backed by [Amazon DynamoDB](http
 The generator creates the following project structure in the `<directory>/<name>` directory:
 
 <FileTree>
-  - scripts
-    - create-local-table.ts Creates the DynamoDB table in the local DynamoDB Local instance
-    - pull-image.ts Pulls the DynamoDB Local image
-    - start-container.ts Starts the DynamoDB Local container
   - src
     - index.ts Project entry point and exports
-    - constants.ts Local development constants and runtime config key
     - client.ts DynamoDB client singleton and table name resolution
     - entities
       - example.ts Example ElectroDB entity definition
       - index.ts Entity exports
-  - dynamodb.config.json GSI definitions for the table
+  - config.json Table configuration including GSI definitions and local development settings
   - project.json Project configuration and build targets
+</FileTree>
+
+The local development scripts are shared across all TypeScript DynamoDB projects and generated once into:
+
+<FileTree>
+  - packages/common/ts-dynamodb/scripts
+    - create-local-table.ts Creates the DynamoDB table in the local DynamoDB Local instance
+    - pull-image.ts Pulls the DynamoDB Local image
+    - start-container.ts Starts the DynamoDB Local container
 </FileTree>
 
 ### Infrastructure
 
-<Snippet name="shared-constructs" />
-
-<Infrastructure>
-  <Fragment slot="cdk">
-    <FileTree>
-      - packages/common/constructs/src
-        - app
-          - dynamodb
-            - \<name>.ts Infrastructure specific to your table
-        - core
-          - dynamodb.ts Generic DynamoDB table construct
-    </FileTree>
-  </Fragment>
-  <Fragment slot="terraform">
-    <FileTree>
-      - packages/common/terraform/src
-        - app
-          - dynamodb
-            - \<name>
-              - \<name>.tf Module specific to your table
-        - core
-          - dynamodb
-            - dynamodb.tf Generic DynamoDB module
-    </FileTree>
-  </Fragment>
-</Infrastructure>
+<Snippet name="dynamodb/infrastructure" />
 
 ## Local Development
 
 ### Starting Local DynamoDB
 
-The generator configures a `serve-local` target that starts a [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) instance and creates the table:
-
-<NxCommands commands={['run <project-name>:serve-local']} />
-
-This automatically:
-1. Pulls the DynamoDB Local image (`pull-image` target)
-2. Starts a container
-3. Creates a local table with the indexes defined in `dynamodb.config.json`
+<Snippet name="dynamodb/serve-local-start" />
 
 ### Data Modelling
 
@@ -151,48 +121,13 @@ The generated `src/client.ts` exports two key utilities:
 
 ### Stopping Local DynamoDB
 
-Stopping `serve-local` (e.g. with `Ctrl+C`) automatically removes the DynamoDB Local container, but preserves the named volume so your data persists across restarts.
-
-:::caution[Windows]
-Due to limitations with signal handling on Windows, the container is not automatically removed when `serve-local` is stopped. You will need to remove it manually:
-
-```bash
-<engine> rm -f <scope>-dynamodb
-```
-
-Replace `<engine>` with your container engine (`docker` or `finch`) and `<scope>` with your Nx workspace scope (e.g. `proj`).
-:::
+<Snippet name="dynamodb/serve-local-windows" />
 
 ## Adding/Removing Global Secondary Indexes
 
-GSIs are defined in `dynamodb.config.json` at the project root. Add an entry to `globalSecondaryIndexes` for each GSI, following the [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) naming convention for GSI keys:
+GSIs are defined in `config.json` at the project root under the `tableConfig.globalSecondaryIndexes` key. Add an entry for each GSI, following the [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) naming convention for GSI keys:
 
-```json title="packages/my-table/dynamodb.config.json"
-{
-  "globalSecondaryIndexes": [
-    {
-      "indexName": "gsi1pk-gsi1sk-index",
-      "partitionKey": "gsi1pk",
-      "sortKey": "gsi1sk"
-    }
-  ]
-}
-```
-
-The `sortKey` field is optional for hash-key-only GSIs.
-
-This config file is read directly from the project root by all consumers:
-- **Local development** — `serve-local` reads `dynamodb.config.json` and creates or updates the local table to match the GSI list
-- **CDK** — the construct reads `dynamodb.config.json` at synth time, so GSI changes are reflected on the next `cdk deploy`
-- **Terraform** — the module reads `dynamodb.config.json` at plan/apply time
-
-### One GSI per Deployment
-
-:::caution
-DynamoDB [does not allow more than one GSI to be created or deleted in a single table update](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.OnlineOps.html).
-
-Each deployment can add or remove **at most one GSI**. If you need to add or remove multiple GSIs, do so one at a time — update `dynamodb.config.json`, deploy the stack, then repeat for the next change.
-:::
+<Snippet name="dynamodb/gsi-config" parentHeading="Adding/Removing Global Secondary Indexes" />
 
 ## Connecting to the Table
 
@@ -220,168 +155,4 @@ For specific project types, use the `connection` generator to automatically wire
 
 ## Deploying your Table
 
-The DynamoDB generator creates CDK or Terraform infrastructure based on your selected `iac`.
-
-<Infrastructure>
-<Fragment slot="cdk">
-The CDK construct is created in `common/constructs`. Example usage:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
-    super(scope, id, props);
-
-    const table = new MyTable(this, 'Table');
-  }
-}
-```
-
-This provisions a DynamoDB table with:
-- `pk` (partition key) and `sk` (sort key), both `String` type
-- Global Secondary Indexes as defined in `dynamodb.config.json`
-- On-demand (`PAY_PER_REQUEST`) billing
-- Customer-managed KMS encryption with automatic key rotation
-- Point-in-time recovery enabled
-- Deletion protection enabled
-- Table name registered in Runtime Config under the `dynamodb` namespace in AWS AppConfig
-</Fragment>
-<Fragment slot="terraform">
-The Terraform module is created in `common/terraform`. Example usage:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source = "../../common/terraform/src/app/dynamodb/my-table"
-}
-```
-
-This provisions a DynamoDB table with:
-- `pk` (partition key) and `sk` (sort key), both `String` type
-- Global Secondary Indexes as defined in `dynamodb.config.json`
-- On-demand (`PAY_PER_REQUEST`) billing
-- Customer-managed KMS encryption with automatic key rotation
-- Point-in-time recovery enabled
-- Deletion protection enabled
-- Table name registered in Runtime Config
-</Fragment>
-</Infrastructure>
-
-### Granting Access
-
-<Snippet name="connection/lambda-dynamodb-access" />
-
-### Deletion Protection
-
-Deletion protection is enabled by default to prevent accidental table deletion.
-
-#### Disable Deletion Protection
-
-Disable it for environments where table deletion is expected, such as short-lived development or preview stacks.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  deletionProtection: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source                      = "../../common/terraform/src/app/dynamodb/my-table"
-  deletion_protection_enabled = false
-}
-```
-</Fragment>
-</Infrastructure>
-
-### Billing Mode
-
-The table defaults to on-demand (`PAY_PER_REQUEST`) billing. Switch to provisioned capacity for predictable, high-throughput workloads.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  billingMode: BillingMode.PROVISIONED,
-  readCapacity: 5,
-  writeCapacity: 5,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source       = "../../common/terraform/src/app/dynamodb/my-table"
-  billing_mode = "PROVISIONED"
-}
-```
-</Fragment>
-</Infrastructure>
-
-### Point-in-time Recovery
-
-[Point-in-time recovery](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) is enabled by default, allowing you to restore the table to any point in the last 35 days.
-
-#### Disable Point-in-time Recovery
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source                         = "../../common/terraform/src/app/dynamodb/my-table"
-  point_in_time_recovery_enabled = false
-}
-```
-</Fragment>
-</Infrastructure>
-
-### Encryption Key Rotation
-
-The KMS key used to encrypt the table has automatic key rotation enabled by default. Disable it if your security policy manages rotation externally.
-
-#### Disable Encryption Key Rotation
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source              = "../../common/terraform/src/app/dynamodb/my-table"
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="dynamodb/deploying-table" parentHeading="Deploying your Table" />

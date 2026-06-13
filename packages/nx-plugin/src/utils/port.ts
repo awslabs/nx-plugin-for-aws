@@ -50,17 +50,20 @@ export interface AssignPortOptions {
 }
 
 /**
- * Assign a port shared across all projects created by the same generator.
- * If this project already has a port, or a sibling project created by the same
- * generator has one, reuse it; otherwise assign a fresh one. Mutates the
- * project to register the port in its metadata.ports.
+ * Assign a port shared across all projects created by the same generator (or
+ * family of generators). If this project already has a port, or a sibling
+ * project created by any of the given generator IDs has one, reuse it;
+ * otherwise assign a fresh one. Mutates the project to register the port in
+ * its metadata.ports.
  */
 export const assignSharedPort = (
   tree: Tree,
   project: ProjectConfiguration,
-  generatorId: string,
+  generatorId: string | string[],
   startPort: number,
 ): number => {
+  const generatorIds = Array.isArray(generatorId) ? generatorId : [generatorId];
+
   // Reuse this project's own port if it already has one (idempotent on re-run)
   const ownPort = getExistingProjectPort(project);
   if (ownPort !== undefined) {
@@ -74,7 +77,9 @@ export const assignSharedPort = (
       generator: (p.metadata as any)?.generator,
       port: getExistingProjectPort(p),
     }))
-    .find((p) => p.generator === generatorId && p.port !== undefined)?.port;
+    .find(
+      (p) => generatorIds.includes(p.generator) && p.port !== undefined,
+    )?.port;
 
   if (siblingPort !== undefined) {
     project.metadata ??= {};

@@ -1,33 +1,39 @@
 import {
+  BillingMode,
   CreateTableCommand,
   DescribeTableCommand,
   DynamoDBClient,
   GlobalSecondaryIndexDescription,
+  IndexStatus,
+  KeyType,
+  ProjectionType,
   ResourceInUseException,
+  TableStatus,
   UpdateTableCommand,
-} from '@aws-sdk/client-dynamodb';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+} from "@aws-sdk/client-dynamodb";
+import { AttributeType } from "aws-cdk-lib/aws-dynamodb";
+import { readFileSync } from "fs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const { globalSecondaryIndexes } = JSON.parse(
-  readFileSync(join(__dirname, '../dynamodb.config.json'), 'utf-8'),
-) as { globalSecondaryIndexes: { indexName: string; partitionKey: string; sortKey?: string }[] };
+const {
+  serveLocal: { port, tableName, region, accessKeyId, secretAccessKey, requestTimeoutMs },
+  tableConfig: { globalSecondaryIndexes },
+} = JSON.parse(readFileSync("config.json", "utf-8")) as {
+  serveLocal: { port: number; tableName: string; region: string; accessKeyId: string; secretAccessKey: string; requestTimeoutMs: number };
+  tableConfig: {
+    globalSecondaryIndexes: {
+      indexName: string;
+      partitionKey: string;
+      sortKey?: string;
+    }[];
+  };
+};
 
-const [tableName, port] = process.argv.slice(2);
-const endpoint = `http://localhost:${port}`;
-
-const REQUEST_TIMEOUT_MS = 10_000;
-const timeoutSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+const timeoutSignal = () => AbortSignal.timeout(requestTimeoutMs);
 
 const client = new DynamoDBClient({
-  endpoint,
-  region: 'us-east-1',
-  credentials: {
-    accessKeyId: 'accessKeyId',
-    secretAccessKey: 'secretAccessKey',
-  },
+  endpoint: `http://localhost:${port}`,
+  region,
+  credentials: { accessKeyId, secretAccessKey },
 });
 
 const waitForTableActive = async (
@@ -40,9 +46,9 @@ const waitForTableActive = async (
       { abortSignal: timeoutSignal() },
     );
     const allActive =
-      Table?.TableStatus === 'ACTIVE' &&
+      Table?.TableStatus === TableStatus.ACTIVE &&
       (Table?.GlobalSecondaryIndexes ?? []).every(
-        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === 'ACTIVE',
+        (g: GlobalSecondaryIndexDescription) => g.IndexStatus === IndexStatus.ACTIVE,
       );
     if (allActive) return;
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -55,12 +61,14 @@ const ensureTable = async (
   gsIs: { indexName: string; partitionKey: string; sortKey?: string }[],
 ): Promise<void> => {
   const gsiAttributeDefinitions = gsIs.flatMap((gsi) => [
-    { AttributeName: gsi.partitionKey, AttributeType: 'S' as const },
-    ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }] : []),
+    { AttributeName: gsi.partitionKey, AttributeType: AttributeType.STRING },
+    ...(gsi.sortKey
+      ? [{ AttributeName: gsi.sortKey, AttributeType: AttributeType.STRING }]
+      : []),
   ]);
   const attributeDefinitions = [
-    { AttributeName: 'pk', AttributeType: 'S' as const },
-    { AttributeName: 'sk', AttributeType: 'S' as const },
+    { AttributeName: "pk", AttributeType: AttributeType.STRING },
+    { AttributeName: "sk", AttributeType: AttributeType.STRING },
     ...gsiAttributeDefinitions.filter(
       (a, i, arr) =>
         arr.findIndex((b) => b.AttributeName === a.AttributeName) === i,
@@ -69,10 +77,12 @@ const ensureTable = async (
   const globalSecondaryIndexes = gsIs.map((gsi) => ({
     IndexName: gsi.indexName,
     KeySchema: [
-      { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
-      ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' as const }] : []),
+      { AttributeName: gsi.partitionKey, KeyType: KeyType.HASH },
+      ...(gsi.sortKey
+        ? [{ AttributeName: gsi.sortKey, KeyType: KeyType.RANGE }]
+        : []),
     ],
-    Projection: { ProjectionType: 'ALL' as const },
+    Projection: { ProjectionType: ProjectionType.ALL },
   }));
 
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -83,10 +93,10 @@ const ensureTable = async (
           TableName: tblName,
           AttributeDefinitions: attributeDefinitions,
           KeySchema: [
-            { AttributeName: 'pk', KeyType: 'HASH' },
-            { AttributeName: 'sk', KeyType: 'RANGE' },
+            { AttributeName: "pk", KeyType: KeyType.HASH },
+            { AttributeName: "sk", KeyType: KeyType.RANGE },
           ],
-          BillingMode: 'PAY_PER_REQUEST',
+          BillingMode: BillingMode.PAY_PER_REQUEST,
           ...(globalSecondaryIndexes.length > 0 && {
             GlobalSecondaryIndexes: globalSecondaryIndexes,
           }),
@@ -108,7 +118,7 @@ const ensureTable = async (
         const existingGSIs = Table?.GlobalSecondaryIndexes ?? [];
         const existingNames = new Set(
           existingGSIs.map(
-            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? '',
+            (g: GlobalSecondaryIndexDescription) => g.IndexName ?? "",
           ),
         );
         const desiredNames = new Set(gsIs.map((g) => g.indexName));
@@ -136,18 +146,35 @@ const ensureTable = async (
             new UpdateTableCommand({
               TableName: tblName,
               AttributeDefinitions: [
-                { AttributeName: gsi.partitionKey, AttributeType: 'S' },
-                ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, AttributeType: 'S' as const }] : []),
+                { AttributeName: gsi.partitionKey, AttributeType: AttributeType.STRING },
+                ...(gsi.sortKey
+                  ? [
+                      {
+                        AttributeName: gsi.sortKey,
+                        AttributeType: AttributeType.STRING,
+                      },
+                    ]
+                  : []),
               ],
               GlobalSecondaryIndexUpdates: [
                 {
                   Create: {
                     IndexName: gsi.indexName,
                     KeySchema: [
-                      { AttributeName: gsi.partitionKey, KeyType: 'HASH' },
-                      ...(gsi.sortKey ? [{ AttributeName: gsi.sortKey, KeyType: 'RANGE' }] : []),
+                      {
+                        AttributeName: gsi.partitionKey,
+                        KeyType: KeyType.HASH,
+                      },
+                      ...(gsi.sortKey
+                        ? [
+                            {
+                              AttributeName: gsi.sortKey,
+                              KeyType: KeyType.RANGE,
+                            },
+                          ]
+                        : []),
                     ],
-                    Projection: { ProjectionType: 'ALL' },
+                    Projection: { ProjectionType: ProjectionType.ALL },
                   },
                 },
               ],

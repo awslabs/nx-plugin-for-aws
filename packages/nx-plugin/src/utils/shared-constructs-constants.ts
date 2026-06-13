@@ -14,3 +14,6 @@ export const SHARED_INFRA_CONFIG_NAME = 'common-infra-config';
 export const SHARED_INFRA_CONFIG_DIR = 'common/infra-config';
 export const SHARED_SCRIPTS_NAME = 'common-scripts';
 export const SHARED_SCRIPTS_DIR = 'common/scripts';
+export const SHARED_TS_DYNAMODB_SCRIPTS_DIR = 'common/ts-dynamodb/scripts';
+export const SHARED_PY_DYNAMODB_SCRIPTS_DIR = 'common/py-dynamodb/scripts';
+export const DYNAMODB_GENERATOR_IDS = ['ts#dynamodb', 'py#dynamodb'];
