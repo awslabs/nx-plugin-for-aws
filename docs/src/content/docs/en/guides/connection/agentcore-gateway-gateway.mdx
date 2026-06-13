@@ -1,0 +1,150 @@
+---
+title: AgentCore Gateway to AgentCore Gateway
+description: Connect an AgentCore Gateway to another AgentCore Gateway
+when:
+  sourceType: agentcore-gateway
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator can register an <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> as a target of another AgentCore Gateway. This lets you compose gateways hierarchically — for example a team-level gateway aggregating several domain gateways, each of which fronts its own MCP servers.
+
+Once connected, the source Gateway aggregates the target Gateway's tools into its single MCP endpoint. Since the target Gateway already prefixes its tools with its own target names, tools surface through the source Gateway as `<gateway-target-name>___<target-name>___<tool-name>` — each gateway in the chain adds one prefix. Both gateways evaluate their own Cedar policies: the source Gateway authorizes the caller for the prefixed action, then the target Gateway authorizes the source Gateway's execution role for the inner action.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. Two <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> projects
+
+Both gateways must have `protocol: mcp` and `auth: iam` — the generator validates both. The generator also rejects connections that would create a cycle between gateways, which would otherwise recurse infinitely on `tools/list`.
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select the aggregating Gateway project as the source and the Gateway to be aggregated as the target.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator wires existing projects together rather than emitting new source files. The following files are modified:
+
+<FileTree>
+
+- packages/\<source-gateway>
+  - project.json `<source-gateway>-serve-local` gains a dependency on the target gateway's `<target-gateway>-serve-local`
+  - serve-local.ts `ATTACHED_MCP_SERVERS` updated so the local gateway aggregates the target gateway
+
+</FileTree>
+
+The source Gateway project's `<source-gateway>-serve-local` target gains a dependency on the target Gateway's `<target-gateway>-serve-local` target, so running the source Gateway locally also starts the target gateway (and, transitively, every MCP server attached to it). The target gateway is also registered in the source Gateway project's `serve-local.ts` so the local gateway aggregates its tools.
+
+## Adding the gateway target to your stack
+
+The generator **cannot** automatically wire the gateway target into your infrastructure because it doesn't know which stack or module instantiates the Gateways. Add a single call to `gateway.addGateway(targetGateway)` yourself.
+
+<Infrastructure>
+<Fragment slot="cdk">
+In the stack where you instantiate the Gateways, register the target gateway as a target of the source gateway:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const innerGateway = new InnerGateway(this, 'InnerGateway');
+const outerGateway = new OuterGateway(this, 'OuterGateway');
+
+// Register the inner gateway as a target of the outer gateway. The target
+// name defaults to the inner gateway's `gatewayName` (its class name in
+// kebab-case, e.g. `InnerGateway` -> `inner-gateway`).
+outerGateway.addGateway(innerGateway);
+```
+
+The Gateway target name (the target gateway's `gatewayName` by default) prefixes Cedar action names on the source gateway — the action format is ``AgentCore::Action::"<gatewayTargetName>___<targetName>___<toolName>"``. See the <Link path="guides/agentcore-gateway">Writing Policies section</Link>. Keep the target name short and stable; changing it later invalidates any Cedar policies that reference the old name.
+
+To override the default target name, pass `gatewayTargetName`:
+
+```ts
+outerGateway.addGateway(innerGateway, { gatewayTargetName: 'inner' });
+```
+
+The construct grants the source gateway's execution role `bedrock-agentcore:InvokeGateway` access to the target gateway, and configures the target with `iamCredentialProvider.service = 'bedrock-agentcore'` so the source gateway signs outbound calls using its own execution role. The target is created after the target gateway and all of its own targets, since AgentCore fetches the target's tools during creation.
+</Fragment>
+<Fragment slot="terraform">
+In the Terraform file where you instantiate the Gateways, wire the gateway target in:
+
+```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+module "inner_gateway" {
+  source = "../../common/terraform/src/app/gateways/inner-gateway"
+}
+
+module "outer_gateway" {
+  source              = "../../common/terraform/src/app/gateways/outer-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.inner_gateway.target_id]
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = [module.inner_gateway.gateway_arn]
+    }
+  ]
+}
+
+# Register the inner gateway as a target of the outer gateway
+resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
+  gateway_identifier = module.outer_gateway.gateway_id
+  name               = "inner-gateway"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = module.inner_gateway.gateway_url
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+The target `name` (`inner-gateway` above) prefixes Cedar action names on the outer gateway — see the <Link path="guides/agentcore-gateway">Writing Policies section</Link>. The `additional_iam_policy_statements` entry grants the outer gateway's execution role invoke access to the inner gateway, which is required both to fetch the inner gateway's tools at target creation time and to route calls at runtime. `policy_dependencies` ensures Cedar policies referencing this target's actions are created after the target has registered them.
+
+:::note[Target ordering]
+AgentCore fetches the inner gateway's tools when the `aws_bedrockagentcore_gateway_target` is created, so any targets of the inner gateway should be created first. Add them to the target's `depends_on` if they are managed in the same configuration.
+:::
+</Fragment>
+</Infrastructure>
+
+## Cedar policies across chained gateways
+
+Each gateway in the chain evaluates its own policy set:
+
+1. The **source gateway** evaluates the original caller (e.g. an agent's execution role) against the prefixed action, e.g. `AgentCore::Action::"inner-gateway___my-mcp___add"`.
+2. The **target gateway** evaluates the source gateway's execution role against the inner action, e.g. `AgentCore::Action::"my-mcp___add"`.
+
+This means a tool call through a gateway chain must be permitted at every hop. The default `permit-all.cedar` permits any caller in the same AWS account, which includes the source gateway's role; if you write narrower policies on the target gateway, remember that the principal it sees is the *source gateway's* role, not the original caller.
+
+## Local Development
+
+Running the source Gateway locally with:
+
+<NxCommands commands={["<source-gateway-name>-serve-local"]} />
+
+starts the local source gateway, the local target gateway, and every MCP server attached to either, each on its assigned local port. Tool names are prefixed at each hop exactly as deployed (`<gateway-target-name>___<target-name>___<tool-name>`), so agent prompts and Cedar action names remain consistent across local and deployed runs.
+
+:::caution[Local fidelity]
+Local development uses **local stand-in gateways** — lightweight MCP aggregators started by each Gateway project, not the AgentCore Gateway service. As a consequence, **Cedar policies are not evaluated locally** at either hop. To exercise Cedar policies, run the agent's `serve` target instead (see the <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> agent-connection guides) so the locally-running agent calls the deployed Gateway.
+:::

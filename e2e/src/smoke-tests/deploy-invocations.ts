@@ -105,6 +105,43 @@ export async function invokeAgentCoreMcp(
   }
 }
 
+/**
+ * List tools on a deployed AgentCore Gateway over SigV4 and call one,
+ * asserting the result contains the expected text. Used to exercise
+ * chained gateways (gateway -> gateway -> MCP server) directly, without
+ * an agent in front.
+ */
+export async function invokeAgentCoreGatewayTool(
+  gatewayUrl: string,
+  gatewayName: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  expected: string,
+): Promise<void> {
+  const aws = await createAwsClient('bedrock-agentcore');
+  console.log(`Testing ${gatewayName} at ${gatewayUrl}`);
+
+  const transport = new StreamableHTTPClientTransport(new URL(gatewayUrl), {
+    fetch: aws.fetch.bind(aws),
+  });
+
+  const client = new Client({ name: 'test-client', version: '1.0.0' });
+  await client.connect(transport);
+  try {
+    const { tools } = await client.listTools();
+    const names = tools.map((t) => t.name);
+    console.log(`${gatewayName} tools:`, names);
+    expect(names).toContain(toolName);
+
+    const result = await client.callTool({ name: toolName, arguments: args });
+    const resultText = JSON.stringify(result.content);
+    console.log(`${gatewayName} ${toolName} result:`, resultText);
+    expect(resultText).toContain(expected);
+  } finally {
+    await client.close();
+  }
+}
+
 export async function invokeAgentCoreAgent(
   arn: string,
   agentName: string,

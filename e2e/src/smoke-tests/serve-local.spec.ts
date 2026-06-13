@@ -344,6 +344,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive`,
         opts,
       );
+      // A second gateway fronting my-gateway, to exercise the
+      // gateway -> gateway connection (chained local gateways).
+      await runCLI(
+        `generate @aws/nx-plugin:agentcore-gateway --name=parent-gateway --no-interactive`,
+        opts,
+      );
 
       // Connections
       await runCLI(
@@ -391,6 +397,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       );
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=my-gateway --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
+        opts,
+      );
+      // parent-gateway -> my-gateway: the parent's local gateway aggregates
+      // my-gateway's (already prefixed) tools under a second prefix.
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=parent-gateway --targetProject=my-gateway --no-interactive`,
         opts,
       );
 
@@ -561,6 +573,16 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           projectRoot,
           'packages/py_project/project.json',
           'gw-py-agent-serve-local',
+        ),
+        gateway: getPortFromProjectJson(
+          projectRoot,
+          'packages/my-gateway/project.json',
+          'my-gateway-serve-local',
+        ),
+        parentGateway: getPortFromProjectJson(
+          projectRoot,
+          'packages/parent-gateway/project.json',
+          'parent-gateway-serve-local',
         ),
       };
       console.log('Ports discovered:', ports);
@@ -885,6 +907,64 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     console.log('Py Agent Gateway -> Py MCP (add) stream:', pyResult);
     expect(pyResult).toContain('8');
 
+    await stopLast();
+  });
+
+  it('AgentCore Gateway - chained local gateways (gateway -> gateway -> MCP servers)', async () => {
+    // parent-gateway fronts my-gateway, which fronts the TypeScript `my-mcp`
+    // and Python `my-py-mcp` servers. Starting the parent's serve-local boots
+    // the whole chain. Listing tools on the parent must surface my-gateway's
+    // (already prefixed) tools under a second prefix
+    // (`my-gateway___<target>___<tool>`), and calling one must route
+    // parent -> my-gateway -> the right upstream MCP server.
+    const { Client } = await import(
+      '@modelcontextprotocol/sdk/client/index.js'
+    );
+    const { StreamableHTTPClientTransport } = await import(
+      '@modelcontextprotocol/sdk/client/streamableHttp.js'
+    );
+
+    await startAndWait(
+      '@serve-local-test/parent-gateway:parent-gateway-serve-local',
+      ports.parentGateway,
+    );
+    // The chain is started in dependency order; wait for the inner gateway
+    // and MCP servers too so list/call below cannot race their startup.
+    await waitForPort(ports.gateway, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.tsMcp, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyMcp, STARTUP_TIMEOUT_MS);
+
+    const client = new Client({ name: 'e2e-test', version: '1.0.0' });
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${ports.parentGateway}/mcp`),
+      ),
+    );
+    try {
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      console.log('Parent gateway aggregated tools:', names);
+      expect(names).toContain('my-gateway___my-mcp___divide');
+      expect(names).toContain('my-gateway___my-py-mcp___add');
+
+      // TypeScript MCP server through both gateways: divide(6, 2) = 3
+      const divide = await client.callTool({
+        name: 'my-gateway___my-mcp___divide',
+        arguments: { a: 6, b: 2 },
+      });
+      console.log('Chained gateway divide result:', JSON.stringify(divide));
+      expect(JSON.stringify(divide)).toContain('3');
+
+      // Python MCP server through both gateways: add(6, 2) = 8
+      const add = await client.callTool({
+        name: 'my-gateway___my-py-mcp___add',
+        arguments: { a: 6, b: 2 },
+      });
+      console.log('Chained gateway add result:', JSON.stringify(add));
+      expect(JSON.stringify(add)).toContain('8');
+    } finally {
+      await client.close();
+    }
     await stopLast();
   });
 

@@ -187,34 +187,7 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
       cdk.Fn.split('/', cdk.Fn.join('%3A', cdk.Fn.split(':', arn))),
     );
     const endpoint = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations?qualifier=DEFAULT`;
-    // The construct id is derived from the target name so the two change
-    // together — target names are unique per gateway, and replacing a target
-    // under an unchanged name fails with AlreadyExists.
-    const target = new agentcore.CfnGatewayTarget(
-      this,
-      `Target-${props.gatewayTargetName}`,
-      {
-        gatewayIdentifier: this.gateway.gatewayId,
-        name: props.gatewayTargetName,
-        targetConfiguration: {
-          mcp: {
-            mcpServer: {
-              endpoint,
-            },
-          },
-        },
-        credentialProviderConfigurations: [
-          {
-            credentialProviderType: 'GATEWAY_IAM_ROLE',
-            credentialProvider: {
-              iamCredentialProvider: {
-                service: 'bedrock-agentcore',
-              },
-            },
-          },
-        ],
-      },
-    );
+    const target = this.addTarget(props.gatewayTargetName, endpoint);
 
     // Grant the gateway role invoke access to the target runtime before the
     // target is created — AgentCore probes the target during creation, which
@@ -252,6 +225,115 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
       probe.trigger.node.addDependency(probeGrant.policyDependable);
     }
     target.node.addDependency(probe.trigger);
+
+    return target;
+  }
+
+  /**
+   * Add another Gateway as a target of this Gateway, exposing its tools
+   * under `<targetName>___<innerTargetName>___<toolName>` names.
+   *
+   * The target name defaults to the gateway construct's `gatewayName`
+   * (its project's class name in kebab-case, e.g. `MyGateway` ->
+   * `my-gateway`). It prefixes Cedar action names and the gateway's tool
+   * names, so renaming it later is a breaking change for consumers.
+   *
+   * Both gateways evaluate their own Cedar policies: this gateway
+   * authorizes the prefixed action, then the target gateway authorizes the
+   * inner action for this gateway's role.
+   */
+  public addGateway(
+    gateway: Construct & {
+      readonly gateway: agentcore.Gateway;
+      readonly gatewayName: string;
+    },
+    props?: {
+      gatewayTargetName?: string;
+    },
+  ): agentcore.CfnGatewayTarget {
+    const target = this.addGatewayTarget({
+      gatewayTargetName: props?.gatewayTargetName ?? gateway.gatewayName,
+      // The Gateway L2 only populates gatewayUrl when created from its own
+      // props; fall back to the CloudFormation attribute otherwise.
+      gatewayUrl:
+        gateway.gateway.gatewayUrl ??
+        (gateway.gateway.node.defaultChild as agentcore.CfnGateway)
+          .attrGatewayUrl,
+      gatewayArn: gateway.gateway.gatewayArn,
+    });
+    // AgentCore fetches the target gateway's tools during target creation,
+    // so the target gateway and all of its own targets must exist first.
+    // Construct dependencies resolve at synth time, covering targets added
+    // to the target gateway after this call.
+    target.node.addDependency(gateway);
+    return target;
+  }
+
+  /**
+   * Register another Gateway's MCP endpoint as a target of this Gateway.
+   * Prefer {@link addGateway} when the construct is in scope — it also
+   * orders this gateway's target after the target gateway's own targets,
+   * so its tools are registered before they are fetched.
+   */
+  public addGatewayTarget(props: {
+    gatewayTargetName: string;
+    gatewayUrl: string;
+    gatewayArn: string;
+  }): agentcore.CfnGatewayTarget {
+    const target = this.addTarget(props.gatewayTargetName, props.gatewayUrl);
+
+    // Grant the gateway role invoke access to the target gateway before the
+    // target is created — AgentCore fetches the target's tools during
+    // creation, which fails if the permission is not yet in place.
+    const grant = this.gateway.role.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock-agentcore:InvokeGateway'],
+        resources: [props.gatewayArn],
+      }),
+    );
+    if (grant.policyDependable) {
+      target.node.addDependency(grant.policyDependable);
+    }
+
+    return target;
+  }
+
+  /**
+   * Create a Gateway target for an MCP endpoint, with outbound calls signed
+   * using this gateway's own execution role.
+   */
+  private addTarget(
+    gatewayTargetName: string,
+    endpoint: string,
+  ): agentcore.CfnGatewayTarget {
+    // The construct id is derived from the target name so the two change
+    // together — target names are unique per gateway, and replacing a target
+    // under an unchanged name fails with AlreadyExists.
+    const target = new agentcore.CfnGatewayTarget(
+      this,
+      `Target-${gatewayTargetName}`,
+      {
+        gatewayIdentifier: this.gateway.gatewayId,
+        name: gatewayTargetName,
+        targetConfiguration: {
+          mcp: {
+            mcpServer: {
+              endpoint,
+            },
+          },
+        },
+        credentialProviderConfigurations: [
+          {
+            credentialProviderType: 'GATEWAY_IAM_ROLE',
+            credentialProvider: {
+              iamCredentialProvider: {
+                service: 'bedrock-agentcore',
+              },
+            },
+          },
+        ],
+      },
+    );
 
     // Policies referencing this target's actions (e.g.
     // AgentCore::Action::"<targetName>___<tool>") only validate once the

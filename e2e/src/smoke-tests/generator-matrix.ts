@@ -244,6 +244,17 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
+  // A parent gateway fronting my-gateway, exercising the
+  // gateway -> gateway connection edge (chained gateways).
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-gateway --name=parent-gateway --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/parent-gateway --targetProject=@e2e-test/my-gateway --no-interactive`,
+    opts,
+  );
+
   // Website -> agent connections (TypeScript HTTP, TypeScript AG-UI, Python HTTP, Python AG-UI/CopilotKit)
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=agent --no-interactive`,

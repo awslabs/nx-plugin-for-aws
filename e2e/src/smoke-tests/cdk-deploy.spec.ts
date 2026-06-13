@@ -11,6 +11,7 @@ import { runCLI, tmpProjPath } from '../utils';
 import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
+  invokeAgentCoreGatewayTool,
   invokeAgentCoreMcp,
   invokeCustomAuthApi,
   invokeCustomAuthTrpcApi,
@@ -249,6 +250,19 @@ describe('smoke test - cdk-deploy', () => {
           'Use the my-mcp-server___add tool to add 6 and 2. Return just the number.',
         ),
       ).toContain('8');
+
+      // Chained gateways — the parent gateway fronts MyGateway via the
+      // gateway -> gateway connection, re-exposing its tools under a second
+      // prefix. Listing tools on the parent and calling one proves the
+      // parent -> MyGateway (SigV4 + Cedar at both hops) -> MCP server chain
+      // works end-to-end.
+      await invokeAgentCoreGatewayTool(
+        findOutput('ParentGatewayUrl'),
+        'Parent Gateway -> Gateway -> TS MCP',
+        'my-gateway___hosted-mcp-server___divide',
+        { a: 6, b: 2 },
+        '3',
+      );
 
       // Lambda functions
       await invokeLambda(findOutput('PyFunctionArn'), 'Python Function');
