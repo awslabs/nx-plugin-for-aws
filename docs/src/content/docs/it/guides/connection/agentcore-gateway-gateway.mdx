@@ -1,0 +1,150 @@
+---
+title: AgentCore Gateway a AgentCore Gateway
+description: Connetti un AgentCore Gateway a un altro AgentCore Gateway
+when:
+  sourceType: agentcore-gateway
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Il generatore `connection` può registrare un <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> come target di un altro AgentCore Gateway. Questo ti permette di comporre gateway gerarchicamente — ad esempio un gateway a livello di team che aggrega diversi gateway di dominio, ognuno dei quali si interfaccia con i propri server MCP.
+
+Una volta connesso, il Gateway sorgente aggrega gli strumenti del Gateway target nel suo singolo endpoint MCP. Poiché il Gateway target aggiunge già un prefisso ai suoi strumenti con i propri nomi di target, gli strumenti emergono attraverso il Gateway sorgente come `<gateway-target-name>___<target-name>___<tool-name>` — ogni gateway nella catena aggiunge un prefisso. Entrambi i gateway valutano le proprie policy Cedar: il Gateway sorgente autorizza il chiamante per l'azione con prefisso, quindi il Gateway target autorizza il ruolo di esecuzione del Gateway sorgente per l'azione interna.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati di avere:
+
+1. Due progetti <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>
+
+Entrambi i gateway devono avere `protocol: mcp` e `auth: iam` — il generatore valida entrambi. Il generatore rifiuta anche le connessioni che creerebbero un ciclo tra gateway, che altrimenti ricorrerebbe all'infinito su `tools/list`.
+
+## Utilizzo
+
+### Esegui il Generatore
+
+<RunGenerator generator="connection" />
+
+Seleziona il progetto Gateway aggregante come sorgente e il Gateway da aggregare come target.
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del Generatore
+
+Il generatore collega i progetti esistenti insieme piuttosto che emettere nuovi file sorgente. I seguenti file vengono modificati:
+
+<FileTree>
+
+- packages/\<source-gateway>
+  - project.json `<source-gateway>-serve-local` acquisisce una dipendenza dal `<target-gateway>-serve-local` del gateway target
+  - serve-local.ts `ATTACHED_MCP_SERVERS` aggiornato in modo che il gateway locale aggreghi il gateway target
+
+</FileTree>
+
+Il target `<source-gateway>-serve-local` del progetto Gateway sorgente acquisisce una dipendenza dal target `<target-gateway>-serve-local` del Gateway target, quindi l'esecuzione del Gateway sorgente localmente avvia anche il gateway target (e, transitivamente, ogni server MCP collegato ad esso). Il gateway target viene anche registrato nel `serve-local.ts` del progetto Gateway sorgente in modo che il gateway locale aggreghi i suoi strumenti.
+
+## Aggiungere il target gateway al tuo stack
+
+Il generatore **non può** collegare automaticamente il target gateway alla tua infrastruttura perché non sa quale stack o modulo istanzia i Gateway. Aggiungi tu stesso una singola chiamata a `gateway.addGateway(targetGateway)`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Nello stack in cui istanzi i Gateway, registra il gateway target come target del gateway sorgente:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const innerGateway = new InnerGateway(this, 'InnerGateway');
+const outerGateway = new OuterGateway(this, 'OuterGateway');
+
+// Register the inner gateway as a target of the outer gateway. The target
+// name defaults to the inner gateway's `gatewayName` (its class name in
+// kebab-case, e.g. `InnerGateway` -> `inner-gateway`).
+outerGateway.addGateway(innerGateway);
+```
+
+Il nome del target Gateway (il `gatewayName` del gateway target per impostazione predefinita) aggiunge un prefisso ai nomi delle azioni Cedar sul gateway sorgente — il formato dell'azione è ``AgentCore::Action::"<gatewayTargetName>___<targetName>___<toolName>"``. Vedi la <Link path="guides/agentcore-gateway">sezione Writing Policies</Link>. Mantieni il nome del target breve e stabile; modificarlo in seguito invalida qualsiasi policy Cedar che faccia riferimento al vecchio nome.
+
+Per sovrascrivere il nome del target predefinito, passa `gatewayTargetName`:
+
+```ts
+outerGateway.addGateway(innerGateway, { gatewayTargetName: 'inner' });
+```
+
+Il costrutto concede al ruolo di esecuzione del gateway sorgente l'accesso `bedrock-agentcore:InvokeGateway` al gateway target e configura il target con `iamCredentialProvider.service = 'bedrock-agentcore'` in modo che il gateway sorgente firmi le chiamate in uscita utilizzando il proprio ruolo di esecuzione. Il target viene creato dopo il gateway target e tutti i suoi target, poiché AgentCore recupera gli strumenti del target durante la creazione.
+</Fragment>
+<Fragment slot="terraform">
+Nel file Terraform in cui istanzi i Gateway, collega il target gateway:
+
+```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+module "inner_gateway" {
+  source = "../../common/terraform/src/app/gateways/inner-gateway"
+}
+
+module "outer_gateway" {
+  source              = "../../common/terraform/src/app/gateways/outer-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.inner_gateway.target_id]
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = [module.inner_gateway.gateway_arn]
+    }
+  ]
+}
+
+# Register the inner gateway as a target of the outer gateway
+resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
+  gateway_identifier = module.outer_gateway.gateway_id
+  name               = "inner-gateway"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = module.inner_gateway.gateway_url
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+Il `name` del target (`inner-gateway` sopra) aggiunge un prefisso ai nomi delle azioni Cedar sul gateway esterno — vedi la <Link path="guides/agentcore-gateway">sezione Writing Policies</Link>. La voce `additional_iam_policy_statements` concede al ruolo di esecuzione del gateway esterno l'accesso invoke al gateway interno, che è richiesto sia per recuperare gli strumenti del gateway interno al momento della creazione del target sia per instradare le chiamate a runtime. `policy_dependencies` garantisce che le policy Cedar che fanno riferimento alle azioni di questo target vengano create dopo che il target le ha registrate.
+
+:::note[Ordinamento dei target]
+AgentCore recupera gli strumenti del gateway interno quando viene creato `aws_bedrockagentcore_gateway_target`, quindi eventuali target del gateway interno dovrebbero essere creati per primi. Aggiungili al `depends_on` del target se sono gestiti nella stessa configurazione.
+:::
+</Fragment>
+</Infrastructure>
+
+## Policy Cedar attraverso gateway concatenati
+
+Ogni gateway nella catena valuta il proprio set di policy:
+
+1. Il **gateway sorgente** valuta il chiamante originale (ad es. il ruolo di esecuzione di un agente) rispetto all'azione con prefisso, ad es. `AgentCore::Action::"inner-gateway___my-mcp___add"`.
+2. Il **gateway target** valuta il ruolo di esecuzione del gateway sorgente rispetto all'azione interna, ad es. `AgentCore::Action::"my-mcp___add"`.
+
+Ciò significa che una chiamata di strumento attraverso una catena di gateway deve essere consentita ad ogni passaggio. Il `permit-all.cedar` predefinito consente qualsiasi chiamante nello stesso account AWS, che include il ruolo del gateway sorgente; se scrivi policy più restrittive sul gateway target, ricorda che il principale che vede è il ruolo del *gateway sorgente*, non il chiamante originale.
+
+## Sviluppo Locale
+
+Eseguendo il Gateway sorgente localmente con:
+
+<NxCommands commands={["<source-gateway-name>-serve-local"]} />
+
+avvia il gateway sorgente locale, il gateway target locale e ogni server MCP collegato a entrambi, ciascuno sulla propria porta locale assegnata. I nomi degli strumenti hanno un prefisso ad ogni passaggio esattamente come distribuito (`<gateway-target-name>___<target-name>___<tool-name>`), quindi i prompt degli agenti e i nomi delle azioni Cedar rimangono coerenti tra esecuzioni locali e distribuite.
+
+:::caution[Fedeltà locale]
+Lo sviluppo locale utilizza **gateway sostitutivi locali** — aggregatori MCP leggeri avviati da ogni progetto Gateway, non il servizio AgentCore Gateway. Di conseguenza, **le policy Cedar non vengono valutate localmente** in nessuno dei due passaggi. Per esercitare le policy Cedar, esegui invece il target `serve` dell'agente (vedi le guide di connessione agente <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) in modo che l'agente in esecuzione locale chiami il Gateway distribuito.
+:::

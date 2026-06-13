@@ -1,0 +1,150 @@
+---
+title: AgentCore Gateway から AgentCore Gateway へ
+description: AgentCore Gateway を別の AgentCore Gateway に接続する
+when:
+  sourceType: agentcore-gateway
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/agentcore-gateway">AgentCore Gateway</Link> を別の AgentCore Gateway のターゲットとして登録できます。これにより、ゲートウェイを階層的に構成できます。たとえば、チームレベルのゲートウェイが複数のドメインゲートウェイを集約し、各ドメインゲートウェイが独自の MCP サーバーをフロントするような構成が可能です。
+
+接続されると、ソースゲートウェイはターゲットゲートウェイのツールを単一の MCP エンドポイントに集約します。ターゲットゲートウェイは既に独自のターゲット名でツールにプレフィックスを付けているため、ソースゲートウェイを通じてツールは `<gateway-target-name>___<target-name>___<tool-name>` として表示されます。チェーン内の各ゲートウェイが1つのプレフィックスを追加します。両方のゲートウェイは独自の Cedar ポリシーを評価します。ソースゲートウェイはプレフィックス付きアクションに対して呼び出し元を認可し、次にターゲットゲートウェイは内部アクションに対してソースゲートウェイの実行ロールを認可します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. 2つの <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> プロジェクト
+
+両方のゲートウェイは `protocol: mcp` と `auth: iam` を持つ必要があります。ジェネレーターは両方を検証します。また、ジェネレーターはゲートウェイ間でサイクルを作成する接続を拒否します。サイクルがあると `tools/list` で無限に再帰してしまうためです。
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+集約するゲートウェイプロジェクトをソースとして選択し、集約されるゲートウェイをターゲットとして選択します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、新しいソースファイルを生成するのではなく、既存のプロジェクトを接続します。以下のファイルが変更されます：
+
+<FileTree>
+
+- packages/\<source-gateway>
+  - project.json `<source-gateway>-serve-local` がターゲットゲートウェイの `<target-gateway>-serve-local` への依存関係を獲得
+  - serve-local.ts `ATTACHED_MCP_SERVERS` が更新され、ローカルゲートウェイがターゲットゲートウェイを集約
+
+</FileTree>
+
+ソースゲートウェイプロジェクトの `<source-gateway>-serve-local` ターゲットは、ターゲットゲートウェイの `<target-gateway>-serve-local` ターゲットへの依存関係を獲得します。そのため、ソースゲートウェイをローカルで実行すると、ターゲットゲートウェイ（および推移的に、それに接続されているすべての MCP サーバー）も起動します。ターゲットゲートウェイは、ソースゲートウェイプロジェクトの `serve-local.ts` にも登録され、ローカルゲートウェイがそのツールを集約します。
+
+## スタックへのゲートウェイターゲットの追加
+
+ジェネレーターは、どのスタックやモジュールがゲートウェイをインスタンス化するかを知らないため、ゲートウェイターゲットをインフラストラクチャに自動的に接続**できません**。`gateway.addGateway(targetGateway)` の呼び出しを1つ自分で追加してください。
+
+<Infrastructure>
+<Fragment slot="cdk">
+ゲートウェイをインスタンス化するスタックで、ターゲットゲートウェイをソースゲートウェイのターゲットとして登録します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const innerGateway = new InnerGateway(this, 'InnerGateway');
+const outerGateway = new OuterGateway(this, 'OuterGateway');
+
+// 内部ゲートウェイを外部ゲートウェイのターゲットとして登録します。ターゲット
+// 名はデフォルトで内部ゲートウェイの `gatewayName`（クラス名をケバブケースに
+// 変換したもの、例：`InnerGateway` -> `inner-gateway`）になります。
+outerGateway.addGateway(innerGateway);
+```
+
+ゲートウェイターゲット名（デフォルトではターゲットゲートウェイの `gatewayName`）は、ソースゲートウェイ上の Cedar アクション名にプレフィックスを付けます。アクション形式は ``AgentCore::Action::"<gatewayTargetName>___<targetName>___<toolName>"`` です。<Link path="guides/agentcore-gateway">ポリシーの記述セクション</Link>を参照してください。ターゲット名は短く安定したものにしてください。後で変更すると、古い名前を参照する Cedar ポリシーが無効になります。
+
+デフォルトのターゲット名を上書きするには、`gatewayTargetName` を渡します：
+
+```ts
+outerGateway.addGateway(innerGateway, { gatewayTargetName: 'inner' });
+```
+
+コンストラクトは、ソースゲートウェイの実行ロールにターゲットゲートウェイへの `bedrock-agentcore:InvokeGateway` アクセスを付与し、ターゲットを `iamCredentialProvider.service = 'bedrock-agentcore'` で構成します。これにより、ソースゲートウェイは独自の実行ロールを使用してアウトバウンド呼び出しに署名します。ターゲットは、ターゲットゲートウェイとそのすべてのターゲットの後に作成されます。これは、AgentCore がターゲットの作成中にターゲットのツールを取得するためです。
+</Fragment>
+<Fragment slot="terraform">
+ゲートウェイをインスタンス化する Terraform ファイルで、ゲートウェイターゲットを接続します：
+
+```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+module "inner_gateway" {
+  source = "../../common/terraform/src/app/gateways/inner-gateway"
+}
+
+module "outer_gateway" {
+  source              = "../../common/terraform/src/app/gateways/outer-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.inner_gateway.target_id]
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = [module.inner_gateway.gateway_arn]
+    }
+  ]
+}
+
+# 内部ゲートウェイを外部ゲートウェイのターゲットとして登録
+resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
+  gateway_identifier = module.outer_gateway.gateway_id
+  name               = "inner-gateway"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = module.inner_gateway.gateway_url
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+ターゲット `name`（上記の `inner-gateway`）は、外部ゲートウェイ上の Cedar アクション名にプレフィックスを付けます。<Link path="guides/agentcore-gateway">ポリシーの記述セクション</Link>を参照してください。`additional_iam_policy_statements` エントリは、外部ゲートウェイの実行ロールに内部ゲートウェイへの呼び出しアクセスを付与します。これは、ターゲット作成時に内部ゲートウェイのツールを取得する場合と、実行時に呼び出しをルーティングする場合の両方で必要です。`policy_dependencies` は、このターゲットのアクションを参照する Cedar ポリシーが、ターゲットがそれらを登録した後に作成されることを保証します。
+
+:::note[ターゲットの順序]
+AgentCore は `aws_bedrockagentcore_gateway_target` が作成されるときに内部ゲートウェイのツールを取得するため、内部ゲートウェイのターゲットは最初に作成される必要があります。同じ構成で管理されている場合は、ターゲットの `depends_on` にそれらを追加してください。
+:::
+</Fragment>
+</Infrastructure>
+
+## チェーンされたゲートウェイ間の Cedar ポリシー
+
+チェーン内の各ゲートウェイは独自のポリシーセットを評価します：
+
+1. **ソースゲートウェイ**は、元の呼び出し元（例：エージェントの実行ロール）をプレフィックス付きアクションに対して評価します。例：`AgentCore::Action::"inner-gateway___my-mcp___add"`
+2. **ターゲットゲートウェイ**は、ソースゲートウェイの実行ロールを内部アクションに対して評価します。例：`AgentCore::Action::"my-mcp___add"`
+
+これは、ゲートウェイチェーンを通じたツール呼び出しが、すべてのホップで許可される必要があることを意味します。デフォルトの `permit-all.cedar` は同じ AWS アカウント内の任意の呼び出し元を許可し、これにはソースゲートウェイのロールが含まれます。ターゲットゲートウェイでより狭いポリシーを記述する場合は、ターゲットゲートウェイが見るプリンシパルは元の呼び出し元ではなく、*ソースゲートウェイの*ロールであることを忘れないでください。
+
+## ローカル開発
+
+ソースゲートウェイをローカルで実行するには：
+
+<NxCommands commands={["<source-gateway-name>-serve-local"]} />
+
+これにより、ローカルソースゲートウェイ、ローカルターゲットゲートウェイ、およびいずれかに接続されているすべての MCP サーバーが、それぞれ割り当てられたローカルポートで起動します。ツール名は、デプロイされた場合とまったく同じように各ホップでプレフィックスが付けられます（`<gateway-target-name>___<target-name>___<tool-name>`）。そのため、エージェントのプロンプトと Cedar アクション名は、ローカル実行とデプロイ実行の間で一貫性が保たれます。
+
+:::caution[ローカルの忠実性]
+ローカル開発では**ローカルスタンドインゲートウェイ**を使用します。これは、各ゲートウェイプロジェクトによって起動される軽量な MCP アグリゲーターであり、AgentCore Gateway サービスではありません。その結果、**Cedar ポリシーはどちらのホップでもローカルで評価されません**。Cedar ポリシーを実行するには、代わりにエージェントの `serve` ターゲットを実行してください（<Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> エージェント接続ガイドを参照）。これにより、ローカルで実行されているエージェントがデプロイされたゲートウェイを呼び出します。
+:::
