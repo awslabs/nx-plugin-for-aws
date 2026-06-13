@@ -1,0 +1,171 @@
+---
+title: DynamoDB 테이블 배포하기
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+DynamoDB 생성기는 선택한 `iac`에 따라 CDK 또는 Terraform 인프라를 생성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 구성은 `common/constructs`에 생성됩니다. 사용 예시:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+다음과 같은 DynamoDB 테이블을 프로비저닝합니다:
+- `pk` (파티션 키)와 `sk` (정렬 키), 둘 다 `String` 타입
+- `config.json`에 정의된 글로벌 보조 인덱스
+- 온디맨드 (`PAY_PER_REQUEST`) 요금제
+- 자동 키 로테이션이 활성화된 고객 관리형 KMS 암호화
+- 특정 시점 복구 활성화
+- 삭제 보호 활성화
+- AWS AppConfig의 `dynamodb` 네임스페이스 아래 Runtime Config에 등록된 테이블 이름
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 `common/terraform`에 생성됩니다. 사용 예시:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+다음과 같은 DynamoDB 테이블을 프로비저닝합니다:
+- `pk` (파티션 키)와 `sk` (정렬 키), 둘 다 `String` 타입
+- `config.json`에 정의된 글로벌 보조 인덱스
+- 온디맨드 (`PAY_PER_REQUEST`) 요금제
+- 자동 키 로테이션이 활성화된 고객 관리형 KMS 암호화
+- 특정 시점 복구 활성화
+- 삭제 보호 활성화
+- Runtime Config에 등록된 테이블 이름
+</Fragment>
+</Infrastructure>
+
+### 액세스 권한 부여
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+### 삭제 보호
+
+실수로 테이블이 삭제되는 것을 방지하기 위해 삭제 보호가 기본적으로 활성화되어 있습니다.
+
+#### 삭제 보호 비활성화
+
+단기 개발 또는 프리뷰 스택과 같이 테이블 삭제가 예상되는 환경에서는 비활성화하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 요금제 모드
+
+테이블은 기본적으로 온디맨드 (`PAY_PER_REQUEST`) 요금제를 사용합니다. 예측 가능한 고처리량 워크로드의 경우 프로비저닝된 용량으로 전환하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 특정 시점 복구
+
+[특정 시점 복구](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)는 기본적으로 활성화되어 있으며, 지난 35일 중 임의의 시점으로 테이블을 복원할 수 있습니다.
+
+#### 특정 시점 복구 비활성화
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 암호화 키 로테이션
+
+테이블을 암호화하는 데 사용되는 KMS 키는 기본적으로 자동 키 로테이션이 활성화되어 있습니다. 보안 정책에서 외부적으로 로테이션을 관리하는 경우 비활성화하세요.
+
+#### 암호화 키 로테이션 비활성화
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

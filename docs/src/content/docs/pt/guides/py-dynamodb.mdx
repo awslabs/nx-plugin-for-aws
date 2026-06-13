@@ -1,0 +1,162 @@
+---
+title: py#dynamodb
+description: Criar um projeto Python DynamoDB
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+Este gerador cria um novo projeto Python apoiado pelo [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), usando [PynamoDB](https://pynamodb.readthedocs.io/) para modelagem de entidades. Ele gera o código da aplicação e a infraestrutura necessária para provisionar e gerenciar uma tabela DynamoDB usando AWS CDK ou Terraform, com suporte a design de tabela única e desenvolvimento local integrado via DynamoDB Local.
+
+## Uso
+
+### Gerar um Projeto DynamoDB
+
+<RunGenerator generator="py#dynamodb" />
+
+### Opções
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## Saída do Gerador
+
+O gerador cria a seguinte estrutura de projeto no diretório `<directory>/<name>`:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py Package exports
+    - client.py DynamoDB client and table name resolution
+    - entities
+      - base.py Base PynamoDB model with GSI declarations
+      - example.py Example entity definition
+      - \_\_init\_\_.py Entity exports
+  - config.json Table configuration including GSI definitions and local development settings
+  - project.json Project configuration and build targets
+</FileTree>
+
+Os scripts de desenvolvimento local são compartilhados entre todos os projetos Python DynamoDB e gerados uma vez em:
+
+<FileTree>
+  - packages/common/py-dynamodb/scripts
+    - create_local_table.py Creates the DynamoDB table in the local DynamoDB Local instance
+    - pull_image.py Pulls the DynamoDB Local image
+    - start_container.py Starts the DynamoDB Local container
+</FileTree>
+
+### Infraestrutura
+
+<Snippet name="dynamodb/infrastructure" />
+
+## Desenvolvimento Local
+
+### Iniciando o DynamoDB Local
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### Modelagem de Dados
+
+O projeto gerado usa [PynamoDB](https://pynamodb.readthedocs.io/) para modelagem de entidades. Todas as entidades herdam do `BaseModel` gerado, que usa [suporte a polimorfismo do PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) para armazenar múltiplos tipos de entidades em uma única tabela, seguindo o [design de tabela única do DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
+
+Adicione ou atualize arquivos de entidade em `<name>/entities/`, usando a entidade de exemplo gerada como ponto de partida:
+
+```python title="packages/my_table/my_table/entities/example.py"
+from datetime import UTC, datetime
+from typing import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+Para mais detalhes, consulte o [tutorial do PynamoDB](https://pynamodb.readthedocs.io/en/stable/tutorial.html).
+
+### Usando o Cliente DynamoDB
+
+O `client.py` gerado exporta dois utilitários principais:
+
+- `is_local()` — retorna `True` quando `SERVE_LOCAL=true`, usado para alternar entre comportamento local e AWS.
+- `get_table_name()` — retorna o nome da tabela DynamoDB. Quando `SERVE_LOCAL=true`, lê o nome da tabela de `serveLocal.tableName` em `config.json`; caso contrário, busca o nome do AWS AppConfig usando a variável de ambiente `RUNTIME_CONFIG_APP_ID` e o armazena em cache para chamadas subsequentes.
+
+`BaseModel` em `entities/base.py` usa ambos para configurar o PynamoDB automaticamente:
+
+- **Conexão** — `BaseModel.Meta` define `host`, `region`, `aws_access_key_id` e `aws_secret_access_key` de `config.json` quando `is_local()` é `True`, apontando o PynamoDB para a instância local do DynamoDB. Na AWS, estes são deixados indefinidos para que o PynamoDB use a cadeia de credenciais padrão.
+- **Nome da tabela** — `BaseModel._get_connection()` chama `get_table_name()` antes de cada operação, para que a tabela correta seja resolvida em tempo de execução sem qualquer configuração manual.
+
+### Parando o DynamoDB Local
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## Adicionar/Remover Índices Secundários Globais
+
+GSIs são definidos em `config.json` na raiz do projeto sob a chave `tableConfig.globalSecondaryIndexes`. Adicione uma entrada para cada GSI e, em seguida, reflita a mudança em `BaseModel` adicionando ou removendo a classe `GlobalSecondaryIndex` correspondente e os atributos em `<name>/entities/base.py`:
+
+<Snippet name="dynamodb/gsi-config" parentHeading="Adicionar/Remover Índices Secundários Globais" />
+
+## Conectando à Tabela
+
+Em qualquer projeto Python, adicione o pacote DynamoDB como uma dependência do workspace e importe as classes de entidade diretamente:
+
+```python
+from my_scope.my_table import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[Configuração de runtime]
+Ao executar na AWS, `get_table_name()` busca o nome da tabela do AWS AppConfig usando a variável de ambiente `RUNTIME_CONFIG_APP_ID`. Projetos construídos com este plugin já têm esta variável configurada automaticamente. Para outros projetos Python, certifique-se de que `RUNTIME_CONFIG_APP_ID` esteja definido no ambiente de runtime com o ID da aplicação AppConfig provisionado pela sua infraestrutura. Para mais informações, consulte o <Link path="guides/runtime-config">guia de Configuração de Runtime</Link>.
+:::
+
+## Implantando sua Tabela
+
+<Snippet name="dynamodb/deploying-table" parentHeading="Implantando sua Tabela" />

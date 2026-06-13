@@ -1,0 +1,162 @@
+---
+title: py#dynamodb
+description: 创建一个 Python DynamoDB 项目
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+此生成器创建一个由 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) 支持的新 Python 项目，使用 [PynamoDB](https://pynamodb.readthedocs.io/) 进行实体建模。它生成应用程序代码和基础设施，用于使用 AWS CDK 或 Terraform 配置和管理 DynamoDB 表，支持单表设计并通过 DynamoDB Local 内置本地开发功能。
+
+## 用法
+
+### 生成 DynamoDB 项目
+
+<RunGenerator generator="py#dynamodb" />
+
+### 选项
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## 生成器输出
+
+生成器在 `<directory>/<name>` 目录中创建以下项目结构：
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py 包导出
+    - client.py DynamoDB 客户端和表名解析
+    - entities
+      - base.py 带有 GSI 声明的基础 PynamoDB 模型
+      - example.py 示例实体定义
+      - \_\_init\_\_.py 实体导出
+  - config.json 表配置，包括 GSI 定义和本地开发设置
+  - project.json 项目配置和构建目标
+</FileTree>
+
+本地开发脚本在所有 Python DynamoDB 项目之间共享，并一次性生成到：
+
+<FileTree>
+  - packages/common/py-dynamodb/scripts
+    - create_local_table.py 在本地 DynamoDB Local 实例中创建 DynamoDB 表
+    - pull_image.py 拉取 DynamoDB Local 镜像
+    - start_container.py 启动 DynamoDB Local 容器
+</FileTree>
+
+### 基础设施
+
+<Snippet name="dynamodb/infrastructure" />
+
+## 本地开发
+
+### 启动本地 DynamoDB
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### 数据建模
+
+生成的项目使用 [PynamoDB](https://pynamodb.readthedocs.io/) 进行实体建模。所有实体都继承自生成的 `BaseModel`，它使用 [PynamoDB 的多态支持](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) 在单个表中存储多种实体类型，遵循 [DynamoDB 的单表设计](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)。
+
+在 `<name>/entities/` 下添加或更新实体文件，使用生成的示例实体作为起点：
+
+```python title="packages/my_table/my_table/entities/example.py"
+from datetime import UTC, datetime
+from typing import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+有关更多详细信息，请参阅 [PynamoDB 教程](https://pynamodb.readthedocs.io/en/stable/tutorial.html)。
+
+### 使用 DynamoDB 客户端
+
+生成的 `client.py` 导出两个关键实用工具：
+
+- `is_local()` — 当 `SERVE_LOCAL=true` 时返回 `True`，用于在本地和 AWS 行为之间切换。
+- `get_table_name()` — 返回 DynamoDB 表名。当 `SERVE_LOCAL=true` 时，从 `config.json` 中的 `serveLocal.tableName` 读取表名；否则使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 获取名称，并缓存以供后续调用使用。
+
+`entities/base.py` 中的 `BaseModel` 使用这两者自动配置 PynamoDB：
+
+- **连接** — 当 `is_local()` 为 `True` 时，`BaseModel.Meta` 从 `config.json` 设置 `host`、`region`、`aws_access_key_id` 和 `aws_secret_access_key`，将 PynamoDB 指向本地 DynamoDB 实例。在 AWS 中，这些保持未设置状态，因此 PynamoDB 使用默认凭证链。
+- **表名** — `BaseModel._get_connection()` 在每次操作之前调用 `get_table_name()`，因此在运行时解析正确的表，无需任何手动配置。
+
+### 停止本地 DynamoDB
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## 添加/删除全局二级索引
+
+GSI 在项目根目录的 `config.json` 中的 `tableConfig.globalSecondaryIndexes` 键下定义。为每个 GSI 添加一个条目，然后通过在 `<name>/entities/base.py` 中添加或删除相应的 `GlobalSecondaryIndex` 类和属性来反映 `BaseModel` 中的更改：
+
+<Snippet name="dynamodb/gsi-config" parentHeading="添加/删除全局二级索引" />
+
+## 连接到表
+
+在任何 Python 项目中，将 DynamoDB 包添加为工作区依赖项并直接导入实体类：
+
+```python
+from my_scope.my_table import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[运行时配置]
+在 AWS 中运行时，`get_table_name()` 使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 获取表名。使用此插件构建的项目已自动配置此变量。对于其他 Python 项目，请确保在运行时环境中设置 `RUNTIME_CONFIG_APP_ID`，其值为基础设施配置的 AppConfig 应用程序 ID。有关更多信息，请参阅<Link path="guides/runtime-config">运行时配置指南</Link>。
+:::
+
+## 部署您的表
+
+<Snippet name="dynamodb/deploying-table" parentHeading="部署您的表" />

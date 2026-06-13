@@ -1,0 +1,171 @@
+---
+title: DynamoDBテーブルのデプロイ
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+DynamoDBジェネレーターは、選択した`iac`に基づいてCDKまたはTerraformインフラストラクチャを作成します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDKコンストラクトは`common/constructs`に作成されます。使用例：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+これにより、以下の設定でDynamoDBテーブルがプロビジョニングされます：
+- `pk`（パーティションキー）と`sk`（ソートキー）、両方とも`String`型
+- `config.json`で定義されたグローバルセカンダリインデックス
+- オンデマンド（`PAY_PER_REQUEST`）課金
+- 自動キーローテーション付きのカスタマー管理KMS暗号化
+- ポイントインタイムリカバリが有効
+- 削除保護が有効
+- AWS AppConfigの`dynamodb`名前空間下のランタイム設定にテーブル名が登録
+</Fragment>
+<Fragment slot="terraform">
+Terraformモジュールは`common/terraform`に作成されます。使用例：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+これにより、以下の設定でDynamoDBテーブルがプロビジョニングされます：
+- `pk`（パーティションキー）と`sk`（ソートキー）、両方とも`String`型
+- `config.json`で定義されたグローバルセカンダリインデックス
+- オンデマンド（`PAY_PER_REQUEST`）課金
+- 自動キーローテーション付きのカスタマー管理KMS暗号化
+- ポイントインタイムリカバリが有効
+- 削除保護が有効
+- ランタイム設定にテーブル名が登録
+</Fragment>
+</Infrastructure>
+
+### アクセス権限の付与
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+### 削除保護
+
+削除保護はデフォルトで有効になっており、誤ってテーブルを削除することを防ぎます。
+
+#### 削除保護の無効化
+
+短期間の開発環境やプレビュースタックなど、テーブルの削除が想定される環境では無効にします。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 課金モード
+
+テーブルはデフォルトでオンデマンド（`PAY_PER_REQUEST`）課金になります。予測可能で高スループットのワークロードには、プロビジョニングされたキャパシティに切り替えます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### ポイントインタイムリカバリ
+
+[ポイントインタイムリカバリ](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)はデフォルトで有効になっており、過去35日間の任意の時点にテーブルを復元できます。
+
+#### ポイントインタイムリカバリの無効化
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 暗号化キーのローテーション
+
+テーブルの暗号化に使用されるKMSキーは、デフォルトで自動キーローテーションが有効になっています。セキュリティポリシーで外部的にローテーションを管理している場合は無効にします。
+
+#### 暗号化キーのローテーションの無効化
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

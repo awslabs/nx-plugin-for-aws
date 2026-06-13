@@ -1,0 +1,171 @@
+---
+title: Distribuzione della tua tabella DynamoDB
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Il generatore DynamoDB crea infrastruttura CDK o Terraform in base al tuo `iac` selezionato.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Il costrutto CDK viene creato in `common/constructs`. Esempio di utilizzo:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+Questo esegue il provisioning di una tabella DynamoDB con:
+- `pk` (partition key) e `sk` (sort key), entrambe di tipo `String`
+- Global Secondary Indexes come definiti in `config.json`
+- Fatturazione on-demand (`PAY_PER_REQUEST`)
+- Crittografia KMS gestita dal cliente con rotazione automatica delle chiavi
+- Point-in-time recovery abilitato
+- Protezione dalla cancellazione abilitata
+- Nome della tabella registrato in Runtime Config sotto il namespace `dynamodb` in AWS AppConfig
+</Fragment>
+<Fragment slot="terraform">
+Il modulo Terraform viene creato in `common/terraform`. Esempio di utilizzo:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+Questo esegue il provisioning di una tabella DynamoDB con:
+- `pk` (partition key) e `sk` (sort key), entrambe di tipo `String`
+- Global Secondary Indexes come definiti in `config.json`
+- Fatturazione on-demand (`PAY_PER_REQUEST`)
+- Crittografia KMS gestita dal cliente con rotazione automatica delle chiavi
+- Point-in-time recovery abilitato
+- Protezione dalla cancellazione abilitata
+- Nome della tabella registrato in Runtime Config
+</Fragment>
+</Infrastructure>
+
+### Concessione dell'accesso
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+### Protezione dalla cancellazione
+
+La protezione dalla cancellazione è abilitata per impostazione predefinita per prevenire la cancellazione accidentale della tabella.
+
+#### Disabilitare la protezione dalla cancellazione
+
+Disabilitala per ambienti in cui è prevista la cancellazione della tabella, come stack di sviluppo o preview di breve durata.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Modalità di fatturazione
+
+La tabella utilizza per impostazione predefinita la fatturazione on-demand (`PAY_PER_REQUEST`). Passa alla capacità con provisioning per carichi di lavoro prevedibili ad alto throughput.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Point-in-time Recovery
+
+Il [Point-in-time recovery](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) è abilitato per impostazione predefinita, consentendoti di ripristinare la tabella a qualsiasi punto negli ultimi 35 giorni.
+
+#### Disabilitare il Point-in-time Recovery
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Rotazione della chiave di crittografia
+
+La chiave KMS utilizzata per crittografare la tabella ha la rotazione automatica delle chiavi abilitata per impostazione predefinita. Disabilitala se la tua policy di sicurezza gestisce la rotazione esternamente.
+
+#### Disabilitare la rotazione della chiave di crittografia
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

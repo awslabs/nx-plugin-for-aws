@@ -1,0 +1,162 @@
+---
+title: py#dynamodb
+description: Tạo dự án Python DynamoDB
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator này tạo một dự án Python mới được hỗ trợ bởi [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), sử dụng [PynamoDB](https://pynamodb.readthedocs.io/) để mô hình hóa thực thể. Nó tạo ra mã ứng dụng và cơ sở hạ tầng cần thiết để cung cấp và quản lý bảng DynamoDB bằng AWS CDK hoặc Terraform, với hỗ trợ thiết kế bảng đơn và phát triển cục bộ tích hợp sẵn thông qua DynamoDB Local.
+
+## Cách sử dụng
+
+### Tạo Dự án DynamoDB
+
+<RunGenerator generator="py#dynamodb" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## Kết quả Generator
+
+Generator tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py Package exports
+    - client.py DynamoDB client and table name resolution
+    - entities
+      - base.py Base PynamoDB model with GSI declarations
+      - example.py Example entity definition
+      - \_\_init\_\_.py Entity exports
+  - config.json Table configuration including GSI definitions and local development settings
+  - project.json Project configuration and build targets
+</FileTree>
+
+Các script phát triển cục bộ được chia sẻ trên tất cả các dự án Python DynamoDB và được tạo một lần vào:
+
+<FileTree>
+  - packages/common/py-dynamodb/scripts
+    - create_local_table.py Creates the DynamoDB table in the local DynamoDB Local instance
+    - pull_image.py Pulls the DynamoDB Local image
+    - start_container.py Starts the DynamoDB Local container
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="dynamodb/infrastructure" />
+
+## Phát triển Cục bộ
+
+### Khởi động DynamoDB Cục bộ
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### Mô hình hóa Dữ liệu
+
+Dự án được tạo sử dụng [PynamoDB](https://pynamodb.readthedocs.io/) để mô hình hóa thực thể. Tất cả các thực thể kế thừa từ `BaseModel` được tạo, sử dụng [hỗ trợ đa hình của PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) để lưu trữ nhiều loại thực thể trong một bảng duy nhất, tuân theo [thiết kế bảng đơn của DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
+
+Thêm hoặc cập nhật các tệp thực thể trong `<name>/entities/`, sử dụng thực thể ví dụ được tạo làm điểm khởi đầu:
+
+```python title="packages/my_table/my_table/entities/example.py"
+from datetime import UTC, datetime
+from typing import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+Để biết thêm chi tiết, xem [hướng dẫn PynamoDB](https://pynamodb.readthedocs.io/en/stable/tutorial.html).
+
+### Sử dụng DynamoDB Client
+
+Tệp `client.py` được tạo xuất hai tiện ích chính:
+
+- `is_local()` — trả về `True` khi `SERVE_LOCAL=true`, được sử dụng để chuyển đổi giữa hành vi cục bộ và AWS.
+- `get_table_name()` — trả về tên bảng DynamoDB. Khi `SERVE_LOCAL=true`, đọc tên bảng từ `serveLocal.tableName` trong `config.json`; nếu không, lấy tên từ AWS AppConfig bằng biến môi trường `RUNTIME_CONFIG_APP_ID` và lưu vào bộ nhớ cache cho các lần gọi tiếp theo.
+
+`BaseModel` trong `entities/base.py` sử dụng cả hai để cấu hình PynamoDB tự động:
+
+- **Kết nối** — `BaseModel.Meta` đặt `host`, `region`, `aws_access_key_id`, và `aws_secret_access_key` từ `config.json` khi `is_local()` là `True`, trỏ PynamoDB đến phiên bản DynamoDB cục bộ. Trong AWS, các giá trị này không được đặt để PynamoDB sử dụng chuỗi thông tin xác thực mặc định.
+- **Tên bảng** — `BaseModel._get_connection()` gọi `get_table_name()` trước mỗi thao tác, do đó bảng chính xác được phân giải tại thời điểm chạy mà không cần cấu hình thủ công.
+
+### Dừng DynamoDB Cục bộ
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## Thêm/Xóa Global Secondary Indexes
+
+GSI được định nghĩa trong `config.json` tại thư mục gốc dự án dưới khóa `tableConfig.globalSecondaryIndexes`. Thêm một mục cho mỗi GSI, sau đó phản ánh thay đổi trong `BaseModel` bằng cách thêm hoặc xóa lớp `GlobalSecondaryIndex` và các thuộc tính tương ứng trong `<name>/entities/base.py`:
+
+<Snippet name="dynamodb/gsi-config" parentHeading="Thêm/Xóa Global Secondary Indexes" />
+
+## Kết nối đến Bảng
+
+Trong bất kỳ dự án Python nào, thêm gói DynamoDB làm phụ thuộc workspace và import trực tiếp các lớp thực thể:
+
+```python
+from my_scope.my_table import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[Cấu hình runtime]
+Khi chạy trong AWS, `get_table_name()` lấy tên bảng từ AWS AppConfig bằng biến môi trường `RUNTIME_CONFIG_APP_ID`. Các dự án được xây dựng với plugin này đã có biến này được cấu hình tự động. Đối với các dự án Python khác, đảm bảo `RUNTIME_CONFIG_APP_ID` được đặt trong môi trường runtime với ID ứng dụng AppConfig được cung cấp bởi cơ sở hạ tầng của bạn. Để biết thêm thông tin, xem <Link path="guides/runtime-config">hướng dẫn Cấu hình Runtime</Link>.
+:::
+
+## Triển khai Bảng của bạn
+
+<Snippet name="dynamodb/deploying-table" parentHeading="Triển khai Bảng của bạn" />

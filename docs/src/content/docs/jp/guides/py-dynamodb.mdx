@@ -1,0 +1,162 @@
+---
+title: py#dynamodb
+description: Python DynamoDB プロジェクトを作成する
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+このジェネレーターは、[Amazon DynamoDB](https://aws.amazon.com/dynamodb/) をバックエンドとする新しい Python プロジェクトを作成します。エンティティモデリングには [PynamoDB](https://pynamodb.readthedocs.io/) を使用します。AWS CDK または Terraform を使用して DynamoDB テーブルをプロビジョニングおよび管理するために必要なアプリケーションコードとインフラストラクチャを生成し、シングルテーブル設計のサポートと DynamoDB Local による組み込みのローカル開発環境を提供します。
+
+## 使用方法
+
+### DynamoDB プロジェクトを生成する
+
+<RunGenerator generator="py#dynamodb" />
+
+### オプション
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## ジェネレーターの出力
+
+ジェネレーターは `<directory>/<name>` ディレクトリに以下のプロジェクト構造を作成します：
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py パッケージのエクスポート
+    - client.py DynamoDB クライアントとテーブル名の解決
+    - entities
+      - base.py GSI 宣言を含むベース PynamoDB モデル
+      - example.py エンティティ定義の例
+      - \_\_init\_\_.py エンティティのエクスポート
+  - config.json GSI 定義とローカル開発設定を含むテーブル設定
+  - project.json プロジェクト設定とビルドターゲット
+</FileTree>
+
+ローカル開発スクリプトはすべての Python DynamoDB プロジェクト間で共有され、一度だけ以下の場所に生成されます：
+
+<FileTree>
+  - packages/common/py-dynamodb/scripts
+    - create_local_table.py ローカル DynamoDB Local インスタンスに DynamoDB テーブルを作成する
+    - pull_image.py DynamoDB Local イメージをプルする
+    - start_container.py DynamoDB Local コンテナを起動する
+</FileTree>
+
+### インフラストラクチャ
+
+<Snippet name="dynamodb/infrastructure" />
+
+## ローカル開発
+
+### ローカル DynamoDB の起動
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### データモデリング
+
+生成されたプロジェクトは、エンティティモデリングに [PynamoDB](https://pynamodb.readthedocs.io/) を使用します。すべてのエンティティは生成された `BaseModel` を継承し、[PynamoDB のポリモーフィズムサポート](https://pynamodb.readthedocs.io/en/stable/polymorphism.html)を使用して複数のエンティティタイプを単一のテーブルに格納します。これは [DynamoDB のシングルテーブル設計](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)に従っています。
+
+生成されたサンプルエンティティを出発点として、`<name>/entities/` 配下にエンティティファイルを追加または更新します：
+
+```python title="packages/my_table/my_table/entities/example.py"
+from datetime import UTC, datetime
+from typing import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+詳細については、[PynamoDB チュートリアル](https://pynamodb.readthedocs.io/en/stable/tutorial.html)を参照してください。
+
+### DynamoDB クライアントの使用
+
+生成された `client.py` は 2 つの主要なユーティリティをエクスポートします：
+
+- `is_local()` — `SERVE_LOCAL=true` の場合に `True` を返し、ローカルと AWS の動作を切り替えるために使用されます。
+- `get_table_name()` — DynamoDB テーブル名を返します。`SERVE_LOCAL=true` の場合、`config.json` の `serveLocal.tableName` からテーブル名を読み取ります。それ以外の場合は、`RUNTIME_CONFIG_APP_ID` 環境変数を使用して AWS AppConfig から名前を取得し、後続の呼び出しのためにキャッシュします。
+
+`entities/base.py` の `BaseModel` は両方を使用して PynamoDB を自動的に設定します：
+
+- **接続** — `BaseModel.Meta` は、`is_local()` が `True` の場合、`config.json` から `host`、`region`、`aws_access_key_id`、`aws_secret_access_key` を設定し、PynamoDB をローカル DynamoDB インスタンスに向けます。AWS では、これらは未設定のままにされ、PynamoDB はデフォルトの認証情報チェーンを使用します。
+- **テーブル名** — `BaseModel._get_connection()` は各操作の前に `get_table_name()` を呼び出すため、手動設定なしで実行時に正しいテーブルが解決されます。
+
+### ローカル DynamoDB の停止
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## グローバルセカンダリインデックスの追加/削除
+
+GSI は、プロジェクトルートの `config.json` の `tableConfig.globalSecondaryIndexes` キーで定義されます。各 GSI のエントリを追加し、`<name>/entities/base.py` の `BaseModel` に対応する `GlobalSecondaryIndex` クラスと属性を追加または削除して変更を反映します：
+
+<Snippet name="dynamodb/gsi-config" parentHeading="グローバルセカンダリインデックスの追加/削除" />
+
+## テーブルへの接続
+
+任意の Python プロジェクトで、DynamoDB パッケージをワークスペースの依存関係として追加し、エンティティクラスを直接インポートします：
+
+```python
+from my_scope.my_table import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[ランタイム設定]
+AWS で実行する場合、`get_table_name()` は `RUNTIME_CONFIG_APP_ID` 環境変数を使用して AWS AppConfig からテーブル名を取得します。このプラグインでビルドされたプロジェクトには、この変数が自動的に設定されています。他の Python プロジェクトの場合は、インフラストラクチャによってプロビジョニングされた AppConfig アプリケーション ID を使用して、ランタイム環境で `RUNTIME_CONFIG_APP_ID` が設定されていることを確認してください。詳細については、<Link path="guides/runtime-config">ランタイム設定ガイド</Link>を参照してください。
+:::
+
+## テーブルのデプロイ
+
+<Snippet name="dynamodb/deploying-table" parentHeading="テーブルのデプロイ" />
