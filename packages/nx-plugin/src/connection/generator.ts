@@ -13,6 +13,10 @@ import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator'
 import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator';
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator';
 import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator';
+import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/generator';
+import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator';
+import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator';
+import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
@@ -52,6 +56,7 @@ const SUPPORTED_PROJECT_TYPES = [
   'smithy',
   'ts#rdb',
   'ts#dynamodb',
+  'py#dynamodb',
   'agentcore-gateway',
 ] as const;
 
@@ -105,6 +110,9 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'py#agent', target: 'agentcore-gateway' },
   { source: 'agentcore-gateway', target: 'ts#mcp-server' },
   { source: 'agentcore-gateway', target: 'py#mcp-server' },
+  { source: 'py#fast-api', target: 'py#dynamodb' },
+  { source: 'py#agent', target: 'py#dynamodb' },
+  { source: 'py#mcp-server', target: 'py#dynamodb' },
 ] as const satisfies readonly Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -186,6 +194,12 @@ const CONNECTION_GENERATORS = {
     agentcoreGatewayMcpConnectionGenerator(tree, options),
   'agentcore-gateway -> py#mcp-server': (tree, options) =>
     agentcoreGatewayMcpConnectionGenerator(tree, options),
+  'py#fast-api -> py#dynamodb': (tree, options) =>
+    pyDynamoDBFastApiConnectionGenerator(tree, options),
+  'py#agent -> py#dynamodb': (tree, options) =>
+    pyDynamoDBAgentConnectionGenerator(tree, options),
+  'py#mcp-server -> py#dynamodb': (tree, options) =>
+    pyDynamoDBMcpServerConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>
@@ -448,8 +462,12 @@ const determineProjectTypeFromConfig = async (
     return 'ts#rdb';
   }
 
-  if (isDynamoDB(projectConfiguration)) {
+  if (isTsDynamoDB(projectConfiguration)) {
     return 'ts#dynamodb';
+  }
+
+  if (isPyDynamoDB(projectConfiguration)) {
+    return 'py#dynamodb';
   }
 
   if (isAgentCoreGateway(projectConfiguration)) {
@@ -560,9 +578,13 @@ const isRdb = (projectConfiguration: ProjectConfiguration): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===
   TS_RDB_GENERATOR_INFO.id;
 
-const isDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
+const isTsDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===
   TS_DYNAMODB_GENERATOR_INFO.id;
+
+const isPyDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  PY_DYNAMODB_GENERATOR_INFO.id;
 
 const isAgentCoreGateway = (
   projectConfiguration: ProjectConfiguration,

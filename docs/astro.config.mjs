@@ -637,6 +637,18 @@ export default defineConfig({
                   link: '/guides/connection/ts-mcp-server-dynamodb',
                 },
                 {
+                  label: 'FastAPI → DynamoDB',
+                  link: '/guides/connection/py-fast-api-dynamodb',
+                },
+                {
+                  label: 'Python Agent → DynamoDB',
+                  link: '/guides/connection/py-agent-dynamodb',
+                },
+                {
+                  label: 'Python MCP Server → DynamoDB',
+                  link: '/guides/connection/py-mcp-server-dynamodb',
+                },
+                {
                   label: 'AgentCore Gateway → MCP Server',
                   link: '/guides/connection/agentcore-gateway-mcp',
                 },

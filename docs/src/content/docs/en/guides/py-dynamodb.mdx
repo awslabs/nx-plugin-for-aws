@@ -59,7 +59,7 @@ The local development scripts are shared across all Python DynamoDB projects and
 
 ### Data Modelling
 
-The generated project uses [PynamoDB](https://pynamodb.readthedocs.io/) for entity modelling on a single DynamoDB table. All entities inherit from the generated `BaseModel`, which uses [PynamoDB's polymorphism support](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) to store multiple entity types in one table.
+The generated project uses [PynamoDB](https://pynamodb.readthedocs.io/) for entity modelling. All entities inherit from the generated `BaseModel`, which uses [PynamoDB's polymorphism support](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) to store multiple entity types in a single table, following [DynamoDB's single-table design](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
 
 Add or update entity files under `<name>/entities/`, using the generated example entity as a starting point:
 
@@ -97,14 +97,17 @@ class ExampleModel(BaseModel, discriminator='ExampleModel'):
         item.save()
         return item
 
+    # ── Primary index ─────────────────────────────────────────────────────────
     @classmethod
     def get_by_id(cls, id: str) -> 'ExampleModel':
         return cls.get(cls.make_pk(id), cls.make_pk(id))
 
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
     @classmethod
     def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
         return cls.gsi1_index.query(f'CATEGORY#{category}')
 
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
     @classmethod
     def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
         return cls.gsi2_index.query(
