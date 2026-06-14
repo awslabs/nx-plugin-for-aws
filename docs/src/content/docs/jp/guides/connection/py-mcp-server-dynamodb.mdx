@@ -8,6 +8,7 @@ when:
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
 `connection`ジェネレーターは、<Link path="guides/py-mcp-server">Python MCP Server</Link>を<Link path="guides/py-dynamodb">Python DynamoDB</Link>プロジェクトに接続し、両方が自動的に一緒に起動するようにローカル開発環境を構成します。
@@ -33,7 +34,82 @@ MCPサーバープロジェクトをソースとして、DynamoDBプロジェク
 
 ## ジェネレーターの出力
 
-ジェネレーターは、MCPサーバーの`<mcp-server-name>-serve-local`ターゲットを`project.json`内で更新し、DynamoDBプロジェクトの`serve-local`ターゲットに依存するようにします。ソースファイルは変更されません。
+ジェネレーターは、MCPサーバーの`<mcp-server-name>-serve-local`ターゲットを`project.json`内で更新し、DynamoDBプロジェクトの`serve-local`ターゲットに依存するようにし、DynamoDBパッケージをワークスペースの依存関係として追加します。ソースファイルは変更されません。
+
+## ツールでのDynamoDBの使用
+
+DynamoDBパッケージからエンティティクラスをインポートし、MCPサーバーツール内で使用します：
+
+```python title="packages/my_project/my_project/my_mcp_server/server.py"
+from my_scope.my_table.entities.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example items."""
+    items = list(ExampleModel.scan())
+    return str([item.attribute_values for item in items])
+```
+
+## インフラストラクチャ
+
+MCPサーバーのLambda関数がDynamoDBテーブルにアクセスできるようにするには、インフラストラクチャで必要な権限を付与します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+
+table.grantReadWriteData(myMcpServer);
+```
+
+`grantReadWriteData`は、MCPサーバーの実行ロールにDynamoDBとKMSの両方の権限を付与します。
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_mcp_server.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
 
 ## ローカル開発
 
