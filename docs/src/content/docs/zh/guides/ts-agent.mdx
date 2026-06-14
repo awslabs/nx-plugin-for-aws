@@ -269,11 +269,49 @@ AG-UI 代理设计为直接由前端使用。使用 <Link path="/guides/connecti
 
 ### 与您的代理聊天
 
-生成器配置了一个 `<your-agent-name>-chat` Nx 目标,该目标依赖于 `<your-agent-name>-serve-local`。运行它会在本地启动代理,并让您进入交互式终端聊天界面:
+生成器配置了一个 `<your-agent-name>-chat` Nx 目标,让您进入与代理的交互式终端聊天界面,由 [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) 提供支持。
+
+聊天目标独立运行——它**不会**为您启动代理。默认情况下,它连接到您本地运行的代理,因此请先启动 `<your-agent-name>-serve-local`(在单独的终端中):
+
+<NxCommands commands={['run your-project:agent-serve-local']} />
+
+然后,在另一个终端中启动聊天:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-对于 **HTTP**(基于 WebSocket 的 tRPC)代理,生成器还会生成一个小型的 `scripts/<your-agent-name>/chat.ts` 文件,该文件包装生成的 `<Agent>Client.local({ url })`,以便您可以在演进代理的输入形状时对其进行自定义。
+生成器为每个协议生成一个 `scripts/<your-agent-name>/chat.ts` 文件。您可以在演进代理的输入形状时对其进行自定义。默认情况下它连接到本地代理,或者在设置 `RUNTIME_CONFIG_APP_ID` 时连接到已部署的代理(请参阅下面的[与已部署的代理聊天](#chat-with-your-deployed-agent))。
+
+<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+#### Chat with your deployed agent
+
+要与部署到 Bedrock AgentCore 的代理聊天,请将 `RUNTIME_CONFIG_APP_ID` 环境变量设置为部署的 AppConfig 应用程序 ID(由已部署堆栈输出为 `RuntimeConfigApplicationId`)。聊天脚本从运行时配置中解析代理的运行时 ARN 并连接到已部署的端点:
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'iam' }}>
+对于 IAM 身份验证的代理,请求使用您的默认 AWS 凭证通过 [SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) 签名。确保环境具有有权调用运行时的 AWS 凭证:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
+对于 Cognito 身份验证的代理,通过 `AGENT_ACCESS_TOKEN` 环境变量提供 Cognito 访问令牌,该令牌作为 bearer 令牌发送:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
+
+您可以使用 AWS CLI 的 `cognito-idp admin-initiate-auth` 命令获取访问令牌,例如:
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
 ## 将您的 Agent 部署到 Bedrock AgentCore Runtime

@@ -351,18 +351,57 @@ Este comando usa `uv run` para executar seu Agente Strands usando o [Bedrock Age
 
 ### Converse com Seu Agente
 
-O gerador configura um alvo Nx `<your-agent-name>-chat` que depende de `<your-agent-name>-serve-local`. Executá-lo inicia o agente localmente e o coloca em um chat interativo de terminal:
+O gerador configura um alvo Nx `<your-agent-name>-chat` que o coloca em um chat interativo de terminal com seu agente, alimentado por [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli).
+
+O alvo de chat é executado de forma independente — ele **não** inicia o agente para você. Por padrão, ele se conecta ao seu agente em execução local, então inicie `<your-agent-name>-serve-local` primeiro (em um terminal separado):
+
+<NxCommands commands={['run your-project:agent-serve-local']} />
+
+Em seguida, em outro terminal, inicie o chat:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-Para agentes **HTTP**, o gerador também emite:
+O gerador emite um `scripts/<your-agent-name>/chat.ts` para cada protocolo. Ele se conecta ao agente local por padrão, ou ao seu agente implantado quando `RUNTIME_CONFIG_APP_ID` está definido (veja [Converse com seu agente implantado](#chat-with-your-deployed-agent) abaixo).
+
+Para agentes **HTTP**, o script de chat usa um cliente TypeScript com segurança de tipos gerado a partir da especificação OpenAPI do agente. O gerador também emite:
 
 - `scripts/<your-agent-name>_openapi.py` — um pequeno script que exporta a especificação OpenAPI do agente
 - Um alvo Nx `<your-agent-name>-openapi` que o executa
 - Um alvo Nx `<your-agent-name>-generate-client` que produz um cliente TypeScript com segurança de tipos em `scripts/<your-agent-name>/generated/`
-- `scripts/<your-agent-name>/chat.ts` — um wrapper fino em torno do cliente gerado
 
 Quando você personalizar a forma de entrada do agente (por exemplo, adicionar novos campos a `InvokeInput`), atualize `chat.ts` para passar os novos campos ao invocar o agente e o resto funciona automaticamente.
+
+<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+#### Converse com seu agente implantado
+
+Para conversar com seu agente implantado no Bedrock AgentCore, defina a variável de ambiente `RUNTIME_CONFIG_APP_ID` para o id da aplicação AppConfig da implantação (saída como `RuntimeConfigApplicationId` pela stack implantada). O script de chat resolve o ARN de runtime do seu agente a partir da configuração de runtime e se conecta ao endpoint implantado:
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'iam' }}>
+Para agentes autenticados por IAM, as requisições são assinadas com [SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) usando suas credenciais AWS padrão. Certifique-se de que o ambiente tenha credenciais AWS com permissão para invocar o runtime:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
+Para agentes autenticados por Cognito, forneça um token de acesso Cognito através da variável de ambiente `AGENT_ACCESS_TOKEN`, que é enviado como um bearer token:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
+
+Você pode obter um token de acesso usando o comando `cognito-idp admin-initiate-auth` da AWS CLI, por exemplo:
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
 ## Implantando Seu Agente Strands no Bedrock AgentCore Runtime

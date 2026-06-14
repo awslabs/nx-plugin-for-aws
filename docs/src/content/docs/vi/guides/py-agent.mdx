@@ -351,18 +351,57 @@ Lệnh này sử dụng `uv run` để thực thi Agent của bạn bằng [Bedr
 
 ### Chat với Agent của bạn
 
-Generator cấu hình một target Nx `<your-agent-name>-chat` phụ thuộc vào `<your-agent-name>-serve-local`. Khi chạy nó sẽ khởi động agent locally và đưa bạn vào một terminal chat tương tác:
+Generator cấu hình một target Nx `<your-agent-name>-chat` đưa bạn vào một terminal chat tương tác với agent của bạn, được hỗ trợ bởi [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli).
+
+Target chat chạy độc lập — nó **không** khởi động agent cho bạn. Mặc định nó kết nối với agent đang chạy locally của bạn, vì vậy hãy khởi động `<your-agent-name>-serve-local` trước (trong một terminal riêng):
+
+<NxCommands commands={['run your-project:agent-serve-local']} />
+
+Sau đó, trong một terminal khác, khởi động chat:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-Đối với các agent **HTTP**, generator cũng tạo ra:
+Generator tạo ra một `scripts/<your-agent-name>/chat.ts` cho mỗi protocol. Nó kết nối với agent local theo mặc định, hoặc với agent đã triển khai của bạn khi `RUNTIME_CONFIG_APP_ID` được thiết lập (xem [Chat với agent đã triển khai của bạn](#chat-with-your-deployed-agent) bên dưới).
+
+Đối với các agent **HTTP**, script chat sử dụng một TypeScript client type-safe được tạo từ OpenAPI spec của agent. Generator cũng tạo ra:
 
 - `scripts/<your-agent-name>_openapi.py` — một script nhỏ export OpenAPI spec của agent
 - Một target Nx `<your-agent-name>-openapi` để chạy nó
 - Một target Nx `<your-agent-name>-generate-client` tạo một TypeScript client type-safe trong `scripts/<your-agent-name>/generated/`
-- `scripts/<your-agent-name>/chat.ts` — một wrapper mỏng xung quanh generated client
 
 Khi bạn tùy chỉnh input shape của agent (ví dụ: thêm các trường mới vào `InvokeInput`), hãy cập nhật `chat.ts` để truyền các trường mới khi gọi agent và phần còn lại sẽ hoạt động tự động.
+
+<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+#### Chat với agent đã triển khai của bạn
+
+Để chat với agent của bạn đã triển khai lên Bedrock AgentCore, hãy thiết lập biến môi trường `RUNTIME_CONFIG_APP_ID` thành AppConfig application id của deployment (được xuất ra dưới dạng `RuntimeConfigApplicationId` bởi stack đã triển khai). Script chat sẽ phân giải runtime ARN của agent từ runtime configuration và kết nối với endpoint đã triển khai:
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'iam' }}>
+Đối với các agent được xác thực bằng IAM, các request được ký bằng [SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) sử dụng AWS credentials mặc định của bạn. Đảm bảo môi trường có AWS credentials với quyền gọi runtime:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
+Đối với các agent được xác thực bằng Cognito, cung cấp Cognito access token thông qua biến môi trường `AGENT_ACCESS_TOKEN`, được gửi dưới dạng bearer token:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
+
+Bạn có thể lấy access token bằng lệnh `cognito-idp admin-initiate-auth` của AWS CLI, ví dụ:
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
 ## Triển khai Agent của bạn lên Bedrock AgentCore Runtime

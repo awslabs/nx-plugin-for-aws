@@ -351,18 +351,57 @@ AG-UIエージェントは、フロントエンドから直接利用されるよ
 
 ### エージェントとのチャット
 
-ジェネレーターは、`<your-agent-name>-serve-local`に依存する`<your-agent-name>-chat` Nxターゲットを設定します。実行するとエージェントがローカルで起動し、インタラクティブなターミナルチャットに入ります：
+ジェネレーターは、[`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli)を使用してエージェントとのインタラクティブなターミナルチャットに入る`<your-agent-name>-chat` Nxターゲットを設定します。
+
+チャットターゲットは単独で実行されます — エージェントを自動的に起動**しません**。デフォルトではローカルで実行中のエージェントに接続するため、まず`<your-agent-name>-serve-local`を（別のターミナルで）起動してください：
+
+<NxCommands commands={['run your-project:agent-serve-local']} />
+
+次に、別のターミナルでチャットを開始します：
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-**HTTP**エージェントの場合、ジェネレーターは以下も生成します：
+ジェネレーターは、すべてのプロトコルに対して`scripts/<your-agent-name>/chat.ts`を生成します。デフォルトではローカルエージェントに接続し、`RUNTIME_CONFIG_APP_ID`が設定されている場合はデプロイされたエージェントに接続します（以下の[デプロイされたエージェントとのチャット](#chat-with-your-deployed-agent)を参照）。
+
+**HTTP**エージェントの場合、チャットスクリプトはエージェントのOpenAPI仕様から生成された型安全なTypeScriptクライアントを使用します。ジェネレーターは以下も生成します：
 
 - `scripts/<your-agent-name>_openapi.py` — エージェントのOpenAPI仕様をエクスポートする小さなスクリプト
 - `<your-agent-name>-openapi` Nxターゲット（これを実行）
 - `<your-agent-name>-generate-client` Nxターゲット（`scripts/<your-agent-name>/generated/`に型安全なTypeScriptクライアントを生成）
-- `scripts/<your-agent-name>/chat.ts` — 生成されたクライアントの薄いラッパー
 
 エージェントの入力形状をカスタマイズする場合（例：`InvokeInput`に新しいフィールドを追加）、エージェント呼び出し時に新しいフィールドを渡すように`chat.ts`を更新すると、残りは自動的に機能します。
+
+<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+#### デプロイされたエージェントとのチャット
+
+Bedrock AgentCoreにデプロイされたエージェントとチャットするには、`RUNTIME_CONFIG_APP_ID`環境変数をデプロイのAppConfigアプリケーションID（デプロイされたスタックから`RuntimeConfigApplicationId`として出力される）に設定します。チャットスクリプトはランタイム設定からエージェントのランタイムARNを解決し、デプロイされたエンドポイントに接続します：
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'iam' }}>
+IAM認証エージェントの場合、リクエストはデフォルトのAWS認証情報を使用して[SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html)で署名されます。環境にランタイムを呼び出す権限を持つAWS認証情報があることを確認してください：
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
+Cognito認証エージェントの場合、`AGENT_ACCESS_TOKEN`環境変数を介してCognitoアクセストークンを提供します。これはベアラートークンとして送信されます：
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
+
+アクセストークンは、AWS CLIの`cognito-idp admin-initiate-auth`コマンドを使用して取得できます。例えば：
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
 ## Bedrock AgentCore Runtimeへのデプロイ

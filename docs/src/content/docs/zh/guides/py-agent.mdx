@@ -351,18 +351,57 @@ AG-UI智能体设计为可直接被前端使用。使用<Link path="/guides/conn
 
 ### 与智能体聊天
 
-生成器配置了一个`<your-agent-name>-chat` Nx目标，该目标依赖于`<your-agent-name>-serve-local`。运行它会在本地启动智能体并将您带入交互式终端聊天：
+生成器配置了一个`<your-agent-name>-chat` Nx目标，让您进入与智能体的交互式终端聊天，由[`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli)提供支持。
+
+聊天目标独立运行——它**不会**为您启动智能体。默认情况下，它连接到本地运行的智能体，因此请先启动`<your-agent-name>-serve-local`（在单独的终端中）：
+
+<NxCommands commands={['run your-project:agent-serve-local']} />
+
+然后，在另一个终端中启动聊天：
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-对于**HTTP**智能体，生成器还会生成：
+生成器为每个协议生成一个`scripts/<your-agent-name>/chat.ts`。默认情况下它连接到本地智能体，或者在设置`RUNTIME_CONFIG_APP_ID`时连接到已部署的智能体（参见下面的[与已部署的智能体聊天](#chat-with-your-deployed-agent)）。
+
+对于**HTTP**智能体，聊天脚本使用从智能体的OpenAPI规范生成的类型安全TypeScript客户端。生成器还会生成：
 
 - `scripts/<your-agent-name>_openapi.py` — 一个导出智能体OpenAPI规范的小脚本
 - 一个运行该脚本的`<your-agent-name>-openapi` Nx目标
 - 一个`<your-agent-name>-generate-client` Nx目标，在`scripts/<your-agent-name>/generated/`下生成类型安全的TypeScript客户端
-- `scripts/<your-agent-name>/chat.ts` — 生成的客户端的轻量级包装器
 
 当您自定义智能体的输入形状（例如向`InvokeInput`添加新字段）时，更新`chat.ts`以在调用智能体时传递新字段，其余部分将自动工作。
+
+<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+#### 与已部署的智能体聊天
+
+要与部署到Bedrock AgentCore的智能体聊天，请将`RUNTIME_CONFIG_APP_ID`环境变量设置为部署的AppConfig应用程序ID（由已部署堆栈输出为`RuntimeConfigApplicationId`）。聊天脚本从运行时配置解析智能体的运行时ARN并连接到已部署的端点：
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'iam' }}>
+对于IAM身份验证的智能体，请求使用您的默认AWS凭证通过[SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html)签名。确保环境具有有权调用运行时的AWS凭证：
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
+对于Cognito身份验证的智能体，通过`AGENT_ACCESS_TOKEN`环境变量提供Cognito访问令牌，该令牌作为bearer令牌发送：
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
+
+您可以使用AWS CLI的`cognito-idp admin-initiate-auth`命令获取访问令牌，例如：
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
 ## 部署Strands智能体到Bedrock AgentCore Runtime
