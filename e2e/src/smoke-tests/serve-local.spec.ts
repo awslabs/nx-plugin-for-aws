@@ -55,6 +55,66 @@ function startServer(
   return child;
 }
 
+/**
+ * Run an `agent-chat` target against an already-running `serve-local` server
+ * and resolve once the standalone chat CLI prints its connection banner. The
+ * chat loop's message prompt needs a TTY to submit input, so we assert on the
+ * connection (proving the standalone script boots, resolves the local URL, and
+ * connects) rather than driving a full conversation. Rejects if the banner is
+ * not seen before the timeout.
+ */
+function chatConnects(
+  cwd: string,
+  target: string,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('pnpm', ['exec', 'nx', 'run', target], {
+      cwd,
+      detached: true,
+      // Ensure local-only resolution — no deployed-agent lookup.
+      env: { ...process.env, NX_DAEMON: 'true', RUNTIME_CONFIG_APP_ID: '' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // already dead
+        }
+      }
+      err ? reject(err) : resolve();
+    };
+    const timer = setTimeout(
+      () =>
+        finish(
+          new Error(
+            `Chat target ${target} did not connect within ${timeoutMs}ms. Output:\n${output}`,
+          ),
+        ),
+      timeoutMs,
+    );
+    const onData = (d: Buffer) => {
+      const text = d.toString();
+      output += text;
+      process.stdout.write(`[${target}] ${text}`);
+      // `agent-chat-cli` prints "Connected to <agentName>" on success.
+      if (/Connected to /.test(output)) {
+        finish();
+      }
+    };
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+    child.on('error', (err) => finish(err));
+  });
+}
+
 function killProcess(child: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
     if (!child.pid) {
@@ -492,6 +552,13 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     });
     console.log(`TS Agent streamed ${chunks.length} chunks:`, chunks.join(''));
     expect(chunks.length).toBeGreaterThan(0);
+
+    // The standalone chat CLI connects to the running serve-local server.
+    await chatConnects(
+      projectRoot,
+      '@serve-local-test/ts-project:my-agent-chat',
+      STARTUP_TIMEOUT_MS,
+    );
     await stopLast();
   });
 
@@ -626,6 +693,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     );
     expect(streamRes.status).toBe(200);
     expect(streamBody).toContain('data:');
+
+    await chatConnects(
+      projectRoot,
+      '@serve-local-test/ts-project:my-a2a-agent-chat',
+      STARTUP_TIMEOUT_MS,
+    );
     await stopLast();
   });
 
@@ -657,6 +730,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     );
     expect(res.status).toBe(200);
     expect(body).toContain('data:');
+
+    await chatConnects(
+      projectRoot,
+      '@serve-local-test/ts-project:my-agui-agent-chat',
+      STARTUP_TIMEOUT_MS,
+    );
     await stopLast();
   });
 
@@ -685,6 +764,13 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     expect(res.status).toBe(200);
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0]).toHaveProperty('content');
+
+    // HTTP chat builds the generated client first, then connects.
+    await chatConnects(
+      projectRoot,
+      'serve_local_test.py_project:my-py-agent-chat',
+      STARTUP_TIMEOUT_MS,
+    );
     await stopLast();
   });
 
@@ -727,6 +813,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     );
     expect(streamRes.status).toBe(200);
     expect(streamBody).toContain('data:');
+
+    await chatConnects(
+      projectRoot,
+      'serve_local_test.py_project:my-py-a2a-agent-chat',
+      STARTUP_TIMEOUT_MS,
+    );
     await stopLast();
   });
 
@@ -758,6 +850,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     );
     expect(res.status).toBe(200);
     expect(body).toContain('data:');
+
+    await chatConnects(
+      projectRoot,
+      'serve_local_test.py_project:my-py-agui-agent-chat',
+      STARTUP_TIMEOUT_MS,
+    );
     await stopLast();
   });
 

@@ -1,0 +1,43 @@
+// Chat CLI for <%- agentNameClassName %> (Python FastAPI / JSONL streaming), using the
+// generated client. Connects to the local `serve-local` server, or the deployed
+// agent when `RUNTIME_CONFIG_APP_ID` is set.
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { <%- agentNameClassName %> } from './generated/client.gen.js';
+import {
+  createAgentCoreFetch,
+  resolveRemoteAgent,
+  SESSION_ID,
+} from './agentcore.js';
+
+const SESSION_ID_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+const remote = await resolveRemoteAgent();
+
+class <%- agentNameClassName %>Adapter implements ChatAdapter {
+  private client!: <%- agentNameClassName %>;
+
+  async connect(url: string) {
+    this.client = remote
+      ? new <%- agentNameClassName %>({
+          url: `https://bedrock-agentcore.${remote.region}.amazonaws.com/runtimes/${encodeURIComponent(remote.arn)}`,
+          fetch: createAgentCoreFetch(<%- auth === 'iam' ? 'remote.region' : '' %>),
+        })
+      : new <%- agentNameClassName %>({
+          url,
+          fetch: (input, init) => {
+            const headers = new Headers(init?.headers);
+            headers.set(SESSION_ID_HEADER, SESSION_ID);
+            return fetch(input, { ...init, headers });
+          },
+        });
+    return { agentName: '<%- agentNameClassName %>' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    for await (const chunk of this.client.invoke({ message: text })) {
+      if (typeof chunk.content === 'string') yield chunk.content;
+    }
+  }
+}
+
+await chatLoop(new <%- agentNameClassName %>Adapter(), process.env.URL ?? '');

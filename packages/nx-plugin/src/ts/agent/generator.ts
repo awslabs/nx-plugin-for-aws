@@ -12,6 +12,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
@@ -212,9 +213,18 @@ export const tsAgentGenerator = async (
             ] as const)),
     ]),
     withVersions([
+      // The chat CLI runs standalone via tsx for every protocol, and resolves
+      // the deployed agent from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
       'tsx',
       '@types/node',
       'agent-chat-cli',
+      '@aws-lambda-powertools/parameters',
+      '@aws-sdk/client-appconfigdata',
+      ...(auth === 'iam'
+        ? (['aws4fetch', '@aws-sdk/credential-providers'] as const)
+        : ([] as const)),
+      // A2A chat builds a signed @a2a-js client factory for the deployed agent.
+      ...(protocol === 'a2a' ? (['@a2a-js/sdk'] as const) : ([] as const)),
       ...(protocol === 'a2a' || protocol === 'ag-ui'
         ? (['@types/express', '@types/cors'] as const)
         : (['@types/ws', '@types/cors'] as const)),
@@ -228,29 +238,22 @@ export const tsAgentGenerator = async (
     component: { info: TS_AGENT_GENERATOR_INFO, name: agentTargetPrefix },
   });
 
-  // HTTP chat needs a tiny generated script to wrap the project's tRPC
-  // WebSocket client in a `ChatAdapter`. A2A speaks the standard A2A
-  // protocol, so we can run `agent-chat-cli` directly as a binary.
-  if (protocol === 'http') {
-    const scriptsDir = joinPathFragments(
-      project.root,
-      'scripts',
-      agentTargetPrefix,
-    );
-    const relativeAgentImport = `../../${targetSourceDirRelativeToProjectRoot}`;
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'scripts', 'http'),
-      scriptsDir,
-      {
-        agentNameClassName,
-        agentTargetPrefix,
-        localDevPort,
-        relativeAgentImport,
-      },
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
-  }
+  // Every protocol gets a standalone `chat.ts`. It connects to the local
+  // `serve-local` server by default, or to the deployed agent (with the
+  // appropriate auth) when `RUNTIME_CONFIG_APP_ID` is set.
+  const scriptsDir = joinPathFragments(
+    project.root,
+    'scripts',
+    agentTargetPrefix,
+  );
+  addAgentChatScripts(tree, {
+    scriptsDir,
+    protocol,
+    language: 'ts',
+    agentNameClassName,
+    auth,
+    relativeAgentImport: `../../${targetSourceDirRelativeToProjectRoot}`,
+  });
 
   const chatUrl =
     protocol === 'http'
@@ -258,12 +261,7 @@ export const tsAgentGenerator = async (
       : protocol === 'ag-ui'
         ? `http://localhost:${localDevPort}/invocations`
         : `http://localhost:${localDevPort}`;
-  const chatCommand =
-    protocol === 'http'
-      ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : protocol === 'ag-ui'
-        ? `agent-chat-cli agui ${chatUrl}`
-        : `agent-chat-cli a2a ${chatUrl}`;
+  const chatCommand = `tsx ./scripts/${agentTargetPrefix}/chat.ts`;
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
@@ -303,7 +301,6 @@ export const tsAgentGenerator = async (
             URL: chatUrl,
           },
         },
-        dependsOn: [`${agentTargetPrefix}-serve-local`],
       },
     }),
   });

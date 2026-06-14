@@ -14,6 +14,7 @@ import {
 } from '@nx/devkit';
 import { ensureLicenseExceptions } from '../../license/config';
 import { AG_UI_STRANDS_EXCEPTIONS } from '../../license/known-exceptions';
+import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
@@ -258,6 +259,12 @@ export const pyAgentGenerator = async (
   const openApiTargetName = `${agentTargetPrefix}-openapi`;
   const clientGenTargetName = `${agentTargetPrefix}-generate-client`;
 
+  const scriptsDir = joinPathFragments(
+    project.root,
+    'scripts',
+    agentTargetPrefix,
+  );
+
   if (protocol === 'http') {
     // Emit the OpenAPI spec generator script (shared with react-connection)
     generateFiles(
@@ -271,24 +278,6 @@ export const pyAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
-    // Emit the chat CLI adapter script
-    const scriptsDir = joinPathFragments(
-      project.root,
-      'scripts',
-      agentTargetPrefix,
-    );
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'scripts', 'http'),
-      scriptsDir,
-      {
-        agentNameClassName,
-        agentTargetPrefix,
-        localDevPort,
-      },
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
-
     // Ignore the generated client directory
     updateGitIgnore(tree, project.root, (patterns) => [
       ...patterns,
@@ -296,18 +285,33 @@ export const pyAgentGenerator = async (
     ]);
   }
 
-  // Add TypeScript deps for the chat CLI. `agent-chat-cli` transitively
-  // bundles the protocol clients (@a2a-js/sdk, @ag-ui/client) and
-  // @clack/prompts, so nothing else is needed. HTTP also needs tsx to
-  // run the adapter script.
+  // Every protocol gets a standalone `chat.ts`. It connects to the local
+  // `serve-local` server by default, or to the deployed agent (with the
+  // appropriate auth) when `RUNTIME_CONFIG_APP_ID` is set.
+  addAgentChatScripts(tree, {
+    scriptsDir,
+    protocol,
+    language: 'py',
+    agentNameClassName,
+    auth,
+  });
+
+  // TypeScript deps for the chat CLI, which runs standalone via tsx for every
+  // protocol and resolves the deployed agent from AppConfig. `agent-chat-cli`
+  // transitively bundles the protocol clients (@a2a-js/sdk, @ag-ui/client).
   addDependenciesToPackageJson(
     tree,
     {},
     withVersions([
       'agent-chat-cli',
-      ...(protocol === 'http'
-        ? (['tsx', '@types/node'] as const)
+      'tsx',
+      '@types/node',
+      '@aws-lambda-powertools/parameters',
+      '@aws-sdk/client-appconfigdata',
+      ...(auth === 'iam'
+        ? (['aws4fetch', '@aws-sdk/credential-providers'] as const)
         : ([] as const)),
+      ...(protocol === 'a2a' ? (['@a2a-js/sdk'] as const) : ([] as const)),
     ]),
   );
 
@@ -315,12 +319,7 @@ export const pyAgentGenerator = async (
     protocol === 'ag-ui'
       ? `http://localhost:${localDevPort}/invocations`
       : `http://localhost:${localDevPort}`;
-  const chatCommand =
-    protocol === 'http'
-      ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : protocol === 'ag-ui'
-        ? `agent-chat-cli agui ${chatUrl}`
-        : `agent-chat-cli a2a ${chatUrl}`;
+  const chatCommand = `tsx ./scripts/${agentTargetPrefix}/chat.ts`;
 
   const httpOnlyTargets =
     protocol === 'http'
@@ -393,10 +392,10 @@ export const pyAgentGenerator = async (
             URL: chatUrl,
           },
         },
-        dependsOn: [
-          ...(protocol === 'http' ? [clientGenTargetName] : []),
-          `${agentTargetPrefix}-serve-local`,
-        ],
+        // HTTP chat imports the generated client, so ensure it's built first.
+        // No serve-local dependency — chat runs standalone against a local or
+        // deployed agent.
+        ...(protocol === 'http' ? { dependsOn: [clientGenTargetName] } : {}),
       },
     }),
   });

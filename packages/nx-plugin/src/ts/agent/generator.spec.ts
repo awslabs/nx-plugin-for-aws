@@ -1015,7 +1015,7 @@ describe('ts#agent generator', () => {
     expect(projectConfig.metadata.components[0].protocol).toBe('ag-ui');
   });
 
-  it('should not vend a chat script for AG-UI — runs agent-chat-cli directly', async () => {
+  it('should vend a standalone chat script for AG-UI', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       protocol: 'ag-ui',
@@ -1023,17 +1023,27 @@ describe('ts#agent generator', () => {
       iac: 'cdk',
     });
 
-    expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain('AGUIChatAdapter');
+    expect(chatScript).toContain('resolveRemoteAgent');
+    // The shared remote-resolution helper is emitted alongside.
+    expect(
+      tree.exists('apps/test-project/scripts/agent/agentcore.ts'),
+    ).toBeTruthy();
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
-    expect(chatTarget.options.commands[0]).toMatch(
-      /^agent-chat-cli agui http:\/\/localhost:\d+\/invocations$/,
+    expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
+    expect(chatTarget.options.env.URL).toMatch(
+      /^http:\/\/localhost:\d+\/invocations$/,
     );
-    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+    // Chat runs standalone — no serve-local dependency.
+    expect(chatTarget.dependsOn).toBeUndefined();
   });
 
   it('should pass HTTP protocol to CDK infrastructure for AG-UI', async () => {
@@ -1066,6 +1076,7 @@ describe('ts#agent generator', () => {
     expect(chatScript).toContain("from 'agent-chat-cli'");
     expect(chatScript).toContain('chatLoop');
     expect(chatScript).toContain('client.invoke.subscribe');
+    expect(chatScript).toContain('resolveRemoteAgent');
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
@@ -1073,13 +1084,13 @@ describe('ts#agent generator', () => {
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
     expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
-    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+    expect(chatTarget.dependsOn).toBeUndefined();
 
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     expect(rootPackageJson.devDependencies['agent-chat-cli']).toBeDefined();
   });
 
-  it('should not vend a chat script for A2A — runs agent-chat-cli directly', async () => {
+  it('should vend a standalone chat script for A2A', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       protocol: 'a2a',
@@ -1087,17 +1098,20 @@ describe('ts#agent generator', () => {
       iac: 'cdk',
     });
 
-    expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain('A2AChatAdapter');
+    expect(chatScript).toContain('resolveRemoteAgent');
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
-    expect(chatTarget.options.commands[0]).toMatch(
-      /^agent-chat-cli a2a http:\/\/localhost:\d+$/,
-    );
-    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+    expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
+    expect(chatTarget.options.env.URL).toMatch(/^http:\/\/localhost:\d+$/);
+    expect(chatTarget.dependsOn).toBeUndefined();
   });
 
   it('should generate chat CLI with custom agent name', async () => {
@@ -1119,9 +1133,9 @@ describe('ts#agent generator', () => {
     expect(
       projectConfig.targets['my-custom-agent-chat'].options.commands[0],
     ).toBe('tsx ./scripts/my-custom-agent/chat.ts');
-    expect(projectConfig.targets['my-custom-agent-chat'].dependsOn).toEqual([
-      'my-custom-agent-serve-local',
-    ]);
+    expect(
+      projectConfig.targets['my-custom-agent-chat'].dependsOn,
+    ).toBeUndefined();
   });
 
   it('should warn when auth is explicitly set with infra=none', async () => {
