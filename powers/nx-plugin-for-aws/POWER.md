@@ -124,7 +124,6 @@ Add capabilities to existing projects:
 | `agentcore-gateway`  | Generate an AgentCore Gateway project                                                                              |
 | `connection`         | Integrates a source project with a target project                                                                  |
 | `license`            | Add LICENSE files and configure source code licence headers                                                        |
-| `py#dynamodb`        | Create a Python DynamoDB project                                                                                   |
 | `py#api`             | Create a Python API                                                                                                |
 | `py#lambda-function` | Adds a lambda function to a python project                                                                         |
 | `py#mcp-server`      | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
@@ -144,6 +143,7 @@ Add capabilities to existing projects:
 | `ts#api`             | Create a TypeScript API                                                                                            |
 | `ts#rdb`             | Create a relational database project                                                                               |
 | `ts#dynamodb`        | Create a TypeScript DynamoDB project                                                                               |
+| `py#dynamodb`        | Create a Python DynamoDB project                                                                                   |
 
 ## Best Practices
 
