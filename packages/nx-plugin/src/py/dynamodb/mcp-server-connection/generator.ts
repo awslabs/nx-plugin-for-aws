@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type Tree, updateProjectConfiguration } from '@nx/devkit';
+import {
+  type GeneratorCallback,
+  installPackagesTask,
+  type Tree,
+  updateProjectConfiguration,
+} from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
@@ -11,6 +16,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { Logger, UVProvider } from '../../../utils/nxlv-python';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBMcpServerConnectionGeneratorSchema } from './schema';
 
@@ -20,7 +26,7 @@ export const PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
 export const pyDynamoDBMcpServerConnectionGenerator = async (
   tree: Tree,
   options: PyDynamoDBMcpServerConnectionGeneratorSchema,
-): Promise<void> => {
+): Promise<GeneratorCallback> => {
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,
@@ -51,6 +57,10 @@ export const pyDynamoDBMcpServerConnectionGenerator = async (
     PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO,
   ]);
   await formatFilesInSubtree(tree);
+  return async () => {
+    installPackagesTask(tree);
+    await new UVProvider(tree.root, new Logger(), tree).install();
+  };
 };
 
 export default pyDynamoDBMcpServerConnectionGenerator;
