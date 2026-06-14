@@ -11,6 +11,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBAgentConnectionGeneratorSchema } from './schema';
 
 export const PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -27,6 +28,12 @@ export const pyDynamoDBAgentConnectionGenerator = async (
   const targetProject = readProjectConfigurationUnqualified(
     tree,
     options.targetProject,
+  );
+
+  addWorkspaceDependencyToPyProject(
+    tree,
+    sourceProject.root,
+    targetProject.name!,
   );
 
   const agentName = options.sourceComponent?.name ?? 'agent';

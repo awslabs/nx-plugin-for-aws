@@ -52,6 +52,24 @@ describe('py#dynamodb fast-api-connection generator', () => {
     expect(readProjectConfiguration(tree, 'api')).toMatchSnapshot();
   });
 
+  it('should add dynamodb package as workspace dependency to pyproject.toml', async () => {
+    setupFastApiProject();
+    setupDynamoDBProject();
+
+    tree.write(
+      'packages/api/pyproject.toml',
+      `[project]\nname = "test.api"\nversion = "1.0.0"\ndependencies = []\n`,
+    );
+
+    await pyDynamoDBFastApiConnectionGenerator(tree, {
+      sourceProject: 'api',
+      targetProject: 'db',
+    });
+
+    const pyprojectContent = tree.read('packages/api/pyproject.toml', 'utf-8')!;
+    expect(pyprojectContent).toContain('db');
+  });
+
   it('should not add dependency when source has no serve-local', async () => {
     tree.write(
       `packages/api/project.json`,

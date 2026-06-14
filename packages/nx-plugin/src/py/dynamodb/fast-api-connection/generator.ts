@@ -11,6 +11,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBFastApiConnectionGeneratorSchema } from './schema';
 
 export const PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -27,6 +28,12 @@ export const pyDynamoDBFastApiConnectionGenerator = async (
   const targetProject = readProjectConfigurationUnqualified(
     tree,
     options.targetProject,
+  );
+
+  addWorkspaceDependencyToPyProject(
+    tree,
+    sourceProject.root,
+    targetProject.name!,
   );
 
   if (sourceProject.targets?.['serve-local']) {

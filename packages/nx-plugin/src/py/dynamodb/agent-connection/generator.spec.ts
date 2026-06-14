@@ -62,10 +62,31 @@ describe('py#dynamodb agent-connection generator', () => {
     await pyDynamoDBAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
-      sourceComponent: { name: 'custom-agent' },
+      sourceComponent: { generator: 'py#agent', name: 'custom-agent' },
     });
 
     expect(readProjectConfiguration(tree, 'my-agent')).toMatchSnapshot();
+  });
+
+  it('should add dynamodb package as workspace dependency to pyproject.toml', async () => {
+    setupAgentProject();
+    setupDynamoDBProject();
+
+    tree.write(
+      'packages/my-agent/pyproject.toml',
+      `[project]\nname = "test.my_agent"\nversion = "1.0.0"\ndependencies = []\n`,
+    );
+
+    await pyDynamoDBAgentConnectionGenerator(tree, {
+      sourceProject: 'my-agent',
+      targetProject: 'db',
+    });
+
+    const pyprojectContent = tree.read(
+      'packages/my-agent/pyproject.toml',
+      'utf-8',
+    )!;
+    expect(pyprojectContent).toContain('db');
   });
 
   it('should not add dependency when source has no matching serve-local', async () => {

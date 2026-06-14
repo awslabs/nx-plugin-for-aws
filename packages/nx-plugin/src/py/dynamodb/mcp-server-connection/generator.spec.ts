@@ -65,10 +65,34 @@ describe('py#dynamodb mcp-server-connection generator', () => {
     await pyDynamoDBMcpServerConnectionGenerator(tree, {
       sourceProject: 'my-mcp-server',
       targetProject: 'db',
-      sourceComponent: { name: 'custom-mcp-server' },
+      sourceComponent: {
+        generator: 'py#mcp-server',
+        name: 'custom-mcp-server',
+      },
     });
 
     expect(readProjectConfiguration(tree, 'my-mcp-server')).toMatchSnapshot();
+  });
+
+  it('should add dynamodb package as workspace dependency to pyproject.toml', async () => {
+    setupMcpServerProject();
+    setupDynamoDBProject();
+
+    tree.write(
+      'packages/my-mcp-server/pyproject.toml',
+      `[project]\nname = "test.my_mcp_server"\nversion = "1.0.0"\ndependencies = []\n`,
+    );
+
+    await pyDynamoDBMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-mcp-server',
+      targetProject: 'db',
+    });
+
+    const pyprojectContent = tree.read(
+      'packages/my-mcp-server/pyproject.toml',
+      'utf-8',
+    )!;
+    expect(pyprojectContent).toContain('db');
   });
 
   it('should not add dependency when source has no matching serve-local', async () => {
