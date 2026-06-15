@@ -1138,6 +1138,36 @@ describe('ts#agent generator', () => {
     ).toBeUndefined();
   });
 
+  describe.each([
+    'http',
+    'a2a',
+    'ag-ui',
+  ] as const)('chat scripts for %s protocol', (protocol) => {
+    it.each([
+      'iam',
+      'cognito',
+    ] as const)('should match snapshot for chat scripts with %s auth', async (auth) => {
+      await tsAgentGenerator(tree, {
+        project: 'test-project',
+        protocol,
+        auth,
+        infra: 'agentcore',
+        iac: 'cdk',
+      });
+
+      const chat = tree.read(
+        'apps/test-project/scripts/agent/chat.ts',
+        'utf-8',
+      );
+      const agentcore = tree.read(
+        'apps/test-project/scripts/agent/agentcore.ts',
+        'utf-8',
+      );
+      expect(chat).toMatchSnapshot(`chat.ts (${protocol}, ${auth})`);
+      expect(agentcore).toMatchSnapshot(`agentcore.ts (${protocol}, ${auth})`);
+    });
+  });
+
   it('should warn when auth is explicitly set with infra=none', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

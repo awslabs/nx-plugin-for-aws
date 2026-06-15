@@ -1,5 +1,569 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`ts#agent generator > chat scripts for a2a protocol > should match snapshot for chat scripts with cognito auth > agentcore.ts (a2a, cognito) 1`] = `
+"// Resolves the deployed TestProjectAgent agent from runtime config and authenticates requests to it.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+// AgentCore session ids must be at least 33 characters.
+export const SESSION_ID = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+export interface RemoteAgent {
+  /** ARN of the deployed Bedrock AgentCore runtime. */
+  arn: string;
+  /** AWS region parsed from the runtime ARN. */
+  region: string;
+}
+
+// Returns the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set, otherwise \`undefined\` to chat locally.
+export const resolveRemoteAgent = async (): Promise<
+  RemoteAgent | undefined
+> => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  if (!arn) {
+    throw new Error(
+      \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
+    );
+  }
+  return { arn, region: arn.split(':')[3] };
+};
+
+/** The Cognito access token used to authenticate with the deployed agent. */
+export const getAccessToken = (): string => {
+  const accessToken = process.env.AGENT_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error(
+      'AGENT_ACCESS_TOKEN is not set. Provide a Cognito access token to chat with the deployed agent.',
+    );
+  }
+  return accessToken;
+};
+
+// A \`fetch\` that authenticates requests to the deployed agent and forwards the session id.
+export const createAgentCoreFetch = (): typeof fetch => {
+  const accessToken = getAccessToken();
+  return (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, SESSION_ID);
+    headers.set('Authorization', \`Bearer \${accessToken}\`);
+    return fetch(input, { ...init, headers });
+  };
+};
+"
+`;
+
+exports[`ts#agent generator > chat scripts for a2a protocol > should match snapshot for chat scripts with cognito auth > chat.ts (a2a, cognito) 1`] = `
+"// Chat CLI for TestProjectAgent (A2A protocol). Connects to the local
+// \`serve-local\` server, or the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set.
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { A2AChatAdapter, chatLoop } from 'agent-chat-cli';
+import { createAgentCoreFetch, resolveRemoteAgent } from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+const url = remote
+  ? \`https://bedrock-agentcore.\${remote.region}.amazonaws.com/runtimes/\${encodeURIComponent(remote.arn)}/invocations/\`
+  : process.env.URL!;
+
+// Remote requests are authenticated via a custom fetch; locally the default client talks plain HTTP.
+const clientFactory = remote
+  ? new ClientFactory({
+      ...ClientFactoryOptions.default,
+      transports: [
+        new JsonRpcTransportFactory({
+          fetchImpl: createAgentCoreFetch(),
+        }),
+      ],
+      cardResolver: new DefaultAgentCardResolver({
+        fetchImpl: createAgentCoreFetch(),
+      }),
+    })
+  : undefined;
+
+await chatLoop(new A2AChatAdapter({ clientFactory }), url);
+"
+`;
+
+exports[`ts#agent generator > chat scripts for a2a protocol > should match snapshot for chat scripts with iam auth > agentcore.ts (a2a, iam) 1`] = `
+"// Resolves the deployed TestProjectAgent agent from runtime config and authenticates requests to it.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+// AgentCore session ids must be at least 33 characters.
+export const SESSION_ID = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+export interface RemoteAgent {
+  /** ARN of the deployed Bedrock AgentCore runtime. */
+  arn: string;
+  /** AWS region parsed from the runtime ARN. */
+  region: string;
+}
+
+// Returns the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set, otherwise \`undefined\` to chat locally.
+export const resolveRemoteAgent = async (): Promise<
+  RemoteAgent | undefined
+> => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  if (!arn) {
+    throw new Error(
+      \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
+    );
+  }
+  return { arn, region: arn.split(':')[3] };
+};
+
+// A \`fetch\` that authenticates requests to the deployed agent and forwards the session id.
+export const createAgentCoreFetch = (region: string): typeof fetch => {
+  const credentialProvider = fromNodeProviderChain();
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, SESSION_ID);
+    const client = new AwsClient({
+      ...(await credentialProvider()),
+      service: 'bedrock-agentcore',
+      region,
+    });
+    return client.fetch(input, { ...init, headers });
+  };
+};
+"
+`;
+
+exports[`ts#agent generator > chat scripts for a2a protocol > should match snapshot for chat scripts with iam auth > chat.ts (a2a, iam) 1`] = `
+"// Chat CLI for TestProjectAgent (A2A protocol). Connects to the local
+// \`serve-local\` server, or the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set.
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { A2AChatAdapter, chatLoop } from 'agent-chat-cli';
+import { createAgentCoreFetch, resolveRemoteAgent } from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+const url = remote
+  ? \`https://bedrock-agentcore.\${remote.region}.amazonaws.com/runtimes/\${encodeURIComponent(remote.arn)}/invocations/\`
+  : process.env.URL!;
+
+// Remote requests are authenticated via a custom fetch; locally the default client talks plain HTTP.
+const clientFactory = remote
+  ? new ClientFactory({
+      ...ClientFactoryOptions.default,
+      transports: [
+        new JsonRpcTransportFactory({
+          fetchImpl: createAgentCoreFetch(remote.region),
+        }),
+      ],
+      cardResolver: new DefaultAgentCardResolver({
+        fetchImpl: createAgentCoreFetch(remote.region),
+      }),
+    })
+  : undefined;
+
+await chatLoop(new A2AChatAdapter({ clientFactory }), url);
+"
+`;
+
+exports[`ts#agent generator > chat scripts for ag-ui protocol > should match snapshot for chat scripts with cognito auth > agentcore.ts (ag-ui, cognito) 1`] = `
+"// Resolves the deployed TestProjectAgent agent from runtime config and authenticates requests to it.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+// AgentCore session ids must be at least 33 characters.
+export const SESSION_ID = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+export interface RemoteAgent {
+  /** ARN of the deployed Bedrock AgentCore runtime. */
+  arn: string;
+  /** AWS region parsed from the runtime ARN. */
+  region: string;
+}
+
+// Returns the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set, otherwise \`undefined\` to chat locally.
+export const resolveRemoteAgent = async (): Promise<
+  RemoteAgent | undefined
+> => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  if (!arn) {
+    throw new Error(
+      \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
+    );
+  }
+  return { arn, region: arn.split(':')[3] };
+};
+
+/** The Cognito access token used to authenticate with the deployed agent. */
+export const getAccessToken = (): string => {
+  const accessToken = process.env.AGENT_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error(
+      'AGENT_ACCESS_TOKEN is not set. Provide a Cognito access token to chat with the deployed agent.',
+    );
+  }
+  return accessToken;
+};
+
+// A \`fetch\` that authenticates requests to the deployed agent and forwards the session id.
+export const createAgentCoreFetch = (): typeof fetch => {
+  const accessToken = getAccessToken();
+  return (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, SESSION_ID);
+    headers.set('Authorization', \`Bearer \${accessToken}\`);
+    return fetch(input, { ...init, headers });
+  };
+};
+"
+`;
+
+exports[`ts#agent generator > chat scripts for ag-ui protocol > should match snapshot for chat scripts with cognito auth > chat.ts (ag-ui, cognito) 1`] = `
+"// Chat CLI for TestProjectAgent (AG-UI protocol). Connects to the local
+// \`serve-local\` server, or the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set.
+import { AGUIChatAdapter, chatLoop } from 'agent-chat-cli';
+import { createAgentCoreFetch, resolveRemoteAgent } from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+const url = remote
+  ? \`https://bedrock-agentcore.\${remote.region}.amazonaws.com/runtimes/\${encodeURIComponent(remote.arn)}/invocations?qualifier=DEFAULT\`
+  : process.env.URL!;
+
+// Remote requests are authenticated via a custom fetch; locally the default agent talks plain HTTP.
+const fetchImpl = remote ? createAgentCoreFetch() : undefined;
+
+await chatLoop(new AGUIChatAdapter({ fetch: fetchImpl }), url);
+"
+`;
+
+exports[`ts#agent generator > chat scripts for ag-ui protocol > should match snapshot for chat scripts with iam auth > agentcore.ts (ag-ui, iam) 1`] = `
+"// Resolves the deployed TestProjectAgent agent from runtime config and authenticates requests to it.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+// AgentCore session ids must be at least 33 characters.
+export const SESSION_ID = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+export interface RemoteAgent {
+  /** ARN of the deployed Bedrock AgentCore runtime. */
+  arn: string;
+  /** AWS region parsed from the runtime ARN. */
+  region: string;
+}
+
+// Returns the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set, otherwise \`undefined\` to chat locally.
+export const resolveRemoteAgent = async (): Promise<
+  RemoteAgent | undefined
+> => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  if (!arn) {
+    throw new Error(
+      \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
+    );
+  }
+  return { arn, region: arn.split(':')[3] };
+};
+
+// A \`fetch\` that authenticates requests to the deployed agent and forwards the session id.
+export const createAgentCoreFetch = (region: string): typeof fetch => {
+  const credentialProvider = fromNodeProviderChain();
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, SESSION_ID);
+    const client = new AwsClient({
+      ...(await credentialProvider()),
+      service: 'bedrock-agentcore',
+      region,
+    });
+    return client.fetch(input, { ...init, headers });
+  };
+};
+"
+`;
+
+exports[`ts#agent generator > chat scripts for ag-ui protocol > should match snapshot for chat scripts with iam auth > chat.ts (ag-ui, iam) 1`] = `
+"// Chat CLI for TestProjectAgent (AG-UI protocol). Connects to the local
+// \`serve-local\` server, or the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set.
+import { AGUIChatAdapter, chatLoop } from 'agent-chat-cli';
+import { createAgentCoreFetch, resolveRemoteAgent } from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+const url = remote
+  ? \`https://bedrock-agentcore.\${remote.region}.amazonaws.com/runtimes/\${encodeURIComponent(remote.arn)}/invocations?qualifier=DEFAULT\`
+  : process.env.URL!;
+
+// Remote requests are authenticated via a custom fetch; locally the default agent talks plain HTTP.
+const fetchImpl = remote ? createAgentCoreFetch(remote.region) : undefined;
+
+await chatLoop(new AGUIChatAdapter({ fetch: fetchImpl }), url);
+"
+`;
+
+exports[`ts#agent generator > chat scripts for http protocol > should match snapshot for chat scripts with cognito auth > agentcore.ts (http, cognito) 1`] = `
+"// Resolves the deployed TestProjectAgent agent from runtime config and authenticates requests to it.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+// AgentCore session ids must be at least 33 characters.
+export const SESSION_ID = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+export interface RemoteAgent {
+  /** ARN of the deployed Bedrock AgentCore runtime. */
+  arn: string;
+  /** AWS region parsed from the runtime ARN. */
+  region: string;
+}
+
+// Returns the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set, otherwise \`undefined\` to chat locally.
+export const resolveRemoteAgent = async (): Promise<
+  RemoteAgent | undefined
+> => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  if (!arn) {
+    throw new Error(
+      \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
+    );
+  }
+  return { arn, region: arn.split(':')[3] };
+};
+
+/** The Cognito access token used to authenticate with the deployed agent. */
+export const getAccessToken = (): string => {
+  const accessToken = process.env.AGENT_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error(
+      'AGENT_ACCESS_TOKEN is not set. Provide a Cognito access token to chat with the deployed agent.',
+    );
+  }
+  return accessToken;
+};
+
+// A \`fetch\` that authenticates requests to the deployed agent and forwards the session id.
+export const createAgentCoreFetch = (): typeof fetch => {
+  const accessToken = getAccessToken();
+  return (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, SESSION_ID);
+    headers.set('Authorization', \`Bearer \${accessToken}\`);
+    return fetch(input, { ...init, headers });
+  };
+};
+"
+`;
+
+exports[`ts#agent generator > chat scripts for http protocol > should match snapshot for chat scripts with cognito auth > chat.ts (http, cognito) 1`] = `
+"// Chat CLI for TestProjectAgent (HTTP / tRPC WebSocket). Connects to the local
+// \`serve-local\` server, or the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set.
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { TestProjectAgentClient } from '../../src/agent/client.js';
+import { resolveRemoteAgent, SESSION_ID, getAccessToken } from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+class TrpcWebSocketAdapter implements ChatAdapter {
+  private client!: ReturnType<typeof TestProjectAgentClient.local>;
+
+  async connect(url: string) {
+    this.client = remote
+      ? TestProjectAgentClient.withJwtAuth({
+          agentRuntimeArn: remote.arn,
+          sessionId: SESSION_ID,
+          accessTokenProvider: async () => getAccessToken(),
+        })
+      : TestProjectAgentClient.local({ url, sessionId: SESSION_ID });
+    return { agentName: 'TestProjectAgent' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    const stream = new ReadableStream<string>({
+      start: (controller) => {
+        this.client.invoke.subscribe(
+          { message: text },
+          {
+            onData: (chunk: string) => controller.enqueue(chunk),
+            onComplete: () => controller.close(),
+            onError: (err: unknown) => controller.error(err),
+          },
+        );
+      },
+    });
+
+    yield* stream as unknown as AsyncIterable<string>;
+  }
+}
+
+await chatLoop(new TrpcWebSocketAdapter(), process.env.URL ?? '');
+"
+`;
+
+exports[`ts#agent generator > chat scripts for http protocol > should match snapshot for chat scripts with iam auth > agentcore.ts (http, iam) 1`] = `
+"// Resolves the deployed TestProjectAgent agent from runtime config and authenticates requests to it.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+// AgentCore session ids must be at least 33 characters.
+export const SESSION_ID = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+export interface RemoteAgent {
+  /** ARN of the deployed Bedrock AgentCore runtime. */
+  arn: string;
+  /** AWS region parsed from the runtime ARN. */
+  region: string;
+}
+
+// Returns the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set, otherwise \`undefined\` to chat locally.
+export const resolveRemoteAgent = async (): Promise<
+  RemoteAgent | undefined
+> => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  if (!arn) {
+    throw new Error(
+      \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
+    );
+  }
+  return { arn, region: arn.split(':')[3] };
+};
+
+// A \`fetch\` that authenticates requests to the deployed agent and forwards the session id.
+export const createAgentCoreFetch = (region: string): typeof fetch => {
+  const credentialProvider = fromNodeProviderChain();
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, SESSION_ID);
+    const client = new AwsClient({
+      ...(await credentialProvider()),
+      service: 'bedrock-agentcore',
+      region,
+    });
+    return client.fetch(input, { ...init, headers });
+  };
+};
+"
+`;
+
+exports[`ts#agent generator > chat scripts for http protocol > should match snapshot for chat scripts with iam auth > chat.ts (http, iam) 1`] = `
+"// Chat CLI for TestProjectAgent (HTTP / tRPC WebSocket). Connects to the local
+// \`serve-local\` server, or the deployed agent when \`RUNTIME_CONFIG_APP_ID\` is set.
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { TestProjectAgentClient } from '../../src/agent/client.js';
+import { resolveRemoteAgent, SESSION_ID } from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+class TrpcWebSocketAdapter implements ChatAdapter {
+  private client!: ReturnType<typeof TestProjectAgentClient.local>;
+
+  async connect(url: string) {
+    this.client = remote
+      ? TestProjectAgentClient.withIamAuth({
+          agentRuntimeArn: remote.arn,
+          sessionId: SESSION_ID,
+        })
+      : TestProjectAgentClient.local({ url, sessionId: SESSION_ID });
+    return { agentName: 'TestProjectAgent' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    const stream = new ReadableStream<string>({
+      start: (controller) => {
+        this.client.invoke.subscribe(
+          { message: text },
+          {
+            onData: (chunk: string) => controller.enqueue(chunk),
+            onComplete: () => controller.close(),
+            onError: (err: unknown) => controller.error(err),
+          },
+        );
+      },
+    });
+
+    yield* stream as unknown as AsyncIterable<string>;
+  }
+}
+
+await chatLoop(new TrpcWebSocketAdapter(), process.env.URL ?? '');
+"
+`;
+
 exports[`ts#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/node:lts-jod
 

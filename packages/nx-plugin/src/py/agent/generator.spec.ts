@@ -1409,4 +1409,34 @@ dev-dependencies = []
 
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
   });
+
+  describe.each([
+    'http',
+    'a2a',
+    'ag-ui',
+  ] as const)('chat scripts for %s protocol', (protocol) => {
+    it.each([
+      'iam',
+      'cognito',
+    ] as const)('should match snapshot for chat scripts with %s auth', async (auth) => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        protocol,
+        auth,
+        infra: 'agentcore',
+        iac: 'cdk',
+      });
+
+      const chat = tree.read(
+        'apps/test-project/scripts/agent/chat.ts',
+        'utf-8',
+      );
+      const agentcore = tree.read(
+        'apps/test-project/scripts/agent/agentcore.ts',
+        'utf-8',
+      );
+      expect(chat).toMatchSnapshot(`chat.ts (${protocol}, ${auth})`);
+      expect(agentcore).toMatchSnapshot(`agentcore.ts (${protocol}, ${auth})`);
+    });
+  });
 });
