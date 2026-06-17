@@ -1291,10 +1291,9 @@ dev-dependencies = []
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
     expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
-    expect(chatTarget.dependsOn).toEqual([
-      'agent-generate-client',
-      'agent-serve-local',
-    ]);
+    // HTTP chat builds the generated client first, but runs standalone — no
+    // serve-local dependency.
+    expect(chatTarget.dependsOn).toEqual(['agent-generate-client']);
 
     // Generated client dir should be gitignored
     const gitignore = tree.read('apps/test-project/.gitignore', 'utf-8');
@@ -1305,7 +1304,7 @@ dev-dependencies = []
     expect(rootPackageJson.devDependencies['agent-chat-cli']).toBeDefined();
   });
 
-  it('should not vend a chat script for A2A — runs agent-chat-cli directly', async () => {
+  it('should vend a standalone chat script for A2A', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
       protocol: 'a2a',
@@ -1313,7 +1312,11 @@ dev-dependencies = []
       iac: 'cdk',
     });
 
-    expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain('A2AChatAdapter');
+    expect(chatScript).toContain('resolveRemoteAgent');
     // No openapi/generate-client targets for A2A
     expect(
       tree.exists('apps/test-project/scripts/agent_openapi.py'),
@@ -1327,13 +1330,12 @@ dev-dependencies = []
 
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
-    expect(chatTarget.options.commands[0]).toMatch(
-      /^agent-chat-cli a2a http:\/\/localhost:\d+$/,
-    );
-    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+    expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
+    expect(chatTarget.options.env.URL).toMatch(/^http:\/\/localhost:\d+$/);
+    expect(chatTarget.dependsOn).toBeUndefined();
   });
 
-  it('should not vend a chat script for AG-UI — runs agent-chat-cli directly', async () => {
+  it('should vend a standalone chat script for AG-UI', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
       protocol: 'ag-ui',
@@ -1341,17 +1343,22 @@ dev-dependencies = []
       iac: 'cdk',
     });
 
-    expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain('AGUIChatAdapter');
+    expect(chatScript).toContain('resolveRemoteAgent');
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
-    expect(chatTarget.options.commands[0]).toMatch(
-      /^agent-chat-cli agui http:\/\/localhost:\d+\/invocations$/,
+    expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
+    expect(chatTarget.options.env.URL).toMatch(
+      /^http:\/\/localhost:\d+\/invocations$/,
     );
-    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+    expect(chatTarget.dependsOn).toBeUndefined();
   });
 
   it('should generate HTTP chat targets with custom agent name', async () => {
@@ -1375,7 +1382,6 @@ dev-dependencies = []
     expect(projectConfig.targets['my-custom-agent-chat']).toBeDefined();
     expect(projectConfig.targets['my-custom-agent-chat'].dependsOn).toEqual([
       'my-custom-agent-generate-client',
-      'my-custom-agent-serve-local',
     ]);
   });
 
@@ -1402,5 +1408,35 @@ dev-dependencies = []
     });
 
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
+  });
+
+  describe.each([
+    'http',
+    'a2a',
+    'ag-ui',
+  ] as const)('chat scripts for %s protocol', (protocol) => {
+    it.each([
+      'iam',
+      'cognito',
+    ] as const)('should match snapshot for chat scripts with %s auth', async (auth) => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        protocol,
+        auth,
+        infra: 'agentcore',
+        iac: 'cdk',
+      });
+
+      const chat = tree.read(
+        'apps/test-project/scripts/agent/chat.ts',
+        'utf-8',
+      );
+      const agentcore = tree.read(
+        'apps/test-project/scripts/agent/agentcore.ts',
+        'utf-8',
+      );
+      expect(chat).toMatchSnapshot(`chat.ts (${protocol}, ${auth})`);
+      expect(agentcore).toMatchSnapshot(`agentcore.ts (${protocol}, ${auth})`);
+    });
   });
 });

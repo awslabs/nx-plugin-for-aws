@@ -269,11 +269,49 @@ Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando 
 
 ### Chat com seu Agente
 
-O gerador configura um destino Nx `<your-agent-name>-chat` que depende de `<your-agent-name>-serve-local`. Executá-lo inicia o agente localmente e o coloca em um chat de terminal interativo:
+O gerador configura um destino Nx `<your-agent-name>-chat` que o coloca em um chat de terminal interativo com seu agente.
+
+O destino de chat é executado de forma independente. Por padrão, ele se conecta ao seu agente em execução local, então inicie `<your-agent-name>-serve-local` primeiro (em um terminal separado):
+
+<NxCommands commands={['run your-project:agent-serve-local']} />
+
+Então, em outro terminal, inicie o chat:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-Para agentes **HTTP** (tRPC sobre WebSocket), o gerador também emite um pequeno `scripts/<your-agent-name>/chat.ts` que envolve o `<Agent>Client.local({ url })` gerado para que você possa personalizá-lo à medida que evolui a forma de entrada do agente.
+O gerador emite um `scripts/<your-agent-name>/chat.ts` para cada protocolo. Você pode personalizá-lo à medida que evolui a forma de entrada do agente. Ele se conecta ao agente local por padrão, ou ao seu agente implantado quando `RUNTIME_CONFIG_APP_ID` está definido (veja [Chat com seu agente implantado](#chat-com-seu-agente-implantado) abaixo).
+
+<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+#### Chat com seu agente implantado
+
+Para conversar com seu agente implantado no Bedrock AgentCore, defina a variável de ambiente `RUNTIME_CONFIG_APP_ID` para o id da aplicação AppConfig da implantação (saída como `RuntimeConfigApplicationId` pela pilha implantada). O script de chat resolve o ARN de runtime do seu agente a partir da configuração de runtime e se conecta ao endpoint implantado:
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'iam' }}>
+Para agentes autenticados por IAM, as solicitações são assinadas com [SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) usando suas credenciais AWS padrão. Certifique-se de que o ambiente tenha credenciais AWS com permissão para invocar o runtime:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
+</TabItem>
+
+<TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
+Para agentes autenticados por Cognito, forneça um token de acesso Cognito através da variável de ambiente `AGENT_ACCESS_TOKEN`, que é enviado como um token bearer:
+
+<NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
+
+Você pode obter um token de acesso usando o comando `cognito-idp admin-initiate-auth` da AWS CLI, por exemplo:
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
 ## Implantando seu Agent no Bedrock AgentCore Runtime

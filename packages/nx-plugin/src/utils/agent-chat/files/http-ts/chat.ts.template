@@ -1,0 +1,54 @@
+// Chat CLI for <%- agentNameClassName %> (HTTP / tRPC WebSocket). Connects to the local
+// `serve-local` server, or the deployed agent when `RUNTIME_CONFIG_APP_ID` is set.
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { <%- agentNameClassName %>Client } from '<%- relativeAgentImport %>/client.js';
+import {
+  resolveRemoteAgent,
+  SESSION_ID,
+<%_ if (auth === 'cognito') { _%>
+  getAccessToken,
+<%_ } _%>
+} from './agentcore.js';
+
+const remote = await resolveRemoteAgent();
+
+class TrpcWebSocketAdapter implements ChatAdapter {
+  private client!: ReturnType<typeof <%- agentNameClassName %>Client.local>;
+
+  async connect(url: string) {
+    this.client = remote
+<%_ if (auth === 'iam') { _%>
+      ? <%- agentNameClassName %>Client.withIamAuth({
+          agentRuntimeArn: remote.arn,
+          sessionId: SESSION_ID,
+        })
+<%_ } else { _%>
+      ? <%- agentNameClassName %>Client.withJwtAuth({
+          agentRuntimeArn: remote.arn,
+          sessionId: SESSION_ID,
+          accessTokenProvider: async () => getAccessToken(),
+        })
+<%_ } _%>
+      : <%- agentNameClassName %>Client.local({ url, sessionId: SESSION_ID });
+    return { agentName: '<%- agentNameClassName %>' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    const stream = new ReadableStream<string>({
+      start: (controller) => {
+        this.client.invoke.subscribe(
+          { message: text },
+          {
+            onData: (chunk: string) => controller.enqueue(chunk),
+            onComplete: () => controller.close(),
+            onError: (err: unknown) => controller.error(err),
+          },
+        );
+      },
+    });
+
+    yield* stream as unknown as AsyncIterable<string>;
+  }
+}
+
+await chatLoop(new TrpcWebSocketAdapter(), process.env.URL ?? '');
