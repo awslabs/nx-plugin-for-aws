@@ -1,0 +1,171 @@
+---
+title: Triển khai DynamoDB Table của bạn
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Trình tạo DynamoDB tạo cơ sở hạ tầng CDK hoặc Terraform dựa trên `iac` bạn đã chọn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct được tạo trong `common/constructs`. Ví dụ sử dụng:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+Điều này cung cấp một bảng DynamoDB với:
+- `pk` (partition key) và `sk` (sort key), cả hai đều là kiểu `String`
+- Global Secondary Indexes như được định nghĩa trong `config.json`
+- Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
+- Mã hóa KMS do khách hàng quản lý với tự động xoay khóa
+- Khôi phục theo thời điểm được bật
+- Bảo vệ xóa được bật
+- Tên bảng được đăng ký trong Runtime Config dưới namespace `dynamodb` trong AWS AppConfig
+</Fragment>
+<Fragment slot="terraform">
+Module Terraform được tạo trong `common/terraform`. Ví dụ sử dụng:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+Điều này cung cấp một bảng DynamoDB với:
+- `pk` (partition key) và `sk` (sort key), cả hai đều là kiểu `String`
+- Global Secondary Indexes như được định nghĩa trong `config.json`
+- Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
+- Mã hóa KMS do khách hàng quản lý với tự động xoay khóa
+- Khôi phục theo thời điểm được bật
+- Bảo vệ xóa được bật
+- Tên bảng được đăng ký trong Runtime Config
+</Fragment>
+</Infrastructure>
+
+### Cấp quyền truy cập
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+### Bảo vệ xóa
+
+Bảo vệ xóa được bật mặc định để ngăn chặn việc xóa bảng do nhầm lẫn.
+
+#### Tắt bảo vệ xóa
+
+Tắt nó cho các môi trường mà việc xóa bảng được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước tồn tại ngắn hạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Chế độ thanh toán
+
+Bảng mặc định sử dụng thanh toán theo yêu cầu (`PAY_PER_REQUEST`). Chuyển sang dung lượng được cung cấp cho các khối lượng công việc có thông lượng cao và có thể dự đoán.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Khôi phục theo thời điểm
+
+[Khôi phục theo thời điểm](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) được bật mặc định, cho phép bạn khôi phục bảng về bất kỳ thời điểm nào trong 35 ngày qua.
+
+#### Tắt khôi phục theo thời điểm
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Xoay khóa mã hóa
+
+Khóa KMS được sử dụng để mã hóa bảng có tự động xoay khóa được bật mặc định. Tắt nó nếu chính sách bảo mật của bạn quản lý việc xoay khóa từ bên ngoài.
+
+#### Tắt xoay khóa mã hóa
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

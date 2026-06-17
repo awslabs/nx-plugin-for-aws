@@ -23,7 +23,6 @@ export interface AddDynamoDBConstructOptions {
   projectName: string;
   nameClassName: string;
   nameKebabCase: string;
-  dynamoPackageAlias: string;
   tableName: string;
   projectRoot: string;
 }

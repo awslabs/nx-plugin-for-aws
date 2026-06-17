@@ -27,6 +27,7 @@ describe('ts#dynamodb generator', () => {
   const defaultOptions = {
     name: 'MyTable',
     directory: 'packages',
+    framework: 'electrodb' as const,
     infra: 'dynamodb' as const,
     iac: 'cdk' as const,
   };
@@ -40,7 +41,7 @@ describe('ts#dynamodb generator', () => {
     );
 
     snapshotTreeDir(tree, 'packages/my-table/src');
-    snapshotTreeDir(tree, 'packages/my-table/scripts');
+    snapshotTreeDir(tree, 'packages/common/scripts/src/dynamodb');
 
     expect(
       tree.read('packages/common/constructs/src/core/dynamodb.ts', 'utf-8'),
@@ -64,8 +65,7 @@ describe('ts#dynamodb generator', () => {
     expect(projectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command:
-          'tsx scripts/pull-image.ts public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest',
+        command: 'tsx ../common/scripts/src/dynamodb/pull-image.ts',
         cwd: '{projectRoot}',
       },
     });
@@ -75,8 +75,8 @@ describe('ts#dynamodb generator', () => {
       dependsOn: ['pull-image'],
       options: {
         commands: [
-          'tsx scripts/start-container.ts proj-dynamodb public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest 8000',
-          'tsx scripts/create-local-table.ts proj-my-table 8000',
+          'tsx ../common/scripts/src/dynamodb/start-container.ts',
+          'tsx ../common/scripts/src/dynamodb/create-local-table.ts',
         ],
         parallel: true,
         cwd: '{projectRoot}',
@@ -90,7 +90,7 @@ describe('ts#dynamodb generator', () => {
       '@proj/my-table:build',
     );
 
-    expect(tree.exists('packages/my-table/dynamodb.config.json')).toBe(true);
+    expect(tree.exists('packages/my-table/config.json')).toBe(true);
 
     expect(packageJson.dependencies['@aws-sdk/client-dynamodb']).toBeDefined();
     expect(packageJson.dependencies['electrodb']).toBeDefined();
@@ -108,7 +108,9 @@ describe('ts#dynamodb generator', () => {
   it('should generate scripts for finch engine', async () => {
     vi.mocked(resolveContainers).mockResolvedValue('finch');
     await tsDynamoDBGenerator(tree, defaultOptions);
-    snapshotTreeDir(tree, 'packages/my-table/scripts');
+    expect(
+      tree.read('packages/my-table/config.json', 'utf-8'),
+    ).toMatchSnapshot();
   });
 
   it('should generate terraform modules when iac is terraform', async () => {
@@ -180,16 +182,17 @@ describe('ts#dynamodb generator', () => {
       (cfg.metadata as any)?.ports?.[0] as number | undefined;
 
     expect(portOf(secondConfig)).toBe(portOf(firstConfig));
-    expect(secondConfig.targets['serve-local'].options.commands[0]).toContain(
-      `${portOf(firstConfig)}`,
+    const secondConfigJson = JSON.parse(
+      tree.read('packages/other-table/config.json', 'utf-8') ?? '{}',
     );
+    expect(secondConfigJson.serveLocal.port).toBe(portOf(firstConfig));
   });
 
   it('should generate with infra=none then upgrade to infra=dynamodb', async () => {
     await tsDynamoDBGenerator(tree, { ...defaultOptions, infra: 'none' });
 
     snapshotTreeDir(tree, 'packages/my-table/src');
-    snapshotTreeDir(tree, 'packages/my-table/scripts');
+    snapshotTreeDir(tree, 'packages/common/scripts/src/dynamodb');
     expect(tree.exists('packages/common/constructs')).toBeFalsy();
 
     const projectJson = JSON.parse(
@@ -227,16 +230,12 @@ describe('ts#dynamodb generator', () => {
       ...defaultOptions,
       tableName: 'CustomTableName',
     });
-    const projectConfig = readProjectConfigurationUnqualified(
-      tree,
-      '@proj/my-table',
+    const configJson = JSON.parse(
+      tree.read('packages/my-table/config.json', 'utf-8') ?? '{}',
     );
-
-    expect(projectConfig.targets['serve-local'].options.commands[0]).toContain(
-      'proj-dynamodb',
-    );
-    expect(tree.read('packages/my-table/src/constants.ts', 'utf-8')).toContain(
-      "LOCAL_TABLE_NAME = 'proj-custom-table-name'",
+    expect(configJson.serveLocal.containerName).toBe('proj-dynamodb');
+    expect(tree.read('packages/my-table/config.json', 'utf-8')).toContain(
+      '"tableName": "proj-custom-table-name"',
     );
   });
 });

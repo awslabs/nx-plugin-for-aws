@@ -1,0 +1,449 @@
+---
+title: py#dynamodb
+description: Python DynamoDB 프로젝트 생성
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+이 생성기는 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/)를 기반으로 하는 새로운 Python 프로젝트를 생성하며, 엔티티 모델링을 위해 [PynamoDB](https://pynamodb.readthedocs.io/)를 사용합니다. AWS CDK 또는 Terraform을 사용하여 DynamoDB 테이블을 프로비저닝하고 관리하는 데 필요한 애플리케이션 코드와 인프라를 생성하며, 단일 테이블 설계 지원과 DynamoDB Local을 통한 내장 로컬 개발 환경을 제공합니다.
+
+## 사용법
+
+### DynamoDB 프로젝트 생성
+
+<RunGenerator generator="py#dynamodb" />
+
+### 옵션
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## 생성기 출력
+
+생성기는 `<directory>/<name>` 디렉토리에 다음과 같은 프로젝트 구조를 생성합니다:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py 패키지 내보내기
+    - client.py DynamoDB 클라이언트 및 테이블 이름 확인
+    - entities
+      - base.py GSI 선언이 포함된 기본 PynamoDB 모델
+      - example.py 예제 엔티티 정의
+      - \_\_init\_\_.py 엔티티 내보내기
+  - config.json GSI 정의 및 로컬 개발 설정을 포함한 테이블 구성
+  - project.json 프로젝트 구성 및 빌드 타겟
+</FileTree>
+
+로컬 개발 스크립트는 모든 DynamoDB 프로젝트(TypeScript 및 Python 모두)에서 공유되며 다음 위치에 한 번 생성됩니다:
+
+<FileTree>
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts 로컬 DynamoDB Local 인스턴스에 DynamoDB 테이블 생성
+    - pull-image.ts DynamoDB Local 이미지 가져오기
+    - start-container.ts DynamoDB Local 컨테이너 시작
+</FileTree>
+
+### 인프라
+
+<Snippet name="dynamodb/infrastructure" />
+
+## 로컬 개발
+
+### 로컬 DynamoDB 시작
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### 데이터 모델링
+
+생성된 프로젝트는 엔티티 모델링을 위해 [PynamoDB](https://pynamodb.readthedocs.io/)를 사용합니다. 모든 엔티티는 생성된 `BaseModel`을 **반드시** 상속해야 합니다 — 이는 런타임에 올바른 DynamoDB 테이블 이름을 확인하며, 배포 시에는 AWS AppConfig에서, DynamoDB Local을 통해 로컬에서 실행할 때는 `config.json`에서 읽습니다. 이것이 없으면 PynamoDB는 어떤 테이블을 사용해야 할지 알 수 없습니다. `BaseModel`은 또한 [PynamoDB의 다형성 지원](https://pynamodb.readthedocs.io/en/stable/polymorphism.html)을 사용하여 [DynamoDB의 단일 테이블 설계](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)를 따라 단일 테이블에 여러 엔티티 유형을 저장합니다.
+
+생성된 예제 엔티티를 시작점으로 사용하여 `<name>/entities/` 아래에 엔티티 파일을 추가하거나 업데이트하세요:
+
+```python title="packages/my_table/my_table/entities/example.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    """
+    키 설계:
+      pk=EXAMPLE#<id>,        sk=EXAMPLE#<id>
+      gsi1pk=CATEGORY#<cat>,  gsi1sk=EXAMPLE#<id>    <- 카테고리별 항목 목록
+      gsi2pk=EXAMPLE,         gsi2sk=<created_at>    <- 날짜별 모든 항목 목록
+    """
+
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+자세한 내용은 [PynamoDB 튜토리얼](https://pynamodb.readthedocs.io/en/stable/tutorial.html)을 참조하세요.
+
+#### 액세스 패턴을 중심으로 설계하기
+
+DynamoDB에서 스키마 설계는 데이터 형태가 아닌 쿼리에서 시작됩니다. 모델을 작성하기 전에 애플리케이션에 필요한 모든 액세스 패턴을 나열한 다음, 각 패턴이 단일 테이블 요청으로 응답될 수 있도록 `pk`, `sk` 및 GSI 키 값을 설계하세요 — JOIN이나 순차 읽기 없이 말이죠.
+
+생성된 `ExampleModel`은 세 가지 패턴에 대해 이를 보여줍니다:
+
+- **ID로 가져오기** — 기본 인덱스, `pk=EXAMPLE#<id>`, `sk=EXAMPLE#<id>`
+- **카테고리별 목록** — `gsi1`, `pk=CATEGORY#<category>`
+- **생성 날짜별 목록** — `gsi2`, `pk=EXAMPLE`, ISO 타임스탬프 간 정렬 키
+
+**타입 접두사** 규칙(예: `EXAMPLE#`, `CATEGORY#`)은 의도적입니다: 테이블을 탐색할 때 항목을 자체 설명적으로 만들고, 인덱스를 공유하는 엔티티 유형 간의 우발적인 키 충돌을 방지하며, `begins_with`를 사용한 정렬 키 접두사 필터링을 허용합니다.
+
+새 엔티티를 작성하기 전에 docstring에 키 패턴을 미리 정의하세요. 다음 섹션의 `OrderModel`은 이 규칙을 따릅니다:
+
+```python
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    키 설계:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>   <- 사용자의 주문 목록
+      gsi2pk=ORDER,           gsi2sk=<created_at>        <- 날짜별 모든 주문 목록
+    """
+```
+
+#### 여러 엔티티 유형 저장
+
+PynamoDB의 `DiscriminatorAttribute`는 모든 항목에 타입 레이블(`entity_type`)을 저장합니다. `BaseModel`을 통해 쿼리할 때 이 레이블은 각 결과를 올바른 서브클래스로 자동으로 인스턴스화하는 데 사용됩니다 — 따라서 단일 쿼리가 `UserModel`, `OrderModel` 및 동일한 테이블에 등록된 다른 엔티티 유형의 혼합을 반환할 수 있습니다.
+
+:::caution[PynamoDB는 단일 테이블 설계를 위해 특별히 제작되지 않았습니다]
+PynamoDB의 `DiscriminatorAttribute`는 단일 동질 테이블 내의 클래스 계층 다형성을 위해 설계되었으며 — 하나의 테이블에 구조적으로 다른 엔티티 유형을 저장하기 위한 것이 아닙니다. 여기서 사용된 패턴은 작동하지만 다음 주의사항을 염두에 두세요:
+
+- **키 충돌은 사용자의 책임입니다.** PynamoDB는 두 엔티티 유형이 동일한 `pk`/`sk` 쌍을 작성하는 것을 방지하지 않습니다. 항상 고유한 타입 접두사(예: `ORDER#`, `USER#`)를 사용하세요.
+- **교차 엔티티 쿼리에는 `BaseModel`이 필요합니다.** PynamoDB는 특정 서브클래스를 쿼리할 때 자동으로 판별자 필터를 추가하므로 동일한 키에 있는 다른 엔티티 유형의 항목은 절대 반환되지 않습니다. 공유 GSI 파티션 키에서 여러 유형의 혼합을 검색하려면 항상 `BaseModel`을 통해 쿼리하세요.
+- **공유 테이블 설정.** 모든 엔티티는 `BaseModel`에 정의된 `Meta` 구성(테이블 이름, 리전, 자격 증명)을 공유합니다.
+:::
+
+다음은 동일한 테이블에 저장된 관련 `OrderModel` 레코드가 있는 `UserModel`의 완전한 두 엔티티 예제입니다:
+
+```python title="packages/my_table/my_table/entities/user.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class UserModel(BaseModel, discriminator='UserModel'):
+    """
+    키 설계:
+      pk=USER#<user_id>,  sk=USER#<user_id>
+      gsi2pk=USER,        gsi2sk=<created_at>    <- 날짜별 모든 사용자 목록
+    """
+
+    username = UnicodeAttribute()
+    email = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, user_id: str) -> str:
+        return f'USER#{user_id}'
+
+    @classmethod
+    def create(cls, user_id: str, username: str, email: str) -> 'UserModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(user_id),
+            sk=cls.make_pk(user_id),
+            gsi2pk='USER',
+            gsi2sk=now,
+            username=username,
+            email=email,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, user_id: str) -> 'UserModel':
+        return cls.get(cls.make_pk(user_id), cls.make_pk(user_id))
+
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['UserModel']:
+        return cls.gsi2_index.query('USER', limit=limit, scan_index_forward=False)
+```
+
+```python title="packages/my_table/my_table/entities/order.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    키 설계:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>    <- 사용자별 주문 목록
+      gsi2pk=ORDER,           gsi2sk=<created_at>         <- 날짜별 모든 주문 목록
+    """
+
+    user_id = UnicodeAttribute()
+    total = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, order_id: str) -> str:
+        return f'ORDER#{order_id}'
+
+    @classmethod
+    def create(cls, order_id: str, user_id: str, total: str) -> 'OrderModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(order_id),
+            sk=cls.make_pk(order_id),
+            gsi1pk=f'USER#{user_id}',
+            gsi1sk=cls.make_pk(order_id),
+            gsi2pk='ORDER',
+            gsi2sk=now,
+            user_id=user_id,
+            total=total,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, order_id: str) -> 'OrderModel':
+        return cls.get(cls.make_pk(order_id), cls.make_pk(order_id))
+
+    # ── gsi1_index: partition=user, sort=order_id ────────────────────────────
+    @classmethod
+    def list_by_user(cls, user_id: str) -> Iterator['OrderModel']:
+        return cls.gsi1_index.query(f'USER#{user_id}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['OrderModel']:
+        return cls.gsi2_index.query('ORDER', limit=limit, scan_index_forward=False)
+```
+
+`__init__.py`에서 새 엔티티를 내보내세요:
+
+```python title="packages/my_table/my_table/entities/__init__.py"
+from .user import UserModel
+from .order import OrderModel
+from .example import ExampleModel
+```
+
+#### GSI 오버로딩
+
+`BaseModel`은 두 개의 공유 GSI(`gsi1_index`, `gsi2_index`)를 제공합니다. 위의 `UserModel`과 `OrderModel` 모두 `gsi2`에 쓰지만 서로 다른 `gsi2pk` 값(`USER` 대 `ORDER`)을 사용합니다. 이것이 **GSI 오버로딩**입니다: 추가 GSI 용량을 소비하지 않고 여러 독립적인 액세스 패턴을 제공하기 위해 단일 물리적 인덱스를 재사용하는 것입니다.
+
+- **`UserModel`** — `gsi2pk=USER`, `gsi2sk=<created_at>` → 날짜별 모든 사용자 목록
+- **`OrderModel`** — `gsi2pk=ORDER`, `gsi2sk=<created_at>` → 날짜별 모든 주문 목록
+
+여러 엔티티 유형이 동일한 부모를 공유할 때 `gsi1`도 오버로드할 수 있습니다. 나중에 사용자에게도 속하는 `ReviewModel`을 추가하는 경우 `REVIEW#<id>` 정렬 키와 함께 `gsi1pk=USER#<user_id>`를 할당할 수 있습니다 — 추가 GSI가 필요하지 않습니다. 그런 다음 `BaseModel`을 통해 `gsi1`을 쿼리하면 한 번의 요청으로 해당 사용자의 주문과 리뷰를 모두 반환하며, PynamoDB는 각 항목을 올바른 서브클래스로 인스턴스화합니다:
+
+```python
+from .base import BaseModel
+from .order import OrderModel
+from .review import ReviewModel
+
+user_id = 'user-123'
+items = list(BaseModel.gsi1_index.query(f'USER#{user_id}'))
+
+orders  = [i for i in items if isinstance(i, OrderModel)]
+reviews = [i for i in items if isinstance(i, ReviewModel)]
+```
+
+오버로드된 GSI에서 하나의 엔티티 유형만 검색하려면 정렬 키 접두사 조건을 사용하세요:
+
+```python
+orders_only = list(BaseModel.gsi1_index.query(
+    f'USER#{user_id}',
+    range_key_condition=BaseModel.gsi1sk.startswith('ORDER#'),
+))
+```
+
+#### 일대다 관계
+
+**일대다** 관계에서 자식 엔티티는 GSI 파티션 키에 부모에 대한 참조를 저장하여 데이터를 복제하지 않고 양방향으로 관계를 탐색할 수 있게 합니다. 위의 `UserModel` / `OrderModel` 예제가 정확히 이 패턴입니다:
+
+- **ID로 단일 주문 가져오기** — 기본 테이블: `pk=ORDER#<id>`, `sk=ORDER#<id>`
+- **사용자의 모든 주문 목록** — `gsi1`: `pk=USER#<user_id>`
+
+GSI 기반 조회의 대안은 **항목 컬렉션** 패턴입니다: 자식 항목에 부모와 동일한 `pk`를 부여하고 정렬 키를 사용하여 구분합니다. 이를 통해 GSI 없이 단일 기본 테이블 쿼리로 부모와 모든 자식을 검색할 수 있습니다:
+
+```python title="packages/my_table/my_table/entities/order.py (항목 컬렉션 변형)"
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    키 설계 (항목 컬렉션):
+      pk=USER#<user_id>,    sk=ORDER#<order_id>   <- 부모 사용자 아래에 공동 배치
+    """
+    ...
+```
+
+```python
+# 단일 기본 테이블 쿼리로 사용자와 모든 주문 검색
+# BaseModel은 DiscriminatorAttribute를 통해 각 항목을 올바른 서브클래스로 디스패치합니다
+items = list(BaseModel.query(f'USER#{user_id}'))
+user   = next(i for i in items if isinstance(i, UserModel))
+orders = [i for i in items if isinstance(i, OrderModel)]
+```
+
+트레이드오프: 항목 컬렉션은 모든 자식을 단일 파티션 키 아래에 배치하는데, 이는 대부분의 워크로드에 최적이지만 극단적인 쓰기 처리량에서 핫 파티션을 생성할 수 있습니다. GSI 접근 방식(위 예제에서 사용)은 각 엔티티를 자체 파티션에 유지하며 일반적으로 시작하기에 더 안전합니다.
+
+#### 다대다 관계
+
+다대다 관계에는 [인접 목록 패턴](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-adjacency-graphs.html)을 사용하는 **접합 엔티티**가 필요합니다: 각 링크를 기록하는 전용 항목으로, GSI 키가 방향을 반전시켜 관계를 양방향으로 탐색할 수 있게 합니다.
+
+기사가 여러 태그를 가질 수 있고 태그가 여러 기사에 적용될 수 있는 `ArticleModel`과 `TagModel`을 고려하세요:
+
+```python title="packages/my_table/my_table/entities/article_tag.py"
+from collections.abc import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ArticleTagModel(BaseModel, discriminator='ArticleTag'):
+    """
+    Article ↔ Tag 다대다 관계를 위한 접합 엔티티.
+
+    키 설계:
+      pk=ARTICLE#<article_id>,  sk=TAG#<tag_name>             <- 기사의 태그 목록
+      gsi1pk=TAG#<tag_name>,    gsi1sk=ARTICLE#<article_id>  <- 태그의 기사 목록
+    """
+
+    article_id = UnicodeAttribute()
+    tag_name = UnicodeAttribute()
+
+    @classmethod
+    def add(cls, article_id: str, tag_name: str) -> 'ArticleTagModel':
+        item = cls(
+            pk=f'ARTICLE#{article_id}',
+            sk=f'TAG#{tag_name}',
+            gsi1pk=f'TAG#{tag_name}',
+            gsi1sk=f'ARTICLE#{article_id}',
+            article_id=article_id,
+            tag_name=tag_name,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def remove(cls, article_id: str, tag_name: str) -> None:
+        cls.get(f'ARTICLE#{article_id}', f'TAG#{tag_name}').delete()
+
+    # ── Primary index: pk=article, sk=tag ─────────────────────────────────────
+    @classmethod
+    def list_tags_for_article(cls, article_id: str) -> Iterator['ArticleTagModel']:
+        return cls.query(f'ARTICLE#{article_id}')
+
+    # ── gsi1_index: pk=tag, sk=article ────────────────────────────────────────
+    @classmethod
+    def list_articles_for_tag(cls, tag_name: str) -> Iterator['ArticleTagModel']:
+        return cls.gsi1_index.query(f'TAG#{tag_name}')
+```
+
+`ArticleTagModel`은 `pk=ARTICLE#<article_id>`를 사용하기 때문에 — 기사 자체와 동일한 파티션 — 단일 기본 테이블 쿼리로 기사와 모든 태그를 검색할 수 있습니다:
+
+```python
+from .base import BaseModel
+from .article import ArticleModel
+from .article_tag import ArticleTagModel
+
+items   = list(BaseModel.query('ARTICLE#article-123'))
+article = next(i for i in items if isinstance(i, ArticleModel))
+tags    = [i.tag_name for i in items if isinstance(i, ArticleTagModel)]
+```
+
+DynamoDB 데이터 모델링에 대한 추가 정보는 [DynamoDB 데이터 모델링 가이드](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling.html) 및 [Amazon DynamoDB로 단일 테이블 설계 만들기](https://aws.amazon.com/blogs/compute/creating-a-single-table-design-with-amazon-dynamodb/)를 참조하세요.
+
+### DynamoDB 클라이언트 사용
+
+생성된 `client.py`는 두 가지 주요 유틸리티를 내보냅니다:
+
+- `is_local()` — `SERVE_LOCAL=true`일 때 `True`를 반환하며, 로컬과 AWS 동작을 전환하는 데 사용됩니다.
+- `get_table_name()` — DynamoDB 테이블 이름을 반환합니다. `SERVE_LOCAL=true`일 때는 `config.json`의 `serveLocal.tableName`에서 테이블 이름을 읽고, 그렇지 않으면 `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 이름을 가져와 후속 호출을 위해 캐시합니다.
+
+`entities/base.py`의 `BaseModel`은 두 가지를 모두 사용하여 PynamoDB를 자동으로 구성합니다:
+
+- **연결** — `BaseModel.Meta`는 `is_local()`이 `True`일 때 `config.json`에서 `host`를 설정하고 `region`, `aws_access_key_id`, `aws_secret_access_key`를 하드코딩하여 PynamoDB가 로컬 DynamoDB 인스턴스를 가리키도록 합니다. AWS에서는 이러한 값이 설정되지 않아 PynamoDB가 기본 자격 증명 체인을 사용합니다.
+- **테이블 이름** — `BaseModel._get_connection()`은 각 작업 전에 `get_table_name()`을 호출하므로 수동 구성 없이 런타임에 올바른 테이블이 확인됩니다.
+
+### 로컬 DynamoDB 중지
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## 글로벌 보조 인덱스 추가/제거
+
+GSI는 프로젝트 루트의 `config.json`에서 `tableConfig.globalSecondaryIndexes` 키 아래에 정의됩니다. 각 GSI에 대한 항목을 추가한 다음 `<name>/entities/base.py`의 `BaseModel`에서 해당 `GlobalSecondaryIndex` 클래스와 속성을 추가하거나 제거하여 변경 사항을 반영하세요:
+
+<Snippet name="dynamodb/gsi-config" parentHeading="글로벌 보조 인덱스 추가/제거" />
+
+## 테이블에 연결
+
+모든 Python 프로젝트에서 DynamoDB 패키지를 워크스페이스 종속성으로 추가하고 엔티티 클래스를 직접 가져오세요:
+
+```python
+from my_db_package.entities import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[런타임 구성]
+AWS에서 실행할 때 `get_table_name()`은 `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 테이블 이름을 가져옵니다. 이 플러그인으로 빌드된 프로젝트는 이미 이 변수가 자동으로 구성되어 있습니다. 다른 Python 프로젝트의 경우 인프라에서 프로비저닝한 AppConfig 애플리케이션 ID로 런타임 환경에 `RUNTIME_CONFIG_APP_ID`가 설정되어 있는지 확인하세요. 자세한 내용은 <Link path="guides/runtime-config">런타임 구성 가이드</Link>를 참조하세요.
+:::
+
+### 연결 생성기
+
+특정 프로젝트 유형의 경우 `connection` 생성기를 사용하여 로컬 개발 종속성을 자동으로 연결하면 DynamoDB Local이 프로젝트와 함께 자동으로 시작되고 DynamoDB 패키지가 워크스페이스 종속성으로 추가됩니다:
+
+- <Link path="guides/connection/py-fast-api-dynamodb">FastAPI → DynamoDB</Link>
+- <Link path="guides/connection/py-agent-dynamodb">Python Agent → DynamoDB</Link>
+- <Link path="guides/connection/py-mcp-server-dynamodb">Python MCP Server → DynamoDB</Link>
+
+## 테이블 배포
+
+<Snippet name="dynamodb/deploying-table" parentHeading="테이블 배포" />

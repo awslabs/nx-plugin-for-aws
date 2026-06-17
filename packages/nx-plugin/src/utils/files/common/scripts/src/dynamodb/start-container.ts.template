@@ -1,17 +1,17 @@
 import { spawn, spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 
-const ENGINE = '<%= containerEngine %>';
-
-const [containerName, image, hostPort] = process.argv.slice(2);
+const { containerEngine, containerName, image, port } =
+  JSON.parse(readFileSync('config.json', 'utf-8')).serveLocal;
 
 const containerExists = (): boolean =>
-  spawnSync(ENGINE, ['container', 'inspect', containerName], {
+  spawnSync(containerEngine, ['container', 'inspect', containerName], {
     stdio: 'ignore',
   }).status === 0;
 
 const isRunning = (): boolean => {
   const result = spawnSync(
-    ENGINE,
+    containerEngine,
     ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
     { encoding: 'utf-8' },
   );
@@ -29,19 +29,29 @@ for (;;) {
     if (!isRunning()) {
       // Another process may have started it between our inspect and start — container engine start
       // exits 0 even if the container is already running, so no special-casing needed.
-      const start = spawnSync(ENGINE, ['start', containerName], {
+      const start = spawnSync(containerEngine, ['start', containerName], {
         stdio: 'inherit',
       });
       if (start.status !== 0) process.exit(start.status ?? 1);
     }
     break;
   }
-  const runArgs = (
-    `run <%- containerEngine === 'docker' ? '--rm ' : '' %>--name ${containerName} -u root -w /home/dynamodblocal` +
-    ` -p ${hostPort}:${hostPort} -v ${containerName}-data:/home/dynamodblocal/data` +
-    ` -d ${image} -jar DynamoDBLocal.jar -sharedDb -dbPath ./data -port ${hostPort} -optimizeDbBeforeStartup`
-  ).split(' ');
-  const create = spawnSync(ENGINE, runArgs, { stdio: 'pipe' });
+  const runArgs = [
+    'run',
+    ...(containerEngine === 'docker' ? ['--rm'] : []),
+    '--name', containerName,
+    '-u', 'root',
+    '-w', '/home/dynamodblocal',
+    `-p`, `${port}:${port}`,
+    '-v', `${containerName}-data:/home/dynamodblocal/data`,
+    '-d', image,
+    '-jar', 'DynamoDBLocal.jar',
+    '-sharedDb',
+    '-dbPath', './data',
+    '-port', `${port}`,
+    '-optimizeDbBeforeStartup',
+  ];
+  const create = spawnSync(containerEngine, runArgs, { stdio: 'pipe' });
   if (create.status === 0) {
     created = true;
     break;
@@ -52,7 +62,7 @@ for (;;) {
   }
 }
 
-const logs = spawn(ENGINE, ['logs', '-f', containerName], {
+const logs = spawn(containerEngine, ['logs', '-f', containerName], {
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 
@@ -62,11 +72,11 @@ const cleanup = () => {
   if (exiting) return;
   exiting = true;
   if (created) {
-<%_ if (containerEngine === 'docker') { _%>
-    spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
-<%_ } else { _%>
-    spawnSync(ENGINE, ['rm', '-f', containerName], { stdio: 'ignore' });
-<%_ } _%>
+    if (containerEngine === 'docker') {
+      spawnSync(containerEngine, ['stop', containerName], { stdio: 'ignore' });
+    } else {
+      spawnSync(containerEngine, ['rm', '-f', containerName], { stdio: 'ignore' });
+    }
   }
   logs.kill();
   process.exit(0);

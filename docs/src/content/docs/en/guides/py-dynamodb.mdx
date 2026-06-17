@@ -1,0 +1,449 @@
+---
+title: py#dynamodb
+description: Create a Python DynamoDB project
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+This generator creates a new Python project backed by [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), using [PynamoDB](https://pynamodb.readthedocs.io/) for entity modelling. It generates the application code and infrastructure needed to provision and manage a DynamoDB table using AWS CDK or Terraform, with single-table design support and built-in local development via DynamoDB Local.
+
+## Usage
+
+### Generate a DynamoDB Project
+
+<RunGenerator generator="py#dynamodb" />
+
+### Options
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## Generator Output
+
+The generator creates the following project structure in the `<directory>/<name>` directory:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py Package exports
+    - client.py DynamoDB client and table name resolution
+    - entities
+      - base.py Base PynamoDB model with GSI declarations
+      - example.py Example entity definition
+      - \_\_init\_\_.py Entity exports
+  - config.json Table configuration including GSI definitions and local development settings
+  - project.json Project configuration and build targets
+</FileTree>
+
+The local development scripts are shared across all DynamoDB projects (both TypeScript and Python) and generated once into:
+
+<FileTree>
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts Creates the DynamoDB table in the local DynamoDB Local instance
+    - pull-image.ts Pulls the DynamoDB Local image
+    - start-container.ts Starts the DynamoDB Local container
+</FileTree>
+
+### Infrastructure
+
+<Snippet name="dynamodb/infrastructure" />
+
+## Local Development
+
+### Starting Local DynamoDB
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### Data Modelling
+
+The generated project uses [PynamoDB](https://pynamodb.readthedocs.io/) for entity modelling. All entities **must** inherit from the generated `BaseModel` — it resolves the correct DynamoDB table name at runtime, reading from AWS AppConfig when deployed or from `config.json` when running locally via DynamoDB Local. Without this, PynamoDB will not know which table to use. `BaseModel` also uses [PynamoDB's polymorphism support](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) to store multiple entity types in a single table, following [DynamoDB's single-table design](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
+
+Add or update entity files under `<name>/entities/`, using the generated example entity as a starting point:
+
+```python title="packages/my_table/my_table/entities/example.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    """
+    Key design:
+      pk=EXAMPLE#<id>,        sk=EXAMPLE#<id>
+      gsi1pk=CATEGORY#<cat>,  gsi1sk=EXAMPLE#<id>    <- list items by category
+      gsi2pk=EXAMPLE,         gsi2sk=<created_at>    <- list all items by date
+    """
+
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+For more details, see the [PynamoDB tutorial](https://pynamodb.readthedocs.io/en/stable/tutorial.html).
+
+#### Designing Around Access Patterns
+
+In DynamoDB, schema design starts with your queries, not your data shape. Before writing any model, list every access pattern your application needs, then design `pk`, `sk`, and GSI key values so each pattern is answered by a single table request — no JOINs, no sequential reads.
+
+The generated `ExampleModel` demonstrates this for three patterns:
+
+- **Get by ID** — primary index, `pk=EXAMPLE#<id>`, `sk=EXAMPLE#<id>`
+- **List by category** — `gsi1`, `pk=CATEGORY#<category>`
+- **List by creation date** — `gsi2`, `pk=EXAMPLE`, sort key between ISO timestamps
+
+The **type prefix** convention (e.g. `EXAMPLE#`, `CATEGORY#`) is deliberate: it makes items self-describing when browsing the table, prevents accidental key collisions between entity types that share an index, and allows sort key prefix filtering using `begins_with`.
+
+Before writing a new entity, define its key patterns upfront in a docstring. The `OrderModel` in the next section follows this convention:
+
+```python
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>   <- list orders for a user
+      gsi2pk=ORDER,           gsi2sk=<created_at>        <- list all orders by date
+    """
+```
+
+#### Storing Multiple Entity Types
+
+PynamoDB's `DiscriminatorAttribute` stores a type label (`entity_type`) in every item. When querying via `BaseModel`, this label is used to instantiate each result as its correct subclass automatically — so a single query can return a mix of `UserModel`, `OrderModel`, and any other entity type registered in the same table.
+
+:::caution[PynamoDB is not purpose-built for single-table design]
+PynamoDB's `DiscriminatorAttribute` was designed for class hierarchy polymorphism within a single homogeneous table — not for storing structurally different entity types in one table. The pattern used here works, but keep these caveats in mind:
+
+- **Key collision is your responsibility.** PynamoDB does not prevent two entity types from writing the same `pk`/`sk` pair. Always use unique type prefixes (e.g. `ORDER#`, `USER#`).
+- **Cross-entity queries require `BaseModel`.** PynamoDB automatically adds a discriminator filter when querying a specific subclass, so items of other entity types at the same key will never be returned. To retrieve a mix of types from a shared GSI partition key, always query via `BaseModel`.
+- **Shared table settings.** All entities share the `Meta` configuration (table name, region, credentials) defined in `BaseModel`.
+:::
+
+Below is a complete two-entity example — a `UserModel` with associated `OrderModel` records stored in the same table:
+
+```python title="packages/my_table/my_table/entities/user.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class UserModel(BaseModel, discriminator='UserModel'):
+    """
+    Key design:
+      pk=USER#<user_id>,  sk=USER#<user_id>
+      gsi2pk=USER,        gsi2sk=<created_at>    <- list all users by date
+    """
+
+    username = UnicodeAttribute()
+    email = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, user_id: str) -> str:
+        return f'USER#{user_id}'
+
+    @classmethod
+    def create(cls, user_id: str, username: str, email: str) -> 'UserModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(user_id),
+            sk=cls.make_pk(user_id),
+            gsi2pk='USER',
+            gsi2sk=now,
+            username=username,
+            email=email,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, user_id: str) -> 'UserModel':
+        return cls.get(cls.make_pk(user_id), cls.make_pk(user_id))
+
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['UserModel']:
+        return cls.gsi2_index.query('USER', limit=limit, scan_index_forward=False)
+```
+
+```python title="packages/my_table/my_table/entities/order.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>    <- list orders by user
+      gsi2pk=ORDER,           gsi2sk=<created_at>         <- list all orders by date
+    """
+
+    user_id = UnicodeAttribute()
+    total = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, order_id: str) -> str:
+        return f'ORDER#{order_id}'
+
+    @classmethod
+    def create(cls, order_id: str, user_id: str, total: str) -> 'OrderModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(order_id),
+            sk=cls.make_pk(order_id),
+            gsi1pk=f'USER#{user_id}',
+            gsi1sk=cls.make_pk(order_id),
+            gsi2pk='ORDER',
+            gsi2sk=now,
+            user_id=user_id,
+            total=total,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, order_id: str) -> 'OrderModel':
+        return cls.get(cls.make_pk(order_id), cls.make_pk(order_id))
+
+    # ── gsi1_index: partition=user, sort=order_id ────────────────────────────
+    @classmethod
+    def list_by_user(cls, user_id: str) -> Iterator['OrderModel']:
+        return cls.gsi1_index.query(f'USER#{user_id}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['OrderModel']:
+        return cls.gsi2_index.query('ORDER', limit=limit, scan_index_forward=False)
+```
+
+Export the new entities from `__init__.py`:
+
+```python title="packages/my_table/my_table/entities/__init__.py"
+from .user import UserModel
+from .order import OrderModel
+from .example import ExampleModel
+```
+
+#### GSI Overloading
+
+`BaseModel` provides two shared GSIs (`gsi1_index`, `gsi2_index`). Both `UserModel` and `OrderModel` above write to `gsi2` — but with different `gsi2pk` values (`USER` vs `ORDER`). This is **GSI overloading**: reusing a single physical index to serve multiple independent access patterns without consuming extra GSI capacity.
+
+- **`UserModel`** — `gsi2pk=USER`, `gsi2sk=<created_at>` → list all users by date
+- **`OrderModel`** — `gsi2pk=ORDER`, `gsi2sk=<created_at>` → list all orders by date
+
+`gsi1` can also be overloaded when multiple entity types share the same parent. If you later add a `ReviewModel` that also belongs to a user, you can assign it `gsi1pk=USER#<user_id>` with a `REVIEW#<id>` sort key — no additional GSI needed. Querying `gsi1` via `BaseModel` then returns both orders and reviews for that user in one request, with PynamoDB instantiating each item as its correct subclass:
+
+```python
+from .base import BaseModel
+from .order import OrderModel
+from .review import ReviewModel
+
+user_id = 'user-123'
+items = list(BaseModel.gsi1_index.query(f'USER#{user_id}'))
+
+orders  = [i for i in items if isinstance(i, OrderModel)]
+reviews = [i for i in items if isinstance(i, ReviewModel)]
+```
+
+To retrieve only one entity type from an overloaded GSI, use a sort key prefix condition:
+
+```python
+orders_only = list(BaseModel.gsi1_index.query(
+    f'USER#{user_id}',
+    range_key_condition=BaseModel.gsi1sk.startswith('ORDER#'),
+))
+```
+
+#### One-to-Many Relationships
+
+In a **one-to-many** relationship the child entity stores a reference to its parent in a GSI partition key, making the relationship traversable in both directions without duplicating data. The `UserModel` / `OrderModel` example above is exactly this pattern:
+
+- **Get a single order by ID** — primary table: `pk=ORDER#<id>`, `sk=ORDER#<id>`
+- **List all orders for a user** — `gsi1`: `pk=USER#<user_id>`
+
+An alternative to GSI-based lookups is the **item collection** pattern: give child items the same `pk` as their parent and use the sort key to differentiate them. This lets you retrieve the parent and all its children in a single primary-table query, without a GSI:
+
+```python title="packages/my_table/my_table/entities/order.py (item collection variant)"
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design (item collection):
+      pk=USER#<user_id>,    sk=ORDER#<order_id>   <- co-located under the parent user
+    """
+    ...
+```
+
+```python
+# Retrieve the user and all their orders in one primary-table query
+# BaseModel dispatches each item to its correct subclass via DiscriminatorAttribute
+items = list(BaseModel.query(f'USER#{user_id}'))
+user   = next(i for i in items if isinstance(i, UserModel))
+orders = [i for i in items if isinstance(i, OrderModel)]
+```
+
+The tradeoff: item collections place all children under a single partition key, which is optimal for most workloads but can create a hot partition at extreme write throughput. The GSI approach (used in the examples above) keeps each entity in its own partition and is generally safer to start with.
+
+#### Many-to-Many Relationships
+
+Many-to-many relationships require a **junction entity** using the [adjacency list pattern](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-adjacency-graphs.html): a dedicated item that records each link, with its GSI key inverting the direction so the relationship can be traversed both ways.
+
+Consider `ArticleModel` and `TagModel`, where an article can have many tags and a tag can apply to many articles:
+
+```python title="packages/my_table/my_table/entities/article_tag.py"
+from collections.abc import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ArticleTagModel(BaseModel, discriminator='ArticleTag'):
+    """
+    Junction entity for the Article ↔ Tag many-to-many relationship.
+
+    Key design:
+      pk=ARTICLE#<article_id>,  sk=TAG#<tag_name>             <- list tags for an article
+      gsi1pk=TAG#<tag_name>,    gsi1sk=ARTICLE#<article_id>  <- list articles for a tag
+    """
+
+    article_id = UnicodeAttribute()
+    tag_name = UnicodeAttribute()
+
+    @classmethod
+    def add(cls, article_id: str, tag_name: str) -> 'ArticleTagModel':
+        item = cls(
+            pk=f'ARTICLE#{article_id}',
+            sk=f'TAG#{tag_name}',
+            gsi1pk=f'TAG#{tag_name}',
+            gsi1sk=f'ARTICLE#{article_id}',
+            article_id=article_id,
+            tag_name=tag_name,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def remove(cls, article_id: str, tag_name: str) -> None:
+        cls.get(f'ARTICLE#{article_id}', f'TAG#{tag_name}').delete()
+
+    # ── Primary index: pk=article, sk=tag ─────────────────────────────────────
+    @classmethod
+    def list_tags_for_article(cls, article_id: str) -> Iterator['ArticleTagModel']:
+        return cls.query(f'ARTICLE#{article_id}')
+
+    # ── gsi1_index: pk=tag, sk=article ────────────────────────────────────────
+    @classmethod
+    def list_articles_for_tag(cls, tag_name: str) -> Iterator['ArticleTagModel']:
+        return cls.gsi1_index.query(f'TAG#{tag_name}')
+```
+
+Because `ArticleTagModel` uses `pk=ARTICLE#<article_id>` — the same partition as the article itself — you can retrieve an article and all its tags in a single primary-table query:
+
+```python
+from .base import BaseModel
+from .article import ArticleModel
+from .article_tag import ArticleTagModel
+
+items   = list(BaseModel.query('ARTICLE#article-123'))
+article = next(i for i in items if isinstance(i, ArticleModel))
+tags    = [i.tag_name for i in items if isinstance(i, ArticleTagModel)]
+```
+
+For further reading on DynamoDB data modelling, see the [DynamoDB data modelling guide](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling.html) and [Creating a single-table design with Amazon DynamoDB](https://aws.amazon.com/blogs/compute/creating-a-single-table-design-with-amazon-dynamodb/).
+
+### Using the DynamoDB Client
+
+The generated `client.py` exports two key utilities:
+
+- `is_local()` — returns `True` when `SERVE_LOCAL=true`, used to switch between local and AWS behaviour.
+- `get_table_name()` — returns the DynamoDB table name. When `SERVE_LOCAL=true`, reads the table name from `serveLocal.tableName` in `config.json`; otherwise fetches the name from AWS AppConfig using the `RUNTIME_CONFIG_APP_ID` environment variable and caches it for subsequent calls.
+
+`BaseModel` in `entities/base.py` uses both to configure PynamoDB automatically:
+
+- **Connection** — `BaseModel.Meta` sets `host` from `config.json` and hardcodes `region`, `aws_access_key_id`, and `aws_secret_access_key` when `is_local()` is `True`, pointing PynamoDB at the local DynamoDB instance. In AWS, these are left unset so PynamoDB uses the default credential chain.
+- **Table name** — `BaseModel._get_connection()` calls `get_table_name()` before each operation, so the correct table is resolved at runtime without any manual configuration.
+
+### Stopping Local DynamoDB
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## Adding/Removing Global Secondary Indexes
+
+GSIs are defined in `config.json` at the project root under the `tableConfig.globalSecondaryIndexes` key. Add an entry for each GSI, then reflect the change in `BaseModel` by adding or removing the corresponding `GlobalSecondaryIndex` class and attributes in `<name>/entities/base.py`:
+
+<Snippet name="dynamodb/gsi-config" parentHeading="Adding/Removing Global Secondary Indexes" />
+
+## Connecting to the Table
+
+In any Python project, add the DynamoDB package as a workspace dependency and import entity classes directly:
+
+```python
+from my_db_package.entities import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[Runtime config]
+When running in AWS, `get_table_name()` fetches the table name from AWS AppConfig using the `RUNTIME_CONFIG_APP_ID` environment variable. Projects built with this plugin already have this variable configured automatically. For other Python projects, ensure `RUNTIME_CONFIG_APP_ID` is set in the runtime environment with the AppConfig application ID provisioned by your infrastructure. For more information, see the <Link path="guides/runtime-config">Runtime Configuration guide</Link>.
+:::
+
+### Connection Generators
+
+For specific project types, use the `connection` generator to automatically wire up local development dependencies so DynamoDB Local starts automatically alongside your project, and add the DynamoDB package as a workspace dependency:
+
+- <Link path="guides/connection/py-fast-api-dynamodb">FastAPI → DynamoDB</Link>
+- <Link path="guides/connection/py-agent-dynamodb">Python Agent → DynamoDB</Link>
+- <Link path="guides/connection/py-mcp-server-dynamodb">Python MCP Server → DynamoDB</Link>
+
+## Deploying your Table
+
+<Snippet name="dynamodb/deploying-table" parentHeading="Deploying your Table" />

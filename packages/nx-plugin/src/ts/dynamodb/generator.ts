@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { relative } from 'node:path';
 import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
@@ -18,7 +20,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
-import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
+import { getNpmScope } from '../../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -26,15 +28,18 @@ import {
 } from '../../utils/nx';
 import { assignSharedPort } from '../../utils/port';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  DYNAMODB_GENERATOR_IDS,
+  PACKAGES_DIR,
+  SHARED_SCRIPTS_DIR,
+} from '../../utils/shared-constructs-constants';
+import { sharedDynamoDBScriptsGenerator } from '../../utils/shared-dynamodb-scripts';
 import { withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsDynamoDBGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
-
-const DYNAMODB_LOCAL_IMAGE =
-  'public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest';
 
 export const tsDynamoDBGenerator = async (
   tree: Tree,
@@ -67,18 +72,20 @@ export const tsDynamoDBGenerator = async (
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
-  const localDynamoPort = assignSharedPort(
+  const localDynamoDBPort = assignSharedPort(
     tree,
     projectConfig,
-    TS_DYNAMODB_GENERATOR_INFO.id,
+    DYNAMODB_GENERATOR_IDS,
     8000,
   );
 
+  const containerName = `${getNpmScope(tree)}-dynamodb`;
+
   const templateOptions = {
     runtimeConfigKey: nameClassName,
-    dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
-    localDynamoPort,
+    localDynamoDBPort,
     localTableName,
+    containerName,
     containerEngine,
   };
 
@@ -89,12 +96,17 @@ export const tsDynamoDBGenerator = async (
     templateOptions,
   );
 
-  const containerName = `${getNpmScope(tree)}-dynamodb`;
+  await sharedDynamoDBScriptsGenerator(tree);
+
+  const scriptsDir = relative(
+    dir,
+    joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'dynamodb'),
+  );
 
   projectConfig.targets['pull-image'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/pull-image.ts ${DYNAMODB_LOCAL_IMAGE}`,
+      command: `tsx ${scriptsDir}/pull-image.ts`,
       cwd: '{projectRoot}',
     },
   };
@@ -104,8 +116,8 @@ export const tsDynamoDBGenerator = async (
     dependsOn: ['pull-image'],
     options: {
       commands: [
-        `tsx scripts/start-container.ts ${containerName} ${DYNAMODB_LOCAL_IMAGE} ${localDynamoPort}`,
-        `tsx scripts/create-local-table.ts ${localTableName} ${localDynamoPort}`,
+        `tsx ${scriptsDir}/start-container.ts`,
+        `tsx ${scriptsDir}/create-local-table.ts`,
       ],
       parallel: true,
       cwd: '{projectRoot}',
@@ -123,7 +135,6 @@ export const tsDynamoDBGenerator = async (
       projectName: fullyQualifiedName,
       nameClassName,
       nameKebabCase,
-      dynamoPackageAlias: toScopeAlias(fullyQualifiedName),
       tableName: localTableName,
       projectRoot: dir,
     });

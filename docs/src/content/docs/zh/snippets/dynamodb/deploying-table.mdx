@@ -1,0 +1,171 @@
+---
+title: 部署您的 DynamoDB 表
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+DynamoDB 生成器会根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 构造在 `common/constructs` 中创建。使用示例：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const table = new MyTable(this, 'Table');
+  }
+}
+```
+
+这将配置一个具有以下特性的 DynamoDB 表：
+- `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
+- 在 `config.json` 中定义的全局二级索引
+- 按需（`PAY_PER_REQUEST`）计费
+- 客户管理的 KMS 加密，并自动轮换密钥
+- 启用时间点恢复
+- 启用删除保护
+- 表名在 AWS AppConfig 的 `dynamodb` 命名空间下注册到运行时配置中
+</Fragment>
+<Fragment slot="terraform">
+Terraform 模块在 `common/terraform` 中创建。使用示例：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+```
+
+这将配置一个具有以下特性的 DynamoDB 表：
+- `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
+- 在 `config.json` 中定义的全局二级索引
+- 按需（`PAY_PER_REQUEST`）计费
+- 客户管理的 KMS 加密，并自动轮换密钥
+- 启用时间点恢复
+- 启用删除保护
+- 表名注册到运行时配置中
+</Fragment>
+</Infrastructure>
+
+### 授予访问权限
+
+<Snippet name="connection/lambda-dynamodb-access" />
+
+### 删除保护
+
+默认启用删除保护以防止意外删除表。
+
+#### 禁用删除保护
+
+对于预期会删除表的环境（例如短期开发或预览堆栈），可以禁用删除保护。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                      = "../../common/terraform/src/app/dynamodb/my-table"
+  deletion_protection_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 计费模式
+
+表默认使用按需（`PAY_PER_REQUEST`）计费。对于可预测的高吞吐量工作负载，可以切换到预配置容量。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  billingMode: BillingMode.PROVISIONED,
+  readCapacity: 5,
+  writeCapacity: 5,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source       = "../../common/terraform/src/app/dynamodb/my-table"
+  billing_mode = "PROVISIONED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 时间点恢复
+
+默认启用[时间点恢复](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)，允许您将表恢复到过去 35 天内的任何时间点。
+
+#### 禁用时间点恢复
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source                         = "../../common/terraform/src/app/dynamodb/my-table"
+  point_in_time_recovery_enabled = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 加密密钥轮换
+
+用于加密表的 KMS 密钥默认启用自动密钥轮换。如果您的安全策略在外部管理轮换，可以禁用它。
+
+#### 禁用加密密钥轮换
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

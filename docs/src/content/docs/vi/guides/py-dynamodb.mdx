@@ -1,0 +1,449 @@
+---
+title: py#dynamodb
+description: Tạo dự án Python DynamoDB
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator này tạo một dự án Python mới được hỗ trợ bởi [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), sử dụng [PynamoDB](https://pynamodb.readthedocs.io/) để mô hình hóa thực thể. Nó tạo ra mã ứng dụng và cơ sở hạ tầng cần thiết để cung cấp và quản lý bảng DynamoDB bằng AWS CDK hoặc Terraform, với hỗ trợ thiết kế bảng đơn và phát triển cục bộ tích hợp sẵn thông qua DynamoDB Local.
+
+## Cách sử dụng
+
+### Tạo Dự án DynamoDB
+
+<RunGenerator generator="py#dynamodb" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## Kết quả Generator
+
+Generator tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py Package exports
+    - client.py DynamoDB client and table name resolution
+    - entities
+      - base.py Base PynamoDB model with GSI declarations
+      - example.py Example entity definition
+      - \_\_init\_\_.py Entity exports
+  - config.json Table configuration including GSI definitions and local development settings
+  - project.json Project configuration and build targets
+</FileTree>
+
+Các script phát triển cục bộ được chia sẻ trên tất cả các dự án DynamoDB (cả TypeScript và Python) và được tạo một lần vào:
+
+<FileTree>
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts Creates the DynamoDB table in the local DynamoDB Local instance
+    - pull-image.ts Pulls the DynamoDB Local image
+    - start-container.ts Starts the DynamoDB Local container
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="dynamodb/infrastructure" />
+
+## Phát triển Cục bộ
+
+### Khởi động DynamoDB Cục bộ
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### Mô hình hóa Dữ liệu
+
+Dự án được tạo sử dụng [PynamoDB](https://pynamodb.readthedocs.io/) để mô hình hóa thực thể. Tất cả các thực thể **phải** kế thừa từ `BaseModel` được tạo — nó phân giải tên bảng DynamoDB chính xác tại thời điểm chạy, đọc từ AWS AppConfig khi triển khai hoặc từ `config.json` khi chạy cục bộ thông qua DynamoDB Local. Nếu không có điều này, PynamoDB sẽ không biết bảng nào để sử dụng. `BaseModel` cũng sử dụng [hỗ trợ đa hình của PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) để lưu trữ nhiều loại thực thể trong một bảng duy nhất, tuân theo [thiết kế bảng đơn của DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
+
+Thêm hoặc cập nhật các tệp thực thể trong `<name>/entities/`, sử dụng thực thể ví dụ được tạo làm điểm khởi đầu:
+
+```python title="packages/my_table/my_table/entities/example.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    """
+    Key design:
+      pk=EXAMPLE#<id>,        sk=EXAMPLE#<id>
+      gsi1pk=CATEGORY#<cat>,  gsi1sk=EXAMPLE#<id>    <- list items by category
+      gsi2pk=EXAMPLE,         gsi2sk=<created_at>    <- list all items by date
+    """
+
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+Để biết thêm chi tiết, xem [hướng dẫn PynamoDB](https://pynamodb.readthedocs.io/en/stable/tutorial.html).
+
+#### Thiết kế Dựa trên Mẫu Truy cập
+
+Trong DynamoDB, thiết kế schema bắt đầu từ các truy vấn của bạn, không phải hình dạng dữ liệu. Trước khi viết bất kỳ model nào, hãy liệt kê mọi mẫu truy cập mà ứng dụng của bạn cần, sau đó thiết kế các giá trị khóa `pk`, `sk` và GSI sao cho mỗi mẫu được trả lời bằng một yêu cầu bảng duy nhất — không có JOIN, không có đọc tuần tự.
+
+`ExampleModel` được tạo minh họa điều này cho ba mẫu:
+
+- **Lấy theo ID** — chỉ mục chính, `pk=EXAMPLE#<id>`, `sk=EXAMPLE#<id>`
+- **Liệt kê theo danh mục** — `gsi1`, `pk=CATEGORY#<category>`
+- **Liệt kê theo ngày tạo** — `gsi2`, `pk=EXAMPLE`, khóa sắp xếp giữa các timestamp ISO
+
+Quy ước **tiền tố loại** (ví dụ: `EXAMPLE#`, `CATEGORY#`) là có chủ đích: nó làm cho các mục tự mô tả khi duyệt bảng, ngăn chặn va chạm khóa ngẫu nhiên giữa các loại thực thể chia sẻ một chỉ mục, và cho phép lọc tiền tố khóa sắp xếp bằng cách sử dụng `begins_with`.
+
+Trước khi viết một thực thể mới, hãy định nghĩa các mẫu khóa của nó trước trong một docstring. `OrderModel` trong phần tiếp theo tuân theo quy ước này:
+
+```python
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>   <- list orders for a user
+      gsi2pk=ORDER,           gsi2sk=<created_at>        <- list all orders by date
+    """
+```
+
+#### Lưu trữ Nhiều Loại Thực thể
+
+`DiscriminatorAttribute` của PynamoDB lưu trữ một nhãn loại (`entity_type`) trong mọi mục. Khi truy vấn thông qua `BaseModel`, nhãn này được sử dụng để khởi tạo mỗi kết quả dưới dạng lớp con chính xác của nó một cách tự động — do đó một truy vấn duy nhất có thể trả về hỗn hợp `UserModel`, `OrderModel` và bất kỳ loại thực thể nào khác được đăng ký trong cùng một bảng.
+
+:::caution[PynamoDB không được xây dựng chuyên biệt cho thiết kế bảng đơn]
+`DiscriminatorAttribute` của PynamoDB được thiết kế cho đa hình phân cấp lớp trong một bảng đồng nhất duy nhất — không phải để lưu trữ các loại thực thể khác nhau về cấu trúc trong một bảng. Mẫu được sử dụng ở đây hoạt động, nhưng hãy ghi nhớ những lưu ý sau:
+
+- **Va chạm khóa là trách nhiệm của bạn.** PynamoDB không ngăn chặn hai loại thực thể ghi cùng một cặp `pk`/`sk`. Luôn sử dụng các tiền tố loại duy nhất (ví dụ: `ORDER#`, `USER#`).
+- **Truy vấn xuyên thực thể yêu cầu `BaseModel`.** PynamoDB tự động thêm bộ lọc discriminator khi truy vấn một lớp con cụ thể, do đó các mục của các loại thực thể khác tại cùng một khóa sẽ không bao giờ được trả về. Để truy xuất hỗn hợp các loại từ một khóa phân vùng GSI được chia sẻ, luôn truy vấn thông qua `BaseModel`.
+- **Cài đặt bảng được chia sẻ.** Tất cả các thực thể chia sẻ cấu hình `Meta` (tên bảng, vùng, thông tin xác thực) được định nghĩa trong `BaseModel`.
+:::
+
+Dưới đây là một ví dụ đầy đủ về hai thực thể — một `UserModel` với các bản ghi `OrderModel` liên quan được lưu trữ trong cùng một bảng:
+
+```python title="packages/my_table/my_table/entities/user.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class UserModel(BaseModel, discriminator='UserModel'):
+    """
+    Key design:
+      pk=USER#<user_id>,  sk=USER#<user_id>
+      gsi2pk=USER,        gsi2sk=<created_at>    <- list all users by date
+    """
+
+    username = UnicodeAttribute()
+    email = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, user_id: str) -> str:
+        return f'USER#{user_id}'
+
+    @classmethod
+    def create(cls, user_id: str, username: str, email: str) -> 'UserModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(user_id),
+            sk=cls.make_pk(user_id),
+            gsi2pk='USER',
+            gsi2sk=now,
+            username=username,
+            email=email,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, user_id: str) -> 'UserModel':
+        return cls.get(cls.make_pk(user_id), cls.make_pk(user_id))
+
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['UserModel']:
+        return cls.gsi2_index.query('USER', limit=limit, scan_index_forward=False)
+```
+
+```python title="packages/my_table/my_table/entities/order.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>    <- list orders by user
+      gsi2pk=ORDER,           gsi2sk=<created_at>         <- list all orders by date
+    """
+
+    user_id = UnicodeAttribute()
+    total = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, order_id: str) -> str:
+        return f'ORDER#{order_id}'
+
+    @classmethod
+    def create(cls, order_id: str, user_id: str, total: str) -> 'OrderModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(order_id),
+            sk=cls.make_pk(order_id),
+            gsi1pk=f'USER#{user_id}',
+            gsi1sk=cls.make_pk(order_id),
+            gsi2pk='ORDER',
+            gsi2sk=now,
+            user_id=user_id,
+            total=total,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, order_id: str) -> 'OrderModel':
+        return cls.get(cls.make_pk(order_id), cls.make_pk(order_id))
+
+    # ── gsi1_index: partition=user, sort=order_id ────────────────────────────
+    @classmethod
+    def list_by_user(cls, user_id: str) -> Iterator['OrderModel']:
+        return cls.gsi1_index.query(f'USER#{user_id}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['OrderModel']:
+        return cls.gsi2_index.query('ORDER', limit=limit, scan_index_forward=False)
+```
+
+Xuất các thực thể mới từ `__init__.py`:
+
+```python title="packages/my_table/my_table/entities/__init__.py"
+from .user import UserModel
+from .order import OrderModel
+from .example import ExampleModel
+```
+
+#### Quá tải GSI
+
+`BaseModel` cung cấp hai GSI được chia sẻ (`gsi1_index`, `gsi2_index`). Cả `UserModel` và `OrderModel` ở trên đều ghi vào `gsi2` — nhưng với các giá trị `gsi2pk` khác nhau (`USER` so với `ORDER`). Đây là **quá tải GSI**: tái sử dụng một chỉ mục vật lý duy nhất để phục vụ nhiều mẫu truy cập độc lập mà không tiêu tốn thêm dung lượng GSI.
+
+- **`UserModel`** — `gsi2pk=USER`, `gsi2sk=<created_at>` → liệt kê tất cả người dùng theo ngày
+- **`OrderModel`** — `gsi2pk=ORDER`, `gsi2sk=<created_at>` → liệt kê tất cả đơn hàng theo ngày
+
+`gsi1` cũng có thể được quá tải khi nhiều loại thực thể chia sẻ cùng một cha. Nếu sau này bạn thêm một `ReviewModel` cũng thuộc về một người dùng, bạn có thể gán cho nó `gsi1pk=USER#<user_id>` với khóa sắp xếp `REVIEW#<id>` — không cần thêm GSI. Truy vấn `gsi1` thông qua `BaseModel` sau đó trả về cả đơn hàng và đánh giá cho người dùng đó trong một yêu cầu, với PynamoDB khởi tạo mỗi mục dưới dạng lớp con chính xác của nó:
+
+```python
+from .base import BaseModel
+from .order import OrderModel
+from .review import ReviewModel
+
+user_id = 'user-123'
+items = list(BaseModel.gsi1_index.query(f'USER#{user_id}'))
+
+orders  = [i for i in items if isinstance(i, OrderModel)]
+reviews = [i for i in items if isinstance(i, ReviewModel)]
+```
+
+Để chỉ truy xuất một loại thực thể từ một GSI quá tải, sử dụng điều kiện tiền tố khóa sắp xếp:
+
+```python
+orders_only = list(BaseModel.gsi1_index.query(
+    f'USER#{user_id}',
+    range_key_condition=BaseModel.gsi1sk.startswith('ORDER#'),
+))
+```
+
+#### Quan hệ Một-nhiều
+
+Trong quan hệ **một-nhiều**, thực thể con lưu trữ một tham chiếu đến cha của nó trong một khóa phân vùng GSI, làm cho quan hệ có thể duyệt theo cả hai hướng mà không cần sao chép dữ liệu. Ví dụ `UserModel` / `OrderModel` ở trên chính xác là mẫu này:
+
+- **Lấy một đơn hàng duy nhất theo ID** — bảng chính: `pk=ORDER#<id>`, `sk=ORDER#<id>`
+- **Liệt kê tất cả đơn hàng cho một người dùng** — `gsi1`: `pk=USER#<user_id>`
+
+Một giải pháp thay thế cho tra cứu dựa trên GSI là mẫu **bộ sưu tập mục**: cho các mục con cùng `pk` với cha của chúng và sử dụng khóa sắp xếp để phân biệt chúng. Điều này cho phép bạn truy xuất cha và tất cả các con của nó trong một truy vấn bảng chính duy nhất, không cần GSI:
+
+```python title="packages/my_table/my_table/entities/order.py (biến thể bộ sưu tập mục)"
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design (item collection):
+      pk=USER#<user_id>,    sk=ORDER#<order_id>   <- co-located under the parent user
+    """
+    ...
+```
+
+```python
+# Truy xuất người dùng và tất cả đơn hàng của họ trong một truy vấn bảng chính
+# BaseModel phân phối mỗi mục đến lớp con chính xác của nó thông qua DiscriminatorAttribute
+items = list(BaseModel.query(f'USER#{user_id}'))
+user   = next(i for i in items if isinstance(i, UserModel))
+orders = [i for i in items if isinstance(i, OrderModel)]
+```
+
+Sự đánh đổi: bộ sưu tập mục đặt tất cả các con dưới một khóa phân vùng duy nhất, điều này tối ưu cho hầu hết các khối lượng công việc nhưng có thể tạo ra một phân vùng nóng ở thông lượng ghi cực cao. Cách tiếp cận GSI (được sử dụng trong các ví dụ ở trên) giữ mỗi thực thể trong phân vùng riêng của nó và thường an toàn hơn để bắt đầu.
+
+#### Quan hệ Nhiều-nhiều
+
+Quan hệ nhiều-nhiều yêu cầu một **thực thể nối** sử dụng [mẫu danh sách kề](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-adjacency-graphs.html): một mục chuyên dụng ghi lại mỗi liên kết, với khóa GSI của nó đảo ngược hướng để quan hệ có thể được duyệt theo cả hai cách.
+
+Xem xét `ArticleModel` và `TagModel`, trong đó một bài viết có thể có nhiều thẻ và một thẻ có thể áp dụng cho nhiều bài viết:
+
+```python title="packages/my_table/my_table/entities/article_tag.py"
+from collections.abc import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ArticleTagModel(BaseModel, discriminator='ArticleTag'):
+    """
+    Junction entity for the Article ↔ Tag many-to-many relationship.
+
+    Key design:
+      pk=ARTICLE#<article_id>,  sk=TAG#<tag_name>             <- list tags for an article
+      gsi1pk=TAG#<tag_name>,    gsi1sk=ARTICLE#<article_id>  <- list articles for a tag
+    """
+
+    article_id = UnicodeAttribute()
+    tag_name = UnicodeAttribute()
+
+    @classmethod
+    def add(cls, article_id: str, tag_name: str) -> 'ArticleTagModel':
+        item = cls(
+            pk=f'ARTICLE#{article_id}',
+            sk=f'TAG#{tag_name}',
+            gsi1pk=f'TAG#{tag_name}',
+            gsi1sk=f'ARTICLE#{article_id}',
+            article_id=article_id,
+            tag_name=tag_name,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def remove(cls, article_id: str, tag_name: str) -> None:
+        cls.get(f'ARTICLE#{article_id}', f'TAG#{tag_name}').delete()
+
+    # ── Primary index: pk=article, sk=tag ─────────────────────────────────────
+    @classmethod
+    def list_tags_for_article(cls, article_id: str) -> Iterator['ArticleTagModel']:
+        return cls.query(f'ARTICLE#{article_id}')
+
+    # ── gsi1_index: pk=tag, sk=article ────────────────────────────────────────
+    @classmethod
+    def list_articles_for_tag(cls, tag_name: str) -> Iterator['ArticleTagModel']:
+        return cls.gsi1_index.query(f'TAG#{tag_name}')
+```
+
+Bởi vì `ArticleTagModel` sử dụng `pk=ARTICLE#<article_id>` — cùng phân vùng với chính bài viết — bạn có thể truy xuất một bài viết và tất cả các thẻ của nó trong một truy vấn bảng chính duy nhất:
+
+```python
+from .base import BaseModel
+from .article import ArticleModel
+from .article_tag import ArticleTagModel
+
+items   = list(BaseModel.query('ARTICLE#article-123'))
+article = next(i for i in items if isinstance(i, ArticleModel))
+tags    = [i.tag_name for i in items if isinstance(i, ArticleTagModel)]
+```
+
+Để đọc thêm về mô hình hóa dữ liệu DynamoDB, xem [hướng dẫn mô hình hóa dữ liệu DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling.html) và [Tạo thiết kế bảng đơn với Amazon DynamoDB](https://aws.amazon.com/blogs/compute/creating-a-single-table-design-with-amazon-dynamodb/).
+
+### Sử dụng DynamoDB Client
+
+Tệp `client.py` được tạo xuất hai tiện ích chính:
+
+- `is_local()` — trả về `True` khi `SERVE_LOCAL=true`, được sử dụng để chuyển đổi giữa hành vi cục bộ và AWS.
+- `get_table_name()` — trả về tên bảng DynamoDB. Khi `SERVE_LOCAL=true`, đọc tên bảng từ `serveLocal.tableName` trong `config.json`; nếu không, lấy tên từ AWS AppConfig bằng biến môi trường `RUNTIME_CONFIG_APP_ID` và lưu vào bộ nhớ cache cho các lần gọi tiếp theo.
+
+`BaseModel` trong `entities/base.py` sử dụng cả hai để cấu hình PynamoDB tự động:
+
+- **Kết nối** — `BaseModel.Meta` đặt `host` từ `config.json` và mã hóa cứng `region`, `aws_access_key_id`, và `aws_secret_access_key` khi `is_local()` là `True`, trỏ PynamoDB đến phiên bản DynamoDB cục bộ. Trong AWS, các giá trị này không được đặt để PynamoDB sử dụng chuỗi thông tin xác thực mặc định.
+- **Tên bảng** — `BaseModel._get_connection()` gọi `get_table_name()` trước mỗi thao tác, do đó bảng chính xác được phân giải tại thời điểm chạy mà không cần cấu hình thủ công.
+
+### Dừng DynamoDB Cục bộ
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## Thêm/Xóa Global Secondary Indexes
+
+GSI được định nghĩa trong `config.json` tại thư mục gốc dự án dưới khóa `tableConfig.globalSecondaryIndexes`. Thêm một mục cho mỗi GSI, sau đó phản ánh thay đổi trong `BaseModel` bằng cách thêm hoặc xóa lớp `GlobalSecondaryIndex` và các thuộc tính tương ứng trong `<name>/entities/base.py`:
+
+<Snippet name="dynamodb/gsi-config" parentHeading="Thêm/Xóa Global Secondary Indexes" />
+
+## Kết nối đến Bảng
+
+Trong bất kỳ dự án Python nào, thêm gói DynamoDB làm phụ thuộc workspace và import trực tiếp các lớp thực thể:
+
+```python
+from my_db_package.entities import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[Cấu hình runtime]
+Khi chạy trong AWS, `get_table_name()` lấy tên bảng từ AWS AppConfig bằng biến môi trường `RUNTIME_CONFIG_APP_ID`. Các dự án được xây dựng với plugin này đã có biến này được cấu hình tự động. Đối với các dự án Python khác, đảm bảo `RUNTIME_CONFIG_APP_ID` được đặt trong môi trường runtime với ID ứng dụng AppConfig được cung cấp bởi cơ sở hạ tầng của bạn. Để biết thêm thông tin, xem <Link path="guides/runtime-config">hướng dẫn Cấu hình Runtime</Link>.
+:::
+
+### Connection Generators
+
+Đối với các loại dự án cụ thể, sử dụng generator `connection` để tự động kết nối các phụ thuộc phát triển cục bộ để DynamoDB Local khởi động tự động cùng với dự án của bạn, và thêm gói DynamoDB làm phụ thuộc workspace:
+
+- <Link path="guides/connection/py-fast-api-dynamodb">FastAPI → DynamoDB</Link>
+- <Link path="guides/connection/py-agent-dynamodb">Python Agent → DynamoDB</Link>
+- <Link path="guides/connection/py-mcp-server-dynamodb">Python MCP Server → DynamoDB</Link>
+
+## Triển khai Bảng của bạn
+
+<Snippet name="dynamodb/deploying-table" parentHeading="Triển khai Bảng của bạn" />

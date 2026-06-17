@@ -1,0 +1,116 @@
+---
+title: Servidor MCP de Python a DynamoDB
+description: Conectar un servidor MCP de Python a una tabla DynamoDB de Python
+when:
+  sourceType: py#mcp-server
+  targetType: py#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+El generador `connection` conecta un <Link path="guides/py-mcp-server">Servidor MCP de Python</Link> a un proyecto <Link path="guides/py-dynamodb">DynamoDB de Python</Link>, configurando el desarrollo local para que ambos se inicien juntos automáticamente.
+
+## Requisitos previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/py-mcp-server">`py#mcp-server`</Link>
+2. Un proyecto <Link path="guides/py-dynamodb">`py#dynamodb`</Link>
+
+## Uso
+
+### Ejecutar el generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto de servidor MCP como origen y tu proyecto DynamoDB como destino. Si el proyecto contiene múltiples componentes de servidor MCP, especifica `sourceComponent` para desambiguar.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del generador
+
+El generador actualiza el target `<mcp-server-name>-serve-local` del servidor MCP en `project.json` para que dependa del target `serve-local` del proyecto DynamoDB, y agrega el paquete DynamoDB como una dependencia del workspace. No se modifican archivos fuente.
+
+## Usar DynamoDB en herramientas
+
+Importa las clases de entidad del paquete DynamoDB y úsalas dentro de las herramientas de tu servidor MCP:
+
+```python title="packages/my_project/my_project/my_mcp_server/server.py"
+from my_scope.my_table.entities.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example items."""
+    items = list(ExampleModel.scan())
+    return str([item.attribute_values for item in items])
+```
+
+## Infraestructura
+
+Para permitir que la función Lambda del servidor MCP acceda a la tabla DynamoDB, otorga los permisos necesarios en tu infraestructura.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
+
+table.grantReadWriteData(myMcpServer);
+```
+
+`grantReadWriteData` otorga tanto los permisos de DynamoDB como de KMS al rol de ejecución del servidor MCP.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_mcp_server.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Desarrollo local
+
+<Snippet name="connection/py-dynamodb-local-development" />

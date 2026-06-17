@@ -1,0 +1,116 @@
+---
+title: Python Agent para DynamoDB
+description: Conectar um Python Agent a uma tabela Python DynamoDB
+when:
+  sourceType: py#agent
+  targetType: py#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+O gerador `connection` conecta um <Link path="guides/py-agent">Python Agent</Link> a um projeto <Link path="guides/py-dynamodb">Python DynamoDB</Link>, configurando o desenvolvimento local para que ambos iniciem juntos automaticamente.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um projeto <Link path="guides/py-agent">`py#agent`</Link>
+2. Um projeto <Link path="guides/py-dynamodb">`py#dynamodb`</Link>
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione seu projeto Agent como origem e seu projeto DynamoDB como destino. Se o projeto contiver múltiplos componentes de agente, especifique `sourceComponent` para desambiguar.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador atualiza o target `<agent-name>-serve-local` do agente em `project.json` para depender do target `serve-local` do projeto DynamoDB, e adiciona o pacote DynamoDB como uma dependência do workspace. Nenhum arquivo de código-fonte é modificado.
+
+## Usando DynamoDB em Agents
+
+Importe classes de entidade do pacote DynamoDB e use-as dentro das ferramentas do seu agente:
+
+```python title="packages/my_project/my_project/my_agent/agent.py"
+from my_scope.my_table.entities.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example items."""
+    return [item.attribute_values for item in ExampleModel.scan()]
+```
+
+## Infraestrutura
+
+Para permitir que a função Lambda do agente acesse a tabela DynamoDB, conceda as permissões necessárias em sua infraestrutura.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from ':my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+table.grantReadWriteData(myAgent);
+```
+
+`grantReadWriteData` concede tanto as permissões do DynamoDB quanto do KMS ao papel de execução do agente.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+}
+
+resource "aws_iam_role_policy" "dynamodb_access" {
+  role = module.my_agent.lambda_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Desenvolvimento Local
+
+<Snippet name="connection/py-dynamodb-local-development" />

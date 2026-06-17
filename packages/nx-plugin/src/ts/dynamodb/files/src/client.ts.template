@@ -1,17 +1,32 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
-import { PACKAGE_NAME, LOCAL_ACCESS_KEY_ID, LOCAL_ENDPOINT, LOCAL_REGION, LOCAL_SECRET_ACCESS_KEY, LOCAL_TABLE_NAME } from './constants.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Generated: must match runtimeConfigKey in config.json
+const runtimeConfigKey = '<%= runtimeConfigKey %>';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// config.json is only present in local dev (not included in the deployed bundle); guard with SERVE_LOCAL check
+const serveLocal = () =>
+  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8')).serveLocal;
 
 let _client: DynamoDBClient | undefined;
 
 export const getDynamoDBClient = (): DynamoDBClient => {
-  _client ??= process.env.SERVE_LOCAL === 'true'
-    ? new DynamoDBClient({
-        endpoint: LOCAL_ENDPOINT,
-        region: LOCAL_REGION,
-        credentials: { accessKeyId: LOCAL_ACCESS_KEY_ID, secretAccessKey: LOCAL_SECRET_ACCESS_KEY },
-      })
-    : new DynamoDBClient({});
+  if (!_client) {
+    if (process.env.SERVE_LOCAL === 'true') {
+      const { port } = serveLocal();
+      _client = new DynamoDBClient({
+        endpoint: `http://localhost:${port}`,
+        region: 'us-east-1',
+        credentials: { accessKeyId: 'UNUSED', secretAccessKey: 'UNUSED' },
+      });
+    } else {
+      _client = new DynamoDBClient({});
+    }
+  }
   return _client;
 };
 
@@ -23,7 +38,8 @@ let _tableName: string | undefined;
 
 export const resolveTableName = async (): Promise<string> => {
   if (process.env.SERVE_LOCAL === 'true') {
-    return LOCAL_TABLE_NAME;
+    const { tableName } = serveLocal();
+    return tableName;
   }
   if (_tableName === undefined) {
     const appId = process.env.RUNTIME_CONFIG_APP_ID;
@@ -35,7 +51,7 @@ export const resolveTableName = async (): Promise<string> => {
       environment: 'default',
       transform: 'json',
     });
-    const tableName = config?.[PACKAGE_NAME]?.tableName;
+    const tableName = config?.[runtimeConfigKey]?.tableName;
     if (!tableName) {
       throw new Error('Could not resolve table name from runtime config');
     }

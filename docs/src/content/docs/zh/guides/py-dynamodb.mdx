@@ -1,0 +1,449 @@
+---
+title: py#dynamodb
+description: 创建一个 Python DynamoDB 项目
+generator: py#dynamodb
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+此生成器创建一个由 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) 支持的新 Python 项目，使用 [PynamoDB](https://pynamodb.readthedocs.io/) 进行实体建模。它生成应用程序代码和基础设施，用于使用 AWS CDK 或 Terraform 配置和管理 DynamoDB 表，支持单表设计并通过 DynamoDB Local 内置本地开发功能。
+
+## 用法
+
+### 生成 DynamoDB 项目
+
+<RunGenerator generator="py#dynamodb" />
+
+### 选项
+
+<GeneratorParameters generator="py#dynamodb" />
+
+## 生成器输出
+
+生成器在 `<directory>/<name>` 目录中创建以下项目结构：
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py 包导出
+    - client.py DynamoDB 客户端和表名解析
+    - entities
+      - base.py 带有 GSI 声明的基础 PynamoDB 模型
+      - example.py 示例实体定义
+      - \_\_init\_\_.py 实体导出
+  - config.json 表配置，包括 GSI 定义和本地开发设置
+  - project.json 项目配置和构建目标
+</FileTree>
+
+本地开发脚本在所有 DynamoDB 项目（TypeScript 和 Python）之间共享，并一次性生成到：
+
+<FileTree>
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts 在本地 DynamoDB Local 实例中创建 DynamoDB 表
+    - pull-image.ts 拉取 DynamoDB Local 镜像
+    - start-container.ts 启动 DynamoDB Local 容器
+</FileTree>
+
+### 基础设施
+
+<Snippet name="dynamodb/infrastructure" />
+
+## 本地开发
+
+### 启动本地 DynamoDB
+
+<Snippet name="dynamodb/serve-local-start" />
+
+### 数据建模
+
+生成的项目使用 [PynamoDB](https://pynamodb.readthedocs.io/) 进行实体建模。所有实体**必须**继承自生成的 `BaseModel` — 它在运行时解析正确的 DynamoDB 表名，在部署时从 AWS AppConfig 读取，或在通过 DynamoDB Local 本地运行时从 `config.json` 读取。如果没有这个，PynamoDB 将不知道要使用哪个表。`BaseModel` 还使用 [PynamoDB 的多态支持](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) 在单个表中存储多种实体类型，遵循 [DynamoDB 的单表设计](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)。
+
+在 `<name>/entities/` 下添加或更新实体文件，使用生成的示例实体作为起点：
+
+```python title="packages/my_table/my_table/entities/example.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    """
+    Key design:
+      pk=EXAMPLE#<id>,        sk=EXAMPLE#<id>
+      gsi1pk=CATEGORY#<cat>,  gsi1sk=EXAMPLE#<id>    <- list items by category
+      gsi2pk=EXAMPLE,         gsi2sk=<created_at>    <- list all items by date
+    """
+
+    name = UnicodeAttribute()
+    category = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+    updated_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, id: str) -> str:
+        return f'EXAMPLE#{id}'
+
+    @classmethod
+    def create(cls, id: str, name: str, category: str) -> 'ExampleModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(id),
+            sk=cls.make_pk(id),
+            gsi1pk=f'CATEGORY#{category}',
+            gsi1sk=cls.make_pk(id),
+            gsi2pk='EXAMPLE',
+            gsi2sk=now,
+            name=name,
+            category=category,
+            created_at=now,
+            updated_at=now,
+        )
+        item.save()
+        return item
+
+    # ── Primary index ─────────────────────────────────────────────────────────
+    @classmethod
+    def get_by_id(cls, id: str) -> 'ExampleModel':
+        return cls.get(cls.make_pk(id), cls.make_pk(id))
+
+    # ── gsi1_index: partition=category, sort=id ───────────────────────────────
+    @classmethod
+    def list_by_category(cls, category: str) -> Iterator['ExampleModel']:
+        return cls.gsi1_index.query(f'CATEGORY#{category}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_created_between(cls, start: datetime, end: datetime) -> Iterator['ExampleModel']:
+        return cls.gsi2_index.query(
+            'EXAMPLE',
+            range_key_condition=ExampleModel.gsi2sk.between(
+                start.isoformat(), end.isoformat(),
+            ),
+            scan_index_forward=False,
+        )
+```
+
+有关更多详细信息，请参阅 [PynamoDB 教程](https://pynamodb.readthedocs.io/en/stable/tutorial.html)。
+
+#### 围绕访问模式进行设计
+
+在 DynamoDB 中，模式设计从查询开始，而不是数据形状。在编写任何模型之前，列出应用程序需要的每个访问模式，然后设计 `pk`、`sk` 和 GSI 键值，使每个模式都由单个表请求回答 — 无需 JOIN，无需顺序读取。
+
+生成的 `ExampleModel` 演示了三种模式：
+
+- **按 ID 获取** — 主索引，`pk=EXAMPLE#<id>`，`sk=EXAMPLE#<id>`
+- **按类别列出** — `gsi1`，`pk=CATEGORY#<category>`
+- **按创建日期列出** — `gsi2`，`pk=EXAMPLE`，排序键在 ISO 时间戳之间
+
+**类型前缀**约定（例如 `EXAMPLE#`、`CATEGORY#`）是有意为之的：它使浏览表时项目具有自描述性，防止共享索引的实体类型之间意外的键冲突，并允许使用 `begins_with` 进行排序键前缀过滤。
+
+在编写新实体之前，在文档字符串中预先定义其键模式。下一节中的 `OrderModel` 遵循此约定：
+
+```python
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>   <- list orders for a user
+      gsi2pk=ORDER,           gsi2sk=<created_at>        <- list all orders by date
+    """
+```
+
+#### 存储多种实体类型
+
+PynamoDB 的 `DiscriminatorAttribute` 在每个项目中存储一个类型标签（`entity_type`）。通过 `BaseModel` 查询时，此标签用于自动将每个结果实例化为其正确的子类 — 因此单个查询可以返回 `UserModel`、`OrderModel` 和在同一表中注册的任何其他实体类型的混合。
+
+:::caution[PynamoDB 并非专为单表设计而构建]
+PynamoDB 的 `DiscriminatorAttribute` 是为单个同构表中的类层次结构多态性而设计的 — 而不是为在一个表中存储结构不同的实体类型。这里使用的模式是有效的，但请记住以下注意事项：
+
+- **键冲突是您的责任。** PynamoDB 不会阻止两种实体类型写入相同的 `pk`/`sk` 对。始终使用唯一的类型前缀（例如 `ORDER#`、`USER#`）。
+- **跨实体查询需要 `BaseModel`。** 当查询特定子类时，PynamoDB 会自动添加鉴别器过滤器，因此永远不会返回同一键处的其他实体类型的项目。要从共享的 GSI 分区键检索混合类型，始终通过 `BaseModel` 查询。
+- **共享表设置。** 所有实体共享 `BaseModel` 中定义的 `Meta` 配置（表名、区域、凭证）。
+:::
+
+下面是一个完整的双实体示例 — 一个 `UserModel` 及其关联的 `OrderModel` 记录存储在同一个表中：
+
+```python title="packages/my_table/my_table/entities/user.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class UserModel(BaseModel, discriminator='UserModel'):
+    """
+    Key design:
+      pk=USER#<user_id>,  sk=USER#<user_id>
+      gsi2pk=USER,        gsi2sk=<created_at>    <- list all users by date
+    """
+
+    username = UnicodeAttribute()
+    email = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, user_id: str) -> str:
+        return f'USER#{user_id}'
+
+    @classmethod
+    def create(cls, user_id: str, username: str, email: str) -> 'UserModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(user_id),
+            sk=cls.make_pk(user_id),
+            gsi2pk='USER',
+            gsi2sk=now,
+            username=username,
+            email=email,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, user_id: str) -> 'UserModel':
+        return cls.get(cls.make_pk(user_id), cls.make_pk(user_id))
+
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['UserModel']:
+        return cls.gsi2_index.query('USER', limit=limit, scan_index_forward=False)
+```
+
+```python title="packages/my_table/my_table/entities/order.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>    <- list orders by user
+      gsi2pk=ORDER,           gsi2sk=<created_at>         <- list all orders by date
+    """
+
+    user_id = UnicodeAttribute()
+    total = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, order_id: str) -> str:
+        return f'ORDER#{order_id}'
+
+    @classmethod
+    def create(cls, order_id: str, user_id: str, total: str) -> 'OrderModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(order_id),
+            sk=cls.make_pk(order_id),
+            gsi1pk=f'USER#{user_id}',
+            gsi1sk=cls.make_pk(order_id),
+            gsi2pk='ORDER',
+            gsi2sk=now,
+            user_id=user_id,
+            total=total,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, order_id: str) -> 'OrderModel':
+        return cls.get(cls.make_pk(order_id), cls.make_pk(order_id))
+
+    # ── gsi1_index: partition=user, sort=order_id ────────────────────────────
+    @classmethod
+    def list_by_user(cls, user_id: str) -> Iterator['OrderModel']:
+        return cls.gsi1_index.query(f'USER#{user_id}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['OrderModel']:
+        return cls.gsi2_index.query('ORDER', limit=limit, scan_index_forward=False)
+```
+
+从 `__init__.py` 导出新实体：
+
+```python title="packages/my_table/my_table/entities/__init__.py"
+from .user import UserModel
+from .order import OrderModel
+from .example import ExampleModel
+```
+
+#### GSI 重载
+
+`BaseModel` 提供两个共享的 GSI（`gsi1_index`、`gsi2_index`）。上面的 `UserModel` 和 `OrderModel` 都写入 `gsi2` — 但使用不同的 `gsi2pk` 值（`USER` vs `ORDER`）。这就是 **GSI 重载**：重用单个物理索引来服务多个独立的访问模式，而不消耗额外的 GSI 容量。
+
+- **`UserModel`** — `gsi2pk=USER`，`gsi2sk=<created_at>` → 按日期列出所有用户
+- **`OrderModel`** — `gsi2pk=ORDER`，`gsi2sk=<created_at>` → 按日期列出所有订单
+
+当多个实体类型共享同一父级时，`gsi1` 也可以重载。如果您稍后添加一个也属于用户的 `ReviewModel`，您可以为其分配 `gsi1pk=USER#<user_id>` 和 `REVIEW#<id>` 排序键 — 无需额外的 GSI。然后通过 `BaseModel` 查询 `gsi1` 会在一个请求中返回该用户的订单和评论，PynamoDB 将每个项目实例化为其正确的子类：
+
+```python
+from .base import BaseModel
+from .order import OrderModel
+from .review import ReviewModel
+
+user_id = 'user-123'
+items = list(BaseModel.gsi1_index.query(f'USER#{user_id}'))
+
+orders  = [i for i in items if isinstance(i, OrderModel)]
+reviews = [i for i in items if isinstance(i, ReviewModel)]
+```
+
+要从重载的 GSI 中仅检索一种实体类型，请使用排序键前缀条件：
+
+```python
+orders_only = list(BaseModel.gsi1_index.query(
+    f'USER#{user_id}',
+    range_key_condition=BaseModel.gsi1sk.startswith('ORDER#'),
+))
+```
+
+#### 一对多关系
+
+在**一对多**关系中，子实体在 GSI 分区键中存储对其父级的引用，使关系可以在两个方向上遍历而无需复制数据。上面的 `UserModel` / `OrderModel` 示例正是这种模式：
+
+- **按 ID 获取单个订单** — 主表：`pk=ORDER#<id>`，`sk=ORDER#<id>`
+- **列出用户的所有订单** — `gsi1`：`pk=USER#<user_id>`
+
+GSI 查找的替代方案是**项目集合**模式：给子项目与其父级相同的 `pk`，并使用排序键来区分它们。这使您可以在单个主表查询中检索父级及其所有子级，无需 GSI：
+
+```python title="packages/my_table/my_table/entities/order.py (项目集合变体)"
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design (item collection):
+      pk=USER#<user_id>,    sk=ORDER#<order_id>   <- co-located under the parent user
+    """
+    ...
+```
+
+```python
+# 在一个主表查询中检索用户及其所有订单
+# BaseModel 通过 DiscriminatorAttribute 将每个项目分派到其正确的子类
+items = list(BaseModel.query(f'USER#{user_id}'))
+user   = next(i for i in items if isinstance(i, UserModel))
+orders = [i for i in items if isinstance(i, OrderModel)]
+```
+
+权衡：项目集合将所有子项放在单个分区键下，这对大多数工作负载是最优的，但在极端写入吞吐量下可能会创建热分区。GSI 方法（在上面的示例中使用）将每个实体保留在自己的分区中，通常更安全地开始。
+
+#### 多对多关系
+
+多对多关系需要使用[邻接列表模式](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-adjacency-graphs.html)的**连接实体**：一个专用项目记录每个链接，其 GSI 键反转方向，以便关系可以双向遍历。
+
+考虑 `ArticleModel` 和 `TagModel`，其中一篇文章可以有多个标签，一个标签可以应用于多篇文章：
+
+```python title="packages/my_table/my_table/entities/article_tag.py"
+from collections.abc import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ArticleTagModel(BaseModel, discriminator='ArticleTag'):
+    """
+    Junction entity for the Article ↔ Tag many-to-many relationship.
+
+    Key design:
+      pk=ARTICLE#<article_id>,  sk=TAG#<tag_name>             <- list tags for an article
+      gsi1pk=TAG#<tag_name>,    gsi1sk=ARTICLE#<article_id>  <- list articles for a tag
+    """
+
+    article_id = UnicodeAttribute()
+    tag_name = UnicodeAttribute()
+
+    @classmethod
+    def add(cls, article_id: str, tag_name: str) -> 'ArticleTagModel':
+        item = cls(
+            pk=f'ARTICLE#{article_id}',
+            sk=f'TAG#{tag_name}',
+            gsi1pk=f'TAG#{tag_name}',
+            gsi1sk=f'ARTICLE#{article_id}',
+            article_id=article_id,
+            tag_name=tag_name,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def remove(cls, article_id: str, tag_name: str) -> None:
+        cls.get(f'ARTICLE#{article_id}', f'TAG#{tag_name}').delete()
+
+    # ── Primary index: pk=article, sk=tag ─────────────────────────────────────
+    @classmethod
+    def list_tags_for_article(cls, article_id: str) -> Iterator['ArticleTagModel']:
+        return cls.query(f'ARTICLE#{article_id}')
+
+    # ── gsi1_index: pk=tag, sk=article ────────────────────────────────────────
+    @classmethod
+    def list_articles_for_tag(cls, tag_name: str) -> Iterator['ArticleTagModel']:
+        return cls.gsi1_index.query(f'TAG#{tag_name}')
+```
+
+因为 `ArticleTagModel` 使用 `pk=ARTICLE#<article_id>` — 与文章本身相同的分区 — 您可以在单个主表查询中检索文章及其所有标签：
+
+```python
+from .base import BaseModel
+from .article import ArticleModel
+from .article_tag import ArticleTagModel
+
+items   = list(BaseModel.query('ARTICLE#article-123'))
+article = next(i for i in items if isinstance(i, ArticleModel))
+tags    = [i.tag_name for i in items if isinstance(i, ArticleTagModel)]
+```
+
+有关 DynamoDB 数据建模的进一步阅读，请参阅 [DynamoDB 数据建模指南](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling.html)和[使用 Amazon DynamoDB 创建单表设计](https://aws.amazon.com/blogs/compute/creating-a-single-table-design-with-amazon-dynamodb/)。
+
+### 使用 DynamoDB 客户端
+
+生成的 `client.py` 导出两个关键实用工具：
+
+- `is_local()` — 当 `SERVE_LOCAL=true` 时返回 `True`，用于在本地和 AWS 行为之间切换。
+- `get_table_name()` — 返回 DynamoDB 表名。当 `SERVE_LOCAL=true` 时，从 `config.json` 中的 `serveLocal.tableName` 读取表名；否则使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 获取名称，并缓存以供后续调用使用。
+
+`entities/base.py` 中的 `BaseModel` 使用这两者自动配置 PynamoDB：
+
+- **连接** — 当 `is_local()` 为 `True` 时，`BaseModel.Meta` 从 `config.json` 设置 `host` 并硬编码 `region`、`aws_access_key_id` 和 `aws_secret_access_key`，将 PynamoDB 指向本地 DynamoDB 实例。在 AWS 中，这些保持未设置状态，因此 PynamoDB 使用默认凭证链。
+- **表名** — `BaseModel._get_connection()` 在每次操作之前调用 `get_table_name()`，因此在运行时解析正确的表，无需任何手动配置。
+
+### 停止本地 DynamoDB
+
+<Snippet name="dynamodb/serve-local-windows" />
+
+## 添加/删除全局二级索引
+
+GSI 在项目根目录的 `config.json` 中的 `tableConfig.globalSecondaryIndexes` 键下定义。为每个 GSI 添加一个条目，然后通过在 `<name>/entities/base.py` 中添加或删除相应的 `GlobalSecondaryIndex` 类和属性来反映 `BaseModel` 中的更改：
+
+<Snippet name="dynamodb/gsi-config" parentHeading="添加/删除全局二级索引" />
+
+## 连接到表
+
+在任何 Python 项目中，将 DynamoDB 包添加为工作区依赖项并直接导入实体类：
+
+```python
+from my_db_package.entities import ExampleModel
+
+item = ExampleModel.get_by_id('123')
+```
+
+:::note[运行时配置]
+在 AWS 中运行时，`get_table_name()` 使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 获取表名。使用此插件构建的项目已自动配置此变量。对于其他 Python 项目，请确保在运行时环境中设置 `RUNTIME_CONFIG_APP_ID`，其值为基础设施配置的 AppConfig 应用程序 ID。有关更多信息，请参阅<Link path="guides/runtime-config">运行时配置指南</Link>。
+:::
+
+### 连接生成器
+
+对于特定的项目类型，使用 `connection` 生成器自动连接本地开发依赖项，以便 DynamoDB Local 与您的项目一起自动启动，并将 DynamoDB 包添加为工作区依赖项：
+
+- <Link path="guides/connection/py-fast-api-dynamodb">FastAPI → DynamoDB</Link>
+- <Link path="guides/connection/py-agent-dynamodb">Python Agent → DynamoDB</Link>
+- <Link path="guides/connection/py-mcp-server-dynamodb">Python MCP Server → DynamoDB</Link>
+
+## 部署您的表
+
+<Snippet name="dynamodb/deploying-table" parentHeading="部署您的表" />

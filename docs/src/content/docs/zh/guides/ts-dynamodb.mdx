@@ -1,6 +1,6 @@
 ---
-title: DynamoDB
-description: 创建 DynamoDB 项目
+title: TypeScript DynamoDB
+description: 创建 TypeScript DynamoDB 项目
 generator: ts#dynamodb
 ---
 
@@ -8,15 +8,13 @@ import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import Infrastructure from '@components/infrastructure.astro';
-import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
 
-此生成器创建一个由 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) 支持的新 TypeScript 项目，使用 [ElectroDB](https://electrodb.dev/) 进行类型安全的实体建模。它生成应用程序代码和基础设施，用于使用 AWS CDK 或 Terraform 配置和管理 DynamoDB 表，支持单表设计，并通过 DynamoDB Local 内置本地开发功能。
+此生成器创建一个由 [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) 支持的新 TypeScript DynamoDB 项目，使用 [ElectroDB](https://electrodb.dev/) 进行类型安全的实体建模。它生成应用程序代码和基础设施，用于使用 AWS CDK 或 Terraform 配置和管理 DynamoDB 表，支持单表设计，并通过 DynamoDB Local 内置本地开发功能。
 
 ## 用法
 
-### 生成 DynamoDB 项目
+### 生成 TypeScript DynamoDB 项目
 
 <RunGenerator generator="ts#dynamodb" />
 
@@ -29,66 +27,38 @@ import Snippet from '@components/snippet.astro';
 生成器在 `<directory>/<name>` 目录中创建以下项目结构：
 
 <FileTree>
-  - scripts
-    - create-local-table.ts 在本地 DynamoDB Local 实例中创建 DynamoDB 表
-    - pull-image.ts 拉取 DynamoDB Local 镜像
-    - start-container.ts 启动 DynamoDB Local 容器
   - src
     - index.ts 项目入口点和导出
-    - constants.ts 本地开发常量和运行时配置键
     - client.ts DynamoDB 客户端单例和表名解析
     - entities
       - example.ts 示例 ElectroDB 实体定义
       - index.ts 实体导出
-  - dynamodb.config.json 表的 GSI 定义
+  - config.json 表配置，包括 GSI 定义和本地开发设置
   - project.json 项目配置和构建目标
+</FileTree>
+
+本地开发脚本在所有 DynamoDB 项目（TypeScript 和 Python）之间共享，并生成一次到：
+
+<FileTree>
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts 在本地 DynamoDB Local 实例中创建 DynamoDB 表
+    - pull-image.ts 拉取 DynamoDB Local 镜像
+    - start-container.ts 启动 DynamoDB Local 容器
 </FileTree>
 
 ### 基础设施
 
-<Snippet name="shared-constructs" />
-
-<Infrastructure>
-  <Fragment slot="cdk">
-    <FileTree>
-      - packages/common/constructs/src
-        - app
-          - dynamodb
-            - \<name>.ts 特定于您的表的基础设施
-        - core
-          - dynamodb.ts 通用 DynamoDB 表构造
-    </FileTree>
-  </Fragment>
-  <Fragment slot="terraform">
-    <FileTree>
-      - packages/common/terraform/src
-        - app
-          - dynamodb
-            - \<name>
-              - \<name>.tf 特定于您的表的模块
-        - core
-          - dynamodb
-            - dynamodb.tf 通用 DynamoDB 模块
-    </FileTree>
-  </Fragment>
-</Infrastructure>
+<Snippet name="dynamodb/infrastructure" />
 
 ## 本地开发
 
 ### 启动本地 DynamoDB
 
-生成器配置了一个 `serve-local` 目标，启动 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 实例并创建表：
-
-<NxCommands commands={['run <project-name>:serve-local']} />
-
-这会自动：
-1. 拉取 DynamoDB Local 镜像（`pull-image` 目标）
-2. 启动容器
-3. 创建包含 `dynamodb.config.json` 中定义的索引的本地表
+<Snippet name="dynamodb/serve-local-start" />
 
 ### 数据建模
 
-生成的项目使用 [ElectroDB](https://electrodb.dev/) 在单个 DynamoDB 表上进行类型安全的实体建模。在 `src/entities/` 下添加或更新实体文件，使用生成的示例实体作为起点。
+生成的项目使用 [ElectroDB](https://electrodb.dev/) 在单个 DynamoDB 表上进行类型安全的实体建模，遵循 [DynamoDB 的单表设计](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)。在 `src/entities/` 下添加或更新实体文件，使用生成的示例实体作为起点。
 
 示例实体定义：
 
@@ -151,48 +121,13 @@ export const createExampleEntity = async () =>
 
 ### 停止本地 DynamoDB
 
-停止 `serve-local`（例如使用 `Ctrl+C`）会自动删除 DynamoDB Local 容器，但会保留命名卷，以便您的数据在重启后保持不变。
-
-:::caution[Windows]
-由于 Windows 上信号处理的限制，停止 `serve-local` 时不会自动删除容器。您需要手动删除它：
-
-```bash
-<engine> rm -f <scope>-dynamodb
-```
-
-将 `<engine>` 替换为您的容器引擎（`docker` 或 `finch`），将 `<scope>` 替换为您的 Nx 工作区作用域（例如 `proj`）。
-:::
+<Snippet name="dynamodb/serve-local-windows" />
 
 ## 添加/删除全局二级索引
 
-GSI 在项目根目录的 `dynamodb.config.json` 中定义。为每个 GSI 添加一个条目到 `globalSecondaryIndexes`，遵循 [单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/) 的 GSI 键命名约定：
+GSI 在项目根目录的 `config.json` 中的 `tableConfig.globalSecondaryIndexes` 键下定义。为每个 GSI 添加一个条目，遵循[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)的 GSI 键命名约定：
 
-```json title="packages/my-table/dynamodb.config.json"
-{
-  "globalSecondaryIndexes": [
-    {
-      "indexName": "gsi1pk-gsi1sk-index",
-      "partitionKey": "gsi1pk",
-      "sortKey": "gsi1sk"
-    }
-  ]
-}
-```
-
-`sortKey` 字段对于仅哈希键的 GSI 是可选的。
-
-此配置文件由所有使用者直接从项目根目录读取：
-- **本地开发** — `serve-local` 读取 `dynamodb.config.json` 并创建或更新本地表以匹配 GSI 列表
-- **CDK** — 构造在合成时读取 `dynamodb.config.json`，因此 GSI 更改会在下次 `cdk deploy` 时反映
-- **Terraform** — 模块在计划/应用时读取 `dynamodb.config.json`
-
-### 每次部署一个 GSI
-
-:::caution
-DynamoDB [不允许在单次表更新中创建或删除多个 GSI](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.OnlineOps.html)。
-
-每次部署最多可以添加或删除**一个 GSI**。如果您需要添加或删除多个 GSI，请一次执行一个 — 更新 `dynamodb.config.json`，部署堆栈，然后重复下一个更改。
-:::
+<Snippet name="dynamodb/gsi-config" parentHeading="添加/删除全局二级索引" />
 
 ## 连接到表
 
@@ -220,169 +155,4 @@ const result = await entity.query.primary({ id: '123' }).go();
 
 ## 部署您的表
 
-DynamoDB 生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施。
-
-<Infrastructure>
-<Fragment slot="cdk">
-CDK 构造在 `common/constructs` 中创建。示例用法：
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
-    super(scope, id, props);
-
-    const table = new MyTable(this, 'Table');
-  }
-}
-```
-
-这将配置一个具有以下特性的 DynamoDB 表：
-- `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
-- 如 `dynamodb.config.json` 中定义的全局二级索引
-- 按需（`PAY_PER_REQUEST`）计费
-- 客户管理的 KMS 加密，具有自动密钥轮换
-- 启用时间点恢复
-- 启用删除保护
-- 表名在 AWS AppConfig 的 `dynamodb` 命名空间下注册到运行时配置中
-</Fragment>
-<Fragment slot="terraform">
-Terraform 模块在 `common/terraform` 中创建。示例用法：
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source = "../../common/terraform/src/app/dynamodb/my-table"
-}
-```
-
-这将配置一个具有以下特性的 DynamoDB 表：
-- `pk`（分区键）和 `sk`（排序键），均为 `String` 类型
-- 如 `dynamodb.config.json` 中定义的全局二级索引
-- 按需（`PAY_PER_REQUEST`）计费
-- 客户管理的 KMS 加密，具有自动密钥轮换
-- 启用时间点恢复
-- 启用删除保护
-- 表名注册到运行时配置中
-</Fragment>
-</Infrastructure>
-
-### 授予访问权限
-
-<Snippet name="connection/lambda-dynamodb-access" />
-
-### 删除保护
-
-默认情况下启用删除保护以防止意外删除表。
-
-#### 禁用删除保护
-
-对于预期删除表的环境（例如短期开发或预览堆栈），请禁用它。
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  deletionProtection: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source                      = "../../common/terraform/src/app/dynamodb/my-table"
-  deletion_protection_enabled = false
-}
-```
-</Fragment>
-</Infrastructure>
-
-### 计费模式
-
-表默认为按需（`PAY_PER_REQUEST`）计费。对于可预测的高吞吐量工作负载，切换到预配置容量。
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { BillingMode } from 'aws-cdk-lib/aws-dynamodb';
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  billingMode: BillingMode.PROVISIONED,
-  readCapacity: 5,
-  writeCapacity: 5,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source       = "../../common/terraform/src/app/dynamodb/my-table"
-  billing_mode = "PROVISIONED"
-}
-```
-</Fragment>
-</Infrastructure>
-
-### 时间点恢复
-
-[时间点恢复](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)默认情况下启用，允许您将表恢复到过去 35 天内的任何时间点。
-
-#### 禁用时间点恢复
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source                         = "../../common/terraform/src/app/dynamodb/my-table"
-  point_in_time_recovery_enabled = false
-}
-```
-</Fragment>
-</Infrastructure>
-
-### 加密密钥轮换
-
-用于加密表的 KMS 密钥默认启用自动密钥轮换。如果您的安全策略在外部管理轮换，请禁用它。
-
-#### 禁用加密密钥轮换
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from ':my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source              = "../../common/terraform/src/app/dynamodb/my-table"
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
-
+<Snippet name="dynamodb/deploying-table" parentHeading="部署您的表" />

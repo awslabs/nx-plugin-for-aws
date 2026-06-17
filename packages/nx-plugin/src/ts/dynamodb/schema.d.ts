@@ -8,6 +8,7 @@ export interface TsDynamoDBGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
+  framework: 'electrodb';
   tableName?: string;
   infra: 'dynamodb' | 'none';
   iac: IacOption;
