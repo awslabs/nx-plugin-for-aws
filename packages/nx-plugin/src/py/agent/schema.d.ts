@@ -5,7 +5,7 @@
 
 import { IacOption } from '../../utils/iac';
 
-export type PyAgentFramework = 'strands';
+export type PyAgentFramework = 'strands' | 'langchain';
 export type PyAgentInfra = 'agentcore' | 'none';
 export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 

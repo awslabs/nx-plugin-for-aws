@@ -1,0 +1,88 @@
+import logging
+import time
+import uuid
+
+from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
+from ag_ui.encoder import EventEncoder
+from ag_ui_langgraph import LangGraphAgent
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from .agent import get_agent
+
+logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+# Build the compiled LangGraph graph once, then wrap it for AG-UI.
+# ag_ui_langgraph.LangGraphAgent is CopilotKit's official Python AG-UI adapter for
+# LangGraph. It exposes `async def run(input: RunAgentInput)` yielding ag_ui.core
+# events. There is no FastAPI-app helper for LangGraph, so we hand-roll the
+# /invocations run-loop below.
+_graph = get_agent()
+
+agui_agent = LangGraphAgent(
+    name="<%= agentNameClassName %>",
+    graph=_graph,
+    description="A LangChain/LangGraph Agent exposed via the AG-UI protocol.",
+)
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app = FastAPI(title="<%= agentNameClassName %>")
+app.add_middleware(_SessionIdMiddleware)
+
+
+@app.post("/invocations")
+async def invocations(request: Request):
+    # Read and validate the body ourselves rather than via a typed FastAPI parameter:
+    # AgentCore forwards the payload without guaranteeing Content-Type: application/json,
+    # so a typed `input_data: RunAgentInput` parameter would 422 even when the bytes are
+    # valid JSON. EventEncoder's accept parameter is typed str; the header may be absent,
+    # so coerce the Optional to a plain string (empty string lets the encoder pick its default).
+    accept = request.headers.get("accept") or ""
+    encoder = EventEncoder(accept=accept)
+    raw = await request.body()
+    try:
+        input_data = RunAgentInput.model_validate_json(raw)
+    except Exception as exc:
+        message = f"Invalid RunAgentInput: {str(exc)[:200]}"
+
+        async def _bad():
+            yield encoder.encode(RunErrorEvent(type=EventType.RUN_ERROR, message=message, code="BAD_REQUEST"))
+
+        return StreamingResponse(_bad(), media_type=encoder.get_content_type())
+
+    session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
+
+    async def event_generator():
+        # Set any per-request context HERE, inside the generator: this is the context that
+        # drives agui_agent.run() and the LangGraph tool execution. ChatBedrockConverse has
+        # no native async, so a synchronous tool runs via run_in_executor wrapped in
+        # copy_context().run — context set here, before run(), reaches the tool. Re-bind the
+        # session id here too, since the streaming body runs in its own task outside the
+        # middleware's contextmanager.
+        with session_id_context(session_id or str(uuid.uuid4())):
+            try:
+                async for event in agui_agent.run(input_data):
+                    yield encoder.encode(event)
+            except Exception as e:  # surface as an AG-UI RUN_ERROR rather than dropping the stream
+                yield encoder.encode(RunErrorEvent(type=EventType.RUN_ERROR, message=str(e)[:300], code="AGENT_ERROR"))
+
+    return StreamingResponse(event_generator(), media_type=encoder.get_content_type())
+
+
+@app.get("/ping")
+async def ping():
+    # AgentCore container health contract: status + last-update timestamp.
+    return JSONResponse({"status": "Healthy", "time_of_last_update": int(time.time())})

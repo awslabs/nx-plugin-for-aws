@@ -39,3 +39,12 @@ export const AG_UI_STRANDS_EXCEPTIONS: DependencyCheckException[] = [
     spdx: 'MIT',
   },
 ];
+
+export const AG_UI_LANGGRAPH_EXCEPTIONS: DependencyCheckException[] = [
+  {
+    package: 'ag_ui_langgraph',
+    reason:
+      'Part of MIT-licensed ag-ui-protocol/ag-ui repo. Wheel ships without license metadata.',
+    spdx: 'MIT',
+  },
+];

@@ -13,7 +13,10 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { ensureLicenseExceptions } from '../../license/config';
-import { AG_UI_STRANDS_EXCEPTIONS } from '../../license/known-exceptions';
+import {
+  AG_UI_LANGGRAPH_EXCEPTIONS,
+  AG_UI_STRANDS_EXCEPTIONS,
+} from '../../license/known-exceptions';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
   ensurePythonAgentConnectionProject,
@@ -93,6 +96,19 @@ export const pyAgentGenerator = async (
 
   const infra = options.infra ?? 'agentcore';
   const protocol = options.protocol ?? 'http';
+  const framework = options.framework ?? 'strands';
+
+  // The langchain framework currently ships only an AG-UI server template. The
+  // http and a2a server templates are Strands-specific by construction (http's
+  // main.py consumes a contextmanager yielding a strands.Agent; a2a uses
+  // strands.multiagent.a2a.A2AServer), and create_agent returns a compiled
+  // LangGraph graph that is incompatible with those. Fail fast rather than emit
+  // a Strands server over langchain dependencies.
+  if (framework === 'langchain' && protocol !== 'ag-ui') {
+    throw new Error(
+      `The 'langchain' framework currently supports only the 'ag-ui' protocol (got '${protocol}').`,
+    );
+  }
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -121,25 +137,37 @@ export const pyAgentGenerator = async (
     agentNameClassName,
     moduleName,
     agentConnectionModuleName,
+    framework,
   };
 
-  // Generate common files shared by both protocols
+  // Generate the framework-agnostic shared files (the package __init__.py)
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common'),
+    joinPathFragments(__dirname, 'files', 'common-shared'),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Generate protocol-specific files
+  // Generate the framework-specific agent module (agent.py)
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', protocol.toLowerCase()),
+    joinPathFragments(__dirname, 'files', 'common', framework),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // Generate protocol-specific files. The ag-ui server is framework-specific
+  // (Strands has create_strands_app; langchain hand-rolls the FastAPI loop over
+  // ag_ui_langgraph). http and a2a are Strands-only (guarded above).
+  const protocolTemplateDir =
+    protocol === 'ag-ui'
+      ? joinPathFragments(__dirname, 'files', 'ag-ui', framework)
+      : joinPathFragments(__dirname, 'files', protocol.toLowerCase());
+  generateFiles(tree, protocolTemplateDir, targetSourceDir, templateContext, {
+    overwriteStrategy: OverwriteStrategy.KeepExisting,
+  });
 
   addDependenciesToPyProjectToml(tree, project.root, [
     'aws-lambda-powertools',
@@ -148,12 +176,25 @@ export const pyAgentGenerator = async (
     'boto3',
     'fastapi',
     'mcp',
-    ...(protocol === 'a2a'
-      ? (['strands-agents[a2a]'] as const)
-      : protocol === 'ag-ui'
-        ? (['strands-agents', 'ag-ui-protocol', 'ag-ui-strands'] as const)
-        : (['strands-agents'] as const)),
-    'strands-agents-tools',
+    ...(framework === 'langchain'
+      ? // langchain is restricted to ag-ui (guarded above)
+        ([
+          'ag-ui-protocol',
+          'ag-ui-langgraph',
+          'langchain',
+          'langchain-aws',
+          'langgraph',
+        ] as const)
+      : protocol === 'a2a'
+        ? (['strands-agents[a2a]', 'strands-agents-tools'] as const)
+        : protocol === 'ag-ui'
+          ? ([
+              'strands-agents',
+              'strands-agents-tools',
+              'ag-ui-protocol',
+              'ag-ui-strands',
+            ] as const)
+          : (['strands-agents', 'strands-agents-tools'] as const)),
     'uvicorn',
   ]);
   addDependenciesToDependencyGroupInPyProjectToml(tree, project.root, 'dev', [
@@ -249,7 +290,8 @@ export const pyAgentGenerator = async (
   // All protocols use fastapi dev for hot reload:
   // - HTTP: FastAPI app directly defined in init.py
   // - A2A: A2AServer.to_fastapi_app() creates a FastAPI app in main.py
-  // - AG-UI: create_strands_app() creates a FastAPI app in main.py
+  // - AG-UI: main.py exposes a FastAPI app (create_strands_app for strands; a
+  //   hand-rolled FastAPI /invocations loop over ag_ui_langgraph for langchain)
   const serveCommand = `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`;
 
   // HTTP chat uses the type-safe TypeScript client generated from the
@@ -417,7 +459,12 @@ export const pyAgentGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [PY_AGENT_GENERATOR_INFO]);
 
   if (protocol === 'ag-ui') {
-    await ensureLicenseExceptions(tree, AG_UI_STRANDS_EXCEPTIONS);
+    await ensureLicenseExceptions(
+      tree,
+      framework === 'langchain'
+        ? AG_UI_LANGGRAPH_EXCEPTIONS
+        : AG_UI_STRANDS_EXCEPTIONS,
+    );
   }
 
   await formatFilesInSubtree(tree);
