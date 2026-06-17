@@ -595,26 +595,22 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await stopLast();
   });
 
-  it('FastAPI - echo', async () => {
-    await startAndWait('serve_local_test.py_api:serve-local', ports.fastApi);
-    const res = await fetch(
-      `http://127.0.0.1:${ports.fastApi}/echo?message=hello`,
-    );
-    const body = await res.json();
-    console.log('FastAPI echo response:', JSON.stringify(body));
-    expect(body.message).toBe('hello');
-    await stopLast();
-  });
-
-  it('Python DynamoDB - FastAPI persists via PynamoDB client', async () => {
-    // The FastAPI is connected to the py#dynamodb table, so its serve-local
-    // cascades DynamoDB Local and sets SERVE_LOCAL=true — the generated
-    // PynamoDB client points at the local table. Drive the DynamoDB-backed
-    // routes over HTTP to prove the Python client writes and reads real items.
+  it('FastAPI - echo + DynamoDB persists via PynamoDB client', async () => {
+    // py_api:serve-local cascades DynamoDB Local (the FastAPI is connected to
+    // the py#dynamodb table) and sets SERVE_LOCAL=true, so the generated
+    // PynamoDB client points at the local table. Drive the echo route plus the
+    // DynamoDB-backed routes over the one server lifecycle: a separate test
+    // can't restart py_api:serve-local because uvicorn's dev reloader holds the
+    // port briefly after stop (EADDRINUSE).
     await startAndWait('serve_local_test.py_api:serve-local', ports.fastApi);
     await waitForPort(ports.pyTable, STARTUP_TIMEOUT_MS);
 
     const base = `http://127.0.0.1:${ports.fastApi}`;
+
+    const res = await fetch(`${base}/echo?message=hello`);
+    const body = await res.json();
+    console.log('FastAPI echo response:', JSON.stringify(body));
+    expect(body.message).toBe('hello');
 
     // Wait out the gap between DynamoDB Local's port opening and the local
     // table being created, then assert the (empty) category query succeeds.
