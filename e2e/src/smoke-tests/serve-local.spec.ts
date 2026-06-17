@@ -2,11 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { stripVTControlCharacters } from 'node:util';
 import { type ChildProcess, spawn } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
 import { createConnection } from 'net';
+import * as pty from 'node-pty';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
 
@@ -112,6 +115,67 @@ function chatConnects(
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('error', (err) => finish(err));
+  });
+}
+
+/**
+ * Drive `agent-chat` through a PTY (the Clack prompt needs a TTY), send one
+ * message once connected, and resolve when the agent streams `expected` back.
+ * Proves the standalone chat boots, connects, submits input and renders the
+ * reply end-to-end. Rejects if not seen before the timeout.
+ */
+function chatStreamsReply(
+  cwd: string,
+  target: string,
+  expected: string,
+  timeoutMs: number,
+  message = 'What is 3 times 5?',
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
+      cwd,
+      env: { ...process.env, NX_DAEMON: 'true', RUNTIME_CONFIG_APP_ID: '' },
+    });
+    let out = '';
+    let sent = false;
+    let settled = false;
+    const clean = () => stripVTControlCharacters(out);
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        term.kill();
+      } catch {
+        // already dead
+      }
+      err ? reject(err) : resolve();
+    };
+    const timer = setTimeout(
+      () =>
+        finish(
+          new Error(
+            `Chat target ${target} did not stream "${expected}" within ${timeoutMs}ms. Output:\n${clean()}`,
+          ),
+        ),
+      timeoutMs,
+    );
+    term.onData((d) => {
+      out += d;
+      process.stdout.write(`[${target}] ${d}`);
+      const text = clean();
+      if (!sent && text.includes('Connected to ')) {
+        sent = true;
+        setTimeout(() => term.write(`${message}\r`), 1000);
+      }
+      if (
+        sent &&
+        text.slice(text.indexOf(message) + message.length).includes(expected)
+      ) {
+        finish();
+      }
+    });
+    term.onExit(() => finish(new Error(`Chat target ${target} exited early`)));
   });
 }
 
@@ -553,10 +617,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     console.log(`TS Agent streamed ${chunks.length} chunks:`, chunks.join(''));
     expect(chunks.length).toBeGreaterThan(0);
 
-    // The standalone chat CLI connects to the running serve-local server.
-    await chatConnects(
+    // The standalone chat CLI connects to the running serve-local server and
+    // streams the mock LLM's reply back through the interactive prompt.
+    await chatStreamsReply(
       projectRoot,
       '@serve-local-test/ts-project:my-agent-chat',
+      'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
     await stopLast();
