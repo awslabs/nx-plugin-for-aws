@@ -38,13 +38,13 @@ import Snippet from '@components/snippet.astro';
   - project.json プロジェクト設定とビルドターゲット
 </FileTree>
 
-ローカル開発スクリプトはすべての Python DynamoDB プロジェクト間で共有され、一度だけ以下の場所に生成されます：
+ローカル開発スクリプトはすべての DynamoDB プロジェクト（TypeScript と Python の両方）間で共有され、一度だけ以下の場所に生成されます：
 
 <FileTree>
-  - packages/common/py-dynamodb/scripts
-    - create_local_table.py ローカル DynamoDB Local インスタンスに DynamoDB テーブルを作成する
-    - pull_image.py DynamoDB Local イメージをプルする
-    - start_container.py DynamoDB Local コンテナを起動する
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts ローカル DynamoDB Local インスタンスに DynamoDB テーブルを作成する
+    - pull-image.ts DynamoDB Local イメージをプルする
+    - start-container.ts DynamoDB Local コンテナを起動する
 </FileTree>
 
 ### インフラストラクチャ
@@ -59,17 +59,25 @@ import Snippet from '@components/snippet.astro';
 
 ### データモデリング
 
-生成されたプロジェクトは、エンティティモデリングに [PynamoDB](https://pynamodb.readthedocs.io/) を使用します。すべてのエンティティは生成された `BaseModel` を継承し、[PynamoDB のポリモーフィズムサポート](https://pynamodb.readthedocs.io/en/stable/polymorphism.html)を使用して複数のエンティティタイプを単一のテーブルに格納します。これは [DynamoDB のシングルテーブル設計](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)に従っています。
+生成されたプロジェクトは、エンティティモデリングに [PynamoDB](https://pynamodb.readthedocs.io/) を使用します。すべてのエンティティは生成された `BaseModel` を継承**しなければなりません** — これは実行時に正しい DynamoDB テーブル名を解決し、デプロイ時には AWS AppConfig から、DynamoDB Local 経由でローカル実行時には `config.json` から読み取ります。これがないと、PynamoDB はどのテーブルを使用すればよいかわかりません。`BaseModel` は [PynamoDB のポリモーフィズムサポート](https://pynamodb.readthedocs.io/en/stable/polymorphism.html)も使用して、複数のエンティティタイプを単一のテーブルに格納します。これは [DynamoDB のシングルテーブル設計](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html)に従っています。
 
 生成されたサンプルエンティティを出発点として、`<name>/entities/` 配下にエンティティファイルを追加または更新します：
 
 ```python title="packages/my_table/my_table/entities/example.py"
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Iterator
 from pynamodb.attributes import UnicodeAttribute
 from .base import BaseModel
 
+
 class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    """
+    キー設計:
+      pk=EXAMPLE#<id>,        sk=EXAMPLE#<id>
+      gsi1pk=CATEGORY#<cat>,  gsi1sk=EXAMPLE#<id>    <- カテゴリ別にアイテムをリスト
+      gsi2pk=EXAMPLE,         gsi2sk=<created_at>    <- 日付別にすべてのアイテムをリスト
+    """
+
     name = UnicodeAttribute()
     category = UnicodeAttribute()
     created_at = UnicodeAttribute()
@@ -120,6 +128,277 @@ class ExampleModel(BaseModel, discriminator='ExampleModel'):
 ```
 
 詳細については、[PynamoDB チュートリアル](https://pynamodb.readthedocs.io/en/stable/tutorial.html)を参照してください。
+
+#### アクセスパターンを中心とした設計
+
+DynamoDB では、スキーマ設計はデータの形状ではなく、クエリから始まります。モデルを書く前に、アプリケーションが必要とするすべてのアクセスパターンをリストアップし、各パターンが単一のテーブルリクエストで応答できるように `pk`、`sk`、GSI キー値を設計します — JOIN も順次読み取りも不要です。
+
+生成された `ExampleModel` は、3 つのパターンについてこれを実証しています：
+
+- **ID で取得** — プライマリインデックス、`pk=EXAMPLE#<id>`、`sk=EXAMPLE#<id>`
+- **カテゴリ別にリスト** — `gsi1`、`pk=CATEGORY#<category>`
+- **作成日別にリスト** — `gsi2`、`pk=EXAMPLE`、ISO タイムスタンプ間のソートキー
+
+**タイプ接頭辞**の規約（例：`EXAMPLE#`、`CATEGORY#`）は意図的なものです：テーブルを閲覧する際にアイテムを自己記述的にし、インデックスを共有するエンティティタイプ間の偶発的なキー衝突を防ぎ、`begins_with` を使用したソートキー接頭辞フィルタリングを可能にします。
+
+新しいエンティティを書く前に、そのキーパターンを docstring で事前に定義してください。次のセクションの `OrderModel` はこの規約に従っています：
+
+```python
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    キー設計:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>   <- ユーザーの注文をリスト
+      gsi2pk=ORDER,           gsi2sk=<created_at>        <- 日付別にすべての注文をリスト
+    """
+```
+
+#### 複数のエンティティタイプの格納
+
+PynamoDB の `DiscriminatorAttribute` は、すべてのアイテムにタイプラベル（`entity_type`）を格納します。`BaseModel` 経由でクエリする場合、このラベルは各結果を正しいサブクラスとして自動的にインスタンス化するために使用されます — したがって、単一のクエリで `UserModel`、`OrderModel`、および同じテーブルに登録されている他のエンティティタイプの混合を返すことができます。
+
+:::caution[PynamoDB はシングルテーブル設計専用に作られていません]
+PynamoDB の `DiscriminatorAttribute` は、単一の同質なテーブル内のクラス階層ポリモーフィズム用に設計されました — 構造的に異なるエンティティタイプを 1 つのテーブルに格納するためではありません。ここで使用されているパターンは機能しますが、これらの注意点を念頭に置いてください：
+
+- **キー衝突はあなたの責任です。** PynamoDB は、2 つのエンティティタイプが同じ `pk`/`sk` ペアを書き込むことを防ぎません。常に一意のタイプ接頭辞（例：`ORDER#`、`USER#`）を使用してください。
+- **エンティティ間クエリには `BaseModel` が必要です。** PynamoDB は特定のサブクラスをクエリする際に自動的に識別子フィルタを追加するため、同じキーにある他のエンティティタイプのアイテムは決して返されません。共有 GSI パーティションキーからタイプの混合を取得するには、常に `BaseModel` 経由でクエリしてください。
+- **共有テーブル設定。** すべてのエンティティは、`BaseModel` で定義された `Meta` 設定（テーブル名、リージョン、認証情報）を共有します。
+:::
+
+以下は、同じテーブルに格納された `UserModel` と関連する `OrderModel` レコードを持つ、完全な 2 エンティティの例です：
+
+```python title="packages/my_table/my_table/entities/user.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class UserModel(BaseModel, discriminator='UserModel'):
+    """
+    キー設計:
+      pk=USER#<user_id>,  sk=USER#<user_id>
+      gsi2pk=USER,        gsi2sk=<created_at>    <- 日付別にすべてのユーザーをリスト
+    """
+
+    username = UnicodeAttribute()
+    email = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, user_id: str) -> str:
+        return f'USER#{user_id}'
+
+    @classmethod
+    def create(cls, user_id: str, username: str, email: str) -> 'UserModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(user_id),
+            sk=cls.make_pk(user_id),
+            gsi2pk='USER',
+            gsi2sk=now,
+            username=username,
+            email=email,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, user_id: str) -> 'UserModel':
+        return cls.get(cls.make_pk(user_id), cls.make_pk(user_id))
+
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['UserModel']:
+        return cls.gsi2_index.query('USER', limit=limit, scan_index_forward=False)
+```
+
+```python title="packages/my_table/my_table/entities/order.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    キー設計:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>    <- ユーザー別に注文をリスト
+      gsi2pk=ORDER,           gsi2sk=<created_at>         <- 日付別にすべての注文をリスト
+    """
+
+    user_id = UnicodeAttribute()
+    total = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, order_id: str) -> str:
+        return f'ORDER#{order_id}'
+
+    @classmethod
+    def create(cls, order_id: str, user_id: str, total: str) -> 'OrderModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(order_id),
+            sk=cls.make_pk(order_id),
+            gsi1pk=f'USER#{user_id}',
+            gsi1sk=cls.make_pk(order_id),
+            gsi2pk='ORDER',
+            gsi2sk=now,
+            user_id=user_id,
+            total=total,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, order_id: str) -> 'OrderModel':
+        return cls.get(cls.make_pk(order_id), cls.make_pk(order_id))
+
+    # ── gsi1_index: partition=user, sort=order_id ────────────────────────────
+    @classmethod
+    def list_by_user(cls, user_id: str) -> Iterator['OrderModel']:
+        return cls.gsi1_index.query(f'USER#{user_id}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['OrderModel']:
+        return cls.gsi2_index.query('ORDER', limit=limit, scan_index_forward=False)
+```
+
+`__init__.py` から新しいエンティティをエクスポートします：
+
+```python title="packages/my_table/my_table/entities/__init__.py"
+from .user import UserModel
+from .order import OrderModel
+from .example import ExampleModel
+```
+
+#### GSI オーバーロード
+
+`BaseModel` は 2 つの共有 GSI（`gsi1_index`、`gsi2_index`）を提供します。上記の `UserModel` と `OrderModel` の両方が `gsi2` に書き込みますが、異なる `gsi2pk` 値（`USER` vs `ORDER`）を使用します。これが **GSI オーバーロード**です：単一の物理インデックスを再利用して、追加の GSI 容量を消費することなく、複数の独立したアクセスパターンを提供します。
+
+- **`UserModel`** — `gsi2pk=USER`、`gsi2sk=<created_at>` → 日付別にすべてのユーザーをリスト
+- **`OrderModel`** — `gsi2pk=ORDER`、`gsi2sk=<created_at>` → 日付別にすべての注文をリスト
+
+`gsi1` も、複数のエンティティタイプが同じ親を共有する場合にオーバーロードできます。後で同じくユーザーに属する `ReviewModel` を追加する場合、`REVIEW#<id>` ソートキーで `gsi1pk=USER#<user_id>` を割り当てることができます — 追加の GSI は不要です。`BaseModel` 経由で `gsi1` をクエリすると、そのユーザーの注文とレビューの両方が 1 つのリクエストで返され、PynamoDB が各アイテムを正しいサブクラスとしてインスタンス化します：
+
+```python
+from .base import BaseModel
+from .order import OrderModel
+from .review import ReviewModel
+
+user_id = 'user-123'
+items = list(BaseModel.gsi1_index.query(f'USER#{user_id}'))
+
+orders  = [i for i in items if isinstance(i, OrderModel)]
+reviews = [i for i in items if isinstance(i, ReviewModel)]
+```
+
+オーバーロードされた GSI から 1 つのエンティティタイプのみを取得するには、ソートキー接頭辞条件を使用します：
+
+```python
+orders_only = list(BaseModel.gsi1_index.query(
+    f'USER#{user_id}',
+    range_key_condition=BaseModel.gsi1sk.startswith('ORDER#'),
+))
+```
+
+#### 1 対多の関係
+
+**1 対多**の関係では、子エンティティが GSI パーティションキーに親への参照を格納し、データを複製することなく両方向に関係をトラバース可能にします。上記の `UserModel` / `OrderModel` の例はまさにこのパターンです：
+
+- **ID で単一の注文を取得** — プライマリテーブル：`pk=ORDER#<id>`、`sk=ORDER#<id>`
+- **ユーザーのすべての注文をリスト** — `gsi1`：`pk=USER#<user_id>`
+
+GSI ベースのルックアップの代替は、**アイテムコレクション**パターンです：子アイテムに親と同じ `pk` を与え、ソートキーを使用してそれらを区別します。これにより、GSI なしで、単一のプライマリテーブルクエリで親とそのすべての子を取得できます：
+
+```python title="packages/my_table/my_table/entities/order.py (アイテムコレクションバリアント)"
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    キー設計（アイテムコレクション）:
+      pk=USER#<user_id>,    sk=ORDER#<order_id>   <- 親ユーザーの下に共存
+    """
+    ...
+```
+
+```python
+# 単一のプライマリテーブルクエリでユーザーとそのすべての注文を取得
+# BaseModel は DiscriminatorAttribute を介して各アイテムを正しいサブクラスにディスパッチ
+items = list(BaseModel.query(f'USER#{user_id}'))
+user   = next(i for i in items if isinstance(i, UserModel))
+orders = [i for i in items if isinstance(i, OrderModel)]
+```
+
+トレードオフ：アイテムコレクションはすべての子を単一のパーティションキーの下に配置します。これはほとんどのワークロードに最適ですが、極端な書き込みスループットではホットパーティションを作成する可能性があります。GSI アプローチ（上記の例で使用）は、各エンティティを独自のパーティションに保持し、一般的に開始するのがより安全です。
+
+#### 多対多の関係
+
+多対多の関係には、[隣接リストパターン](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-adjacency-graphs.html)を使用した**ジャンクションエンティティ**が必要です：各リンクを記録する専用アイテムで、その GSI キーが方向を反転させて、関係を両方向にトラバース可能にします。
+
+`ArticleModel` と `TagModel` を考えてみましょう。記事は多くのタグを持つことができ、タグは多くの記事に適用できます：
+
+```python title="packages/my_table/my_table/entities/article_tag.py"
+from collections.abc import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ArticleTagModel(BaseModel, discriminator='ArticleTag'):
+    """
+    Article ↔ Tag 多対多関係のジャンクションエンティティ。
+
+    キー設計:
+      pk=ARTICLE#<article_id>,  sk=TAG#<tag_name>             <- 記事のタグをリスト
+      gsi1pk=TAG#<tag_name>,    gsi1sk=ARTICLE#<article_id>  <- タグの記事をリスト
+    """
+
+    article_id = UnicodeAttribute()
+    tag_name = UnicodeAttribute()
+
+    @classmethod
+    def add(cls, article_id: str, tag_name: str) -> 'ArticleTagModel':
+        item = cls(
+            pk=f'ARTICLE#{article_id}',
+            sk=f'TAG#{tag_name}',
+            gsi1pk=f'TAG#{tag_name}',
+            gsi1sk=f'ARTICLE#{article_id}',
+            article_id=article_id,
+            tag_name=tag_name,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def remove(cls, article_id: str, tag_name: str) -> None:
+        cls.get(f'ARTICLE#{article_id}', f'TAG#{tag_name}').delete()
+
+    # ── Primary index: pk=article, sk=tag ─────────────────────────────────────
+    @classmethod
+    def list_tags_for_article(cls, article_id: str) -> Iterator['ArticleTagModel']:
+        return cls.query(f'ARTICLE#{article_id}')
+
+    # ── gsi1_index: pk=tag, sk=article ────────────────────────────────────────
+    @classmethod
+    def list_articles_for_tag(cls, tag_name: str) -> Iterator['ArticleTagModel']:
+        return cls.gsi1_index.query(f'TAG#{tag_name}')
+```
+
+`ArticleTagModel` は `pk=ARTICLE#<article_id>` を使用します — 記事自体と同じパーティション — したがって、単一のプライマリテーブルクエリで記事とそのすべてのタグを取得できます：
+
+```python
+from .base import BaseModel
+from .article import ArticleModel
+from .article_tag import ArticleTagModel
+
+items   = list(BaseModel.query('ARTICLE#article-123'))
+article = next(i for i in items if isinstance(i, ArticleModel))
+tags    = [i.tag_name for i in items if isinstance(i, ArticleTagModel)]
+```
+
+DynamoDB データモデリングの詳細については、[DynamoDB データモデリングガイド](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling.html)および [Amazon DynamoDB でシングルテーブル設計を作成する](https://aws.amazon.com/blogs/compute/creating-a-single-table-design-with-amazon-dynamodb/)を参照してください。
 
 ### DynamoDB クライアントの使用
 

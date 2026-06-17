@@ -31,9 +31,9 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   DYNAMODB_GENERATOR_IDS,
   PACKAGES_DIR,
-  SHARED_TS_DYNAMODB_SCRIPTS_DIR,
+  SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { sharedTsDynamoDBScriptsGenerator } from '../../utils/ts-dynamodb-scripts/ts-dynamodb-scripts';
+import { sharedDynamoDBScriptsGenerator } from '../../utils/shared-dynamodb-scripts';
 import { withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsDynamoDBGeneratorSchema } from './schema';
@@ -96,11 +96,11 @@ export const tsDynamoDBGenerator = async (
     templateOptions,
   );
 
-  sharedTsDynamoDBScriptsGenerator(tree);
+  await sharedDynamoDBScriptsGenerator(tree);
 
   const scriptsDir = relative(
     dir,
-    joinPathFragments(PACKAGES_DIR, SHARED_TS_DYNAMODB_SCRIPTS_DIR),
+    joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'dynamodb'),
   );
 
   projectConfig.targets['pull-image'] = {

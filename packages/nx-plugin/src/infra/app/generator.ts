@@ -39,7 +39,7 @@ import {
   SHARED_INFRA_CONFIG_DIR,
 } from '../../utils/shared-constructs-constants';
 import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
-import { sharedScriptsGenerator } from '../../utils/shared-scripts';
+import { sharedInfraScriptsGenerator } from '../../utils/shared-infra-scripts';
 import { withVersions } from '../../utils/versions';
 import type { TsInfraGeneratorSchema } from './schema';
 
@@ -79,7 +79,7 @@ export async function tsInfraGenerator(
   const stageConfig = schema.stageConfig ?? false;
   if (stageConfig) {
     await sharedInfraConfigGenerator(tree);
-    await sharedScriptsGenerator(tree);
+    await sharedInfraScriptsGenerator(tree);
   }
 
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
@@ -158,7 +158,7 @@ export async function tsInfraGenerator(
         dependsOn: ['^build', 'compile'],
         options: stageConfig
           ? withCdkEnv({
-              command: `tsx packages/common/scripts/src/infra-deploy.ts ${libraryRoot}`,
+              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
@@ -177,7 +177,7 @@ export async function tsInfraGenerator(
         dependsOn: ['^build', 'compile'],
         options: stageConfig
           ? withCdkEnv({
-              command: `tsx packages/common/scripts/src/infra-destroy.ts ${libraryRoot}`,
+              command: `tsx packages/common/scripts/src/infra/infra-destroy.ts ${libraryRoot}`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',

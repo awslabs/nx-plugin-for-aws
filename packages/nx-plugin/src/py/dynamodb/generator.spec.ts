@@ -41,7 +41,7 @@ describe('py#dynamodb generator', () => {
     );
 
     snapshotTreeDir(tree, 'packages/my_table/proj_my_table');
-    snapshotTreeDir(tree, 'packages/common/py-dynamodb/scripts');
+    snapshotTreeDir(tree, 'packages/common/scripts/src/dynamodb');
 
     expect(
       tree.read('packages/common/constructs/src/core/dynamodb.ts', 'utf-8'),
@@ -65,7 +65,7 @@ describe('py#dynamodb generator', () => {
     expect(projectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command: 'uv run python ../common/py-dynamodb/scripts/pull_image.py',
+        command: 'tsx ../common/scripts/src/dynamodb/pull-image.ts',
         cwd: '{projectRoot}',
       },
     });
@@ -75,8 +75,8 @@ describe('py#dynamodb generator', () => {
       dependsOn: ['pull-image'],
       options: {
         commands: [
-          'uv run python ../common/py-dynamodb/scripts/start_container.py',
-          'uv run python ../common/py-dynamodb/scripts/create_local_table.py',
+          'tsx ../common/scripts/src/dynamodb/start-container.ts',
+          'tsx ../common/scripts/src/dynamodb/create-local-table.ts',
         ],
         parallel: true,
         cwd: '{projectRoot}',
@@ -188,7 +188,7 @@ describe('py#dynamodb generator', () => {
     await pyDynamoDBGenerator(tree, { ...defaultOptions, infra: 'none' });
 
     snapshotTreeDir(tree, 'packages/my_table/proj_my_table');
-    snapshotTreeDir(tree, 'packages/common/py-dynamodb/scripts');
+    snapshotTreeDir(tree, 'packages/common/scripts/src/dynamodb');
     expect(tree.exists('packages/common/constructs')).toBeFalsy();
 
     const projectJson = JSON.parse(

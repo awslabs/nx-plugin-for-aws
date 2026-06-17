@@ -38,13 +38,13 @@ O gerador cria a seguinte estrutura de projeto no diretório `<directory>/<name>
   - project.json Configuração do projeto e alvos de build
 </FileTree>
 
-Os scripts de desenvolvimento local são compartilhados entre todos os projetos Python DynamoDB e gerados uma vez em:
+Os scripts de desenvolvimento local são compartilhados entre todos os projetos DynamoDB (tanto TypeScript quanto Python) e gerados uma vez em:
 
 <FileTree>
-  - packages/common/py-dynamodb/scripts
-    - create_local_table.py Creates the DynamoDB table in the local DynamoDB Local instance
-    - pull_image.py Pulls the DynamoDB Local image
-    - start_container.py Starts the DynamoDB Local container
+  - packages/common/scripts/src/dynamodb
+    - create-local-table.ts Cria a tabela DynamoDB na instância local do DynamoDB Local
+    - pull-image.ts Baixa a imagem do DynamoDB Local
+    - start-container.ts Inicia o contêiner do DynamoDB Local
 </FileTree>
 
 ### Infraestrutura
@@ -59,17 +59,25 @@ Os scripts de desenvolvimento local são compartilhados entre todos os projetos 
 
 ### Modelagem de Dados
 
-O projeto gerado usa [PynamoDB](https://pynamodb.readthedocs.io/) para modelagem de entidades. Todas as entidades herdam do `BaseModel` gerado, que usa [suporte a polimorfismo do PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) para armazenar múltiplos tipos de entidades em uma única tabela, seguindo o [design de tabela única do DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
+O projeto gerado usa [PynamoDB](https://pynamodb.readthedocs.io/) para modelagem de entidades. Todas as entidades **devem** herdar do `BaseModel` gerado — ele resolve o nome correto da tabela DynamoDB em tempo de execução, lendo do AWS AppConfig quando implantado ou de `config.json` quando executado localmente via DynamoDB Local. Sem isso, o PynamoDB não saberá qual tabela usar. `BaseModel` também usa [suporte a polimorfismo do PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) para armazenar múltiplos tipos de entidades em uma única tabela, seguindo o [design de tabela única do DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
 
 Adicione ou atualize arquivos de entidade em `<name>/entities/`, usando a entidade de exemplo gerada como ponto de partida:
 
 ```python title="packages/my_table/my_table/entities/example.py"
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Iterator
 from pynamodb.attributes import UnicodeAttribute
 from .base import BaseModel
 
+
 class ExampleModel(BaseModel, discriminator='ExampleModel'):
+    """
+    Key design:
+      pk=EXAMPLE#<id>,        sk=EXAMPLE#<id>
+      gsi1pk=CATEGORY#<cat>,  gsi1sk=EXAMPLE#<id>    <- list items by category
+      gsi2pk=EXAMPLE,         gsi2sk=<created_at>    <- list all items by date
+    """
+
     name = UnicodeAttribute()
     category = UnicodeAttribute()
     created_at = UnicodeAttribute()
@@ -120,6 +128,277 @@ class ExampleModel(BaseModel, discriminator='ExampleModel'):
 ```
 
 Para mais detalhes, consulte o [tutorial do PynamoDB](https://pynamodb.readthedocs.io/en/stable/tutorial.html).
+
+#### Projetando em Torno de Padrões de Acesso
+
+No DynamoDB, o design de esquema começa com suas consultas, não com a forma dos seus dados. Antes de escrever qualquer modelo, liste todos os padrões de acesso que sua aplicação precisa, depois projete os valores de chave `pk`, `sk` e GSI para que cada padrão seja respondido por uma única requisição à tabela — sem JOINs, sem leituras sequenciais.
+
+O `ExampleModel` gerado demonstra isso para três padrões:
+
+- **Obter por ID** — índice primário, `pk=EXAMPLE#<id>`, `sk=EXAMPLE#<id>`
+- **Listar por categoria** — `gsi1`, `pk=CATEGORY#<category>`
+- **Listar por data de criação** — `gsi2`, `pk=EXAMPLE`, chave de ordenação entre timestamps ISO
+
+A convenção de **prefixo de tipo** (por exemplo, `EXAMPLE#`, `CATEGORY#`) é deliberada: torna os itens autodescritivos ao navegar pela tabela, previne colisões acidentais de chaves entre tipos de entidades que compartilham um índice e permite filtragem de prefixo de chave de ordenação usando `begins_with`.
+
+Antes de escrever uma nova entidade, defina seus padrões de chave antecipadamente em uma docstring. O `OrderModel` na próxima seção segue essa convenção:
+
+```python
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>   <- list orders for a user
+      gsi2pk=ORDER,           gsi2sk=<created_at>        <- list all orders by date
+    """
+```
+
+#### Armazenando Múltiplos Tipos de Entidades
+
+O `DiscriminatorAttribute` do PynamoDB armazena um rótulo de tipo (`entity_type`) em cada item. Ao consultar via `BaseModel`, esse rótulo é usado para instanciar cada resultado como sua subclasse correta automaticamente — então uma única consulta pode retornar uma mistura de `UserModel`, `OrderModel` e qualquer outro tipo de entidade registrado na mesma tabela.
+
+:::caution[PynamoDB não foi projetado especificamente para design de tabela única]
+O `DiscriminatorAttribute` do PynamoDB foi projetado para polimorfismo de hierarquia de classes dentro de uma única tabela homogênea — não para armazenar tipos de entidades estruturalmente diferentes em uma tabela. O padrão usado aqui funciona, mas tenha essas ressalvas em mente:
+
+- **Colisão de chaves é sua responsabilidade.** PynamoDB não impede que dois tipos de entidades escrevam o mesmo par `pk`/`sk`. Sempre use prefixos de tipo únicos (por exemplo, `ORDER#`, `USER#`).
+- **Consultas entre entidades requerem `BaseModel`.** PynamoDB adiciona automaticamente um filtro discriminador ao consultar uma subclasse específica, então itens de outros tipos de entidades na mesma chave nunca serão retornados. Para recuperar uma mistura de tipos de uma chave de partição GSI compartilhada, sempre consulte via `BaseModel`.
+- **Configurações de tabela compartilhadas.** Todas as entidades compartilham a configuração `Meta` (nome da tabela, região, credenciais) definida em `BaseModel`.
+:::
+
+Abaixo está um exemplo completo de duas entidades — um `UserModel` com registros `OrderModel` associados armazenados na mesma tabela:
+
+```python title="packages/my_table/my_table/entities/user.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class UserModel(BaseModel, discriminator='UserModel'):
+    """
+    Key design:
+      pk=USER#<user_id>,  sk=USER#<user_id>
+      gsi2pk=USER,        gsi2sk=<created_at>    <- list all users by date
+    """
+
+    username = UnicodeAttribute()
+    email = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, user_id: str) -> str:
+        return f'USER#{user_id}'
+
+    @classmethod
+    def create(cls, user_id: str, username: str, email: str) -> 'UserModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(user_id),
+            sk=cls.make_pk(user_id),
+            gsi2pk='USER',
+            gsi2sk=now,
+            username=username,
+            email=email,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, user_id: str) -> 'UserModel':
+        return cls.get(cls.make_pk(user_id), cls.make_pk(user_id))
+
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['UserModel']:
+        return cls.gsi2_index.query('USER', limit=limit, scan_index_forward=False)
+```
+
+```python title="packages/my_table/my_table/entities/order.py"
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design:
+      pk=ORDER#<order_id>,    sk=ORDER#<order_id>
+      gsi1pk=USER#<user_id>,  gsi1sk=ORDER#<order_id>    <- list orders by user
+      gsi2pk=ORDER,           gsi2sk=<created_at>         <- list all orders by date
+    """
+
+    user_id = UnicodeAttribute()
+    total = UnicodeAttribute()
+    created_at = UnicodeAttribute()
+
+    @classmethod
+    def make_pk(cls, order_id: str) -> str:
+        return f'ORDER#{order_id}'
+
+    @classmethod
+    def create(cls, order_id: str, user_id: str, total: str) -> 'OrderModel':
+        now = datetime.now(UTC).isoformat()
+        item = cls(
+            pk=cls.make_pk(order_id),
+            sk=cls.make_pk(order_id),
+            gsi1pk=f'USER#{user_id}',
+            gsi1sk=cls.make_pk(order_id),
+            gsi2pk='ORDER',
+            gsi2sk=now,
+            user_id=user_id,
+            total=total,
+            created_at=now,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def get_by_id(cls, order_id: str) -> 'OrderModel':
+        return cls.get(cls.make_pk(order_id), cls.make_pk(order_id))
+
+    # ── gsi1_index: partition=user, sort=order_id ────────────────────────────
+    @classmethod
+    def list_by_user(cls, user_id: str) -> Iterator['OrderModel']:
+        return cls.gsi1_index.query(f'USER#{user_id}')
+
+    # ── gsi2_index: partition=type, sort=created_at ───────────────────────────
+    @classmethod
+    def list_recent(cls, limit: int | None = None) -> Iterator['OrderModel']:
+        return cls.gsi2_index.query('ORDER', limit=limit, scan_index_forward=False)
+```
+
+Exporte as novas entidades de `__init__.py`:
+
+```python title="packages/my_table/my_table/entities/__init__.py"
+from .user import UserModel
+from .order import OrderModel
+from .example import ExampleModel
+```
+
+#### Sobrecarga de GSI
+
+`BaseModel` fornece dois GSIs compartilhados (`gsi1_index`, `gsi2_index`). Tanto `UserModel` quanto `OrderModel` acima escrevem em `gsi2` — mas com valores `gsi2pk` diferentes (`USER` vs `ORDER`). Isso é **sobrecarga de GSI**: reutilizar um único índice físico para servir múltiplos padrões de acesso independentes sem consumir capacidade extra de GSI.
+
+- **`UserModel`** — `gsi2pk=USER`, `gsi2sk=<created_at>` → listar todos os usuários por data
+- **`OrderModel`** — `gsi2pk=ORDER`, `gsi2sk=<created_at>` → listar todos os pedidos por data
+
+`gsi1` também pode ser sobrecarregado quando múltiplos tipos de entidades compartilham o mesmo pai. Se você adicionar posteriormente um `ReviewModel` que também pertence a um usuário, pode atribuir a ele `gsi1pk=USER#<user_id>` com uma chave de ordenação `REVIEW#<id>` — nenhum GSI adicional necessário. Consultar `gsi1` via `BaseModel` então retorna tanto pedidos quanto avaliações para aquele usuário em uma única requisição, com PynamoDB instanciando cada item como sua subclasse correta:
+
+```python
+from .base import BaseModel
+from .order import OrderModel
+from .review import ReviewModel
+
+user_id = 'user-123'
+items = list(BaseModel.gsi1_index.query(f'USER#{user_id}'))
+
+orders  = [i for i in items if isinstance(i, OrderModel)]
+reviews = [i for i in items if isinstance(i, ReviewModel)]
+```
+
+Para recuperar apenas um tipo de entidade de um GSI sobrecarregado, use uma condição de prefixo de chave de ordenação:
+
+```python
+orders_only = list(BaseModel.gsi1_index.query(
+    f'USER#{user_id}',
+    range_key_condition=BaseModel.gsi1sk.startswith('ORDER#'),
+))
+```
+
+#### Relacionamentos Um-para-Muitos
+
+Em um relacionamento **um-para-muitos**, a entidade filha armazena uma referência ao seu pai em uma chave de partição GSI, tornando o relacionamento navegável em ambas as direções sem duplicar dados. O exemplo `UserModel` / `OrderModel` acima é exatamente esse padrão:
+
+- **Obter um único pedido por ID** — tabela primária: `pk=ORDER#<id>`, `sk=ORDER#<id>`
+- **Listar todos os pedidos de um usuário** — `gsi1`: `pk=USER#<user_id>`
+
+Uma alternativa às buscas baseadas em GSI é o padrão de **coleção de itens**: dê aos itens filhos o mesmo `pk` que seu pai e use a chave de ordenação para diferenciá-los. Isso permite recuperar o pai e todos os seus filhos em uma única consulta à tabela primária, sem um GSI:
+
+```python title="packages/my_table/my_table/entities/order.py (variante de coleção de itens)"
+class OrderModel(BaseModel, discriminator='OrderModel'):
+    """
+    Key design (item collection):
+      pk=USER#<user_id>,    sk=ORDER#<order_id>   <- co-located under the parent user
+    """
+    ...
+```
+
+```python
+# Recuperar o usuário e todos os seus pedidos em uma única consulta à tabela primária
+# BaseModel despacha cada item para sua subclasse correta via DiscriminatorAttribute
+items = list(BaseModel.query(f'USER#{user_id}'))
+user   = next(i for i in items if isinstance(i, UserModel))
+orders = [i for i in items if isinstance(i, OrderModel)]
+```
+
+O trade-off: coleções de itens colocam todos os filhos sob uma única chave de partição, o que é ideal para a maioria das cargas de trabalho, mas pode criar uma partição quente em throughput de escrita extremo. A abordagem GSI (usada nos exemplos acima) mantém cada entidade em sua própria partição e geralmente é mais segura para começar.
+
+#### Relacionamentos Muitos-para-Muitos
+
+Relacionamentos muitos-para-muitos requerem uma **entidade de junção** usando o [padrão de lista de adjacência](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-adjacency-graphs.html): um item dedicado que registra cada link, com sua chave GSI invertendo a direção para que o relacionamento possa ser percorrido em ambos os sentidos.
+
+Considere `ArticleModel` e `TagModel`, onde um artigo pode ter muitas tags e uma tag pode se aplicar a muitos artigos:
+
+```python title="packages/my_table/my_table/entities/article_tag.py"
+from collections.abc import Iterator
+from pynamodb.attributes import UnicodeAttribute
+from .base import BaseModel
+
+
+class ArticleTagModel(BaseModel, discriminator='ArticleTag'):
+    """
+    Junction entity for the Article ↔ Tag many-to-many relationship.
+
+    Key design:
+      pk=ARTICLE#<article_id>,  sk=TAG#<tag_name>             <- list tags for an article
+      gsi1pk=TAG#<tag_name>,    gsi1sk=ARTICLE#<article_id>  <- list articles for a tag
+    """
+
+    article_id = UnicodeAttribute()
+    tag_name = UnicodeAttribute()
+
+    @classmethod
+    def add(cls, article_id: str, tag_name: str) -> 'ArticleTagModel':
+        item = cls(
+            pk=f'ARTICLE#{article_id}',
+            sk=f'TAG#{tag_name}',
+            gsi1pk=f'TAG#{tag_name}',
+            gsi1sk=f'ARTICLE#{article_id}',
+            article_id=article_id,
+            tag_name=tag_name,
+        )
+        item.save()
+        return item
+
+    @classmethod
+    def remove(cls, article_id: str, tag_name: str) -> None:
+        cls.get(f'ARTICLE#{article_id}', f'TAG#{tag_name}').delete()
+
+    # ── Primary index: pk=article, sk=tag ─────────────────────────────────────
+    @classmethod
+    def list_tags_for_article(cls, article_id: str) -> Iterator['ArticleTagModel']:
+        return cls.query(f'ARTICLE#{article_id}')
+
+    # ── gsi1_index: pk=tag, sk=article ────────────────────────────────────────
+    @classmethod
+    def list_articles_for_tag(cls, tag_name: str) -> Iterator['ArticleTagModel']:
+        return cls.gsi1_index.query(f'TAG#{tag_name}')
+```
+
+Como `ArticleTagModel` usa `pk=ARTICLE#<article_id>` — a mesma partição que o próprio artigo — você pode recuperar um artigo e todas as suas tags em uma única consulta à tabela primária:
+
+```python
+from .base import BaseModel
+from .article import ArticleModel
+from .article_tag import ArticleTagModel
+
+items   = list(BaseModel.query('ARTICLE#article-123'))
+article = next(i for i in items if isinstance(i, ArticleModel))
+tags    = [i.tag_name for i in items if isinstance(i, ArticleTagModel)]
+```
+
+Para leitura adicional sobre modelagem de dados do DynamoDB, consulte o [guia de modelagem de dados do DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling.html) e [Criando um design de tabela única com Amazon DynamoDB](https://aws.amazon.com/blogs/compute/creating-a-single-table-design-with-amazon-dynamodb/).
 
 ### Usando o Cliente DynamoDB
 

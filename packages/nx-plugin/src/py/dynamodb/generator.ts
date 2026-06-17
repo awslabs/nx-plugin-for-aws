@@ -29,13 +29,13 @@ import {
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { assignSharedPort } from '../../utils/port';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { sharedPyDynamoDBScriptsGenerator } from '../../utils/py-dynamodb-scripts/py-dynamodb-scripts';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   DYNAMODB_GENERATOR_IDS,
   PACKAGES_DIR,
-  SHARED_PY_DYNAMODB_SCRIPTS_DIR,
+  SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
+import { sharedDynamoDBScriptsGenerator } from '../../utils/shared-dynamodb-scripts';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import type { PyDynamoDBGeneratorSchema } from './schema';
 
@@ -94,17 +94,17 @@ export const pyDynamoDBGenerator = async (
     templateOptions,
   );
 
-  sharedPyDynamoDBScriptsGenerator(tree);
+  await sharedDynamoDBScriptsGenerator(tree);
 
   const scriptsDir = relative(
     dir,
-    joinPathFragments(PACKAGES_DIR, SHARED_PY_DYNAMODB_SCRIPTS_DIR),
+    joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'dynamodb'),
   );
 
   projectConfig.targets['pull-image'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `uv run python ${scriptsDir}/pull_image.py`,
+      command: `tsx ${scriptsDir}/pull-image.ts`,
       cwd: '{projectRoot}',
     },
   };
@@ -114,8 +114,8 @@ export const pyDynamoDBGenerator = async (
     dependsOn: ['pull-image'],
     options: {
       commands: [
-        `uv run python ${scriptsDir}/start_container.py`,
-        `uv run python ${scriptsDir}/create_local_table.py`,
+        `tsx ${scriptsDir}/start-container.ts`,
+        `tsx ${scriptsDir}/create-local-table.ts`,
       ],
       parallel: true,
       cwd: '{projectRoot}',

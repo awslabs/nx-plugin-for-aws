@@ -325,10 +325,10 @@ describe('infra generator', () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets.deploy.options.command).toBe(
-        'tsx packages/common/scripts/src/infra-deploy.ts packages/test',
+        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
       );
       expect(config.targets.destroy.options.command).toBe(
-        'tsx packages/common/scripts/src/infra-destroy.ts packages/test',
+        'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
       );
     });
 
@@ -370,23 +370,25 @@ describe('infra generator', () => {
       // Pre-create scripts with project.json to trigger early return
       tree.write('packages/common/scripts/project.json', '{}');
       tree.write(
-        'packages/common/scripts/src/infra-deploy.ts',
+        'packages/common/scripts/src/infra/infra-deploy.ts',
         '// custom deploy\n',
       );
       await tsInfraGenerator(tree, stageConfigOptions);
       // Should preserve the existing files
       expect(
-        tree.read('packages/common/scripts/src/infra-deploy.ts').toString(),
+        tree
+          .read('packages/common/scripts/src/infra/infra-deploy.ts')
+          .toString(),
       ).toBe('// custom deploy\n');
     });
 
     it('should generate scripts package with deploy and destroy scripts', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       expect(
-        tree.exists('packages/common/scripts/src/infra-deploy.ts'),
+        tree.exists('packages/common/scripts/src/infra/infra-deploy.ts'),
       ).toBeTruthy();
       expect(
-        tree.exists('packages/common/scripts/src/infra-destroy.ts'),
+        tree.exists('packages/common/scripts/src/infra/infra-destroy.ts'),
       ).toBeTruthy();
     });
 
@@ -420,7 +422,7 @@ describe('infra generator', () => {
         dependsOn: ['^build', 'compile'],
         options: {
           command:
-            'tsx packages/common/scripts/src/infra-deploy.ts packages/test',
+            'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
         },
       });
       expect(config.targets.destroy).toMatchObject({
@@ -428,7 +430,7 @@ describe('infra generator', () => {
         dependsOn: ['^build', 'compile'],
         options: {
           command:
-            'tsx packages/common/scripts/src/infra-destroy.ts packages/test',
+            'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
         },
       });
     });
