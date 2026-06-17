@@ -4,7 +4,7 @@
  */
 
 import { stripVTControlCharacters } from 'node:util';
-import { type ChildProcess, spawn } from 'child_process';
+import { type ChildProcess, execSync, spawn } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
@@ -36,6 +36,34 @@ function waitForPort(port: number, timeoutMs: number): Promise<void> {
     };
     attempt();
   });
+}
+
+// Poll a URL until the JSON response satisfies `predicate`. Used to wait out
+// the gap between DynamoDB Local's port opening and the local table being
+// created (the serve-local cascade does both, but not atomically).
+async function waitForJson(
+  url: string,
+  predicate: (body: any) => boolean,
+  timeoutMs = STARTUP_TIMEOUT_MS,
+): Promise<any> {
+  const deadline = Date.now() + timeoutMs;
+  let last: any;
+  for (;;) {
+    try {
+      last = await fetch(url).then((r) => r.json());
+      if (predicate(last)) return last;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Timed out waiting for ${url}: ${JSON.stringify(last)?.slice(0, 500)}`,
+      );
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, HEALTH_CHECK_INTERVAL_MS),
+    );
+  }
 }
 
 function startServer(
@@ -178,6 +206,22 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
   let projectRoot: string;
   let ports: Record<string, number>;
 
+  // DynamoDB Local persists to a named volume keyed on the workspace scope, so
+  // remove the container and its volume to guarantee a fresh table (otherwise a
+  // previous run's data leaks into this run's assertions).
+  const cleanupDynamoLocal = () => {
+    for (const cmd of [
+      `docker rm -f serve-local-test-dynamodb`,
+      `docker volume rm serve-local-test-dynamodb-data`,
+    ]) {
+      try {
+        execSync(cmd, { stdio: 'ignore' });
+      } catch {
+        // not present
+      }
+    }
+  };
+
   async function startAndWait(
     target: string,
     port: number,
@@ -204,6 +248,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       if (existsSync(targetDir))
         rmSync(targetDir, { force: true, recursive: true });
       ensureDirSync(targetDir);
+      cleanupDynamoLocal();
 
       await runCLI(
         `${buildCreateNxWorkspaceCommand(pkgMgr, 'serve-local-test', 'cdk')} --interactive=false --skipGit`,
@@ -280,6 +325,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
         opts,
       );
+      // Python DynamoDB table, connected to the FastAPI so its serve-local
+      // boots DynamoDB Local and the PynamoDB client points at it locally.
+      await runCLI(
+        `generate @aws/nx-plugin:py#dynamodb --name=py-table --no-interactive`,
+        opts,
+      );
       // AgentCore Gateway: a dedicated agent fronted only by the gateway,
       // which aggregates the same TS and Python MCP servers used by the
       // direct-connection tests above (Nx dedupes the shared continuous
@@ -315,6 +366,10 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         opts,
       );
       await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_api --targetProject=py_table --no-interactive`,
+        opts,
+      );
+      await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-agent --targetProject=ts-project --targetComponent=my-mcp --no-interactive`,
         opts,
       );
@@ -340,6 +395,45 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=my-gateway --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
         opts,
+      );
+
+      // Add DynamoDB-backed routes to the FastAPI, exercising the generated
+      // PynamoDB ExampleModel (create/get/list-by-category) so the serve-local
+      // test can drive the Python DynamoDB client end-to-end over HTTP. Imports
+      // are prepended so they stay at the top of the module (ruff E402).
+      const pyApiMainFile = `${projectRoot}/packages/py_api/serve_local_test_py_api/main.py`;
+      writeFileSync(
+        pyApiMainFile,
+        `from serve_local_test_py_table.entities.example import ExampleModel
+
+${readFileSync(pyApiMainFile, 'utf-8')}
+
+class ExampleItem(BaseModel):
+    id: str
+    name: str
+    category: str
+
+
+def _to_item(model: ExampleModel) -> ExampleItem:
+    return ExampleItem(
+        id=model.pk.split("#")[1], name=model.name, category=model.category
+    )
+
+
+@app.post("/examples")
+def create_example(body: ExampleItem) -> ExampleItem:
+    return _to_item(ExampleModel.create(body.id, body.name, body.category))
+
+
+@app.get("/examples/{id}")
+def get_example(id: str) -> ExampleItem:
+    return _to_item(ExampleModel.get_by_id(id))
+
+
+@app.get("/examples")
+def list_examples_by_category(category: str) -> list[ExampleItem]:
+    return [_to_item(m) for m in ExampleModel.list_by_category(category)]
+`,
       );
 
       // Lint fix + build
@@ -456,6 +550,11 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
           'packages/postgres-db/project.json',
           'serve-local',
         ),
+        pyTable: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_table/project.json',
+          'serve-local',
+        ),
         gwAgent: getPortFromProjectJson(
           projectRoot,
           'packages/ts-project/project.json',
@@ -476,6 +575,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     await Promise.all(runningProcesses.map(killProcess));
     runningProcesses.length = 0;
     if (llmMock) await llmMock.stop();
+    cleanupDynamoLocal();
   });
 
   afterEach(async () => {
@@ -503,6 +603,59 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     const body = await res.json();
     console.log('FastAPI echo response:', JSON.stringify(body));
     expect(body.message).toBe('hello');
+    await stopLast();
+  });
+
+  it('Python DynamoDB - FastAPI persists via PynamoDB client', async () => {
+    // The FastAPI is connected to the py#dynamodb table, so its serve-local
+    // cascades DynamoDB Local and sets SERVE_LOCAL=true — the generated
+    // PynamoDB client points at the local table. Drive the DynamoDB-backed
+    // routes over HTTP to prove the Python client writes and reads real items.
+    await startAndWait('serve_local_test.py_api:serve-local', ports.fastApi);
+    await waitForPort(ports.pyTable, STARTUP_TIMEOUT_MS);
+
+    const base = `http://127.0.0.1:${ports.fastApi}`;
+
+    // Wait out the gap between DynamoDB Local's port opening and the local
+    // table being created, then assert the (empty) category query succeeds.
+    const empty = await waitForJson(
+      `${base}/examples?category=tools`,
+      (b) => Array.isArray(b),
+    );
+    console.log('examples (empty):', JSON.stringify(empty));
+    expect(empty).toEqual([]);
+
+    // Create persists through the PynamoDB client to DynamoDB Local
+    const created = await fetch(`${base}/examples`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: '1', name: 'Widget', category: 'tools' }),
+    }).then((r) => r.json());
+    console.log('create example:', JSON.stringify(created));
+    expect(created.name).toBe('Widget');
+
+    await fetch(`${base}/examples`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: '2', name: 'Gadget', category: 'tools' }),
+    }).then((r) => r.json());
+
+    // Get reads the persisted item back via the primary key
+    const fetched = await fetch(`${base}/examples/1`).then((r) => r.json());
+    console.log('get example:', JSON.stringify(fetched));
+    expect(fetched).toEqual({ id: '1', name: 'Widget', category: 'tools' });
+
+    // List exercises a GSI query (gsi1 by category)
+    const byCategory = await fetch(`${base}/examples?category=tools`).then((r) =>
+      r.json(),
+    );
+    console.log('examples by category:', JSON.stringify(byCategory));
+    expect(byCategory).toHaveLength(2);
+    expect(byCategory.map((i: { id: string }) => i.id).sort()).toEqual([
+      '1',
+      '2',
+    ]);
+
     await stopLast();
   });
 
