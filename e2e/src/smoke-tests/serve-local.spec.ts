@@ -349,6 +349,10 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         opts,
       );
       await runCLI(
+        `generate @aws/nx-plugin:py#agent --project=py_project --name=gw-py-agent --infra=none --no-interactive`,
+        opts,
+      );
+      await runCLI(
         `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive`,
         opts,
       );
@@ -378,11 +382,15 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
         opts,
       );
-      // Gateway wiring: gw-agent -> gateway -> {my-mcp, my-py-mcp}. The
-      // agent's serve-local boots the local gateway, which aggregates both
-      // MCP servers behind one endpoint.
+      // Gateway wiring: {gw-agent, gw-py-agent} -> gateway -> {my-mcp,
+      // my-py-mcp}. Each agent's serve-local boots the local gateway, which
+      // aggregates both MCP servers behind one endpoint.
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=gw-agent --targetProject=my-gateway --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=gw-py-agent --targetProject=my-gateway --no-interactive`,
         opts,
       );
       await runCLI(
@@ -427,6 +435,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         'my_py_agent',
         'my_py_a2a_agent',
         'my_py_agui_agent',
+        'gw_py_agent',
       ]) {
         const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/${dir}/agent.py`;
         let content = readFileSync(file, 'utf-8');
@@ -511,6 +520,11 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
           projectRoot,
           'packages/ts-project/project.json',
           'gw-agent-serve-local',
+        ),
+        gwPyAgent: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_project/project.json',
+          'gw-py-agent-serve-local',
         ),
       };
       console.log('Ports discovered:', ports);
@@ -715,6 +729,74 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
     // Python MCP server: add(6, 2) = 8
     const pyResult = await invokeGatewayTool('my-py-mcp___add');
     console.log('Gateway -> Py MCP (add) stream:', pyResult);
+    expect(pyResult).toContain('8');
+
+    await stopLast();
+  });
+
+  it('Python HTTP Agent - AgentCore Gateway local gateway across multiple MCP servers', async () => {
+    // Mirror of the TypeScript gateway test for a Python agent: the
+    // `gw-py-agent` fronts the gateway, which aggregates the TypeScript
+    // `my-mcp` and Python `my-py-mcp` servers. Drive the LLM mock to call a
+    // gateway-prefixed tool (`<target>___<tool>`) from each and echo the
+    // result. A successful round-trip for both proves the Python agent booted
+    // the local gateway under SERVE_LOCAL, aggregated tools from every
+    // attached MCP server, and routed each call to the right upstream server.
+    type MockReq = {
+      lastMessage: string;
+      messages: { role: string; content: string }[];
+    };
+    const resolver = (req: MockReq) => {
+      const toolMsg = [...req.messages]
+        .reverse()
+        .find((m) => m.role === 'tool');
+      if (toolMsg) return { text: `gateway tool returned ${toolMsg.content}` };
+      const tool = req.lastMessage.replace('call ', '').trim();
+      return { tools: [{ name: tool, args: { a: 6, b: 2 } }] };
+    };
+    const isGatewayTurn = (req: MockReq) =>
+      req.lastMessage.startsWith('call my-') ||
+      req.messages.some((m) => m.role === 'tool');
+    llmMock!
+      .when(isGatewayTurn as never)
+      .reply(resolver as never)
+      .first()
+      .times(4);
+
+    // gw-py-agent-serve-local chains the gateway's serve-local, which starts
+    // both attached MCP servers (deduped with any other serve-local chains in
+    // the same task graph).
+    await startAndWait(
+      'serve_local_test.py_project:gw-py-agent-serve-local',
+      ports.gwPyAgent,
+    );
+
+    const invokeGatewayTool = async (tool: string): Promise<string> => {
+      const res = await fetch(
+        `http://127.0.0.1:${ports.gwPyAgent}/invocations`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `call ${tool}` }),
+        },
+      );
+      const body = await res.text();
+      const chunks = body
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      return chunks.map((c) => c.content ?? '').join('');
+    };
+
+    // TypeScript MCP server: divide(6, 2) = 3
+    const tsResult = await invokeGatewayTool('my-mcp___divide');
+    console.log('Py Agent Gateway -> TS MCP (divide) stream:', tsResult);
+    expect(tsResult).toContain('3');
+
+    // Python MCP server: add(6, 2) = 8
+    const pyResult = await invokeGatewayTool('my-py-mcp___add');
+    console.log('Py Agent Gateway -> Py MCP (add) stream:', pyResult);
     expect(pyResult).toContain('8');
 
     await stopLast();

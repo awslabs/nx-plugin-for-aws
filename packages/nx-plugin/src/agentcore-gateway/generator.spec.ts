@@ -266,6 +266,18 @@ describe('agentcore-gateway generator', () => {
       expect(construct).toContain('public addMcpServerTarget');
     });
 
+    it('derives the gateway target construct id from the target name as Target-<name>', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      // Construct ids preserve the kebab-case target name (e.g. `ts-mcp` ->
+      // `Target-ts-mcp`) so the id changes with the target name.
+      expect(construct).toContain('`Target-${props.gatewayTargetName}`');
+      expect(construct).not.toContain('toPascalCase');
+    });
+
     it('URL-encodes the runtime ARN correctly for the MCP target endpoint', () => {
       const construct = tree
         .read(
