@@ -64,11 +64,15 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
         `Gateway '${gateway.name}' has protocol='${gateway.protocol}'. Gateway->Gateway connections are only supported between MCP-protocol gateways.`,
       );
     }
-    if (gateway.auth !== 'iam') {
-      throw new Error(
-        `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Gateway->Gateway connections currently require both gateways to use IAM authentication.`,
-      );
-    }
+  }
+
+  // The source gateway invokes the target signing with its own IAM role, so
+  // only the target's inbound auth must be IAM. The source's inbound auth (how
+  // its own callers reach it) is irrelevant to this hop.
+  if (targetGateway.auth !== 'iam') {
+    throw new Error(
+      `Gateway '${targetGateway.name}' uses auth='${targetGateway.auth}'. Gateway->Gateway connections currently require the target gateway to use IAM authentication.`,
+    );
   }
 
   assertNoCycle(tree, sourceProject.name, targetProject.name);

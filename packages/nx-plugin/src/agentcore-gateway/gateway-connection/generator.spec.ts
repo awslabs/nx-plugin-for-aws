@@ -274,7 +274,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     ).rejects.toThrow(/MCP-protocol gateways/);
   });
 
-  it('fails when either gateway is not IAM auth', async () => {
+  it('fails when the target gateway is not IAM auth', async () => {
     const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
     const config = readProjectConfiguration(tree, `@proj/${inner.name}`);
@@ -286,6 +286,20 @@ describe('agentcore-gateway#gateway-connection generator', () => {
         targetProject: `@proj/${inner.name}`,
       }),
     ).rejects.toThrow(/IAM authentication/);
+  });
+
+  it('allows a non-IAM source gateway since it signs the hop with its own role', async () => {
+    const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
+    const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
+    const config = readProjectConfiguration(tree, `@proj/${outer.name}`);
+    (config.metadata as any).auth = 'cognito';
+    updateProjectConfiguration(tree, `@proj/${outer.name}`, config);
+    await expect(
+      agentcoreGatewayGatewayConnectionGenerator(tree, {
+        sourceProject: `@proj/${outer.name}`,
+        targetProject: `@proj/${inner.name}`,
+      }),
+    ).resolves.toBeDefined();
   });
 
   it('adds generator metric tags', async () => {
