@@ -76,6 +76,8 @@ export const TS_CORE_TEMPLATES = {
 
 export const PY_CORE_TEMPLATES = {
   mcp: 'py-core-mcp',
+  /** LangChain MCP client (loads `BaseTool`s) for `create_agent` agents. */
+  'mcp-langchain': 'py-core-mcp-langchain',
   a2a: 'py-core-a2a',
   gateway: 'py-core-gateway',
   /** Shared SigV4 `httpx.Auth` used by both MCP and A2A clients. */
@@ -312,6 +314,9 @@ export async function addPythonClientToAgent(
 
 /**
  * Append `*<clientVarName>.list_tools_sync()` to the Agent's tools list.
+ *
+ * Scoped via `$old <: within \`yield Agent($_)\`` so unrelated `tools=`
+ * keyword arguments elsewhere in the file are not touched.
  */
 const addPythonClientTools = async (
   tree: Tree,
@@ -332,6 +337,7 @@ const addPythonClientTools = async (
     tree,
     filePath,
     py(`\`tools=$old\` where {
+  $old <: within \`yield Agent($_)\`,
   $old <: not contains \`${clientVarName}\`,
   if ($old <: \`[]\`) {
     $old => \`[*${clientVarName}.list_tools_sync()]\`
@@ -339,6 +345,86 @@ const addPythonClientTools = async (
     $old <: \`[$items]\` where { $items += \`, *${clientVarName}.list_tools_sync()\` }
   }
 }`),
+  );
+};
+
+/**
+ * Patch a LangChain agent.py to load connection tools and spread them into the
+ * `create_agent(...)` tools list. Used by the MCP and gateway connection
+ * generators when the source agent uses the `langchain` framework — the client
+ * class must expose a static `create()` returning a `list[BaseTool]` (the tools
+ * close over their own connection, so no `with` block is needed). Mirrors
+ * {@link addPythonClientToAgent} for the Strands shape.
+ */
+export async function addPythonLangchainClientToAgent(
+  tree: Tree,
+  agentFilePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> {
+  await addPythonLangchainClientTools(tree, agentFilePath, clientVarName);
+  await addPythonLangchainClientToGetAgent(
+    tree,
+    agentFilePath,
+    clientClassName,
+    clientVarName,
+  );
+}
+
+/**
+ * Spread `*<clientVarName>` into the `create_agent(...)` tools list.
+ *
+ * Scoped via `$old <: within \`create_agent($_)\`` so only the agent's own
+ * tools= keyword argument is touched.
+ */
+const addPythonLangchainClientTools = async (
+  tree: Tree,
+  filePath: string,
+  clientVarName: string,
+): Promise<void> => {
+  await applyGritQL(
+    tree,
+    filePath,
+    py(`\`tools=$old\` where {
+  $old <: within \`create_agent($_)\`,
+  $old <: not contains \`*${clientVarName}\`,
+  if ($old <: \`[]\`) {
+    $old => \`[*${clientVarName}]\`
+  } else {
+    $old <: \`[$items]\` where { $items += \`, *${clientVarName}\` }
+  }
+}`),
+  );
+};
+
+/**
+ * Prepend `<clientVarName> = <clientClassName>.create()` to the get_agent body
+ * (which loads the connection's tools). No `with` block — LangChain MCP tools
+ * open their own session per call, so they are safe to use after get_agent
+ * returns. Idempotent via the `not contains <clientClassName>.create` guard.
+ */
+const addPythonLangchainClientToGetAgent = async (
+  tree: Tree,
+  filePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> => {
+  if (
+    await matchGritQL(tree, filePath, py(`\`${clientClassName}.create()\``))
+  ) {
+    return;
+  }
+
+  await applyGritQL(
+    tree,
+    filePath,
+    py(`\`def get_agent($params):
+    $body\` where {
+  $body <: contains \`create_agent($_)\`,
+  $body <: not contains \`${clientClassName}.create\`
+} => \`def get_agent($params):
+    ${clientVarName} = ${clientClassName}.create()
+    $body\``),
   );
 };
 

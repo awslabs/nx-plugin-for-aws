@@ -158,13 +158,18 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // AG-UI protocol agents (TypeScript and Python).
+  // AG-UI protocol agents (TypeScript Strands, Python Strands, Python LangChain).
   await runCLI(
     `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
+    opts,
+  );
+  // LangChain only supports the AG-UI protocol.
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -201,6 +206,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
     opts,
   );
+  // LangChain agent -> MCP server (langchain-mcp-adapters tool loading).
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
+    opts,
+  );
 
   // HTTP agent <-> A2A agent connections (4 permutations)
   await runCLI(
@@ -217,6 +227,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
+    opts,
+  );
+  // LangChain (AG-UI) agent -> A2A agent delegation.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
     opts,
   );
 

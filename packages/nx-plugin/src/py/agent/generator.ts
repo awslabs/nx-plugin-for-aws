@@ -453,6 +453,7 @@ export const pyAgentGenerator = async (
       rc: agentNameClassName,
       auth,
       protocol,
+      framework,
     },
   );
 

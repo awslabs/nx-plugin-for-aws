@@ -1401,12 +1401,9 @@ from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
-# Pass region_name explicitly so an ambient AWS_REGION does not silently shadow the
-# region the agent should run in. The Bedrock provider otherwise defaults to us-east-1.
+# Pass region_name explicitly so an ambient AWS_REGION doesn't shadow it.
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-# ChatBedrockConverse requires a model id (unlike Strands, which picks a Bedrock default).
-# Override with the MODEL_ID env var to use a different model / inference profile.
-MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
+MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 
 
 @tool
@@ -1416,14 +1413,9 @@ def subtract(a: int, b: int) -> int:
 
 
 def get_agent():
-    # ChatBedrockConverse drives the Bedrock Converse API. region_name is passed
-    # explicitly so an ambient AWS_REGION cannot shadow the intended region.
     model = ChatBedrockConverse(model_id=MODEL_ID, region_name=REGION)
-    # ag_ui_langgraph.LangGraphAgent.run() calls graph.aget_state(), which REQUIRES a
-    # checkpointer (the Strands AG-UI adapter needed none). InMemorySaver keeps per-thread
-    # state within one process, keyed by the AgentCore session id (rebound per request in
-    # main.py). For a multi-replica deployment, swap this for a durable saver
-    # (DynamoDB / Redis) so session state survives a replica swap.
+    # The AG-UI adapter needs a checkpointer; swap InMemorySaver for a durable
+    # one (DynamoDB / Redis) in a multi-replica deployment.
     return create_agent(
         model=model,
         tools=[subtract],
@@ -1456,11 +1448,7 @@ logging.basicConfig(level=logging.INFO)
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# Build the compiled LangGraph graph once, then wrap it for AG-UI.
-# ag_ui_langgraph.LangGraphAgent is CopilotKit's official Python AG-UI adapter for
-# LangGraph. It exposes \`async def run(input: RunAgentInput)\` yielding ag_ui.core
-# events. There is no FastAPI-app helper for LangGraph, so we hand-roll the
-# /invocations run-loop below.
+# LangGraph has no FastAPI-app helper, so the /invocations loop is hand-rolled.
 _graph = get_agent()
 
 agui_agent = LangGraphAgent(
@@ -1485,11 +1473,8 @@ app.add_middleware(_SessionIdMiddleware)
 
 @app.post("/invocations")
 async def invocations(request: Request):
-    # Read and validate the body ourselves rather than via a typed FastAPI parameter:
-    # AgentCore forwards the payload without guaranteeing Content-Type: application/json,
-    # so a typed \`input_data: RunAgentInput\` parameter would 422 even when the bytes are
-    # valid JSON. EventEncoder's accept parameter is typed str; the header may be absent,
-    # so coerce the Optional to a plain string (empty string lets the encoder pick its default).
+    # Validate the body ourselves: AgentCore may omit Content-Type, so a typed
+    # RunAgentInput parameter would 422 even on valid JSON.
     accept = request.headers.get("accept") or ""
     encoder = EventEncoder(accept=accept)
     raw = await request.body()
@@ -1510,12 +1495,8 @@ async def invocations(request: Request):
     session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
 
     async def event_generator():
-        # Set any per-request context HERE, inside the generator: this is the context that
-        # drives agui_agent.run() and the LangGraph tool execution. ChatBedrockConverse has
-        # no native async, so a synchronous tool runs via run_in_executor wrapped in
-        # copy_context().run — context set here, before run(), reaches the tool. Re-bind the
-        # session id here too, since the streaming body runs in its own task outside the
-        # middleware's contextmanager.
+        # Re-bind the session inside the generator: the streaming body runs in
+        # its own task, outside the middleware's context manager.
         with session_id_context(session_id or str(uuid.uuid4())):
             try:
                 async for event in agui_agent.run(input_data):
@@ -1549,9 +1530,9 @@ dependencies = [
   "proj.agent_connection",
   "aws-lambda-powertools==3.29.0",
   "aws-opentelemetry-distro==0.17.1",
-  "bedrock-agentcore==1.14.0",
-  "boto3==1.43.24",
-  "fastapi==0.136.3",
+  "bedrock-agentcore==1.14.1",
+  "boto3==1.43.29",
+  "fastapi==0.137.1",
   "mcp==1.27.2",
   "ag-ui-protocol==0.1.19",
   "ag-ui-langgraph==0.0.41",
@@ -1562,7 +1543,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [ "fastapi[standard]==0.136.3" ]
+dev = [ "fastapi[standard]==0.137.1" ]
 
 [tool.uv]
 dev-dependencies = [ ]

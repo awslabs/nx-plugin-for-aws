@@ -1,0 +1,76 @@
+import asyncio
+
+import boto3
+import httpx
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from .auth import SigV4HTTPXAuth
+from .session_context import get_current_session_id
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class _SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, inner: httpx.Auth | None = None):
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
+
+
+class AgentCoreMCPLangchainClient:
+    """Loads LangChain tools from an MCP server, forwarding the current
+    async-context session. The tools close over the connection config and open
+    a fresh session per call, so they outlive this helper.
+    """
+
+    @staticmethod
+    def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
+        region = agent_runtime_arn.split(":")[3]
+        encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
+        url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{encoded_arn}/invocations?qualifier=DEFAULT"
+        )
+        return region, url
+
+    @staticmethod
+    def _load_tools(url: str, auth: httpx.Auth) -> list[BaseTool]:
+        # get_tools() lists the server's tools once, at agent construction time.
+        client = MultiServerMCPClient(
+            {
+                "server": {
+                    "transport": "streamable_http",
+                    "url": url,
+                    "auth": auth,
+                    "terminate_on_close": False,
+                }
+            }
+        )
+        return asyncio.run(client.get_tools())
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> list[BaseTool]:
+        """SigV4-authenticated tools for a Bedrock AgentCore runtime."""
+        region, url = AgentCoreMCPLangchainClient._build_url(agent_runtime_arn)
+        credentials = boto3.Session(region_name=region).get_credentials()
+        return AgentCoreMCPLangchainClient._load_tools(
+            url, _SessionHeaderAuth(SigV4HTTPXAuth(credentials, "bedrock-agentcore", region))
+        )
+
+    @staticmethod
+    def without_auth(url: str) -> list[BaseTool]:
+        """Plain-HTTP tools — for local dev."""
+        return AgentCoreMCPLangchainClient._load_tools(url, _SessionHeaderAuth())

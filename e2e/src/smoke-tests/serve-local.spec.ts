@@ -314,6 +314,11 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=none --no-interactive`,
         opts,
       );
+      // LangChain agent — only supports the AG-UI protocol.
+      await runCLI(
+        `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=none --no-interactive`,
+        opts,
+      );
       await runCLI(
         `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-py-mcp --infra=none --no-interactive`,
         opts,
@@ -478,12 +483,31 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         writeFileSync(file, content);
       }
 
+      // Patch the LangChain agent to use the OpenAI mock. It builds a
+      // ChatBedrockConverse model rather than a strands `Agent(`, so it needs
+      // its own swap to a ChatOpenAI client pointed at the mock.
+      {
+        const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/my_py_langchain_agent/agent.py`;
+        let content = readFileSync(file, 'utf-8');
+        content = `from langchain_openai import ChatOpenAI\n${content}`;
+        content = content.replace(
+          /model = ChatBedrockConverse\([^)]*\)/,
+          `model = ChatOpenAI(model="mock", api_key="test", base_url="http://127.0.0.1:${LLM_MOCK_PORT}/v1")`,
+        );
+        writeFileSync(file, content);
+      }
+
       // Install openai dep for agents
       await runCLI(`pnpm add openai --filter=@serve-local-test/ts-project`, {
         cwd: projectRoot,
         prefixWithPackageManagerCmd: false,
       });
       await runCLI(`run serve_local_test.py_project:add -- openai`, opts);
+      // langchain-openai provides the ChatOpenAI client used by the mock swap.
+      await runCLI(
+        `run serve_local_test.py_project:add -- langchain-openai`,
+        opts,
+      );
 
       // Discover ports
       ports = {
@@ -536,6 +560,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           projectRoot,
           'packages/py_project/project.json',
           'my-py-agui-agent-serve-local',
+        ),
+        pyLangchainAgui: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_project/project.json',
+          'my-py-langchain-agent-serve-local',
         ),
         pyMcp: getPortFromProjectJson(
           projectRoot,
@@ -611,9 +640,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     // Wait out the gap between DynamoDB Local's port opening and the local
     // table being created, then assert the (empty) category query succeeds.
-    const empty = await waitForJson(
-      `${base}/examples?category=tools`,
-      (b) => Array.isArray(b),
+    const empty = await waitForJson(`${base}/examples?category=tools`, (b) =>
+      Array.isArray(b),
     );
     console.log('examples (empty):', JSON.stringify(empty));
     expect(empty).toEqual([]);
@@ -639,8 +667,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(fetched).toEqual({ id: '1', name: 'Widget', category: 'tools' });
 
     // List exercises a GSI query (gsi1 by category)
-    const byCategory = await fetch(`${base}/examples?category=tools`).then((r) =>
-      r.json(),
+    const byCategory = await fetch(`${base}/examples?category=tools`).then(
+      (r) => r.json(),
     );
     console.log('examples by category:', JSON.stringify(byCategory));
     expect(byCategory).toHaveLength(2);
@@ -1092,6 +1120,50 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await chatStreamsReply(
       projectRoot,
       'serve_local_test.py_project:my-py-agui-agent-chat',
+      'The answer is 42',
+      STARTUP_TIMEOUT_MS,
+    );
+    await stopLast();
+  });
+
+  it('Python LangChain AG-UI Agent - streaming invocation', async () => {
+    await startAndWait(
+      'serve_local_test.py_project:my-py-langchain-agent-serve-local',
+      ports.pyLangchainAgui,
+    );
+
+    const res = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainAgui}/invocations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: 'test-thread',
+          runId: 'test-run',
+          messages: [
+            { id: 'msg-1', role: 'user', content: 'What is 3 times 5?' },
+          ],
+          state: {},
+          tools: [],
+          context: [],
+          forwardedProps: {},
+        }),
+      },
+    );
+    const body = await res.text();
+    console.log(
+      `Python LangChain AG-UI response (${res.status}, ${body.length} bytes):`,
+      body.slice(0, 200),
+    );
+    expect(res.status).toBe(200);
+    expect(body).toContain('data:');
+    // The mock model must actually drive the run, not error out (the server
+    // emits RUN_ERROR as a 'data:' event, so assert it is absent).
+    expect(body).not.toContain('RUN_ERROR');
+
+    await chatStreamsReply(
+      projectRoot,
+      'serve_local_test.py_project:my-py-langchain-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );

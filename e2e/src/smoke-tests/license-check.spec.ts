@@ -2,16 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { ensureDirSync } from 'fs-extra';
+
 import TOML from '@iarna/toml';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { ensureDirSync } from 'fs-extra';
+import { join } from 'path';
 // eslint-disable-next-line
 import {
-  TS_VERSIONS,
   PY_VERSIONS,
+  TS_VERSIONS,
 } from '../../../packages/nx-plugin/src/utils/versions';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - license-check', () => {
   const pkgMgr = 'pnpm';
@@ -132,7 +133,9 @@ describe('smoke test - license-check', () => {
           name !== 'checkov' &&
           !name.startsWith('pip-') &&
           // ag-ui-strands ships without license metadata
-          !name.includes('ag-ui-strands'),
+          !name.includes('ag-ui-strands') &&
+          // ag-ui-langgraph ships without license metadata
+          !name.includes('ag-ui-langgraph'),
       )
       .map(([name, version]) => `${name}${version}`);
     (pyToml.project as any).dependencies = pyDeps;

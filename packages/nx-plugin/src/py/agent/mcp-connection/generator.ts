@@ -14,6 +14,7 @@ import {
 import {
   addPythonClientToAgent,
   addPythonCoreClient,
+  addPythonLangchainClientToAgent,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
@@ -72,22 +73,32 @@ export const pyAgentMcpConnectionGenerator = async (
   const mcpServerSnakeCase = snakeCase(mcpServerClassName);
   const mcpServerPort = mcpComponent.port ?? 8000;
 
+  // The transform applied to agent.py depends on the source agent's framework:
+  // Strands enters a context-managed MCPClient and spreads list_tools_sync();
+  // LangChain loads BaseTools and spreads them into create_agent(...).
+  const framework = agentComponent.framework ?? 'strands';
+  const isLangchain = framework === 'langchain';
+
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    MCP core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
   addPythonCoreClient(tree, 'auth');
-  addPythonCoreClient(tree, 'mcp');
+  addPythonCoreClient(tree, isLangchain ? 'mcp-langchain' : 'mcp');
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Python deps required by the MCP core client + shared auth helper.
+  // Python deps required by the MCP core client + shared auth helper. The
+  // Strands client uses strands MCPClient; the LangChain client uses
+  // langchain-mcp-adapters and must not pull Strands in.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
     'mcp',
-    'strands-agents',
+    ...(isLangchain
+      ? (['langchain-mcp-adapters'] as const)
+      : (['strands-agents'] as const)),
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -98,7 +109,15 @@ export const pyAgentMcpConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    isLangchain
+      ? joinPathFragments(
+          __dirname,
+          'files',
+          'langchain',
+          'agent-connection',
+          'app',
+        )
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     appDir,
     {
       mcpServerSnakeCase,
@@ -145,12 +164,21 @@ export const pyAgentMcpConnectionGenerator = async (
       [clientClassName],
       agentConnectionModuleName,
     );
-    await addPythonClientToAgent(
-      tree,
-      agentFilePath,
-      clientClassName,
-      clientVarName,
-    );
+    if (isLangchain) {
+      await addPythonLangchainClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    } else {
+      await addPythonClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    }
   }
 
   // 4. Add workspace dependency from agent project to agent-connection project

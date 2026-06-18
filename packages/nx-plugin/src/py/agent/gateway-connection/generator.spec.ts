@@ -298,6 +298,19 @@ dependencies = ["strands-agents"]
     ).rejects.toThrow(/Only IAM-authenticated agents/);
   });
 
+  it('rejects langchain agents (not yet supported for gateway connections)', async () => {
+    setupProjects();
+    await expect(
+      pyAgentGatewayConnectionGenerator(tree, {
+        ...fullOptions(),
+        sourceComponent: {
+          ...fullOptions().sourceComponent,
+          framework: 'langchain',
+        } as any,
+      }),
+    ).rejects.toThrow(/langchain/);
+  });
+
   it('exposes stable generator info id', () => {
     expect(PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO.id).toBe(
       'py#agent#gateway-connection',

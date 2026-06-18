@@ -59,6 +59,17 @@ export const pyAgentGatewayConnectionGenerator = async (
       'sourceComponent must be provided for py#agent -> agentcore-gateway connections',
     );
   }
+
+  // The gateway client returns a Strands MCPClient consumed via list_tools_sync().
+  // A LangChain agent would need a langchain-mcp-adapters gateway client and a
+  // different agent.py transform, which is not yet implemented — fail fast
+  // rather than silently emit a broken agent.py.
+  if ((agentComponent.framework ?? 'strands') === 'langchain') {
+    throw new Error(
+      `Agent '${agentComponent.name}' uses the 'langchain' framework, which is not yet supported for AgentCore Gateway connections. Use a direct MCP server connection instead, or use a Strands agent.`,
+    );
+  }
+
   const gateway = readAgentCoreGatewayMetadata(targetProject);
 
   if (gateway.protocol !== 'mcp') {

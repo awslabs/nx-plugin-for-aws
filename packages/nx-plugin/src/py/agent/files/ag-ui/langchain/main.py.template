@@ -16,11 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# Build the compiled LangGraph graph once, then wrap it for AG-UI.
-# ag_ui_langgraph.LangGraphAgent is CopilotKit's official Python AG-UI adapter for
-# LangGraph. It exposes `async def run(input: RunAgentInput)` yielding ag_ui.core
-# events. There is no FastAPI-app helper for LangGraph, so we hand-roll the
-# /invocations run-loop below.
+# LangGraph has no FastAPI-app helper, so the /invocations loop is hand-rolled.
 _graph = get_agent()
 
 agui_agent = LangGraphAgent(
@@ -45,11 +41,8 @@ app.add_middleware(_SessionIdMiddleware)
 
 @app.post("/invocations")
 async def invocations(request: Request):
-    # Read and validate the body ourselves rather than via a typed FastAPI parameter:
-    # AgentCore forwards the payload without guaranteeing Content-Type: application/json,
-    # so a typed `input_data: RunAgentInput` parameter would 422 even when the bytes are
-    # valid JSON. EventEncoder's accept parameter is typed str; the header may be absent,
-    # so coerce the Optional to a plain string (empty string lets the encoder pick its default).
+    # Validate the body ourselves: AgentCore may omit Content-Type, so a typed
+    # RunAgentInput parameter would 422 even on valid JSON.
     accept = request.headers.get("accept") or ""
     encoder = EventEncoder(accept=accept)
     raw = await request.body()
@@ -66,12 +59,8 @@ async def invocations(request: Request):
     session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
 
     async def event_generator():
-        # Set any per-request context HERE, inside the generator: this is the context that
-        # drives agui_agent.run() and the LangGraph tool execution. ChatBedrockConverse has
-        # no native async, so a synchronous tool runs via run_in_executor wrapped in
-        # copy_context().run — context set here, before run(), reaches the tool. Re-bind the
-        # session id here too, since the streaming body runs in its own task outside the
-        # middleware's contextmanager.
+        # Re-bind the session inside the generator: the streaming body runs in
+        # its own task, outside the middleware's context manager.
         with session_id_context(session_id or str(uuid.uuid4())):
             try:
                 async for event in agui_agent.run(input_data):

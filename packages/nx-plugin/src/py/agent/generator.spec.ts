@@ -1217,6 +1217,36 @@ dev-dependencies = []
     expect(projectConfig.metadata.components[0].protocol).toBe('ag-ui');
   });
 
+  it('should record framework in component metadata', async () => {
+    // The mcp/a2a/gateway connection generators dispatch on this field, so it
+    // must be persisted for both the default (strands) and langchain agents.
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+    let projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.metadata.components[0].framework).toBe('strands');
+
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'lc-agent',
+      framework: 'langchain',
+      protocol: 'ag-ui',
+      infra: 'none',
+      iac: 'cdk',
+    });
+    projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const lc = projectConfig.metadata.components.find(
+      (c: { name: string }) => c.name === 'lc-agent',
+    );
+    expect(lc.framework).toBe('langchain');
+  });
+
   it('should pass HTTP protocol to CDK infrastructure for AG-UI agents', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
@@ -1277,8 +1307,7 @@ dev-dependencies = []
       'x-amzn-bedrock-agentcore-runtime-session-id',
     );
 
-    // The langchain agent.py builds a compiled LangGraph graph with a checkpointer
-    // (a real difference from Strands, which needed none).
+    // The langchain agent.py builds a compiled LangGraph graph with a checkpointer.
     const agentContent = tree.read(
       'apps/test-project/proj_test_project/agent/agent.py',
       'utf-8',

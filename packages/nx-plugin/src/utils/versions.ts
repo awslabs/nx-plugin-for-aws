@@ -151,6 +151,7 @@ export const PY_VERSIONS = {
   httpx: '==0.28.1',
   langchain: '==1.3.9',
   'langchain-aws': '==1.5.1',
+  'langchain-mcp-adapters': '==0.3.0',
   langgraph: '==1.2.5',
   mcp: '==1.27.2',
   'pip-check-updates': '==0.28.0',
