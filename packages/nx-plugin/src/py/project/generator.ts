@@ -266,11 +266,18 @@ export const pyProjectGenerator = async (
   // Update root .gitignore
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '/reports']);
 
-  // Update project level .gitignore
+  // Update project level .gitignore. The cache directories are also kept out
+  // of type checking: `ty` respects .gitignore, and pytest creates and removes
+  // transient `pytest-cache-files-*` directories while the test and typecheck
+  // targets run concurrently, which would otherwise make `ty` fail with an I/O
+  // error when it scans one mid-deletion.
   updateGitIgnore(tree, dir, (patterns) => [
     ...patterns,
     '**/__pycache__',
     '.coverage',
+    '.pytest_cache',
+    'pytest-cache-files-*',
+    '.ruff_cache',
   ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);

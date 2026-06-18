@@ -6,7 +6,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { beforeEach, describe, it } from 'vitest';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 /**
@@ -22,15 +22,12 @@ export const runTerraformSmokeTest = async (
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
-  await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'terraform')} --interactive=false --skipGit`,
-    {
-      cwd: dir,
-      prefixWithPackageManagerCmd: false,
-      redirectStderr: true,
-    },
+  const projectRoot = await createTestWorkspace(
+    pkgMgr,
+    dir,
+    'e2e-test',
+    'terraform',
   );
-  const projectRoot = `${dir}/e2e-test`;
   const opts = {
     cwd: projectRoot,
     env: {

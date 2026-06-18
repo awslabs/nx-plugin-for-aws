@@ -7,7 +7,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - license-sync', () => {
   const pkgMgr = 'pnpm';
@@ -22,15 +22,12 @@ describe('smoke test - license-sync', () => {
   });
 
   it('should apply license headers to ts and py source files via sync', async () => {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'license-test', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    const projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'license-test',
+      'cdk',
     );
-    const projectRoot = `${targetDir}/license-test`;
     const opts = {
       cwd: projectRoot,
       env: {

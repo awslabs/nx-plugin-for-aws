@@ -4,7 +4,7 @@
  */
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import {
   connectApiProjectPermutations,
   generateApiProjectPermutations,
@@ -23,15 +23,12 @@ describe('smoke test - fast-api', () => {
   });
 
   it('should generate and build', async () => {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'fast-api', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    const projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'fast-api',
+      'cdk',
     );
-    const projectRoot = `${targetDir}/fast-api`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await generateApiProjectPermutations('py#api', 'fast', '_', opts);

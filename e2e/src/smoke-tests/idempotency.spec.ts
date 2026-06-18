@@ -5,7 +5,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 /**
@@ -30,15 +30,12 @@ describe('smoke test - idempotency', () => {
   });
 
   it('should produce no git diff when the generator matrix is re-run', async () => {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    const projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'e2e-test',
+      'cdk',
     );
-    const projectRoot = `${targetDir}/e2e-test`;
     const opts = {
       cwd: projectRoot,
       env: {
@@ -73,10 +70,10 @@ describe('smoke test - idempotency', () => {
       opts,
     );
 
-    // Commit the generated workspace as the baseline. The workspace was created
-    // with --skipGit, so initialise a repo here. The generated .gitignore keeps
-    // node_modules / build output out of the snapshot.
-    git('init');
+    // Commit the generated workspace as the baseline. The workspace is created
+    // with git already initialised, so just stage and commit on top of its
+    // initial commit. The generated .gitignore keeps node_modules / build
+    // output out of the snapshot. --no-verify skips the git-secrets hook.
     git('add -A');
     git('-c user.name=e2e -c user.email=e2e@example.com commit -m baseline --no-verify');
 

@@ -10,8 +10,8 @@ import { getPackageManagerCommand } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
 import {
-  buildCreateNxWorkspaceCommand,
   buildPackageManagerShortCommand,
+  createTestWorkspace,
   getDungeonAdventureElectroDbDependencies,
   runCLI,
   tmpProjPath,
@@ -244,14 +244,7 @@ describe('smoke test - dungeon-adventure', () => {
   it('should generate and build', async () => {
     // 1. Monorepo Setup
 
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
-    );
+    await createTestWorkspace(pkgMgr, targetDir, 'dungeon-adventure', 'cdk');
 
     await runCLI(
       `generate @aws/nx-plugin:ts#api --name=GameApi --no-interactive`,

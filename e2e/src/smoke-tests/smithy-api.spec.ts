@@ -4,7 +4,7 @@
  */
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - smithy-api', () => {
   const pkgMgr = 'pnpm';
@@ -19,15 +19,12 @@ describe('smoke test - smithy-api', () => {
   });
 
   it('should generate and build', async () => {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'smithy', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    const projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'smithy',
+      'cdk',
     );
-    const projectRoot = `${targetDir}/smithy`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     // Test the shared integration pattern for Smithy APIs.
