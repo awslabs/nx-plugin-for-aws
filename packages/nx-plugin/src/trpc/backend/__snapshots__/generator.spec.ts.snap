@@ -1751,6 +1751,8 @@ export type ApiIntegrations<TOperation extends string, TBaseIntegration> =
  * @template TDefaultIntegrationProps - Type for default integration properties
  * @template TDefaultIntegration - Type for default integration implementation
  * @template TPattern - The integration pattern ('shared' or 'isolated')
+ * @template TOverridden - Union of operation names that have been overridden
+ * @template TOperationOptioned - Union of operation names with per-operation options
  */
 export class IntegrationBuilder<
   TOperation extends string,
@@ -1759,6 +1761,8 @@ export class IntegrationBuilder<
   TDefaultIntegrationProps extends object,
   TDefaultIntegration extends TBaseIntegration,
   TPattern extends 'shared' | 'isolated',
+  TOverridden extends string = never,
+  TOperationOptioned extends string = never,
 > {
   /** Options for the integration builder */
   private options: IntegrationBuilderProps<
@@ -1770,6 +1774,11 @@ export class IntegrationBuilder<
 
   /** Map of operation names to their custom integrations */
   private integrations: Partial<TIntegrations> = {};
+
+  /** Map of default integration keys to per-operation default option overrides */
+  private perOperationOptions: Partial<
+    Record<string, Partial<TDefaultIntegrationProps>>
+  > = {};
 
   /**
    * Create an Integration Builder for an HTTP API with a shared pattern
@@ -1925,11 +1934,16 @@ export class IntegrationBuilder<
   /**
    * Overrides default integrations with custom implementations for specific operations.
    *
+   * Operations which have per-operation options set via withOperationOptions cannot be
+   * overridden, since these still use the default integration.
+   *
    * @param overrides - Map of operation names to their custom integration implementations
    * @returns The builder instance with updated type information reflecting the overrides
    */
   public withOverrides<
-    TOverrideIntegrations extends Partial<Record<TOperation, TBaseIntegration>>,
+    TOverrideIntegrations extends Partial<
+      Record<Exclude<TOperation, TOperationOptioned>, TBaseIntegration>
+    >,
   >(overrides: TOverrideIntegrations) {
     this.integrations = { ...this.integrations, ...overrides };
     // Re-type to include the overridden integration types.
@@ -1945,7 +1959,9 @@ export class IntegrationBuilder<
       MergedIntegrations,
       TDefaultIntegrationProps,
       TDefaultIntegration,
-      TPattern
+      TPattern,
+      TOverridden | Extract<keyof TOverrideIntegrations, string>,
+      TOperationOptioned
     >;
   }
 
@@ -1965,6 +1981,43 @@ export class IntegrationBuilder<
   }
 
   /**
+   * Updates the default integration options for specific operations, without
+   * affecting the others. The given options are merged with the defaults (and
+   * any options set via withDefaultOptions) when building each default integration.
+   *
+   * Operations which have been replaced via withOverrides cannot be targeted, since
+   * they no longer use the default integration.
+   *
+   * @param options - Map of operation names to partial default integration options
+   * @returns The builder instance
+   */
+  public withOperationOptions<
+    TOptions extends Partial<
+      Record<
+        Exclude<DefaultIntegrationKeys<TPattern, TOperation>, TOverridden>,
+        Partial<TDefaultIntegrationProps>
+      >
+    >,
+  >(options: TOptions) {
+    Object.entries(options).forEach(([op, opOptions]) => {
+      this.perOperationOptions[op] = {
+        ...this.perOperationOptions[op],
+        ...(opOptions as Partial<TDefaultIntegrationProps>),
+      };
+    });
+    return this as unknown as IntegrationBuilder<
+      TOperation,
+      TBaseIntegration,
+      TIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration,
+      TPattern,
+      TOverridden,
+      TOperationOptioned | Extract<keyof TOptions, string>
+    >;
+  }
+
+  /**
    * Builds and returns the complete set of integrations.
    *
    * This method creates the final integration map by:
@@ -1978,6 +2031,10 @@ export class IntegrationBuilder<
    */
   public build(): TIntegrations {
     const options = this.options;
+    const buildOptionsFor = (op: string): TDefaultIntegrationProps => ({
+      ...options.defaultIntegrationOptions,
+      ...this.perOperationOptions[op],
+    });
     return {
       ...Object.fromEntries(
         options.pattern === 'shared'
@@ -1986,7 +2043,7 @@ export class IntegrationBuilder<
                 '$router',
                 options.buildDefaultIntegration(
                   '$router',
-                  options.defaultIntegrationOptions,
+                  buildOptionsFor('$router'),
                 ),
               ],
             ]
@@ -1997,10 +2054,7 @@ export class IntegrationBuilder<
               )
               .map((op) => [
                 op,
-                options.buildDefaultIntegration(
-                  op,
-                  options.defaultIntegrationOptions,
-                ),
+                options.buildDefaultIntegration(op, buildOptionsFor(op)),
               ]),
       ),
       ...this.integrations,
@@ -2708,6 +2762,8 @@ export type ApiIntegrations<TOperation extends string, TBaseIntegration> =
  * @template TDefaultIntegrationProps - Type for default integration properties
  * @template TDefaultIntegration - Type for default integration implementation
  * @template TPattern - The integration pattern ('shared' or 'isolated')
+ * @template TOverridden - Union of operation names that have been overridden
+ * @template TOperationOptioned - Union of operation names with per-operation options
  */
 export class IntegrationBuilder<
   TOperation extends string,
@@ -2716,6 +2772,8 @@ export class IntegrationBuilder<
   TDefaultIntegrationProps extends object,
   TDefaultIntegration extends TBaseIntegration,
   TPattern extends 'shared' | 'isolated',
+  TOverridden extends string = never,
+  TOperationOptioned extends string = never,
 > {
   /** Options for the integration builder */
   private options: IntegrationBuilderProps<
@@ -2727,6 +2785,11 @@ export class IntegrationBuilder<
 
   /** Map of operation names to their custom integrations */
   private integrations: Partial<TIntegrations> = {};
+
+  /** Map of default integration keys to per-operation default option overrides */
+  private perOperationOptions: Partial<
+    Record<string, Partial<TDefaultIntegrationProps>>
+  > = {};
 
   /**
    * Create an Integration Builder for an HTTP API with a shared pattern
@@ -2882,11 +2945,16 @@ export class IntegrationBuilder<
   /**
    * Overrides default integrations with custom implementations for specific operations.
    *
+   * Operations which have per-operation options set via withOperationOptions cannot be
+   * overridden, since these still use the default integration.
+   *
    * @param overrides - Map of operation names to their custom integration implementations
    * @returns The builder instance with updated type information reflecting the overrides
    */
   public withOverrides<
-    TOverrideIntegrations extends Partial<Record<TOperation, TBaseIntegration>>,
+    TOverrideIntegrations extends Partial<
+      Record<Exclude<TOperation, TOperationOptioned>, TBaseIntegration>
+    >,
   >(overrides: TOverrideIntegrations) {
     this.integrations = { ...this.integrations, ...overrides };
     // Re-type to include the overridden integration types.
@@ -2902,7 +2970,9 @@ export class IntegrationBuilder<
       MergedIntegrations,
       TDefaultIntegrationProps,
       TDefaultIntegration,
-      TPattern
+      TPattern,
+      TOverridden | Extract<keyof TOverrideIntegrations, string>,
+      TOperationOptioned
     >;
   }
 
@@ -2922,6 +2992,43 @@ export class IntegrationBuilder<
   }
 
   /**
+   * Updates the default integration options for specific operations, without
+   * affecting the others. The given options are merged with the defaults (and
+   * any options set via withDefaultOptions) when building each default integration.
+   *
+   * Operations which have been replaced via withOverrides cannot be targeted, since
+   * they no longer use the default integration.
+   *
+   * @param options - Map of operation names to partial default integration options
+   * @returns The builder instance
+   */
+  public withOperationOptions<
+    TOptions extends Partial<
+      Record<
+        Exclude<DefaultIntegrationKeys<TPattern, TOperation>, TOverridden>,
+        Partial<TDefaultIntegrationProps>
+      >
+    >,
+  >(options: TOptions) {
+    Object.entries(options).forEach(([op, opOptions]) => {
+      this.perOperationOptions[op] = {
+        ...this.perOperationOptions[op],
+        ...(opOptions as Partial<TDefaultIntegrationProps>),
+      };
+    });
+    return this as unknown as IntegrationBuilder<
+      TOperation,
+      TBaseIntegration,
+      TIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration,
+      TPattern,
+      TOverridden,
+      TOperationOptioned | Extract<keyof TOptions, string>
+    >;
+  }
+
+  /**
    * Builds and returns the complete set of integrations.
    *
    * This method creates the final integration map by:
@@ -2935,6 +3042,10 @@ export class IntegrationBuilder<
    */
   public build(): TIntegrations {
     const options = this.options;
+    const buildOptionsFor = (op: string): TDefaultIntegrationProps => ({
+      ...options.defaultIntegrationOptions,
+      ...this.perOperationOptions[op],
+    });
     return {
       ...Object.fromEntries(
         options.pattern === 'shared'
@@ -2943,7 +3054,7 @@ export class IntegrationBuilder<
                 '$router',
                 options.buildDefaultIntegration(
                   '$router',
-                  options.defaultIntegrationOptions,
+                  buildOptionsFor('$router'),
                 ),
               ],
             ]
@@ -2954,10 +3065,7 @@ export class IntegrationBuilder<
               )
               .map((op) => [
                 op,
-                options.buildDefaultIntegration(
-                  op,
-                  options.defaultIntegrationOptions,
-                ),
+                options.buildDefaultIntegration(op, buildOptionsFor(op)),
               ]),
       ),
       ...this.integrations,
