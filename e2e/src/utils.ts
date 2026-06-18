@@ -4,11 +4,16 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { output, type PackageManager } from '@nx/devkit';
 import { backOff } from 'exponential-backoff';
+// eslint-disable-next-line
+import {
+  buildCreateNxWorkspaceCommand,
+  buildPackageManagerShortCommand,
+} from '../../packages/nx-plugin/src/utils/commands';
 // eslint-disable-next-line
 import { TS_VERSIONS } from '../../packages/nx-plugin/src/utils/versions';
 
@@ -167,11 +172,41 @@ function logError(message: string, body?: string) {
   process.stdout.write('\n');
 }
 
-// eslint-disable-next-line
-export {
-  buildCreateNxWorkspaceCommand,
-  buildPackageManagerShortCommand,
-} from '../../packages/nx-plugin/src/utils/commands';
+export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
+
+/**
+ * Creates an Nx workspace for an e2e test in `${targetDir}/${name}` and returns
+ * its project root.
+ *
+ * Workspaces are created with git initialised (no `--skipGit`) to match how
+ * real users start a project. This matters for tooling that only honours
+ * `.gitignore` inside a git work tree — notably `ty`, which would otherwise
+ * scan pytest's transient `pytest-cache-files-*` directories (created and
+ * removed in the project root while the `test` and `typecheck` targets run
+ * concurrently) and intermittently fail with an I/O error.
+ */
+export const createTestWorkspace = async (
+  pkgMgr: string,
+  targetDir: string,
+  name: string,
+  iac?: 'cdk' | 'terraform',
+): Promise<string> => {
+  await runCLI(
+    `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
+    {
+      cwd: targetDir,
+      prefixWithPackageManagerCmd: false,
+      redirectStderr: true,
+    },
+  );
+  const projectRoot = join(targetDir, name);
+
+  // pytest writes transient `pytest-cache-files-*` staging directories into the
+  // project root; ignore them so `ty` (which respects .gitignore) skips them.
+  appendFileSync(join(projectRoot, '.gitignore'), '\npytest-cache-files-*\n');
+
+  return projectRoot;
+};
 
 // The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.
 // The Game API's actions.query procedure additionally needs the S3 client to

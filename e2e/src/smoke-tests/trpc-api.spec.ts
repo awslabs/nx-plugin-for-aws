@@ -4,7 +4,7 @@
  */
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import {
   connectApiProjectPermutations,
   generateApiProjectPermutations,
@@ -23,15 +23,12 @@ describe('smoke test - trpc-api', () => {
   });
 
   it('should generate and build', async () => {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'trpc', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    const projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'trpc',
+      'cdk',
     );
-    const projectRoot = `${targetDir}/trpc`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await generateApiProjectPermutations('ts#api', 'trpc', '-', opts);

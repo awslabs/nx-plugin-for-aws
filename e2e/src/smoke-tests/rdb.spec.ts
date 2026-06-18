@@ -4,7 +4,7 @@
  */
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - rdb', () => {
   const pkgMgr = 'pnpm';
@@ -22,15 +22,12 @@ describe('smoke test - rdb', () => {
       });
 
       it(`should generate and build with iac=${iac} engine=${engine}`, async () => {
-        await runCLI(
-          `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', iac)} --interactive=false --skipGit`,
-          {
-            cwd: targetDir,
-            prefixWithPackageManagerCmd: false,
-            redirectStderr: true,
-          },
+        const projectRoot = await createTestWorkspace(
+          pkgMgr,
+          targetDir,
+          'e2e-test',
+          iac,
         );
-        const projectRoot = `${targetDir}/e2e-test`;
         const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
         const rdbProjectName =

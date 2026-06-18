@@ -4,7 +4,7 @@
  */
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - infra-none', () => {
   const pkgMgr = 'pnpm';
@@ -19,15 +19,12 @@ describe('smoke test - infra-none', () => {
   });
 
   it('should generate and build all generators with --infra=none, then upgrade to infra', async () => {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    const projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'e2e-test',
+      'cdk',
     );
-    const projectRoot = `${targetDir}/e2e-test`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     // --- Phase 1: Generate all with infra=none ---

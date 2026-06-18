@@ -6,7 +6,7 @@ import { existsSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { ensureDirSync } from 'fs-extra';
 import TOML from '@iarna/toml';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 // eslint-disable-next-line
 import {
   TS_VERSIONS,
@@ -26,16 +26,12 @@ describe('smoke test - license-check', () => {
     }
     ensureDirSync(targetDir);
 
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'license-check-test', 'cdk')} --interactive=false --skipGit`,
-      {
-        cwd: targetDir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
+    projectRoot = await createTestWorkspace(
+      pkgMgr,
+      targetDir,
+      'license-check-test',
+      'cdk',
     );
-
-    projectRoot = `${targetDir}/license-check-test`;
     opts = {
       cwd: projectRoot,
       env: {

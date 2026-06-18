@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { PackageManager } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import { afterEach, beforeEach, describe, it } from 'vitest';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 export const runSmokeTest = async (
@@ -16,15 +16,7 @@ export const runSmokeTest = async (
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
-  await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'cdk')} --interactive=false --skipGit`,
-    {
-      cwd: dir,
-      prefixWithPackageManagerCmd: false,
-      redirectStderr: true,
-    },
-  );
-  const projectRoot = `${dir}/e2e-test`;
+  const projectRoot = await createTestWorkspace(pkgMgr, dir, 'e2e-test', 'cdk');
   const opts = {
     cwd: projectRoot,
     env: {

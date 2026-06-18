@@ -10,7 +10,7 @@ import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
 import { createConnection } from 'net';
 import * as pty from 'node-pty';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
 
 const STARTUP_TIMEOUT_MS = 120_000;
@@ -250,15 +250,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       ensureDirSync(targetDir);
       cleanupDynamoLocal();
 
-      await runCLI(
-        `${buildCreateNxWorkspaceCommand(pkgMgr, 'serve-local-test', 'cdk')} --interactive=false --skipGit`,
-        {
-          cwd: targetDir,
-          prefixWithPackageManagerCmd: false,
-          redirectStderr: true,
-        },
+      projectRoot = await createTestWorkspace(
+        pkgMgr,
+        targetDir,
+        'serve-local-test',
+        'cdk',
       );
-      projectRoot = `${targetDir}/serve-local-test`;
       const opts = {
         cwd: projectRoot,
         env: { NX_DAEMON: 'false', NODE_OPTIONS: '--max-old-space-size=8192' },
