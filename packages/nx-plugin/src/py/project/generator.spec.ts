@@ -87,6 +87,25 @@ describe('python project generator', () => {
     });
   });
 
+  it('should exclude transient and cache directories from ty type checking', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const pyprojectToml = parse(
+      tree.read('apps/test_project/pyproject.toml', 'utf-8'),
+    );
+
+    // pytest creates and removes `pytest-cache-files-*` directories while the
+    // test and typecheck targets run concurrently, so ty must exclude them to
+    // avoid scanning one mid-deletion and failing with an I/O error.
+    const exclude = (pyprojectToml as any).tool?.ty?.src?.exclude;
+    expect(exclude).toContain('**/pytest-cache-files-*');
+    expect(exclude).toContain('**/.pytest_cache');
+  });
+
   it('should add ty as a dev dependency in the root pyproject.toml', async () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',

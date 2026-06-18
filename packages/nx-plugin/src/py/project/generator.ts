@@ -232,6 +232,26 @@ export const pyProjectGenerator = async (
       if ((pyProjectToml.tool as any)?.ruff) {
         (pyProjectToml.tool as any).ruff['line-length'] = 120;
       }
+      // Exclude transient and cache directories from type checking. pytest
+      // creates and removes temporary `pytest-cache-files-*` directories while
+      // the `test` and `typecheck` targets run concurrently, so without this
+      // `ty` can scan one as it is being deleted and fail with an I/O error.
+      const tool = (pyProjectToml.tool ?? {}) as Record<string, any>;
+      tool.ty = {
+        ...tool.ty,
+        src: {
+          ...tool.ty?.src,
+          exclude: [
+            '**/pytest-cache-files-*',
+            '**/.pytest_cache',
+            '**/__pycache__',
+            '**/.ruff_cache',
+            '.venv',
+            'dist',
+          ],
+        },
+      };
+      pyProjectToml.tool = tool as typeof pyProjectToml.tool;
       return pyProjectToml;
     },
   );
