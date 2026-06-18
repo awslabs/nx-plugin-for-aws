@@ -37,21 +37,26 @@ import OptionFilter from '@components/option-filter.astro';
     - models
       - example.prisma 示例模型定义
     - schema.prisma 主 Prisma 架构（引用模型）
-  - scripts
-    - pull-image.ts 拉取用于本地开发的数据库容器镜像
-    - start-container.ts 启动本地数据库容器
-    - wait-for-db.ts 等待本地数据库准备就绪
   - src
     - index.ts 项目入口点
-    - constants.ts 本地开发连接详细信息和运行时配置键
     - prisma.ts Prisma 运行时客户端包装器
     - utils.ts 运行时配置和密钥助手
     - create-db-user-handler.ts 用于在部署期间创建应用程序数据库用户的 Lambda 处理程序
     - migration-handler.ts 用于在部署期间运行数据库迁移的 Lambda 处理程序
   - .gitignore Git 忽略条目，包括生成的 Prisma 客户端输出
+  - config.json 本地开发连接详细信息和运行时配置键
   - Dockerfile 迁移处理程序的容器镜像定义
   - project.json 项目配置和构建目标
   - prisma.config.ts Prisma CLI 的配置
+</FileTree>
+
+本地开发脚本在所有数据库项目之间共享，并生成到 `packages/common/scripts/` 中：
+
+<FileTree>
+  - packages/common/scripts/src/rdb
+    - pull-image.ts 拉取数据库容器镜像
+    - start-container.ts 启动本地数据库容器
+    - wait-for-db.ts 等待本地数据库准备就绪
 </FileTree>
 
 ### 基础设施
@@ -156,7 +161,6 @@ model User {
 
 `src/prisma.ts` 中的运行时包装器导出：
 
-- `DB_PACKAGE_NAME` - 在 AWS AppConfig 的 `database` 运行时配置命名空间下使用的键
 - `getPrisma()` - 从 AWS AppConfig 加载数据库连接设置并使用 IAM 认证创建 Prisma 客户端
 
 客户端自动：
@@ -204,7 +208,7 @@ model User {
 
 <NxCommands commands={['run <project>:prisma <prisma-command>']} />
 
-### Using Prisma Studio
+### 使用 Prisma Studio
 
 [Prisma Studio](https://www.prisma.io/studio) 是本地数据库的可视化编辑器。使用它浏览表、检查和编辑记录、过滤数据、跟踪关系，并通过内置 SQL 控制台运行原始 SQL。它对于在开发期间验证迁移和填充测试数据很有用。使用以下命令启动它：
 
@@ -286,7 +290,7 @@ Terraform 模块在 `common/terraform` 中创建。使用示例：
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
-  vpc_id             = module.vpc.vpc_id
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 
@@ -540,7 +544,7 @@ module "my_database" {
 
 默认情况下，生成的本地数据库容器镜像与默认 Aurora 引擎版本匹配。如果您更改 Aurora 引擎版本，建议也使用匹配的本地容器镜像版本以获得最大兼容性。请参阅 AWS 发布说明中的 [Aurora PostgreSQL 版本](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html)和 [Aurora MySQL 版本](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html)以确定相应的社区数据库版本。
 
-本地数据库镜像在生成的数据库项目的 `project.json` 中的 `serve-local` 目标中配置。当您更改引擎版本时，请更新传递给 `scripts/start-container.ts` 的镜像参数。
+本地数据库镜像在数据库项目根目录中生成的 `config.json` 文件的 `serveLocal.image` 字段中配置。当您更改引擎版本时，请更新该值。
 
 <OptionFilter when={{ engine: 'postgres' }}>
 <Infrastructure>

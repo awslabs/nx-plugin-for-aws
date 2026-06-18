@@ -1,0 +1,102 @@
+import { spawn, spawnSync } from "child_process";
+import { readFileSync } from "fs";
+
+const {
+  containerEngine,
+  containerName,
+  image,
+  port,
+  dbName,
+  dbUser,
+  dbPassword,
+  dbEngine,
+} = JSON.parse(readFileSync("config.json", "utf-8")).serveLocal;
+
+const containerExists = (): boolean =>
+  spawnSync(containerEngine, ["container", "inspect", containerName], {
+    stdio: "ignore",
+  }).status === 0;
+
+const isRunning = (): boolean => {
+  const result = spawnSync(
+    containerEngine,
+    ["container", "inspect", "-f", "{{.State.Running}}", containerName],
+    { encoding: "utf-8" },
+  );
+  return result.status === 0 && result.stdout.trim() === "true";
+};
+
+if (containerExists()) {
+  if (!isRunning()) {
+    const start = spawnSync(containerEngine, ["start", containerName], {
+      stdio: "inherit",
+    });
+    if (start.status !== 0) process.exit(start.status ?? 1);
+  }
+} else {
+  const engineArgs =
+    dbEngine === "mysql"
+      ? [
+          "-v",
+          `${containerName}-data:/var/lib/mysql`,
+          "-e",
+          `MYSQL_DATABASE=${dbName}`,
+          "-e",
+          `MYSQL_ROOT_PASSWORD=${dbPassword}`,
+          "-p",
+          `${port}:3306`,
+        ]
+      : [
+          "-v",
+          `${containerName}-data:/var/lib/postgresql`,
+          "-e",
+          `POSTGRES_DB=${dbName}`,
+          "-e",
+          `POSTGRES_USER=${dbUser}`,
+          "-e",
+          `POSTGRES_PASSWORD=${dbPassword}`,
+          "-e",
+          "PGDATA=/var/lib/postgresql/17/docker",
+          "-p",
+          `${port}:5432`,
+        ];
+  const runArgs = [
+    "run",
+    ...(containerEngine === "docker" ? ["--rm"] : []),
+    "--name",
+    containerName,
+    "-d",
+    ...engineArgs,
+    image,
+  ];
+  const create = spawnSync(containerEngine, runArgs, { stdio: "inherit" });
+  if (create.status !== 0) process.exit(create.status ?? 1);
+}
+
+const logs = spawn(containerEngine, ["logs", "-f", containerName], {
+  stdio: ["ignore", "inherit", "inherit"],
+});
+
+let exiting = false;
+
+const cleanup = () => {
+  if (exiting) return;
+  exiting = true;
+  if (containerEngine === "docker") {
+    spawnSync(containerEngine, ["stop", containerName], { stdio: "ignore" });
+  } else {
+    spawnSync(containerEngine, ["rm", "-f", containerName], {
+      stdio: "ignore",
+    });
+  }
+  logs.kill();
+  process.exit(0);
+};
+
+process.on("SIGTERM", cleanup);
+process.on("SIGINT", cleanup);
+process.on("SIGHUP", cleanup);
+
+logs.on("exit", (code) => {
+  if (!exiting) process.exit(code ?? 0);
+});
