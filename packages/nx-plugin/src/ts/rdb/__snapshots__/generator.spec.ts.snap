@@ -22,137 +22,6 @@ datasource db {
 "
 `;
 
-exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/pull-image.ts 1`] = `
-"import { spawnSync } from 'child_process';
-
-const ENGINE = 'docker';
-const image = process.argv[2];
-
-const inspect = spawnSync(ENGINE, ['image', 'inspect', image], {
-  stdio: 'ignore',
-});
-
-if (inspect.status !== 0) {
-  const pull = spawnSync(ENGINE, ['pull', image], { stdio: 'inherit' });
-  if (pull.status !== 0) {
-    process.exit(pull.status ?? 1);
-  }
-}
-"
-`;
-
-exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/start-container.ts 1`] = `
-"import { spawn, spawnSync } from 'child_process';
-
-const ENGINE = 'docker';
-
-const [containerName, image, hostPort, dbName, dbPassword] =
-  process.argv.slice(2);
-
-const containerExists = (): boolean =>
-  spawnSync(ENGINE, ['container', 'inspect', containerName], {
-    stdio: 'ignore',
-  }).status === 0;
-
-const isRunning = (): boolean => {
-  const result = spawnSync(
-    ENGINE,
-    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
-    { encoding: 'utf-8' },
-  );
-  return result.status === 0 && result.stdout.trim() === 'true';
-};
-
-if (containerExists()) {
-  if (!isRunning()) {
-    const start = spawnSync(ENGINE, ['start', containerName], {
-      stdio: 'inherit',
-    });
-    if (start.status !== 0) process.exit(start.status ?? 1);
-  }
-} else {
-  const runArgs = (
-    \`run --rm --name \${containerName}\` +
-    \` -e MYSQL_DATABASE=\${dbName}\` +
-    \` -e MYSQL_ROOT_PASSWORD=\${dbPassword}\` +
-    \` -p \${hostPort}:3306\` +
-    \` -v \${containerName}-data:/var/lib/mysql\` +
-    \` -d \${image}\`
-  ).split(' ');
-  const create = spawnSync(ENGINE, runArgs, { stdio: 'inherit' });
-  if (create.status !== 0) process.exit(create.status ?? 1);
-}
-
-const logs = spawn(ENGINE, ['logs', '-f', containerName], {
-  stdio: ['ignore', 'inherit', 'inherit'],
-});
-
-let exiting = false;
-
-const cleanup = () => {
-  if (exiting) return;
-  exiting = true;
-  spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
-  logs.kill();
-  process.exit(0);
-};
-
-process.on('SIGTERM', cleanup);
-process.on('SIGINT', cleanup);
-process.on('SIGHUP', cleanup);
-
-logs.on('exit', (code) => {
-  if (!exiting) process.exit(code ?? 0);
-});
-"
-`;
-
-exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/wait-for-db.ts 1`] = `
-"import { createConnection, Connection } from 'mariadb';
-
-const noop = () => undefined;
-
-const [portArg, dbArg, userArg, passwordArg] = process.argv.slice(2);
-const timeoutAt = Date.now() + 60000;
-
-while (Date.now() < timeoutAt) {
-  let conn: Connection | undefined;
-  try {
-    conn = await createConnection({
-      host: 'localhost',
-      port: parseInt(portArg),
-      user: userArg,
-      password: passwordArg,
-      database: dbArg,
-      connectTimeout: 500,
-      allowPublicKeyRetrieval: true,
-    });
-    await conn.end();
-    console.log('Database is ready.');
-    process.exit(0);
-  } catch {
-    console.log('Database is not ready.');
-    await conn?.end().catch(noop);
-  }
-  await new Promise((r) => setTimeout(r, 200));
-}
-
-throw new Error(\`Timed out waiting for mysql on port \${portArg}\`);
-"
-`;
-
-exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/constants.ts 1`] = `
-"export const DB_PACKAGE_NAME = 'Db';
-
-// Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
-export const LOCAL_DB_PORT = 3306;
-export const LOCAL_DB_HOST = 'localhost';
-export const LOCAL_DB_NAME = 'database_name';
-export const LOCAL_DB_USER = 'root';
-export const LOCAL_DB_PASSWORD = 'password';
-"
-`;
-
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/create-db-user-handler.ts 1`] = `
 "import type { CloudFormationCustomResourceEvent } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
@@ -230,8 +99,7 @@ export const handler = async (
 `;
 
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/index.ts 1`] = `
-"export { DB_PACKAGE_NAME } from './constants.js';
-export { getPrisma } from './prisma.js';
+"export { getPrisma } from './prisma.js';
 "
 `;
 
@@ -270,26 +138,31 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 "import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { Signer } from '@aws-sdk/rds-signer';
 import { Prisma, PrismaClient } from '../generated/prisma/client.js';
-import {
-  DB_PACKAGE_NAME,
-  LOCAL_DB_HOST,
-  LOCAL_DB_NAME,
-  LOCAL_DB_PASSWORD,
-  LOCAL_DB_PORT,
-  LOCAL_DB_USER,
-} from './constants.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { getDatabaseConfig } from './utils.js';
+
+// Generated: must match runtimeConfigKey in config.json
+const runtimeConfigKey = 'Db';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// config.json is only present in local dev (not included in the deployed bundle); guard with SERVE_LOCAL check
+const serveLocal = () =>
+  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8'))
+    .serveLocal;
 
 export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   log: LogOpts[] = ['warn', 'error'] as LogOpts[],
 ): Promise<PrismaClient<LogOpts>> => {
   if (process.env.SERVE_LOCAL === 'true') {
+    const { host, port, dbName, dbUser, dbPassword } = serveLocal();
     const adapter = new PrismaMariaDb({
-      host: LOCAL_DB_HOST,
-      port: LOCAL_DB_PORT,
-      database: LOCAL_DB_NAME,
-      user: LOCAL_DB_USER,
-      password: LOCAL_DB_PASSWORD,
+      host,
+      port,
+      database: dbName,
+      user: dbUser,
+      password: dbPassword,
       allowPublicKeyRetrieval: true,
     });
     return new PrismaClient({
@@ -299,7 +172,7 @@ export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   }
 
   const { hostname, port, database, dbUser, region } =
-    await getDatabaseConfig(DB_PACKAGE_NAME);
+    await getDatabaseConfig(runtimeConfigKey);
   const iamAuthToken = await new Signer({
     hostname,
     port,
@@ -896,17 +769,14 @@ export abstract class AuroraDatabase extends Construct {
 
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL 2`] = `
 "import { defineConfig } from 'prisma/config';
+import { readFileSync } from 'fs';
 
 const getDatabaseUrl = async () => {
   if (process.env.SERVE_LOCAL === 'true') {
-    const {
-      LOCAL_DB_HOST,
-      LOCAL_DB_NAME,
-      LOCAL_DB_PASSWORD,
-      LOCAL_DB_PORT,
-      LOCAL_DB_USER,
-    } = await import('./src/constants.js');
-    return \`mysql://\${LOCAL_DB_USER}:\${LOCAL_DB_PASSWORD}@\${LOCAL_DB_HOST}:\${LOCAL_DB_PORT}/\${LOCAL_DB_NAME}\`;
+    const { host, port, dbName, dbUser, dbPassword } = JSON.parse(
+      readFileSync('config.json', 'utf-8'),
+    ).serveLocal;
+    return \`mysql://\${dbUser}:\${dbPassword}@\${host}:\${port}/\${dbName}\`;
   }
   return process.env.DATABASE_URL;
 };
@@ -1822,10 +1692,12 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  create_db_user_bundle_path = "\${path.module}/../../../../../../../dist/packages/db/bundle/create-db-user"
-  migration_function_name = "db-migration-\${random_string.suffix.result}"
+  config                       = jsondecode(file("\${path.module}/../../../../../../../packages/db/config.json"))
+  runtime_config_key           = local.config.runtimeConfigKey
+  create_db_user_bundle_path   = "\${path.module}/../../../../../../../dist/packages/db/bundle/create-db-user"
+  migration_function_name      = "db-migration-\${random_string.suffix.result}"
   create_db_user_function_name = "db-create-db-user-\${random_string.suffix.result}"
-  database_runtime_user = "db_\${random_string.suffix.result}"
+  database_runtime_user        = "db_\${random_string.suffix.result}"
 }
 
 module "aurora" {
@@ -1891,7 +1763,7 @@ module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
   namespace = "database"
-  key       = "Db"
+  key       = local.runtime_config_key
   value = {
     hostname  = module.aurora.cluster_endpoint
     port      = module.aurora.cluster_port
@@ -3281,10 +3153,12 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  create_db_user_bundle_path = "\${path.module}/../../../../../../../dist/packages/db/bundle/create-db-user"
-  migration_function_name = "db-migration-\${random_string.suffix.result}"
+  config                       = jsondecode(file("\${path.module}/../../../../../../../packages/db/config.json"))
+  runtime_config_key           = local.config.runtimeConfigKey
+  create_db_user_bundle_path   = "\${path.module}/../../../../../../../dist/packages/db/bundle/create-db-user"
+  migration_function_name      = "db-migration-\${random_string.suffix.result}"
   create_db_user_function_name = "db-create-db-user-\${random_string.suffix.result}"
-  database_runtime_user = "db_\${random_string.suffix.result}"
+  database_runtime_user        = "db_\${random_string.suffix.result}"
 }
 
 module "aurora" {
@@ -3350,7 +3224,7 @@ module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
   namespace = "database"
-  key       = "Db"
+  key       = local.runtime_config_key
   value = {
     hostname  = module.aurora.cluster_endpoint
     port      = module.aurora.cluster_port
@@ -3864,139 +3738,6 @@ datasource db {
 "
 `;
 
-exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/pull-image.ts 1`] = `
-"import { spawnSync } from 'child_process';
-
-const ENGINE = 'docker';
-const image = process.argv[2];
-
-const inspect = spawnSync(ENGINE, ['image', 'inspect', image], {
-  stdio: 'ignore',
-});
-
-if (inspect.status !== 0) {
-  const pull = spawnSync(ENGINE, ['pull', image], { stdio: 'inherit' });
-  if (pull.status !== 0) {
-    process.exit(pull.status ?? 1);
-  }
-}
-"
-`;
-
-exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/start-container.ts 1`] = `
-"import { spawn, spawnSync } from 'child_process';
-
-const ENGINE = 'docker';
-
-const [containerName, image, hostPort, dbName, dbUser, dbPassword] =
-  process.argv.slice(2);
-
-const containerExists = (): boolean =>
-  spawnSync(ENGINE, ['container', 'inspect', containerName], {
-    stdio: 'ignore',
-  }).status === 0;
-
-const isRunning = (): boolean => {
-  const result = spawnSync(
-    ENGINE,
-    ['container', 'inspect', '-f', '{{.State.Running}}', containerName],
-    { encoding: 'utf-8' },
-  );
-  return result.status === 0 && result.stdout.trim() === 'true';
-};
-
-if (containerExists()) {
-  if (!isRunning()) {
-    const start = spawnSync(ENGINE, ['start', containerName], {
-      stdio: 'inherit',
-    });
-    if (start.status !== 0) process.exit(start.status ?? 1);
-  }
-} else {
-  const runArgs = (
-    \`run --rm --name \${containerName}\` +
-    \` -e POSTGRES_DB=\${dbName}\` +
-    \` -e POSTGRES_USER=\${dbUser}\` +
-    \` -e POSTGRES_PASSWORD=\${dbPassword}\` +
-    \` -e PGDATA=/var/lib/postgresql/17/docker\` +
-    \` -p \${hostPort}:5432\` +
-    \` -v \${containerName}-data:/var/lib/postgresql\` +
-    \` -d \${image}\`
-  ).split(' ');
-  const create = spawnSync(ENGINE, runArgs, { stdio: 'inherit' });
-  if (create.status !== 0) process.exit(create.status ?? 1);
-}
-
-const logs = spawn(ENGINE, ['logs', '-f', containerName], {
-  stdio: ['ignore', 'inherit', 'inherit'],
-});
-
-let exiting = false;
-
-const cleanup = () => {
-  if (exiting) return;
-  exiting = true;
-  spawnSync(ENGINE, ['stop', containerName], { stdio: 'ignore' });
-  logs.kill();
-  process.exit(0);
-};
-
-process.on('SIGTERM', cleanup);
-process.on('SIGINT', cleanup);
-process.on('SIGHUP', cleanup);
-
-logs.on('exit', (code) => {
-  if (!exiting) process.exit(code ?? 0);
-});
-"
-`;
-
-exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/wait-for-db.ts 1`] = `
-"import { Client } from 'pg';
-
-const noop = () => undefined;
-
-const [portArg, dbArg, userArg, passwordArg] = process.argv.slice(2);
-const timeoutAt = Date.now() + 60000;
-
-while (Date.now() < timeoutAt) {
-  const client = new Client({
-    host: 'localhost',
-    port: parseInt(portArg),
-    user: userArg,
-    password: passwordArg,
-    database: dbArg,
-    connectionTimeoutMillis: 500,
-  });
-  client.on('error', noop);
-  try {
-    await client.connect();
-    await client.end();
-    console.log('Database is ready.');
-    process.exit(0);
-  } catch {
-    console.log('Database is not ready.');
-    await client.end().catch(noop);
-  }
-  await new Promise((r) => setTimeout(r, 200));
-}
-
-throw new Error(\`Timed out waiting for postgres on port \${portArg}\`);
-"
-`;
-
-exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/constants.ts 1`] = `
-"export const DB_PACKAGE_NAME = 'Db';
-
-// Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
-export const LOCAL_DB_PORT = 5432;
-export const LOCAL_DB_HOST = 'localhost';
-export const LOCAL_DB_NAME = 'database_name';
-export const LOCAL_DB_USER = 'dbadmin';
-export const LOCAL_DB_PASSWORD = 'password';
-"
-`;
-
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/create-db-user-handler.ts 1`] = `
 "import type { CloudFormationCustomResourceEvent } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
@@ -4088,8 +3829,7 @@ export const handler = async (
 `;
 
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/index.ts 1`] = `
-"export { DB_PACKAGE_NAME } from './constants.js';
-export { getPrisma } from './prisma.js';
+"export { getPrisma } from './prisma.js';
 "
 `;
 
@@ -4141,15 +3881,19 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 import { Signer } from '@aws-sdk/rds-signer';
 import { Prisma, PrismaClient } from '../generated/prisma/client.js';
 import { Pool } from 'pg';
-import {
-  DB_PACKAGE_NAME,
-  LOCAL_DB_HOST,
-  LOCAL_DB_NAME,
-  LOCAL_DB_PASSWORD,
-  LOCAL_DB_PORT,
-  LOCAL_DB_USER,
-} from './constants.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { getDatabaseConfig } from './utils.js';
+
+// Generated: must match runtimeConfigKey in config.json
+const runtimeConfigKey = 'Db';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// config.json is only present in local dev (not included in the deployed bundle); guard with SERVE_LOCAL check
+const serveLocal = () =>
+  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8'))
+    .serveLocal;
 
 let prismaClient: PrismaClient<Prisma.LogLevel> | undefined;
 
@@ -4159,13 +3903,14 @@ export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   if (prismaClient) return prismaClient;
 
   if (process.env.SERVE_LOCAL === 'true') {
+    const { host, port, dbName, dbUser, dbPassword } = serveLocal();
     const adapter = new PrismaPg(
       new Pool({
-        host: LOCAL_DB_HOST,
-        port: LOCAL_DB_PORT,
-        database: LOCAL_DB_NAME,
-        user: LOCAL_DB_USER,
-        password: LOCAL_DB_PASSWORD,
+        host,
+        port,
+        database: dbName,
+        user: dbUser,
+        password: dbPassword,
         allowExitOnIdle: true,
       }),
     );
@@ -4177,7 +3922,7 @@ export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   }
 
   const { hostname, port, database, dbUser, region } =
-    await getDatabaseConfig(DB_PACKAGE_NAME);
+    await getDatabaseConfig(runtimeConfigKey);
   const adapter = new PrismaPg(
     new Pool({
       host: hostname,
@@ -4780,14 +4525,24 @@ export abstract class AuroraDatabase extends Construct {
 exports[`ts#rdb generator > should generate the aurora shared construct 2`] = `
 "import * as path from 'path';
 import * as url from 'url';
+import { readFileSync } from 'fs';
 import { Construct } from 'constructs';
-import { DB_PACKAGE_NAME } from ':proj/db';
 import {
   AuroraDatabase,
   AuroraDatabaseEngines,
   AuroraDatabaseProps,
 } from '../../core/rdb/aurora.js';
 import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const { runtimeConfigKey } = JSON.parse(
+  readFileSync(
+    path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'packages/db/config.json',
+    ),
+    'utf-8',
+  ),
+) as { runtimeConfigKey: string };
 
 export type DbProps = Omit<
   AuroraDatabaseProps,
@@ -4808,7 +4563,7 @@ export class Db extends AuroraDatabase {
       ...props,
       databaseName: 'database_name',
       adminUser: 'databaseUser',
-      runtimeConfigKey: DB_PACKAGE_NAME,
+      runtimeConfigKey,
       migrationBundleDir: path.join(
         findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
         'dist/packages/db/bundle/migration',
@@ -4826,17 +4581,14 @@ export class Db extends AuroraDatabase {
 
 exports[`ts#rdb generator > should generate the aurora shared construct 3`] = `
 "import { defineConfig } from 'prisma/config';
+import { readFileSync } from 'fs';
 
 const getDatabaseUrl = async () => {
   if (process.env.SERVE_LOCAL === 'true') {
-    const {
-      LOCAL_DB_HOST,
-      LOCAL_DB_NAME,
-      LOCAL_DB_PASSWORD,
-      LOCAL_DB_PORT,
-      LOCAL_DB_USER,
-    } = await import('./src/constants.js');
-    return \`postgresql://\${LOCAL_DB_USER}:\${LOCAL_DB_PASSWORD}@\${LOCAL_DB_HOST}:\${LOCAL_DB_PORT}/\${LOCAL_DB_NAME}\`;
+    const { host, port, dbName, dbUser, dbPassword } = JSON.parse(
+      readFileSync('config.json', 'utf-8'),
+    ).serveLocal;
+    return \`postgresql://\${dbUser}:\${dbPassword}@\${host}:\${port}/\${dbName}\`;
   }
   return process.env.DATABASE_URL;
 };

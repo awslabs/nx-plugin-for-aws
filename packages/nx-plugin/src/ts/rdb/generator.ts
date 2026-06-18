@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { relative } from 'node:path';
 import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
@@ -33,6 +34,11 @@ import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
 import { assignPort } from '../../utils/port';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  PACKAGES_DIR,
+  SHARED_SCRIPTS_DIR,
+} from '../../utils/shared-constructs-constants';
+import { sharedRdbScriptsGenerator } from '../../utils/shared-rdb-scripts';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsRdbGeneratorSchema } from './schema';
@@ -84,6 +90,11 @@ export const tsRdbGenerator = async (
   const localDbHost = 'localhost';
   const localDbUser = options.engine === 'mysql' ? 'root' : 'dbadmin';
   const localDbPassword = 'password';
+  const containerName = `${getNpmScope(tree)}-${databaseName}`;
+  const dockerImage =
+    options.engine === 'mysql'
+      ? 'public.ecr.aws/docker/library/mysql:8.0.44'
+      : 'public.ecr.aws/docker/library/postgres:17.7';
 
   const templateOptions = {
     engine: options.engine,
@@ -103,6 +114,8 @@ export const tsRdbGenerator = async (
     localDbUser,
     localDbPassword,
     containerEngine,
+    containerName,
+    dockerImage,
   };
 
   generateFiles(
@@ -112,6 +125,11 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
+  await sharedRdbScriptsGenerator(tree);
+  const scriptsDir = relative(
+    dir,
+    joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'rdb'),
+  );
   const relativePathToRoot = getRelativePathToRootByDirectory(
     projectConfig.root,
   );
@@ -172,22 +190,17 @@ export const tsRdbGenerator = async (
       cwd: '{projectRoot}',
     },
   };
-  const containerName = `${getNpmScope(tree)}-${databaseName}`;
-  const dockerImage =
-    options.engine === 'mysql'
-      ? 'public.ecr.aws/docker/library/mysql:8.0.44'
-      : 'public.ecr.aws/docker/library/postgres:17.7';
   projectConfig.targets['pull-image'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/pull-image.ts ${dockerImage}`,
+      command: `tsx ${scriptsDir}/pull-image.ts`,
       cwd: '{projectRoot}',
     },
   };
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/start-container.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'mysql' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
+      command: `tsx ${scriptsDir}/start-container.ts`,
       cwd: '{projectRoot}',
     },
     continuous: true,
@@ -197,7 +210,7 @@ export const tsRdbGenerator = async (
     executor: 'nx:run-commands',
     dependsOn: ['serve-local'],
     options: {
-      command: `tsx scripts/wait-for-db.ts ${localDbPort} ${databaseName} ${localDbUser} ${localDbPassword}`,
+      command: `tsx ${scriptsDir}/wait-for-db.ts`,
       cwd: '{projectRoot}',
     },
   };
@@ -239,6 +252,7 @@ export const tsRdbGenerator = async (
     await addRdbInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
+      projectRoot: dir,
       nameClassName,
       nameKebabCase,
       databasePackageAlias: toScopeAlias(fullyQualifiedName),

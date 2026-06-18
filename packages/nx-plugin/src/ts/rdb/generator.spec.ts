@@ -90,20 +90,17 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
     });
-    snapshotTreeDir(tree, 'packages/db/scripts');
     expect(projectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command:
-          'tsx scripts/pull-image.ts public.ecr.aws/docker/library/postgres:17.7',
+        command: 'tsx ../common/scripts/src/rdb/pull-image.ts',
         cwd: '{projectRoot}',
       },
     });
     expect(projectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command:
-          'tsx scripts/start-container.ts proj-database_name public.ecr.aws/docker/library/postgres:17.7 5432 database_name dbadmin password',
+        command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
       },
       continuous: true,
@@ -113,8 +110,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       dependsOn: ['serve-local'],
       options: {
-        command:
-          'tsx scripts/wait-for-db.ts 5432 database_name dbadmin password',
+        command: 'tsx ../common/scripts/src/rdb/wait-for-db.ts',
         cwd: '{projectRoot}',
       },
     });
@@ -181,20 +177,17 @@ describe('ts#rdb generator', () => {
       tree,
       '@proj/db',
     );
-    snapshotTreeDir(tree, 'packages/db/scripts');
     expect(mysqlProjectConfig.targets['pull-image']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command:
-          'tsx scripts/pull-image.ts public.ecr.aws/docker/library/mysql:8.0.44',
+        command: 'tsx ../common/scripts/src/rdb/pull-image.ts',
         cwd: '{projectRoot}',
       },
     });
     expect(mysqlProjectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command:
-          'tsx scripts/start-container.ts proj-database_name public.ecr.aws/docker/library/mysql:8.0.44 3306 database_name password',
+        command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
       },
       continuous: true,
@@ -204,7 +197,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       dependsOn: ['serve-local'],
       options: {
-        command: 'tsx scripts/wait-for-db.ts 3306 database_name root password',
+        command: 'tsx ../common/scripts/src/rdb/wait-for-db.ts',
         cwd: '{projectRoot}',
       },
     });

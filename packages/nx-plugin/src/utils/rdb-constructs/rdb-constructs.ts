@@ -22,6 +22,7 @@ import {
 
 export interface AddRdbConstructOptions {
   projectName: string;
+  projectRoot: string;
   nameClassName: string;
   nameKebabCase: string;
   databasePackageAlias: string;

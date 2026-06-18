@@ -4,27 +4,31 @@ import { Prisma, PrismaClient } from '../generated/prisma/client.js';
 <%_ if (engine === 'postgres') { _%>
 import { Pool } from 'pg';
 <%_ } _%>
-import {
-  DB_PACKAGE_NAME,
-  LOCAL_DB_HOST,
-  LOCAL_DB_NAME,
-  LOCAL_DB_PASSWORD,
-  LOCAL_DB_PORT,
-  LOCAL_DB_USER,
-} from './constants.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { getDatabaseConfig } from './utils.js';
-<%_ if (engine === 'mysql') { _%>
 
+// Generated: must match runtimeConfigKey in config.json
+const runtimeConfigKey = '<%= runtimeConfigKey %>';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// config.json is only present in local dev (not included in the deployed bundle); guard with SERVE_LOCAL check
+const serveLocal = () =>
+  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8')).serveLocal;
+
+<%_ if (engine === 'mysql') { _%>
 export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   log: LogOpts[] = ['warn', 'error'] as LogOpts[],
 ): Promise<PrismaClient<LogOpts>> => {
   if (process.env.SERVE_LOCAL === 'true') {
+    const { host, port, dbName, dbUser, dbPassword } = serveLocal();
     const adapter = new PrismaMariaDb({
-      host: LOCAL_DB_HOST,
-      port: LOCAL_DB_PORT,
-      database: LOCAL_DB_NAME,
-      user: LOCAL_DB_USER,
-      password: LOCAL_DB_PASSWORD,
+      host,
+      port,
+      database: dbName,
+      user: dbUser,
+      password: dbPassword,
       allowPublicKeyRetrieval: true,
     });
     return new PrismaClient({
@@ -34,7 +38,7 @@ export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   }
 
   const { hostname, port, database, dbUser, region } =
-    await getDatabaseConfig(DB_PACKAGE_NAME);
+    await getDatabaseConfig(runtimeConfigKey);
   const iamAuthToken = await new Signer({
     hostname,
     port,
@@ -68,13 +72,14 @@ export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   if (prismaClient) return prismaClient;
 
   if (process.env.SERVE_LOCAL === 'true') {
+    const { host, port, dbName, dbUser, dbPassword } = serveLocal();
     const adapter = new PrismaPg(
       new Pool({
-        host: LOCAL_DB_HOST,
-        port: LOCAL_DB_PORT,
-        database: LOCAL_DB_NAME,
-        user: LOCAL_DB_USER,
-        password: LOCAL_DB_PASSWORD,
+        host,
+        port,
+        database: dbName,
+        user: dbUser,
+        password: dbPassword,
         allowExitOnIdle: true,
       }),
     );
@@ -86,7 +91,7 @@ export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
   }
 
   const { hostname, port, database, dbUser, region } =
-    await getDatabaseConfig(DB_PACKAGE_NAME);
+    await getDatabaseConfig(runtimeConfigKey);
   const adapter = new PrismaPg(
     new Pool({
       host: hostname,
