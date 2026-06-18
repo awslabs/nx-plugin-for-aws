@@ -162,6 +162,12 @@ describe('python project generator', () => {
       tree.read('apps/test_project/.gitignore', 'utf-8')?.split('\n') ?? [];
     expect(projectGitIgnorePatterns).toContain('**/__pycache__');
     expect(projectGitIgnorePatterns).toContain('.coverage');
+    // Tool cache directories — also keeps `ty` from scanning pytest's transient
+    // `pytest-cache-files-*` dirs (it respects .gitignore) and failing the
+    // concurrent typecheck with an I/O error.
+    expect(projectGitIgnorePatterns).toContain('.pytest_cache');
+    expect(projectGitIgnorePatterns).toContain('pytest-cache-files-*');
+    expect(projectGitIgnorePatterns).toContain('.ruff_cache');
   });
 
   it('should add a dependency on the python plugin', async () => {

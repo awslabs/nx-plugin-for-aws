@@ -4,7 +4,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { appendFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { output, type PackageManager } from '@nx/devkit';
@@ -181,9 +181,10 @@ export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
  * Workspaces are created with git initialised (no `--skipGit`) to match how
  * real users start a project. This matters for tooling that only honours
  * `.gitignore` inside a git work tree — notably `ty`, which would otherwise
- * scan pytest's transient `pytest-cache-files-*` directories (created and
- * removed in the project root while the `test` and `typecheck` targets run
- * concurrently) and intermittently fail with an I/O error.
+ * scan the cache directories ignored by the generated `.gitignore` (such as
+ * pytest's transient `pytest-cache-files-*` directories, created and removed
+ * while the `test` and `typecheck` targets run concurrently) and intermittently
+ * fail with an I/O error.
  */
 export const createTestWorkspace = async (
   pkgMgr: string,
@@ -199,13 +200,7 @@ export const createTestWorkspace = async (
       redirectStderr: true,
     },
   );
-  const projectRoot = join(targetDir, name);
-
-  // pytest writes transient `pytest-cache-files-*` staging directories into the
-  // project root; ignore them so `ty` (which respects .gitignore) skips them.
-  appendFileSync(join(projectRoot, '.gitignore'), '\npytest-cache-files-*\n');
-
-  return projectRoot;
+  return join(targetDir, name);
 };
 
 // The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.
