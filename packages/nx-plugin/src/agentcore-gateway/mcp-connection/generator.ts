@@ -5,20 +5,17 @@
 import {
   type GeneratorCallback,
   installPackagesTask,
-  joinPathFragments,
   type Tree,
-  updateProjectConfiguration,
 } from '@nx/devkit';
-import { applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import {
-  addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
+import { attachUpstreamToLocalGateway } from '../attach-upstream';
 import { readAgentCoreGatewayMetadata } from '../generator';
 import type { AgentcoreGatewayMcpConnectionGeneratorSchema } from './schema';
 
@@ -67,8 +64,7 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
     );
   }
 
-  const gatewayKebabCase = kebabCase(gateway.rc);
-  const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
+  const gatewayServeLocalTargetName = `${kebabCase(gateway.rc)}-serve-local`;
 
   // The target name must match what the deployed Gateway uses
   // (`mcpServerName` on the MCP construct, derived from the project's class
@@ -77,37 +73,18 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   // both default to `mcp-server`.
   const mcpTargetName = kebabCase(mcpComponent.rc as string);
   const mcpComponentName = mcpComponent.name ?? 'mcp-server';
-  const mcpServeLocalTargetName = `${mcpComponentName}-serve-local`;
-  const mcpPort = (mcpComponent.port as number | undefined) ?? 8000;
 
-  // 1. Wire serve-local chain
-  if (sourceProject.targets?.[gatewayServeLocalTargetName]) {
-    addDependencyToTargetIfNotPresent(
-      sourceProject,
-      gatewayServeLocalTargetName,
-      {
-        projects: [targetProject.name],
-        target: mcpServeLocalTargetName,
-      },
-    );
-    updateProjectConfiguration(tree, sourceProject.name, sourceProject);
-  }
-
-  // 2. Register the MCP server in the gateway's local serve-local.ts
-  const serveTsPath = joinPathFragments(sourceProject.root, 'serve-local.ts');
-  if (tree.exists(serveTsPath)) {
-    const entry = `{ name: '${mcpTargetName}', url: 'http://localhost:${mcpPort}/mcp' }`;
-    await applyGritQL(
-      tree,
-      serveTsPath,
-      `or {
-  \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = []\` => \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [${entry}]\`,
-  \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [$items]\` => \`const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [${entry}, $items]\` where {
-    $items <: not contains \`'${mcpTargetName}'\`
-  }
-}`,
-    );
-  }
+  await attachUpstreamToLocalGateway(
+    tree,
+    sourceProject,
+    gatewayServeLocalTargetName,
+    {
+      targetName: mcpTargetName,
+      port: (mcpComponent.port as number | undefined) ?? 8000,
+      upstreamProjectName: targetProject.name,
+      upstreamServeLocalTargetName: `${mcpComponentName}-serve-local`,
+    },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO,

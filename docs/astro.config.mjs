@@ -653,6 +653,10 @@ export default defineConfig({
                   link: '/guides/connection/agentcore-gateway-mcp',
                 },
                 {
+                  label: 'AgentCore Gateway → AgentCore Gateway',
+                  link: '/guides/connection/agentcore-gateway-gateway',
+                },
+                {
                   label: 'TypeScript Agent → AgentCore Gateway',
                   link: '/guides/connection/ts-agent-gateway',
                 },

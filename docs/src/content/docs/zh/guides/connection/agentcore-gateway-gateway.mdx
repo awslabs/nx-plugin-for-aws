@@ -1,0 +1,150 @@
+---
+title: AgentCore Gateway 到 AgentCore Gateway
+description: 将一个 AgentCore Gateway 连接到另一个 AgentCore Gateway
+when:
+  sourceType: agentcore-gateway
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器可以将一个 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> 注册为另一个 AgentCore Gateway 的目标。这使您可以分层组合网关——例如，一个团队级网关聚合多个域网关，每个域网关都有自己的 MCP 服务器。
+
+连接后，源网关将目标网关的工具聚合到其单一的 MCP 端点中。由于目标网关已经使用自己的目标名称为其工具添加了前缀，因此工具通过源网关显示为 `<gateway-target-name>___<target-name>___<tool-name>` ——链中的每个网关都会添加一个前缀。两个网关都会评估自己的 Cedar 策略：源网关为调用者授权前缀操作，然后目标网关为源网关的执行角色授权内部操作。
+
+## 前提条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 两个 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 项目
+
+两个网关都必须具有 `protocol: mcp`，并且目标网关必须具有 `auth: iam` ——源网关使用自己的执行角色对目标进行签名调用，因此只有目标的入站身份验证需要是 IAM。生成器会验证这一点，并且还会拒绝会在网关之间创建循环的连接，否则会在 `tools/list` 上无限递归。
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择聚合网关项目作为源，选择要聚合的网关作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器将现有项目连接在一起，而不是生成新的源文件。以下文件将被修改：
+
+<FileTree>
+
+- packages/\<source-gateway>
+  - project.json `<source-gateway>-serve-local` 获得对目标网关的 `<target-gateway>-serve-local` 的依赖
+  - serve-local.ts `ATTACHED_MCP_SERVERS` 更新，使本地网关聚合目标网关
+
+</FileTree>
+
+源网关项目的 `<source-gateway>-serve-local` 目标获得对目标网关的 `<target-gateway>-serve-local` 目标的依赖，因此在本地运行源网关也会启动目标网关（以及传递地启动附加到它的每个 MCP 服务器）。目标网关也会在源网关项目的 `serve-local.ts` 中注册，以便本地网关聚合其工具。
+
+## 将网关目标添加到您的堆栈
+
+生成器**无法**自动将网关目标连接到您的基础设施中，因为它不知道哪个堆栈或模块实例化了网关。请自行添加对 `gateway.addGateway(targetGateway)` 的单个调用。
+
+<Infrastructure>
+<Fragment slot="cdk">
+在实例化网关的堆栈中，将目标网关注册为源网关的目标：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const innerGateway = new InnerGateway(this, 'InnerGateway');
+const outerGateway = new OuterGateway(this, 'OuterGateway');
+
+// Register the inner gateway as a target of the outer gateway. The target
+// name defaults to the inner gateway's `gatewayName` (its class name in
+// kebab-case, e.g. `InnerGateway` -> `inner-gateway`).
+outerGateway.addGateway(innerGateway);
+```
+
+网关目标名称（默认为目标网关的 `gatewayName`）为源网关上的 Cedar 操作名称添加前缀——操作格式为 ``AgentCore::Action::"<gatewayTargetName>___<targetName>___<toolName>"``。请参阅<Link path="guides/agentcore-gateway">编写策略部分</Link>。保持目标名称简短且稳定；稍后更改它会使引用旧名称的任何 Cedar 策略失效。
+
+要覆盖默认目标名称，请传递 `gatewayTargetName`：
+
+```ts
+outerGateway.addGateway(innerGateway, { gatewayTargetName: 'inner' });
+```
+
+该构造授予源网关的执行角色对目标网关的 `bedrock-agentcore:InvokeGateway` 访问权限，并使用 `iamCredentialProvider.service = 'bedrock-agentcore'` 配置目标，以便源网关使用自己的执行角色对出站调用进行签名。目标在目标网关及其所有自己的目标之后创建，因为 AgentCore 在创建期间获取目标的工具。
+</Fragment>
+<Fragment slot="terraform">
+在实例化网关的 Terraform 文件中，连接网关目标：
+
+```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+module "inner_gateway" {
+  source = "../../common/terraform/src/app/gateways/inner-gateway"
+}
+
+module "outer_gateway" {
+  source              = "../../common/terraform/src/app/gateways/outer-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.inner_gateway.target_id]
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = [module.inner_gateway.gateway_arn]
+    }
+  ]
+}
+
+# Register the inner gateway as a target of the outer gateway
+resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
+  gateway_identifier = module.outer_gateway.gateway_id
+  name               = "inner-gateway"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = module.inner_gateway.gateway_url
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+目标 `name`（上面的 `inner-gateway`）为外部网关上的 Cedar 操作名称添加前缀——请参阅<Link path="guides/agentcore-gateway">编写策略部分</Link>。`additional_iam_policy_statements` 条目授予外部网关的执行角色对内部网关的调用访问权限，这在目标创建时获取内部网关的工具以及在运行时路由调用时都是必需的。`policy_dependencies` 确保引用此目标操作的 Cedar 策略在目标注册它们之后创建。
+
+:::note[目标排序]
+AgentCore 在创建 `aws_bedrockagentcore_gateway_target` 时获取内部网关的工具，因此应首先创建内部网关的任何目标。如果它们在同一配置中管理，请将它们添加到目标的 `depends_on` 中。
+:::
+</Fragment>
+</Infrastructure>
+
+## 跨链式网关的 Cedar 策略
+
+链中的每个网关都会评估自己的策略集：
+
+1. **源网关**根据前缀操作评估原始调用者（例如代理的执行角色），例如 `AgentCore::Action::"inner-gateway___my-mcp___add"`。
+2. **目标网关**根据内部操作评估源网关的执行角色，例如 `AgentCore::Action::"my-mcp___add"`。
+
+这意味着通过网关链的工具调用必须在每一跳都被允许。默认的 `permit-all.cedar` 允许同一 AWS 账户中的任何调用者，其中包括源网关的角色；如果您在目标网关上编写更窄的策略，请记住它看到的主体是*源网关的*角色，而不是原始调用者。
+
+## 本地开发
+
+使用以下命令在本地运行源网关：
+
+<NxCommands commands={["<source-gateway-name>-serve-local"]} />
+
+启动本地源网关、本地目标网关以及附加到任一网关的每个 MCP 服务器，每个都在其分配的本地端口上。工具名称在每一跳都会像部署时一样添加前缀（`<gateway-target-name>___<target-name>___<tool-name>`），因此代理提示和 Cedar 操作名称在本地和部署运行中保持一致。
+
+:::caution[本地保真度]
+本地开发使用**本地替代网关**——由每个网关项目启动的轻量级 MCP 聚合器，而不是 AgentCore Gateway 服务。因此，**Cedar 策略不会在本地的任一跳进行评估**。要执行 Cedar 策略，请改为运行代理的 `serve` 目标（请参阅 <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> 代理连接指南），以便本地运行的代理调用已部署的网关。
+:::

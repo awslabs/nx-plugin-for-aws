@@ -1,0 +1,150 @@
+---
+title: AgentCore Gateway đến AgentCore Gateway
+description: Kết nối một AgentCore Gateway với một AgentCore Gateway khác
+when:
+  sourceType: agentcore-gateway
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` có thể đăng ký một <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> làm mục tiêu của một AgentCore Gateway khác. Điều này cho phép bạn kết hợp các gateway theo cấu trúc phân cấp — ví dụ một gateway cấp nhóm tổng hợp nhiều gateway miền, mỗi gateway miền lại đứng trước các MCP server riêng của nó.
+
+Sau khi được kết nối, Gateway nguồn tổng hợp các công cụ của Gateway mục tiêu vào một điểm cuối MCP duy nhất. Vì Gateway mục tiêu đã thêm tiền tố cho các công cụ của nó bằng tên mục tiêu riêng, các công cụ sẽ xuất hiện qua Gateway nguồn dưới dạng `<gateway-target-name>___<target-name>___<tool-name>` — mỗi gateway trong chuỗi thêm một tiền tố. Cả hai gateway đều đánh giá các chính sách Cedar của riêng chúng: Gateway nguồn ủy quyền cho người gọi đối với hành động có tiền tố, sau đó Gateway mục tiêu ủy quyền cho vai trò thực thi của Gateway nguồn đối với hành động bên trong.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Hai dự án <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>
+
+Cả hai gateway phải có `protocol: mcp`, và gateway mục tiêu phải có `auth: iam` — gateway nguồn gọi mục tiêu bằng cách ký với vai trò thực thi của chính nó, vì vậy chỉ xác thực đầu vào của mục tiêu cần phải là IAM. Trình tạo xác thực điều này, và cũng từ chối các kết nối có thể tạo ra chu trình giữa các gateway, điều này sẽ gây đệ quy vô hạn trên `tools/list`.
+
+## Cách sử dụng
+
+### Chạy Trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án Gateway tổng hợp làm nguồn và Gateway được tổng hợp làm mục tiêu.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Đầu ra của Trình tạo
+
+Trình tạo kết nối các dự án hiện có với nhau thay vì tạo ra các tệp nguồn mới. Các tệp sau được sửa đổi:
+
+<FileTree>
+
+- packages/\<source-gateway>
+  - project.json `<source-gateway>-serve-local` có thêm phụ thuộc vào `<target-gateway>-serve-local` của gateway mục tiêu
+  - serve-local.ts `ATTACHED_MCP_SERVERS` được cập nhật để gateway cục bộ tổng hợp gateway mục tiêu
+
+</FileTree>
+
+Target `<source-gateway>-serve-local` của dự án Gateway nguồn có thêm phụ thuộc vào target `<target-gateway>-serve-local` của Gateway mục tiêu, vì vậy khi chạy Gateway nguồn cục bộ cũng sẽ khởi động gateway mục tiêu (và theo cách bắc cầu, mọi MCP server được gắn vào nó). Gateway mục tiêu cũng được đăng ký trong `serve-local.ts` của dự án Gateway nguồn để gateway cục bộ tổng hợp các công cụ của nó.
+
+## Thêm gateway target vào stack của bạn
+
+Trình tạo **không thể** tự động kết nối gateway target vào cơ sở hạ tầng của bạn vì nó không biết stack hoặc module nào khởi tạo các Gateway. Hãy tự thêm một lệnh gọi duy nhất `gateway.addGateway(targetGateway)`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Trong stack nơi bạn khởi tạo các Gateway, hãy đăng ký gateway mục tiêu làm mục tiêu của gateway nguồn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-6}
+const innerGateway = new InnerGateway(this, 'InnerGateway');
+const outerGateway = new OuterGateway(this, 'OuterGateway');
+
+// Register the inner gateway as a target of the outer gateway. The target
+// name defaults to the inner gateway's `gatewayName` (its class name in
+// kebab-case, e.g. `InnerGateway` -> `inner-gateway`).
+outerGateway.addGateway(innerGateway);
+```
+
+Tên gateway target (mặc định là `gatewayName` của gateway mục tiêu) thêm tiền tố cho tên hành động Cedar trên gateway nguồn — định dạng hành động là ``AgentCore::Action::"<gatewayTargetName>___<targetName>___<toolName>"``. Xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>. Giữ tên target ngắn gọn và ổn định; thay đổi nó sau này sẽ làm mất hiệu lực bất kỳ chính sách Cedar nào tham chiếu đến tên cũ.
+
+Để ghi đè tên target mặc định, hãy truyền `gatewayTargetName`:
+
+```ts
+outerGateway.addGateway(innerGateway, { gatewayTargetName: 'inner' });
+```
+
+Construct cấp cho vai trò thực thi của gateway nguồn quyền truy cập `bedrock-agentcore:InvokeGateway` vào gateway mục tiêu, và cấu hình mục tiêu với `iamCredentialProvider.service = 'bedrock-agentcore'` để gateway nguồn ký các cuộc gọi đi bằng vai trò thực thi của chính nó. Mục tiêu được tạo sau gateway mục tiêu và tất cả các mục tiêu của chính nó, vì AgentCore tìm nạp các công cụ của mục tiêu trong quá trình tạo.
+</Fragment>
+<Fragment slot="terraform">
+Trong tệp Terraform nơi bạn khởi tạo các Gateway, hãy kết nối gateway target vào:
+
+```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+module "inner_gateway" {
+  source = "../../common/terraform/src/app/gateways/inner-gateway"
+}
+
+module "outer_gateway" {
+  source              = "../../common/terraform/src/app/gateways/outer-gateway"
+  policy_dependencies = [aws_bedrockagentcore_gateway_target.inner_gateway.target_id]
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = [module.inner_gateway.gateway_arn]
+    }
+  ]
+}
+
+# Register the inner gateway as a target of the outer gateway
+resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
+  gateway_identifier = module.outer_gateway.gateway_id
+  name               = "inner-gateway"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = module.inner_gateway.gateway_url
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+```
+
+`name` của target (`inner-gateway` ở trên) thêm tiền tố cho tên hành động Cedar trên outer gateway — xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>. Mục `additional_iam_policy_statements` cấp cho vai trò thực thi của outer gateway quyền truy cập invoke vào inner gateway, điều này là bắt buộc cả để tìm nạp các công cụ của inner gateway tại thời điểm tạo target và để định tuyến các cuộc gọi tại runtime. `policy_dependencies` đảm bảo các chính sách Cedar tham chiếu đến các hành động của target này được tạo sau khi target đã đăng ký chúng.
+
+:::note[Thứ tự target]
+AgentCore tìm nạp các công cụ của inner gateway khi `aws_bedrockagentcore_gateway_target` được tạo, vì vậy bất kỳ target nào của inner gateway nên được tạo trước. Thêm chúng vào `depends_on` của target nếu chúng được quản lý trong cùng một cấu hình.
+:::
+</Fragment>
+</Infrastructure>
+
+## Chính sách Cedar qua các gateway được xâu chuỗi
+
+Mỗi gateway trong chuỗi đánh giá tập chính sách của riêng nó:
+
+1. **Gateway nguồn** đánh giá người gọi ban đầu (ví dụ: vai trò thực thi của agent) đối với hành động có tiền tố, ví dụ: `AgentCore::Action::"inner-gateway___my-mcp___add"`.
+2. **Gateway mục tiêu** đánh giá vai trò thực thi của gateway nguồn đối với hành động bên trong, ví dụ: `AgentCore::Action::"my-mcp___add"`.
+
+Điều này có nghĩa là một cuộc gọi công cụ qua chuỗi gateway phải được cho phép tại mọi điểm dừng. `permit-all.cedar` mặc định cho phép bất kỳ người gọi nào trong cùng tài khoản AWS, bao gồm vai trò của gateway nguồn; nếu bạn viết các chính sách hẹp hơn trên gateway mục tiêu, hãy nhớ rằng principal mà nó thấy là vai trò của *gateway nguồn*, không phải người gọi ban đầu.
+
+## Phát triển Cục bộ
+
+Chạy Gateway nguồn cục bộ với:
+
+<NxCommands commands={["<source-gateway-name>-serve-local"]} />
+
+khởi động gateway nguồn cục bộ, gateway mục tiêu cục bộ và mọi MCP server được gắn vào một trong hai, mỗi cái trên cổng cục bộ được chỉ định của nó. Tên công cụ được thêm tiền tố tại mỗi điểm dừng chính xác như khi triển khai (`<gateway-target-name>___<target-name>___<tool-name>`), vì vậy các lời nhắc của agent và tên hành động Cedar vẫn nhất quán giữa các lần chạy cục bộ và triển khai.
+
+:::caution[Độ trung thực cục bộ]
+Phát triển cục bộ sử dụng **gateway thay thế cục bộ** — các bộ tổng hợp MCP nhẹ được khởi động bởi mỗi dự án Gateway, không phải dịch vụ AgentCore Gateway. Do đó, **các chính sách Cedar không được đánh giá cục bộ** tại cả hai điểm dừng. Để thực thi các chính sách Cedar, hãy chạy target `serve` của agent thay thế (xem hướng dẫn kết nối agent <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) để agent chạy cục bộ gọi Gateway đã triển khai.
+:::

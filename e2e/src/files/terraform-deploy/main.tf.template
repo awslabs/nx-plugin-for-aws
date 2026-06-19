@@ -268,6 +268,55 @@ resource "aws_bedrockagentcore_gateway_target" "py_mcp_server" {
   }
 }
 
+# Chained gateways: the parent gateway fronts my_gateway via the
+# gateway -> gateway connection, re-exposing its tools under
+# `my-gateway___<target>___<tool>`. The parent signs outbound calls to
+# my_gateway with its own role and fetches its tools at target creation
+# time, so it needs InvokeGateway access before the target is created.
+module "parent_gateway" {
+  source = "../../common/terraform/src/app/gateways/parent-gateway"
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock-agentcore:InvokeGateway"]
+      Resource = [module.my_gateway.gateway_arn]
+    }
+  ]
+
+  policy_dependencies = [
+    aws_bedrockagentcore_gateway_target.my_gateway.target_id,
+  ]
+}
+
+# Register my_gateway as a target of the parent gateway — the Terraform
+# analogue of `parentGateway.addGateway(myGateway)` in the CDK template.
+# AgentCore fetches my_gateway's tools when this target is created, so
+# my_gateway's own targets must exist first.
+resource "aws_bedrockagentcore_gateway_target" "my_gateway" {
+  gateway_identifier = module.parent_gateway.gateway_id
+  name               = "my-gateway"
+
+  target_configuration {
+    mcp {
+      mcp_server {
+        endpoint = module.my_gateway.gateway_url
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+
+  depends_on = [
+    aws_bedrockagentcore_gateway_target.ts_mcp_server,
+    aws_bedrockagentcore_gateway_target.py_mcp_server,
+  ]
+}
+
 # ---------------------------------------------------------------------------
 # HTTP agents (Bedrock AgentCore runtimes)
 # ---------------------------------------------------------------------------
@@ -442,6 +491,7 @@ module "runtime_config_appconfig_deployment" {
     module.ts_agent,
     module.my_table,
     module.my_gateway,
+    module.parent_gateway,
   ]
 }
 
@@ -553,4 +603,8 @@ output "website_distribution_domain_name" {
 
 output "my_gateway_url" {
   value = module.my_gateway.gateway_url
+}
+
+output "parent_gateway_url" {
+  value = module.parent_gateway.gateway_url
 }

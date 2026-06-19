@@ -266,6 +266,27 @@ describe('agentcore-gateway generator', () => {
       expect(construct).toContain('public addMcpServerTarget');
     });
 
+    it('exposes addGateway + addGatewayTarget for gateway-to-gateway composition', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      expect(construct).toContain('public addGateway');
+      expect(construct).toContain('public addGatewayTarget');
+      // The source gateway's role needs InvokeGateway on the target gateway
+      // to fetch tools at target creation time and route calls at runtime.
+      expect(construct).toContain('bedrock-agentcore:InvokeGateway');
+      // The vended app construct exposes the default gateway target name
+      // used by addGateway.
+      const app = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      expect(app).toContain("public readonly gatewayName = 'my-gateway'");
+    });
+
     it('derives the gateway target construct id from the target name as Target-<name>', () => {
       const construct = tree
         .read(
@@ -274,7 +295,7 @@ describe('agentcore-gateway generator', () => {
         .toString();
       // Construct ids preserve the kebab-case target name (e.g. `ts-mcp` ->
       // `Target-ts-mcp`) so the id changes with the target name.
-      expect(construct).toContain('`Target-${props.gatewayTargetName}`');
+      expect(construct).toContain('`Target-${gatewayTargetName}`');
       expect(construct).not.toContain('toPascalCase');
     });
 

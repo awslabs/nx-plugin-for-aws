@@ -7,6 +7,7 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import agentcoreGatewayGatewayConnectionGenerator from '../agentcore-gateway/gateway-connection/generator';
 import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator';
 import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator';
 import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
@@ -110,6 +111,7 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'py#agent', target: 'agentcore-gateway' },
   { source: 'agentcore-gateway', target: 'ts#mcp-server' },
   { source: 'agentcore-gateway', target: 'py#mcp-server' },
+  { source: 'agentcore-gateway', target: 'agentcore-gateway' },
   { source: 'py#fast-api', target: 'py#dynamodb' },
   { source: 'py#agent', target: 'py#dynamodb' },
   { source: 'py#mcp-server', target: 'py#dynamodb' },
@@ -194,6 +196,8 @@ const CONNECTION_GENERATORS = {
     agentcoreGatewayMcpConnectionGenerator(tree, options),
   'agentcore-gateway -> py#mcp-server': (tree, options) =>
     agentcoreGatewayMcpConnectionGenerator(tree, options),
+  'agentcore-gateway -> agentcore-gateway': (tree, options) =>
+    agentcoreGatewayGatewayConnectionGenerator(tree, options),
   'py#fast-api -> py#dynamodb': (tree, options) =>
     pyDynamoDBFastApiConnectionGenerator(tree, options),
   'py#agent -> py#dynamodb': (tree, options) =>

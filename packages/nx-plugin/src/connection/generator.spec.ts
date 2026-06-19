@@ -120,6 +120,18 @@ describe('connection generator', () => {
     );
   };
 
+  // Helper to set up an agentcore-gateway project
+  const setupGatewayProject = (name: string) => {
+    tree.write(
+      `packages/${name}/project.json`,
+      JSON.stringify({
+        name,
+        root: `packages/${name}`,
+        metadata: { generator: 'agentcore-gateway' },
+      }),
+    );
+  };
+
   // Helper to set up an unknown project
   const setupUnknownProject = (name = 'unknown', components?: any[]) => {
     tree.write(
@@ -263,6 +275,21 @@ describe('connection generator', () => {
           source: 'react',
           target: 'smithy',
         });
+      });
+
+      it('should resolve agentcore-gateway -> agentcore-gateway', async () => {
+        setupGatewayProject('outer-gateway');
+        setupGatewayProject('inner-gateway');
+        const result = await resolveConnection(tree, {
+          sourceProject: 'outer-gateway',
+          targetProject: 'inner-gateway',
+        });
+        expect(result.connection).toEqual({
+          source: 'agentcore-gateway',
+          target: 'agentcore-gateway',
+        });
+        expect(result.sourceComponent).toBeUndefined();
+        expect(result.targetComponent).toBeUndefined();
       });
 
       it('should throw for unsupported connection (trpc -> trpc)', async () => {
