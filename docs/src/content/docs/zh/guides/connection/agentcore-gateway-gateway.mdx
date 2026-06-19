@@ -81,9 +81,13 @@ outerGateway.addGateway(innerGateway, { gatewayTargetName: 'inner' });
 <Fragment slot="terraform">
 在实例化网关的 Terraform 文件中，连接网关目标：
 
-```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+```hcl title="packages/infra/src/main.tf" {2-5,11-15,18-36}
 module "inner_gateway" {
   source = "../../common/terraform/src/app/gateways/inner-gateway"
+
+  # Target ids of the inner gateway's own targets (e.g. its MCP servers), so
+  # its gateway_url is not consumed until it serves their tools.
+  tool_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 module "outer_gateway" {
@@ -123,7 +127,7 @@ resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
 目标 `name`（上面的 `inner-gateway`）为外部网关上的 Cedar 操作名称添加前缀——请参阅<Link path="guides/agentcore-gateway">编写策略部分</Link>。`additional_iam_policy_statements` 条目授予外部网关的执行角色对内部网关的调用访问权限，这在目标创建时获取内部网关的工具以及在运行时路由调用时都是必需的。`policy_dependencies` 确保引用此目标操作的 Cedar 策略在目标注册它们之后创建。
 
 :::note[目标排序]
-AgentCore 在创建 `aws_bedrockagentcore_gateway_target` 时获取内部网关的工具，因此应首先创建内部网关的任何目标。如果它们在同一配置中管理，请将它们添加到目标的 `depends_on` 中。
+AgentCore 在创建 `aws_bedrockagentcore_gateway_target` 时获取内部网关的工具，因此内部网关必须已经在提供这些工具。将内部网关的 `tool_dependencies` 设置为其自己目标的 id：然后其 `gateway_url` 会通过就绪探测流动，该探测会轮询 `tools/list` 直到提供这些工具，因此外部网关的目标会等待内部网关准备就绪。
 :::
 </Fragment>
 </Infrastructure>

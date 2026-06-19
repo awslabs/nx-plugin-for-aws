@@ -81,9 +81,13 @@ Construct cấp cho vai trò thực thi của gateway nguồn quyền truy cập
 <Fragment slot="terraform">
 Trong tệp Terraform nơi bạn khởi tạo các Gateway, hãy kết nối gateway target vào:
 
-```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+```hcl title="packages/infra/src/main.tf" {2-5,11-15,18-36}
 module "inner_gateway" {
   source = "../../common/terraform/src/app/gateways/inner-gateway"
+
+  # Target ids của các target riêng của inner gateway (ví dụ: các MCP server của nó), để
+  # gateway_url của nó không được sử dụng cho đến khi nó phục vụ các công cụ của chúng.
+  tool_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 module "outer_gateway" {
@@ -123,7 +127,7 @@ resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
 `name` của target (`inner-gateway` ở trên) thêm tiền tố cho tên hành động Cedar trên outer gateway — xem <Link path="guides/agentcore-gateway">phần Viết Chính sách</Link>. Mục `additional_iam_policy_statements` cấp cho vai trò thực thi của outer gateway quyền truy cập invoke vào inner gateway, điều này là bắt buộc cả để tìm nạp các công cụ của inner gateway tại thời điểm tạo target và để định tuyến các cuộc gọi tại runtime. `policy_dependencies` đảm bảo các chính sách Cedar tham chiếu đến các hành động của target này được tạo sau khi target đã đăng ký chúng.
 
 :::note[Thứ tự target]
-AgentCore tìm nạp các công cụ của inner gateway khi `aws_bedrockagentcore_gateway_target` được tạo, vì vậy bất kỳ target nào của inner gateway nên được tạo trước. Thêm chúng vào `depends_on` của target nếu chúng được quản lý trong cùng một cấu hình.
+AgentCore tìm nạp các công cụ của inner gateway khi `aws_bedrockagentcore_gateway_target` được tạo, vì vậy inner gateway phải đã phục vụ chúng. Đặt `tool_dependencies` của inner gateway thành các id của các target riêng của nó: `gateway_url` của nó sau đó sẽ chảy qua một readiness probe thăm dò `tools/list` cho đến khi các công cụ đó được phục vụ, vì vậy target của outer gateway sẽ đợi inner gateway sẵn sàng.
 :::
 </Fragment>
 </Infrastructure>
