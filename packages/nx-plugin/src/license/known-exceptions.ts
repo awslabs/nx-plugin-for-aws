@@ -30,12 +30,3 @@ export const MCP_INSPECTOR_EXCEPTIONS: DependencyCheckException[] = [
     spdx: 'Apache-2.0',
   },
 ];
-
-export const AG_UI_STRANDS_EXCEPTIONS: DependencyCheckException[] = [
-  {
-    package: 'ag_ui_strands',
-    reason:
-      'Part of MIT-licensed ag-ui-protocol/ag-ui repo. Wheel ships without license metadata.',
-    spdx: 'MIT',
-  },
-];

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, readNxJson, type Tree, updateNxJson } from '@nx/devkit';
-import { PY_AGENT_GENERATOR_INFO } from '../py/agent/generator';
 import { PY_MCP_SERVER_GENERATOR_INFO } from '../py/mcp-server/generator';
 import { TS_MCP_SERVER_GENERATOR_INFO } from '../ts/mcp-server/generator';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
@@ -19,10 +18,7 @@ import {
   updateLicenseCheckTargetInputs,
   writeLicenseConfig,
 } from './config';
-import {
-  AG_UI_STRANDS_EXCEPTIONS,
-  MCP_INSPECTOR_EXCEPTIONS,
-} from './known-exceptions';
+import { MCP_INSPECTOR_EXCEPTIONS } from './known-exceptions';
 import type { LicenseGeneratorSchema } from './schema';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
 
@@ -128,13 +124,11 @@ const writeLicenseCheckTarget = async (tree: Tree): Promise<void> => {
 const addExceptionsForExistingProjects = async (tree: Tree): Promise<void> => {
   const projects = getProjects(tree);
   let needsMcp = false;
-  let needsAgUi = false;
 
   const mcpIds = [
     TS_MCP_SERVER_GENERATOR_INFO.id,
     PY_MCP_SERVER_GENERATOR_INFO.id,
   ];
-  const pyAgentId = PY_AGENT_GENERATOR_INFO.id;
 
   for (const [, config] of projects) {
     const components =
@@ -146,18 +140,10 @@ const addExceptionsForExistingProjects = async (tree: Tree): Promise<void> => {
       if (typeof gen === 'string' && mcpIds.includes(gen)) {
         needsMcp = true;
       }
-      if (typeof gen === 'string' && gen === pyAgentId) {
-        if (comp.protocol === 'AG-UI' || comp.protocol === 'ag-ui') {
-          needsAgUi = true;
-        }
-      }
     }
   }
 
-  const exceptions = [
-    ...(needsMcp ? MCP_INSPECTOR_EXCEPTIONS : []),
-    ...(needsAgUi ? AG_UI_STRANDS_EXCEPTIONS : []),
-  ];
+  const exceptions = [...(needsMcp ? MCP_INSPECTOR_EXCEPTIONS : [])];
 
   if (exceptions.length > 0) {
     await ensureLicenseExceptions(tree, exceptions);
