@@ -1318,6 +1318,11 @@ dev-dependencies = []
     expect(agentContent).toContain('checkpointer');
     expect(agentContent).not.toContain('from strands');
 
+    // ChatBedrockConverse's init alias is `model`, not `model_id` — `model_id=`
+    // passes at runtime but fails `ty` (which blocks build/synth/deploy).
+    expect(agentContent).toContain('ChatBedrockConverse(model=MODEL_ID');
+    expect(agentContent).not.toContain('model_id=MODEL_ID');
+
     // AG-UI should not generate init.py (HTTP-only)
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/init.py'),

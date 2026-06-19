@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 import httpx
@@ -9,6 +10,20 @@ from .auth import SigV4HTTPXAuth
 from .session_context import get_current_session_id
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+def _run_sync(coro):
+    """Run a coroutine to completion from sync code, even when an event loop is
+    already running on this thread (e.g. tools are loaded at agent-construction
+    time, which under uvicorn happens inside the running loop). asyncio.run()
+    refuses a running loop, so fall back to a dedicated loop on a worker thread.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 class _SessionHeaderAuth(httpx.Auth):
@@ -59,7 +74,7 @@ class AgentCoreMCPLangchainClient:
                 }
             }
         )
-        return asyncio.run(client.get_tools())
+        return _run_sync(client.get_tools())
 
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> list[BaseTool]:

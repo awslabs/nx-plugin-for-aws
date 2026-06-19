@@ -236,7 +236,6 @@ export const PRE_APPROVED_LICENSES: AllowlistEntry[] = [
       'BSD 3-clause New License',
       'New BSD',
       'New BSD License',
-      'Modified BSD License',
       'BSD License 3',
       'The BSD 3-Clause License',
       'BSD 3-Clause "New" or "Revised" License (BSD-3-Clause)',

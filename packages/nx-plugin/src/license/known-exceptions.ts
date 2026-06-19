@@ -42,9 +42,22 @@ export const AG_UI_STRANDS_EXCEPTIONS: DependencyCheckException[] = [
 
 export const AG_UI_LANGGRAPH_EXCEPTIONS: DependencyCheckException[] = [
   {
-    package: 'ag_ui_langgraph',
+    // pip-licenses reports this wheel with hyphens (unlike ag_ui_strands).
+    package: 'ag-ui-langgraph',
     reason:
       'Part of MIT-licensed ag-ui-protocol/ag-ui repo. Wheel ships without license metadata.',
     spdx: 'MIT',
+  },
+  {
+    package: 'jsonpatch',
+    reason:
+      'Unconditional dependency of langchain-core. Genuinely BSD-3-Clause (LICENSE matches the SPDX BSD-3-Clause template), but the wheel only carries the free-text "Modified BSD License" metadata, not an SPDX expression.',
+    spdx: 'BSD-3-Clause',
+  },
+  {
+    package: 'jsonpointer',
+    reason:
+      'Transitive dependency of jsonpatch (via langchain-core). Genuinely BSD-3-Clause (LICENSE matches the SPDX BSD-3-Clause template), but the wheel only carries the free-text "Modified BSD License" metadata, not an SPDX expression.',
+    spdx: 'BSD-3-Clause',
   },
 ];

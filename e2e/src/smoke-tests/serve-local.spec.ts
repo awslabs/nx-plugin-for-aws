@@ -379,6 +379,14 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
         opts,
       );
+      // Connect the LangChain agent to the MCP server too, so its serve-local
+      // boots the langchain MCP tool loader. That loads tools at agent
+      // construction (module import) under uvicorn's running loop — the path
+      // that crashes if tools are loaded with a bare asyncio.run().
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
+        opts,
+      );
       // Gateway wiring: {gw-agent, gw-py-agent} -> gateway -> {my-mcp,
       // my-py-mcp}. Each agent's serve-local boots the local gateway, which
       // aggregates both MCP servers behind one endpoint.
