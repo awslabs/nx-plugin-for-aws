@@ -81,9 +81,13 @@ The construct grants the source gateway's execution role `bedrock-agentcore:Invo
 <Fragment slot="terraform">
 In the Terraform file where you instantiate the Gateways, wire the gateway target in:
 
-```hcl title="packages/infra/src/main.tf" {5-9,12-30}
+```hcl title="packages/infra/src/main.tf" {2-5,11-15,18-36}
 module "inner_gateway" {
   source = "../../common/terraform/src/app/gateways/inner-gateway"
+
+  # Target ids of the inner gateway's own targets (e.g. its MCP servers), so
+  # its gateway_url is not consumed until it serves their tools.
+  tool_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 module "outer_gateway" {
@@ -123,7 +127,7 @@ resource "aws_bedrockagentcore_gateway_target" "inner_gateway" {
 The target `name` (`inner-gateway` above) prefixes Cedar action names on the outer gateway — see the <Link path="guides/agentcore-gateway">Writing Policies section</Link>. The `additional_iam_policy_statements` entry grants the outer gateway's execution role invoke access to the inner gateway, which is required both to fetch the inner gateway's tools at target creation time and to route calls at runtime. `policy_dependencies` ensures Cedar policies referencing this target's actions are created after the target has registered them.
 
 :::note[Target ordering]
-AgentCore fetches the inner gateway's tools when the `aws_bedrockagentcore_gateway_target` is created, so any targets of the inner gateway should be created first. Add them to the target's `depends_on` if they are managed in the same configuration.
+AgentCore fetches the inner gateway's tools when the `aws_bedrockagentcore_gateway_target` is created, so the inner gateway must already be serving them. Set the inner gateway's `tool_dependencies` to its own targets' ids: its `gateway_url` then flows through a readiness probe that polls `tools/list` until those tools are served, so the outer gateway's target waits for the inner gateway to be ready.
 :::
 </Fragment>
 </Infrastructure>

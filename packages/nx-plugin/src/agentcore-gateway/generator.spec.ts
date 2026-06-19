@@ -361,6 +361,24 @@ describe('agentcore-gateway generator', () => {
       expect(module).toContain('data "external" "rendered_policies"');
       expect(module).toContain('render-cedar.cjs');
     });
+
+    it('emits a tool_dependencies-gated readiness probe routed through gateway_url', () => {
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      // The probe only runs when this gateway is aggregated by another.
+      expect(module).toContain('variable "tool_dependencies"');
+      expect(module).toContain('resource "null_resource" "gateway_ready"');
+      expect(module).toContain(
+        'count = length(var.tool_dependencies) > 0 ? 1 : 0',
+      );
+      // gateway_url flows through the probe so consumers wait for readiness.
+      expect(module).toContain(
+        'null_resource.gateway_ready[0].triggers.gateway_url',
+      );
+    });
   });
 
   describe('Cedar policy templates', () => {
