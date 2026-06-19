@@ -28,6 +28,12 @@ variable "additional_iam_policy_statements" {
   }))
   default = []
 }
+
+variable "tool_dependencies" {
+  description = "Target ids whose tools must be queryable before `gateway_url` is consumable. Set this to the gateway's own target ids (e.g. from agentcore-gateway#mcp-connection) when another gateway aggregates this one: the readiness probe waits until this gateway serves those tools, since a parent gateway fetches them at target creation."
+  type        = list(string)
+  default     = []
+}
 <%_ if (cedarPolicy) { _%>
 
 variable "policy_dependencies" {
@@ -210,6 +216,86 @@ resource "aws_bedrockagentcore_policy" "policies" {
 }
 <%_ } _%>
 
+# A parent gateway fetches this gateway's tools when it registers it as a
+# target, so this gateway must already serve them — its own targets register
+# their tools asynchronously after creation. Probe `tools/list` over SigV4
+# until the configured `tool_dependencies` are served, and route `gateway_url`
+# through this resource so a parent gateway target waits for readiness. Only
+# runs when this gateway is aggregated by another (empty `tool_dependencies`).
+resource "null_resource" "gateway_ready" {
+  count = length(var.tool_dependencies) > 0 ? 1 : 0
+
+  triggers = {
+    gateway_url       = aws_bedrockagentcore_gateway.this.gateway_url
+    region            = local.aws_region
+    tool_dependencies = join(",", var.tool_dependencies)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      uv run --with boto3 --with httpx --with mcp python -c "
+import asyncio
+import time
+
+import boto3
+import httpx
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+gateway_url = '${self.triggers.gateway_url}'
+region = '${self.triggers.region}'
+credentials = boto3.Session(region_name=region).get_credentials()
+signer = SigV4Auth(credentials, 'bedrock-agentcore', region)
+
+
+class SigV4Auth_(httpx.Auth):
+    requires_request_body = True
+
+    def auth_flow(self, request):
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=dict(request.headers),
+        )
+        signer.add_auth(aws_request)
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+async def list_tools():
+    async with streamablehttp_client(
+        gateway_url, auth=SigV4Auth_(), timeout=120
+    ) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.list_tools()
+            return [t.name for t in result.tools]
+
+
+# The built-in semantic-search tool is always present, so require at least one
+# more tool before declaring the gateway ready to serve its aggregated targets.
+deadline = time.time() + 5 * 60
+while True:
+    try:
+        tools = asyncio.run(list_tools())
+        if len([t for t in tools if t != 'x_amz_bedrock_agentcore_search']) > 0:
+            break
+        last = f'gateway serves no aggregated tools yet (got {tools})'
+    except Exception as e:
+        last = str(e)
+    if time.time() >= deadline:
+        raise SystemExit(f'Gateway {gateway_url} not ready: {last}')
+    time.sleep(5)
+
+print(f'Gateway {gateway_url} is serving tools')
+"
+    EOT
+  }
+}
+
 # Add gateway URL to runtime config
 module "add_gateway_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
@@ -232,8 +318,10 @@ output "gateway_arn" {
 }
 
 output "gateway_url" {
-  description = "MCP endpoint URL of the Bedrock AgentCore Gateway"
-  value       = aws_bedrockagentcore_gateway.this.gateway_url
+  description = "MCP endpoint URL of the Bedrock AgentCore Gateway. When `tool_dependencies` is set, this value flows through the readiness probe so consumers (e.g. a parent gateway target) wait until the gateway serves its aggregated tools."
+  value = length(var.tool_dependencies) > 0 ? (
+    null_resource.gateway_ready[0].triggers.gateway_url
+  ) : aws_bedrockagentcore_gateway.this.gateway_url
 }
 
 output "gateway_role_arn" {
