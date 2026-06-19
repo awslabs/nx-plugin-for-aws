@@ -12,8 +12,6 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { ensureLicenseExceptions } from '../../license/config';
-import { AG_UI_STRANDS_EXCEPTIONS } from '../../license/known-exceptions';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
   ensurePythonAgentConnectionProject,
@@ -415,10 +413,6 @@ export const pyAgentGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_AGENT_GENERATOR_INFO]);
-
-  if (protocol === 'ag-ui') {
-    await ensureLicenseExceptions(tree, AG_UI_STRANDS_EXCEPTIONS);
-  }
 
   await formatFilesInSubtree(tree);
   return async () => {

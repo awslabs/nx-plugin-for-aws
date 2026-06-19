@@ -289,51 +289,7 @@ describe('license generator', () => {
       expect(config).toContain('@modelcontextprotocol/inspector');
     });
 
-    it('should add AG-UI exceptions when py#agent with ag-ui protocol exists (license after agent)', async () => {
-      addProjectConfiguration(tree, 'my-project', {
-        root: 'packages/my-project',
-        sourceRoot: 'packages/my-project/src',
-        metadata: {
-          components: [
-            {
-              generator: 'py#agent',
-              path: 'src/agent',
-              name: 'my-agent',
-              protocol: 'ag-ui',
-            },
-          ],
-        } as any,
-      });
-
-      await licenseGenerator(tree, options);
-
-      const config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).toContain('ag_ui_strands');
-    });
-
-    it('should NOT add AG-UI exceptions for ts#agent (only py#agent uses ag_ui_strands)', async () => {
-      addProjectConfiguration(tree, 'my-project', {
-        root: 'packages/my-project',
-        sourceRoot: 'packages/my-project/src',
-        metadata: {
-          components: [
-            {
-              generator: 'ts#agent',
-              path: 'src/agent',
-              name: 'my-agent',
-              protocol: 'ag-ui',
-            },
-          ],
-        } as any,
-      });
-
-      await licenseGenerator(tree, options);
-
-      const config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).not.toContain('ag_ui_strands');
-    });
-
-    it('should not add exceptions when no MCP/AG-UI projects exist', async () => {
+    it('should not add exceptions when no MCP projects exist', async () => {
       addProjectConfiguration(tree, 'my-project', {
         root: 'packages/my-project',
         sourceRoot: 'packages/my-project/src',
@@ -348,7 +304,6 @@ describe('license generator', () => {
 
       const config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
       expect(config).not.toContain('@modelcontextprotocol/inspector');
-      expect(config).not.toContain('ag_ui_strands');
     });
 
     it('should add pythonCollector when py#project runs after license generator', async () => {
@@ -386,19 +341,6 @@ describe('license generator', () => {
       await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
       config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
       expect(config).toContain('@modelcontextprotocol/inspector');
-    });
-
-    it('should add AG-UI exceptions when py#agent runs after license generator', async () => {
-      const { ensureLicenseExceptions } = await import('./config');
-      const { AG_UI_STRANDS_EXCEPTIONS } = await import('./known-exceptions');
-
-      await licenseGenerator(tree, options);
-      let config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).not.toContain('ag_ui_strands');
-
-      await ensureLicenseExceptions(tree, AG_UI_STRANDS_EXCEPTIONS);
-      config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).toContain('ag_ui_strands');
     });
 
     it('should be no-op when ensure functions run before license generator', async () => {
