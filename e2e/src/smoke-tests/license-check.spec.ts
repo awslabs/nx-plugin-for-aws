@@ -141,6 +141,23 @@ describe('smoke test - license-check', () => {
     (pyToml.project as any).dependencies = pyDeps;
     writeFileSync(pyProjectTomlPath, TOML.stringify(pyToml));
 
+    // langchain pulls jsonpatch (+ its transitive jsonpointer), whose wheels
+    // declare only the free-text "Modified BSD License" — both are genuinely
+    // BSD-3-Clause. A generated langchain agent gets per-package exceptions for
+    // these via the py#agent generator; this test adds raw PY_VERSIONS without
+    // running that generator, so add the same exceptions to the config here.
+    const configPath = join(projectRoot, 'aws-nx-plugin.config.mts');
+    const config = readFileSync(configPath, 'utf-8');
+    writeFileSync(
+      configPath,
+      config.replace(
+        'exceptions: [',
+        `exceptions: [
+        { package: 'jsonpatch', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },
+        { package: 'jsonpointer', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },`,
+      ),
+    );
+
     await runCLI('uv sync --directory packages/py_deps', {
       ...opts,
       prefixWithPackageManagerCmd: false,
