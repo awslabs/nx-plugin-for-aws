@@ -127,6 +127,22 @@ dependencies = ["strands-agents"]
         `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_client.py`,
       ),
     ).toBe(true);
+    // Framework-agnostic transport layer shared with the MCP client
+    expect(
+      tree.exists(
+        `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_transport.py`,
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        `packages/common/agent_connection/${moduleName}/core/agentcore_transport.py`,
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        `packages/common/agent_connection/${moduleName}/core/auth/session.py`,
+      ),
+    ).toBe(true);
     // Per-connection app client
     expect(
       tree.exists(

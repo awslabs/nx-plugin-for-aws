@@ -138,6 +138,23 @@ export const getAgent = async (sessionId: string) =>
       ),
     ).toBe(true);
 
+    // Check the framework-agnostic transport layer was generated in core/
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-mcp-transport.ts',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-transport.ts',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-fetch.ts',
+      ),
+    ).toBe(true);
+
     // Check per-connection client was generated in app/
     expect(
       tree.exists(
@@ -447,6 +464,24 @@ export const getAgent = async (sessionId: string) => {
       'utf-8',
     );
     expect(agentCoreMcpClient).toMatchSnapshot('agentcore-mcp-client.ts');
+
+    const agentCoreMcpTransport = tree.read(
+      'packages/common/agent-connection/src/core/agentcore-mcp-transport.ts',
+      'utf-8',
+    );
+    expect(agentCoreMcpTransport).toMatchSnapshot('agentcore-mcp-transport.ts');
+
+    const agentCoreTransport = tree.read(
+      'packages/common/agent-connection/src/core/agentcore-transport.ts',
+      'utf-8',
+    );
+    expect(agentCoreTransport).toMatchSnapshot('agentcore-transport.ts');
+
+    const agentCoreFetch = tree.read(
+      'packages/common/agent-connection/src/core/agentcore-fetch.ts',
+      'utf-8',
+    );
+    expect(agentCoreFetch).toMatchSnapshot('agentcore-fetch.ts');
 
     const inventoryMcpClient = tree.read(
       'packages/common/agent-connection/src/app/inventory-mcp-client.ts',

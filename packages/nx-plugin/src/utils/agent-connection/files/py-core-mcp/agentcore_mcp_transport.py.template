@@ -1,0 +1,45 @@
+from collections.abc import Callable
+
+from .agentcore_transport import (
+    TransportFactory,
+    jwt_transport,
+    no_auth_transport,
+    sigv4_transport,
+)
+
+
+def _resolve(agent_runtime_arn: str) -> tuple[str, str]:
+    """Extract region from ARN and construct the invocation URL.
+
+    ARN format: arn:partition:service:region:account-id:resource
+    """
+    region = agent_runtime_arn.split(":")[3]
+    encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
+    url = (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+        f"{encoded_arn}/invocations?qualifier=DEFAULT"
+    )
+    return region, url
+
+
+class AgentCoreMCPTransport:
+    """Factory for MCP transport factories that connect to an AgentCore runtime."""
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> TransportFactory:
+        """SigV4-authenticated transport for a Bedrock AgentCore runtime."""
+        region, url = _resolve(agent_runtime_arn)
+        return sigv4_transport(url, region)
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> TransportFactory:
+        """Bearer-authenticated transport for a Bedrock AgentCore runtime."""
+        _, url = _resolve(agent_runtime_arn)
+        return jwt_transport(url, access_token_provider)
+
+    @staticmethod
+    def without_auth(url: str) -> TransportFactory:
+        """Plain-HTTP transport — for local dev."""
+        return no_auth_transport(url)

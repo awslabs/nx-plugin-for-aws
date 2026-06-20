@@ -159,6 +159,23 @@ dependencies = ["strands-agents"]
       ),
     ).toBe(true);
 
+    // Check the framework-agnostic transport layer was generated
+    expect(
+      tree.exists(
+        'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_transport.py',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent_connection/proj_agent_connection/core/agentcore_transport.py',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent_connection/proj_agent_connection/core/auth/session.py',
+      ),
+    ).toBe(true);
+
     // Check per-connection client was generated in the shared project
     expect(
       tree.exists(
@@ -496,6 +513,24 @@ dependencies = ["strands-agents"]
       'utf-8',
     );
     expect(agentCoreMcpClient).toMatchSnapshot('agentcore_mcp_client.py');
+
+    const agentCoreMcpTransport = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_transport.py',
+      'utf-8',
+    );
+    expect(agentCoreMcpTransport).toMatchSnapshot('agentcore_mcp_transport.py');
+
+    const agentCoreTransport = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/agentcore_transport.py',
+      'utf-8',
+    );
+    expect(agentCoreTransport).toMatchSnapshot('agentcore_transport.py');
+
+    const sessionAuth = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/auth/session.py',
+      'utf-8',
+    );
+    expect(sessionAuth).toMatchSnapshot('session.py');
 
     const initPy = tree.read(
       'packages/common/agent_connection/proj_agent_connection/__init__.py',

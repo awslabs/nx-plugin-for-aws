@@ -108,6 +108,22 @@ export const getAgent = async (sessionId: string) =>
         'packages/common/agent-connection/src/core/agentcore-gateway-mcp-client.ts',
       ),
     ).toBe(true);
+    // Framework-agnostic transport layer shared with the MCP client
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-gateway-mcp-transport.ts',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-transport.ts',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-fetch.ts',
+      ),
+    ).toBe(true);
     expect(
       tree.exists(
         'packages/common/agent-connection/src/app/my-gateway-client.ts',
