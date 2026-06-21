@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 `connection` 생성기는 <Link path="guides/py-agent">Python Agent</Link>를 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>에 연결할 수 있습니다.
 
-생성기는 에이전트가 배포 시 IAM SigV4(`httpx` 요청 서명 사용)로 Gateway에 인증하고, 로컬 실행 시 연결된 MCP 서버에 직접 멀티플렉싱하도록 연결합니다.
+생성기는 에이전트가 배포 시 IAM SigV4(`httpx` 요청 서명 사용)로 Gateway에 인증하고, 로컬 실행 시 Gateway 프로젝트에서 시작한 로컬 게이트웨이에 연결하도록 연결합니다.
 
 ## 사전 요구 사항
 
@@ -44,10 +44,9 @@ import Infrastructure from '@components/infrastructure.astro';
 - packages/common/agent\_connection
   - \<scope>\_agent\_connection
     - core/
-      - agentcore\_gateway\_mcp\_client.py `httpx`를 사용하는 SigV4 MCP 클라이언트
-      - agentcore\_gateway\_mcp\_local\_client.py 연결된 MCP 서버용 로컬 멀티플렉스 클라이언트
+      - strands\_agentcore\_gateway\_mcp\_client.py 배포된 Gateway용 Strands MCP 클라이언트
     - app/
-      - \<gateway\_snake>\_client.py `ATTACHED_MCP_SERVERS` 목록이 있는 Gateway별 래퍼
+      - \<gateway\_snake>\_client.py Gateway별 클라이언트 래퍼
     - \_\_init\_\_.py Gateway 클라이언트를 재내보내기
 
 </FileTree>
@@ -83,7 +82,7 @@ def get_agent():
 `MyGatewayClient.create()`는 컨텍스트 관리 가능한 단일 클라이언트를 반환하며, 이 클라이언트의 `list_tools_sync()`는 Gateway를 통해 사용 가능한 모든 도구를 제공합니다:
 
 - **배포 모드** (`SERVE_LOCAL` 미설정): Gateway의 MCP 엔드포인트를 가리키는 단일 `MCPClient`, SigV4 서명됨.
-- **로컬 모드** (`SERVE_LOCAL=true`): 연결된 각 MCP 서버로 팬아웃하고 도구의 합집합을 제공하는 `AgentCoreGatewayLocalMultiplexClient`.
+- **로컬 모드** (`SERVE_LOCAL=true`): Gateway 프로젝트의 `serve-local` 대상에서 시작한 로컬 게이트웨이를 가리키는 일반 HTTP `MCPClient`.
 
 세션 ID는 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더를 통해 다운스트림 MCP 서버로 자동으로 전파됩니다.
 
@@ -140,8 +139,8 @@ Gateway URL은 생성된 Terraform 모듈에 의해 <Link path="guides/runtime-c
 
 생성기는 에이전트의 `serve-local` 대상을 다음과 같이 구성합니다:
 
-1. 연결된 Gateway에 연결된 모든 MCP 서버 시작
-2. `SERVE_LOCAL=true`를 설정하여 생성된 클라이언트가 배포된 Gateway를 호출하는 대신 로컬 MCP 서버로 팬아웃하도록 함
+1. 연결된 Gateway의 로컬 게이트웨이와 연결된 모든 MCP 서버 시작
+2. `SERVE_LOCAL=true`를 설정하여 생성된 클라이언트가 배포된 Gateway 대신 로컬 게이트웨이를 가리키도록 함
 
 다음 명령으로 에이전트를 로컬에서 실행하세요:
 
