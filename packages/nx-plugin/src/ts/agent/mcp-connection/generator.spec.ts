@@ -131,10 +131,10 @@ export const getAgent = async (sessionId: string) =>
       true,
     );
 
-    // Check agentcore-mcp-client.ts was generated in core/
+    // Check strands-agentcore-mcp-client.ts was generated in core/
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/core/agentcore-mcp-client.ts',
+        'packages/common/agent-connection/src/core/strands-agentcore-mcp-client.ts',
       ),
     ).toBe(true);
 
@@ -459,11 +459,13 @@ export const getAgent = async (sessionId: string) => {
       },
     });
 
-    const agentCoreMcpClient = tree.read(
-      'packages/common/agent-connection/src/core/agentcore-mcp-client.ts',
+    const strandsAgentCoreMcpClient = tree.read(
+      'packages/common/agent-connection/src/core/strands-agentcore-mcp-client.ts',
       'utf-8',
     );
-    expect(agentCoreMcpClient).toMatchSnapshot('agentcore-mcp-client.ts');
+    expect(strandsAgentCoreMcpClient).toMatchSnapshot(
+      'strands-agentcore-mcp-client.ts',
+    );
 
     const agentCoreMcpTransport = tree.read(
       'packages/common/agent-connection/src/core/agentcore-mcp-transport.ts',

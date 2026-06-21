@@ -152,10 +152,10 @@ dependencies = ["strands-agents"]
       true,
     );
 
-    // Check core agentcore_mcp_client.py was generated
+    // Check core strands_agentcore_mcp_client.py was generated
     expect(
       tree.exists(
-        'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client.py',
+        'packages/common/agent_connection/proj_agent_connection/core/strands_agentcore_mcp_client.py',
       ),
     ).toBe(true);
 
@@ -508,11 +508,13 @@ dependencies = ["strands-agents"]
     );
     expect(clientFile).toMatchSnapshot('inventory_mcp_client.py');
 
-    const agentCoreMcpClient = tree.read(
-      'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client.py',
+    const strandsAgentCoreMcpClient = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/strands_agentcore_mcp_client.py',
       'utf-8',
     );
-    expect(agentCoreMcpClient).toMatchSnapshot('agentcore_mcp_client.py');
+    expect(strandsAgentCoreMcpClient).toMatchSnapshot(
+      'strands_agentcore_mcp_client.py',
+    );
 
     const agentCoreMcpTransport = tree.read(
       'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_transport.py',

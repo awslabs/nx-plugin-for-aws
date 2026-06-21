@@ -141,9 +141,9 @@ core-runtime-config/session-context.ts           (unchanged)  Layer 0 — async-
 core-auth/agentcore-fetch.ts                     NEW  Layer 0 — createSigV4Fetch / createJwtFetch / createPlainFetch (each forwards the session header)
 core-transport/agentcore-transport.ts            NEW  Layer 1 shared — sigV4Transport / jwtTransport / noAuthTransport (endpoint-agnostic)
 core-mcp/agentcore-mcp-transport.ts              NEW  Layer 1 — resolve ARN → { region, url }, delegate to shared core
-core-mcp/agentcore-mcp-client.ts                 KEEP Layer 2 — thin: new McpClient({ transport })
+core-mcp/strands-agentcore-mcp-client.ts         NEW  Layer 2 — thin Strands wrapper: new McpClient({ transport })
 core-gateway/agentcore-gateway-mcp-transport.ts  NEW  Layer 1 — resolve gateway URL → region, delegate to shared core
-core-gateway/agentcore-gateway-mcp-client.ts     KEEP Layer 2 — thin Strands wrapper
+core-gateway/strands-agentcore-gateway-mcp-client.ts  NEW  Layer 2 — thin Strands wrapper
 ```
 
 ### File layout (Python, `py-core-*` directories) — structurally equivalent
@@ -155,9 +155,9 @@ core-auth/auth/sigv4.py                           (unchanged)  Layer 0 — SigV4
 core-auth/auth/session.py                        NEW  Layer 0 — SessionHeaderAuth + sigv4_auth / jwt_auth / plain_auth builders (each forwards the session header)
 core-transport/agentcore_transport.py            NEW  Layer 1 shared — sigv4_transport / jwt_transport / no_auth_transport (return a transport factory)
 core-mcp/agentcore_mcp_transport.py              NEW  Layer 1 — resolve ARN → (region, url), delegate to shared core
-core-mcp/agentcore_mcp_client.py                 KEEP Layer 2 — thin: MCPClient(<factory>)
+core-mcp/strands_agentcore_mcp_client.py         NEW  Layer 2 — thin Strands wrapper: MCPClient(<factory>)
 core-gateway/agentcore_gateway_mcp_transport.py  NEW  Layer 1 — resolve gateway URL → region, delegate to shared core
-core-gateway/agentcore_gateway_mcp_client.py     KEEP Layer 2 — thin Strands wrapper
+core-gateway/strands_agentcore_gateway_mcp_client.py  NEW  Layer 2 — thin Strands wrapper
 ```
 
 The languages are equivalent layer-for-layer. The only intrinsic difference is the auth
@@ -377,7 +377,7 @@ export class AgentCoreGatewayMcpTransport {
 }
 ```
 
-### Layer 2 — `core-mcp/agentcore-mcp-client.ts` (only file importing Strands)
+### Layer 2 — `core-mcp/strands-agentcore-mcp-client.ts` (only file importing Strands)
 
 ```ts
 import { McpClient } from '@strands-agents/sdk';
@@ -388,7 +388,7 @@ import {
   AgentCoreMcpTransportNoAuthOptions,
 } from './agentcore-mcp-transport.js';
 
-export class AgentCoreMcpClient {
+export class StrandsAgentCoreMcpClient {
   static withIamAuth(o: AgentCoreMcpTransportIamOptions): McpClient {
     return new McpClient({ transport: AgentCoreMcpTransport.withIamAuth(o) });
   }
@@ -401,8 +401,12 @@ export class AgentCoreMcpClient {
 }
 ```
 
-`core-gateway/agentcore-gateway-mcp-client.ts` is the same shape, delegating to
+`core-gateway/strands-agentcore-gateway-mcp-client.ts` is the same shape, delegating to
 `AgentCoreGatewayMcpTransport`.
+
+The framework name is part of the class name (`StrandsAgentCoreMcpClient`) and file name
+because these files *are* Strands-specific — only the framework-agnostic Layers 0–1 (the
+transport, signer, and runtime-config resolution) keep generic `AgentCore*` names.
 
 ## Appendix B: Python reference implementation (equivalent)
 
@@ -574,7 +578,7 @@ class AgentCoreGatewayMcpTransport:
         return no_auth_transport(gateway_url)
 ```
 
-### Layer 2 — `core-mcp/agentcore_mcp_client.py` (only file importing Strands)
+### Layer 2 — `core-mcp/strands_agentcore_mcp_client.py` (only file importing Strands)
 
 ```python
 from collections.abc import Callable
@@ -584,7 +588,7 @@ from strands.tools.mcp.mcp_client import MCPClient
 from .agentcore_mcp_transport import AgentCoreMcpTransport
 
 
-class AgentCoreMCPClient:
+class StrandsAgentCoreMCPClient:
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> MCPClient:
         return MCPClient(AgentCoreMcpTransport.with_iam_auth(agent_runtime_arn))
@@ -602,7 +606,7 @@ class AgentCoreMCPClient:
         return MCPClient(AgentCoreMcpTransport.without_auth(url))
 ```
 
-`core-gateway/agentcore_gateway_mcp_client.py` is the same shape, delegating to
+`core-gateway/strands_agentcore_gateway_mcp_client.py` is the same shape, delegating to
 `AgentCoreGatewayMcpTransport`.
 
 ## Appendix C: Adding a non-Strands framework (TypeScript)
