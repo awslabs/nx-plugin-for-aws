@@ -287,10 +287,15 @@ resource "null_resource" "docker_publish" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      aws ecr get-login-password --region ${data.aws_region.current.region} | <%= containerEngine %> login --username AWS --password-stdin ${self.triggers.repository_url}
-      <%= containerEngine %> tag ${self.triggers.docker_image_tag} ${self.triggers.repository_url}:latest
-      <%= containerEngine %> push ${self.triggers.repository_url}:latest
+      aws ecr get-login-password --region "$AWS_REGION" | <%= containerEngine %> login --username AWS --password-stdin "$REPOSITORY_URL"
+      <%= containerEngine %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:latest"
+      <%= containerEngine %> push "$REPOSITORY_URL:latest"
     EOT
+    environment = {
+      AWS_REGION       = data.aws_region.current.region
+      REPOSITORY_URL   = self.triggers.repository_url
+      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+    }
   }
 
   depends_on = [aws_ecr_repository_policy.migration_handler]
@@ -574,10 +579,10 @@ resource "null_resource" "create_db_user_trigger" {
     command = <<-EOT
       output_file=$(mktemp)
       response=$(aws lambda invoke \
-        --region ${data.aws_region.current.region} \
-        --function-name ${self.triggers.function_name} \
+        --region "$AWS_REGION" \
+        --function-name "$FUNCTION_NAME" \
         --cli-binary-format raw-in-base64-out \
-        --payload '{"RequestType":"Create","PhysicalResourceId":"db-user:${self.triggers.db_user}"}' \
+        --payload "{\"RequestType\":\"Create\",\"PhysicalResourceId\":\"db-user:$DB_USER\"}" \
         "$output_file")
       cat "$output_file"
       echo "$response"
@@ -587,6 +592,11 @@ resource "null_resource" "create_db_user_trigger" {
       fi
       rm -f "$output_file"
     EOT
+    environment = {
+      AWS_REGION    = data.aws_region.current.region
+      FUNCTION_NAME = self.triggers.function_name
+      DB_USER       = self.triggers.db_user
+    }
   }
 
   depends_on = [aws_lambda_function.create_db_user, module.aurora]
@@ -655,8 +665,8 @@ resource "null_resource" "migration_trigger" {
     command = <<-EOT
       output_file=$(mktemp)
       response=$(aws lambda invoke \
-        --region ${data.aws_region.current.region} \
-        --function-name ${self.triggers.function_name} \
+        --region "$AWS_REGION" \
+        --function-name "$FUNCTION_NAME" \
         --cli-binary-format raw-in-base64-out \
         "$output_file")
       cat "$output_file"
@@ -667,6 +677,10 @@ resource "null_resource" "migration_trigger" {
       fi
       rm -f "$output_file"
     EOT
+    environment = {
+      AWS_REGION    = data.aws_region.current.region
+      FUNCTION_NAME = self.triggers.function_name
+    }
   }
 
   depends_on = [

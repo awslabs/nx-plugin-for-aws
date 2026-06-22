@@ -690,7 +690,7 @@ resource "null_resource" "upload_website_files" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      cd "\${path.root}"
+      cd "$ROOT_PATH"
       uv run --with boto3 python3 -c "
 import os
 import sys
@@ -779,9 +779,14 @@ def sync_to_s3(local_path, bucket_name):
         sys.exit(1)
 
 # Execute sync
-sync_to_s3('\${var.website_file_path}', '\${aws_s3_bucket.website.bucket}')
+sync_to_s3(os.environ['WEBSITE_FILE_PATH'], os.environ['BUCKET_NAME'])
 "
     EOT
+    environment = {
+      ROOT_PATH         = path.root
+      WEBSITE_FILE_PATH = var.website_file_path
+      BUCKET_NAME       = aws_s3_bucket.website.bucket
+    }
   }
 
   depends_on = [aws_s3_bucket_policy.website_cloudfront_policy]
@@ -811,6 +816,7 @@ resource "null_resource" "cloudfront_invalidation" {
     command = <<-EOT
       uv run --with boto3 python3 -c "
 import boto3
+import os
 import sys
 from botocore.exceptions import ClientError, NoCredentialsError
 
@@ -832,7 +838,7 @@ def create_invalidation(distribution_id):
 
         invalidation_id = response['Invalidation']['Id']
         print(f'CloudFront cache invalidation created: {invalidation_id}')
-        print(f'Distribution: \${aws_cloudfront_distribution.website.id}')
+        print(f'Distribution: {distribution_id}')
         print(f'Status: {response[\\"Invalidation\\"][\\"Status\\"]}')
 
     except NoCredentialsError:
@@ -846,9 +852,12 @@ def create_invalidation(distribution_id):
         sys.exit(1)
 
 # Execute invalidation
-create_invalidation('\${aws_cloudfront_distribution.website.id}')
+create_invalidation(os.environ['DISTRIBUTION_ID'])
 "
     EOT
+    environment = {
+      DISTRIBUTION_ID = aws_cloudfront_distribution.website.id
+    }
   }
 
   depends_on = [

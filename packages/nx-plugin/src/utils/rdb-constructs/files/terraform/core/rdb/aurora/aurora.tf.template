@@ -540,9 +540,9 @@ resource "null_resource" "proxy_target_ready" {
       deadline=$((start_time + 600))
       while true; do
         target_state=$(aws rds describe-db-proxy-targets \
-          --region ${data.aws_region.current.region} \
-          --db-proxy-name ${self.triggers.db_proxy_name} \
-          --target-group-name ${self.triggers.target_group_name} \
+          --region "$AWS_REGION" \
+          --db-proxy-name "$DB_PROXY_NAME" \
+          --target-group-name "$TARGET_GROUP_NAME" \
           --query "Targets[?Type=='RDS_INSTANCE'] | [0].TargetHealth.State" \
           --output text)
 
@@ -552,13 +552,19 @@ resource "null_resource" "proxy_target_ready" {
 
         current_time=$(date +%s)
         if [ "$current_time" -ge "$deadline" ]; then
-          echo "RDS Proxy target ${self.triggers.db_cluster_identifier} did not become AVAILABLE within 10 minutes. Last state: $target_state"
+          echo "RDS Proxy target $DB_CLUSTER_IDENTIFIER did not become AVAILABLE within 10 minutes. Last state: $target_state"
           exit 1
         fi
 
         sleep 10
       done
     EOT
+    environment = {
+      AWS_REGION            = data.aws_region.current.region
+      DB_PROXY_NAME         = self.triggers.db_proxy_name
+      TARGET_GROUP_NAME     = self.triggers.target_group_name
+      DB_CLUSTER_IDENTIFIER = self.triggers.db_cluster_identifier
+    }
   }
 
   depends_on = [
