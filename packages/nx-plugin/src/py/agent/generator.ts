@@ -14,6 +14,7 @@ import {
 } from '@nx/devkit';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
+  addPythonFrameworkBase,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
@@ -105,6 +106,9 @@ export const pyAgentGenerator = async (
   // session ID to any downstream MCP / A2A clients a later connection
   // generator wires into this agent.
   await ensurePythonAgentConnectionProject(tree);
+  // The agent server imports the framework base helpers (session cache + model
+  // error logging) regardless of whether a connection client is wired in.
+  await addPythonFrameworkBase(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
   addWorkspaceDependencyToPyProject(

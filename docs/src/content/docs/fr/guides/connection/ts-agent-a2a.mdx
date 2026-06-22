@@ -47,9 +47,12 @@ Le générateur crée un package partagé `agent-connection` et modifie le code 
 - packages/common/agent-connection
   - src
     - app
-      - \<target-agent-name>-client.ts Client de haut niveau pour l'agent A2A connecté
+      - \<target-agent-name>-client-strands.ts Client Strands de haut niveau pour l'agent A2A connecté
     - core
-      - agentcore-a2a-client.ts Client A2A AgentCore de bas niveau avec authentification SigV4
+      - agentcore-endpoints.ts Résolution ARN/URL indépendante du framework
+      - agentcore-fetch.ts Fetch SigV4 / JWT / transfert de session indépendant du framework
+      - agentcore-a2a-client-config.ts Configuration du client A2A indépendante du framework (`clientFactory` signé)
+      - agentcore-a2a-client-strands.ts Client A2A Strands encapsulant la configuration
     - index.ts Exporte tous les clients
   - project.json
   - tsconfig.json
@@ -66,12 +69,12 @@ De plus, il :
 Le générateur transforme le fichier `agent.ts` de votre agent pour encapsuler l'agent A2A distant en tant qu'outil :
 
 ```ts title="packages/example/src/my-agent/agent.ts" {2,5-11,14}
-import { Agent, tool } from '@agents/sdk';
-import { RemoteAgentClient } from ':my-scope/agent-connection';
+import { Agent, tool } from '@strands-agents/sdk';
+import { RemoteAgentClientStrands } from ':my-scope/agent-connection';
 import { z } from 'zod';
 
 export const getAgent = async (sessionId: string) => {
-  const remoteAgent = await RemoteAgentClient.create(sessionId);
+  const remoteAgent = await RemoteAgentClientStrands.create(sessionId);
   const remoteAgentTool = tool({
     name: 'askRemoteAgent',
     description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
@@ -87,7 +90,7 @@ export const getAgent = async (sessionId: string) => {
 
 Le paramètre `sessionId` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
-En coulisses, `RemoteAgentClient.create(sessionId)` retourne un `A2AAgent` Strands configuré avec un `clientFactory` signant SigV4 lorsqu'il est déployé sur AWS, et un endpoint simple `http://localhost:<port>/` lorsque `SERVE_LOCAL=true`.
+En coulisses, `RemoteAgentClientStrands.create(sessionId)` retourne un `A2AAgent` Strands configuré avec un `clientFactory` signant SigV4 lorsqu'il est déployé sur AWS, et un endpoint simple `http://localhost:<port>/` lorsque `SERVE_LOCAL=true`. La signature et la résolution des endpoints résident dans le fichier `agentcore-a2a-client-config.ts` indépendant du framework ; seul le mince `agentcore-a2a-client-strands.ts` dépend de Strands.
 
 ## Infrastructure
 

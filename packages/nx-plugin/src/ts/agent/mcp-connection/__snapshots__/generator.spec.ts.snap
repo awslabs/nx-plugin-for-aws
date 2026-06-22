@@ -1,9 +1,9 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > agent-connection-index.ts 1`] = `
-"export * from './app/inventory-mcp-client.js';
-export * from './core/model-errors.js';
-export * from './core/with-session-id.js';
+"export * from './app/inventory-mcp-client-strands.js';
+export * from './core/model-errors-strands.js';
+export * from './core/with-session-id-strands.js';
 export * from './core/session-context.js';
 // Export your library code here
 "
@@ -67,9 +67,45 @@ export const createPlainFetch = (): typeof fetch => withSessionHeader(fetch);
 "
 `;
 
+exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > agentcore-mcp-client-strands.ts 1`] = `
+"import { McpClient } from '@strands-agents/sdk';
+import {
+  AgentCoreMcpTransport,
+  type AgentCoreMcpTransportIamOptions,
+  type AgentCoreMcpTransportJwtOptions,
+  type AgentCoreMcpTransportNoAuthOptions,
+} from './agentcore-mcp-transport.js';
+
+/** Strands MCP clients for a Bedrock AgentCore runtime. */
+export class AgentCoreMcpClientStrands {
+  /** SigV4-authenticated client for a Bedrock AgentCore runtime. */
+  static withIamAuth(options: AgentCoreMcpTransportIamOptions): McpClient {
+    return new McpClient({
+      transport: AgentCoreMcpTransport.withIamAuth(options),
+    });
+  }
+
+  /** Bearer-authenticated client for a Bedrock AgentCore runtime. */
+  static withJwtAuth(options: AgentCoreMcpTransportJwtOptions): McpClient {
+    return new McpClient({
+      transport: AgentCoreMcpTransport.withJwtAuth(options),
+    });
+  }
+
+  /** For local dev — plain HTTP, no auth. */
+  static withoutAuth(options: AgentCoreMcpTransportNoAuthOptions): McpClient {
+    return new McpClient({
+      transport: AgentCoreMcpTransport.withoutAuth(options),
+    });
+  }
+}
+"
+`;
+
 exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > agentcore-mcp-transport.ts 1`] = `
 "import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { mcpUrlFromArn, regionFromArn } from './agentcore-endpoints.js';
 import {
   sigV4Transport,
   jwtTransport,
@@ -104,16 +140,6 @@ export interface AgentCoreMcpTransportNoAuthOptions {
   url: string;
 }
 
-/**
- * Construct the invocation URL for an AgentCore runtime ARN and extract the
- * region. ARN format: arn:partition:service:region:account-id:resource
- */
-const resolve = (agentRuntimeArn: string): { region: string; url: string } => {
-  const region = agentRuntimeArn.split(':')[3];
-  const url = \`https://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT\`;
-  return { region, url };
-};
-
 /** Factory for MCP transports that connect to a Bedrock AgentCore runtime. */
 export class AgentCoreMcpTransport {
   /** SigV4-authenticated transport for a Bedrock AgentCore runtime. */
@@ -121,7 +147,8 @@ export class AgentCoreMcpTransport {
     options: AgentCoreMcpTransportIamOptions,
   ): StreamableHTTPClientTransport {
     return sigV4Transport({
-      ...resolve(options.agentRuntimeArn),
+      region: regionFromArn(options.agentRuntimeArn),
+      url: mcpUrlFromArn(options.agentRuntimeArn),
       credentialProvider: options.credentialProvider,
     });
   }
@@ -131,7 +158,7 @@ export class AgentCoreMcpTransport {
     options: AgentCoreMcpTransportJwtOptions,
   ): StreamableHTTPClientTransport {
     return jwtTransport({
-      url: resolve(options.agentRuntimeArn).url,
+      url: mcpUrlFromArn(options.agentRuntimeArn),
       accessTokenProvider: options.accessTokenProvider,
     });
   }
@@ -189,16 +216,16 @@ export const noAuthTransport = (options: {
 "
 `;
 
-exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > inventory-mcp-client.ts 1`] = `
+exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > inventory-mcp-client-strands.ts 1`] = `
 "import { McpClient } from '@strands-agents/sdk';
-import { StrandsAgentCoreMcpClient } from '../core/strands-agentcore-mcp-client.js';
+import { AgentCoreMcpClientStrands } from '../core/agentcore-mcp-client-strands.js';
 import { getAgentCoreRuntimeConfig } from '../core/runtime-config.js';
 
-/** Client for the InventoryMcp MCP server. */
-export class InventoryMcpClient {
+/** Strands client for the InventoryMcp MCP server. */
+export class InventoryMcpClientStrands {
   static async create(): Promise<McpClient> {
     if (process.env.SERVE_LOCAL === 'true') {
-      return StrandsAgentCoreMcpClient.withoutAuth({
+      return AgentCoreMcpClientStrands.withoutAuth({
         url: 'http://localhost:8082/mcp',
       });
     }
@@ -209,49 +236,14 @@ export class InventoryMcpClient {
         \`No connected MCP server runtime named 'InventoryMcp' found in runtime configuration.\`,
       );
     }
-    return StrandsAgentCoreMcpClient.withIamAuth({ agentRuntimeArn });
-  }
-}
-"
-`;
-
-exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > strands-agentcore-mcp-client.ts 1`] = `
-"import { McpClient } from '@strands-agents/sdk';
-import {
-  AgentCoreMcpTransport,
-  type AgentCoreMcpTransportIamOptions,
-  type AgentCoreMcpTransportJwtOptions,
-  type AgentCoreMcpTransportNoAuthOptions,
-} from './agentcore-mcp-transport.js';
-
-/** Strands MCP clients for a Bedrock AgentCore runtime. */
-export class StrandsAgentCoreMcpClient {
-  /** SigV4-authenticated client for a Bedrock AgentCore runtime. */
-  static withIamAuth(options: AgentCoreMcpTransportIamOptions): McpClient {
-    return new McpClient({
-      transport: AgentCoreMcpTransport.withIamAuth(options),
-    });
-  }
-
-  /** Bearer-authenticated client for a Bedrock AgentCore runtime. */
-  static withJwtAuth(options: AgentCoreMcpTransportJwtOptions): McpClient {
-    return new McpClient({
-      transport: AgentCoreMcpTransport.withJwtAuth(options),
-    });
-  }
-
-  /** For local dev — plain HTTP, no auth. */
-  static withoutAuth(options: AgentCoreMcpTransportNoAuthOptions): McpClient {
-    return new McpClient({
-      transport: AgentCoreMcpTransport.withoutAuth(options),
-    });
+    return AgentCoreMcpClientStrands.withIamAuth({ agentRuntimeArn });
   }
 }
 "
 `;
 
 exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > transformed-agent.ts 1`] = `
-"import { InventoryMcpClient } from ':proj/agent-connection';
+"import { InventoryMcpClientStrands } from ':proj/agent-connection';
 import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
 
@@ -263,7 +255,7 @@ const multiply = tool({
 });
 
 export const getAgent = async (sessionId: string) => {
-  const inventoryMcp = await InventoryMcpClient.create();
+  const inventoryMcp = await InventoryMcpClientStrands.create();
   return new Agent({
     systemPrompt: 'You are a mathematical wizard.',
     tools: [inventoryMcp, multiply],

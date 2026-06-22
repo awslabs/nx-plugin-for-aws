@@ -131,10 +131,10 @@ export const getAgent = async (sessionId: string) =>
       true,
     );
 
-    // Check strands-agentcore-mcp-client.ts was generated in core/
+    // Check agentcore-mcp-client-strands.ts was generated in core/
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/core/strands-agentcore-mcp-client.ts',
+        'packages/common/agent-connection/src/core/agentcore-mcp-client-strands.ts',
       ),
     ).toBe(true);
 
@@ -158,7 +158,7 @@ export const getAgent = async (sessionId: string) =>
     // Check per-connection client was generated in app/
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+        'packages/common/agent-connection/src/app/inventory-mcp-client-strands.ts',
       ),
     ).toBe(true);
 
@@ -167,7 +167,7 @@ export const getAgent = async (sessionId: string) =>
       'packages/common/agent-connection/src/index.ts',
       'utf-8',
     );
-    expect(indexContent).toContain('inventory-mcp-client');
+    expect(indexContent).toContain('inventory-mcp-client-strands');
   });
 
   it('should transform agent.ts to add MCP client', async () => {
@@ -197,11 +197,11 @@ export const getAgent = async (sessionId: string) =>
     )!;
 
     // Check import was added
-    expect(agentContent).toContain('InventoryMcpClient');
+    expect(agentContent).toContain('InventoryMcpClientStrands');
     expect(agentContent).toContain('agent-connection');
 
     // Check client creation was added
-    expect(agentContent).toContain('InventoryMcpClient.create()');
+    expect(agentContent).toContain('InventoryMcpClientStrands.create()');
 
     // Check client was added to tools array
     expect(agentContent).toContain('inventoryMcp, multiply');
@@ -258,14 +258,16 @@ export const getAgent = async (sessionId: string) => {
     )!;
 
     // Check client creation was inserted before new Agent
-    expect(agentContent).toContain('InventoryMcpClient.create()');
+    expect(agentContent).toContain('InventoryMcpClientStrands.create()');
     expect(agentContent).toContain('inventoryMcp, multiply');
 
     // Verify the console.log is still present (block body preserved)
     expect(agentContent).toContain("console.log('Creating agent')");
 
     // Verify client creation comes before new Agent
-    const clientIndex = agentContent.indexOf('InventoryMcpClient.create');
+    const clientIndex = agentContent.indexOf(
+      'InventoryMcpClientStrands.create',
+    );
     const agentIndex = agentContent.indexOf('new Agent(');
     expect(clientIndex).toBeLessThan(agentIndex);
   });
@@ -335,7 +337,7 @@ export const getAgent = async (sessionId: string) => {
     )!;
 
     // Should only have one import
-    const importCount = (agentContent.match(/InventoryMcpClient/g) || [])
+    const importCount = (agentContent.match(/InventoryMcpClientStrands/g) || [])
       .length;
     // Import + create + listToolsSync = 3 occurrences, not more
     expect(importCount).toBeLessThanOrEqual(4);
@@ -387,15 +389,15 @@ export const getAgent = async (sessionId: string) => {
       'utf-8',
     )!;
 
-    // Should have exactly one import from agent-connection (with both clients)
-    const importLines = agentContent
-      .split('\n')
-      .filter((l) => l.includes('agent-connection'));
-    expect(importLines).toHaveLength(1);
+    // Should have exactly one import statement from agent-connection
+    const importSourceCount = (
+      agentContent.match(/from ':proj\/agent-connection'/g) ?? []
+    ).length;
+    expect(importSourceCount).toBe(1);
 
-    // The single import should contain both clients
-    expect(importLines[0]).toContain('InventoryMcpClient');
-    expect(importLines[0]).toContain('CatalogMcpClient');
+    // That single import should bring in both clients
+    expect(agentContent).toContain('InventoryMcpClientStrands');
+    expect(agentContent).toContain('CatalogMcpClientStrands');
 
     // Both clients should be in the tools array
     expect(agentContent).toContain('catalogMcp');
@@ -459,12 +461,12 @@ export const getAgent = async (sessionId: string) => {
       },
     });
 
-    const strandsAgentCoreMcpClient = tree.read(
-      'packages/common/agent-connection/src/core/strands-agentcore-mcp-client.ts',
+    const agentCoreMcpClientStrands = tree.read(
+      'packages/common/agent-connection/src/core/agentcore-mcp-client-strands.ts',
       'utf-8',
     );
-    expect(strandsAgentCoreMcpClient).toMatchSnapshot(
-      'strands-agentcore-mcp-client.ts',
+    expect(agentCoreMcpClientStrands).toMatchSnapshot(
+      'agentcore-mcp-client-strands.ts',
     );
 
     const agentCoreMcpTransport = tree.read(
@@ -486,10 +488,10 @@ export const getAgent = async (sessionId: string) => {
     expect(agentCoreFetch).toMatchSnapshot('agentcore-fetch.ts');
 
     const inventoryMcpClient = tree.read(
-      'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+      'packages/common/agent-connection/src/app/inventory-mcp-client-strands.ts',
       'utf-8',
     );
-    expect(inventoryMcpClient).toMatchSnapshot('inventory-mcp-client.ts');
+    expect(inventoryMcpClient).toMatchSnapshot('inventory-mcp-client-strands.ts');
 
     const indexTs = tree.read(
       'packages/common/agent-connection/src/index.ts',

@@ -75,19 +75,19 @@ export const pyAgentMcpConnectionGenerator = async (
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    MCP core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
-  addPythonCoreClient(tree, 'auth');
-  addPythonCoreClient(tree, 'mcp');
+  await addPythonCoreClient(tree, 'mcp');
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
   // Python deps required by the MCP core client + shared auth helper.
+  // Layer 0/1 deps for the MCP transport + signed httpx auth. The framework's
+  // own dependency (strands-agents) is added by addPythonCoreClient.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
     'mcp',
-    'strands-agents',
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -124,8 +124,8 @@ export const pyAgentMcpConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${mcpServerSnakeCase}_client`,
-    `${mcpServerClassName}Client`,
+    `.app.${mcpServerSnakeCase}_client_strands`,
+    `${mcpServerClassName}ClientStrands`,
   );
 
   // 3. Transform agent.py to add MCP client import and usage
@@ -136,7 +136,7 @@ export const pyAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}Client`;
+    const clientClassName = `${mcpServerClassName}ClientStrands`;
     const clientVarName = mcpServerSnakeCase;
 
     await addPythonDestructuredImport(

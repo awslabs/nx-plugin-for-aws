@@ -142,24 +142,31 @@ dependencies = ["strands-agents"]
       .map((c) => c.path)
       .filter((p) => p.includes('agent_connection/') && p.includes('core/'));
     const corePath = coreFiles.find((p) =>
-      p.endsWith('agentcore_a2a_client.py'),
+      p.endsWith('agentcore_a2a_client_strands.py'),
     );
     expect(corePath).toBeDefined();
+    // Layer 1 (framework-agnostic client config) + Layer 0 (shared auth)
+    expect(
+      coreFiles.find((p) => p.endsWith('agentcore_a2a_client_config.py')),
+    ).toBeDefined();
+    expect(
+      coreFiles.find((p) => p.endsWith('core/auth/session.py')),
+    ).toBeDefined();
 
     // Per-connection client vended
     const clientPath =
-      coreFiles[0]?.replace(/core\/.*/, '') + 'app/remote_client.py';
+      coreFiles[0]?.replace(/core\/.*/, '') + 'app/remote_client_strands.py';
     // Find it properly
     const clientFile = tree
       .listChanges()
       .map((c) => c.path)
-      .find((p) => p.endsWith('app/remote_client.py'));
+      .find((p) => p.endsWith('app/remote_client_strands.py'));
     expect(clientFile).toBeDefined();
     const client = tree.read(clientFile!, 'utf-8')!;
-    expect(client).toContain('RemoteClient');
+    expect(client).toContain('RemoteClientStrands');
     expect(client).toContain('SERVE_LOCAL');
     expect(client).toContain('http://localhost:9001/');
-    expect(client).toContain('AgentCoreA2aClient.with_iam_auth');
+    expect(client).toContain('AgentCoreA2aClientStrands.with_iam_auth');
   });
 
   it('should transform agent.py to wire the remote as a tool', async () => {
@@ -172,8 +179,8 @@ dependencies = ["strands-agents"]
     });
 
     const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
-    expect(agent).toContain('RemoteClient');
-    expect(agent).toContain('RemoteClient.create()');
+    expect(agent).toContain('RemoteClientStrands');
+    expect(agent).toContain('RemoteClientStrands.create()');
     expect(agent).toContain('def ask_remote(prompt: str)');
     // A2AAgent is directly callable (syncs over invoke_async internally)
     expect(agent).toContain('str(remote(prompt))');
@@ -261,11 +268,13 @@ dependencies = ["strands-agents"]
       targetComponent: REMOTE,
     });
     const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
-    expect((agent.match(/\bRemoteClient\b/g) ?? []).length).toBeGreaterThan(0);
+    expect(
+      (agent.match(/\bRemoteClientStrands\b/g) ?? []).length,
+    ).toBeGreaterThan(0);
     // import line appears exactly once
     const importLines = agent
       .split('\n')
-      .filter((l) => l.startsWith('from') && l.includes('RemoteClient'));
+      .filter((l) => l.startsWith('from') && l.includes('RemoteClientStrands'));
     expect(importLines).toHaveLength(1);
   });
 
@@ -330,7 +339,7 @@ def get_agent(session_id: str):
     });
     const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
     // Client creation appears exactly once
-    expect((agent.match(/RemoteClient\.create/g) ?? []).length).toBe(1);
+    expect((agent.match(/RemoteClientStrands\.create/g) ?? []).length).toBe(1);
     // The tool function is defined exactly once
     expect((agent.match(/def ask_remote\(/g) ?? []).length).toBe(1);
     // ask_remote appears in the tools list exactly once
@@ -428,5 +437,34 @@ def get_agent(session_id: str):
     expect(agent).toContain('_other = SomethingElse(tools=[])');
     // The Agent call got the new tool
     expect(agent).toMatch(/yield Agent\([\s\S]*tools=\[ask_remote\]/);
+  });
+
+  it('should match snapshot for agent-connection core files', async () => {
+    setupProjects();
+    await pyAgentA2aConnectionGenerator(tree, {
+      sourceProject: 'test.py_host',
+      targetProject: 'test.py_remote',
+      sourceComponent: HOST,
+      targetComponent: REMOTE,
+    });
+
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    const base = `packages/common/agent_connection/${moduleName}`;
+    const snap = (path: string, name: string) =>
+      expect(tree.read(`${base}/${path}`, 'utf-8')).toMatchSnapshot(name);
+
+    // Layer 2 (Strands wrapper) -> Layer 1 (client config) -> Layer 0 (auth)
+    snap(
+      'core/agentcore_a2a_client_strands.py',
+      'agentcore_a2a_client_strands.py',
+    );
+    snap(
+      'core/agentcore_a2a_client_config.py',
+      'agentcore_a2a_client_config.py',
+    );
+    snap('core/auth/session.py', 'session.py');
+    // Per-connection client
+    snap('app/remote_client_strands.py', 'remote_client_strands.py');
   });
 });

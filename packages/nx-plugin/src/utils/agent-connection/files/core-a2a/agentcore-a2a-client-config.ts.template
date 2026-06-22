@@ -1,0 +1,93 @@
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { a2aUrlFromArn, regionFromArn } from './agentcore-endpoints.js';
+import {
+  createJwtFetch,
+  createPlainFetch,
+  createSigV4Fetch,
+} from './agentcore-fetch.js';
+
+/** Common options for resolving an AgentCore A2A endpoint. */
+export interface AgentCoreA2aClientConfigOptions {
+  /** The ARN of the Bedrock AgentCore Runtime to connect to. */
+  agentRuntimeArn: string;
+}
+
+/** Options for an A2A client config with IAM authentication. */
+export interface AgentCoreA2aClientConfigIamOptions
+  extends AgentCoreA2aClientConfigOptions {
+  /** AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/** Options for an A2A client config with JWT authentication. */
+export interface AgentCoreA2aClientConfigJwtOptions
+  extends AgentCoreA2aClientConfigOptions {
+  /** A function which returns the JWT access token used to authenticate. */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/** Options for an A2A client config with no auth (local dev). */
+export interface AgentCoreA2aClientConfigNoAuthOptions {
+  /** Full URL of the local A2A endpoint. */
+  url: string;
+}
+
+/** A resolved A2A endpoint and a configured `@a2a-js` client factory. */
+export interface A2aClientConfig {
+  /** The A2A endpoint URL. */
+  url: string;
+  /** A client factory wired with a signed, session-forwarding fetch. */
+  clientFactory: ClientFactory;
+}
+
+const build = (url: string, fetchFn: typeof fetch): A2aClientConfig => {
+  const clientFactory = new ClientFactory({
+    ...ClientFactoryOptions.default,
+    transports: [new JsonRpcTransportFactory({ fetchImpl: fetchFn })],
+    cardResolver: new DefaultAgentCardResolver({ fetchImpl: fetchFn }),
+  });
+  return { url, clientFactory };
+};
+
+/**
+ * Factory for A2A client configs that connect to a Bedrock AgentCore runtime.
+ * Each forwards the current async-context session via the AgentCore session
+ * header. Framework-agnostic — wrap the result in a framework's A2A client.
+ */
+export class AgentCoreA2aClientConfig {
+  /** SigV4-authenticated A2A client config for a Bedrock AgentCore runtime. */
+  static withIamAuth(
+    options: AgentCoreA2aClientConfigIamOptions,
+  ): A2aClientConfig {
+    return build(
+      a2aUrlFromArn(options.agentRuntimeArn),
+      createSigV4Fetch({
+        region: regionFromArn(options.agentRuntimeArn),
+        credentialProvider: options.credentialProvider,
+      }),
+    );
+  }
+
+  /** Bearer-authenticated A2A client config for a Bedrock AgentCore runtime. */
+  static withJwtAuth(
+    options: AgentCoreA2aClientConfigJwtOptions,
+  ): A2aClientConfig {
+    return build(
+      a2aUrlFromArn(options.agentRuntimeArn),
+      createJwtFetch(options.accessTokenProvider),
+    );
+  }
+
+  /** For local dev — plain HTTP, no auth. */
+  static withoutAuth(
+    options: AgentCoreA2aClientConfigNoAuthOptions,
+  ): A2aClientConfig {
+    return build(options.url, createPlainFetch());
+  }
+}

@@ -47,9 +47,12 @@ import Snippet from '@components/snippet.astro';
 - packages/common/agent-connection
   - src
     - app
-      - \<target-agent-name>-client.ts 连接的 A2A 代理的高级客户端
+      - \<target-agent-name>-client-strands.ts 连接的 A2A 代理的高级 Strands 客户端
     - core
-      - agentcore-a2a-client.ts 带有 SigV4 身份验证的低级 AgentCore A2A 客户端
+      - agentcore-endpoints.ts 框架无关的 ARN/URL 解析
+      - agentcore-fetch.ts 框架无关的 SigV4 / JWT / 会话转发 fetch
+      - agentcore-a2a-client-config.ts 框架无关的 A2A 客户端配置(签名的 `clientFactory`)
+      - agentcore-a2a-client-strands.ts 包装配置的 Strands A2A 客户端
     - index.ts 导出所有客户端
   - project.json
   - tsconfig.json
@@ -66,12 +69,12 @@ import Snippet from '@components/snippet.astro';
 生成器会转换您代理的 `agent.ts` 以将远程 A2A 代理包装为工具:
 
 ```ts title="packages/example/src/my-agent/agent.ts" {2,5-11,14}
-import { Agent, tool } from '@agents/sdk';
-import { RemoteAgentClient } from ':my-scope/agent-connection';
+import { Agent, tool } from '@strands-agents/sdk';
+import { RemoteAgentClientStrands } from ':my-scope/agent-connection';
 import { z } from 'zod';
 
 export const getAgent = async (sessionId: string) => {
-  const remoteAgent = await RemoteAgentClient.create(sessionId);
+  const remoteAgent = await RemoteAgentClientStrands.create(sessionId);
   const remoteAgentTool = tool({
     name: 'askRemoteAgent',
     description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
@@ -87,7 +90,7 @@ export const getAgent = async (sessionId: string) => {
 
 `sessionId` 参数从调用者传递过来,确保 [Bedrock AgentCore 可观测性](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)的一致性。
 
-在底层,`RemoteAgentClient.create(sessionId)` 返回一个配置了 SigV4 签名 `clientFactory` 的 Strands `A2AAgent`(当部署到 AWS 时),以及一个普通的 `http://localhost:<port>/` 端点(当 `SERVE_LOCAL=true` 时)。
+在底层,`RemoteAgentClientStrands.create(sessionId)` 返回一个配置了 SigV4 签名 `clientFactory` 的 Strands `A2AAgent`(当部署到 AWS 时),以及一个普通的 `http://localhost:<port>/` 端点(当 `SERVE_LOCAL=true` 时)。签名和端点解析位于框架无关的 `agentcore-a2a-client-config.ts` 中;只有轻量的 `agentcore-a2a-client-strands.ts` 依赖于 Strands。
 
 ## 基础设施
 

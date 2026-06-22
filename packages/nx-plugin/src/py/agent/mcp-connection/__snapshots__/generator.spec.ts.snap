@@ -5,12 +5,12 @@ exports[`py#agent#mcp-connection generator > should match snapshot for generated
 
 from .core.session_context import get_current_session_id, session_id_context
 
-from .app.inventory_mcp_client import InventoryMcpClient
+from .app.inventory_mcp_client_strands import InventoryMcpClientStrands
 
-from .core.model_errors import log_model_errors
+from .core.model_errors_strands import log_model_errors
 
 
-from .core.with_session_id import with_session_id
+from .core.with_session_id_strands import with_session_id
 
 
 __all__ = [
@@ -18,14 +18,49 @@ __all__ = [
     "session_id_context",
     "with_session_id",
     "log_model_errors",
-    "InventoryMcpClient",
+    "InventoryMcpClientStrands",
 ]
+"
+`;
+
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client_strands.py 1`] = `
+"from collections.abc import Callable
+
+from strands.tools.mcp.mcp_client import MCPClient
+
+from .agentcore_mcp_transport import AgentCoreMCPTransport
+
+
+class AgentCoreMCPClientStrands:
+    """Factory for Strands MCP clients that connect to an AgentCore runtime."""
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> MCPClient:
+        """SigV4-authenticated client for a Bedrock AgentCore runtime."""
+        return MCPClient(AgentCoreMCPTransport.with_iam_auth(agent_runtime_arn))
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> MCPClient:
+        """Bearer-authenticated client for a Bedrock AgentCore runtime."""
+        return MCPClient(
+            AgentCoreMCPTransport.with_jwt_auth(
+                agent_runtime_arn, access_token_provider
+            )
+        )
+
+    @staticmethod
+    def without_auth(url: str) -> MCPClient:
+        """Plain-HTTP client — for local dev."""
+        return MCPClient(AgentCoreMCPTransport.without_auth(url))
 "
 `;
 
 exports[`py#agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_transport.py 1`] = `
 "from collections.abc import Callable
 
+from .agentcore_endpoints import mcp_url_from_arn, region_from_arn
 from .agentcore_transport import (
     TransportFactory,
     jwt_transport,
@@ -34,36 +69,22 @@ from .agentcore_transport import (
 )
 
 
-def _resolve(agent_runtime_arn: str) -> tuple[str, str]:
-    """Extract region from ARN and construct the invocation URL.
-
-    ARN format: arn:partition:service:region:account-id:resource
-    """
-    region = agent_runtime_arn.split(":")[3]
-    encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
-    url = (
-        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-        f"{encoded_arn}/invocations?qualifier=DEFAULT"
-    )
-    return region, url
-
-
 class AgentCoreMCPTransport:
     """Factory for MCP transport factories that connect to an AgentCore runtime."""
 
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> TransportFactory:
         """SigV4-authenticated transport for a Bedrock AgentCore runtime."""
-        region, url = _resolve(agent_runtime_arn)
-        return sigv4_transport(url, region)
+        return sigv4_transport(
+            mcp_url_from_arn(agent_runtime_arn), region_from_arn(agent_runtime_arn)
+        )
 
     @staticmethod
     def with_jwt_auth(
         agent_runtime_arn: str, access_token_provider: Callable[[], str]
     ) -> TransportFactory:
         """Bearer-authenticated transport for a Bedrock AgentCore runtime."""
-        _, url = _resolve(agent_runtime_arn)
-        return jwt_transport(url, access_token_provider)
+        return jwt_transport(mcp_url_from_arn(agent_runtime_arn), access_token_provider)
 
     @staticmethod
     def without_auth(url: str) -> TransportFactory:
@@ -116,33 +137,33 @@ def no_auth_transport(url: str) -> TransportFactory:
 "
 `;
 
-exports[`py#agent#mcp-connection generator > should match snapshot for generated files > inventory_mcp_client.py 1`] = `
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > inventory_mcp_client_strands.py 1`] = `
 "import os
 
 from strands.tools.mcp.mcp_client import MCPClient
 
-from proj_agent_connection.core.strands_agentcore_mcp_client import (
-    StrandsAgentCoreMCPClient,
+from proj_agent_connection.core.agentcore_mcp_client_strands import (
+    AgentCoreMCPClientStrands,
 )
 from proj_agent_connection.core.runtime_config import (
     get_agentcore_runtime_config,
 )
 
 
-class InventoryMcpClient:
-    """Client for the InventoryMcp MCP server."""
+class InventoryMcpClientStrands:
+    """Strands client for the InventoryMcp MCP server."""
 
     @staticmethod
     def create() -> MCPClient:
         if os.environ.get("SERVE_LOCAL") == "true":
-            return StrandsAgentCoreMCPClient.without_auth("http://localhost:8082/mcp")
+            return AgentCoreMCPClientStrands.without_auth("http://localhost:8082/mcp")
         config = get_agentcore_runtime_config()
         agent_runtime_arn = config.get("agentRuntimes", {}).get("InventoryMcp")
         if not agent_runtime_arn:
             raise RuntimeError(
                 "No connected MCP server runtime named 'InventoryMcp' found in runtime configuration."
             )
-        return StrandsAgentCoreMCPClient.with_iam_auth(agent_runtime_arn)
+        return AgentCoreMCPClientStrands.with_iam_auth(agent_runtime_arn)
 "
 `;
 
@@ -201,42 +222,8 @@ def plain_auth() -> httpx.Auth:
 "
 `;
 
-exports[`py#agent#mcp-connection generator > should match snapshot for generated files > strands_agentcore_mcp_client.py 1`] = `
-"from collections.abc import Callable
-
-from strands.tools.mcp.mcp_client import MCPClient
-
-from .agentcore_mcp_transport import AgentCoreMCPTransport
-
-
-class StrandsAgentCoreMCPClient:
-    """Factory for Strands MCP clients that connect to an AgentCore runtime."""
-
-    @staticmethod
-    def with_iam_auth(agent_runtime_arn: str) -> MCPClient:
-        """SigV4-authenticated client for a Bedrock AgentCore runtime."""
-        return MCPClient(AgentCoreMCPTransport.with_iam_auth(agent_runtime_arn))
-
-    @staticmethod
-    def with_jwt_auth(
-        agent_runtime_arn: str, access_token_provider: Callable[[], str]
-    ) -> MCPClient:
-        """Bearer-authenticated client for a Bedrock AgentCore runtime."""
-        return MCPClient(
-            AgentCoreMCPTransport.with_jwt_auth(
-                agent_runtime_arn, access_token_provider
-            )
-        )
-
-    @staticmethod
-    def without_auth(url: str) -> MCPClient:
-        """Plain-HTTP client — for local dev."""
-        return MCPClient(AgentCoreMCPTransport.without_auth(url))
-"
-`;
-
 exports[`py#agent#mcp-connection generator > should match snapshot for generated files > transformed-agent.py 1`] = `
-"from proj_agent_connection import InventoryMcpClient
+"from proj_agent_connection import InventoryMcpClientStrands
 from contextlib import contextmanager
 
 from strands import Agent, tool
@@ -251,7 +238,7 @@ def subtract(a: int, b: int) -> int:
 
 @contextmanager
 def get_agent(session_id: str):
-    inventory_mcp = InventoryMcpClient.create()
+    inventory_mcp = InventoryMcpClientStrands.create()
     with (
         inventory_mcp,
     ):

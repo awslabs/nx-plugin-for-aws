@@ -1,0 +1,197 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py#agent#gateway-connection generator > should match snapshot for agent-connection core files > agentcore_gateway_mcp_client_strands.py 1`] = `
+"from strands.tools.mcp.mcp_client import MCPClient
+
+from .agentcore_gateway_mcp_transport import AgentCoreGatewayMCPTransport
+
+
+class AgentCoreGatewayMCPClientStrands:
+    """Factory for Strands MCP clients that connect to an AgentCore Gateway."""
+
+    @staticmethod
+    def with_iam_auth(
+        gateway_url: str,
+        region: str | None = None,
+    ) -> MCPClient:
+        """Create a gateway MCP client authenticated with IAM SigV4."""
+        return MCPClient(
+            AgentCoreGatewayMCPTransport.with_iam_auth(gateway_url, region)
+        )
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> MCPClient:
+        """Plain-HTTP gateway client, for the local gateway started by serve-local."""
+        return MCPClient(AgentCoreGatewayMCPTransport.without_auth(gateway_url))
+"
+`;
+
+exports[`py#agent#gateway-connection generator > should match snapshot for agent-connection core files > agentcore_gateway_mcp_transport.py 1`] = `
+"from .agentcore_endpoints import region_from_gateway_url
+from .agentcore_transport import (
+    TransportFactory,
+    no_auth_transport,
+    sigv4_transport,
+)
+
+
+class AgentCoreGatewayMCPTransport:
+    """Factory for MCP transport factories that connect to an AgentCore Gateway.
+    Forwards the current async-context session via the AgentCore session header,
+    which the gateway propagates to downstream MCP server targets.
+    """
+
+    @staticmethod
+    def with_iam_auth(
+        gateway_url: str,
+        region: str | None = None,
+    ) -> TransportFactory:
+        """Create a gateway MCP transport authenticated with IAM SigV4."""
+        return sigv4_transport(
+            gateway_url, region or region_from_gateway_url(gateway_url)
+        )
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> TransportFactory:
+        """Plain-HTTP gateway transport, for the local gateway started by serve-local."""
+        return no_auth_transport(gateway_url)
+"
+`;
+
+exports[`py#agent#gateway-connection generator > should match snapshot for agent-connection core files > agentcore_transport.py 1`] = `
+"from collections.abc import Callable
+from typing import Any
+
+import boto3
+
+from mcp.client.streamable_http import streamablehttp_client
+
+from .auth.session import jwt_auth, plain_auth, sigv4_auth
+
+# Agent frameworks wrap a transport *factory* — a no-arg callable returning a
+# streamable-HTTP transport context manager. Typed as \`\`Any\`\` so this layer
+# stays free of any framework-specific transport type.
+TransportFactory = Callable[[], Any]
+
+
+def _factory(url: str, auth) -> TransportFactory:
+    return lambda: streamablehttp_client(
+        url,
+        auth=auth,
+        timeout=120,
+        terminate_on_close=False,
+    )
+
+
+def sigv4_transport(url: str, region: str) -> TransportFactory:
+    """SigV4-signed transport factory for a resolved AgentCore endpoint."""
+    credentials = boto3.Session(region_name=region).get_credentials()
+    return _factory(url, sigv4_auth(credentials, region))
+
+
+def jwt_transport(
+    url: str, access_token_provider: Callable[[], str]
+) -> TransportFactory:
+    """Bearer-token transport factory for a resolved AgentCore endpoint."""
+    return _factory(url, jwt_auth(access_token_provider))
+
+
+def no_auth_transport(url: str) -> TransportFactory:
+    """Plain-HTTP transport factory — for local dev."""
+    return _factory(url, plain_auth())
+"
+`;
+
+exports[`py#agent#gateway-connection generator > should match snapshot for agent-connection core files > my_gateway_client_strands.py 1`] = `
+"import os
+
+from strands.tools.mcp.mcp_client import MCPClient
+
+from proj_agent_connection.core.agentcore_gateway_mcp_client_strands import (
+    AgentCoreGatewayMCPClientStrands,
+)
+from proj_agent_connection.core.runtime_config import (
+    get_agentcore_runtime_config,
+)
+
+
+class MyGatewayClientStrands:
+    """Strands client for the MyGateway AgentCore Gateway.
+
+    Deployed: a SigV4-signed MCP client pointing at the gateway URL.
+    Local (\`\`SERVE_LOCAL=true\`\`): a plain-HTTP client pointing at the local
+    gateway started by the gateway project's serve-local target. The local
+    gateway aggregates every attached MCP server but does not evaluate
+    Cedar policies.
+    """
+
+    @staticmethod
+    def create() -> MCPClient:
+        if os.environ.get("SERVE_LOCAL") == "true":
+            return AgentCoreGatewayMCPClientStrands.without_auth(
+                gateway_url="http://localhost:8100/mcp"
+            )
+        config = get_agentcore_runtime_config()
+        gateway_url = config.get("gateways", {}).get("MyGateway")
+        if not gateway_url:
+            raise RuntimeError(
+                "No connected gateway named 'MyGateway' found in runtime configuration."
+            )
+        return AgentCoreGatewayMCPClientStrands.with_iam_auth(gateway_url=gateway_url)
+"
+`;
+
+exports[`py#agent#gateway-connection generator > should match snapshot for agent-connection core files > session.py 1`] = `
+"from collections.abc import Callable
+
+import httpx
+
+from ..session_context import get_current_session_id
+from .sigv4 import SigV4HTTPXAuth
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context,
+    then delegates to an optional inner auth (e.g. SigV4)."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, inner: httpx.Auth | None = None):
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
+
+
+def sigv4_auth(
+    credentials, region: str, service: str = "bedrock-agentcore"
+) -> httpx.Auth:
+    """Session-forwarding SigV4 auth (per-request, body-aware)."""
+    return SessionHeaderAuth(SigV4HTTPXAuth(credentials, service, region))
+
+
+def jwt_auth(access_token_provider: Callable[[], str]) -> httpx.Auth:
+    """Session-forwarding bearer-token auth."""
+
+    class _Bearer(httpx.Auth):
+        def auth_flow(self, request: httpx.Request):
+            request.headers["Authorization"] = f"Bearer {access_token_provider()}"
+            yield request
+
+    return SessionHeaderAuth(_Bearer())
+
+
+def plain_auth() -> httpx.Auth:
+    """Session-forwarding plain auth — for local dev."""
+    return SessionHeaderAuth()
+"
+`;

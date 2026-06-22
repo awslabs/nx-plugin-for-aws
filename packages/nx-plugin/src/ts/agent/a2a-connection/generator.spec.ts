@@ -121,26 +121,37 @@ export const getAgent = async (sessionId: string) =>
     );
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/core/agentcore-a2a-client.ts',
+        'packages/common/agent-connection/src/core/agentcore-a2a-client-strands.ts',
+      ),
+    ).toBe(true);
+    // Layer 1 (framework-agnostic client config) + Layer 0 (shared fetch)
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-a2a-client-config.ts',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/agentcore-fetch.ts',
       ),
     ).toBe(true);
 
     // Per-connection client vended into app/
     const clientPath =
-      'packages/common/agent-connection/src/app/remote-client.ts';
+      'packages/common/agent-connection/src/app/remote-client-strands.ts';
     expect(tree.exists(clientPath)).toBe(true);
     const client = tree.read(clientPath, 'utf-8')!;
-    expect(client).toContain('RemoteClient');
+    expect(client).toContain('RemoteClientStrands');
     expect(client).toContain('SERVE_LOCAL');
     expect(client).toContain('http://localhost:9000/');
-    expect(client).toContain('AgentCoreA2aClient.withIamAuth');
+    expect(client).toContain('AgentCoreA2aClientStrands.withIamAuth');
 
     // index.ts re-exports
     const index = tree.read(
       'packages/common/agent-connection/src/index.ts',
       'utf-8',
     )!;
-    expect(index).toContain('remote-client');
+    expect(index).toContain('remote-client-strands');
   });
 
   it('should transform agent.ts to wire the remote as a tool', async () => {
@@ -153,8 +164,8 @@ export const getAgent = async (sessionId: string) =>
     });
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
-    expect(agent).toContain('RemoteClient');
-    expect(agent).toContain('RemoteClient.create()');
+    expect(agent).toContain('RemoteClientStrands');
+    expect(agent).toContain('RemoteClientStrands.create()');
     expect(agent).toContain("name: 'askRemote'");
     expect(agent).toContain('remote.invoke(prompt)');
     expect(agent).toContain('remoteTool');
@@ -303,7 +314,7 @@ export const getAgent = async (sessionId: string) =>
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect((agent.match(/remoteTool/g) ?? []).length).toBeGreaterThanOrEqual(1);
     // Tool creation appears exactly once
-    expect((agent.match(/RemoteClient\.create/g) ?? []).length).toBe(1);
+    expect((agent.match(/RemoteClientStrands\.create/g) ?? []).length).toBe(1);
     // The `tools` array contains `remoteTool` exactly once
     const toolsArrayMatch = agent.match(/tools: \[([^\]]*)\]/);
     expect(toolsArrayMatch).toBeTruthy();
@@ -349,9 +360,9 @@ export const getAgent = async (sessionId: string) => {
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect(agent).toContain("console.log('Creating agent')");
-    expect(agent).toContain('RemoteClient.create()');
+    expect(agent).toContain('RemoteClientStrands.create()');
     // Tool creation must come before new Agent()
-    const clientIdx = agent.indexOf('RemoteClient.create');
+    const clientIdx = agent.indexOf('RemoteClientStrands.create');
     const newAgentIdx = agent.indexOf('new Agent(');
     expect(clientIdx).toBeLessThan(newAgentIdx);
   });
@@ -383,5 +394,33 @@ export const getAgent = async (sessionId: string) =>
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect(agent).toMatch(/tools: \[multiply, divide, remoteTool\]/);
+  });
+
+  it('should match snapshot for agent-connection src files', async () => {
+    setupProjects();
+    await tsAgentA2aConnectionGenerator(tree, {
+      sourceProject: '@test/ts-host',
+      targetProject: '@test/ts-remote',
+      sourceComponent: HOST,
+      targetComponent: REMOTE,
+    });
+
+    const base = 'packages/common/agent-connection/src';
+    const snap = (path: string, name: string) =>
+      expect(tree.read(`${base}/${path}`, 'utf-8')).toMatchSnapshot(name);
+
+    // Layer 2 (Strands wrapper) -> Layer 1 (client config) -> Layer 0 (fetch)
+    snap(
+      'core/agentcore-a2a-client-strands.ts',
+      'agentcore-a2a-client-strands.ts',
+    );
+    snap(
+      'core/agentcore-a2a-client-config.ts',
+      'agentcore-a2a-client-config.ts',
+    );
+    snap('core/agentcore-fetch.ts', 'agentcore-fetch.ts');
+    // Per-connection client + barrel
+    snap('app/remote-client-strands.ts', 'remote-client-strands.ts');
+    snap('index.ts', 'agent-connection-index.ts');
   });
 });

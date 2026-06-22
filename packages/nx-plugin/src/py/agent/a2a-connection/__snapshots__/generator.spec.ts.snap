@@ -1,0 +1,201 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py#agent#a2a-connection generator > should match snapshot for agent-connection core files > agentcore_a2a_client_config.py 1`] = `
+"from collections.abc import Callable
+
+import boto3
+import httpx
+from a2a.client import ClientConfig
+
+from .agentcore_endpoints import a2a_url_from_arn, region_from_arn
+from .auth.session import jwt_auth, plain_auth, sigv4_auth
+
+
+def _config(url: str, auth: httpx.Auth) -> tuple[str, ClientConfig]:
+    httpx_client = httpx.AsyncClient(auth=auth, timeout=120)
+    return url, ClientConfig(httpx_client=httpx_client, streaming=False)
+
+
+class AgentCoreA2aClientConfig:
+    """Factory for A2A client configs that connect to a Bedrock AgentCore
+    runtime. Each forwards the current async-context session via the AgentCore
+    session header. Framework-agnostic — wrap the result in a framework's
+    A2A client."""
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> tuple[str, ClientConfig]:
+        """SigV4-authenticated A2A client config for a Bedrock AgentCore runtime."""
+        region = region_from_arn(agent_runtime_arn)
+        credentials = boto3.Session(region_name=region).get_credentials()
+        return _config(
+            a2a_url_from_arn(agent_runtime_arn), sigv4_auth(credentials, region)
+        )
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> tuple[str, ClientConfig]:
+        """Bearer-authenticated A2A client config for a Bedrock AgentCore runtime."""
+        return _config(
+            a2a_url_from_arn(agent_runtime_arn), jwt_auth(access_token_provider)
+        )
+
+    @staticmethod
+    def without_auth(url: str) -> tuple[str, ClientConfig]:
+        """Plain-HTTP A2A client config — for local dev."""
+        return _config(url, plain_auth())
+"
+`;
+
+exports[`py#agent#a2a-connection generator > should match snapshot for agent-connection core files > agentcore_a2a_client_strands.py 1`] = `
+"from collections.abc import Callable
+
+from strands.agent.a2a_agent import A2AAgent
+
+from .agentcore_a2a_client_config import AgentCoreA2aClientConfig
+
+
+def _build(config: tuple, *, name: str | None, description: str | None) -> A2AAgent:
+    url, client_config = config
+    kwargs: dict = {"endpoint": url, "client_config": client_config}
+    if name:
+        kwargs["name"] = name
+    if description:
+        kwargs["description"] = description
+    return A2AAgent(**kwargs)
+
+
+class AgentCoreA2aClientStrands:
+    """Factory for Strands A2A clients that connect to an AgentCore runtime."""
+
+    @staticmethod
+    def with_iam_auth(
+        agent_runtime_arn: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> A2AAgent:
+        """SigV4-authenticated client for a Bedrock AgentCore runtime."""
+        return _build(
+            AgentCoreA2aClientConfig.with_iam_auth(agent_runtime_arn),
+            name=name,
+            description=description,
+        )
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str,
+        access_token_provider: Callable[[], str],
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> A2AAgent:
+        """Bearer-authenticated client for a Bedrock AgentCore runtime."""
+        return _build(
+            AgentCoreA2aClientConfig.with_jwt_auth(
+                agent_runtime_arn, access_token_provider
+            ),
+            name=name,
+            description=description,
+        )
+
+    @staticmethod
+    def without_auth(
+        url: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> A2AAgent:
+        """Plain-HTTP client — for local dev."""
+        return _build(
+            AgentCoreA2aClientConfig.without_auth(url),
+            name=name,
+            description=description,
+        )
+"
+`;
+
+exports[`py#agent#a2a-connection generator > should match snapshot for agent-connection core files > remote_client_strands.py 1`] = `
+"import os
+
+from strands.agent.a2a_agent import A2AAgent
+
+from test_agent_connection.core.agentcore_a2a_client_strands import (
+    AgentCoreA2aClientStrands,
+)
+from test_agent_connection.core.runtime_config import (
+    get_agentcore_runtime_config,
+)
+
+
+class RemoteClientStrands:
+    """Strands client for the Remote A2A agent."""
+
+    @staticmethod
+    def create() -> A2AAgent:
+        if os.environ.get("SERVE_LOCAL") == "true":
+            return AgentCoreA2aClientStrands.without_auth("http://localhost:9001/")
+        config = get_agentcore_runtime_config()
+        agent_runtime_arn = config.get("agentRuntimes", {}).get("Remote")
+        if not agent_runtime_arn:
+            raise RuntimeError(
+                "No connected agent runtime named 'Remote' found in runtime configuration."
+            )
+        return AgentCoreA2aClientStrands.with_iam_auth(agent_runtime_arn)
+"
+`;
+
+exports[`py#agent#a2a-connection generator > should match snapshot for agent-connection core files > session.py 1`] = `
+"from collections.abc import Callable
+
+import httpx
+
+from ..session_context import get_current_session_id
+from .sigv4 import SigV4HTTPXAuth
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context,
+    then delegates to an optional inner auth (e.g. SigV4)."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, inner: httpx.Auth | None = None):
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
+
+
+def sigv4_auth(
+    credentials, region: str, service: str = "bedrock-agentcore"
+) -> httpx.Auth:
+    """Session-forwarding SigV4 auth (per-request, body-aware)."""
+    return SessionHeaderAuth(SigV4HTTPXAuth(credentials, service, region))
+
+
+def jwt_auth(access_token_provider: Callable[[], str]) -> httpx.Auth:
+    """Session-forwarding bearer-token auth."""
+
+    class _Bearer(httpx.Auth):
+        def auth_flow(self, request: httpx.Request):
+            request.headers["Authorization"] = f"Bearer {access_token_provider()}"
+            yield request
+
+    return SessionHeaderAuth(_Bearer())
+
+
+def plain_auth() -> httpx.Auth:
+    """Session-forwarding plain auth — for local dev."""
+    return SessionHeaderAuth()
+"
+`;

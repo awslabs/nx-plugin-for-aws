@@ -14,6 +14,7 @@ import pyProjectGenerator, {
 import tsProjectGenerator from '../../ts/lib/generator';
 import { addStarExport, applyGritQL, matchGritQL } from '../ast';
 import { addDependenciesToPyProjectToml } from '../py';
+import type { IPyDepVersion } from '../versions';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -64,28 +65,130 @@ export function getPythonAgentConnectionPackageName(tree: Tree): string {
 }
 
 /**
- * Directories (relative to this file) holding per-protocol core client
- * template files. Per-connection generators select which set to emit so
- * the MCP connection doesn't pull in the A2A client (or vice versa).
+ * The connection protocols an agent framework can connect over. Each maps to a
+ * framework-agnostic Layer-0/1 template directory plus a per-framework Layer-2
+ * client directory (see `FRAMEWORKS`).
  */
-export const TS_CORE_TEMPLATES = {
-  mcp: 'core-mcp',
-  a2a: 'core-a2a',
-  gateway: 'core-gateway',
-} as const;
+export type ConnectionProtocol = 'mcp' | 'gateway' | 'a2a';
 
-export const PY_CORE_TEMPLATES = {
+/**
+ * The agent frameworks we can generate connection clients for. Adding a new
+ * framework is an additive change: append an entry to `FRAMEWORKS` with its
+ * Layer-2 template directories and dependencies — the framework-agnostic
+ * Layer-0/1 (`core-auth`, `core-shared`, the per-protocol transports/configs)
+ * is reused unchanged.
+ */
+export type AgentFramework = 'strands';
+
+/**
+ * Framework-agnostic Layer-1 templates, keyed by protocol. These resolve the
+ * endpoint and build the signed transport/client-config; they contain no
+ * framework dependency.
+ */
+const TS_PROTOCOL_TEMPLATES: Record<ConnectionProtocol, string> = {
+  mcp: 'core-mcp',
+  gateway: 'core-gateway',
+  a2a: 'core-a2a',
+};
+const PY_PROTOCOL_TEMPLATES: Record<ConnectionProtocol, string> = {
   mcp: 'py-core-mcp',
-  a2a: 'py-core-a2a',
   gateway: 'py-core-gateway',
-  /** Shared SigV4 `httpx.Auth` used by both MCP and A2A clients. */
-  auth: 'py-core-auth',
-} as const;
+  a2a: 'py-core-a2a',
+};
+
+/**
+ * A framework's Layer-2 templates for one language. `base` holds the helpers
+ * every connection of that framework needs (error logging, per-session agent
+ * cache); `protocols` maps each *supported* protocol to the thin client that
+ * wraps the matching Layer-1 transport/config in the framework's client type.
+ *
+ * A protocol absent from `protocols` is not supported by that framework in that
+ * language — callers must check before emitting. `deps` are the extra package
+ * dependencies the base + client templates require.
+ */
+interface FrameworkLanguageTemplates<Dep extends string> {
+  base: string;
+  protocols: Partial<Record<ConnectionProtocol, string>>;
+  deps: Dep[];
+}
+
+/**
+ * Per-framework Layer-2 templates. Support is asymmetric by design: a framework
+ * may target only one language (`ts`/`py` is optional) and only a subset of
+ * protocols. Adding a framework — or extending an existing one to a new
+ * language/protocol — is an additive change to this registry.
+ */
+interface FrameworkTemplates {
+  ts?: FrameworkLanguageTemplates<string>;
+  py?: FrameworkLanguageTemplates<IPyDepVersion>;
+}
+
+const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
+  strands: {
+    ts: {
+      base: 'core-strands/base',
+      protocols: {
+        mcp: 'core-strands/mcp',
+        gateway: 'core-strands/gateway',
+        a2a: 'core-strands/a2a',
+      },
+      deps: [],
+    },
+    py: {
+      base: 'py-core-strands/base',
+      protocols: {
+        mcp: 'py-core-strands/mcp',
+        gateway: 'py-core-strands/gateway',
+        a2a: 'py-core-strands/a2a',
+      },
+      deps: ['strands-agents'],
+    },
+  },
+};
+
+/** Resolve a framework's templates for a language + protocol, or throw. */
+function frameworkLanguage<L extends 'ts' | 'py'>(
+  framework: AgentFramework,
+  language: L,
+  protocol: ConnectionProtocol,
+): NonNullable<FrameworkTemplates[L]> & { protocol: string } {
+  const lang = FRAMEWORKS[framework][language];
+  if (!lang) {
+    throw new Error(
+      `The '${framework}' framework does not support ${language === 'ts' ? 'TypeScript' : 'Python'} agents.`,
+    );
+  }
+  const protocolDir = lang.protocols[protocol];
+  if (!protocolDir) {
+    throw new Error(
+      `The '${framework}' framework does not support ${protocol} connections for ${language === 'ts' ? 'TypeScript' : 'Python'} agents.`,
+    );
+  }
+  return { ...lang, protocol: protocolDir } as NonNullable<
+    FrameworkTemplates[L]
+  > & { protocol: string };
+}
+
+/** Protocols whose Layer-1 needs the shared MCP transport (`core-shared`). */
+const MCP_TRANSPORT_PROTOCOLS: ConnectionProtocol[] = ['mcp', 'gateway'];
+
+const tsCoreDir = () =>
+  joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core');
+
+const emitTs = (tree: Tree, templateDir: string) =>
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', templateDir),
+    tsCoreDir(),
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
 
 /**
  * Ensure the shared TypeScript agent-connection project exists and has the
- * shared core helpers (runtime-config loader). Per-connection generators
- * are responsible for emitting their own per-protocol core client templates.
+ * framework-agnostic core helpers (runtime-config loader, session context).
+ * Per-connection generators emit their own protocol + framework client
+ * templates via `addTypeScriptCoreClient`.
  */
 export async function ensureTypeScriptAgentConnectionProject(
   tree: Tree,
@@ -101,69 +204,74 @@ export async function ensureTypeScriptAgentConnectionProject(
     });
   }
 
-  // Shared core helpers — emitted regardless of which per-protocol core
-  // client the caller needs, so both MCP and A2A clients can import from them.
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'core-runtime-config'),
-    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
-    {},
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
+  // Framework-agnostic runtime-config + session-context helpers.
+  emitTs(tree, 'core-runtime-config');
 
-  // Re-export session-context helpers so agent server entry points
-  // can set the current session on each inbound request without pulling in
-  // the agent-connection internals.
+  // Re-export session-context helpers so agent server entry points can set the
+  // current session on each inbound request without pulling in internals.
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
     './core/session-context.js',
   );
-  await addStarExport(
-    tree,
-    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    './core/with-session-id.js',
-  );
-  await addStarExport(
-    tree,
-    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    './core/model-errors.js',
-  );
 }
 
 /**
- * Emit one of the TypeScript core client templates (mcp / a2a / gateway) into
- * the agent-connection project's `src/core/` directory. Safe to call multiple
- * times — `KeepExisting` preserves customised files.
- *
- * The MCP and gateway clients share the auth + transport helpers in
- * `core-shared`, so those are emitted alongside them.
+ * Emit a framework's base Layer-2 helpers (model-error logging + per-session
+ * agent cache) into the agent-connection project and re-export them. The agent
+ * server entry point imports these regardless of whether any connection client
+ * is wired in, so the agent generator calls this directly; connection
+ * generators call it transitively via `addTypeScriptCoreClient`.
  */
-export function addTypeScriptCoreClient(
+export async function addTypeScriptFrameworkBase(
   tree: Tree,
-  kind: keyof typeof TS_CORE_TEMPLATES,
-): void {
-  const coreDir = joinPathFragments(
-    AGENT_CONNECTION_PROJECT_DIR,
-    'src',
-    'core',
-  );
-  if (kind === 'mcp' || kind === 'gateway') {
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', 'core-shared'),
-      coreDir,
-      {},
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  framework: AgentFramework = 'strands',
+): Promise<void> {
+  const lang = FRAMEWORKS[framework].ts;
+  if (!lang) {
+    throw new Error(
+      `The '${framework}' framework does not support TypeScript agents.`,
     );
   }
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', TS_CORE_TEMPLATES[kind]),
-    coreDir,
-    {},
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  emitTs(tree, lang.base);
+
+  const indexPath = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'index.ts',
   );
+  await addStarExport(tree, indexPath, './core/with-session-id-strands.js');
+  await addStarExport(tree, indexPath, './core/model-errors-strands.js');
+}
+
+/**
+ * Emit the TypeScript client templates for a connection protocol and agent
+ * framework into the agent-connection project's `src/core/` directory. Safe to
+ * call multiple times — `KeepExisting` preserves customised files.
+ *
+ * Layers emitted:
+ *  - Layer 0 `core-auth` (signed fetch + endpoint resolution) — always
+ *  - Layer 1 `core-shared` MCP transport — for mcp/gateway protocols
+ *  - Layer 1 the protocol's transport/client-config — always
+ *  - Layer 2 the framework's base helpers + protocol client — per framework
+ */
+export async function addTypeScriptCoreClient(
+  tree: Tree,
+  protocol: ConnectionProtocol,
+  framework: AgentFramework = 'strands',
+): Promise<void> {
+  const fw = frameworkLanguage(framework, 'ts', protocol);
+
+  emitTs(tree, 'core-auth');
+  if (MCP_TRANSPORT_PROTOCOLS.includes(protocol)) {
+    emitTs(tree, 'core-shared');
+  }
+  emitTs(tree, TS_PROTOCOL_TEMPLATES[protocol]);
+
+  // Framework Layer 2: base helpers (re-exported for the agent server) + the
+  // thin protocol client.
+  await addTypeScriptFrameworkBase(tree, framework);
+  emitTs(tree, fw.protocol);
 }
 
 /**
@@ -201,8 +309,7 @@ export async function ensurePythonAgentConnectionProject(
     tree.write(appInitPath, '');
   }
 
-  // Shared core helpers — emitted regardless of which per-protocol core
-  // client the caller needs, so both MCP and A2A clients can import them.
+  // Framework-agnostic runtime-config + session-context helpers.
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'py-core-runtime-config'),
@@ -211,9 +318,8 @@ export async function ensurePythonAgentConnectionProject(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Re-export session-context helpers so agent server entry points
-  // can set the current session on each inbound request without importing
-  // the agent-connection internals directly.
+  // Re-export the session id context so agent server entry points can set the
+  // current session on each inbound request without importing internals.
   const moduleInitPath = joinPathFragments(moduleDir, '__init__.py');
   await addPythonReExport(
     tree,
@@ -227,57 +333,99 @@ export async function ensurePythonAgentConnectionProject(
     '.core.session_context',
     'session_id_context',
   );
+
+  // The runtime-config loader reads AppConfig via aws-lambda-powertools.
+  addDependenciesToPyProjectToml(tree, projectDir, ['aws-lambda-powertools']);
+}
+
+const pyCoreDir = (tree: Tree) =>
+  joinPathFragments(
+    getPythonAgentConnectionProjectDir(tree),
+    getPythonAgentConnectionModuleName(tree),
+    'core',
+  );
+
+const emitPy = (tree: Tree, templateDir: string) =>
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', templateDir),
+    pyCoreDir(tree),
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+/**
+ * Emit a framework's base Layer-2 helpers (model-error logging + per-session
+ * agent cache) into the Python agent-connection project and re-export them.
+ * The agent server entry point imports these regardless of whether a connection
+ * client is wired in, so the agent generator calls this directly; connection
+ * generators call it transitively via `addPythonCoreClient`.
+ */
+export async function addPythonFrameworkBase(
+  tree: Tree,
+  framework: AgentFramework = 'strands',
+): Promise<void> {
+  const lang = FRAMEWORKS[framework].py;
+  if (!lang) {
+    throw new Error(
+      `The '${framework}' framework does not support Python agents.`,
+    );
+  }
+  emitPy(tree, lang.base);
+
+  const moduleInitPath = joinPathFragments(
+    getPythonAgentConnectionProjectDir(tree),
+    getPythonAgentConnectionModuleName(tree),
+    '__init__.py',
+  );
   await addPythonReExport(
     tree,
     moduleInitPath,
-    '.core.with_session_id',
+    '.core.with_session_id_strands',
     'with_session_id',
   );
   await addPythonReExport(
     tree,
     moduleInitPath,
-    '.core.model_errors',
+    '.core.model_errors_strands',
     'log_model_errors',
   );
 
-  // Shared core helpers depend on aws-lambda-powertools for AppConfig access
-  // and strands-agents for the model error-logging hook.
-  addDependenciesToPyProjectToml(tree, projectDir, [
-    'aws-lambda-powertools',
-    'strands-agents',
-  ]);
+  if (lang.deps.length > 0) {
+    addDependenciesToPyProjectToml(
+      tree,
+      getPythonAgentConnectionProjectDir(tree),
+      lang.deps,
+    );
+  }
 }
 
 /**
- * Emit a Python core client template (mcp / a2a / gateway / shared auth) into
- * the agent-connection project's core directory.
+ * Emit the Python client templates for a connection protocol and agent
+ * framework into the agent-connection project's core directory.
  *
- * The MCP and gateway clients share the transport helpers in `py-core-shared`,
- * so those are emitted alongside them.
+ * Layers emitted:
+ *  - Layer 0 `py-core-auth` (SigV4 httpx.Auth, session auth, endpoints) — always
+ *  - Layer 1 `py-core-shared` MCP transport — for mcp/gateway protocols
+ *  - Layer 1 the protocol's transport/client-config — always
+ *  - Layer 2 the framework's base helpers + protocol client — per framework
  */
-export function addPythonCoreClient(
+export async function addPythonCoreClient(
   tree: Tree,
-  kind: keyof typeof PY_CORE_TEMPLATES,
-): void {
-  const projectDir = getPythonAgentConnectionProjectDir(tree);
-  const moduleName = getPythonAgentConnectionModuleName(tree);
-  const coreDir = joinPathFragments(projectDir, moduleName, 'core');
-  if (kind === 'mcp' || kind === 'gateway') {
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', 'py-core-shared'),
-      coreDir,
-      {},
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
+  protocol: ConnectionProtocol,
+  framework: AgentFramework = 'strands',
+): Promise<void> {
+  const fw = frameworkLanguage(framework, 'py', protocol);
+
+  emitPy(tree, 'py-core-auth');
+  if (MCP_TRANSPORT_PROTOCOLS.includes(protocol)) {
+    emitPy(tree, 'py-core-shared');
   }
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', PY_CORE_TEMPLATES[kind]),
-    coreDir,
-    {},
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
+  emitPy(tree, PY_PROTOCOL_TEMPLATES[protocol]);
+
+  // Framework Layer 2: base helpers + the thin protocol client.
+  await addPythonFrameworkBase(tree, framework);
+  emitPy(tree, fw.protocol);
 }
 
 /**

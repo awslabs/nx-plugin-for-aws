@@ -52,6 +52,25 @@ describe('ts#agent generator', () => {
     // Check that agent files were added to the existing project
     expect(tree.exists('apps/test-project/src/agent/index.ts')).toBeTruthy();
 
+    // The agent server imports the framework base helpers, so they must be
+    // emitted + re-exported even without any connection client.
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/with-session-id-strands.ts',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/agent-connection/src/core/model-errors-strands.ts',
+      ),
+    ).toBeTruthy();
+    const agentConnectionIndex = tree.read(
+      'packages/common/agent-connection/src/index.ts',
+      'utf-8',
+    )!;
+    expect(agentConnectionIndex).toContain('with-session-id-strands');
+    expect(agentConnectionIndex).toContain('model-errors-strands');
+
     // There should be no Dockerfile since the computeType is None
     expect(tree.exists('apps/test-project/src/agent/Dockerfile')).toBeFalsy();
 

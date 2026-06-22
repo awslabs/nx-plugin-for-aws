@@ -84,7 +84,7 @@ export const tsAgentA2aConnectionGenerator = async (
 
   // 1. Ensure the shared agent-connection project exists + has the A2A core client
   await ensureTypeScriptAgentConnectionProject(tree);
-  addTypeScriptCoreClient(tree, 'a2a');
+  await addTypeScriptCoreClient(tree, 'a2a');
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
@@ -103,7 +103,7 @@ export const tsAgentA2aConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${targetAgentKebabCase}-client.js`,
+    `./app/${targetAgentKebabCase}-client-strands.js`,
   );
 
   // 3. AST transform agent.ts to add the remote A2A agent as a tool
@@ -114,7 +114,7 @@ export const tsAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}Client`;
+    const clientClassName = `${targetAgentClassName}ClientStrands`;
     const clientVarName =
       targetAgentClassName.charAt(0).toLowerCase() +
       targetAgentClassName.slice(1);

@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 `connection` 生成器可以将您的 <Link path="guides/py-agent">Python Agent</Link> 连接到 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>。
 
-该生成器会配置 agent，使其在部署时使用 IAM SigV4（通过 `httpx` 请求签名）向 Gateway 进行身份验证，并在本地运行时直接多路复用到附加的 MCP 服务器。
+该生成器会配置 agent，使其在部署时使用 IAM SigV4（通过 `httpx` 请求签名）向 Gateway 进行身份验证，并在本地运行时连接到 Gateway 项目启动的本地网关。
 
 ## 前置条件
 
@@ -44,10 +44,12 @@ import Infrastructure from '@components/infrastructure.astro';
 - packages/common/agent\_connection
   - \<scope>\_agent\_connection
     - core/
-      - agentcore\_gateway\_mcp\_client.py 使用 `httpx` 的 SigV4 MCP 客户端
-      - agentcore\_gateway\_mcp\_local\_client.py 用于附加 MCP 服务器的本地多路复用客户端
+      - agentcore\_endpoints.py 框架无关的 ARN/URL 解析
+      - agentcore\_gateway\_mcp\_transport.py 框架无关的 Gateway MCP 传输
+      - agentcore\_gateway\_mcp\_client\_strands.py 用于已部署 Gateway 的 Strands MCP 客户端
+      - auth/ 框架无关的 SigV4 / 会话转发 `httpx.Auth`
     - app/
-      - \<gateway\_snake>\_client.py 带有 `ATTACHED_MCP_SERVERS` 列表的针对每个 Gateway 的包装器
+      - \<gateway\_snake>\_client\_strands.py 针对每个 Gateway 的 Strands 客户端包装器
     - \_\_init\_\_.py 重新导出 Gateway 客户端
 
 </FileTree>
@@ -66,11 +68,11 @@ import Infrastructure from '@components/infrastructure.astro';
 from contextlib import contextmanager
 from strands import Agent
 
-from my_scope_agent_connection import MyGatewayClient
+from my_scope_agent_connection import MyGatewayClientStrands
 
 @contextmanager
 def get_agent():
-    my_gateway = MyGatewayClient.create()
+    my_gateway = MyGatewayClientStrands.create()
     with (
         my_gateway,
     ):
@@ -80,10 +82,10 @@ def get_agent():
         )
 ```
 
-`MyGatewayClient.create()` 返回一个可以作为上下文管理器的单一客户端，其 `list_tools_sync()` 会产生通过 Gateway 可用的每个工具：
+`MyGatewayClientStrands.create()` 返回一个可以作为上下文管理器的单一客户端，其 `list_tools_sync()` 会产生通过 Gateway 可用的每个工具：
 
 - **部署模式**（未设置 `SERVE_LOCAL`）：指向 Gateway 的 MCP 端点的单个 `MCPClient`，使用 SigV4 签名。
-- **本地模式**（`SERVE_LOCAL=true`）：一个 `AgentCoreGatewayLocalMultiplexClient`，它会扇出到每个附加的 MCP 服务器并呈现它们工具的并集。
+- **本地模式**（`SERVE_LOCAL=true`）：指向 Gateway 项目的 `serve-local` 目标启动的本地网关的纯 HTTP `MCPClient`。
 
 会话 ID 会通过 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 标头自动传播到下游 MCP 服务器。
 
@@ -157,3 +159,4 @@ Gateway URL 会由生成的 Terraform 模块自动注册到 <Link path="guides/r
 
 - **没有 Cedar 策略评估。** 无论策略如何，agent 都可以看到每个工具。使用 `serve` target 针对已部署的 Gateway 执行策略。
 - **工具名称前缀被保留。** 每个本地 MCP 服务器的工具都以 `<target-name>___<tool-name>` 的形式公开，与已部署的 Gateway 发出的内容相匹配。这使得 agent 的系统提示和您引用的 Cedar 操作名称在本地和部署运行中保持一致。
+持一致。

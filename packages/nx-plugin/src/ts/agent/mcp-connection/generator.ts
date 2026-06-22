@@ -72,7 +72,7 @@ export const tsAgentMcpConnectionGenerator = async (
 
   // 1. Ensure the shared agent-connection project exists + has the MCP core client
   await ensureTypeScriptAgentConnectionProject(tree);
-  addTypeScriptCoreClient(tree, 'mcp');
+  await addTypeScriptCoreClient(tree, 'mcp');
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
@@ -91,7 +91,7 @@ export const tsAgentMcpConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${mcpServerKebabCase}-client.js`,
+    `./app/${mcpServerKebabCase}-client-strands.js`,
   );
 
   // 3. AST transform agent.ts to add MCP tools
@@ -102,7 +102,7 @@ export const tsAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}Client`;
+    const clientClassName = `${mcpServerClassName}ClientStrands`;
     const clientVarName =
       mcpServerClassName.charAt(0).toLowerCase() + mcpServerClassName.slice(1);
 

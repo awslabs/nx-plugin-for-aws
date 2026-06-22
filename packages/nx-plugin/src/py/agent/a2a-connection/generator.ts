@@ -90,14 +90,15 @@ export const pyAgentA2aConnectionGenerator = async (
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    A2A core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
-  addPythonCoreClient(tree, 'auth');
-  addPythonCoreClient(tree, 'a2a');
+  await addPythonCoreClient(tree, 'a2a');
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Python deps required by the A2A core client + shared auth helper.
+  // Layer 0/1 deps for the A2A client config + shared auth helper, plus the
+  // Strands A2A extra the framework's A2A client needs (the base strands-agents
+  // dependency is added by addPythonCoreClient).
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
@@ -138,8 +139,8 @@ export const pyAgentA2aConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${targetAgentSnakeCase}_client`,
-    `${targetAgentClassName}Client`,
+    `.app.${targetAgentSnakeCase}_client_strands`,
+    `${targetAgentClassName}ClientStrands`,
   );
 
   // 3. Transform agent.py to add the A2A client import + wrap it as a tool
@@ -150,7 +151,7 @@ export const pyAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}Client`;
+    const clientClassName = `${targetAgentClassName}ClientStrands`;
     const clientVarName = targetAgentSnakeCase;
     const toolName = `ask_${targetAgentSnakeCase}`;
 

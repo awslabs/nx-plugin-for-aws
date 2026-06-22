@@ -13,7 +13,10 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
-import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
+import {
+  addTypeScriptFrameworkBase,
+  ensureTypeScriptAgentConnectionProject,
+} from '../../utils/agent-connection/agent-connection';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
@@ -82,6 +85,9 @@ export const tsAgentGenerator = async (
   // ID to any downstream MCP / A2A clients a later connection generator
   // wires into this agent.
   await ensureTypeScriptAgentConnectionProject(tree);
+  // The agent server imports the framework base helpers (session cache + model
+  // error logging) regardless of whether a connection client is wired in.
+  await addTypeScriptFrameworkBase(tree);
 
   const templateContext = {
     name,

@@ -83,7 +83,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   // 1. Ensure the shared agent-connection project exists + has the gateway
   //    core client template.
   await ensureTypeScriptAgentConnectionProject(tree);
-  addTypeScriptCoreClient(tree, 'gateway');
+  await addTypeScriptCoreClient(tree, 'gateway');
 
   // 2. Generate the per-connection <Gateway>Client into app/. Local mode
   //    points at the gateway project's local gateway port.
@@ -103,7 +103,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${gatewayKebabCase}-client.js`,
+    `./app/${gatewayKebabCase}-client-strands.js`,
   );
 
   // 3. AST-transform agent.ts to add the gateway client (an McpClient in
@@ -115,7 +115,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${gatewayClassName}Client`;
+    const clientClassName = `${gatewayClassName}ClientStrands`;
     const clientVarName =
       gatewayClassName.charAt(0).toLowerCase() + gatewayClassName.slice(1);
 
