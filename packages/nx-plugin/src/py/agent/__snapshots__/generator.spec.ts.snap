@@ -1108,14 +1108,19 @@ resource "null_resource" "docker_publish" {
   provisioner "local-exec" {
     command = <<-EOT
       # Get ECR login token
-      aws ecr get-login-password --region \${local.aws_region} | docker login --username AWS --password-stdin \${self.triggers.repository_url}
+      aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URL"
 
       # Tag the image
-      docker tag \${self.triggers.docker_image_tag} \${self.triggers.repository_url}:latest
+      docker tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:latest"
 
       # Push the image
-      docker push \${self.triggers.repository_url}:latest
+      docker push "$REPOSITORY_URL:latest"
     EOT
+    environment = {
+      AWS_REGION       = local.aws_region
+      REPOSITORY_URL   = self.triggers.repository_url
+      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+    }
   }
 
   depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
@@ -1177,10 +1182,11 @@ resource "null_resource" "runtime_ready" {
       uv run --with boto3 python -c "
 import boto3
 import json
+import os
 import time
 import uuid
 
-runtime_arn = '\${self.triggers.runtime_arn}'
+runtime_arn = os.environ['RUNTIME_ARN']
 client = boto3.client('bedrock-agentcore')
 initialize_request = json.dumps({
     'jsonrpc': '2.0',
@@ -1212,6 +1218,9 @@ while True:
 print(f'Runtime {runtime_arn} is serving MCP')
 "
     EOT
+    environment = {
+      RUNTIME_ARN = self.triggers.runtime_arn
+    }
   }
 }
 
