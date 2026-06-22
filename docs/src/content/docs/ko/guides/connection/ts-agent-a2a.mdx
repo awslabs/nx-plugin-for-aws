@@ -49,7 +49,10 @@ import Snippet from '@components/snippet.astro';
     - app
       - \<target-agent-name>-client.ts 연결된 A2A 에이전트용 고수준 클라이언트
     - core
-      - agentcore-a2a-client.ts SigV4 인증을 사용하는 저수준 AgentCore A2A 클라이언트
+      - agentcore-endpoints.ts 프레임워크에 독립적인 ARN/URL 해석
+      - agentcore-fetch.ts 프레임워크에 독립적인 SigV4 / JWT / 세션 전달 fetch
+      - agentcore-a2a-client-config.ts 프레임워크에 독립적인 A2A 클라이언트 구성(서명된 `clientFactory`)
+      - agentcore-a2a-client-strands.ts 구성을 래핑하는 Strands A2A 클라이언트
     - index.ts 모든 클라이언트 내보내기
   - project.json
   - tsconfig.json
@@ -66,12 +69,12 @@ import Snippet from '@components/snippet.astro';
 생성기는 에이전트의 `agent.ts`를 변환하여 원격 A2A 에이전트를 도구로 래핑합니다:
 
 ```ts title="packages/example/src/my-agent/agent.ts" {2,5-11,14}
-import { Agent, tool } from '@agents/sdk';
-import { RemoteAgentClient } from ':my-scope/agent-connection';
+import { Agent, tool } from '@strands-agents/sdk';
+import { RemoteAgentClientStrands } from ':my-scope/agent-connection';
 import { z } from 'zod';
 
 export const getAgent = async (sessionId: string) => {
-  const remoteAgent = await RemoteAgentClient.create(sessionId);
+  const remoteAgent = await RemoteAgentClientStrands.create(sessionId);
   const remoteAgentTool = tool({
     name: 'askRemoteAgent',
     description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
@@ -87,7 +90,7 @@ export const getAgent = async (sessionId: string) => {
 
 `sessionId` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
 
-내부적으로 `RemoteAgentClient.create(sessionId)`는 AWS에 배포되었을 때 SigV4 서명 `clientFactory`로 구성된 Strands `A2AAgent`를 반환하고, `SERVE_LOCAL=true`일 때는 일반 `http://localhost:<port>/` 엔드포인트를 반환합니다.
+내부적으로 `RemoteAgentClientStrands.create(sessionId)`는 AWS에 배포되었을 때 SigV4 서명 `clientFactory`로 구성된 Strands `A2AAgent`를 반환하고, `SERVE_LOCAL=true`일 때는 일반 `http://localhost:<port>/` 엔드포인트를 반환합니다. 서명 및 엔드포인트 해석은 프레임워크에 독립적인 `agentcore-a2a-client-config.ts`에 있으며, 얇은 `agentcore-a2a-client-strands.ts`만 Strands에 의존합니다.
 
 ## 인프라
 
