@@ -1,7 +1,8 @@
 name: Translate Documentation
 
 on:
-  pull_request:
+  push:
+    branches: [main, 'release/0.x']
     paths:
       - 'docs/src/content/docs/en/**/*.md'
       - 'docs/src/content/docs/en/**/*.mdx'
@@ -22,7 +23,6 @@ on:
 permissions:
   id-token: write # Required for OIDC
   contents: write # Required for committing changes
-  pull-requests: write # Required for updating PR
 
 jobs:
   translate:
@@ -32,9 +32,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.head_ref }} # Explicitly checkout the PR branch
           fetch-depth: 0 # Required to detect changed files
-          token: ${{ secrets.TRANSLATE_PUSH_GITHUB_TOKEN }} # needed to trigger PR workflow after push
+          token: ${{ secrets.TRANSLATE_PUSH_GITHUB_TOKEN }} # needed to trigger workflow after push
       - uses: ./.github/actions/init-monorepo
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
@@ -82,19 +81,5 @@ jobs:
           git add docs/src/content/docs/ docs/src/i18n/schema-translations.json
           git commit -m "docs: update translations" --no-verify
 
-          # Push directly to the PR branch
-          git push origin HEAD:${{ github.head_ref }}
-      - name: Update PR
-        if: github.event_name == 'pull_request' && steps.translate.outputs.has_changes == 'true'
-        env:
-          URL: ${{ github.event.pull_request.comments_url}}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          FILES_CHANGED=$(git diff --name-only HEAD^ | xargs -I{} bash -c 'echo -n "\n{}";')
-          LATEST_COMMIT=$(git log --pretty=format:"%h" -n 1)
-
-          # Use GitHub API to create a comment
-          curl -X POST "$URL" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -d "{\"body\":\"📚 Documentation translations have been updated and committed ($LATEST_COMMIT) to this PR.\n\n\`\`\`$FILES_CHANGED\n\`\`\`\"}"
+          # Push directly to the branch that was pushed to
+          git push origin HEAD:${{ github.ref_name }}
