@@ -610,7 +610,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     );
     const body = await res.json();
     console.log('tRPC echo response:', JSON.stringify(body));
-    expect(body.result.data.result).toBe('hello');
+    expect(body.result.data.message).toBe('hello');
     await stopLast();
   });
 
@@ -633,9 +633,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     // Wait out the gap between DynamoDB Local's port opening and the local
     // table being created, then assert the (empty) category query succeeds.
-    const empty = await waitForJson(
-      `${base}/examples?category=tools`,
-      (b) => Array.isArray(b),
+    const empty = await waitForJson(`${base}/examples?category=tools`, (b) =>
+      Array.isArray(b),
     );
     console.log('examples (empty):', JSON.stringify(empty));
     expect(empty).toEqual([]);
@@ -661,8 +660,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(fetched).toEqual({ id: '1', name: 'Widget', category: 'tools' });
 
     // List exercises a GSI query (gsi1 by category)
-    const byCategory = await fetch(`${base}/examples?category=tools`).then((r) =>
-      r.json(),
+    const byCategory = await fetch(`${base}/examples?category=tools`).then(
+      (r) => r.json(),
     );
     console.log('examples by category:', JSON.stringify(byCategory));
     expect(byCategory).toHaveLength(2);
