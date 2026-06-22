@@ -217,6 +217,34 @@ export async function ensureTypeScriptAgentConnectionProject(
 }
 
 /**
+ * Emit a framework's base Layer-2 helpers (model-error logging + per-session
+ * agent cache) into the agent-connection project and re-export them. The agent
+ * server entry point imports these regardless of whether any connection client
+ * is wired in, so the agent generator calls this directly; connection
+ * generators call it transitively via `addTypeScriptCoreClient`.
+ */
+export async function addTypeScriptFrameworkBase(
+  tree: Tree,
+  framework: AgentFramework = 'strands',
+): Promise<void> {
+  const lang = FRAMEWORKS[framework].ts;
+  if (!lang) {
+    throw new Error(
+      `The '${framework}' framework does not support TypeScript agents.`,
+    );
+  }
+  emitTs(tree, lang.base);
+
+  const indexPath = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'index.ts',
+  );
+  await addStarExport(tree, indexPath, './core/with-session-id-strands.js');
+  await addStarExport(tree, indexPath, './core/model-errors-strands.js');
+}
+
+/**
  * Emit the TypeScript client templates for a connection protocol and agent
  * framework into the agent-connection project's `src/core/` directory. Safe to
  * call multiple times — `KeepExisting` preserves customised files.
@@ -242,16 +270,8 @@ export async function addTypeScriptCoreClient(
 
   // Framework Layer 2: base helpers (re-exported for the agent server) + the
   // thin protocol client.
-  emitTs(tree, fw.base);
+  await addTypeScriptFrameworkBase(tree, framework);
   emitTs(tree, fw.protocol);
-
-  const indexPath = joinPathFragments(
-    AGENT_CONNECTION_PROJECT_DIR,
-    'src',
-    'index.ts',
-  );
-  await addStarExport(tree, indexPath, './core/with-session-id-strands.js');
-  await addStarExport(tree, indexPath, './core/model-errors-strands.js');
 }
 
 /**
@@ -335,6 +355,52 @@ const emitPy = (tree: Tree, templateDir: string) =>
   );
 
 /**
+ * Emit a framework's base Layer-2 helpers (model-error logging + per-session
+ * agent cache) into the Python agent-connection project and re-export them.
+ * The agent server entry point imports these regardless of whether a connection
+ * client is wired in, so the agent generator calls this directly; connection
+ * generators call it transitively via `addPythonCoreClient`.
+ */
+export async function addPythonFrameworkBase(
+  tree: Tree,
+  framework: AgentFramework = 'strands',
+): Promise<void> {
+  const lang = FRAMEWORKS[framework].py;
+  if (!lang) {
+    throw new Error(
+      `The '${framework}' framework does not support Python agents.`,
+    );
+  }
+  emitPy(tree, lang.base);
+
+  const moduleInitPath = joinPathFragments(
+    getPythonAgentConnectionProjectDir(tree),
+    getPythonAgentConnectionModuleName(tree),
+    '__init__.py',
+  );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.with_session_id_strands',
+    'with_session_id',
+  );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.model_errors_strands',
+    'log_model_errors',
+  );
+
+  if (lang.deps.length > 0) {
+    addDependenciesToPyProjectToml(
+      tree,
+      getPythonAgentConnectionProjectDir(tree),
+      lang.deps,
+    );
+  }
+}
+
+/**
  * Emit the Python client templates for a connection protocol and agent
  * framework into the agent-connection project's core directory.
  *
@@ -358,35 +424,8 @@ export async function addPythonCoreClient(
   emitPy(tree, PY_PROTOCOL_TEMPLATES[protocol]);
 
   // Framework Layer 2: base helpers + the thin protocol client.
-  emitPy(tree, fw.base);
+  await addPythonFrameworkBase(tree, framework);
   emitPy(tree, fw.protocol);
-
-  // Re-export the framework base helpers for the agent server entry points.
-  const moduleInitPath = joinPathFragments(
-    getPythonAgentConnectionProjectDir(tree),
-    getPythonAgentConnectionModuleName(tree),
-    '__init__.py',
-  );
-  await addPythonReExport(
-    tree,
-    moduleInitPath,
-    '.core.with_session_id_strands',
-    'with_session_id',
-  );
-  await addPythonReExport(
-    tree,
-    moduleInitPath,
-    '.core.model_errors_strands',
-    'log_model_errors',
-  );
-
-  if (fw.deps.length > 0) {
-    addDependenciesToPyProjectToml(
-      tree,
-      getPythonAgentConnectionProjectDir(tree),
-      fw.deps,
-    );
-  }
 }
 
 /**

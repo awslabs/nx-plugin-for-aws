@@ -81,6 +81,19 @@ dev-dependencies = []
       tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
     ).toBeTruthy();
 
+    // The agent server imports the framework base helpers, so they must be
+    // emitted + re-exported even without any connection client.
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    const acBase = `packages/common/agent_connection/${moduleName}`;
+    expect(
+      tree.exists(`${acBase}/core/with_session_id_strands.py`),
+    ).toBeTruthy();
+    expect(tree.exists(`${acBase}/core/model_errors_strands.py`)).toBeTruthy();
+    const acInit = tree.read(`${acBase}/__init__.py`, 'utf-8')!;
+    expect(acInit).toContain('with_session_id');
+    expect(acInit).toContain('log_model_errors');
+
     // Check that pyproject.toml was updated with strands agent dependencies
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
