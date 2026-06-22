@@ -1206,6 +1206,7 @@ import {
   HttpMethod,
   HttpStage,
   LogGroupLogDestination,
+  ThrottleSettings,
 } from 'aws-cdk-lib/aws-apigatewayv2';
 import { LogGroup } from 'aws-cdk-lib/aws-logs';
 import { suppressRules } from '../checkov.js';
@@ -1232,6 +1233,12 @@ export interface HttpApiProps<
    * Map of operation names to their API Gateway integrations
    */
   readonly integrations: TIntegrations;
+  /**
+   * Default throttling limits applied to the API's default stage.
+   *
+   * @default { rateLimit: 10000, burstLimit: 5000 }
+   */
+  readonly throttle?: ThrottleSettings;
 }
 
 /**
@@ -1265,6 +1272,7 @@ export class HttpApi<
       apiName,
       operations,
       integrations,
+      throttle = { rateLimit: 10000, burstLimit: 5000 },
       ...props
     }: HttpApiProps<TIntegrations, TOperation>,
   ) {
@@ -1292,6 +1300,7 @@ export class HttpApi<
     this.defaultStage = new HttpStage(this, 'DefaultStage', {
       httpApi: this.api,
       autoDeploy: true,
+      throttle,
       accessLogSettings: {
         destination: new LogGroupLogDestination(accessLogGroup),
       },
@@ -2073,6 +2082,7 @@ import {
   RestApiProps as _RestApiProps,
   IResource,
   Stage,
+  ThrottleSettings,
 } from 'aws-cdk-lib/aws-apigateway';
 import { IAspect, RemovalPolicy } from 'aws-cdk-lib';
 import {
@@ -2119,6 +2129,12 @@ export interface RestApiProps<
    * @default true
    */
   readonly enableWaf?: boolean;
+  /**
+   * Default throttling limits applied to all methods on the API's default stage.
+   *
+   * @default { rateLimit: 10000, burstLimit: 5000 }
+   */
+  readonly throttle?: ThrottleSettings;
 }
 
 /**
@@ -2153,6 +2169,7 @@ export class RestApi<
       operations,
       integrations,
       enableWaf = true,
+      throttle = { rateLimit: 10000, burstLimit: 5000 },
       ...props
     }: RestApiProps<TIntegrations, TOperation>,
   ) {
@@ -2160,7 +2177,21 @@ export class RestApi<
     this.integrations = integrations;
 
     // Create the API Gateway REST API
-    this.api = new _RestApi(this, 'Api', props);
+    this.api = new _RestApi(this, 'Api', {
+      ...props,
+      deployOptions: {
+        ...props.deployOptions,
+        methodOptions: {
+          ...props.deployOptions?.methodOptions,
+          // Default throttling applied to all resource paths and methods
+          '/*/*': {
+            throttlingRateLimit: throttle.rateLimit,
+            throttlingBurstLimit: throttle.burstLimit,
+            ...props.deployOptions?.methodOptions?.['/*/*'],
+          },
+        },
+      },
+    });
 
     if (enableWaf) {
       this.webAcl = new CfnWebACL(this, 'WebAcl', {
