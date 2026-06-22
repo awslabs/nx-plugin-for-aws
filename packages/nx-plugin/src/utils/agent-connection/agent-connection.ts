@@ -132,18 +132,35 @@ export async function ensureTypeScriptAgentConnectionProject(
 }
 
 /**
- * Emit one of the TypeScript core client templates (mcp or a2a) into the
- * agent-connection project's `src/core/` directory. Safe to call multiple
+ * Emit one of the TypeScript core client templates (mcp / a2a / gateway) into
+ * the agent-connection project's `src/core/` directory. Safe to call multiple
  * times — `KeepExisting` preserves customised files.
+ *
+ * The MCP and gateway clients share the auth + transport helpers in
+ * `core-shared`, so those are emitted alongside them.
  */
 export function addTypeScriptCoreClient(
   tree: Tree,
   kind: keyof typeof TS_CORE_TEMPLATES,
 ): void {
+  const coreDir = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'core',
+  );
+  if (kind === 'mcp' || kind === 'gateway') {
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'core-shared'),
+      coreDir,
+      {},
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+  }
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', TS_CORE_TEMPLATES[kind]),
-    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
+    coreDir,
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -232,8 +249,11 @@ export async function ensurePythonAgentConnectionProject(
 }
 
 /**
- * Emit a Python core client template (mcp / a2a / shared auth) into the
- * agent-connection project's core directory.
+ * Emit a Python core client template (mcp / a2a / gateway / shared auth) into
+ * the agent-connection project's core directory.
+ *
+ * The MCP and gateway clients share the transport helpers in `py-core-shared`,
+ * so those are emitted alongside them.
  */
 export function addPythonCoreClient(
   tree: Tree,
@@ -242,6 +262,15 @@ export function addPythonCoreClient(
   const projectDir = getPythonAgentConnectionProjectDir(tree);
   const moduleName = getPythonAgentConnectionModuleName(tree);
   const coreDir = joinPathFragments(projectDir, moduleName, 'core');
+  if (kind === 'mcp' || kind === 'gateway') {
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'py-core-shared'),
+      coreDir,
+      {},
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+  }
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', PY_CORE_TEMPLATES[kind]),

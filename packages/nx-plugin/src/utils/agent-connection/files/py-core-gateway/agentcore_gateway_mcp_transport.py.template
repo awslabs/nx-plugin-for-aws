@@ -1,0 +1,39 @@
+import re
+
+from .agentcore_transport import (
+    TransportFactory,
+    no_auth_transport,
+    sigv4_transport,
+)
+
+
+def _parse_region_from_gateway_url(gateway_url: str) -> str:
+    match = re.search(r"\.bedrock-agentcore\.([^.]+)\.amazonaws\.com", gateway_url)
+    if not match:
+        raise ValueError(
+            f"Cannot determine region from gateway URL '{gateway_url}'. "
+            "Pass region explicitly."
+        )
+    return match.group(1)
+
+
+class AgentCoreGatewayMCPTransport:
+    """Factory for MCP transport factories that connect to an AgentCore Gateway.
+    Forwards the current async-context session via the AgentCore session header,
+    which the gateway propagates to downstream MCP server targets.
+    """
+
+    @staticmethod
+    def with_iam_auth(
+        gateway_url: str,
+        region: str | None = None,
+    ) -> TransportFactory:
+        """Create a gateway MCP transport authenticated with IAM SigV4."""
+        return sigv4_transport(
+            gateway_url, region or _parse_region_from_gateway_url(gateway_url)
+        )
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> TransportFactory:
+        """Plain-HTTP gateway transport, for the local gateway started by serve-local."""
+        return no_auth_transport(gateway_url)

@@ -1,0 +1,75 @@
+import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import {
+  sigV4Transport,
+  jwtTransport,
+  noAuthTransport,
+} from './agentcore-transport.js';
+
+/**
+ * Options for an MCP transport with IAM authentication.
+ */
+export interface AgentCoreMcpTransportIamOptions {
+  /** The ARN of the Bedrock AgentCore Runtime to connect to. */
+  agentRuntimeArn: string;
+  /** AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/**
+ * Options for an MCP transport with JWT authentication.
+ */
+export interface AgentCoreMcpTransportJwtOptions {
+  /** The ARN of the Bedrock AgentCore Runtime to connect to. */
+  agentRuntimeArn: string;
+  /** A function which returns the JWT access token used to authenticate. */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/**
+ * Options for an MCP transport with no auth (local dev).
+ */
+export interface AgentCoreMcpTransportNoAuthOptions {
+  /** Full URL of the local MCP endpoint. */
+  url: string;
+}
+
+/**
+ * Construct the invocation URL for an AgentCore runtime ARN and extract the
+ * region. ARN format: arn:partition:service:region:account-id:resource
+ */
+const resolve = (agentRuntimeArn: string): { region: string; url: string } => {
+  const region = agentRuntimeArn.split(':')[3];
+  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
+  return { region, url };
+};
+
+/** Factory for MCP transports that connect to a Bedrock AgentCore runtime. */
+export class AgentCoreMcpTransport {
+  /** SigV4-authenticated transport for a Bedrock AgentCore runtime. */
+  static withIamAuth(
+    options: AgentCoreMcpTransportIamOptions,
+  ): StreamableHTTPClientTransport {
+    return sigV4Transport({
+      ...resolve(options.agentRuntimeArn),
+      credentialProvider: options.credentialProvider,
+    });
+  }
+
+  /** Bearer-authenticated transport for a Bedrock AgentCore runtime. */
+  static withJwtAuth(
+    options: AgentCoreMcpTransportJwtOptions,
+  ): StreamableHTTPClientTransport {
+    return jwtTransport({
+      url: resolve(options.agentRuntimeArn).url,
+      accessTokenProvider: options.accessTokenProvider,
+    });
+  }
+
+  /** For local dev — plain HTTP, no auth. */
+  static withoutAuth(
+    options: AgentCoreMcpTransportNoAuthOptions,
+  ): StreamableHTTPClientTransport {
+    return noAuthTransport({ url: options.url });
+  }
+}

@@ -23,22 +23,143 @@ __all__ = [
 "
 `;
 
-exports[`py#agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client.py 1`] = `
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_transport.py 1`] = `
 "from collections.abc import Callable
 
+from .agentcore_transport import (
+    TransportFactory,
+    jwt_transport,
+    no_auth_transport,
+    sigv4_transport,
+)
+
+
+def _resolve(agent_runtime_arn: str) -> tuple[str, str]:
+    """Extract region from ARN and construct the invocation URL.
+
+    ARN format: arn:partition:service:region:account-id:resource
+    """
+    region = agent_runtime_arn.split(":")[3]
+    encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
+    url = (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+        f"{encoded_arn}/invocations?qualifier=DEFAULT"
+    )
+    return region, url
+
+
+class AgentCoreMCPTransport:
+    """Factory for MCP transport factories that connect to an AgentCore runtime."""
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> TransportFactory:
+        """SigV4-authenticated transport for a Bedrock AgentCore runtime."""
+        region, url = _resolve(agent_runtime_arn)
+        return sigv4_transport(url, region)
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> TransportFactory:
+        """Bearer-authenticated transport for a Bedrock AgentCore runtime."""
+        _, url = _resolve(agent_runtime_arn)
+        return jwt_transport(url, access_token_provider)
+
+    @staticmethod
+    def without_auth(url: str) -> TransportFactory:
+        """Plain-HTTP transport — for local dev."""
+        return no_auth_transport(url)
+"
+`;
+
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > agentcore_transport.py 1`] = `
+"from collections.abc import Callable
+from typing import Any
+
 import boto3
-import httpx
+
 from mcp.client.streamable_http import streamablehttp_client
+
+from .auth.session import jwt_auth, plain_auth, sigv4_auth
+
+# Agent frameworks wrap a transport *factory* — a no-arg callable returning a
+# streamable-HTTP transport context manager. Typed as \`\`Any\`\` so this layer
+# stays free of any framework-specific transport type.
+TransportFactory = Callable[[], Any]
+
+
+def _factory(url: str, auth) -> TransportFactory:
+    return lambda: streamablehttp_client(
+        url,
+        auth=auth,
+        timeout=120,
+        terminate_on_close=False,
+    )
+
+
+def sigv4_transport(url: str, region: str) -> TransportFactory:
+    """SigV4-signed transport factory for a resolved AgentCore endpoint."""
+    credentials = boto3.Session(region_name=region).get_credentials()
+    return _factory(url, sigv4_auth(credentials, region))
+
+
+def jwt_transport(
+    url: str, access_token_provider: Callable[[], str]
+) -> TransportFactory:
+    """Bearer-token transport factory for a resolved AgentCore endpoint."""
+    return _factory(url, jwt_auth(access_token_provider))
+
+
+def no_auth_transport(url: str) -> TransportFactory:
+    """Plain-HTTP transport factory — for local dev."""
+    return _factory(url, plain_auth())
+"
+`;
+
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > inventory_mcp_client.py 1`] = `
+"import os
+
 from strands.tools.mcp.mcp_client import MCPClient
 
-from .auth import SigV4HTTPXAuth
-from .session_context import get_current_session_id
+from proj_agent_connection.core.strands_agentcore_mcp_client import (
+    StrandsAgentCoreMCPClient,
+)
+from proj_agent_connection.core.runtime_config import (
+    get_agentcore_runtime_config,
+)
+
+
+class InventoryMcpClient:
+    """Client for the InventoryMcp MCP server."""
+
+    @staticmethod
+    def create() -> MCPClient:
+        if os.environ.get("SERVE_LOCAL") == "true":
+            return StrandsAgentCoreMCPClient.without_auth("http://localhost:8082/mcp")
+        config = get_agentcore_runtime_config()
+        agent_runtime_arn = config.get("agentRuntimes", {}).get("InventoryMcp")
+        if not agent_runtime_arn:
+            raise RuntimeError(
+                "No connected MCP server runtime named 'InventoryMcp' found in runtime configuration."
+            )
+        return StrandsAgentCoreMCPClient.with_iam_auth(agent_runtime_arn)
+"
+`;
+
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > session.py 1`] = `
+"from collections.abc import Callable
+
+import httpx
+
+from ..session_context import get_current_session_id
+from .sigv4 import SigV4HTTPXAuth
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
 
-class _SessionHeaderAuth(httpx.Auth):
-    """Stamps the AgentCore session header from the current async context."""
+class SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context,
+    then delegates to an optional inner auth (e.g. SigV4)."""
 
     requires_request_body = True
     requires_response_body = True
@@ -56,91 +177,61 @@ class _SessionHeaderAuth(httpx.Auth):
         yield from self._inner.auth_flow(request)
 
 
-class AgentCoreMCPClient:
-    """Factory for MCP clients that forward the current async-context session."""
+def sigv4_auth(
+    credentials, region: str, service: str = "bedrock-agentcore"
+) -> httpx.Auth:
+    """Session-forwarding SigV4 auth (per-request, body-aware)."""
+    return SessionHeaderAuth(SigV4HTTPXAuth(credentials, service, region))
 
-    @staticmethod
-    def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
-        """Extract region from ARN and construct the invocation URL.
 
-        ARN format: arn:partition:service:region:account-id:resource
-        """
-        region = agent_runtime_arn.split(":")[3]
-        encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
-        url = (
-            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-            f"{encoded_arn}/invocations?qualifier=DEFAULT"
-        )
-        return region, url
+def jwt_auth(access_token_provider: Callable[[], str]) -> httpx.Auth:
+    """Session-forwarding bearer-token auth."""
 
-    @staticmethod
-    def _create(url: str, auth: httpx.Auth | None = None) -> MCPClient:
-        return MCPClient(
-            lambda: streamablehttp_client(
-                url,
-                auth=_SessionHeaderAuth(auth),
-                timeout=120,
-                terminate_on_close=False,
-            )
-        )
+    class _Bearer(httpx.Auth):
+        def auth_flow(self, request: httpx.Request):
+            request.headers["Authorization"] = f"Bearer {access_token_provider()}"
+            yield request
+
+    return SessionHeaderAuth(_Bearer())
+
+
+def plain_auth() -> httpx.Auth:
+    """Session-forwarding plain auth — for local dev."""
+    return SessionHeaderAuth()
+"
+`;
+
+exports[`py#agent#mcp-connection generator > should match snapshot for generated files > strands_agentcore_mcp_client.py 1`] = `
+"from collections.abc import Callable
+
+from strands.tools.mcp.mcp_client import MCPClient
+
+from .agentcore_mcp_transport import AgentCoreMCPTransport
+
+
+class StrandsAgentCoreMCPClient:
+    """Factory for Strands MCP clients that connect to an AgentCore runtime."""
 
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> MCPClient:
         """SigV4-authenticated client for a Bedrock AgentCore runtime."""
-        region, url = AgentCoreMCPClient._build_url(agent_runtime_arn)
-        credentials = boto3.Session(region_name=region).get_credentials()
-        return AgentCoreMCPClient._create(
-            url, SigV4HTTPXAuth(credentials, "bedrock-agentcore", region)
-        )
+        return MCPClient(AgentCoreMCPTransport.with_iam_auth(agent_runtime_arn))
 
     @staticmethod
     def with_jwt_auth(
         agent_runtime_arn: str, access_token_provider: Callable[[], str]
     ) -> MCPClient:
         """Bearer-authenticated client for a Bedrock AgentCore runtime."""
-        _, url = AgentCoreMCPClient._build_url(agent_runtime_arn)
         return MCPClient(
-            lambda: streamablehttp_client(
-                url,
-                auth=_SessionHeaderAuth(),
-                headers={"Authorization": f"Bearer {access_token_provider()}"},
-                timeout=120,
-                terminate_on_close=False,
+            AgentCoreMCPTransport.with_jwt_auth(
+                agent_runtime_arn, access_token_provider
             )
         )
 
     @staticmethod
     def without_auth(url: str) -> MCPClient:
         """Plain-HTTP client — for local dev."""
-        return AgentCoreMCPClient._create(url)
-"
-`;
-
-exports[`py#agent#mcp-connection generator > should match snapshot for generated files > inventory_mcp_client.py 1`] = `
-"import os
-
-from strands.tools.mcp.mcp_client import MCPClient
-
-from proj_agent_connection.core.agentcore_mcp_client import AgentCoreMCPClient
-from proj_agent_connection.core.runtime_config import (
-    get_agentcore_runtime_config,
-)
-
-
-class InventoryMcpClient:
-    """Client for the InventoryMcp MCP server."""
-
-    @staticmethod
-    def create() -> MCPClient:
-        if os.environ.get("SERVE_LOCAL") == "true":
-            return AgentCoreMCPClient.without_auth("http://localhost:8082/mcp")
-        config = get_agentcore_runtime_config()
-        agent_runtime_arn = config.get("agentRuntimes", {}).get("InventoryMcp")
-        if not agent_runtime_arn:
-            raise RuntimeError(
-                "No connected MCP server runtime named 'InventoryMcp' found in runtime configuration."
-            )
-        return AgentCoreMCPClient.with_iam_auth(agent_runtime_arn)
+        return MCPClient(AgentCoreMCPTransport.without_auth(url))
 "
 `;
 

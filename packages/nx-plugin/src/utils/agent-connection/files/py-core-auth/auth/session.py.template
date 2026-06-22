@@ -1,0 +1,51 @@
+from collections.abc import Callable
+
+import httpx
+
+from ..session_context import get_current_session_id
+from .sigv4 import SigV4HTTPXAuth
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context,
+    then delegates to an optional inner auth (e.g. SigV4)."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, inner: httpx.Auth | None = None):
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
+
+
+def sigv4_auth(
+    credentials, region: str, service: str = "bedrock-agentcore"
+) -> httpx.Auth:
+    """Session-forwarding SigV4 auth (per-request, body-aware)."""
+    return SessionHeaderAuth(SigV4HTTPXAuth(credentials, service, region))
+
+
+def jwt_auth(access_token_provider: Callable[[], str]) -> httpx.Auth:
+    """Session-forwarding bearer-token auth."""
+
+    class _Bearer(httpx.Auth):
+        def auth_flow(self, request: httpx.Request):
+            request.headers["Authorization"] = f"Bearer {access_token_provider()}"
+            yield request
+
+    return SessionHeaderAuth(_Bearer())
+
+
+def plain_auth() -> httpx.Auth:
+    """Session-forwarding plain auth — for local dev."""
+    return SessionHeaderAuth()

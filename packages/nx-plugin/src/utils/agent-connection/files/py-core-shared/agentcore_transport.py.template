@@ -1,0 +1,40 @@
+from collections.abc import Callable
+from typing import Any
+
+import boto3
+
+from mcp.client.streamable_http import streamablehttp_client
+
+from .auth.session import jwt_auth, plain_auth, sigv4_auth
+
+# Agent frameworks wrap a transport *factory* — a no-arg callable returning a
+# streamable-HTTP transport context manager. Typed as ``Any`` so this layer
+# stays free of any framework-specific transport type.
+TransportFactory = Callable[[], Any]
+
+
+def _factory(url: str, auth) -> TransportFactory:
+    return lambda: streamablehttp_client(
+        url,
+        auth=auth,
+        timeout=120,
+        terminate_on_close=False,
+    )
+
+
+def sigv4_transport(url: str, region: str) -> TransportFactory:
+    """SigV4-signed transport factory for a resolved AgentCore endpoint."""
+    credentials = boto3.Session(region_name=region).get_credentials()
+    return _factory(url, sigv4_auth(credentials, region))
+
+
+def jwt_transport(
+    url: str, access_token_provider: Callable[[], str]
+) -> TransportFactory:
+    """Bearer-token transport factory for a resolved AgentCore endpoint."""
+    return _factory(url, jwt_auth(access_token_provider))
+
+
+def no_auth_transport(url: str) -> TransportFactory:
+    """Plain-HTTP transport factory — for local dev."""
+    return _factory(url, plain_auth())

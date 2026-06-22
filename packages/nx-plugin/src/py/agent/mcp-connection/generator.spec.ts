@@ -152,10 +152,27 @@ dependencies = ["strands-agents"]
       true,
     );
 
-    // Check core agentcore_mcp_client.py was generated
+    // Check core strands_agentcore_mcp_client.py was generated
     expect(
       tree.exists(
-        'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client.py',
+        'packages/common/agent_connection/proj_agent_connection/core/strands_agentcore_mcp_client.py',
+      ),
+    ).toBe(true);
+
+    // Check the framework-agnostic transport layer was generated
+    expect(
+      tree.exists(
+        'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_transport.py',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent_connection/proj_agent_connection/core/agentcore_transport.py',
+      ),
+    ).toBe(true);
+    expect(
+      tree.exists(
+        'packages/common/agent_connection/proj_agent_connection/core/auth/session.py',
       ),
     ).toBe(true);
 
@@ -491,11 +508,31 @@ dependencies = ["strands-agents"]
     );
     expect(clientFile).toMatchSnapshot('inventory_mcp_client.py');
 
-    const agentCoreMcpClient = tree.read(
-      'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client.py',
+    const strandsAgentCoreMcpClient = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/strands_agentcore_mcp_client.py',
       'utf-8',
     );
-    expect(agentCoreMcpClient).toMatchSnapshot('agentcore_mcp_client.py');
+    expect(strandsAgentCoreMcpClient).toMatchSnapshot(
+      'strands_agentcore_mcp_client.py',
+    );
+
+    const agentCoreMcpTransport = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_transport.py',
+      'utf-8',
+    );
+    expect(agentCoreMcpTransport).toMatchSnapshot('agentcore_mcp_transport.py');
+
+    const agentCoreTransport = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/agentcore_transport.py',
+      'utf-8',
+    );
+    expect(agentCoreTransport).toMatchSnapshot('agentcore_transport.py');
+
+    const sessionAuth = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/auth/session.py',
+      'utf-8',
+    );
+    expect(sessionAuth).toMatchSnapshot('session.py');
 
     const initPy = tree.read(
       'packages/common/agent_connection/proj_agent_connection/__init__.py',

@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 `connection`ジェネレーターは、<Link path="guides/py-agent">Python Agent</Link>を<Link path="guides/agentcore-gateway">AgentCore Gateway</Link>に接続できます。
 
-このジェネレーターは、デプロイ時にGatewayに対してIAM SigV4（`httpx`リクエスト署名経由）で認証し、ローカル実行時には接続されたMCPサーバーに直接多重化するようにエージェントを配線します。
+このジェネレーターは、デプロイ時にGatewayに対してIAM SigV4（`httpx`リクエスト署名経由）で認証し、ローカル実行時にはGatewayプロジェクトによって起動されたローカルゲートウェイに接続するようにエージェントを配線します。
 
 ## 前提条件
 
@@ -44,10 +44,9 @@ import Infrastructure from '@components/infrastructure.astro';
 - packages/common/agent\_connection
   - \<scope>\_agent\_connection
     - core/
-      - agentcore\_gateway\_mcp\_client.py `httpx`を使用したSigV4 MCPクライアント
-      - agentcore\_gateway\_mcp\_local\_client.py 接続されたMCPサーバー用のローカル多重化クライアント
+      - strands\_agentcore\_gateway\_mcp\_client.py デプロイされたGateway用のStrands MCPクライアント
     - app/
-      - \<gateway\_snake>\_client.py `ATTACHED_MCP_SERVERS`リストを持つGatewayごとのラッパー
+      - \<gateway\_snake>\_client.py Gatewayごとのクライアントラッパー
     - \_\_init\_\_.py Gatewayクライアントを再エクスポート
 
 </FileTree>
@@ -83,7 +82,7 @@ def get_agent():
 `MyGatewayClient.create()`は、`list_tools_sync()`がGatewayを通じて利用可能なすべてのツールを生成する、単一のコンテキスト管理可能なクライアントを返します：
 
 - **デプロイモード**（`SERVE_LOCAL`未設定）：GatewayのMCPエンドポイントを指す単一の`MCPClient`、SigV4署名付き。
-- **ローカルモード**（`SERVE_LOCAL=true`）：接続された各MCPサーバーにファンアウトし、それらのツールの和集合を提示する`AgentCoreGatewayLocalMultiplexClient`。
+- **ローカルモード**（`SERVE_LOCAL=true`）：Gatewayプロジェクトの`serve-local`ターゲットによって起動されたローカルゲートウェイを指すプレーンHTTPの`MCPClient`。
 
 セッションIDは`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`ヘッダーを介して、下流のMCPサーバーに自動的に伝播されます。
 
@@ -140,8 +139,8 @@ Gateway URLは、生成されたTerraformモジュールによって<Link path="
 
 ジェネレーターは、エージェントの`serve-local`ターゲットを次のように設定します：
 
-1. 接続されたGatewayに接続されているすべてのMCPサーバーを起動
-2. `SERVE_LOCAL=true`を設定して、生成されたクライアントがデプロイされたGatewayを呼び出す代わりに、それらのローカルMCPサーバーにファンアウトするようにします
+1. 接続されたGatewayのローカルゲートウェイと接続されているすべてのMCPサーバーを起動
+2. `SERVE_LOCAL=true`を設定して、生成されたクライアントがデプロイされたGatewayの代わりにローカルゲートウェイを指すようにします
 
 エージェントをローカルで実行するには：
 
