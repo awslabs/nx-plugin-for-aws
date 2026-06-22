@@ -401,6 +401,180 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 };
 ```
 
+### 访问调用用户
+
+当您的 API 受身份验证保护时，您的操作通常需要知道是谁在调用。生成器不会为您添加此功能，但由于原始 API Gateway 事件可用，您可以在操作中提取调用者的身份。
+
+例如，让我们添加一个 `Me` 操作，返回有关调用用户的详细信息。首先，通过在 `src/context.ts` 中添加 API Gateway 事件，使其在[服务上下文](#service-context)上可用：
+
+```ts {4,12} ins={4,12}
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+/**
+ * Context provided to all operations.
+ */
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  event: APIGatewayProxyEvent;
+}
+```
+
+然后在 `src/handler.ts` 中构造上下文时传递事件：
+
+```ts {6} ins={6}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  event,
+});
+```
+
+:::note[本地服务器]
+`serve` 目标的 `src/local-server.ts` 也会构造上下文。在本地运行时没有 API Gateway 事件，因此您可以传递一个存根（例如 `event: { requestContext: {} } as never`）来满足类型要求。
+:::
+
+接下来，在您的 Smithy 模型中定义 `Me` 操作，例如在 `model/src/operations/me.smithy` 中：
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Return details about the calling user
+@http(method: "GET", uri: "/me")
+@readonly
+operation Me {
+    output := {
+        @required
+        sub: String
+
+        @required
+        username: String
+    }
+    errors: [
+        UnauthorizedError
+    ]
+}
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+记得在 `model/src/main.smithy` 中将操作注册到您的服务：
+
+```smithy {4} ins={4}
+service YourService {
+    operations: [
+        Echo
+        Me
+    ]
+}
+```
+
+现在实现该操作。提取调用者身份的方式取决于您选择的 `auth` 方法：
+
+<OptionFilter when={{ auth: 'iam' }} description="IAM 身份验证 API 的身份提取">
+对于 `IAM` 身份验证，我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。创建 `src/operations/me.ts`：
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const cognitoAuthenticationProvider =
+    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Cognito 身份验证 API 的身份提取">
+使用 `auth: 'cognito'` 时，API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT，并将验证后的声明放置在事件的 `event.requestContext.authorizer.claims` 上。该操作只需读取这些声明——无需额外的 AWS SDK 调用，无需手动 JWT 验证。
+
+生成器将授权器配置为接受 Cognito 访问令牌，因此 `username` 是规范的用户名声明；如果您重新配置授权器以接受 ID 令牌，我们会回退到 `cognito:username`。创建 `src/operations/me.ts`：
+
+```ts
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const claims = ctx.event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[验证令牌]
+您不需要 `aws-jwt-verify` 或任何其他 JWT 验证库——API Gateway Cognito 用户池授权器在您的 Lambda 运行之前已经验证了签名、颁发者、作用域和过期时间。如果任何这些检查失败，API Gateway 会返回 `401 Unauthorized`，并且永远不会调用您的处理程序。
+:::
+</OptionFilter>
+
+最后，在 `src/service.ts` 中将操作注册到您的服务：
+
+```ts {4,9} ins={4,9}
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+import { Me } from './operations/me.js';
+
+// Register operations to the service here
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  Me,
+};
+```
+
 ## 构建与代码生成
 
 Smithy 模型项目使用 [Docker](https://www.docker.com/) 构建 Smithy 产物并生成 TypeScript Server SDK：

@@ -401,6 +401,180 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 };
 ```
 
+### Truy Cập Người Dùng Đang Gọi
+
+Khi API của bạn được bảo vệ bằng xác thực, các operation thường cần biết ai đang gọi. Trình tạo không thêm điều này cho bạn, nhưng vì sự kiện API Gateway thô có sẵn, bạn có thể trích xuất danh tính của người gọi trong một operation.
+
+Ví dụ, hãy thêm một operation `Me` trả về thông tin chi tiết về người dùng đang gọi. Đầu tiên, làm cho sự kiện API Gateway có sẵn trên [service context](#service-context) bằng cách thêm nó vào `src/context.ts`:
+
+```ts {4,12} ins={4,12}
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+/**
+ * Context provided to all operations.
+ */
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  event: APIGatewayProxyEvent;
+}
+```
+
+Sau đó truyền sự kiện khi bạn xây dựng context trong `src/handler.ts`:
+
+```ts {6} ins={6}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  event,
+});
+```
+
+:::note[Local Server]
+Target `serve` của `src/local-server.ts` cũng xây dựng context. Không có sự kiện API Gateway khi chạy cục bộ, vì vậy bạn có thể truyền một stub (ví dụ: `event: { requestContext: {} } as never`) để thỏa mãn kiểu.
+:::
+
+Tiếp theo, định nghĩa operation `Me` trong mô hình Smithy của bạn, ví dụ trong `model/src/operations/me.smithy`:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Return details about the calling user
+@http(method: "GET", uri: "/me")
+@readonly
+operation Me {
+    output := {
+        @required
+        sub: String
+
+        @required
+        username: String
+    }
+    errors: [
+        UnauthorizedError
+    ]
+}
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+Nhớ đăng ký operation trên service của bạn trong `model/src/main.smithy`:
+
+```smithy {4} ins={4}
+service YourService {
+    operations: [
+        Echo
+        Me
+    ]
+}
+```
+
+Bây giờ triển khai operation. Cách bạn trích xuất danh tính của người gọi phụ thuộc vào phương thức `auth` đã chọn:
+
+<OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
+Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ sự kiện API Gateway. Tạo `src/operations/me.ts`:
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const cognitoAuthenticationProvider =
+    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Identity extraction for Cognito-authenticated APIs">
+Với `auth: 'cognito'`, trình ủy quyền Cognito User Pools của API Gateway xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claim đã xác minh trên sự kiện tại `event.requestContext.authorizer.claims`. Operation chỉ đọc các claim đó — không có cuộc gọi AWS SDK bổ sung, không có xác minh JWT thủ công.
+
+Trình tạo kết nối trình ủy quyền để chấp nhận access token của Cognito, vì vậy `username` là claim username chính tắc; chúng ta quay lại `cognito:username` trong trường hợp bạn cấu hình lại trình ủy quyền để chấp nhận ID token. Tạo `src/operations/me.ts`:
+
+```ts
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const claims = ctx.event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[Verifying the token]
+Bạn không cần `aws-jwt-verify` hoặc bất kỳ thư viện xác minh JWT nào khác ở đây — trình ủy quyền Cognito User Pools của API Gateway đã xác minh chữ ký, issuer, scope và thời hạn vào thời điểm Lambda của bạn chạy. Nếu bất kỳ kiểm tra nào trong số đó thất bại, API Gateway trả về `401 Unauthorized` và handler của bạn không bao giờ được gọi.
+:::
+</OptionFilter>
+
+Cuối cùng, đăng ký operation trên service của bạn trong `src/service.ts`:
+
+```ts {4,9} ins={4,9}
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+import { Me } from './operations/me.js';
+
+// Register operations to the service here
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  Me,
+};
+```
+
 ## Building và Tạo Mã
 
 Dự án mô hình Smithy sử dụng [Docker](https://www.docker.com/) để build các artifact Smithy và tạo TypeScript Server SDK:

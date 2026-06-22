@@ -401,6 +401,180 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 };
 ```
 
+### 呼び出しユーザーへのアクセス
+
+APIが認証で保護されている場合、オペレーションは誰が呼び出しているかを知る必要があることがよくあります。ジェネレーターはこれを自動的に追加しませんが、生のAPI Gatewayイベントが利用可能なため、オペレーション内で呼び出し元のIDを抽出できます。
+
+例として、呼び出しユーザーの詳細を返す`Me`オペレーションを追加してみましょう。まず、`src/context.ts`に追加して、API Gatewayイベントを[サービスコンテキスト](#service-context)で利用できるようにします：
+
+```ts {4,12} ins={4,12}
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+/**
+ * Context provided to all operations.
+ */
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  event: APIGatewayProxyEvent;
+}
+```
+
+次に、`src/handler.ts`でコンテキストを構築する際にイベントを渡します：
+
+```ts {6} ins={6}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  event,
+});
+```
+
+:::note[ローカルサーバー]
+`serve`ターゲットの`src/local-server.ts`もコンテキストを構築します。ローカルで実行する場合はAPI Gatewayイベントがないため、型を満たすためにスタブ（例：`event: { requestContext: {} } as never`）を渡すことができます。
+:::
+
+次に、Smithyモデルで`Me`オペレーションを定義します。例えば`model/src/operations/me.smithy`に：
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Return details about the calling user
+@http(method: "GET", uri: "/me")
+@readonly
+operation Me {
+    output := {
+        @required
+        sub: String
+
+        @required
+        username: String
+    }
+    errors: [
+        UnauthorizedError
+    ]
+}
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+`model/src/main.smithy`でサービスにオペレーションを登録することを忘れないでください：
+
+```smithy {4} ins={4}
+service YourService {
+    operations: [
+        Echo
+        Me
+    ]
+}
+```
+
+次に、オペレーションを実装します。呼び出し元のIDを抽出する方法は、選択した`auth`メソッドによって異なります：
+
+<OptionFilter when={{ auth: 'iam' }} description="IAM認証APIのID抽出">
+`IAM`認証の場合、API Gatewayイベントから抽出したsubを使用してCognitoで呼び出し元を検索します。`src/operations/me.ts`を作成します：
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const cognitoAuthenticationProvider =
+    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Cognito認証APIのID抽出">
+`auth: 'cognito'`の場合、API Gateway Cognito User Pools オーソライザーは、呼び出し元が`Authorization`ヘッダーで提供するJWTを検証し、検証済みのクレームを`event.requestContext.authorizer.claims`のイベントに配置します。オペレーションはそれらのクレームを読み取るだけで、追加のAWS SDK呼び出しや手動のJWT検証は不要です。
+
+ジェネレーターはCognitoアクセストークンを受け入れるようにオーソライザーを配線するため、`username`は正規のユーザー名クレームです。IDトークンを受け入れるようにオーソライザーを再構成する場合に備えて、`cognito:username`にフォールバックします。`src/operations/me.ts`を作成します：
+
+```ts
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const claims = ctx.event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[トークンの検証]
+ここでは`aws-jwt-verify`や他のJWT検証ライブラリは必要ありません — API Gateway Cognito User Pools オーソライザーは、Lambdaが実行される時点で既に署名、発行者、スコープ、有効期限を検証しています。これらのチェックのいずれかが失敗した場合、API Gatewayは`401 Unauthorized`を返し、ハンドラーは呼び出されません。
+:::
+</OptionFilter>
+
+最後に、`src/service.ts`でサービスにオペレーションを登録します：
+
+```ts {4,9} ins={4,9}
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+import { Me } from './operations/me.js';
+
+// Register operations to the service here
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  Me,
+};
+```
+
 ## ビルドとコード生成
 
 Smithyモデルプロジェクトは[Docker](https://www.docker.com/)を使用してSmithyアーティファクトをビルドし、TypeScript Server SDKを生成します：

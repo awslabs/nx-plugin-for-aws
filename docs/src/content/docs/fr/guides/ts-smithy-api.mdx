@@ -401,6 +401,180 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 };
 ```
 
+### Accès à l'utilisateur appelant
+
+Lorsque votre API est protégée par authentification, vos opérations ont souvent besoin de savoir qui appelle. Le générateur n'ajoute pas cela pour vous, mais comme l'événement brut API Gateway est disponible, vous pouvez extraire l'identité de l'appelant dans une opération.
+
+À titre d'exemple, ajoutons une opération `Me` qui retourne les détails de l'utilisateur appelant. Tout d'abord, rendez l'événement API Gateway disponible sur le [contexte de service](#service-context) en l'ajoutant dans `src/context.ts` :
+
+```ts {4,12} ins={4,12}
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+/**
+ * Context provided to all operations.
+ */
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  event: APIGatewayProxyEvent;
+}
+```
+
+Ensuite, passez l'événement lors de la construction du contexte dans `src/handler.ts` :
+
+```ts {6} ins={6}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  event,
+});
+```
+
+:::note[Serveur local]
+Le `src/local-server.ts` de la cible `serve` construit également le contexte. Il n'y a pas d'événement API Gateway lors de l'exécution locale, vous pouvez donc passer un stub (par exemple `event: { requestContext: {} } as never`) pour satisfaire le type.
+:::
+
+Ensuite, définissez l'opération `Me` dans votre modèle Smithy, par exemple dans `model/src/operations/me.smithy` :
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Return details about the calling user
+@http(method: "GET", uri: "/me")
+@readonly
+operation Me {
+    output := {
+        @required
+        sub: String
+
+        @required
+        username: String
+    }
+    errors: [
+        UnauthorizedError
+    ]
+}
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+N'oubliez pas d'enregistrer l'opération sur votre service dans `model/src/main.smithy` :
+
+```smithy {4} ins={4}
+service YourService {
+    operations: [
+        Echo
+        Me
+    ]
+}
+```
+
+Maintenant, implémentez l'opération. La façon dont vous extrayez l'identité de l'appelant dépend de votre méthode `auth` sélectionnée :
+
+<OptionFilter when={{ auth: 'iam' }} description="Extraction d'identité pour les API authentifiées par IAM">
+Pour l'authentification `IAM`, nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway. Créez `src/operations/me.ts` :
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const cognitoAuthenticationProvider =
+    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Extraction d'identité pour les API authentifiées par Cognito">
+Avec `auth: 'cognito'`, l'autorisateur Cognito User Pools d'API Gateway vérifie le JWT que l'appelant fournit dans l'en-tête `Authorization` et place les revendications vérifiées sur l'événement à `event.requestContext.authorizer.claims`. L'opération lit simplement ces revendications — pas d'appels AWS SDK supplémentaires, pas de vérification JWT manuelle.
+
+Le générateur configure l'autorisateur pour accepter les jetons d'accès Cognito, donc `username` est la revendication de nom d'utilisateur canonique ; nous revenons à `cognito:username` au cas où vous reconfigureriez l'autorisateur pour accepter les jetons ID. Créez `src/operations/me.ts` :
+
+```ts
+import { ServiceContext } from '../context.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
+
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  const claims = ctx.event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[Vérification du jeton]
+Vous n'avez pas besoin de `aws-jwt-verify` ou d'une autre bibliothèque de vérification JWT ici — l'autorisateur Cognito User Pools d'API Gateway a déjà vérifié la signature, l'émetteur, les portées et l'expiration au moment où votre Lambda s'exécute. Si l'une de ces vérifications échoue, API Gateway retourne `401 Unauthorized` et votre gestionnaire n'est jamais invoqué.
+:::
+</OptionFilter>
+
+Enfin, enregistrez l'opération sur votre service dans `src/service.ts` :
+
+```ts {4,9} ins={4,9}
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+import { Me } from './operations/me.js';
+
+// Register operations to the service here
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  Me,
+};
+```
+
 ## Build et génération de code
 
 Le projet de modèle Smithy utilise [Docker](https://www.docker.com/) pour construire les artefacts Smithy et générer le SDK serveur TypeScript :
