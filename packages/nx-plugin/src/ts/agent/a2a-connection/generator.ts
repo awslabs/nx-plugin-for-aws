@@ -84,7 +84,7 @@ export const tsAgentA2aConnectionGenerator = async (
 
   // 1. Ensure the shared agent-connection project exists + has the A2A core client
   await ensureTypeScriptAgentConnectionProject(tree);
-  addTypeScriptCoreClient(tree, 'a2a');
+  await addTypeScriptCoreClient(tree, 'a2a');
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(

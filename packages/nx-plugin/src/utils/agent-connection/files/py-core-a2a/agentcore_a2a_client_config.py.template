@@ -1,26 +1,11 @@
 from collections.abc import Callable
-from urllib.parse import quote
 
 import boto3
 import httpx
 from a2a.client import ClientConfig
 
+from .agentcore_endpoints import a2a_url_from_arn, region_from_arn
 from .auth.session import jwt_auth, plain_auth, sigv4_auth
-
-
-def _resolve(agent_runtime_arn: str) -> tuple[str, str]:
-    """Extract region from ARN and construct the A2A invocations URL.
-
-    ARN format: arn:partition:service:region:account-id:resource
-    A2A on AgentCore is mounted at `/invocations/` (trailing slash matters).
-    """
-    region = agent_runtime_arn.split(":")[3]
-    encoded_arn = quote(agent_runtime_arn, safe="")
-    url = (
-        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-        f"{encoded_arn}/invocations/"
-    )
-    return region, url
 
 
 def _config(url: str, auth: httpx.Auth) -> tuple[str, ClientConfig]:
@@ -37,17 +22,20 @@ class AgentCoreA2aClientConfig:
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> tuple[str, ClientConfig]:
         """SigV4-authenticated A2A client config for a Bedrock AgentCore runtime."""
-        region, url = _resolve(agent_runtime_arn)
+        region = region_from_arn(agent_runtime_arn)
         credentials = boto3.Session(region_name=region).get_credentials()
-        return _config(url, sigv4_auth(credentials, region))
+        return _config(
+            a2a_url_from_arn(agent_runtime_arn), sigv4_auth(credentials, region)
+        )
 
     @staticmethod
     def with_jwt_auth(
         agent_runtime_arn: str, access_token_provider: Callable[[], str]
     ) -> tuple[str, ClientConfig]:
         """Bearer-authenticated A2A client config for a Bedrock AgentCore runtime."""
-        _, url = _resolve(agent_runtime_arn)
-        return _config(url, jwt_auth(access_token_provider))
+        return _config(
+            a2a_url_from_arn(agent_runtime_arn), jwt_auth(access_token_provider)
+        )
 
     @staticmethod
     def without_auth(url: str) -> tuple[str, ClientConfig]:

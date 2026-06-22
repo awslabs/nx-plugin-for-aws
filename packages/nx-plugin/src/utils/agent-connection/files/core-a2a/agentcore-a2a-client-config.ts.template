@@ -5,6 +5,7 @@ import {
   JsonRpcTransportFactory,
 } from '@a2a-js/sdk/client';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { a2aUrlFromArn, regionFromArn } from './agentcore-endpoints.js';
 import {
   createJwtFetch,
   createPlainFetch,
@@ -45,17 +46,6 @@ export interface A2aClientConfig {
   clientFactory: ClientFactory;
 }
 
-/**
- * Construct the A2A invocations URL for an AgentCore runtime ARN and extract
- * the region. A2A on AgentCore is mounted at `/invocations/` (trailing slash
- * matters). ARN format: arn:partition:service:region:account-id:resource
- */
-const resolve = (agentRuntimeArn: string): { region: string; url: string } => {
-  const region = agentRuntimeArn.split(':')[3];
-  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations/`;
-  return { region, url };
-};
-
 const build = (url: string, fetchFn: typeof fetch): A2aClientConfig => {
   const clientFactory = new ClientFactory({
     ...ClientFactoryOptions.default,
@@ -75,11 +65,10 @@ export class AgentCoreA2aClientConfig {
   static withIamAuth(
     options: AgentCoreA2aClientConfigIamOptions,
   ): A2aClientConfig {
-    const { region, url } = resolve(options.agentRuntimeArn);
     return build(
-      url,
+      a2aUrlFromArn(options.agentRuntimeArn),
       createSigV4Fetch({
-        region,
+        region: regionFromArn(options.agentRuntimeArn),
         credentialProvider: options.credentialProvider,
       }),
     );
@@ -89,8 +78,10 @@ export class AgentCoreA2aClientConfig {
   static withJwtAuth(
     options: AgentCoreA2aClientConfigJwtOptions,
   ): A2aClientConfig {
-    const { url } = resolve(options.agentRuntimeArn);
-    return build(url, createJwtFetch(options.accessTokenProvider));
+    return build(
+      a2aUrlFromArn(options.agentRuntimeArn),
+      createJwtFetch(options.accessTokenProvider),
+    );
   }
 
   /** For local dev — plain HTTP, no auth. */

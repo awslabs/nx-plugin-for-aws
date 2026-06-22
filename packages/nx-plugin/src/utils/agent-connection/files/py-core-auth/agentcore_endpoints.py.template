@@ -1,0 +1,47 @@
+"""Resolve Bedrock AgentCore invocation endpoints from a runtime ARN.
+
+Framework-agnostic — reusable by any framework's connection client.
+"""
+
+import re
+from urllib.parse import quote
+
+
+def region_from_arn(agent_runtime_arn: str) -> str:
+    """Extract the AWS region from a Bedrock AgentCore runtime ARN.
+
+    ARN format: arn:partition:service:region:account-id:resource
+    """
+    return agent_runtime_arn.split(":")[3]
+
+
+def mcp_url_from_arn(agent_runtime_arn: str) -> str:
+    """The MCP invocation URL for a runtime ARN."""
+    region = region_from_arn(agent_runtime_arn)
+    encoded_arn = quote(agent_runtime_arn, safe="")
+    return (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+        f"{encoded_arn}/invocations?qualifier=DEFAULT"
+    )
+
+
+def a2a_url_from_arn(agent_runtime_arn: str) -> str:
+    """The A2A invocation URL for a runtime ARN. A2A on AgentCore is mounted at
+    the `/invocations/` root (trailing slash matters)."""
+    region = region_from_arn(agent_runtime_arn)
+    encoded_arn = quote(agent_runtime_arn, safe="")
+    return (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+        f"{encoded_arn}/invocations/"
+    )
+
+
+def region_from_gateway_url(gateway_url: str) -> str:
+    """Extract the AWS region from an AgentCore Gateway MCP URL."""
+    match = re.search(r"\.bedrock-agentcore\.([^.]+)\.amazonaws\.com", gateway_url)
+    if not match:
+        raise ValueError(
+            f"Cannot determine region from gateway URL '{gateway_url}'. "
+            "Pass region explicitly."
+        )
+    return match.group(1)

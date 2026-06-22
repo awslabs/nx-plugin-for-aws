@@ -72,7 +72,7 @@ export const tsAgentMcpConnectionGenerator = async (
 
   // 1. Ensure the shared agent-connection project exists + has the MCP core client
   await ensureTypeScriptAgentConnectionProject(tree);
-  addTypeScriptCoreClient(tree, 'mcp');
+  await addTypeScriptCoreClient(tree, 'mcp');
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(

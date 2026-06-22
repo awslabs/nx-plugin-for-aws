@@ -2,8 +2,8 @@
 
 exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > agent-connection-index.ts 1`] = `
 "export * from './app/inventory-mcp-client.js';
-export * from './core/model-errors.js';
-export * from './core/with-session-id.js';
+export * from './core/model-errors-strands.js';
+export * from './core/with-session-id-strands.js';
 export * from './core/session-context.js';
 // Export your library code here
 "
@@ -105,6 +105,7 @@ export class AgentCoreMcpClientStrands {
 exports[`ts#agent#mcp-connection generator > should match snapshot for agent-connection src files > agentcore-mcp-transport.ts 1`] = `
 "import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { mcpUrlFromArn, regionFromArn } from './agentcore-endpoints.js';
 import {
   sigV4Transport,
   jwtTransport,
@@ -139,16 +140,6 @@ export interface AgentCoreMcpTransportNoAuthOptions {
   url: string;
 }
 
-/**
- * Construct the invocation URL for an AgentCore runtime ARN and extract the
- * region. ARN format: arn:partition:service:region:account-id:resource
- */
-const resolve = (agentRuntimeArn: string): { region: string; url: string } => {
-  const region = agentRuntimeArn.split(':')[3];
-  const url = \`https://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT\`;
-  return { region, url };
-};
-
 /** Factory for MCP transports that connect to a Bedrock AgentCore runtime. */
 export class AgentCoreMcpTransport {
   /** SigV4-authenticated transport for a Bedrock AgentCore runtime. */
@@ -156,7 +147,8 @@ export class AgentCoreMcpTransport {
     options: AgentCoreMcpTransportIamOptions,
   ): StreamableHTTPClientTransport {
     return sigV4Transport({
-      ...resolve(options.agentRuntimeArn),
+      region: regionFromArn(options.agentRuntimeArn),
+      url: mcpUrlFromArn(options.agentRuntimeArn),
       credentialProvider: options.credentialProvider,
     });
   }
@@ -166,7 +158,7 @@ export class AgentCoreMcpTransport {
     options: AgentCoreMcpTransportJwtOptions,
   ): StreamableHTTPClientTransport {
     return jwtTransport({
-      url: resolve(options.agentRuntimeArn).url,
+      url: mcpUrlFromArn(options.agentRuntimeArn),
       accessTokenProvider: options.accessTokenProvider,
     });
   }

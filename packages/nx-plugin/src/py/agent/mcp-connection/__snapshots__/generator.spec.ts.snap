@@ -7,10 +7,10 @@ from .core.session_context import get_current_session_id, session_id_context
 
 from .app.inventory_mcp_client import InventoryMcpClientStrands
 
-from .core.model_errors import log_model_errors
+from .core.model_errors_strands import log_model_errors
 
 
-from .core.with_session_id import with_session_id
+from .core.with_session_id_strands import with_session_id
 
 
 __all__ = [
@@ -60,6 +60,7 @@ class AgentCoreMCPClientStrands:
 exports[`py#agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_transport.py 1`] = `
 "from collections.abc import Callable
 
+from .agentcore_endpoints import mcp_url_from_arn, region_from_arn
 from .agentcore_transport import (
     TransportFactory,
     jwt_transport,
@@ -68,36 +69,22 @@ from .agentcore_transport import (
 )
 
 
-def _resolve(agent_runtime_arn: str) -> tuple[str, str]:
-    """Extract region from ARN and construct the invocation URL.
-
-    ARN format: arn:partition:service:region:account-id:resource
-    """
-    region = agent_runtime_arn.split(":")[3]
-    encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
-    url = (
-        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-        f"{encoded_arn}/invocations?qualifier=DEFAULT"
-    )
-    return region, url
-
-
 class AgentCoreMCPTransport:
     """Factory for MCP transport factories that connect to an AgentCore runtime."""
 
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> TransportFactory:
         """SigV4-authenticated transport for a Bedrock AgentCore runtime."""
-        region, url = _resolve(agent_runtime_arn)
-        return sigv4_transport(url, region)
+        return sigv4_transport(
+            mcp_url_from_arn(agent_runtime_arn), region_from_arn(agent_runtime_arn)
+        )
 
     @staticmethod
     def with_jwt_auth(
         agent_runtime_arn: str, access_token_provider: Callable[[], str]
     ) -> TransportFactory:
         """Bearer-authenticated transport for a Bedrock AgentCore runtime."""
-        _, url = _resolve(agent_runtime_arn)
-        return jwt_transport(url, access_token_provider)
+        return jwt_transport(mcp_url_from_arn(agent_runtime_arn), access_token_provider)
 
     @staticmethod
     def without_auth(url: str) -> TransportFactory:

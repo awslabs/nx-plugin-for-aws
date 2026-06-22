@@ -84,18 +84,18 @@ export const pyAgentGatewayConnectionGenerator = async (
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
 
   await ensurePythonAgentConnectionProject(tree);
-  addPythonCoreClient(tree, 'auth');
-  addPythonCoreClient(tree, 'gateway');
+  await addPythonCoreClient(tree, 'gateway');
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
+  // Layer 0/1 deps for the MCP transport + signed httpx auth. The framework's
+  // own dependency (strands-agents) is added by addPythonCoreClient.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
     'mcp',
-    'strands-agents',
   ]);
 
   const appDir = joinPathFragments(

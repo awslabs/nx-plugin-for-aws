@@ -1,6 +1,10 @@
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import {
+  mcpUrlFromArn,
+  regionFromArn,
+} from './agentcore-endpoints.js';
+import {
   sigV4Transport,
   jwtTransport,
   noAuthTransport,
@@ -34,16 +38,6 @@ export interface AgentCoreMcpTransportNoAuthOptions {
   url: string;
 }
 
-/**
- * Construct the invocation URL for an AgentCore runtime ARN and extract the
- * region. ARN format: arn:partition:service:region:account-id:resource
- */
-const resolve = (agentRuntimeArn: string): { region: string; url: string } => {
-  const region = agentRuntimeArn.split(':')[3];
-  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
-  return { region, url };
-};
-
 /** Factory for MCP transports that connect to a Bedrock AgentCore runtime. */
 export class AgentCoreMcpTransport {
   /** SigV4-authenticated transport for a Bedrock AgentCore runtime. */
@@ -51,7 +45,8 @@ export class AgentCoreMcpTransport {
     options: AgentCoreMcpTransportIamOptions,
   ): StreamableHTTPClientTransport {
     return sigV4Transport({
-      ...resolve(options.agentRuntimeArn),
+      region: regionFromArn(options.agentRuntimeArn),
+      url: mcpUrlFromArn(options.agentRuntimeArn),
       credentialProvider: options.credentialProvider,
     });
   }
@@ -61,7 +56,7 @@ export class AgentCoreMcpTransport {
     options: AgentCoreMcpTransportJwtOptions,
   ): StreamableHTTPClientTransport {
     return jwtTransport({
-      url: resolve(options.agentRuntimeArn).url,
+      url: mcpUrlFromArn(options.agentRuntimeArn),
       accessTokenProvider: options.accessTokenProvider,
     });
   }
