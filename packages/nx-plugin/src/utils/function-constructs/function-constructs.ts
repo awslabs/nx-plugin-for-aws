@@ -80,7 +80,7 @@ const addLambdaFunctionCdkConstructs = async (
     ),
     {
       ...options,
-      runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_14' : 'NODEJS_LATEST'}`,
+      runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_14' : 'NODEJS_22_X'}`,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
