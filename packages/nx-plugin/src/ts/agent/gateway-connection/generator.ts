@@ -103,7 +103,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${gatewayKebabCase}-client.js`,
+    `./app/${gatewayKebabCase}-client-strands.js`,
   );
 
   // 3. AST-transform agent.ts to add the gateway client (an McpClient in

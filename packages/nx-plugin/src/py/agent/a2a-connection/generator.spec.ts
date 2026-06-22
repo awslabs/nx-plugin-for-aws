@@ -155,12 +155,12 @@ dependencies = ["strands-agents"]
 
     // Per-connection client vended
     const clientPath =
-      coreFiles[0]?.replace(/core\/.*/, '') + 'app/remote_client.py';
+      coreFiles[0]?.replace(/core\/.*/, '') + 'app/remote_client_strands.py';
     // Find it properly
     const clientFile = tree
       .listChanges()
       .map((c) => c.path)
-      .find((p) => p.endsWith('app/remote_client.py'));
+      .find((p) => p.endsWith('app/remote_client_strands.py'));
     expect(clientFile).toBeDefined();
     const client = tree.read(clientFile!, 'utf-8')!;
     expect(client).toContain('RemoteClientStrands');
@@ -465,6 +465,6 @@ def get_agent(session_id: str):
     );
     snap('core/auth/session.py', 'session.py');
     // Per-connection client
-    snap('app/remote_client.py', 'remote_client.py');
+    snap('app/remote_client_strands.py', 'remote_client_strands.py');
   });
 });

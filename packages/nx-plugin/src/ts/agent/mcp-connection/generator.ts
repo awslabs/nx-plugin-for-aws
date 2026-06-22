@@ -91,7 +91,7 @@ export const tsAgentMcpConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${mcpServerKebabCase}-client.js`,
+    `./app/${mcpServerKebabCase}-client-strands.js`,
   );
 
   // 3. AST transform agent.ts to add MCP tools

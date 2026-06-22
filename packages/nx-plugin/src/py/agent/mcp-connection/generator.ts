@@ -124,7 +124,7 @@ export const pyAgentMcpConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${mcpServerSnakeCase}_client`,
+    `.app.${mcpServerSnakeCase}_client_strands`,
     `${mcpServerClassName}ClientStrands`,
   );
 

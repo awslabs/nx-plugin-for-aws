@@ -179,7 +179,7 @@ dependencies = ["strands-agents"]
     // Check per-connection client was generated in the shared project
     expect(
       tree.exists(
-        'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client.py',
+        'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client_strands.py',
       ),
     ).toBe(true);
 
@@ -189,7 +189,7 @@ dependencies = ["strands-agents"]
       'utf-8',
     );
     expect(initContent).toContain(
-      'from .app.inventory_mcp_client import InventoryMcpClientStrands',
+      'from .app.inventory_mcp_client_strands import InventoryMcpClientStrands',
     );
   });
 
@@ -429,12 +429,12 @@ dependencies = ["strands-agents"]
     // Both client files should exist in the shared project
     expect(
       tree.exists(
-        'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client.py',
+        'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client_strands.py',
       ),
     ).toBe(true);
     expect(
       tree.exists(
-        'packages/common/agent_connection/proj_agent_connection/app/catalog_mcp_client.py',
+        'packages/common/agent_connection/proj_agent_connection/app/catalog_mcp_client_strands.py',
       ),
     ).toBe(true);
 
@@ -507,10 +507,10 @@ dependencies = ["strands-agents"]
     });
 
     const clientFile = tree.read(
-      'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client.py',
+      'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client_strands.py',
       'utf-8',
     );
-    expect(clientFile).toMatchSnapshot('inventory_mcp_client.py');
+    expect(clientFile).toMatchSnapshot('inventory_mcp_client_strands.py');
 
     const agentCoreMcpClientStrands = tree.read(
       'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client_strands.py',

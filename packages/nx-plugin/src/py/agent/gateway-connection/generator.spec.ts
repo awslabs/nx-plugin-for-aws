@@ -146,7 +146,7 @@ dependencies = ["strands-agents"]
     // Per-connection app client
     expect(
       tree.exists(
-        `packages/common/agent_connection/${moduleName}/app/my_gateway_client.py`,
+        `packages/common/agent_connection/${moduleName}/app/my_gateway_client_strands.py`,
       ),
     ).toBe(true);
   });
@@ -159,7 +159,7 @@ dependencies = ["strands-agents"]
     const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
     const client = tree
       .read(
-        `packages/common/agent_connection/${moduleName}/app/my_gateway_client.py`,
+        `packages/common/agent_connection/${moduleName}/app/my_gateway_client_strands.py`,
       )!
       .toString();
     expect(client).toContain('class MyGatewayClientStrands');
@@ -183,7 +183,7 @@ dependencies = ["strands-agents"]
     const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
     const client = tree
       .read(
-        `packages/common/agent_connection/${moduleName}/app/my_gateway_client.py`,
+        `packages/common/agent_connection/${moduleName}/app/my_gateway_client_strands.py`,
       )!
       .toString();
     expect(client).toContain('gateway_url="http://localhost:8123/mcp"');
@@ -214,7 +214,7 @@ dependencies = ["strands-agents"]
       .read(`packages/common/agent_connection/${moduleName}/__init__.py`)!
       .toString();
     expect(initPy).toContain('MyGatewayClientStrands');
-    expect(initPy).toContain('my_gateway_client');
+    expect(initPy).toContain('my_gateway_client_strands');
   });
 
   it('patches agent.py to enter the gateway client in a `with` block', async () => {
@@ -337,7 +337,7 @@ dependencies = ["strands-agents"]
     snap('core/agentcore_transport.py', 'agentcore_transport.py');
     snap('core/auth/session.py', 'session.py');
     // Per-connection client
-    snap('app/my_gateway_client.py', 'my_gateway_client.py');
+    snap('app/my_gateway_client_strands.py', 'my_gateway_client_strands.py');
   });
 
   it('exposes stable generator info id', () => {

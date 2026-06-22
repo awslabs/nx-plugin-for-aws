@@ -139,7 +139,7 @@ export const pyAgentA2aConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${targetAgentSnakeCase}_client`,
+    `.app.${targetAgentSnakeCase}_client_strands`,
     `${targetAgentClassName}ClientStrands`,
   );
 

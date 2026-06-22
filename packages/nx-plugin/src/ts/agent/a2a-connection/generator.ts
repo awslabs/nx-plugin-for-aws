@@ -103,7 +103,7 @@ export const tsAgentA2aConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${targetAgentKebabCase}-client.js`,
+    `./app/${targetAgentKebabCase}-client-strands.js`,
   );
 
   // 3. AST transform agent.ts to add the remote A2A agent as a tool

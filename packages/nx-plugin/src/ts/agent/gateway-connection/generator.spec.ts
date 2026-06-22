@@ -126,7 +126,7 @@ export const getAgent = async (sessionId: string) =>
     ).toBe(true);
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/app/my-gateway-client.ts',
+        'packages/common/agent-connection/src/app/my-gateway-client-strands.ts',
       ),
     ).toBe(true);
   });
@@ -136,7 +136,7 @@ export const getAgent = async (sessionId: string) =>
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const client = tree
-      .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
+      .read('packages/common/agent-connection/src/app/my-gateway-client-strands.ts')!
       .toString();
     expect(client).toContain('export class MyGatewayClientStrands');
     expect(client).toContain("config.gateways?.['MyGateway']");
@@ -158,7 +158,7 @@ export const getAgent = async (sessionId: string) =>
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const client = tree
-      .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
+      .read('packages/common/agent-connection/src/app/my-gateway-client-strands.ts')!
       .toString();
     expect(client).toContain("gatewayUrl: 'http://localhost:8123/mcp'");
     expect(client).toContain('withoutAuth');
@@ -181,7 +181,7 @@ export const getAgent = async (sessionId: string) =>
     const index = tree
       .read('packages/common/agent-connection/src/index.ts')!
       .toString();
-    expect(index).toContain('my-gateway-client');
+    expect(index).toContain('my-gateway-client-strands');
   });
 
   it('adds the gateway client into the agent source file', async () => {
@@ -317,7 +317,7 @@ export const getAgent = async (sessionId: string) =>
     snap('core/agentcore-transport.ts', 'agentcore-transport.ts');
     snap('core/agentcore-fetch.ts', 'agentcore-fetch.ts');
     // Per-connection client + barrel
-    snap('app/my-gateway-client.ts', 'my-gateway-client.ts');
+    snap('app/my-gateway-client-strands.ts', 'my-gateway-client-strands.ts');
     snap('index.ts', 'agent-connection-index.ts');
   });
 

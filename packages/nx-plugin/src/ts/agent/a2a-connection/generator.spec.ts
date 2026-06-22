@@ -138,7 +138,7 @@ export const getAgent = async (sessionId: string) =>
 
     // Per-connection client vended into app/
     const clientPath =
-      'packages/common/agent-connection/src/app/remote-client.ts';
+      'packages/common/agent-connection/src/app/remote-client-strands.ts';
     expect(tree.exists(clientPath)).toBe(true);
     const client = tree.read(clientPath, 'utf-8')!;
     expect(client).toContain('RemoteClientStrands');
@@ -151,7 +151,7 @@ export const getAgent = async (sessionId: string) =>
       'packages/common/agent-connection/src/index.ts',
       'utf-8',
     )!;
-    expect(index).toContain('remote-client');
+    expect(index).toContain('remote-client-strands');
   });
 
   it('should transform agent.ts to wire the remote as a tool', async () => {
@@ -420,7 +420,7 @@ export const getAgent = async (sessionId: string) =>
     );
     snap('core/agentcore-fetch.ts', 'agentcore-fetch.ts');
     // Per-connection client + barrel
-    snap('app/remote-client.ts', 'remote-client.ts');
+    snap('app/remote-client-strands.ts', 'remote-client-strands.ts');
     snap('index.ts', 'agent-connection-index.ts');
   });
 });

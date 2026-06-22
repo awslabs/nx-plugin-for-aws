@@ -130,7 +130,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${gatewaySnakeCase}_client`,
+    `.app.${gatewaySnakeCase}_client_strands`,
     `${gatewayClassName}ClientStrands`,
   );
 

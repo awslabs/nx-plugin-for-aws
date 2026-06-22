@@ -158,7 +158,7 @@ export const getAgent = async (sessionId: string) =>
     // Check per-connection client was generated in app/
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+        'packages/common/agent-connection/src/app/inventory-mcp-client-strands.ts',
       ),
     ).toBe(true);
 
@@ -167,7 +167,7 @@ export const getAgent = async (sessionId: string) =>
       'packages/common/agent-connection/src/index.ts',
       'utf-8',
     );
-    expect(indexContent).toContain('inventory-mcp-client');
+    expect(indexContent).toContain('inventory-mcp-client-strands');
   });
 
   it('should transform agent.ts to add MCP client', async () => {
@@ -488,10 +488,10 @@ export const getAgent = async (sessionId: string) => {
     expect(agentCoreFetch).toMatchSnapshot('agentcore-fetch.ts');
 
     const inventoryMcpClient = tree.read(
-      'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+      'packages/common/agent-connection/src/app/inventory-mcp-client-strands.ts',
       'utf-8',
     );
-    expect(inventoryMcpClient).toMatchSnapshot('inventory-mcp-client.ts');
+    expect(inventoryMcpClient).toMatchSnapshot('inventory-mcp-client-strands.ts');
 
     const indexTs = tree.read(
       'packages/common/agent-connection/src/index.ts',
