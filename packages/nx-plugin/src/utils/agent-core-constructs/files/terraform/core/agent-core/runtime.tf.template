@@ -95,8 +95,7 @@ resource "aws_ecr_repository" "agent_core_repository" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
   name = "${lower(var.agent_runtime_name)}_repository_${random_id.unique_suffix.hex}"
 
-  #checkov:skip=CKV_AWS_51:Image tag is reused for latest deployments
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 
   image_scanning_configuration {
@@ -270,12 +269,18 @@ data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containers %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
 }
 
+locals {
+  # Content-based, immutable image tag derived from the local image digest
+  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+}
+
 # Null resource for container image publish
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
     repository_url   = aws_ecr_repository.agent_core_repository.repository_url
     docker_image_tag = var.docker_image_tag
+    image_tag        = local.image_tag
   }
 
   provisioner "local-exec" {
@@ -283,16 +288,17 @@ resource "null_resource" "docker_publish" {
       # Get ECR login token
       aws ecr get-login-password --region "$AWS_REGION" | <%= containers %> login --username AWS --password-stdin "$REPOSITORY_URL"
 
-      # Tag the image
-      <%= containers %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:latest"
+      # Tag the image with the immutable content-based tag
+      <%= containers %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
 
       # Push the image
-      <%= containers %> push "$REPOSITORY_URL:latest"
+      <%= containers %> push "$REPOSITORY_URL:$IMAGE_TAG"
     EOT
     environment = {
       AWS_REGION       = local.aws_region
       REPOSITORY_URL   = self.triggers.repository_url
       DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      IMAGE_TAG        = self.triggers.image_tag
     }
   }
 
@@ -307,7 +313,7 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
 
   agent_runtime_artifact {
     container_configuration {
-      container_uri = "${aws_ecr_repository.agent_core_repository.repository_url}:latest"
+      container_uri = "${aws_ecr_repository.agent_core_repository.repository_url}:${local.image_tag}"
     }
   }
 

@@ -318,8 +318,8 @@ Il provider AWS di Terraform non ha una risorsa di prima classe "build and push 
 
 1. Il target `build` del progetto esegue `docker build`, producendo un'immagine locale taggata `my-scope-my-project:latest`.
 2. Un `aws_ecr_repository` per contenere l'immagine.
-3. Una `null_resource` con un provisioner `local-exec` che si autentica su ECR, ri-tagga l'immagine costruita localmente e la carica.
-4. La risorsa downstream (ad es. `aws_ecs_task_definition`) fa riferimento a `"${aws_ecr_repository.repo.repository_url}:latest"`.
+3. Una `null_resource` con un provisioner `local-exec` che si autentica su ECR, ri-tagga l'immagine costruita localmente con il suo digest di contenuto e la carica.
+4. La risorsa downstream (ad es. `aws_ecs_task_definition`) fa riferimento all'immagine tramite il suo tag immutabile basato sul digest.
 
 ```d2
 direction: down
@@ -361,7 +361,7 @@ infra.repo -> ecr
 ```hcl
 resource "aws_ecr_repository" "repo" {
   name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 }
 
@@ -370,24 +370,30 @@ data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
 }
 
+locals {
+  # Content-based, immutable image tag derived from the local image digest
+  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+}
+
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
     repository_url = aws_ecr_repository.repo.repository_url
+    image_tag      = local.image_tag
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region ${data.aws_region.current.id} \
         | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:${self.triggers.image_tag}
+      docker push ${self.triggers.repository_url}:${self.triggers.image_tag}
     EOT
   }
 }
 ```
 
-Il blocco `data.external.docker_digest` garantisce che la `null_resource` venga rieseguita ogni volta che l'hash dell'immagine locale cambia, attivando un nuovo push ad ogni modifica significativa del codice.
+Il blocco `data.external.docker_digest` garantisce che la `null_resource` venga rieseguita ogni volta che l'hash dell'immagine locale cambia, attivando un nuovo push ad ogni modifica significativa del codice. L'immagine viene caricata con un tag immutabile basato sul contenuto derivato dal suo digest, quindi il repository ECR può utilizzare la mutabilità del tag `IMMUTABLE` e rifiutare qualsiasi tentativo di sovrascrivere un tag esistente.
 
 :::note[Eseguire bundle prima di apply]
 `nx apply <project>` richiede che il tag dell'immagine `my-scope-my-project:latest` esista già localmente. Esegui `nx build my-project` (o `nx docker my-project`) prima di `nx apply <project>`.
