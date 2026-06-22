@@ -1,0 +1,229 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#agent#gateway-connection generator > should match snapshot for agent-connection src files > agent-connection-index.ts 1`] = `
+"export * from './app/my-gateway-client.js';
+export * from './core/model-errors.js';
+export * from './core/with-session-id.js';
+export * from './core/session-context.js';
+// Export your library code here
+"
+`;
+
+exports[`ts#agent#gateway-connection generator > should match snapshot for agent-connection src files > agentcore-fetch.ts 1`] = `
+"import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { getCurrentSessionId } from './session-context.js';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+/** Wrap a fetch so each request carries the current async-context session id. */
+const withSessionHeader =
+  (inner: typeof fetch): typeof fetch =>
+  async (input, init) => {
+    const headers = new Headers(init?.headers);
+    const sessionId = getCurrentSessionId();
+    if (sessionId) headers.set(SESSION_HEADER, sessionId);
+    return inner(input, { ...init, headers });
+  };
+
+/** Options for a SigV4-signing fetch. */
+export interface SigV4FetchOptions {
+  /** AWS region to sign for. */
+  region: string;
+  /** AWS service to sign for. Defaults to \`bedrock-agentcore\`. */
+  service?: string;
+  /** AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/** A fetch that signs every request with AWS SigV4 (per-request, body-aware). */
+export const createSigV4Fetch = (options: SigV4FetchOptions): typeof fetch => {
+  const { region, service = 'bedrock-agentcore' } = options;
+  const credentialProvider =
+    options.credentialProvider ?? fromNodeProviderChain();
+  const signedFetch: typeof fetch = async (...args) => {
+    const client = new AwsClient({
+      ...(await credentialProvider()),
+      service,
+      region,
+    });
+    return client.fetch(...args);
+  };
+  return withSessionHeader(signedFetch);
+};
+
+/** A fetch that adds a bearer token from the given async provider. */
+export const createJwtFetch = (
+  accessTokenProvider: () => Promise<string>,
+): typeof fetch =>
+  withSessionHeader(async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', \`Bearer \${await accessTokenProvider()}\`);
+    return fetch(input, { ...init, headers });
+  });
+
+/** A plain fetch (local dev) that still forwards the session id. */
+export const createPlainFetch = (): typeof fetch => withSessionHeader(fetch);
+"
+`;
+
+exports[`ts#agent#gateway-connection generator > should match snapshot for agent-connection src files > agentcore-gateway-mcp-client-strands.ts 1`] = `
+"import { McpClient } from '@strands-agents/sdk';
+import {
+  AgentCoreGatewayMcpTransport,
+  type AgentCoreGatewayMcpTransportIamOptions,
+} from './agentcore-gateway-mcp-transport.js';
+
+/**
+ * Strands MCP clients that connect to an AgentCore Gateway.
+ */
+export class AgentCoreGatewayMcpClientStrands {
+  /** Create a gateway MCP client authenticated with IAM SigV4. */
+  static withIamAuth(
+    options: AgentCoreGatewayMcpTransportIamOptions,
+  ): McpClient {
+    return new McpClient({
+      transport: AgentCoreGatewayMcpTransport.withIamAuth(options),
+    });
+  }
+
+  /** Plain-HTTP gateway client, for the local gateway started by serve-local. */
+  static withoutAuth(options: { gatewayUrl: string }): McpClient {
+    return new McpClient({
+      transport: AgentCoreGatewayMcpTransport.withoutAuth(options),
+    });
+  }
+}
+"
+`;
+
+exports[`ts#agent#gateway-connection generator > should match snapshot for agent-connection src files > agentcore-gateway-mcp-transport.ts 1`] = `
+"import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { sigV4Transport, noAuthTransport } from './agentcore-transport.js';
+
+export interface AgentCoreGatewayMcpTransportIamOptions {
+  /**
+   * The MCP URL of the AgentCore Gateway, of the form
+   * https://<gatewayId>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp
+   */
+  gatewayUrl: string;
+  /** AWS region override; by default parsed from \`gatewayUrl\`. */
+  region?: string;
+  /** AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+const parseRegionFromGatewayUrl = (gatewayUrl: string): string => {
+  const match = /\\.bedrock-agentcore\\.([^.]+)\\.amazonaws\\.com/.exec(gatewayUrl);
+  if (!match) {
+    throw new Error(
+      \`Cannot determine region from gateway URL '\${gatewayUrl}'. Pass region explicitly.\`,
+    );
+  }
+  return match[1];
+};
+
+/**
+ * Factory for MCP transports that connect to an AgentCore Gateway. Forwards the
+ * current async-context session via the AgentCore session header, which the
+ * gateway propagates to downstream MCP server targets.
+ */
+export class AgentCoreGatewayMcpTransport {
+  /** Create a gateway MCP transport authenticated with IAM SigV4. */
+  static withIamAuth(
+    options: AgentCoreGatewayMcpTransportIamOptions,
+  ): StreamableHTTPClientTransport {
+    return sigV4Transport({
+      region: options.region ?? parseRegionFromGatewayUrl(options.gatewayUrl),
+      url: options.gatewayUrl,
+      credentialProvider: options.credentialProvider,
+    });
+  }
+
+  /** Plain-HTTP gateway transport, for the local gateway started by serve-local. */
+  static withoutAuth(options: {
+    gatewayUrl: string;
+  }): StreamableHTTPClientTransport {
+    return noAuthTransport({ url: options.gatewayUrl });
+  }
+}
+"
+`;
+
+exports[`ts#agent#gateway-connection generator > should match snapshot for agent-connection src files > agentcore-transport.ts 1`] = `
+"import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import {
+  createSigV4Fetch,
+  createJwtFetch,
+  createPlainFetch,
+} from './agentcore-fetch.js';
+
+const build = (
+  url: string,
+  fetchFn: typeof fetch,
+): StreamableHTTPClientTransport =>
+  new StreamableHTTPClientTransport(new URL(url), { fetch: fetchFn });
+
+/** SigV4-signed transport for a resolved AgentCore endpoint. */
+export const sigV4Transport = (options: {
+  region: string;
+  url: string;
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}): StreamableHTTPClientTransport =>
+  build(
+    options.url,
+    createSigV4Fetch({
+      region: options.region,
+      credentialProvider: options.credentialProvider,
+    }),
+  );
+
+/** Bearer-token transport for a resolved AgentCore endpoint. */
+export const jwtTransport = (options: {
+  url: string;
+  accessTokenProvider: () => Promise<string>;
+}): StreamableHTTPClientTransport =>
+  build(options.url, createJwtFetch(options.accessTokenProvider));
+
+/** Plain-HTTP transport — for local dev. */
+export const noAuthTransport = (options: {
+  url: string;
+}): StreamableHTTPClientTransport => build(options.url, createPlainFetch());
+"
+`;
+
+exports[`ts#agent#gateway-connection generator > should match snapshot for agent-connection src files > my-gateway-client.ts 1`] = `
+"import { McpClient } from '@strands-agents/sdk';
+import { AgentCoreGatewayMcpClientStrands } from '../core/agentcore-gateway-mcp-client-strands.js';
+import { getAgentCoreRuntimeConfig } from '../core/runtime-config.js';
+
+/**
+ * Strands client for the MyGateway AgentCore Gateway.
+ *
+ * Deployed: a SigV4-signed MCP client pointing at the gateway URL.
+ * Local (\`SERVE_LOCAL=true\`): a plain-HTTP client pointing at the local
+ * gateway started by the gateway project's serve-local target. The local
+ * gateway aggregates every attached MCP server but does not evaluate
+ * Cedar policies.
+ */
+export class MyGatewayClientStrands {
+  static async create(): Promise<McpClient> {
+    if (process.env.SERVE_LOCAL === 'true') {
+      return AgentCoreGatewayMcpClientStrands.withoutAuth({
+        gatewayUrl: 'http://localhost:8100/mcp',
+      });
+    }
+    const config = await getAgentCoreRuntimeConfig();
+    const gatewayUrl = config.gateways?.['MyGateway'];
+    if (!gatewayUrl) {
+      throw new Error(
+        \`No connected gateway named 'MyGateway' found in runtime configuration.\`,
+      );
+    }
+    return AgentCoreGatewayMcpClientStrands.withIamAuth({ gatewayUrl });
+  }
+}
+"
+`;

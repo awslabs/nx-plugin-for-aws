@@ -131,7 +131,7 @@ export const pyAgentGatewayConnectionGenerator = async (
     tree,
     moduleInitPath,
     `.app.${gatewaySnakeCase}_client`,
-    `${gatewayClassName}Client`,
+    `${gatewayClassName}ClientStrands`,
   );
 
   const agentSourceDir = joinPathFragments(
@@ -141,7 +141,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${gatewayClassName}Client`;
+    const clientClassName = `${gatewayClassName}ClientStrands`;
     const clientVarName = gatewaySnakeCase;
 
     await addPythonDestructuredImport(

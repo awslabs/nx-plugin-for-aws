@@ -114,7 +114,7 @@ export const tsAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}Client`;
+    const clientClassName = `${targetAgentClassName}ClientStrands`;
     const clientVarName =
       targetAgentClassName.charAt(0).toLowerCase() +
       targetAgentClassName.slice(1);

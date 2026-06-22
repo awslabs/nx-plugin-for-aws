@@ -136,8 +136,9 @@ export async function ensureTypeScriptAgentConnectionProject(
  * the agent-connection project's `src/core/` directory. Safe to call multiple
  * times — `KeepExisting` preserves customised files.
  *
- * The MCP and gateway clients share the auth + transport helpers in
- * `core-shared`, so those are emitted alongside them.
+ * All clients share the SigV4 / JWT / plain fetch wrappers in `core-auth`, so
+ * those are always emitted. The MCP and gateway clients additionally share the
+ * MCP transport helper in `core-shared`.
  */
 export function addTypeScriptCoreClient(
   tree: Tree,
@@ -147,6 +148,13 @@ export function addTypeScriptCoreClient(
     AGENT_CONNECTION_PROJECT_DIR,
     'src',
     'core',
+  );
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'core-auth'),
+    coreDir,
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (kind === 'mcp' || kind === 'gateway') {
     generateFiles(

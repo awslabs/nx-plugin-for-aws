@@ -125,7 +125,7 @@ export const pyAgentMcpConnectionGenerator = async (
     tree,
     moduleInitPath,
     `.app.${mcpServerSnakeCase}_client`,
-    `${mcpServerClassName}Client`,
+    `${mcpServerClassName}ClientStrands`,
   );
 
   // 3. Transform agent.py to add MCP client import and usage
@@ -136,7 +136,7 @@ export const pyAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}Client`;
+    const clientClassName = `${mcpServerClassName}ClientStrands`;
     const clientVarName = mcpServerSnakeCase;
 
     await addPythonDestructuredImport(

@@ -124,7 +124,7 @@ dependencies = ["strands-agents"]
     ).toBe(true);
     expect(
       tree.exists(
-        `packages/common/agent_connection/${moduleName}/core/strands_agentcore_gateway_mcp_client.py`,
+        `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_client_strands.py`,
       ),
     ).toBe(true);
     // Framework-agnostic transport layer shared with the MCP client
@@ -162,7 +162,7 @@ dependencies = ["strands-agents"]
         `packages/common/agent_connection/${moduleName}/app/my_gateway_client.py`,
       )!
       .toString();
-    expect(client).toContain('class MyGatewayClient');
+    expect(client).toContain('class MyGatewayClientStrands');
     expect(client).toContain('config.get("gateways", {}).get("MyGateway")');
     expect(client).toContain('SERVE_LOCAL');
   });
@@ -213,7 +213,7 @@ dependencies = ["strands-agents"]
     const initPy = tree
       .read(`packages/common/agent_connection/${moduleName}/__init__.py`)!
       .toString();
-    expect(initPy).toContain('MyGatewayClient');
+    expect(initPy).toContain('MyGatewayClientStrands');
     expect(initPy).toContain('my_gateway_client');
   });
 
@@ -225,8 +225,8 @@ dependencies = ["strands-agents"]
       .read('packages/my-agent/my_scope_my_agent/agent/agent.py')!
       .toString();
 
-    expect(agent).toContain('MyGatewayClient');
-    expect(agent).toContain('my_gateway = MyGatewayClient.create()');
+    expect(agent).toContain('MyGatewayClientStrands');
+    expect(agent).toContain('my_gateway = MyGatewayClientStrands.create()');
     // The gateway client is an MCPClient context manager — entered directly.
     expect(agent).toMatch(/with \([\s\S]*?my_gateway[\s\S]*?\):/);
     // Tools array spreads list_tools_sync() — the same shape mcp-connection uses.
@@ -257,7 +257,8 @@ dependencies = ["strands-agents"]
     const agent = tree
       .read('packages/my-agent/my_scope_my_agent/agent/agent.py')!
       .toString();
-    const createCount = (agent.match(/MyGatewayClient\.create/g) ?? []).length;
+    const createCount = (agent.match(/MyGatewayClientStrands\.create/g) ?? [])
+      .length;
     expect(createCount).toBe(1);
   });
 
@@ -312,6 +313,31 @@ dependencies = ["strands-agents"]
         } as any,
       }),
     ).rejects.toThrow(/Only IAM-authenticated agents/);
+  });
+
+  it('should match snapshot for agent-connection core files', async () => {
+    setupProjects();
+    await pyAgentGatewayConnectionGenerator(tree, fullOptions());
+
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    const base = `packages/common/agent_connection/${moduleName}`;
+    const snap = (path: string, name: string) =>
+      expect(tree.read(`${base}/${path}`, 'utf-8')).toMatchSnapshot(name);
+
+    // Layer 2 (Strands wrapper) -> Layer 1 (transport) -> Layer 0 (auth)
+    snap(
+      'core/agentcore_gateway_mcp_client_strands.py',
+      'agentcore_gateway_mcp_client_strands.py',
+    );
+    snap(
+      'core/agentcore_gateway_mcp_transport.py',
+      'agentcore_gateway_mcp_transport.py',
+    );
+    snap('core/agentcore_transport.py', 'agentcore_transport.py');
+    snap('core/auth/session.py', 'session.py');
+    // Per-connection client
+    snap('app/my_gateway_client.py', 'my_gateway_client.py');
   });
 
   it('exposes stable generator info id', () => {

@@ -152,10 +152,10 @@ dependencies = ["strands-agents"]
       true,
     );
 
-    // Check core strands_agentcore_mcp_client.py was generated
+    // Check core agentcore_mcp_client_strands.py was generated
     expect(
       tree.exists(
-        'packages/common/agent_connection/proj_agent_connection/core/strands_agentcore_mcp_client.py',
+        'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client_strands.py',
       ),
     ).toBe(true);
 
@@ -189,7 +189,7 @@ dependencies = ["strands-agents"]
       'utf-8',
     );
     expect(initContent).toContain(
-      'from .app.inventory_mcp_client import InventoryMcpClient',
+      'from .app.inventory_mcp_client import InventoryMcpClientStrands',
     );
   });
 
@@ -221,14 +221,14 @@ dependencies = ["strands-agents"]
     )!;
 
     // Check import was added using the shared module
-    expect(agentContent).toContain('InventoryMcpClient');
+    expect(agentContent).toContain('InventoryMcpClientStrands');
     expect(agentContent).toContain(
-      'from proj_agent_connection import InventoryMcpClient',
+      'from proj_agent_connection import InventoryMcpClientStrands',
     );
 
     // Check named client creation (matching TS pattern)
     expect(agentContent).toContain(
-      'inventory_mcp = InventoryMcpClient.create()',
+      'inventory_mcp = InventoryMcpClientStrands.create()',
     );
 
     // Check parenthesized with block was added
@@ -333,7 +333,7 @@ dependencies = ["strands-agents"]
     )!;
 
     // Should only have one import and one client creation
-    const importCount = (agentContent.match(/InventoryMcpClient/g) || [])
+    const importCount = (agentContent.match(/InventoryMcpClientStrands/g) || [])
       .length;
     // Import + creation = 2 occurrences, not more
     expect(importCount).toBeLessThanOrEqual(2);
@@ -405,12 +405,16 @@ dependencies = ["strands-agents"]
     )!;
 
     // Both imports should be present
-    expect(agentContent).toContain('InventoryMcpClient');
-    expect(agentContent).toContain('CatalogMcpClient');
+    expect(agentContent).toContain('InventoryMcpClientStrands');
+    expect(agentContent).toContain('CatalogMcpClientStrands');
 
     // Both named variables should be present
-    expect(agentContent).toContain('inventory_mcp = InventoryMcpClient.create');
-    expect(agentContent).toContain('catalog_mcp = CatalogMcpClient.create');
+    expect(agentContent).toContain(
+      'inventory_mcp = InventoryMcpClientStrands.create',
+    );
+    expect(agentContent).toContain(
+      'catalog_mcp = CatalogMcpClientStrands.create',
+    );
 
     // Should use parenthesized multi-with syntax (not nested)
     expect(agentContent).toContain('inventory_mcp,');
@@ -439,8 +443,8 @@ dependencies = ["strands-agents"]
       'packages/common/agent_connection/proj_agent_connection/__init__.py',
       'utf-8',
     );
-    expect(initContent).toContain('InventoryMcpClient');
-    expect(initContent).toContain('CatalogMcpClient');
+    expect(initContent).toContain('InventoryMcpClientStrands');
+    expect(initContent).toContain('CatalogMcpClientStrands');
   });
 
   it('should throw if components are not provided', async () => {
@@ -508,12 +512,12 @@ dependencies = ["strands-agents"]
     );
     expect(clientFile).toMatchSnapshot('inventory_mcp_client.py');
 
-    const strandsAgentCoreMcpClient = tree.read(
-      'packages/common/agent_connection/proj_agent_connection/core/strands_agentcore_mcp_client.py',
+    const agentCoreMcpClientStrands = tree.read(
+      'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client_strands.py',
       'utf-8',
     );
-    expect(strandsAgentCoreMcpClient).toMatchSnapshot(
-      'strands_agentcore_mcp_client.py',
+    expect(agentCoreMcpClientStrands).toMatchSnapshot(
+      'agentcore_mcp_client_strands.py',
     );
 
     const agentCoreMcpTransport = tree.read(

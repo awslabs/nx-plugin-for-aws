@@ -139,7 +139,7 @@ export const pyAgentA2aConnectionGenerator = async (
     tree,
     moduleInitPath,
     `.app.${targetAgentSnakeCase}_client`,
-    `${targetAgentClassName}Client`,
+    `${targetAgentClassName}ClientStrands`,
   );
 
   // 3. Transform agent.py to add the A2A client import + wrap it as a tool
@@ -150,7 +150,7 @@ export const pyAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}Client`;
+    const clientClassName = `${targetAgentClassName}ClientStrands`;
     const clientVarName = targetAgentSnakeCase;
     const toolName = `ask_${targetAgentSnakeCase}`;
 

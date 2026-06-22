@@ -102,7 +102,7 @@ export const tsAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}Client`;
+    const clientClassName = `${mcpServerClassName}ClientStrands`;
     const clientVarName =
       mcpServerClassName.charAt(0).toLowerCase() + mcpServerClassName.slice(1);
 

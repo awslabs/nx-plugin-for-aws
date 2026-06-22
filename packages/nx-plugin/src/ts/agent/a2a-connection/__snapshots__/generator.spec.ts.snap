@@ -1,0 +1,265 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#agent#a2a-connection generator > should match snapshot for agent-connection src files > agent-connection-index.ts 1`] = `
+"export * from './app/remote-client.js';
+export * from './core/model-errors.js';
+export * from './core/with-session-id.js';
+export * from './core/session-context.js';
+// Export your library code here
+"
+`;
+
+exports[`ts#agent#a2a-connection generator > should match snapshot for agent-connection src files > agentcore-a2a-client-config.ts 1`] = `
+"import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import {
+  createJwtFetch,
+  createPlainFetch,
+  createSigV4Fetch,
+} from './agentcore-fetch.js';
+
+/** Common options for resolving an AgentCore A2A endpoint. */
+export interface AgentCoreA2aClientConfigOptions {
+  /** The ARN of the Bedrock AgentCore Runtime to connect to. */
+  agentRuntimeArn: string;
+}
+
+/** Options for an A2A client config with IAM authentication. */
+export interface AgentCoreA2aClientConfigIamOptions
+  extends AgentCoreA2aClientConfigOptions {
+  /** AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/** Options for an A2A client config with JWT authentication. */
+export interface AgentCoreA2aClientConfigJwtOptions
+  extends AgentCoreA2aClientConfigOptions {
+  /** A function which returns the JWT access token used to authenticate. */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/** Options for an A2A client config with no auth (local dev). */
+export interface AgentCoreA2aClientConfigNoAuthOptions {
+  /** Full URL of the local A2A endpoint. */
+  url: string;
+}
+
+/** A resolved A2A endpoint and a configured \`@a2a-js\` client factory. */
+export interface A2aClientConfig {
+  /** The A2A endpoint URL. */
+  url: string;
+  /** A client factory wired with a signed, session-forwarding fetch. */
+  clientFactory: ClientFactory;
+}
+
+/**
+ * Construct the A2A invocations URL for an AgentCore runtime ARN and extract
+ * the region. A2A on AgentCore is mounted at \`/invocations/\` (trailing slash
+ * matters). ARN format: arn:partition:service:region:account-id:resource
+ */
+const resolve = (agentRuntimeArn: string): { region: string; url: string } => {
+  const region = agentRuntimeArn.split(':')[3];
+  const url = \`https://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/invocations/\`;
+  return { region, url };
+};
+
+const build = (url: string, fetchFn: typeof fetch): A2aClientConfig => {
+  const clientFactory = new ClientFactory({
+    ...ClientFactoryOptions.default,
+    transports: [new JsonRpcTransportFactory({ fetchImpl: fetchFn })],
+    cardResolver: new DefaultAgentCardResolver({ fetchImpl: fetchFn }),
+  });
+  return { url, clientFactory };
+};
+
+/**
+ * Factory for A2A client configs that connect to a Bedrock AgentCore runtime.
+ * Each forwards the current async-context session via the AgentCore session
+ * header. Framework-agnostic — wrap the result in a framework's A2A client.
+ */
+export class AgentCoreA2aClientConfig {
+  /** SigV4-authenticated A2A client config for a Bedrock AgentCore runtime. */
+  static withIamAuth(
+    options: AgentCoreA2aClientConfigIamOptions,
+  ): A2aClientConfig {
+    const { region, url } = resolve(options.agentRuntimeArn);
+    return build(
+      url,
+      createSigV4Fetch({
+        region,
+        credentialProvider: options.credentialProvider,
+      }),
+    );
+  }
+
+  /** Bearer-authenticated A2A client config for a Bedrock AgentCore runtime. */
+  static withJwtAuth(
+    options: AgentCoreA2aClientConfigJwtOptions,
+  ): A2aClientConfig {
+    const { url } = resolve(options.agentRuntimeArn);
+    return build(url, createJwtFetch(options.accessTokenProvider));
+  }
+
+  /** For local dev — plain HTTP, no auth. */
+  static withoutAuth(
+    options: AgentCoreA2aClientConfigNoAuthOptions,
+  ): A2aClientConfig {
+    return build(options.url, createPlainFetch());
+  }
+}
+"
+`;
+
+exports[`ts#agent#a2a-connection generator > should match snapshot for agent-connection src files > agentcore-a2a-client-strands.ts 1`] = `
+"import { A2AAgent } from '@strands-agents/sdk/a2a';
+import {
+  type A2aClientConfig,
+  AgentCoreA2aClientConfig,
+  type AgentCoreA2aClientConfigIamOptions,
+  type AgentCoreA2aClientConfigJwtOptions,
+  type AgentCoreA2aClientConfigNoAuthOptions,
+} from './agentcore-a2a-client-config.js';
+
+/** Optional friendly metadata for the remote agent. */
+export interface StrandsA2aOptions {
+  /** Optional friendly name for the remote agent. */
+  name?: string;
+  /** Optional description for the remote agent. */
+  description?: string;
+}
+
+/** Strands A2A clients for a Bedrock AgentCore runtime. */
+export class AgentCoreA2aClientStrands {
+  private static build(
+    { url, clientFactory }: A2aClientConfig,
+    options: StrandsA2aOptions,
+  ): A2AAgent {
+    return new A2AAgent({
+      url,
+      clientFactory,
+      ...(options.name ? { name: options.name } : {}),
+      ...(options.description ? { description: options.description } : {}),
+    });
+  }
+
+  /** SigV4-authenticated client for a Bedrock AgentCore runtime. */
+  static withIamAuth(
+    options: AgentCoreA2aClientConfigIamOptions & StrandsA2aOptions,
+  ): A2AAgent {
+    return AgentCoreA2aClientStrands.build(
+      AgentCoreA2aClientConfig.withIamAuth(options),
+      options,
+    );
+  }
+
+  /** Bearer-authenticated client for a Bedrock AgentCore runtime. */
+  static withJwtAuth(
+    options: AgentCoreA2aClientConfigJwtOptions & StrandsA2aOptions,
+  ): A2AAgent {
+    return AgentCoreA2aClientStrands.build(
+      AgentCoreA2aClientConfig.withJwtAuth(options),
+      options,
+    );
+  }
+
+  /** For local dev — plain HTTP, no auth. */
+  static withoutAuth(
+    options: AgentCoreA2aClientConfigNoAuthOptions & StrandsA2aOptions,
+  ): A2AAgent {
+    return AgentCoreA2aClientStrands.build(
+      AgentCoreA2aClientConfig.withoutAuth(options),
+      options,
+    );
+  }
+}
+"
+`;
+
+exports[`ts#agent#a2a-connection generator > should match snapshot for agent-connection src files > agentcore-fetch.ts 1`] = `
+"import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { getCurrentSessionId } from './session-context.js';
+
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+/** Wrap a fetch so each request carries the current async-context session id. */
+const withSessionHeader =
+  (inner: typeof fetch): typeof fetch =>
+  async (input, init) => {
+    const headers = new Headers(init?.headers);
+    const sessionId = getCurrentSessionId();
+    if (sessionId) headers.set(SESSION_HEADER, sessionId);
+    return inner(input, { ...init, headers });
+  };
+
+/** Options for a SigV4-signing fetch. */
+export interface SigV4FetchOptions {
+  /** AWS region to sign for. */
+  region: string;
+  /** AWS service to sign for. Defaults to \`bedrock-agentcore\`. */
+  service?: string;
+  /** AWS credential provider; defaults to the standard provider chain. */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/** A fetch that signs every request with AWS SigV4 (per-request, body-aware). */
+export const createSigV4Fetch = (options: SigV4FetchOptions): typeof fetch => {
+  const { region, service = 'bedrock-agentcore' } = options;
+  const credentialProvider =
+    options.credentialProvider ?? fromNodeProviderChain();
+  const signedFetch: typeof fetch = async (...args) => {
+    const client = new AwsClient({
+      ...(await credentialProvider()),
+      service,
+      region,
+    });
+    return client.fetch(...args);
+  };
+  return withSessionHeader(signedFetch);
+};
+
+/** A fetch that adds a bearer token from the given async provider. */
+export const createJwtFetch = (
+  accessTokenProvider: () => Promise<string>,
+): typeof fetch =>
+  withSessionHeader(async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', \`Bearer \${await accessTokenProvider()}\`);
+    return fetch(input, { ...init, headers });
+  });
+
+/** A plain fetch (local dev) that still forwards the session id. */
+export const createPlainFetch = (): typeof fetch => withSessionHeader(fetch);
+"
+`;
+
+exports[`ts#agent#a2a-connection generator > should match snapshot for agent-connection src files > remote-client.ts 1`] = `
+"import { A2AAgent } from '@strands-agents/sdk/a2a';
+import { AgentCoreA2aClientStrands } from '../core/agentcore-a2a-client-strands.js';
+import { getAgentCoreRuntimeConfig } from '../core/runtime-config.js';
+
+/** Strands client for the Remote A2A agent. */
+export class RemoteClientStrands {
+  static async create(): Promise<A2AAgent> {
+    if (process.env.SERVE_LOCAL === 'true') {
+      return AgentCoreA2aClientStrands.withoutAuth({
+        url: 'http://localhost:9000/',
+      });
+    }
+    const config = await getAgentCoreRuntimeConfig();
+    const agentRuntimeArn = config.agentRuntimes?.['Remote'];
+    if (!agentRuntimeArn) {
+      throw new Error(
+        \`No connected agent runtime named 'Remote' found in runtime configuration.\`,
+      );
+    }
+    return AgentCoreA2aClientStrands.withIamAuth({ agentRuntimeArn });
+  }
+}
+"
+`;

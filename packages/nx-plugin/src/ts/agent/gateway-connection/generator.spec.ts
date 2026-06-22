@@ -105,7 +105,7 @@ export const getAgent = async (sessionId: string) =>
     );
     expect(
       tree.exists(
-        'packages/common/agent-connection/src/core/strands-agentcore-gateway-mcp-client.ts',
+        'packages/common/agent-connection/src/core/agentcore-gateway-mcp-client-strands.ts',
       ),
     ).toBe(true);
     // Framework-agnostic transport layer shared with the MCP client
@@ -138,7 +138,7 @@ export const getAgent = async (sessionId: string) =>
     const client = tree
       .read('packages/common/agent-connection/src/app/my-gateway-client.ts')!
       .toString();
-    expect(client).toContain('export class MyGatewayClient');
+    expect(client).toContain('export class MyGatewayClientStrands');
     expect(client).toContain("config.gateways?.['MyGateway']");
     expect(client).toContain('SERVE_LOCAL');
     // create() returns a single McpClient in both modes
@@ -191,9 +191,9 @@ export const getAgent = async (sessionId: string) =>
     const agent = tree
       .read('packages/my-api/src/my-agent/agent.ts')!
       .toString();
-    expect(agent).toContain('MyGatewayClient');
+    expect(agent).toContain('MyGatewayClientStrands');
     expect(agent).toContain('agent-connection');
-    expect(agent).toContain('MyGatewayClient.create()');
+    expect(agent).toContain('MyGatewayClientStrands.create()');
     expect(agent).toContain('myGateway, multiply');
   });
 
@@ -221,7 +221,8 @@ export const getAgent = async (sessionId: string) =>
     const agent = tree
       .read('packages/my-api/src/my-agent/agent.ts')!
       .toString();
-    const createCount = (agent.match(/MyGatewayClient\.create/g) ?? []).length;
+    const createCount = (agent.match(/MyGatewayClientStrands\.create/g) ?? [])
+      .length;
     expect(createCount).toBe(1);
     const toolsArrayMatches = agent.match(/myGateway/g) ?? [];
     // Expect exactly: declaration + tools reference
@@ -294,6 +295,30 @@ export const getAgent = async (sessionId: string) =>
         } as any,
       }),
     ).rejects.toThrow(/Only IAM-authenticated agents/);
+  });
+
+  it('should match snapshot for agent-connection src files', async () => {
+    setupProjects();
+    await tsAgentGatewayConnectionGenerator(tree, fullOptions());
+
+    const base = 'packages/common/agent-connection/src';
+    const snap = (path: string, name: string) =>
+      expect(tree.read(`${base}/${path}`, 'utf-8')).toMatchSnapshot(name);
+
+    // Layer 2 (Strands wrapper) -> Layer 1 (transport) -> Layer 0 (fetch)
+    snap(
+      'core/agentcore-gateway-mcp-client-strands.ts',
+      'agentcore-gateway-mcp-client-strands.ts',
+    );
+    snap(
+      'core/agentcore-gateway-mcp-transport.ts',
+      'agentcore-gateway-mcp-transport.ts',
+    );
+    snap('core/agentcore-transport.ts', 'agentcore-transport.ts');
+    snap('core/agentcore-fetch.ts', 'agentcore-fetch.ts');
+    // Per-connection client + barrel
+    snap('app/my-gateway-client.ts', 'my-gateway-client.ts');
+    snap('index.ts', 'agent-connection-index.ts');
   });
 
   it('exposes stable generator info id', () => {
