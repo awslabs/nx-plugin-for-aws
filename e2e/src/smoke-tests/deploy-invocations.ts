@@ -64,7 +64,7 @@ export async function invokeTrpcApi(
   );
   const data = await response.json();
   console.log(`${apiName} response:`, data);
-  expect(data.result.data.result).toBe('test');
+  expect(data.result.data.message).toBe('test');
 }
 
 export async function invokeRestApi(
