@@ -160,6 +160,18 @@ variable "website_file_path" {
   type        = string
 }
 
+variable "content_security_policy" {
+  description = "The Content-Security-Policy to apply to all responses. Defaults to a conservative policy suitable for a single page application."
+  type        = string
+  default     = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+}
+
+variable "content_security_policy_report_only" {
+  description = "When true, the Content-Security-Policy is delivered via the Content-Security-Policy-Report-Only header rather than being enforced. Report-only mode lets you observe what the policy would block without breaking your application. Tighten the policy to your app's sources, verify nothing legitimate is reported as blocked, then set this to false to switch to enforcement."
+  type        = bool
+  default     = true
+}
+
 
 # Data sources
 data "aws_caller_identity" "current" {}
@@ -520,8 +532,9 @@ resource "aws_cloudfront_origin_access_control" "website_oac" {
   signing_protocol                  = "sigv4"
 }
 
-# Security headers applied to all responses. A Content-Security-Policy is
-# intentionally omitted as it is application specific - add one for your app.
+# Security headers applied to all responses. The Content-Security-Policy is
+# delivered in report-only mode by default so it can be tuned to your app
+# without breaking it - switch to enforcement via content_security_policy_report_only.
 resource "aws_cloudfront_response_headers_policy" "website" {
   name = "\${aws_s3_bucket.website.bucket}-security-headers"
 
@@ -542,6 +555,26 @@ resource "aws_cloudfront_response_headers_policy" "website" {
     referrer_policy {
       referrer_policy = "strict-origin-when-cross-origin"
       override        = true
+    }
+    # CloudFront only supports an enforcing Content-Security-Policy here.
+    # Report-only is delivered via the custom header below.
+    dynamic "content_security_policy" {
+      for_each = var.content_security_policy_report_only ? [] : [1]
+      content {
+        content_security_policy = var.content_security_policy
+        override                = true
+      }
+    }
+  }
+
+  dynamic "custom_headers_config" {
+    for_each = var.content_security_policy_report_only ? [1] : []
+    content {
+      items {
+        header   = "Content-Security-Policy-Report-Only"
+        value    = var.content_security_policy
+        override = true
+      }
     }
   }
 }

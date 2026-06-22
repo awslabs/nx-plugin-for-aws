@@ -27,9 +27,45 @@ import { suppressRules } from './checkov.js';
 
 const DEFAULT_RUNTIME_CONFIG_FILENAME = 'runtime-config.json';
 
+/**
+ * Conservative starter Content-Security-Policy.
+ *
+ * It restricts most resources to the site's own origin, which is a sensible
+ * baseline for a single page application, while allowing inline styles and
+ * data: images which are commonly required by frontend frameworks.
+ */
+const DEFAULT_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * The Content-Security-Policy to apply to all responses.
+   *
+   * @default a conservative policy suitable for a single page application
+   */
+  readonly contentSecurityPolicy?: string;
+  /**
+   * When true, the Content-Security-Policy is delivered via the
+   * Content-Security-Policy-Report-Only header rather than being enforced.
+   *
+   * Report-only mode lets you observe what the policy would block (via the
+   * browser console and any configured report-to endpoint) without breaking
+   * your application. This is the safe default: tighten your policy to your
+   * app's actual sources, verify nothing legitimate is reported as blocked,
+   * then set this to false to switch to enforcement.
+   *
+   * @default true
+   */
+  readonly contentSecurityPolicyReportOnly?: boolean;
 }
 
 /**
@@ -48,7 +84,12 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps
+    {
+      websiteFilePath,
+      websiteName,
+      contentSecurityPolicy = DEFAULT_CONTENT_SECURITY_POLICY,
+      contentSecurityPolicyReportOnly = true,
+    }: StaticWebsiteProps
   ) {
     super(scope, id);
     this.node.setContext(
@@ -118,8 +159,9 @@ export class StaticWebsite extends Construct {
       'Distribution log bucket does not need versioning enabled',
     );
 
-    // Security headers applied to all responses. A Content-Security-Policy is
-    // intentionally omitted as it is application specific - add one for your app.
+    // Security headers applied to all responses. The Content-Security-Policy is
+    // delivered in report-only mode by default so it can be tuned to your app
+    // without breaking it - switch to enforcement via contentSecurityPolicyReportOnly.
     const responseHeadersPolicy = new ResponseHeadersPolicy(
       this,
       'ResponseHeadersPolicy',
@@ -140,7 +182,30 @@ export class StaticWebsite extends Construct {
             referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
             override: true,
           },
+          // CloudFront only supports an enforcing Content-Security-Policy here.
+          // Report-only is delivered via a custom header below.
+          ...(contentSecurityPolicyReportOnly
+            ? {}
+            : {
+                contentSecurityPolicy: {
+                  contentSecurityPolicy,
+                  override: true,
+                },
+              }),
         },
+        ...(contentSecurityPolicyReportOnly
+          ? {
+              customHeadersBehavior: {
+                customHeaders: [
+                  {
+                    header: 'Content-Security-Policy-Report-Only',
+                    value: contentSecurityPolicy,
+                    override: true,
+                  },
+                ],
+              },
+            }
+          : {}),
       },
     );
 
