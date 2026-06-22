@@ -1268,7 +1268,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     );
     const trpcBody = await trpcRes.json();
     console.log('tRPC cascade echo:', JSON.stringify(trpcBody));
-    expect(trpcBody.result.data.result).toBe('cascade');
+    expect(trpcBody.result.data.message).toBe('cascade');
 
     const fastApiRes = await fetch(
       `http://127.0.0.1:${ports.fastApi}/echo?message=cascade`,
