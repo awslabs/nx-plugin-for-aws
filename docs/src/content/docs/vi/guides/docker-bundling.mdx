@@ -318,8 +318,8 @@ AWS provider của Terraform không có resource "build and push a Docker image"
 
 1. Target `build` của dự án chạy `docker build`, tạo ra một local image được tag `my-scope-my-project:latest`.
 2. Một `aws_ecr_repository` để lưu trữ image.
-3. Một `null_resource` với provisioner `local-exec` xác thực với ECR, re-tag image được build locally, và đẩy nó lên.
-4. Resource downstream (ví dụ `aws_ecs_task_definition`) tham chiếu `"${aws_ecr_repository.repo.repository_url}:latest"`.
+3. Một `null_resource` với provisioner `local-exec` xác thực với ECR, re-tag image được build locally với content digest của nó, và đẩy nó lên.
+4. Resource downstream (ví dụ `aws_ecs_task_definition`) tham chiếu image bằng tag bất biến, dựa trên digest.
 
 ```d2
 direction: down
@@ -361,7 +361,7 @@ infra.repo -> ecr
 ```hcl
 resource "aws_ecr_repository" "repo" {
   name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 }
 
@@ -370,24 +370,30 @@ data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
 }
 
+locals {
+  # Content-based, immutable image tag derived from the local image digest
+  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+}
+
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
     repository_url = aws_ecr_repository.repo.repository_url
+    image_tag      = local.image_tag
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region ${data.aws_region.current.id} \
         | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:${self.triggers.image_tag}
+      docker push ${self.triggers.repository_url}:${self.triggers.image_tag}
     EOT
   }
 }
 ```
 
-Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào hash của local image thay đổi, kích hoạt push mới cho mỗi thay đổi code có ý nghĩa.
+Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào hash của local image thay đổi, kích hoạt push mới cho mỗi thay đổi code có ý nghĩa. Image được đẩy lên dưới một tag bất biến, dựa trên nội dung được lấy từ digest của nó, do đó ECR repository có thể sử dụng tính bất biến tag `IMMUTABLE` và từ chối bất kỳ nỗ lực nào ghi đè một tag hiện có.
 
 :::note[Chạy bundle trước khi apply]
 `nx apply <project>` yêu cầu image tag `my-scope-my-project:latest` đã tồn tại locally. Chạy `nx build my-project` (hoặc `nx docker my-project`) trước `nx apply <project>`.
