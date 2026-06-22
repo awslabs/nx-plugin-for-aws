@@ -238,12 +238,11 @@ pnpm tsx ./scripts/translate.ts --dry-run
 
 #### GitHub Workflow
 
-A GitHub workflow automatically translates documentation when changes are made to English documentation files in pull requests. The workflow:
+A GitHub workflow automatically translates documentation after changes to English documentation files are merged to `main` or `release/0.x`. The workflow:
 
 1. Detects changes to English documentation files
 2. Translates the changed files using DeepSeek and Haiku 3.5 on AWS Bedrock
-3. Commits the translations back to the source branch
-4. Updates the PR with files translated
+3. Commits the translations back to the branch that was pushed to
 
 ## Finding contributions to work on
 
