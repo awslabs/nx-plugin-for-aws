@@ -403,11 +403,25 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### Accessing the Calling User
 
-When your API is protected by authentication, your operations often need to know who is calling. The cleanest approach is to resolve the caller's identity once in the handler and pass it through the [service context](#service-context), so your operations stay free of any API Gateway event parsing.
+When your API is protected by authentication, your operations often need to know who is calling. The recommended approach is to resolve the caller's identity once in the handler and pass it through the [service context](#service-context) for consumption by specific operations.
 
-As an example, let's add a `Me` operation that returns details about the calling user.
+We'll model the unauthorized case as a Smithy error so it serializes to a proper `403` response. Add it to your model, for example in `model/src/operations/errors.smithy`, and reference it on any operation that requires identity:
 
-First, add the resolved identity to the service context in `src/context.ts`:
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+First, expose the resolved identity on the service context in `src/context.ts`. We provide it as a function so that the `UnauthorizedError` is thrown from within an operation (where the Server SDK serializes it to a `403`), rather than from the handler:
 
 ```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -426,11 +440,11 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  identity?: Identity;
+  getIdentity: () => Promise<Identity>;
 }
 ```
 
-Next, write a function which resolves the identity from the API Gateway event in `src/identity.ts`. The implementation depends on your selected `auth` method:
+Next, write the resolver in `src/identity.ts`. It throws `UnauthorizedError` when the caller cannot be determined. The implementation depends on your selected `auth` method:
 
 <OptionFilter when={{ auth: 'iam' }} description="Identity resolution for IAM-authenticated APIs">
 For `IAM` authentication, we look up the caller in Cognito using the sub extracted from the API Gateway event:
@@ -439,12 +453,13 @@ For `IAM` authentication, we look up the caller in Cognito using the sub extract
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
 const cognito = new CognitoIdentityProvider();
 
 export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Promise<Identity | undefined> => {
+): Promise<Identity> => {
   const cognitoAuthenticationProvider =
     event.requestContext?.identity?.cognitoAuthenticationProvider;
 
@@ -455,7 +470,7 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   const { Users } = await cognito.listUsers({
@@ -466,7 +481,7 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    return undefined;
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
   }
 
   return { sub, username: Users[0].Username! };
@@ -475,38 +490,37 @@ export const getIdentity = async (
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Identity resolution for Cognito-authenticated APIs">
-With `auth: 'cognito'`, the API Gateway Cognito User Pools authorizer verifies the JWT that the caller supplies in the `Authorization` header and places the verified claims on the event at `event.requestContext.authorizer.claims`. We just read those claims — no extra AWS SDK calls, no manual JWT verification.
-
-The generator wires the authorizer to accept Cognito access tokens, so `username` is the canonical username claim; we fall back to `cognito:username` in case you reconfigure the authorizer to accept ID tokens:
+With `auth: 'cognito'`, the API Gateway Cognito User Pools authorizer verifies the JWT that the caller supplies in the `Authorization` header and places the verified claims on the event at `event.requestContext.authorizer.claims`:
 
 ```ts
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
-export const getIdentity = (
+export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Identity | undefined => {
+): Promise<Identity> => {
   const claims = event.requestContext?.authorizer?.claims as
     | Record<string, string>
     | undefined;
 
   const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
+  const username = claims?.username;
 
   if (!sub || !username) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   return { sub, username };
 };
 ```
 
-:::tip[Verifying the token]
+:::tip[No token verification required]
 You don't need `aws-jwt-verify` or any other JWT-verification library here — the API Gateway Cognito User Pools authorizer has already verified the signature, issuer, scopes, and expiry by the time your Lambda runs. If any of those checks fail, API Gateway returns `401 Unauthorized` and your handler is never invoked.
 :::
 </OptionFilter>
 
-Then call `getIdentity` in `src/handler.ts` and add the result to the context:
+Then wire the resolver into the context in `src/handler.ts`:
 
 ```ts {2,8} ins={2,8}
 import { Service } from './service.js';
@@ -516,87 +530,19 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  identity: await getIdentity(event),
+  getIdentity: () => getIdentity(event),
 });
 ```
 
-:::note[IAM lookup is asynchronous]
-For `IAM` auth, `getIdentity` is `async` (it calls Cognito), which is why we `await` it above. For `cognito` auth it just reads claims and is synchronous, but awaiting it is harmless — so the handler code is identical for both.
-:::
-
-Now define the `Me` operation in your Smithy model, for example in `model/src/operations/me.smithy`:
-
-```smithy
-$version: "2.0"
-
-namespace your.namespace
-
-/// Return details about the calling user
-@http(method: "GET", uri: "/me")
-@readonly
-operation Me {
-    output := {
-        @required
-        sub: String
-
-        @required
-        username: String
-    }
-    errors: [
-        UnauthorizedError
-    ]
-}
-
-/// Thrown when the calling user cannot be determined
-@error("client")
-@httpError(403)
-structure UnauthorizedError {
-    @required
-    message: String
-}
-```
-
-Remember to register the operation on your service in `model/src/main.smithy`:
-
-```smithy {4} ins={4}
-service YourService {
-    operations: [
-        Echo
-        Me
-    ]
-}
-```
-
-Implement the operation in `src/operations/me.ts`, reading the resolved identity straight from the context:
+We can now use the resolved identity in an operation, for example in `src/operations/echo.ts`:
 
 ```ts
 import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
 
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  if (!ctx.identity) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  return { sub: ctx.identity.sub, username: ctx.identity.username };
-};
-```
-
-Finally, register the operation on your service in `src/service.ts`:
-
-```ts {4,9} ins={4,9}
-import { ServiceContext } from './context.js';
-import { YourServiceService } from './generated/ssdk/index.js';
-import { Echo } from './operations/echo.js';
-import { Me } from './operations/me.js';
-
-// Register operations to the service here
-export const Service: YourServiceService<ServiceContext> = {
-  Echo,
-  Me,
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  const identity = await ctx.getIdentity();
+  return { message: `${identity.username} says ${input.message}` };
 };
 ```
 
