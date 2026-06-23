@@ -401,6 +401,151 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 };
 ```
 
+### Accès à l'utilisateur appelant
+
+Lorsque votre API est protégée par authentification, vos opérations ont souvent besoin de savoir qui appelle. L'approche recommandée consiste à résoudre l'identité de l'appelant une fois dans le gestionnaire et à la transmettre via le [contexte de service](#service-context) pour consommation par des opérations spécifiques.
+
+Nous allons modéliser le cas non autorisé comme une erreur Smithy afin qu'elle se sérialise en une réponse `403` appropriée. Ajoutez-la à votre modèle, par exemple dans `model/src/operations/errors.smithy`, et référencez-la sur toute opération qui nécessite une identité :
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+Tout d'abord, exposez l'identité résolue sur le contexte de service dans `src/context.ts`. Nous la fournissons sous forme de fonction afin que l'`UnauthorizedError` soit levée depuis une opération (où le SDK serveur la sérialise en `403`), plutôt que depuis le gestionnaire :
+
+```ts {4-7,15} ins={4-7,15}
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+
+export interface Identity {
+  sub: string;
+  username: string;
+}
+
+/**
+ * Context provided to all operations.
+ */
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  getIdentity: () => Promise<Identity>;
+}
+```
+
+Ensuite, écrivez le résolveur dans `src/identity.ts`. Il lève `UnauthorizedError` lorsque l'appelant ne peut pas être déterminé. L'implémentation dépend de votre méthode `auth` sélectionnée :
+
+<OptionFilter when={{ auth: 'iam' }} description="Résolution d'identité pour les API authentifiées par IAM">
+Pour l'authentification `IAM`, nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway :
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity> => {
+  const cognitoAuthenticationProvider =
+    event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Résolution d'identité pour les API authentifiées par Cognito">
+Avec `auth: 'cognito'`, l'autorisateur Cognito User Pools d'API Gateway vérifie le JWT que l'appelant fournit dans l'en-tête `Authorization` et place les revendications vérifiées sur l'événement à `event.requestContext.authorizer.claims` :
+
+```ts
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity> => {
+  const claims = event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username;
+
+  if (!sub || !username) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[Aucune vérification de jeton requise]
+Vous n'avez pas besoin de `aws-jwt-verify` ou d'une autre bibliothèque de vérification JWT ici — l'autorisateur Cognito User Pools d'API Gateway a déjà vérifié la signature, l'émetteur, les portées et l'expiration au moment où votre Lambda s'exécute. Si l'une de ces vérifications échoue, API Gateway retourne `401 Unauthorized` et votre gestionnaire n'est jamais invoqué.
+:::
+</OptionFilter>
+
+Ensuite, intégrez le résolveur dans le contexte dans `src/handler.ts` :
+
+```ts {2,8} ins={2,8}
+import { Service } from './service.js';
+import { getIdentity } from './identity.js';
+// ...
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: () => getIdentity(event),
+});
+```
+
+Nous pouvons maintenant utiliser l'identité résolue dans une opération, par exemple dans `src/operations/echo.ts` :
+
+```ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  const identity = await ctx.getIdentity();
+  return { message: `${identity.username} says ${input.message}` };
+};
+```
+
 ## Build et génération de code
 
 Le projet de modèle Smithy utilise [Docker](https://www.docker.com/) pour construire les artefacts Smithy et générer le SDK serveur TypeScript :

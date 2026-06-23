@@ -401,6 +401,151 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 };
 ```
 
+### Truy Cập Người Dùng Đang Gọi
+
+Khi API của bạn được bảo vệ bằng xác thực, các operation thường cần biết ai đang gọi. Cách tiếp cận được khuyến nghị là giải quyết danh tính của người gọi một lần trong handler và truyền nó qua [service context](#service-context) để các operation cụ thể sử dụng.
+
+Chúng ta sẽ mô hình hóa trường hợp không được ủy quyền như một lỗi Smithy để nó được tuần tự hóa thành phản hồi `403` phù hợp. Thêm nó vào mô hình của bạn, ví dụ trong `model/src/operations/errors.smithy`, và tham chiếu nó trên bất kỳ operation nào yêu cầu danh tính:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+Đầu tiên, hiển thị danh tính đã giải quyết trên service context trong `src/context.ts`. Chúng ta cung cấp nó dưới dạng một hàm để `UnauthorizedError` được ném ra từ bên trong một operation (nơi Server SDK tuần tự hóa nó thành `403`), thay vì từ handler:
+
+```ts {4-7,15} ins={4-7,15}
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+
+export interface Identity {
+  sub: string;
+  username: string;
+}
+
+/**
+ * Context provided to all operations.
+ */
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  getIdentity: () => Promise<Identity>;
+}
+```
+
+Tiếp theo, viết resolver trong `src/identity.ts`. Nó ném `UnauthorizedError` khi không thể xác định người gọi. Cách triển khai phụ thuộc vào phương thức `auth` đã chọn:
+
+<OptionFilter when={{ auth: 'iam' }} description="Identity resolution for IAM-authenticated APIs">
+Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ sự kiện API Gateway:
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity> => {
+  const cognitoAuthenticationProvider =
+    event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Identity resolution for Cognito-authenticated APIs">
+Với `auth: 'cognito'`, trình ủy quyền Cognito User Pools của API Gateway xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claim đã xác minh trên sự kiện tại `event.requestContext.authorizer.claims`:
+
+```ts
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity> => {
+  const claims = event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username;
+
+  if (!sub || !username) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[No token verification required]
+Bạn không cần `aws-jwt-verify` hoặc bất kỳ thư viện xác minh JWT nào khác ở đây — trình ủy quyền Cognito User Pools của API Gateway đã xác minh chữ ký, issuer, scope và thời hạn vào thời điểm Lambda của bạn chạy. Nếu bất kỳ kiểm tra nào trong số đó thất bại, API Gateway trả về `401 Unauthorized` và handler của bạn không bao giờ được gọi.
+:::
+</OptionFilter>
+
+Sau đó kết nối resolver vào context trong `src/handler.ts`:
+
+```ts {2,8} ins={2,8}
+import { Service } from './service.js';
+import { getIdentity } from './identity.js';
+// ...
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: () => getIdentity(event),
+});
+```
+
+Bây giờ chúng ta có thể sử dụng danh tính đã giải quyết trong một operation, ví dụ trong `src/operations/echo.ts`:
+
+```ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  const identity = await ctx.getIdentity();
+  return { message: `${identity.username} says ${input.message}` };
+};
+```
+
 ## Building và Tạo Mã
 
 Dự án mô hình Smithy sử dụng [Docker](https://www.docker.com/) để build các artifact Smithy và tạo TypeScript Server SDK:

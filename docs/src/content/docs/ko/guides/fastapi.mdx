@@ -185,6 +185,216 @@ def read_item(item_id: int):
 `connection` 생성기를 사용하는 경우 더 나은 코드 생성을 위해 API 작업에 응답 모델을 지정하는 것이 좋습니다. <Link path="guides/connection/react-fastapi#errors">자세한 내용 참조</Link>.
 :::
 
+### 호출 사용자 접근
+
+API가 인증으로 보호되는 경우, 라우트 핸들러는 종종 누가 호출하는지 알아야 합니다. 생성된 FastAPI는 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)를 통해 AWS Lambda 내에서 실행되며, API Gateway 요청 컨텍스트를 `x-amzn-request-context` 헤더에 JSON으로 전달합니다. FastAPI `Request`에서 이를 읽어 호출자의 신원을 추출할 수 있습니다.
+
+예를 들어, 호출 사용자에 대한 세부 정보를 반환하는 `/me` 엔드포인트를 추가해 보겠습니다. 추출을 [FastAPI 의존성](https://fastapi.tiangolo.com/tutorial/dependencies/)으로 구현하여 여러 경로에서 재사용할 수 있도록 하겠습니다. 요청 컨텍스트의 형태 — 따라서 신원을 추출하는 방법 — 는 선택한 `auth` 방법과 REST 또는 HTTP API를 배포했는지 여부에 따라 달라집니다.
+
+<OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
+`IAM` 인증의 경우, API Gateway 요청 컨텍스트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다. `main.py` 옆에 `identity.py`를 생성하세요:
+
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+```python
+import json
+import os
+from typing import Annotated
+
+from boto3 import client
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+cognito = client("cognito-idp")
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter가 API Gateway 요청 컨텍스트를 JSON으로 전달
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    provider = request_context.get("identity", {}).get("cognitoAuthenticationProvider")
+
+    sub = provider.split(":")[-1] if provider else None
+    if not sub:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    users = cognito.list_users(
+        # Lambda 환경에 user pool id가 구성되어 있다고 가정
+        UserPoolId=os.environ["USER_POOL_ID"],
+        Limit=1,
+        Filter=f'sub="{sub}"',
+    ).get("Users", [])
+
+    if len(users) != 1:
+        raise HTTPException(status_code=403, detail=f"No user found with subjectId {sub}")
+
+    return Identity(sub=sub, username=users[0]["Username"])
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+```python
+import json
+import os
+from typing import Annotated
+
+from boto3 import client
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+cognito = client("cognito-idp")
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter가 API Gateway 요청 컨텍스트를 JSON으로 전달
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    amr = (
+        request_context.get("authorizer", {})
+        .get("iam", {})
+        .get("cognitoIdentity", {})
+        .get("amr", [])
+    )
+    sign_in = next((s for s in amr if ":CognitoSignIn:" in s), None)
+    sub = sign_in.split(":")[-1] if sign_in else None
+
+    if not sub:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    users = cognito.list_users(
+        # Lambda 환경에 user pool id가 구성되어 있다고 가정
+        UserPoolId=os.environ["USER_POOL_ID"],
+        Limit=1,
+        Filter=f'sub="{sub}"',
+    ).get("Users", [])
+
+    if len(users) != 1:
+        raise HTTPException(status_code=403, detail=f"No user found with subjectId {sub}")
+
+    return Identity(sub=sub, username=users[0]["Username"])
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+</Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Identity extraction for Cognito-authenticated APIs">
+`auth: 'cognito'`를 사용하면, API Gateway Cognito User Pools authorizer가 호출자가 `Authorization` 헤더에 제공하는 JWT를 검증하고 검증된 클레임을 요청 컨텍스트에 배치합니다.
+
+`main.py` 옆에 `identity.py`를 생성하세요:
+
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+```python
+import json
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter가 API Gateway 요청 컨텍스트를 JSON으로 전달
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    claims = request_context.get("authorizer", {}).get("claims", {})
+
+    sub = claims.get("sub")
+    username = claims.get("username")
+
+    if not sub or not username:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    return Identity(sub=sub, username=username)
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+HTTP API는 검증된 클레임을 `authorizer.jwt.claims` 아래에 배치하는 JWT authorizer를 사용합니다:
+
+```python
+import json
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter가 API Gateway 요청 컨텍스트를 JSON으로 전달
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    claims = request_context.get("authorizer", {}).get("jwt", {}).get("claims", {})
+
+    sub = claims.get("sub")
+    username = claims.get("username")
+
+    if not sub or not username:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    return Identity(sub=sub, username=username)
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+</Tabs>
+
+:::tip[토큰 검증 불필요]
+여기서는 JWT 검증 라이브러리가 필요하지 않습니다 — API Gateway Cognito User Pools authorizer가 Lambda가 실행되기 전에 이미 서명, 발급자, 범위 및 만료를 검증했습니다. 이러한 검사 중 하나라도 실패하면 API Gateway는 `401 Unauthorized`를 반환하고 핸들러는 호출되지 않습니다.
+:::
+</OptionFilter>
+
+그런 다음 호출자의 신원이 필요한 모든 경로에 `CurrentUser` 의존성을 주입할 수 있습니다:
+
+```python
+from .identity import CurrentUser, Identity
+from .init import app, tracer
+
+@app.get("/me")
+@tracer.capture_method
+def me(identity: CurrentUser) -> Identity:
+    return identity
+```
+
 <OptionFilter when={{ infra: 'rest-lambda' }} description="Streaming — REST API only">
 ### 스트리밍
 
