@@ -16,6 +16,7 @@ import {
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
+  addTypeScriptLangchainClientToAgent,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
@@ -68,16 +69,28 @@ export const tsAgentMcpConnectionGenerator = async (
   const mcpServerKebabCase = kebabCase(mcpServerClassName);
   const mcpServerPort = mcpComponent.port ?? 8000;
 
+  // The transform applied to agent.ts depends on the source agent's framework:
+  // Strands wraps `new Agent(...)` and spreads an McpClient into its tools;
+  // LangChain loads StructuredTools and spreads them into createReactAgent(...).
+  const framework =
+    agentComponent.framework === 'langchain' ? 'langchain' : 'strands';
+  const isLangchain = framework === 'langchain';
+  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
+  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
+
   const npmScope = getNpmScope(tree);
 
-  // 1. Ensure the shared agent-connection project exists + has the MCP core client
+  // 1. Ensure the shared agent-connection project exists + has the MCP core
+  //    client for the source agent's framework (Layer-2).
   await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'mcp');
+  await addTypeScriptCoreClient(tree, 'mcp', framework);
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    isLangchain
+      ? joinPathFragments(__dirname, 'files', 'langchain', 'agent-connection', 'app')
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'app'),
     {
       mcpServerKebabCase,
@@ -91,7 +104,7 @@ export const tsAgentMcpConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${mcpServerKebabCase}-client-strands.js`,
+    `./app/${mcpServerKebabCase}-client-${clientModuleSuffix}.js`,
   );
 
   // 3. AST transform agent.ts to add MCP tools
@@ -102,7 +115,7 @@ export const tsAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}ClientStrands`;
+    const clientClassName = `${mcpServerClassName}Client${clientSuffix}`;
     const clientVarName =
       mcpServerClassName.charAt(0).toLowerCase() + mcpServerClassName.slice(1);
 
@@ -114,12 +127,21 @@ export const tsAgentMcpConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    await addTypeScriptClientToAgent(
-      tree,
-      agentFilePath,
-      clientClassName,
-      clientVarName,
-    );
+    if (isLangchain) {
+      await addTypeScriptLangchainClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    } else {
+      await addTypeScriptClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    }
   }
 
   // 4. Set up serve-local target
@@ -135,16 +157,21 @@ export const tsAgentMcpConnectionGenerator = async (
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  // 5. Add dependencies required by the MCP core client + vended client
+  // 5. Add dependencies required by the MCP core client + vended client. The
+  //    Strands Layer-2 client pulls @strands-agents/sdk; the LangChain Layer-2
+  //    client pulls @langchain/mcp-adapters + @langchain/core (and must not pull
+  //    Strands in).
   addDependenciesToPackageJson(
     tree,
     withVersions([
       '@modelcontextprotocol/sdk',
-      '@strands-agents/sdk',
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
       'aws4fetch',
       '@aws-sdk/credential-providers',
+      ...(isLangchain
+        ? (['@langchain/mcp-adapters', '@langchain/core'] as const)
+        : (['@strands-agents/sdk'] as const)),
     ]),
     {},
   );

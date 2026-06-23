@@ -17,6 +17,7 @@ import {
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
+  addTypeScriptLangchainClientToAgent,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
@@ -78,18 +79,29 @@ export const tsAgentGatewayConnectionGenerator = async (
   const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
 
+  // The transform applied to agent.ts depends on the source agent's framework:
+  // Strands wraps `new Agent(...)` and spreads an McpClient into its tools;
+  // LangChain loads StructuredTools and spreads them into createReactAgent(...).
+  const framework =
+    agentComponent.framework === 'langchain' ? 'langchain' : 'strands';
+  const isLangchain = framework === 'langchain';
+  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
+  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
+
   const npmScope = getNpmScope(tree);
 
   // 1. Ensure the shared agent-connection project exists + has the gateway
-  //    core client template.
+  //    core client for the source agent's framework.
   await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'gateway');
+  await addTypeScriptCoreClient(tree, 'gateway', framework);
 
   // 2. Generate the per-connection <Gateway>Client into app/. Local mode
   //    points at the gateway project's local gateway port.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    isLangchain
+      ? joinPathFragments(__dirname, 'files', 'langchain', 'agent-connection', 'app')
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'app'),
     {
       gatewayKebabCase,
@@ -103,11 +115,10 @@ export const tsAgentGatewayConnectionGenerator = async (
   await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
-    `./app/${gatewayKebabCase}-client-strands.js`,
+    `./app/${gatewayKebabCase}-client-${clientModuleSuffix}.js`,
   );
 
-  // 3. AST-transform agent.ts to add the gateway client (an McpClient in
-  //    both deployed and local modes) to the agent's tools.
+  // 3. AST-transform agent.ts to add the gateway client's tools to the agent.
   const agentSourceDir = joinPathFragments(
     sourceProject.root,
     agentComponent.path ?? 'src',
@@ -115,7 +126,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.ts');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${gatewayClassName}ClientStrands`;
+    const clientClassName = `${gatewayClassName}Client${clientSuffix}`;
     const clientVarName =
       gatewayClassName.charAt(0).toLowerCase() + gatewayClassName.slice(1);
 
@@ -125,12 +136,21 @@ export const tsAgentGatewayConnectionGenerator = async (
       [clientClassName],
       `:${npmScope}/agent-connection`,
     );
-    await addTypeScriptClientToAgent(
-      tree,
-      agentFilePath,
-      clientClassName,
-      clientVarName,
-    );
+    if (isLangchain) {
+      await addTypeScriptLangchainClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    } else {
+      await addTypeScriptClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    }
   }
 
   // 4. Wire serve-local chain — agent's serve-local depends on gateway's
@@ -157,16 +177,20 @@ export const tsAgentGatewayConnectionGenerator = async (
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  // 5. Dependencies
+  // 5. Dependencies. The Strands Layer-2 client pulls @strands-agents/sdk; the
+  //    LangChain Layer-2 client pulls @langchain/mcp-adapters + @langchain/core
+  //    (and must not pull Strands in).
   addDependenciesToPackageJson(
     tree,
     withVersions([
       '@modelcontextprotocol/sdk',
-      '@strands-agents/sdk',
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
       'aws4fetch',
       '@aws-sdk/credential-providers',
+      ...(isLangchain
+        ? (['@langchain/mcp-adapters', '@langchain/core'] as const)
+        : (['@strands-agents/sdk'] as const)),
     ]),
     {},
   );

@@ -326,4 +326,104 @@ export const getAgent = async (sessionId: string) =>
       'ts#agent#gateway-connection',
     );
   });
+
+  describe('langchain source agent', () => {
+    const setupLangchainProjects = () => {
+      setupProjects();
+      tree.write(
+        'packages/my-api/src/my-agent/agent.ts',
+        `import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { ChatBedrockConverse } from '@langchain/aws';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+
+const subtract = tool(({ a, b }) => a - b, {
+  name: 'subtract',
+  description: 'Subtract b from a',
+  schema: z.object({ a: z.number(), b: z.number() }),
+});
+
+export const getAgent = async () => {
+  const model = new ChatBedrockConverse({ model: 'm', region: 'r' });
+  return createReactAgent({ llm: model, tools: [subtract] });
+};
+`,
+      );
+    };
+
+    const langchainOptions = () => ({
+      sourceProject: '@test/my-api',
+      targetProject: '@test/my-gateway',
+      sourceComponent: {
+        generator: 'ts#agent',
+        name: 'my-agent',
+        path: 'src/my-agent',
+        port: 8081,
+        rc: 'MyAgent',
+        auth: 'iam',
+        framework: 'langchain',
+        protocol: 'ag-ui',
+      } as any,
+    });
+
+    it('vends the langchain gateway client returning StructuredTools', async () => {
+      setupLangchainProjects();
+      await tsAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      expect(
+        tree.exists(
+          'packages/common/agent-connection/src/core/agentcore-gateway-mcp-client-langchain.ts',
+        ),
+      ).toBe(true);
+      // Layer 1 transport is still shared.
+      expect(
+        tree.exists(
+          'packages/common/agent-connection/src/core/agentcore-gateway-mcp-transport.ts',
+        ),
+      ).toBe(true);
+
+      const client = tree
+        .read(
+          'packages/common/agent-connection/src/app/my-gateway-client-langchain.ts',
+        )!
+        .toString();
+      expect(client).toContain('export class MyGatewayClientLangChain');
+      expect(client).toContain('StructuredToolInterface');
+      expect(client).toContain('AgentCoreGatewayMcpClientLangChain');
+      expect(client).not.toContain('AgentCoreGatewayMcpClientStrands');
+      expect(client).not.toContain('@strands-agents/sdk');
+
+      const index = tree
+        .read('packages/common/agent-connection/src/index.ts')!
+        .toString();
+      expect(index).toContain('my-gateway-client-langchain');
+    });
+
+    it('transforms agent.ts to spread tools into createReactAgent (no Agent wrap)', async () => {
+      setupLangchainProjects();
+      await tsAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      const agent = tree
+        .read('packages/my-api/src/my-agent/agent.ts')!
+        .toString();
+      expect(agent).toContain('MyGatewayClientLangChain');
+      expect(agent).toContain(
+        'const myGateway = await MyGatewayClientLangChain.create();',
+      );
+      expect(agent).toMatch(/tools: \[subtract, \.\.\.myGateway\]/);
+      expect(agent).not.toContain('new Agent(');
+      expect(agent).not.toContain('@strands-agents/sdk');
+    });
+
+    it('adds @langchain/mcp-adapters dep, not @strands-agents/sdk', async () => {
+      setupLangchainProjects();
+      await tsAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      const pkg = JSON.parse(tree.read('package.json', 'utf-8')!);
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      expect(deps['@langchain/mcp-adapters']).toBeDefined();
+      expect(deps['@langchain/core']).toBeDefined();
+      expect(deps['@strands-agents/sdk']).toBeUndefined();
+    });
+  });
 });
