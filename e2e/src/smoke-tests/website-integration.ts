@@ -386,7 +386,8 @@ export const runWebsiteIntegrationTest = async (options: {
 
     if (login) {
       // The deployed site auto-redirects unauthenticated users to the Cognito
-      // hosted UI. Complete the login form, then wait to land back on the app.
+      // hosted UI. Complete the login form, then wait to land back on the app
+      // and for the post-login OAuth code exchange to settle.
       await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
       await page
         .locator('input[name="username"], input[id*="signInFormUsername"]')
@@ -403,12 +404,21 @@ export const runWebsiteIntegrationTest = async (options: {
       await page.waitForURL((url) => !url.href.includes('amazoncognito.com'), {
         timeout: 120_000,
       });
-      // The example route may have been replaced by the post-login redirect to
-      // the app root; navigate back to it.
-      await page.goto(target, {
-        waitUntil: 'domcontentloaded',
-        timeout: 120_000,
-      });
+      // react-oidc-context completes the code exchange on the redirect back to
+      // the app origin. Navigate to the example route and retry until the run
+      // button renders (a premature load before the exchange finishes would
+      // bounce back to the hosted UI).
+      await page.waitForLoadState('networkidle').catch(() => {});
+      for (let attempt = 0; attempt < 30; attempt++) {
+        if (!page.url().includes('amazoncognito.com')) {
+          await page
+            .goto(target, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+            .catch(() => {});
+          const button = page.getByTestId('run-integration-test');
+          if (await button.count()) break;
+        }
+        await page.waitForTimeout(2_000);
+      }
     }
 
     await page.getByTestId('run-integration-test').click({ timeout: 120_000 });

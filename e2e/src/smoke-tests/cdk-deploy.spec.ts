@@ -333,8 +333,8 @@ describe('smoke test - cdk-deploy', () => {
       // and drive the website's vended clients to invoke every connected API
       // and agent from a real browser.
       const login = await createCognitoTestUser(
-        findOutput('UserIdentityUserPoolId'),
-        findOutput('UserIdentityUserPoolClientId'),
+        findOutput('UserIdentityUserIdentityUserPoolId'),
+        findOutput('UserIdentityUserIdentityUserPoolClientId'),
       );
       await runWebsiteIntegrationTest({
         baseUrl: `https://${websiteDomain}`,
