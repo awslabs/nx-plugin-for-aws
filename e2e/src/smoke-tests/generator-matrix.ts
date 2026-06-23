@@ -158,13 +158,19 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // AG-UI protocol agents (TypeScript and Python).
+  // AG-UI protocol agents (TypeScript Strands, Python Strands, Python LangChain).
   await runCLI(
     `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
+    opts,
+  );
+  // Python LangChain agent (AG-UI only), deployed on AgentCore so the smoke
+  // tests cover building, bundling and deploying a langchain agent runtime.
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -201,6 +207,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
     opts,
   );
+  // LangChain agent -> Python MCP server (langchain-mcp-adapters tool loading).
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
+    opts,
+  );
 
   // HTTP agent <-> A2A agent connections (4 permutations)
   await runCLI(
@@ -219,6 +230,12 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
     opts,
   );
+  // LangChain (AG-UI) agent -> Python A2A agent: delegates to a remote agent as
+  // a langchain tool (reusing the framework-agnostic A2A transport).
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
+    opts,
+  );
 
   // AgentCore Gateway + the four connection edges (ts/py agent -> gateway,
   // gateway -> ts/py mcp-server) so each smoke test exercises a deployable
@@ -233,6 +250,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=@e2e-test/my-gateway --no-interactive`,
+    opts,
+  );
+  // LangChain agent -> gateway (langchain gateway MCP client).
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=@e2e-test/my-gateway --no-interactive`,
     opts,
   );
   await runCLI(
@@ -270,6 +292,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-py-agui-agent --no-interactive`,
+    opts,
+  );
+  // Website -> Python LangChain (AG-UI/CopilotKit) agent.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-py-langchain-agent --no-interactive`,
     opts,
   );
 

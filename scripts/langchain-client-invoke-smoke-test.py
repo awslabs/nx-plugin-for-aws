@@ -1,3 +1,7 @@
+# 
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+# 
 """Invoke-smoke-test for the generated LangChain Layer-2 MCP / gateway clients.
 
 This is NOT a generated template (no ``.template`` suffix, so the nx generators

@@ -11,6 +11,7 @@ import { runCLI, tmpProjPath } from '../utils';
 import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
+  invokeAgentCoreAgUi,
   invokeAgentCoreGatewayTool,
   invokeAgentCoreMcp,
   invokeCustomAuthApi,
@@ -174,6 +175,11 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeTrpcAgentCoreAgent(
             outputs.ts_agent_arn,
             'TypeScript Agent',
+          );
+          // Python LangChain (AG-UI) agent — assert a streamed AG-UI response.
+          await invokeAgentCoreAgUi(
+            outputs.py_langchain_agent_arn,
+            'Python LangChain Agent',
           );
 
           // A2A (direct)

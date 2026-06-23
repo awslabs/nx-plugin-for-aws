@@ -5,7 +5,7 @@
 
 import { IacOption } from '../../utils/iac';
 
-export type TsAgentFramework = 'strands' | 'langchain';
+export type TsAgentFramework = 'strands';
 export type TsAgentInfra = 'agentcore' | 'none';
 export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 

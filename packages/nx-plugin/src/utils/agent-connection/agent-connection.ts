@@ -181,26 +181,23 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
     },
   },
   langchain: {
-    // LangChain supports MCP + gateway connections in both languages. In each,
-    // its Layer-2 client loads LangChain tools that stay usable after agent
-    // construction, so there is no base helper layer (no model-error logger /
-    // per-session agent cache) and no strands-agents dependency — its AG-UI
-    // foundation reuses only the framework-agnostic session context. The
-    // per-connection adapter dependency (langchain-mcp-adapters / @langchain/*)
-    // is added by the connection generators.
-    ts: {
-      baseReExports: [],
-      protocols: {
-        mcp: 'core-langchain/mcp',
-        gateway: 'core-langchain/gateway',
-      },
-      deps: [],
-    },
+    // LangChain is supported for Python agents only (the TypeScript LangChain
+    // agent foundation has no in-process AG-UI <-> LangGraph adapter, so it is
+    // not scaffolded — see ts#agent). Its Layer-2 client loads LangChain tools
+    // that stay usable after agent construction, so there is no base helper
+    // layer (no model-error logger / per-session agent cache) and no
+    // strands-agents dependency — its AG-UI foundation reuses only the
+    // framework-agnostic session context. The per-connection adapter dependency
+    // (langchain-mcp-adapters) is added by the connection generators.
     py: {
       baseReExports: [],
       protocols: {
         mcp: 'py-core-langchain/mcp',
         gateway: 'py-core-langchain/gateway',
+        // A2A is wired by reusing the framework-agnostic Strands A2A transport
+        // (A2AAgent carries no model) wrapped as a langchain tool — see the
+        // a2a-connection generator — so it needs no langchain-specific Layer-2
+        // client here.
       },
       deps: [],
     },
@@ -524,45 +521,6 @@ export async function addTypeScriptClientToAgent(
     tree,
     agentFilePath,
     `\`tools: [$items]\` => \`tools: [${clientVarName}, $items]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${clientVarName}\` }`,
-  );
-}
-
-/**
- * Patch a LangChain agent.ts to load connection tools and spread them into the
- * `createReactAgent(...)` tools list. Used by the MCP and gateway connection
- * generators when the source agent uses the `langchain` framework. The client
- * class must expose a static async `create()` returning a `StructuredTool[]`.
- * The tools are bound to a live MCP client that stays connected for the agent's
- * lifetime, so they remain usable after `getAgent` returns: no teardown block
- * is needed. Mirrors {@link addTypeScriptClientToAgent} for the Strands shape and
- * {@link addPythonLangchainClientToAgent} for the Python langchain shape.
- */
-export async function addTypeScriptLangchainClientToAgent(
-  tree: Tree,
-  agentFilePath: string,
-  clientClassName: string,
-  clientVarName: string,
-): Promise<void> {
-  const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create();`;
-
-  // Prepend the client creation to the arrow function body that contains
-  // `createReactAgent`. Idempotent via the `not contains <Class>.create` guard.
-  await applyGritQL(
-    tree,
-    agentFilePath,
-    `\`async ($p) => { $body }\` => raw\`async ($p) => {
-  ${clientCreationStmt}
-  $body
-}\` where { $body <: contains \`createReactAgent($_)\`, $program <: not contains \`${clientClassName}.create\` }`,
-  );
-
-  // Spread the loaded tools into createReactAgent's tools array. Scoped via
-  // `$items <: within \`createReactAgent($_)\`` so only the agent's own tools
-  // list is touched, never an unrelated `tools: [...]` elsewhere.
-  await applyGritQL(
-    tree,
-    agentFilePath,
-    `\`tools: [$items]\` => \`tools: [$items, ...${clientVarName}]\` where { $items <: within \`createReactAgent($_)\`, $items <: not contains \`...${clientVarName}\` }`,
   );
 }
 

@@ -175,36 +175,6 @@ describe('ts#agent generator', () => {
     );
   });
 
-  it('should reject the langchain framework (foundation not yet supported)', async () => {
-    await expect(
-      tsAgentGenerator(tree, {
-        project: 'test-project',
-        framework: 'langchain',
-        protocol: 'ag-ui',
-        infra: 'none',
-        iac: 'cdk',
-      }),
-    ).rejects.toThrow(
-      /'langchain' framework is not yet supported for TypeScript agents/,
-    );
-  });
-
-  it('should record framework=strands in component metadata', async () => {
-    await tsAgentGenerator(tree, {
-      project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
-    });
-
-    const projectConfig = JSON.parse(
-      tree.read('apps/test-project/project.json', 'utf-8'),
-    );
-    const agentComponent = projectConfig.metadata.components.find(
-      (c: { generator: string }) => c.generator === 'ts#agent',
-    );
-    expect(agentComponent.framework).toBe('strands');
-  });
-
   it('should handle nested project names correctly', async () => {
     // Create a project with nested name
     addProjectConfiguration(tree, '@org/nested-project', {

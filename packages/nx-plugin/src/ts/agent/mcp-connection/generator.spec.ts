@@ -491,7 +491,9 @@ export const getAgent = async (sessionId: string) => {
       'packages/common/agent-connection/src/app/inventory-mcp-client-strands.ts',
       'utf-8',
     );
-    expect(inventoryMcpClient).toMatchSnapshot('inventory-mcp-client-strands.ts');
+    expect(inventoryMcpClient).toMatchSnapshot(
+      'inventory-mcp-client-strands.ts',
+    );
 
     const indexTs = tree.read(
       'packages/common/agent-connection/src/index.ts',
@@ -501,143 +503,5 @@ export const getAgent = async (sessionId: string) => {
 
     const agentTs = tree.read('packages/my-api/src/my-agent/agent.ts', 'utf-8');
     expect(agentTs).toMatchSnapshot('transformed-agent.ts');
-  });
-
-  describe('langchain source agent', () => {
-    const LANGCHAIN_AGENT = {
-      generator: 'ts#agent',
-      name: 'my-agent',
-      path: 'src/my-agent',
-      port: 8081,
-      framework: 'langchain',
-      protocol: 'ag-ui',
-    };
-
-    const setupLangchainProjects = (tools = '[subtract]') => {
-      setupProjects();
-      tree.write(
-        'packages/my-api/src/my-agent/agent.ts',
-        `
-import { createReactAgent } from '@langchain/langgraph/prebuilt';
-import { ChatBedrockConverse } from '@langchain/aws';
-import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
-
-const subtract = tool(({ a, b }) => a - b, {
-  name: 'subtract',
-  description: 'Subtract b from a',
-  schema: z.object({ a: z.number(), b: z.number() }),
-});
-
-export const getAgent = async () => {
-  const model = new ChatBedrockConverse({ model: 'm', region: 'r' });
-  return createReactAgent({
-    llm: model,
-    tools: ${tools},
-  });
-};
-`,
-      );
-    };
-
-    const opts = {
-      sourceProject: '@test/my-api',
-      targetProject: '@test/my-api',
-      sourceComponent: LANGCHAIN_AGENT,
-      targetComponent: {
-        generator: 'ts#mcp-server',
-        name: 'inventory-mcp',
-        path: 'src/inventory-mcp',
-        port: 8082,
-        rc: 'InventoryMcp',
-      },
-    };
-
-    it('should vend the langchain MCP client returning StructuredTools', async () => {
-      setupLangchainProjects();
-      await tsAgentMcpConnectionGenerator(tree, opts);
-
-      // The langchain Layer-2 client is vended; the strands one is NOT used.
-      expect(
-        tree.exists(
-          'packages/common/agent-connection/src/core/agentcore-mcp-client-langchain.ts',
-        ),
-      ).toBe(true);
-      // Layer 1 transport is still shared.
-      expect(
-        tree.exists(
-          'packages/common/agent-connection/src/core/agentcore-mcp-transport.ts',
-        ),
-      ).toBe(true);
-
-      const client = tree.read(
-        'packages/common/agent-connection/src/app/inventory-mcp-client-langchain.ts',
-        'utf-8',
-      )!;
-      expect(client).toContain('StructuredToolInterface');
-      expect(client).toContain('AgentCoreMcpClientLangChain');
-      // The langchain app client must not pull in the strands Layer-2 client.
-      expect(client).not.toContain('AgentCoreMcpClientStrands');
-      expect(client).not.toContain('@strands-agents/sdk');
-
-      // Re-export uses the langchain module suffix.
-      const indexContent = tree.read(
-        'packages/common/agent-connection/src/index.ts',
-        'utf-8',
-      )!;
-      expect(indexContent).toContain('inventory-mcp-client-langchain');
-    });
-
-    it('should transform agent.ts to spread tools into createReactAgent (no Agent wrap)', async () => {
-      setupLangchainProjects();
-      await tsAgentMcpConnectionGenerator(tree, opts);
-
-      const agent = tree.read(
-        'packages/my-api/src/my-agent/agent.ts',
-        'utf-8',
-      )!;
-      // Import added from the shared module
-      expect(agent).toContain('InventoryMcpClientLangChain');
-      expect(agent).toContain('agent-connection');
-      // Client variable is actually created (awaited)
-      expect(agent).toContain(
-        'const inventoryMcp = await InventoryMcpClientLangChain.create();',
-      );
-      // Tools spread into createReactAgent
-      expect(agent).toMatch(/tools: \[subtract, \.\.\.inventoryMcp\]/);
-      // No strands shape leaked in
-      expect(agent).not.toContain('new Agent(');
-      expect(agent).not.toContain('@strands-agents/sdk');
-    });
-
-    it('should add @langchain/mcp-adapters dep, not @strands-agents/sdk', async () => {
-      setupLangchainProjects();
-      await tsAgentMcpConnectionGenerator(tree, opts);
-
-      const pkg = JSON.parse(tree.read('package.json', 'utf-8')!);
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-      expect(deps['@langchain/mcp-adapters']).toBeDefined();
-      expect(deps['@langchain/core']).toBeDefined();
-      expect(deps['@strands-agents/sdk']).toBeUndefined();
-    });
-
-    it('should be idempotent for langchain agents', async () => {
-      setupLangchainProjects();
-      await tsAgentMcpConnectionGenerator(tree, opts);
-      await tsAgentMcpConnectionGenerator(tree, opts);
-
-      const agent = tree.read(
-        'packages/my-api/src/my-agent/agent.ts',
-        'utf-8',
-      )!;
-      expect(
-        (agent.match(/InventoryMcpClientLangChain\.create/g) ?? []).length,
-      ).toBe(1);
-      const toolsListMatch = agent.match(/tools: \[([^\]]*)\]/);
-      expect(toolsListMatch).toBeTruthy();
-      expect(
-        (toolsListMatch![1].match(/\.\.\.inventoryMcp\b/g) ?? []).length,
-      ).toBe(1);
-    });
   });
 });

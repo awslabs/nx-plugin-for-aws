@@ -467,4 +467,162 @@ def get_agent(session_id: str):
     // Per-connection client
     snap('app/remote_client_strands.py', 'remote_client_strands.py');
   });
+
+  // --- LangChain source agent ---
+
+  describe('langchain source agent', () => {
+    const LANGCHAIN_HOST = {
+      ...HOST,
+      framework: 'langchain' as const,
+      protocol: 'ag-ui' as const,
+    };
+
+    const setupLangchainHost = () => {
+      setupProjects();
+      // Replace the host's metadata + agent.py with a langchain agent built from
+      // create_agent (the langchain agent generator's shape).
+      tree.write(
+        'apps/py-host/project.json',
+        JSON.stringify({
+          name: 'test.py_host',
+          root: 'apps/py-host',
+          sourceRoot: 'apps/py-host/py_host',
+          targets: {
+            'host-serve-local': {
+              executor: 'nx:run-commands',
+              options: {
+                commands: ['echo serve-local'],
+                env: { SERVE_LOCAL: 'true' },
+              },
+              dependsOn: [],
+              continuous: true,
+            },
+          },
+          metadata: { components: [LANGCHAIN_HOST] },
+        }),
+      );
+      tree.write(
+        'apps/py-host/py_host/host/agent.py',
+        `import os
+
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="You are a mathematical wizard.",
+        checkpointer=InMemorySaver(),
+    )
+`,
+      );
+    };
+
+    it('should wire the remote as a tool into create_agent', async () => {
+      setupLangchainHost();
+      await pyAgentA2aConnectionGenerator(tree, {
+        sourceProject: 'test.py_host',
+        targetProject: 'test.py_remote',
+        sourceComponent: LANGCHAIN_HOST,
+        targetComponent: REMOTE,
+      });
+
+      const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
+      // tool comes from langchain_core.tools, not strands
+      expect(agent).toContain('from langchain_core.tools import tool');
+      expect(agent).not.toContain('from strands import');
+      expect(agent).toContain('RemoteClientStrands.create()');
+      expect(agent).toContain('def ask_remote(prompt: str)');
+      expect(agent).toContain('str(remote(prompt))');
+      // Spread into create_agent's tools list
+      expect(agent).toMatch(/tools=\[subtract, ask_remote\]/);
+    });
+
+    it('should be idempotent for langchain agents', async () => {
+      setupLangchainHost();
+      await pyAgentA2aConnectionGenerator(tree, {
+        sourceProject: 'test.py_host',
+        targetProject: 'test.py_remote',
+        sourceComponent: LANGCHAIN_HOST,
+        targetComponent: REMOTE,
+      });
+      await pyAgentA2aConnectionGenerator(tree, {
+        sourceProject: 'test.py_host',
+        targetProject: 'test.py_remote',
+        sourceComponent: LANGCHAIN_HOST,
+        targetComponent: REMOTE,
+      });
+      const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
+      expect((agent.match(/RemoteClientStrands\.create/g) ?? []).length).toBe(
+        1,
+      );
+      expect((agent.match(/def ask_remote\(/g) ?? []).length).toBe(1);
+      const toolsListMatch = agent.match(/tools=\[([^\]]*)\]/);
+      expect(toolsListMatch).toBeTruthy();
+      expect((toolsListMatch![1].match(/\bask_remote\b/g) ?? []).length).toBe(
+        1,
+      );
+    });
+
+    it('should not match unrelated tools= kwargs (scoped to create_agent)', async () => {
+      setupLangchainHost();
+      tree.write(
+        'apps/py-host/py_host/host/agent.py',
+        `import os
+
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
+
+
+def some_unrelated_helper(tools=[]):
+    return tools
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = ChatBedrockConverse(model="m", region_name="us-east-1")
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="...",
+        checkpointer=InMemorySaver(),
+    )
+`,
+      );
+
+      await pyAgentA2aConnectionGenerator(tree, {
+        sourceProject: 'test.py_host',
+        targetProject: 'test.py_remote',
+        sourceComponent: LANGCHAIN_HOST,
+        targetComponent: REMOTE,
+      });
+
+      const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
+      // The unrelated helper's signature is unchanged
+      expect(agent).toContain('def some_unrelated_helper(tools=[]):');
+      // Only create_agent's tools list got the tool
+      expect(agent).toMatch(/tools=\[subtract, ask_remote\]/);
+    });
+  });
 });

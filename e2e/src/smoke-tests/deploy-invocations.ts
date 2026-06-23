@@ -208,6 +208,67 @@ export async function invokeAgentCoreAgent(
   throw new Error(`Exhausted retries invoking ${agentName}`);
 }
 
+/**
+ * Invoke a deployed AG-UI agent (Strands or LangChain). AG-UI agents serve a
+ * single `POST /invocations` that takes a `RunAgentInput` body and streams
+ * AG-UI events over Server-Sent Events. Assert a 200 + a `data:` SSE stream
+ * with no `RUN_ERROR` event (the server surfaces agent failures as a `data:`
+ * RUN_ERROR rather than a non-200, so a bare status check would miss them).
+ */
+export async function invokeAgentCoreAgUi(
+  arn: string,
+  agentName: string,
+  message = 'What is 3 times 5?',
+): Promise<string> {
+  const aws = await createAwsClient('bedrock-agentcore');
+  console.log(`Testing ${agentName} (AG-UI) with ARN ${arn}`);
+
+  // Retry on 424/429/5xx — AgentCore cold starts pull the container image on
+  // first invoke and can transiently fail before the runtime is ready.
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await aws.fetch(buildAgentCoreUrl(arn), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': AGENT_CORE_SESSION_ID,
+      },
+      body: JSON.stringify({
+        threadId: 'test-thread',
+        runId: 'test-run',
+        messages: [{ id: 'msg-1', role: 'user', content: message }],
+        state: {},
+        tools: [],
+        context: [],
+        forwardedProps: {},
+      }),
+    });
+
+    if (response.status !== 200 && attempt < maxAttempts) {
+      const body = await response.text().catch(() => '');
+      console.log(
+        `${agentName} attempt ${attempt}/${maxAttempts} returned ${response.status}; retrying in 15s. Body: ${body.slice(0, 500)}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      continue;
+    }
+
+    const body = await response.text();
+    console.log(
+      `${agentName} (AG-UI) response status:`,
+      response.status,
+      body.slice(0, 200),
+    );
+    expect(response.status).toBe(200);
+    expect(body).toContain('data:');
+    expect(body).not.toContain('RUN_ERROR');
+    console.log(`Successfully invoked ${agentName} (AG-UI)`);
+    return body;
+  }
+  // Unreachable — the final attempt's expect() throws if it still fails.
+  throw new Error(`Exhausted retries invoking ${agentName}`);
+}
+
 export async function invokeTrpcAgentCoreAgent(
   arn: string,
   agentName: string,

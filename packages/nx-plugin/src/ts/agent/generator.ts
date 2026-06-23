@@ -71,20 +71,6 @@ export const tsAgentGenerator = async (
 
   const infra = options.infra ?? 'agentcore';
   const protocol = options.protocol ?? 'http';
-  const framework = options.framework ?? 'strands';
-
-  // The LangChain TypeScript AGENT foundation is not yet supported: there is no
-  // in-process AG-UI <-> LangGraph adapter that mirrors the Strands
-  // `createStrandsApp` server (the npm `@ag-ui/langgraph` package is a LangGraph
-  // Platform HTTP client needing a separate langgraph-api server, not a clean
-  // parity wrapper for an in-process compiled graph). Only the LangChain MCP /
-  // gateway CONNECTION clients are supported (a TypeScript langchain agent built
-  // by hand can consume them). Fail fast rather than scaffold a broken agent.
-  if (framework === 'langchain') {
-    throw new Error(
-      `The 'langchain' framework is not yet supported for TypeScript agents: only its MCP / gateway connection clients are. Use 'strands' for the ts#agent foundation, or build a LangChain agent by hand and wire connections to it.`,
-    );
-  }
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -331,18 +317,7 @@ export const tsAgentGenerator = async (
     TS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    {
-      port: localDevPort,
-      rc: agentNameClassName,
-      auth,
-      protocol,
-      // The mcp / gateway connection generators dispatch on this field to pick
-      // the Strands vs LangChain Layer-2 client + agent.ts transform. ts#agent
-      // only scaffolds Strands today (langchain is rejected above), but a
-      // hand-built langchain agent sets this to 'langchain' to opt its
-      // connections into the langchain clients.
-      framework,
-    },
+    { port: localDevPort, rc: agentNameClassName, auth, protocol },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_AGENT_GENERATOR_INFO]);
