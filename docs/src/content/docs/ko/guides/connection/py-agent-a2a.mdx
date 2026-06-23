@@ -7,7 +7,7 @@ when:
     - ts#agent
     - py#agent
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ import Snippet from '@components/snippet.astro';
 
 이 생성기를 사용하기 전에 다음을 준비해야 합니다:
 
-1. <Link path="guides/py-agent">Agent</Link> 컴포넌트가 있는 Python 프로젝트 (모든 프로토콜)
+1. <Link path="guides/py-agent">Python Agent</Link> 컴포넌트가 있는 Python 프로젝트 (Strands 또는 LangChain)
 2. `--protocol=A2A` 및 `--auth=IAM`으로 생성된 Agent 컴포넌트가 있는 프로젝트 (<Link path="guides/ts-agent">`ts#agent`</Link> 또는 <Link path="guides/py-agent">`py#agent`</Link>)
 3. `infra: agentcore`으로 생성된 두 컴포넌트
 
@@ -50,12 +50,14 @@ import Snippet from '@components/snippet.astro';
     - core
       - agentcore\_endpoints.py 프레임워크 독립적인 ARN/URL 해석
       - agentcore\_a2a\_client\_config.py 프레임워크 독립적인 A2A 클라이언트 구성 (서명된 `ClientConfig`)
-      - agentcore\_a2a\_client\_strands.py 구성을 래핑하는 Strands A2A 클라이언트
+      - agentcore\_a2a\_client\_strands.py 구성을 래핑하는 A2A 전송 클라이언트
       - auth/ 프레임워크 독립적인 SigV4 / 세션 전달 `httpx.Auth`
     - app
-      - \<target\_agent\_name>\_client\_strands.py 각 A2A 에이전트에 대한 연결별 Strands 클라이언트
+      - \<target\_agent\_name>\_client\_strands.py 각 A2A 에이전트에 대한 연결별 A2A 전송 클라이언트
 
 </FileTree>
+
+A2A 전송(Strands `A2AAgent`)은 모델을 포함하지 않으므로 Strands와 LangChain 에이전트 모두 이를 재사용합니다 — 프레임워크별로 다른 것은 `agent.py`의 도구 배선뿐입니다.
 
 또한 생성기는:
 - 에이전트의 `agent.py`를 변환하여 원격 A2A 에이전트를 `@tool`을 사용하여 도구로 등록합니다
@@ -64,7 +66,10 @@ import Snippet from '@components/snippet.astro';
 
 ## 연결된 A2A 에이전트 사용
 
-생성기는 에이전트의 `agent.py`를 변환하여 원격 A2A 에이전트를 도구로 래핑합니다:
+생성기는 에이전트의 `agent.py`를 변환하여 원격 A2A 에이전트를 도구로 래핑합니다. 원격 에이전트는 `@tool`로 장식된 델리게이트로 등록되며 — 데코레이터의 import와 에이전트 생성자는 프레임워크에 따라 다릅니다:
+
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 
 ```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
 from contextlib import contextmanager
@@ -86,10 +91,33 @@ def get_agent(session_id: str):
         tools=[ask_remote_agent],
     )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,17}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-`session_id` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
+from my_scope_agent_connection import RemoteAgentClientStrands
 
-내부적으로 `RemoteAgentClientStrands.create(session_id=...)`는 AWS에 배포된 경우 SigV4로 요청에 서명하는 `httpx.AsyncClient`로 구성된 Strands `A2AAgent`를 반환하고, `SERVE_LOCAL=true`인 경우 일반 `http://localhost:<port>/` 엔드포인트를 사용합니다.
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+</TabItem>
+</Tabs>
+
+내부적으로 `RemoteAgentClientStrands.create()`는 Strands `A2AAgent`(순수한 A2A 전송으로 사용 — 모델을 포함하지 않으므로 LangChain 에이전트도 재사용)를 반환하며, AWS에 배포된 경우 SigV4로 요청에 서명하는 `httpx.AsyncClient`로 구성되고, `SERVE_LOCAL=true`인 경우 일반 `http://localhost:<port>/` 엔드포인트를 사용합니다. Strands 에이전트의 경우 `session_id`는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
 
 ## 인프라
 

@@ -7,7 +7,7 @@ when:
     - ts#agent
     - py#agent
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ import Snippet from '@components/snippet.astro';
 
 在使用此生成器之前,请确保您具备:
 
-1. 一个包含 <Link path="guides/py-agent">Agent</Link> 组件的 Python 项目(任何协议)
+1. 一个包含 <Link path="guides/py-agent">Python Agent</Link> 组件的 Python 项目(Strands 或 LangChain)
 2. 一个使用 `--protocol=A2A` 和 `--auth=IAM` 生成的 Agent 组件项目(可以是 <Link path="guides/ts-agent">`ts#agent`</Link> 或 <Link path="guides/py-agent">`py#agent`</Link>)
 3. 两个组件都使用 `infra: agentcore` 创建
 
@@ -50,12 +50,14 @@ import Snippet from '@components/snippet.astro';
     - core
       - agentcore\_endpoints.py 框架无关的 ARN/URL 解析
       - agentcore\_a2a\_client\_config.py 框架无关的 A2A 客户端配置(签名的 `ClientConfig`)
-      - agentcore\_a2a\_client\_strands.py 包装配置的 Strands A2A 客户端
+      - agentcore\_a2a\_client\_strands.py 包装配置的 A2A 传输客户端
       - auth/ 框架无关的 SigV4 / 会话转发 `httpx.Auth`
     - app
-      - \<target\_agent\_name>\_client\_strands.py 每个 A2A 代理的连接 Strands 客户端
+      - \<target\_agent\_name>\_client\_strands.py 每个 A2A 代理的连接 A2A 传输客户端
 
 </FileTree>
+
+A2A 传输(一个 Strands `A2AAgent`)不携带模型,因此 Strands 和 LangChain 代理都可以重用它 — 只有 `agent.py` 中的工具配置因框架而异。
 
 此外,生成器还会:
 - 转换您的代理的 `agent.py`,使用 `@tool` 将远程 A2A 代理注册为工具
@@ -64,8 +66,10 @@ import Snippet from '@components/snippet.astro';
 
 ## 使用连接的 A2A 代理
 
-生成器会转换您的代理的 `agent.py`,将远程 A2A 代理包装为工具:
+生成器会转换您的代理的 `agent.py`,将远程 A2A 代理包装为工具。远程代理通过 `@tool` 装饰的委托进行注册 — 装饰器的导入和代理构造函数因框架而异:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
 from contextlib import contextmanager
 from strands import Agent, tool
@@ -86,10 +90,33 @@ def get_agent(session_id: str):
         tools=[ask_remote_agent],
     )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,17}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-`session_id` 参数从调用方传递,确保 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) 的一致性。
+from my_scope_agent_connection import RemoteAgentClientStrands
 
-在底层,`RemoteAgentClientStrands.create(session_id=...)` 返回一个配置了 `httpx.AsyncClient` 的 Strands `A2AAgent`,该客户端在部署到 AWS 时使用 SigV4 签名请求,在 `SERVE_LOCAL=true` 时使用普通的 `http://localhost:<port>/` 端点。
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+</TabItem>
+</Tabs>
+
+在底层,`RemoteAgentClientStrands.create()` 返回一个 Strands `A2AAgent`(纯粹用作 A2A 传输 — 它不携带模型,因此 LangChain 代理可以重用它),配置了一个 `httpx.AsyncClient`,该客户端在部署到 AWS 时使用 SigV4 签名请求,在 `SERVE_LOCAL=true` 时使用普通的 `http://localhost:<port>/` 端点。对于 Strands 代理,`session_id` 从调用方传递,确保 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) 的一致性。
 
 ## 基础设施
 

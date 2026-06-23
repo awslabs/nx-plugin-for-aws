@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 Le générateur `connection` peut connecter votre <Link path="guides/py-agent">Agent Python</Link> à une <Link path="guides/agentcore-gateway">Gateway AgentCore</Link>.
 
-Le générateur configure l'agent pour qu'il s'authentifie auprès de la Gateway avec IAM SigV4 (via la signature de requêtes `httpx`) lors du déploiement, et multiplexe directement vers les serveurs MCP attachés lors de l'exécution locale.
+Le générateur configure l'agent pour qu'il s'authentifie auprès de la Gateway avec IAM SigV4 (via la signature de requêtes `httpx`) lors du déploiement, et se connecte à la gateway locale démarrée par le projet Gateway lors de l'exécution locale.
 
 ## Prérequis
 
@@ -46,13 +46,15 @@ Le générateur émet des modules core-gateway partagés dans votre projet Pytho
     - core/
       - agentcore\_endpoints.py Résolution ARN/URL indépendante du framework
       - agentcore\_gateway\_mcp\_transport.py Transport MCP Gateway indépendant du framework
-      - agentcore\_gateway\_mcp\_client\_strands.py Client MCP Strands pour la Gateway déployée
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py Client MCP Gateway pour le framework de votre agent
       - auth/ `httpx.Auth` SigV4 / transfert de session indépendant du framework
     - app/
-      - \<gateway\_snake>\_client\_strands.py Wrapper client Strands par Gateway
+      - \<gateway\_snake>\_client\_\<framework>.py Wrapper client par Gateway
     - \_\_init\_\_.py Ré-exporte le client Gateway
 
 </FileTree>
+
+Le suffixe du client correspond au framework de votre agent (`_strands` ou `_langchain`).
 
 De plus, le générateur :
 
@@ -64,6 +66,8 @@ De plus, le générateur :
 
 Le générateur transforme le fichier `agent.py` de votre agent pour utiliser le client Gateway :
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClient.create()` retourne un client unique gérable par contexte dont `list_tools_sync()` fournit tous les outils disponibles via la Gateway :
+`MyGatewayClientStrands.create()` retourne un `MCPClient` unique gérable par contexte dont `list_tools_sync()` fournit tous les outils disponibles via la Gateway.
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **Mode déployé** (`SERVE_LOCAL` non défini) : un seul `MCPClient` pointant vers le point de terminaison MCP de la Gateway, signé SigV4.
-- **Mode local** (`SERVE_LOCAL=true`) : un `MCPClient` HTTP simple pointant vers la gateway locale démarrée par la cible `serve-local` du projet Gateway.
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()` retourne une liste d'outils chargés via [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Chaque outil ouvre une nouvelle session par appel, donc aucun bloc `with` n'est nécessaire.
+</TabItem>
+</Tabs>
+
+Dans les deux cas, le client se comporte de la même manière selon le mode :
+
+- **Mode déployé** (`SERVE_LOCAL` non défini) : outils pointant vers le point de terminaison MCP de la Gateway, signé SigV4.
+- **Mode local** (`SERVE_LOCAL=true`) : outils HTTP simples pointant vers la gateway locale démarrée par la cible `serve-local` du projet Gateway.
 
 L'ID de session est propagé automatiquement aux serveurs MCP en aval via l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 

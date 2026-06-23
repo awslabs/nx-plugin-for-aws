@@ -16,11 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 ツールを使用してエージェントを構築するためのPython AIエージェントを生成し、オプションで[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。`framework`オプションでエージェントフレームワークを選択できます：[Strands](https://strandsagents.com/)（デフォルト）または[LangChain](https://docs.langchain.com/oss/python/langchain/overview)（[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)上に構築）。
 
-Strandsエージェントの場合、ジェネレーターはデフォルトで[FastAPI](https://fastapi.tiangolo.com/)を使用してHTTPサーバーを公開します。または、他のA2A互換エージェントとの相互運用性のために[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)プロトコル、または[CopilotKit](https://docs.copilotkit.ai/)を介した直接的なフロントエンド統合のために[AG-UI](https://docs.ag-ui.com/)プロトコルを選択することもできます。
-
-:::note[LangChainはAG-UIのみをサポート]
-`langchain`フレームワークは現在`ag-ui`プロトコルのみをサポートしています。`http`または`a2a`プロトコルが必要な場合は、デフォルトの`strands`フレームワークを選択してください。LangChainエージェントは、<Link path="/guides/connection/py-agent-mcp">`connection`ジェネレーター</Link>を介してMCPサーバー、AgentCore Gateway、A2Aエージェントに接続できます。
-:::
+ジェネレーターはサーバー`protocol`を介してエージェントを公開します。Strandsエージェントは[HTTP](https://fastapi.tiangolo.com/)（デフォルト）、他のA2A互換エージェントとの相互運用性のための[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)プロトコル、および[CopilotKit](https://docs.copilotkit.ai/)を介した直接的なフロントエンド統合のための[AG-UI](https://docs.ag-ui.com/)プロトコルをサポートします。LangChainエージェントは`ag-ui`プロトコルをサポートします。
 
 ## 使用方法
 
@@ -141,14 +137,14 @@ Agentのデプロイ用に以下のファイルが生成されます：
 
 ## エージェントの操作
 
-以下の例ではStrandsを使用しています。LangChainエージェントも同様に動作し、`langchain_core.tools`の`@tool`デコレータと`ChatBedrockConverse`モデルを使用した`create_agent`を使用します（`MODEL_ID`と`AWS_REGION`環境変数でモデルとリージョンを設定）。詳細は[LangChainドキュメント](https://docs.langchain.com/oss/python/langchain/overview)を参照してください。
+`agent.py`を編集してツールの追加、モデルの設定、システムプロンプトのカスタマイズができます。APIは選択したフレームワークによって異なります。
 
 ### ツールの追加
 
-ツールはAIエージェントがアクションを実行するために呼び出す関数です。Strandsフレームワークはデコレータベースのシンプルなアプローチを採用しています。
+ツールはAIエージェントがアクションを実行するために呼び出す関数です。両方のフレームワークはツールを定義するためにデコレータベースのアプローチを使用し、関数名とdocstringからツール名と説明を導出し、型ヒントから入力スキーマを生成します。
 
-`agent.py`ファイルに新しいツールを追加できます：
-
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python
 from strands import Agent, tool
 
@@ -169,15 +165,39 @@ agent = Agent(
     tools=[calculate_sum, get_weather],
 )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-Strandsフレームワークが自動的に処理する機能：
-- 関数の型ヒントに基づく型検証
-- ツール呼び出し用JSONスキーマ生成
-- エラーハンドリングとレスポンスフォーマット
+@tool
+def calculate_sum(numbers: list[int]) -> int:
+    """数値リストの合計を計算"""
+    return sum(numbers)
+
+@tool
+def get_weather(city: str) -> str:
+    """都市の天気情報を取得"""
+    # 天気API連携をここに実装
+    return f"{city}の天気：晴れ、25°C"
+
+# エージェントにツールを追加
+agent = create_agent(
+    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+    tools=[calculate_sum, get_weather],
+    system_prompt="様々なツールにアクセスできる便利なアシスタントです。",
+)
+```
+</TabItem>
+</Tabs>
 
 ### プリビルドツールの使用
 
-`strands-tools`パッケージで提供されるプリビルドツール：
+<Tabs syncKey="framework">
+<TabItem label="Strands">
+Strandsは`strands-tools`パッケージを通じてプリビルドツールのコレクションを提供します：
 
 ```python
 from strands_tools import current_time, http_request, file_read
@@ -187,10 +207,27 @@ agent = Agent(
     tools=[current_time, http_request, file_read],
 )
 ```
+</TabItem>
+<TabItem label="LangChain">
+LangChainは[ツールと統合](https://docs.langchain.com/oss/python/integrations/tools)の大規模なエコシステムを提供します。関連する統合パッケージをインストールし、ツールを`create_agent`に渡します：
+
+```python
+from langchain_community.tools import DuckDuckGoSearchRun
+
+agent = create_agent(
+    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+    tools=[DuckDuckGoSearchRun()],
+    system_prompt="便利なアシスタントです。",
+)
+```
+</TabItem>
+</Tabs>
 
 ### モデル設定
 
-デフォルトではClaude 4 Sonnetを使用しますが、モデルプロバイダーをカスタマイズ可能。[Strandsドキュメントのモデルプロバイダー](https://strandsagents.com/docs/user-guide/concepts/model-providers/)を参照：
+<Tabs syncKey="framework">
+<TabItem label="Strands">
+デフォルトではStrandsエージェントはClaude 4 Sonnetを使用しますが、モデルプロバイダーをカスタマイズできます。設定オプションについては[Strandsドキュメントのモデルプロバイダー](https://strandsagents.com/docs/user-guide/concepts/model-providers/)を参照してください：
 
 ```python
 from strands import Agent
@@ -205,22 +242,35 @@ bedrock_model = BedrockModel(
 
 agent = Agent(model=bedrock_model)
 ```
+</TabItem>
+<TabItem label="LangChain">
+LangChainエージェントは[`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse)モデルを使用します。生成されたエージェントは`MODEL_ID`と`AWS_REGION`環境変数からモデルIDとリージョンを読み取りますが、`agent.py`で直接モデルを設定することもできます：
+
+```python
+from langchain_aws import ChatBedrockConverse
+
+model = ChatBedrockConverse(
+    model="anthropic.claude-sonnet-4-20250514-v1:0",
+    region_name="us-west-2",
+    temperature=0.3,
+)
+```
+</TabItem>
+</Tabs>
 
 ### MCPサーバーの利用
 
-[StrandsエージェントにMCPサーバーのツールを追加](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)できます。
-
-<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>や<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>ジェネレーターで作成したMCPサーバーを利用する場合、<Link path="/guides/connection/py-agent-mcp">`connection`ジェネレーター</Link>を使用できます。
+<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>や<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>ジェネレーターで作成したMCPサーバーを利用する場合、<Link path="/guides/connection/py-agent-mcp">`connection`ジェネレーター</Link>を使用できます。これにより、両方のフレームワークでMCPサーバーのツールがエージェントに接続されます。
 
 <RunGenerator generator="connection" />
 
 接続の設定方法の詳細については、<Link path="/guides/connection/py-agent-mcp">`connection`ジェネレーターガイド</Link>を参照してください。
 
-その他のMCPサーバーについては、[Strandsドキュメント](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)を参照してください。
+その他のMCPサーバーについては、[Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)または[LangChain](https://docs.langchain.com/oss/python/langchain/mcp)のMCPドキュメントを参照してください。
 
 ### 詳細
 
-Strandsエージェントの詳細な作成方法は[Strandsドキュメント](https://strandsagents.com/docs/user-guide/quickstart/overview/)を参照してください。LangChainエージェントについては、<Link path="/guides/connection/py-agent-mcp">`connection`ジェネレーター</Link>がMCPサーバー、AgentCore Gateway、A2Aエージェントツールを`create_agent`に接続します。
+エージェントの詳細な作成方法については、[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/)または[LangChain](https://docs.langchain.com/oss/python/langchain/overview)のドキュメントを参照してください。
 
 ## プロトコル
 
@@ -231,6 +281,10 @@ Strandsエージェントの詳細な作成方法は[Strandsドキュメント](
 - **AG-UI**：[ag-ui-strands](https://docs.ag-ui.com/)統合で、SSE経由で[AG-UIプロトコル](https://docs.ag-ui.com/)を公開します。Reactウェブサイトでの[CopilotKit](https://docs.copilotkit.ai/)との直接的なフロントエンド統合に最適です。
 
 すべてのプロトコルは、AgentCoreランタイムのヘルスチェック契約用に`/ping`を公開します。A2Aエージェントはポート`9000`でリッスンします。HTTPとAG-UIエージェントはポート`8080`でリッスンします。生成されるDockerfileとインフラストラクチャは自動的に設定されます。
+
+:::note[LangChainはAG-UIのみをサポート]
+`langchain`フレームワークは現在`ag-ui`プロトコルのみをサポートしています。`http`または`a2a`プロトコルが必要な場合は、デフォルトの`strands`フレームワークを選択してください。
+:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPIサーバー（HTTPプロトコル）

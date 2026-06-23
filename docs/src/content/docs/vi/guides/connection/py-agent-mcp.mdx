@@ -7,7 +7,7 @@ when:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ Trình tạo thiết lập tất cả các kết nối cần thiết để agent
 
 Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
 
-1. Một dự án Python với component <Link path="guides/py-agent">Agent</Link>
+1. Một dự án Python với component <Link path="guides/py-agent">Python Agent</Link> (Strands hoặc LangChain)
 2. Một dự án với component MCP server (có thể là <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> hoặc <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
 3. Cả hai component được tạo với `infra: agentcore`
 
@@ -50,12 +50,14 @@ Trình tạo tạo một dự án Python `agent_connection` được chia sẻ t
     - core
       - agentcore\_endpoints.py Giải quyết ARN/URL không phụ thuộc framework
       - agentcore\_mcp\_transport.py Truyền tải MCP không phụ thuộc framework
-      - agentcore\_mcp\_client\_strands.py Client MCP Strands bao bọc truyền tải
+      - agentcore\_mcp\_client\_\<framework>.py Client MCP bao bọc truyền tải cho framework của agent
       - auth/ `httpx.Auth` SigV4 / chuyển tiếp session không phụ thuộc framework
     - app
-      - \<mcp\_server\_name>\_client\_strands.py Client Strands theo từng kết nối cho mỗi MCP server
+      - \<mcp\_server\_name>\_client\_\<framework>.py Client theo từng kết nối cho mỗi MCP server
 
 </FileTree>
+
+Hậu tố client khớp với framework của agent (`_strands` hoặc `_langchain`).
 
 Ngoài ra, trình tạo còn:
 - Chuyển đổi `agent.py` của agent để import và sử dụng các công cụ của MCP server thông qua một client dựa trên class
@@ -66,6 +68,8 @@ Ngoài ra, trình tạo còn:
 
 Trình tạo chuyển đổi `agent.py` của agent để sử dụng các công cụ của MCP server:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
 from contextlib import contextmanager
 from strands import Agent
@@ -84,7 +88,27 @@ def get_agent(session_id: str):
         )
 ```
 
-Tham số `session_id` được truyền từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+Client Strands là một context manager, được nhập vào trong một khối `with` xung quanh agent. Tham số `session_id` được truyền từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,9,14}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+Client LangChain trả về một danh sách các công cụ được tải thông qua [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Mỗi công cụ mở một phiên MCP mới cho mỗi lần gọi, vì vậy các công cụ vẫn có thể sử dụng được trong suốt vòng đời của agent — không cần khối `with`.
+</TabItem>
+</Tabs>
 
 ## Hạ tầng
 

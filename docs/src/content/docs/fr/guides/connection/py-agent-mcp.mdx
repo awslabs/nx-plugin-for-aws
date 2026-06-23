@@ -66,6 +66,8 @@ De plus, le générateur :
 
 Le générateur transforme le fichier `agent.py` de votre agent pour utiliser les outils du serveur MCP :
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
 from contextlib import contextmanager
 from strands import Agent
@@ -84,7 +86,27 @@ def get_agent(session_id: str):
         )
 ```
 
-Le paramètre `session_id` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+Le client Strands est un gestionnaire de contexte, entré dans un bloc `with` autour de l'agent. Le paramètre `session_id` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,9,14}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+Le client LangChain retourne une liste d'outils chargés via [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Chaque outil ouvre une nouvelle session MCP par appel, de sorte que les outils restent utilisables pendant toute la durée de vie de l'agent — aucun bloc `with` n'est nécessaire.
+</TabItem>
+</Tabs>
 
 ## Infrastructure
 

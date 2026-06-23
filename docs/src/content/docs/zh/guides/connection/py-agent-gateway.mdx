@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -46,13 +46,15 @@ import Infrastructure from '@components/infrastructure.astro';
     - core/
       - agentcore\_endpoints.py 框架无关的 ARN/URL 解析
       - agentcore\_gateway\_mcp\_transport.py 框架无关的 Gateway MCP 传输
-      - agentcore\_gateway\_mcp\_client\_strands.py 用于已部署 Gateway 的 Strands MCP 客户端
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py 用于您的 agent 框架的 Gateway MCP 客户端
       - auth/ 框架无关的 SigV4 / 会话转发 `httpx.Auth`
     - app/
-      - \<gateway\_snake>\_client\_strands.py 针对每个 Gateway 的 Strands 客户端包装器
+      - \<gateway\_snake>\_client\_\<framework>.py 针对每个 Gateway 的客户端包装器
     - \_\_init\_\_.py 重新导出 Gateway 客户端
 
 </FileTree>
+
+客户端后缀与您的 agent 框架匹配（`_strands` 或 `_langchain`）。
 
 此外，生成器还会：
 
@@ -64,6 +66,8 @@ import Infrastructure from '@components/infrastructure.astro';
 
 生成器会转换您的 agent 的 `agent.py` 以使用 Gateway 客户端：
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()` 返回一个可以作为上下文管理器的单一客户端，其 `list_tools_sync()` 会产生通过 Gateway 可用的每个工具：
+`MyGatewayClientStrands.create()` 返回一个可以作为上下文管理器的单个 `MCPClient`，其 `list_tools_sync()` 会产生通过 Gateway 可用的每个工具。
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **部署模式**（未设置 `SERVE_LOCAL`）：指向 Gateway 的 MCP 端点的单个 `MCPClient`，使用 SigV4 签名。
-- **本地模式**（`SERVE_LOCAL=true`）：指向 Gateway 项目的 `serve-local` 目标启动的本地网关的纯 HTTP `MCPClient`。
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()` 返回通过 [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp) 加载的工具列表。每个工具在每次调用时都会打开一个新会话，因此不需要 `with` 块。
+</TabItem>
+</Tabs>
+
+在两种情况下，客户端在每种模式下的行为方式相同：
+
+- **部署模式**（未设置 `SERVE_LOCAL`）：指向 Gateway 的 MCP 端点的工具，使用 SigV4 签名。
+- **本地模式**（`SERVE_LOCAL=true`）：指向 Gateway 项目的 `serve-local` 目标启动的本地网关的纯 HTTP 工具。
 
 会话 ID 会通过 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 标头自动传播到下游 MCP 服务器。
 
@@ -159,4 +185,4 @@ Gateway URL 会由生成的 Terraform 模块自动注册到 <Link path="guides/r
 
 - **没有 Cedar 策略评估。** 无论策略如何，agent 都可以看到每个工具。使用 `serve` target 针对已部署的 Gateway 执行策略。
 - **工具名称前缀被保留。** 每个本地 MCP 服务器的工具都以 `<target-name>___<tool-name>` 的形式公开，与已部署的 Gateway 发出的内容相匹配。这使得 agent 的系统提示和您引用的 Cedar 操作名称在本地和部署运行中保持一致。
-持一致。
+

@@ -16,11 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 Gere um agente de IA em Python para construir agentes com ferramentas, e opcionalmente implante-o no [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Escolha o framework do agente com a opção `framework`: [Strands](https://strandsagents.com/) (o padrão) ou [LangChain](https://docs.langchain.com/oss/python/langchain/overview) (construído sobre [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)).
 
-Para agentes Strands, o gerador usa [FastAPI](https://fastapi.tiangolo.com/) para expor um servidor HTTP por padrão. Alternativamente, você pode escolher o protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidade com outros agentes compatíveis com A2A, ou o protocolo [AG-UI](https://docs.ag-ui.com/) para integração direta com frontend via [CopilotKit](https://docs.copilotkit.ai/).
-
-:::note[LangChain suporta apenas AG-UI]
-O framework `langchain` atualmente suporta apenas o protocolo `ag-ui`. Escolha o framework padrão `strands` se você precisar do protocolo `http` ou `a2a`. Agentes LangChain ainda podem se conectar a servidores MCP, AgentCore Gateways e agentes A2A através do <Link path="/guides/connection/py-agent-mcp">gerador `connection`</Link>.
-:::
+O gerador expõe seu agente através de um `protocol` de servidor. Agentes Strands suportam [HTTP](https://fastapi.tiangolo.com/) (o padrão), o protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidade com outros agentes compatíveis com A2A, e o protocolo [AG-UI](https://docs.ag-ui.com/) para integração direta com frontend via [CopilotKit](https://docs.copilotkit.ai/). Agentes LangChain suportam o protocolo `ag-ui`.
 
 ## Uso
 
@@ -141,14 +137,14 @@ Se você selecionou `None` para `infra`, nenhum construct CDK ou módulo Terrafo
 
 ## Trabalhando com Seu Agente
 
-Os exemplos abaixo usam Strands. Um agente LangChain funciona da mesma forma, usando `create_agent` com o decorador `@tool` de `langchain_core.tools` e um modelo `ChatBedrockConverse` (as variáveis de ambiente `MODEL_ID` e `AWS_REGION` definem o modelo e a região). Consulte a [documentação do LangChain](https://docs.langchain.com/oss/python/langchain/overview) para detalhes.
+Você pode editar `agent.py` para adicionar ferramentas, configurar o modelo e personalizar o prompt do sistema. A API depende do framework que você escolheu.
 
 ### Adicionando Ferramentas
 
-Ferramentas são funções que o agente de IA pode chamar para executar ações. O framework Strands usa uma abordagem simples baseada em decoradores para definir ferramentas.
+Ferramentas são funções que o agente de IA pode chamar para executar ações. Ambos os frameworks usam uma abordagem baseada em decoradores para definir ferramentas, derivam o nome e a descrição da ferramenta a partir do nome da função e da docstring, e geram o schema de entrada a partir de suas dicas de tipo.
 
-Você pode adicionar novas ferramentas no arquivo `agent.py`:
-
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python
 from strands import Agent, tool
 
@@ -169,14 +165,38 @@ agent = Agent(
     tools=[calculate_sum, get_weather],
 )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-O framework Strands trata automaticamente:
-- Validação de tipos baseada nas dicas de tipo da função
-- Geração de schema JSON para chamadas de ferramentas
-- Tratamento de erros e formatação de respostas
+@tool
+def calculate_sum(numbers: list[int]) -> int:
+    """Calculate the sum of a list of numbers"""
+    return sum(numbers)
+
+@tool
+def get_weather(city: str) -> str:
+    """Get weather information for a city"""
+    # Your weather API integration here
+    return f"Weather in {city}: Sunny, 25°C"
+
+# Add tools to your agent
+agent = create_agent(
+    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+    tools=[calculate_sum, get_weather],
+    system_prompt="You are a helpful assistant with access to various tools.",
+)
+```
+</TabItem>
+</Tabs>
 
 ### Usando Ferramentas Pré-construídas
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 Strands fornece uma coleção de ferramentas pré-construídas através do pacote `strands-tools`:
 
 ```python
@@ -187,9 +207,26 @@ agent = Agent(
     tools=[current_time, http_request, file_read],
 )
 ```
+</TabItem>
+<TabItem label="LangChain">
+LangChain fornece um grande ecossistema de [ferramentas e integrações](https://docs.langchain.com/oss/python/integrations/tools). Instale o pacote de integração relevante e então passe as ferramentas para `create_agent`:
+
+```python
+from langchain_community.tools import DuckDuckGoSearchRun
+
+agent = create_agent(
+    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+    tools=[DuckDuckGoSearchRun()],
+    system_prompt="You are a helpful assistant.",
+)
+```
+</TabItem>
+</Tabs>
 
 ### Configuração de Modelo
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 Por padrão, agentes Strands usam Claude 4 Sonnet, mas você pode personalizar o provedor de modelo. Consulte a [documentação do Strands sobre provedores de modelos](https://strandsagents.com/docs/user-guide/concepts/model-providers/) para opções de configuração:
 
 ```python
@@ -205,22 +242,35 @@ bedrock_model = BedrockModel(
 
 agent = Agent(model=bedrock_model)
 ```
+</TabItem>
+<TabItem label="LangChain">
+Agentes LangChain usam um modelo [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse). O agente gerado lê o id do modelo e a região das variáveis de ambiente `MODEL_ID` e `AWS_REGION`, mas você pode configurar o modelo diretamente em `agent.py`:
+
+```python
+from langchain_aws import ChatBedrockConverse
+
+model = ChatBedrockConverse(
+    model="anthropic.claude-sonnet-4-20250514-v1:0",
+    region_name="us-west-2",
+    temperature=0.3,
+)
+```
+</TabItem>
+</Tabs>
 
 ### Consumindo Servidores MCP
 
-Você pode [adicionar ferramentas de servidores MCP](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) ao seu agente Strands.
-
-Para consumir servidores MCP criados usando os geradores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, você pode usar o <Link path="/guides/connection/py-agent-mcp">gerador `connection`</Link>.
+Para consumir servidores MCP criados usando os geradores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, você pode usar o <Link path="/guides/connection/py-agent-mcp">gerador `connection`</Link>, que conecta as ferramentas do servidor MCP ao seu agente para ambos os frameworks.
 
 <RunGenerator generator="connection" />
 
 Consulte o <Link path="/guides/connection/py-agent-mcp">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.
 
-Para outros servidores MCP, consulte a [Documentação do Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/).
+Para outros servidores MCP, consulte a documentação MCP do [Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) ou [LangChain](https://docs.langchain.com/oss/python/langchain/mcp).
 
 ### Mais
 
-Para um guia mais detalhado sobre escrita de agentes Strands, consulte a [documentação do Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/). Para agentes LangChain, o <Link path="/guides/connection/py-agent-mcp">gerador `connection`</Link> também conecta ferramentas de servidor MCP, AgentCore Gateway e agente A2A ao `create_agent`.
+Para um guia mais detalhado sobre escrita de agentes, consulte a documentação do [Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) ou [LangChain](https://docs.langchain.com/oss/python/langchain/overview).
 
 ## Protocolo
 
@@ -231,6 +281,10 @@ O protocolo de servidor do seu agente determina como ele se comunica. Todas as o
 - **AG-UI**: A integração [ag-ui-strands](https://docs.ag-ui.com/), que expõe o [protocolo AG-UI](https://docs.ag-ui.com/) via SSE. Melhor para integração direta com frontend usando [CopilotKit](https://docs.copilotkit.ai/) em um website React.
 
 Todos os protocolos expõem `/ping` para o contrato de verificação de saúde do runtime AgentCore. Agentes A2A escutam na porta `9000`; agentes HTTP e AG-UI escutam na porta `8080`. O Dockerfile e a infraestrutura gerados são configurados para você.
+
+:::note[LangChain suporta apenas AG-UI]
+O framework `langchain` atualmente suporta apenas o protocolo `ag-ui`. Escolha o framework padrão `strands` se você precisar do protocolo `http` ou `a2a`.
+:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## Servidor FastAPI (protocolo HTTP)

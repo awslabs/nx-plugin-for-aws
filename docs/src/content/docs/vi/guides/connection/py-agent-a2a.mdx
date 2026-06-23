@@ -7,7 +7,7 @@ when:
     - ts#agent
     - py#agent
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ Trình tạo thiết lập tất cả các kết nối cần thiết để agent
 
 Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
 
-1. Một dự án Python với component <Link path="guides/py-agent">Agent</Link> (bất kỳ giao thức nào)
+1. Một dự án Python với component <Link path="guides/py-agent">Python Agent</Link> (Strands hoặc LangChain)
 2. Một dự án với component Agent được tạo với `--protocol=A2A` và `--auth=IAM` (có thể là <Link path="guides/ts-agent">`ts#agent`</Link> hoặc <Link path="guides/py-agent">`py#agent`</Link>)
 3. Cả hai component được tạo với `infra: agentcore`
 
@@ -50,12 +50,14 @@ Trình tạo tạo một dự án Python `agent_connection` được chia sẻ t
     - core
       - agentcore\_endpoints.py Giải quyết ARN/URL không phụ thuộc framework
       - agentcore\_a2a\_client\_config.py Cấu hình client A2A không phụ thuộc framework (đã ký `ClientConfig`)
-      - agentcore\_a2a\_client\_strands.py Client A2A Strands bọc cấu hình
+      - agentcore\_a2a\_client\_strands.py Client truyền tải A2A bọc cấu hình
       - auth/ SigV4 không phụ thuộc framework / chuyển tiếp session `httpx.Auth`
     - app
-      - \<target\_agent\_name>\_client\_strands.py Client Strands theo từng kết nối cho mỗi agent A2A
+      - \<target\_agent\_name>\_client\_strands.py Client truyền tải A2A theo từng kết nối cho mỗi agent A2A
 
 </FileTree>
+
+Truyền tải A2A (một Strands `A2AAgent`) không mang model, vì vậy cả agent Strands và LangChain đều tái sử dụng nó — chỉ có việc kết nối công cụ `agent.py` khác nhau theo framework.
 
 Ngoài ra, trình tạo:
 - Chuyển đổi `agent.py` của agent của bạn để đăng ký agent A2A từ xa như một công cụ sử dụng `@tool`
@@ -64,8 +66,10 @@ Ngoài ra, trình tạo:
 
 ## Sử dụng Agent A2A đã kết nối
 
-Trình tạo chuyển đổi `agent.py` của agent của bạn để bọc agent A2A từ xa như một công cụ:
+Trình tạo chuyển đổi `agent.py` của agent của bạn để bọc agent A2A từ xa như một công cụ. Agent từ xa được đăng ký với một delegate được trang trí bằng `@tool` — import của decorator và constructor của agent khác nhau theo framework:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
 from contextlib import contextmanager
 from strands import Agent, tool
@@ -86,10 +90,33 @@ def get_agent(session_id: str):
         tools=[ask_remote_agent],
     )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,17}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-Tham số `session_id` được truyền qua từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+from my_scope_agent_connection import RemoteAgentClientStrands
 
-Bên trong, `RemoteAgentClientStrands.create(session_id=...)` trả về một Strands `A2AAgent` được cấu hình với một `httpx.AsyncClient` ký các yêu cầu bằng SigV4 khi triển khai lên AWS, và một endpoint `http://localhost:<port>/` đơn giản khi `SERVE_LOCAL=true`.
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+</TabItem>
+</Tabs>
+
+Bên trong, `RemoteAgentClientStrands.create()` trả về một Strands `A2AAgent` (được sử dụng hoàn toàn như một truyền tải A2A — nó không mang model, vì vậy các agent LangChain tái sử dụng nó) được cấu hình với một `httpx.AsyncClient` ký các yêu cầu bằng SigV4 khi triển khai lên AWS, và một endpoint `http://localhost:<port>/` đơn giản khi `SERVE_LOCAL=true`. Đối với các agent Strands, `session_id` được truyền qua từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Hạ tầng
 

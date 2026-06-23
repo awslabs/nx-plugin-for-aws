@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -46,13 +46,15 @@ import Infrastructure from '@components/infrastructure.astro';
     - core/
       - agentcore\_endpoints.py 프레임워크 독립적인 ARN/URL 확인
       - agentcore\_gateway\_mcp\_transport.py 프레임워크 독립적인 Gateway MCP 전송
-      - agentcore\_gateway\_mcp\_client\_strands.py 배포된 Gateway용 Strands MCP 클라이언트
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py 에이전트 프레임워크용 Gateway MCP 클라이언트
       - auth/ 프레임워크 독립적인 SigV4 / 세션 전달 `httpx.Auth`
     - app/
-      - \<gateway\_snake>\_client\_strands.py Gateway별 Strands 클라이언트 래퍼
+      - \<gateway\_snake>\_client\_\<framework>.py Gateway별 클라이언트 래퍼
     - \_\_init\_\_.py Gateway 클라이언트를 재내보내기
 
 </FileTree>
+
+클라이언트 접미사는 에이전트의 프레임워크(`_strands` 또는 `_langchain`)와 일치합니다.
 
 또한 생성기는:
 
@@ -64,15 +66,17 @@ import Infrastructure from '@components/infrastructure.astro';
 
 생성기는 에이전트의 `agent.py`를 변환하여 Gateway 클라이언트를 사용합니다:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
 
-from my_scope_agent_connection import MyGatewayClient
+from my_scope_agent_connection import MyGatewayClientStrands
 
 @contextmanager
 def get_agent():
-    my_gateway = MyGatewayClient.create()
+    my_gateway = MyGatewayClientStrands.create()
     with (
         my_gateway,
     ):
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()`는 컨텍스트 관리 가능한 단일 클라이언트를 반환하며, 이 클라이언트의 `list_tools_sync()`는 Gateway를 통해 사용 가능한 모든 도구를 제공합니다:
+`MyGatewayClientStrands.create()`는 컨텍스트 관리 가능한 단일 `MCPClient`를 반환하며, 이 클라이언트의 `list_tools_sync()`는 Gateway를 통해 사용 가능한 모든 도구를 제공합니다.
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **배포 모드** (`SERVE_LOCAL` 미설정): Gateway의 MCP 엔드포인트를 가리키는 단일 `MCPClient`, SigV4 서명됨.
-- **로컬 모드** (`SERVE_LOCAL=true`): Gateway 프로젝트의 `serve-local` 대상에서 시작한 로컬 게이트웨이를 가리키는 일반 HTTP `MCPClient`.
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()`는 [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp)를 통해 로드된 도구 목록을 반환합니다. 각 도구는 호출마다 새로운 세션을 열기 때문에 `with` 블록이 필요하지 않습니다.
+</TabItem>
+</Tabs>
+
+두 경우 모두 클라이언트는 모드별로 동일하게 동작합니다:
+
+- **배포 모드** (`SERVE_LOCAL` 미설정): Gateway의 MCP 엔드포인트를 가리키는 도구, SigV4 서명됨.
+- **로컬 모드** (`SERVE_LOCAL=true`): Gateway 프로젝트의 `serve-local` 대상에서 시작한 로컬 게이트웨이를 가리키는 일반 HTTP 도구.
 
 세션 ID는 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더를 통해 다운스트림 MCP 서버로 자동으로 전파됩니다.
 
@@ -159,4 +185,4 @@ Gateway URL은 생성된 Terraform 모듈에 의해 <Link path="guides/runtime-c
 
 - **Cedar 정책 평가 없음.** 정책에 관계없이 모든 도구가 에이전트에 표시됩니다. 배포된 Gateway에 대해 정책을 테스트하려면 `serve` 대상을 사용하세요.
 - **도구 이름 접두사는 유지됨.** 각 로컬 MCP 서버의 도구는 `<target-name>___<tool-name>`으로 노출되며, 이는 배포된 Gateway가 생성하는 것과 일치합니다. 이를 통해 에이전트의 시스템 프롬프트와 참조하는 Cedar 액션 이름이 로컬 및 배포 실행 간에 일관성을 유지합니다.
-��다.
+

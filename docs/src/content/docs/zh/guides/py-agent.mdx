@@ -16,11 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 生成一个用于构建带工具的AI代理的Python代理，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。使用`framework`选项选择代理框架：[Strands](https://strandsagents.com/)（默认）或[LangChain](https://docs.langchain.com/oss/python/langchain/overview)（基于[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)构建）。
 
-对于Strands代理，生成器默认使用[FastAPI](https://fastapi.tiangolo.com/)暴露HTTP服务器。或者，您可以选择[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以实现与其他A2A兼容代理的互操作性，或选择[AG-UI](https://docs.ag-ui.com/)协议，通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端。
-
-:::note[LangChain仅支持AG-UI]
-`langchain`框架目前仅支持`ag-ui`协议。如果您需要`http`或`a2a`协议，请选择默认的`strands`框架。LangChain代理仍然可以通过<Link path="/guides/connection/py-agent-mcp">`connection`生成器</Link>连接到MCP服务器、AgentCore网关和A2A代理。
-:::
+生成器通过服务器`protocol`暴露您的代理。Strands代理支持[HTTP](https://fastapi.tiangolo.com/)（默认）、用于与其他A2A兼容代理互操作的[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以及通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端的[AG-UI](https://docs.ag-ui.com/)协议。LangChain代理支持`ag-ui`协议。
 
 ## 使用方式
 
@@ -141,14 +137,14 @@ AG-UI智能体可以使用<Link path="/guides/connection/react-agui">`connection
 
 ## 使用代理
 
-以下示例使用Strands。LangChain代理的工作方式相同，使用`create_agent`和来自`langchain_core.tools`的`@tool`装饰器以及`ChatBedrockConverse`模型（`MODEL_ID`和`AWS_REGION`环境变量设置模型和区域）。详情请参阅[LangChain文档](https://docs.langchain.com/oss/python/langchain/overview)。
+您可以编辑`agent.py`来添加工具、配置模型和自定义系统提示。API取决于您选择的框架。
 
 ### 添加工具
 
-工具是AI智能体可调用的功能函数。Strands框架使用基于装饰器的简单方式定义工具。
+工具是AI智能体可调用的功能函数。两个框架都使用基于装饰器的方式定义工具，从函数名和文档字符串派生工具名称和描述，并从类型提示生成输入模式。
 
-在`agent.py`文件中添加新工具：
-
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python
 from strands import Agent, tool
 
@@ -169,15 +165,39 @@ agent = Agent(
     tools=[calculate_sum, get_weather],
 )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-Strands框架自动处理：
-- 基于函数类型提示的类型验证
-- 工具调用的JSON模式生成
-- 错误处理和响应格式化
+@tool
+def calculate_sum(numbers: list[int]) -> int:
+    """计算数字列表的总和"""
+    return sum(numbers)
+
+@tool
+def get_weather(city: str) -> str:
+    """获取城市天气信息"""
+    # 此处集成天气API
+    return f"{city}天气：晴，25°C"
+
+# 将工具添加到智能体
+agent = create_agent(
+    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+    tools=[calculate_sum, get_weather],
+    system_prompt="您是一个拥有多种工具的智能助手。",
+)
+```
+</TabItem>
+</Tabs>
 
 ### 使用预置工具
 
-通过`strands-tools`包使用预置工具：
+<Tabs syncKey="framework">
+<TabItem label="Strands">
+Strands通过`strands-tools`包提供一系列预置工具：
 
 ```python
 from strands_tools import current_time, http_request, file_read
@@ -187,10 +207,27 @@ agent = Agent(
     tools=[current_time, http_request, file_read],
 )
 ```
+</TabItem>
+<TabItem label="LangChain">
+LangChain提供了大量的[工具和集成生态系统](https://docs.langchain.com/oss/python/integrations/tools)。安装相关的集成包，然后将工具传递给`create_agent`：
+
+```python
+from langchain_community.tools import DuckDuckGoSearchRun
+
+agent = create_agent(
+    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+    tools=[DuckDuckGoSearchRun()],
+    system_prompt="您是一个智能助手。",
+)
+```
+</TabItem>
+</Tabs>
 
 ### 模型配置
 
-默认使用Claude 4 Sonnet模型，可自定义模型供应商。参考[Strands模型供应商文档](https://strandsagents.com/docs/user-guide/concepts/model-providers/)进行配置：
+<Tabs syncKey="framework">
+<TabItem label="Strands">
+默认情况下，Strands代理使用Claude 4 Sonnet，但您可以自定义模型提供商。有关配置选项，请参阅[Strands模型提供商文档](https://strandsagents.com/docs/user-guide/concepts/model-providers/)：
 
 ```python
 from strands import Agent
@@ -205,22 +242,35 @@ bedrock_model = BedrockModel(
 
 agent = Agent(model=bedrock_model)
 ```
+</TabItem>
+<TabItem label="LangChain">
+LangChain代理使用[`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse)模型。生成的代理从`MODEL_ID`和`AWS_REGION`环境变量读取模型ID和区域，但您可以直接在`agent.py`中配置模型：
+
+```python
+from langchain_aws import ChatBedrockConverse
+
+model = ChatBedrockConverse(
+    model="anthropic.claude-sonnet-4-20250514-v1:0",
+    region_name="us-west-2",
+    temperature=0.3,
+)
+```
+</TabItem>
+</Tabs>
 
 ### 使用MCP服务
 
-可通过[添加MCP服务工具](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)扩展智能体功能。
-
-对于使用<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>或<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>生成器创建的MCP服务，可以使用<Link path="/guides/connection/py-agent-mcp">`connection`生成器</Link>。
+对于使用<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>或<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>生成器创建的MCP服务，可以使用<Link path="/guides/connection/py-agent-mcp">`connection`生成器</Link>，它会将MCP服务器的工具连接到您的代理（支持两个框架）。
 
 <RunGenerator generator="connection" />
 
 关于连接设置的详细信息，请参考<Link path="/guides/connection/py-agent-mcp">`connection`生成器指南</Link>。
 
-对于其他MCP服务，请参考[Strands文档](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)。
+对于其他MCP服务器，请参考[Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)或[LangChain](https://docs.langchain.com/oss/python/langchain/mcp) MCP文档。
 
 ### 更多信息
 
-深入指南请参考[Strands官方文档](https://strandsagents.com/docs/user-guide/quickstart/overview/)。对于LangChain代理，<Link path="/guides/connection/py-agent-mcp">`connection`生成器</Link>也会将MCP服务器、AgentCore网关和A2A代理工具连接到`create_agent`。
+有关编写代理的深入指南，请参考[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/)或[LangChain](https://docs.langchain.com/oss/python/langchain/overview)文档。
 
 ## 协议
 
@@ -231,6 +281,10 @@ agent = Agent(model=bedrock_model)
 - **AG-UI**：[ag-ui-strands](https://docs.ag-ui.com/)集成，通过SSE暴露[AG-UI协议](https://docs.ag-ui.com/)。最适合在React网站中通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端。
 
 所有协议都暴露`/ping`端点以满足AgentCore运行时健康检查契约。A2A智能体监听端口`9000`；HTTP和AG-UI智能体监听端口`8080`。生成的Dockerfile和基础设施已为您配置。
+
+:::note[LangChain仅支持AG-UI]
+`langchain`框架目前仅支持`ag-ui`协议。如果您需要`http`或`a2a`协议，请选择默认的`strands`框架。
+:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPI服务器（HTTP协议）

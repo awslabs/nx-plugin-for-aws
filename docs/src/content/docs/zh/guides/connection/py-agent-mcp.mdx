@@ -7,7 +7,7 @@ when:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 在使用此生成器之前,请确保您具备:
 
-1. 一个包含 <Link path="guides/py-agent">Agent</Link> 组件的 Python 项目
+1. 一个包含 <Link path="guides/py-agent">Python Agent</Link> 组件的 Python 项目(Strands 或 LangChain)
 2. 一个包含 MCP 服务器组件的项目(可以是 <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 或 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
 3. 两个组件都使用 `infra: agentcore` 创建
 
@@ -50,12 +50,14 @@ import Infrastructure from '@components/infrastructure.astro';
     - core
       - agentcore\_endpoints.py 框架无关的 ARN/URL 解析
       - agentcore\_mcp\_transport.py 框架无关的 MCP 传输
-      - agentcore\_mcp\_client\_strands.py 封装传输的 Strands MCP 客户端
+      - agentcore\_mcp\_client\_\<framework>.py 为您的代理框架封装传输的 MCP 客户端
       - auth/ 框架无关的 SigV4 / 会话转发 `httpx.Auth`
     - app
-      - \<mcp\_server\_name>\_client\_strands.py 每个 MCP 服务器的专用 Strands 客户端
+      - \<mcp\_server\_name>\_client\_\<framework>.py 每个 MCP 服务器的专用客户端
 
 </FileTree>
+
+客户端后缀与您的代理框架匹配(`_strands` 或 `_langchain`)。
 
 此外,生成器还会:
 - 转换您的代理的 `agent.py`,通过基于类的客户端导入和使用 MCP 服务器的工具
@@ -66,6 +68,8 @@ import Infrastructure from '@components/infrastructure.astro';
 
 生成器会转换您的代理的 `agent.py` 以使用 MCP 服务器的工具:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
 from contextlib import contextmanager
 from strands import Agent
@@ -84,7 +88,27 @@ def get_agent(session_id: str):
         )
 ```
 
-`session_id` 参数从调用方传递,确保 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) 的一致性。
+Strands 客户端是一个上下文管理器,在代理周围的 `with` 块中进入。`session_id` 参数从调用方传递,确保 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) 的一致性。
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,9,14}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+LangChain 客户端返回通过 [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp) 加载的工具列表。每个工具在每次调用时都会打开一个新的 MCP 会话,因此工具在代理的生命周期内保持可用——不需要 `with` 块。
+</TabItem>
+</Tabs>
 
 ## 基础设施
 

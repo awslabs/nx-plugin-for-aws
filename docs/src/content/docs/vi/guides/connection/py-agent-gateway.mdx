@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -46,13 +46,15 @@ Trình tạo tạo ra các module core-gateway được chia sẻ vào dự án 
     - core/
       - agentcore\_endpoints.py Phân giải ARN/URL không phụ thuộc framework
       - agentcore\_gateway\_mcp\_transport.py Gateway MCP transport không phụ thuộc framework
-      - agentcore\_gateway\_mcp\_client\_strands.py Strands MCP client cho Gateway đã triển khai
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py Gateway MCP client cho framework của agent
       - auth/ SigV4 / chuyển tiếp session `httpx.Auth` không phụ thuộc framework
     - app/
-      - \<gateway\_snake>\_client\_strands.py Wrapper client Strands cho mỗi Gateway
+      - \<gateway\_snake>\_client\_\<framework>.py Wrapper client cho mỗi Gateway
     - \_\_init\_\_.py Xuất lại Gateway client
 
 </FileTree>
+
+Hậu tố client khớp với framework của agent (`_strands` hoặc `_langchain`).
 
 Ngoài ra, trình tạo:
 
@@ -64,6 +66,8 @@ Ngoài ra, trình tạo:
 
 Trình tạo chuyển đổi `agent.py` của agent để sử dụng Gateway client:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClient.create()` trả về một client có thể quản lý ngữ cảnh duy nhất mà `list_tools_sync()` của nó cung cấp mọi công cụ có sẵn thông qua Gateway:
+`MyGatewayClientStrands.create()` trả về một `MCPClient` có thể quản lý ngữ cảnh duy nhất mà `list_tools_sync()` của nó cung cấp mọi công cụ có sẵn thông qua Gateway.
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **Chế độ triển khai** (`SERVE_LOCAL` không được đặt): một `MCPClient` duy nhất trỏ đến điểm cuối MCP của Gateway, được ký SigV4.
-- **Chế độ cục bộ** (`SERVE_LOCAL=true`): một `MCPClient` HTTP thuần trỏ đến gateway cục bộ được khởi động bởi target `serve-local` của dự án Gateway.
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()` trả về một danh sách các công cụ được tải thông qua [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Mỗi công cụ mở một session mới cho mỗi lần gọi, do đó không cần khối `with`.
+</TabItem>
+</Tabs>
+
+Trong cả hai trường hợp, client hoạt động theo cùng một cách cho mỗi chế độ:
+
+- **Chế độ triển khai** (`SERVE_LOCAL` không được đặt): các công cụ trỏ đến điểm cuối MCP của Gateway, được ký SigV4.
+- **Chế độ cục bộ** (`SERVE_LOCAL=true`): các công cụ HTTP thuần trỏ đến gateway cục bộ được khởi động bởi target `serve-local` của dự án Gateway.
 
 Session ID được truyền tự động đến các máy chủ MCP downstream thông qua header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
