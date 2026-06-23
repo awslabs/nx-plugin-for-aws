@@ -392,13 +392,25 @@ export const runWebsiteIntegrationTest = async (options: {
       // managed login UI. Complete the login form, then wait to land back on
       // the app and for the post-login OAuth code exchange to settle.
       await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
+      // Cognito Managed Login renders the username field a moment after the
+      // page loads; wait for any text/email input, then fill by best-match.
       const username = page
-        .locator('input[name="username"], input[id*="signInFormUsername"]')
+        .locator(
+          'input[name="username"], input[id*="signInFormUsername"], input[type="text"], input[type="email"]',
+        )
         .first();
-      await username.waitFor({ state: 'visible', timeout: 60_000 });
-      await username.fill(login.username);
+      try {
+        await username.waitFor({ state: 'visible', timeout: 60_000 });
+        await username.fill(login.username);
+      } catch (e) {
+        console.log('[login] username field not found. Page HTML follows:');
+        console.log((await page.content()).slice(0, 4000));
+        throw e;
+      }
       await page
-        .locator('input[name="password"], input[id*="signInFormPassword"]')
+        .locator(
+          'input[name="password"], input[id*="signInFormPassword"], input[type="password"]',
+        )
         .first()
         .fill(login.password);
       await page
