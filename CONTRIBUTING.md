@@ -102,6 +102,33 @@ it('should be idempotent when re-run with same options', async () => {
 - **Component generators**: run twice with the same inputs and assert the tree is unchanged after the second run (no duplicate wiring), and that adding a second differently-named component leaves the first intact.
 - **Guarded refusals**: assert the generator throws the expected error on re-run.
 
+### Connection Permutations
+
+A common pitfall when working on connections is forgetting that a connection has to behave for _every_ combination of its source and target options, not just the defaults. The agent generators are the clearest example: a `py#agent` can connect to MCP servers, gateways, other agents and databases, and each side carries options — `framework`, `protocol`, `auth` — whose enum values multiply into many connection permutations. Adding a new value (say a new agent `framework`) silently introduces a whole new set of permutations that the connection generators have never been asked to handle.
+
+#### The principle
+
+> **Every connection permutation must be consciously considered.** For each combination of source and target options, the `connection` generator must _either_ vend valid, buildable code _or_ throw a clear "not supported" error. It must never crash unexpectedly or silently vend broken code.
+
+#### The guard
+
+The permutation guard lives next to the connection generator and makes "I forgot to consider that combination" a build failure rather than a runtime surprise:
+
+- **`connection/permutations.ts`** reads the enum dimensions of each connection-participating generator live from its `schema.json`. The enums _are_ the source of truth — there is no second list of options to keep in sync.
+- **`connection/connection-expectations.ts`** declares, for every supported `source -> target` routing pair, a function classifying each permutation as `supported` or `unsupported` (with a `RegExp` the thrown error must match). This is where you record _intent_: "cognito MCP servers aren't supported yet, and here's the error the user should see".
+- **`connection/permutations.spec.ts`** is the tripwire. It holds a committed snapshot of every connection type's schema enums and fails the build if the live schema drifts from it, and it asserts every cell of the full source × target cartesian is classified. Add an enum value and this test fails until you update both the snapshot and the expectations.
+- **`connection/permutations-behaviour.spec.ts`** runs the real `connection` generator on an in-memory tree for every permutation the table marks `unsupported`, asserting it throws the declared error.
+- **`e2e/src/smoke-tests/connection-permutations.spec.ts`** drives the actual CLI and a real build: supported agent variants must build, unsupported ones must fail at the CLI. Its cases derive from the same expectation table, so it extends automatically.
+
+#### What to do when the build fails here
+
+When you add an option (or a new connection), `permutations.spec.ts` will tell you exactly which pairs and cells are now unclassified. For each one, decide whether the connection should work, then either:
+
+- **support it** — wire it up in the relevant connection generator and classify the cell `supported`, or
+- **reject it** — make the connection generator throw a clear, actionable "not supported" error and classify the cell `unsupported` with a matching `errorMatches`.
+
+Update the `KNOWN_DIMENSIONS` snapshot in `permutations.spec.ts` _together with_ the expectation changes — never on its own.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).

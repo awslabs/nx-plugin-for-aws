@@ -85,7 +85,7 @@ export interface ResolvedConnection {
  * Enumerates the supported project connections.
  * Source and target can be project-level types or component generator ids.
  */
-const SUPPORTED_CONNECTIONS = [
+export const SUPPORTED_CONNECTIONS = [
   { source: 'ts#trpc-api', target: 'ts#rdb' },
   { source: 'ts#trpc-api', target: 'ts#dynamodb' },
   { source: 'ts#agent', target: 'ts#rdb' },
@@ -117,11 +117,12 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'py#mcp-server', target: 'py#dynamodb' },
 ] as const satisfies readonly Connection[];
 
-type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
-  ? C extends Connection
-    ? `${C['source']} -> ${C['target']}`
-    : never
-  : never;
+export type ConnectionKey =
+  (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
+    ? C extends Connection
+      ? `${C['source']} -> ${C['target']}`
+      : never
+    : never;
 
 /**
  * Generators for each connection type
