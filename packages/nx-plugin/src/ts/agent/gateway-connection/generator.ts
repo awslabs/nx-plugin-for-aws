@@ -83,7 +83,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   // 1. Ensure the shared agent-connection project exists + has the gateway
   //    core client template.
   await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'gateway');
+  await addTypeScriptCoreClient(tree, 'gateway', agentComponent.framework);
 
   // 2. Generate the per-connection <Gateway>Client into app/. Local mode
   //    points at the gateway project's local gateway port.

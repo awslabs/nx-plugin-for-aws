@@ -90,7 +90,7 @@ export const pyAgentA2aConnectionGenerator = async (
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    A2A core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'a2a');
+  await addPythonCoreClient(tree, 'a2a', agentComponent.framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);

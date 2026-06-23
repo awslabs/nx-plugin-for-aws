@@ -79,6 +79,7 @@ export const tsAgentGenerator = async (
   }
 
   const auth = options.auth ?? 'iam';
+  const framework = options.framework ?? 'strands';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `runWithSessionId` and propagate the AgentCore session
@@ -87,7 +88,7 @@ export const tsAgentGenerator = async (
   await ensureTypeScriptAgentConnectionProject(tree);
   // The agent server imports the framework base helpers (session cache + model
   // error logging) regardless of whether a connection client is wired in.
-  await addTypeScriptFrameworkBase(tree);
+  await addTypeScriptFrameworkBase(tree, framework);
 
   const templateContext = {
     name,
@@ -317,7 +318,7 @@ export const tsAgentGenerator = async (
     TS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort, rc: agentNameClassName, auth, protocol },
+    { port: localDevPort, rc: agentNameClassName, auth, protocol, framework },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_AGENT_GENERATOR_INFO]);

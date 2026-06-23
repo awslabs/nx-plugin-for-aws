@@ -84,7 +84,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
 
   await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'gateway');
+  await addPythonCoreClient(tree, 'gateway', agentComponent.framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);

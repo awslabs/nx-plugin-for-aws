@@ -102,6 +102,27 @@ it('should be idempotent when re-run with same options', async () => {
 - **Component generators**: run twice with the same inputs and assert the tree is unchanged after the second run (no duplicate wiring), and that adding a second differently-named component leaves the first intact.
 - **Guarded refusals**: assert the generator throws the expected error on re-run.
 
+### Connections and Agent Frameworks
+
+A connection is never just "project A talks to project B" — it has to behave for every combination of the options on each side. The agent generators are the sharpest example: an agent can connect to MCP servers, gateways and other agents, and its behaviour depends on the agent's _framework_ (`strands`, …). The pitfall is adding a new option value — say a new agent `framework` — implementing the generator that produces it, and forgetting that connections now have a combination they were never taught to handle.
+
+#### The principle
+
+> **Connection support is driven by one registry, and adding an option you can't connect must fail automatically.** A contributor should not have to remember to add a test, update a snapshot, or wire a smoke test for the new combination — the build should break on its own until the combination is either supported or cleanly rejected.
+
+#### How agent frameworks work
+
+The single source of truth for which frameworks have connection support is the `FRAMEWORKS` registry in `utils/agent-connection/agent-connection.ts`. Each entry maps a framework to its per-language, per-protocol client templates. The agent generators record the chosen `framework` in their component metadata, and the connection generators read it back and pass it through to the client emitters — so a connection always uses the agent's actual framework, never a hardcoded default.
+
+This makes a forgotten framework fail by construction:
+
+- `framework-support.spec.ts` reads the `framework` enum **live** from each agent's `schema.json` and asserts every value has a `FRAMEWORKS` entry for that language. Add `langchain` to the `py#agent` enum and this test fails immediately — no snapshot or second list to update.
+- `framework-clients.spec.ts` generates a client for every framework × protocol in the registry and asserts real code is emitted, so a registry entry can't be a hollow stub; it also asserts an unknown framework throws a clear "does not support" error rather than silently emitting another framework's client.
+
+#### Adding a framework
+
+Add the framework's templates to the `FRAMEWORKS` registry (and the schema enum). The tests above then pass for free. If you intentionally _don't_ support connections for a framework yet, don't add it to the schema enum — there's no way to offer an agent option the connections can't honour without the build telling you.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).

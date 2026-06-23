@@ -146,22 +146,73 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
   },
 };
 
+/** The frameworks that have connection support, derived from the registry. */
+export const SUPPORTED_AGENT_FRAMEWORKS = Object.keys(
+  FRAMEWORKS,
+) as AgentFramework[];
+
+/**
+ * Whether a framework has connection support wired in for the given language.
+ * Derived from the `FRAMEWORKS` registry — the single source of truth for
+ * connection support — so the framework guard cannot drift from reality.
+ */
+export const frameworkSupportsLanguage = (
+  framework: string,
+  language: 'ts' | 'py',
+): boolean =>
+  Boolean(
+    (FRAMEWORKS as Record<string, FrameworkTemplates>)[framework]?.[language],
+  );
+
+/**
+ * The connection protocols a framework declares support for in a language,
+ * read from the registry. Empty if the framework doesn't target the language.
+ */
+export const frameworkProtocols = (
+  framework: AgentFramework,
+  language: 'ts' | 'py',
+): ConnectionProtocol[] => {
+  const lang = FRAMEWORKS[framework][language];
+  return lang ? (Object.keys(lang.protocols) as ConnectionProtocol[]) : [];
+};
+
+const languageLabel = (language: 'ts' | 'py') =>
+  language === 'ts' ? 'TypeScript' : 'Python';
+
+/**
+ * Narrow an agent's recorded framework (a free-form string from component
+ * metadata) to a known {@link AgentFramework}, or throw a clear not-supported
+ * error. This is the single point that rejects a framework which exists in the
+ * `py#agent`/`ts#agent` schema enum but has no connection support wired into
+ * the `FRAMEWORKS` registry — so a forgotten framework throws cleanly here
+ * instead of silently falling back to another framework's client.
+ */
+const resolveFramework = (
+  framework: string,
+  language: 'ts' | 'py',
+): AgentFramework => {
+  const lang = (FRAMEWORKS as Record<string, FrameworkTemplates>)[framework]?.[
+    language
+  ];
+  if (!lang) {
+    throw new Error(
+      `The '${framework}' framework does not support ${languageLabel(language)} agents.`,
+    );
+  }
+  return framework as AgentFramework;
+};
+
 /** Resolve a framework's templates for a language + protocol, or throw. */
 function frameworkLanguage<L extends 'ts' | 'py'>(
-  framework: AgentFramework,
+  framework: string,
   language: L,
   protocol: ConnectionProtocol,
 ): NonNullable<FrameworkTemplates[L]> & { protocol: string } {
-  const lang = FRAMEWORKS[framework][language];
-  if (!lang) {
-    throw new Error(
-      `The '${framework}' framework does not support ${language === 'ts' ? 'TypeScript' : 'Python'} agents.`,
-    );
-  }
-  const protocolDir = lang.protocols[protocol];
+  const lang = FRAMEWORKS[resolveFramework(framework, language)][language];
+  const protocolDir = lang!.protocols[protocol];
   if (!protocolDir) {
     throw new Error(
-      `The '${framework}' framework does not support ${protocol} connections for ${language === 'ts' ? 'TypeScript' : 'Python'} agents.`,
+      `The '${framework}' framework does not support ${protocol} connections for ${languageLabel(language)} agents.`,
     );
   }
   return { ...lang, protocol: protocolDir } as NonNullable<
@@ -225,14 +276,9 @@ export async function ensureTypeScriptAgentConnectionProject(
  */
 export async function addTypeScriptFrameworkBase(
   tree: Tree,
-  framework: AgentFramework = 'strands',
+  framework: string = 'strands',
 ): Promise<void> {
-  const lang = FRAMEWORKS[framework].ts;
-  if (!lang) {
-    throw new Error(
-      `The '${framework}' framework does not support TypeScript agents.`,
-    );
-  }
+  const lang = FRAMEWORKS[resolveFramework(framework, 'ts')].ts!;
   emitTs(tree, lang.base);
 
   const indexPath = joinPathFragments(
@@ -258,7 +304,7 @@ export async function addTypeScriptFrameworkBase(
 export async function addTypeScriptCoreClient(
   tree: Tree,
   protocol: ConnectionProtocol,
-  framework: AgentFramework = 'strands',
+  framework: string = 'strands',
 ): Promise<void> {
   const fw = frameworkLanguage(framework, 'ts', protocol);
 
@@ -363,14 +409,9 @@ const emitPy = (tree: Tree, templateDir: string) =>
  */
 export async function addPythonFrameworkBase(
   tree: Tree,
-  framework: AgentFramework = 'strands',
+  framework: string = 'strands',
 ): Promise<void> {
-  const lang = FRAMEWORKS[framework].py;
-  if (!lang) {
-    throw new Error(
-      `The '${framework}' framework does not support Python agents.`,
-    );
-  }
+  const lang = FRAMEWORKS[resolveFramework(framework, 'py')].py!;
   emitPy(tree, lang.base);
 
   const moduleInitPath = joinPathFragments(
@@ -413,7 +454,7 @@ export async function addPythonFrameworkBase(
 export async function addPythonCoreClient(
   tree: Tree,
   protocol: ConnectionProtocol,
-  framework: AgentFramework = 'strands',
+  framework: string = 'strands',
 ): Promise<void> {
   const fw = frameworkLanguage(framework, 'py', protocol);
 

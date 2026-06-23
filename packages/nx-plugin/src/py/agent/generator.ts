@@ -100,6 +100,7 @@ export const pyAgentGenerator = async (
   }
 
   const auth = options.auth ?? 'iam';
+  const framework = options.framework ?? 'strands';
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `session_id_context` and propagate the AgentCore
@@ -108,7 +109,7 @@ export const pyAgentGenerator = async (
   await ensurePythonAgentConnectionProject(tree);
   // The agent server imports the framework base helpers (session cache + model
   // error logging) regardless of whether a connection client is wired in.
-  await addPythonFrameworkBase(tree);
+  await addPythonFrameworkBase(tree, framework);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
   addWorkspaceDependencyToPyProject(
@@ -413,6 +414,7 @@ export const pyAgentGenerator = async (
       rc: agentNameClassName,
       auth,
       protocol,
+      framework,
     },
   );
 

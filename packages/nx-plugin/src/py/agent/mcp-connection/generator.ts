@@ -75,7 +75,7 @@ export const pyAgentMcpConnectionGenerator = async (
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    MCP core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'mcp');
+  await addPythonCoreClient(tree, 'mcp', agentComponent.framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
