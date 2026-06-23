@@ -401,27 +401,34 @@ export const runWebsiteIntegrationTest = async (options: {
           'input[name="username"], input[id*="signInFormUsername"], input[type="email"]',
         )
         .first();
+      const password = page
+        .locator(
+          'input[name="password"], input[id*="signInFormPassword"], input[type="password"]',
+        )
+        .first();
+      const submit = page
+        .locator(
+          'button[type="submit"], input[type="submit"], button:has-text("Sign in"), button:has-text("Continue"), button:has-text("Next")',
+        )
+        .first();
       try {
         await username.waitFor({ state: 'visible', timeout: 60_000 });
         await username.click();
         await username.fill(login.username);
+        // Managed Login may present username and password together, or as two
+        // steps (username -> Continue -> password). Submit once to advance if
+        // the password field is not yet visible, then fill it.
+        if (!(await password.isVisible().catch(() => false))) {
+          await submit.click().catch(() => {});
+        }
+        await password.waitFor({ state: 'visible', timeout: 60_000 });
+        await password.fill(login.password);
+        await submit.click();
       } catch (e) {
-        console.log('[login] username field not fillable. Page HTML follows:');
-        console.log((await page.content()).slice(0, 4000));
+        console.log('[login] login form not fillable. Page HTML follows:');
+        console.log((await page.content()).slice(0, 6000));
         throw e;
       }
-      await page
-        .locator(
-          'input[name="password"], input[id*="signInFormPassword"], input[type="password"]',
-        )
-        .first()
-        .fill(login.password);
-      await page
-        .locator(
-          'button[type="submit"], input[type="submit"], button:has-text("Sign in")',
-        )
-        .first()
-        .click();
       await page.waitForURL((url) => !url.href.includes('amazoncognito.com'), {
         timeout: 120_000,
       });
