@@ -326,8 +326,11 @@ export const createCognitoTestUser = async (
     },
   } = await ensureIntegrationDeps();
   const client = new CognitoIdentityProviderClient({ region: REGION });
-  const username = `e2e-test-${Math.random().toString(36).substring(2, 10)}@example.com`;
-  const password = `Test-${Math.random().toString(36).substring(2, 10)}-A1!`;
+  // The user pool uses email as a sign-in alias, so the username itself must
+  // not be an email; the email is supplied as a separate (verified) attribute.
+  const suffix = Math.random().toString(36).substring(2, 10);
+  const username = `e2e-test-${suffix}`;
+  const password = `Test-${suffix}-A1!`;
 
   await client.send(
     new AdminCreateUserCommand({
@@ -335,7 +338,7 @@ export const createCognitoTestUser = async (
       Username: username,
       MessageAction: 'SUPPRESS',
       UserAttributes: [
-        { Name: 'email', Value: username },
+        { Name: 'email', Value: `${username}@example.com` },
         { Name: 'email_verified', Value: 'true' },
       ],
     }),
