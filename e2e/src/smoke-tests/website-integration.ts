@@ -323,9 +323,20 @@ export const createCognitoTestUser = async (
       CognitoIdentityProviderClient,
       AdminCreateUserCommand,
       AdminSetUserPasswordCommand,
+      SetUserPoolMfaConfigCommand,
     },
   } = await ensureIntegrationDeps();
   const client = new CognitoIdentityProviderClient({ region: REGION });
+
+  // The generated user pool requires MFA. Turn it off for the test so the
+  // browser login does not get diverted to the MFA setup flow.
+  await client.send(
+    new SetUserPoolMfaConfigCommand({
+      UserPoolId: userPoolId,
+      MfaConfiguration: 'OFF',
+    }),
+  );
+
   // The user pool uses email as a sign-in alias, so the username itself must
   // not be an email; the email is supplied as a separate (verified) attribute.
   const suffix = Math.random().toString(36).substring(2, 10);
