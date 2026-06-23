@@ -392,18 +392,21 @@ export const runWebsiteIntegrationTest = async (options: {
       // managed login UI. Complete the login form, then wait to land back on
       // the app and for the post-login OAuth code exchange to settle.
       await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
-      // Cognito Managed Login renders the username field a moment after the
-      // page loads; wait for any text/email input, then fill by best-match.
+      // Cognito Managed Login is a React app that mounts the form a moment
+      // after navigation and can briefly re-render it; wait for the network to
+      // settle, then fill the username/password by their stable field names.
+      await page.waitForLoadState('networkidle').catch(() => {});
       const username = page
         .locator(
-          'input[name="username"], input[id*="signInFormUsername"], input[type="text"], input[type="email"]',
+          'input[name="username"], input[id*="signInFormUsername"], input[type="email"]',
         )
         .first();
       try {
         await username.waitFor({ state: 'visible', timeout: 60_000 });
+        await username.click();
         await username.fill(login.username);
       } catch (e) {
-        console.log('[login] username field not found. Page HTML follows:');
+        console.log('[login] username field not fillable. Page HTML follows:');
         console.log((await page.content()).slice(0, 4000));
         throw e;
       }
