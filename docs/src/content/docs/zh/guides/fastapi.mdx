@@ -189,11 +189,13 @@ def read_item(item_id: int):
 
 当您的 API 受身份验证保护时,路由处理程序通常需要知道是谁在调用。生成的 FastAPI 通过 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 在 AWS Lambda 内运行,它将 API Gateway 请求上下文作为 JSON 转发到 `x-amzn-request-context` 标头。您可以从 FastAPI `Request` 中读取它以提取调用者的身份。
 
-例如,让我们添加一个 `/me` 端点来返回调用用户的详细信息。我们将提取操作实现为 [FastAPI 依赖项](https://fastapi.tiangolo.com/tutorial/dependencies/),以便可以在路由之间重用。提取调用者身份的方式取决于您选择的 `auth` 方法:
+例如,让我们添加一个 `/me` 端点来返回调用用户的详细信息。我们将提取操作实现为 [FastAPI 依赖项](https://fastapi.tiangolo.com/tutorial/dependencies/),以便可以在路由之间重用。请求上下文的结构 — 以及因此如何提取身份 — 取决于您选择的 `auth` 方法以及您部署的是 REST API 还是 HTTP API。
 
 <OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
 对于 `IAM` 身份验证,我们使用从 API Gateway 请求上下文中提取的 sub 在 Cognito 中查找调用者。在 `main.py` 旁边创建 `identity.py`:
 
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
 ```python
 import json
 import os
@@ -239,13 +241,70 @@ def get_identity(request: Request) -> Identity:
 
 CurrentUser = Annotated[Identity, Depends(get_identity)]
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+```python
+import json
+import os
+from typing import Annotated
+
+from boto3 import client
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+cognito = client("cognito-idp")
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter 将 API Gateway 请求上下文作为 JSON 转发
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    amr = (
+        request_context.get("authorizer", {})
+        .get("iam", {})
+        .get("cognitoIdentity", {})
+        .get("amr", [])
+    )
+    sign_in = next((s for s in amr if ":CognitoSignIn:" in s), None)
+    sub = sign_in.split(":")[-1] if sign_in else None
+
+    if not sub:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    users = cognito.list_users(
+        # 假设用户池 ID 在 lambda 环境中配置
+        UserPoolId=os.environ["USER_POOL_ID"],
+        Limit=1,
+        Filter=f'sub="{sub}"',
+    ).get("Users", [])
+
+    if len(users) != 1:
+        raise HTTPException(status_code=403, detail=f"No user found with subjectId {sub}")
+
+    return Identity(sub=sub, username=users[0]["Username"])
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+</Tabs>
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Identity extraction for Cognito-authenticated APIs">
-使用 `auth: 'cognito'` 时,API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT,并将验证后的声明放置在请求上下文的 `authorizer.claims` 中。依赖项只需读取这些声明 — 无需额外的 AWS SDK 调用,无需手动 JWT 验证。
+使用 `auth: 'cognito'` 时,API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT,并将验证后的声明放置在请求上下文中。依赖项只需读取这些声明 — 无需额外的 AWS SDK 调用,无需手动 JWT 验证。
 
 生成器将授权器配置为接受 Cognito 访问令牌,因此 `username` 是规范的用户名声明;如果您重新配置授权器以接受 ID 令牌,我们会回退到 `cognito:username`。在 `main.py` 旁边创建 `identity.py`:
 
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
 ```python
 import json
 from typing import Annotated
@@ -279,6 +338,45 @@ def get_identity(request: Request) -> Identity:
 
 CurrentUser = Annotated[Identity, Depends(get_identity)]
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+HTTP API 使用 JWT 授权器,它将验证后的声明放置在 `authorizer.jwt.claims` 下:
+
+```python
+import json
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter 将 API Gateway 请求上下文作为 JSON 转发
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    claims = request_context.get("authorizer", {}).get("jwt", {}).get("claims", {})
+
+    sub = claims.get("sub")
+    username = claims.get("username") or claims.get("cognito:username")
+
+    if not sub or not username:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    return Identity(sub=sub, username=username)
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+</Tabs>
 
 :::tip[验证令牌]
 您不需要任何 JWT 验证库 — API Gateway Cognito 用户池授权器在您的 Lambda 运行之前已经验证了签名、颁发者、作用域和过期时间。如果任何这些检查失败,API Gateway 会返回 `401 Unauthorized`,您的处理程序永远不会被调用。

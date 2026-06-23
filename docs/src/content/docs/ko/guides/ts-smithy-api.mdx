@@ -403,15 +403,21 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### 호출 사용자 액세스
 
-API가 인증으로 보호되는 경우, 오퍼레이션은 누가 호출하는지 알아야 하는 경우가 많습니다. 생성기는 이를 자동으로 추가하지 않지만, 원시 API Gateway 이벤트를 사용할 수 있으므로 오퍼레이션에서 호출자의 신원을 추출할 수 있습니다.
+API가 인증으로 보호되는 경우, 오퍼레이션은 누가 호출하는지 알아야 하는 경우가 많습니다. 가장 깔끔한 접근 방식은 핸들러에서 호출자의 신원을 한 번 확인하고 [서비스 컨텍스트](#service-context)를 통해 전달하는 것입니다. 이렇게 하면 오퍼레이션이 API Gateway 이벤트 파싱에서 자유로워집니다.
 
-예를 들어, 호출 사용자에 대한 세부 정보를 반환하는 `Me` 오퍼레이션을 추가해 보겠습니다. 먼저 `src/context.ts`에 추가하여 [서비스 컨텍스트](#service-context)에서 API Gateway 이벤트를 사용할 수 있도록 합니다:
+예를 들어, 호출 사용자에 대한 세부 정보를 반환하는 `Me` 오퍼레이션을 추가해 보겠습니다.
 
-```ts {4,12} ins={4,12}
+먼저 `src/context.ts`에서 서비스 컨텍스트에 확인된 신원을 추가합니다:
+
+```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics } from '@aws-lambda-powertools/metrics';
 import { Tracer } from '@aws-lambda-powertools/tracer';
-import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface Identity {
+  sub: string;
+  username: string;
+}
 
 /**
  * Context provided to all operations.
@@ -420,26 +426,105 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  event: APIGatewayProxyEvent;
+  identity?: Identity;
 }
 ```
 
-그런 다음 `src/handler.ts`에서 컨텍스트를 구성할 때 이벤트를 전달합니다:
+다음으로, `src/identity.ts`에서 API Gateway 이벤트로부터 신원을 확인하는 함수를 작성합니다. 구현은 선택한 `auth` 방법에 따라 다릅니다:
 
-```ts {6} ins={6}
+<OptionFilter when={{ auth: 'iam' }} description="Identity resolution for IAM-authenticated APIs">
+`IAM` 인증의 경우, API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다:
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity | undefined> => {
+  const cognitoAuthenticationProvider =
+    event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    return undefined;
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    return undefined;
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Identity resolution for Cognito-authenticated APIs">
+`auth: 'cognito'`를 사용하면, API Gateway Cognito User Pools 권한 부여자가 호출자가 `Authorization` 헤더에 제공하는 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 이벤트에 배치합니다. 우리는 해당 클레임만 읽으면 됩니다 — 추가 AWS SDK 호출이나 수동 JWT 검증이 필요하지 않습니다.
+
+생성기는 권한 부여자가 Cognito 액세스 토큰을 수락하도록 연결하므로 `username`이 표준 사용자 이름 클레임입니다. ID 토큰을 수락하도록 권한 부여자를 재구성하는 경우를 대비하여 `cognito:username`으로 대체합니다:
+
+```ts
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+
+export const getIdentity = (
+  event: APIGatewayProxyEvent,
+): Identity | undefined => {
+  const claims = event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    return undefined;
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[토큰 검증]
+여기서는 `aws-jwt-verify`나 다른 JWT 검증 라이브러리가 필요하지 않습니다 — Lambda가 실행될 때까지 API Gateway Cognito User Pools 권한 부여자가 이미 서명, 발급자, 범위 및 만료를 검증했습니다. 이러한 검사 중 하나라도 실패하면 API Gateway는 `401 Unauthorized`를 반환하고 핸들러는 호출되지 않습니다.
+:::
+</OptionFilter>
+
+그런 다음 `src/handler.ts`에서 `getIdentity`를 호출하고 결과를 컨텍스트에 추가합니다:
+
+```ts {2,8} ins={2,8}
+import { Service } from './service.js';
+import { getIdentity } from './identity.js';
+// ...
 const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  event,
+  identity: await getIdentity(event),
 });
 ```
 
-:::note[로컬 서버]
-`serve` 타겟의 `src/local-server.ts`도 컨텍스트를 구성합니다. 로컬에서 실행할 때는 API Gateway 이벤트가 없으므로, 타입을 만족시키기 위해 스텁(예: `event: { requestContext: {} } as never`)을 전달할 수 있습니다.
+:::note[IAM 조회는 비동기입니다]
+`IAM` 인증의 경우, `getIdentity`는 `async`입니다(Cognito를 호출하기 때문에). 이것이 위에서 `await`하는 이유입니다. `cognito` 인증의 경우 클레임만 읽고 동기적이지만, await하는 것은 무해합니다 — 따라서 핸들러 코드는 두 경우 모두 동일합니다.
 :::
 
-다음으로, Smithy 모델에서 `Me` 오퍼레이션을 정의합니다. 예를 들어 `model/src/operations/me.smithy`에서:
+이제 Smithy 모델에서 `Me` 오퍼레이션을 정의합니다. 예를 들어 `model/src/operations/me.smithy`에서:
 
 ```smithy
 $version: "2.0"
@@ -482,55 +567,7 @@ service YourService {
 }
 ```
 
-이제 오퍼레이션을 구현합니다. 호출자의 신원을 추출하는 방법은 선택한 `auth` 방법에 따라 다릅니다:
-
-<OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
-`IAM` 인증의 경우, API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다. `src/operations/me.ts`를 생성합니다:
-
-```ts
-import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
-import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
-
-const cognito = new CognitoIdentityProvider();
-
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  const cognitoAuthenticationProvider =
-    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
-
-  let sub: string | undefined = undefined;
-  if (cognitoAuthenticationProvider) {
-    const providerParts = cognitoAuthenticationProvider.split(':');
-    sub = providerParts[providerParts.length - 1];
-  }
-
-  if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  const { Users } = await cognito.listUsers({
-    // Assumes user pool id is configured in lambda environment
-    UserPoolId: process.env.USER_POOL_ID!,
-    Limit: 1,
-    Filter: `sub="${sub}"`,
-  });
-
-  if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
-  }
-
-  return { sub, username: Users[0].Username! };
-};
-```
-</OptionFilter>
-
-<OptionFilter when={{ auth: 'cognito' }} description="Identity extraction for Cognito-authenticated APIs">
-`auth: 'cognito'`를 사용하면, API Gateway Cognito User Pools 권한 부여자가 호출자가 `Authorization` 헤더에 제공하는 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 이벤트에 배치합니다. 오퍼레이션은 해당 클레임만 읽으면 됩니다 — 추가 AWS SDK 호출이나 수동 JWT 검증이 필요하지 않습니다.
-
-생성기는 권한 부여자가 Cognito 액세스 토큰을 수락하도록 연결하므로 `username`이 표준 사용자 이름 클레임입니다. ID 토큰을 수락하도록 권한 부여자를 재구성하는 경우를 대비하여 `cognito:username`으로 대체합니다. `src/operations/me.ts`를 생성합니다:
+`src/operations/me.ts`에서 오퍼레이션을 구현하고, 컨텍스트에서 확인된 신원을 직접 읽습니다:
 
 ```ts
 import { ServiceContext } from '../context.js';
@@ -540,25 +577,13 @@ import {
 } from '../generated/ssdk/index.js';
 
 export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  const claims = ctx.event.requestContext?.authorizer?.claims as
-    | Record<string, string>
-    | undefined;
-
-  const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
-
-  if (!sub || !username) {
+  if (!ctx.identity) {
     throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
-  return { sub, username };
+  return { sub: ctx.identity.sub, username: ctx.identity.username };
 };
 ```
-
-:::tip[토큰 검증]
-여기서는 `aws-jwt-verify`나 다른 JWT 검증 라이브러리가 필요하지 않습니다 — Lambda가 실행될 때까지 API Gateway Cognito User Pools 권한 부여자가 이미 서명, 발급자, 범위 및 만료를 검증했습니다. 이러한 검사 중 하나라도 실패하면 API Gateway는 `401 Unauthorized`를 반환하고 핸들러는 호출되지 않습니다.
-:::
-</OptionFilter>
 
 마지막으로 `src/service.ts`에서 서비스에 오퍼레이션을 등록합니다:
 

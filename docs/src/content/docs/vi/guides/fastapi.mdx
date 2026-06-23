@@ -189,11 +189,13 @@ Nên chỉ định response models cho các API operation để tạo code tốt
 
 Khi API của bạn được bảo vệ bởi xác thực, các route handler thường cần biết ai đang gọi. FastAPI được tạo chạy bên trong AWS Lambda thông qua [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), chuyển tiếp API Gateway request context dưới dạng JSON trên header `x-amzn-request-context`. Bạn có thể đọc nó từ FastAPI `Request` để trích xuất danh tính của người gọi.
 
-Ví dụ, hãy thêm một endpoint `/me` trả về thông tin chi tiết về người dùng đang gọi. Chúng ta sẽ triển khai việc trích xuất dưới dạng [FastAPI dependency](https://fastapi.tiangolo.com/tutorial/dependencies/) để có thể tái sử dụng trên các route. Cách bạn trích xuất danh tính của người gọi phụ thuộc vào phương thức `auth` bạn đã chọn:
+Ví dụ, hãy thêm một endpoint `/me` trả về thông tin chi tiết về người dùng đang gọi. Chúng ta sẽ triển khai việc trích xuất dưới dạng [FastAPI dependency](https://fastapi.tiangolo.com/tutorial/dependencies/) để có thể tái sử dụng trên các route. Hình dạng của request context — và do đó cách bạn trích xuất danh tính — phụ thuộc vào cả phương thức `auth` bạn đã chọn và việc bạn triển khai REST hay HTTP API.
 
 <OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
 Với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ API Gateway request context. Tạo `identity.py` cùng với `main.py`:
 
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
 ```python
 import json
 import os
@@ -239,13 +241,70 @@ def get_identity(request: Request) -> Identity:
 
 CurrentUser = Annotated[Identity, Depends(get_identity)]
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+```python
+import json
+import os
+from typing import Annotated
+
+from boto3 import client
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+cognito = client("cognito-idp")
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter chuyển tiếp API Gateway request context dưới dạng JSON
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    amr = (
+        request_context.get("authorizer", {})
+        .get("iam", {})
+        .get("cognitoIdentity", {})
+        .get("amr", [])
+    )
+    sign_in = next((s for s in amr if ":CognitoSignIn:" in s), None)
+    sub = sign_in.split(":")[-1] if sign_in else None
+
+    if not sub:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    users = cognito.list_users(
+        # Giả định user pool id được cấu hình trong lambda environment
+        UserPoolId=os.environ["USER_POOL_ID"],
+        Limit=1,
+        Filter=f'sub="{sub}"',
+    ).get("Users", [])
+
+    if len(users) != 1:
+        raise HTTPException(status_code=403, detail=f"No user found with subjectId {sub}")
+
+    return Identity(sub=sub, username=users[0]["Username"])
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+</Tabs>
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Identity extraction for Cognito-authenticated APIs">
-Với `auth: 'cognito'`, API Gateway Cognito User Pools authorizer xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claims đã xác minh trên request context tại `authorizer.claims`. Dependency chỉ đọc các claims đó — không có thêm AWS SDK calls, không cần xác minh JWT thủ công.
+Với `auth: 'cognito'`, API Gateway Cognito User Pools authorizer xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claims đã xác minh trên request context. Dependency chỉ đọc các claims đó — không có thêm AWS SDK calls, không cần xác minh JWT thủ công.
 
 Generator kết nối authorizer để chấp nhận Cognito access tokens, vì vậy `username` là canonical username claim; chúng ta fallback về `cognito:username` trong trường hợp bạn cấu hình lại authorizer để chấp nhận ID tokens. Tạo `identity.py` cùng với `main.py`:
 
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
 ```python
 import json
 from typing import Annotated
@@ -279,6 +338,45 @@ def get_identity(request: Request) -> Identity:
 
 CurrentUser = Annotated[Identity, Depends(get_identity)]
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+HTTP APIs sử dụng JWT authorizer đặt các claims đã xác minh dưới `authorizer.jwt.claims`:
+
+```python
+import json
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
+
+
+class Identity(BaseModel):
+    sub: str
+    username: str
+
+
+def get_identity(request: Request) -> Identity:
+    # Lambda Web Adapter chuyển tiếp API Gateway request context dưới dạng JSON
+    request_context_header = request.headers.get("x-amzn-request-context")
+    if not request_context_header:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    request_context = json.loads(request_context_header)
+    claims = request_context.get("authorizer", {}).get("jwt", {}).get("claims", {})
+
+    sub = claims.get("sub")
+    username = claims.get("username") or claims.get("cognito:username")
+
+    if not sub or not username:
+        raise HTTPException(status_code=403, detail="Unable to determine calling user")
+
+    return Identity(sub=sub, username=username)
+
+
+CurrentUser = Annotated[Identity, Depends(get_identity)]
+```
+</TabItem>
+</Tabs>
 
 :::tip[Xác minh token]
 Bạn không cần bất kỳ thư viện xác minh JWT nào ở đây — API Gateway Cognito User Pools authorizer đã xác minh chữ ký, issuer, scopes và expiry vào thời điểm Lambda của bạn chạy. Nếu bất kỳ kiểm tra nào trong số đó thất bại, API Gateway trả về `401 Unauthorized` và handler của bạn không bao giờ được gọi.

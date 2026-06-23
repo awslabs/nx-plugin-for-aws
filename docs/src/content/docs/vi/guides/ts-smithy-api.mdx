@@ -403,15 +403,21 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### Truy Cập Người Dùng Đang Gọi
 
-Khi API của bạn được bảo vệ bằng xác thực, các operation thường cần biết ai đang gọi. Trình tạo không thêm điều này cho bạn, nhưng vì sự kiện API Gateway thô có sẵn, bạn có thể trích xuất danh tính của người gọi trong một operation.
+Khi API của bạn được bảo vệ bằng xác thực, các operation thường cần biết ai đang gọi. Cách tiếp cận sạch nhất là giải quyết danh tính của người gọi một lần trong handler và truyền nó qua [service context](#service-context), để các operation của bạn không phải phân tích sự kiện API Gateway.
 
-Ví dụ, hãy thêm một operation `Me` trả về thông tin chi tiết về người dùng đang gọi. Đầu tiên, làm cho sự kiện API Gateway có sẵn trên [service context](#service-context) bằng cách thêm nó vào `src/context.ts`:
+Ví dụ, hãy thêm một operation `Me` trả về thông tin chi tiết về người dùng đang gọi.
 
-```ts {4,12} ins={4,12}
+Đầu tiên, thêm danh tính đã giải quyết vào service context trong `src/context.ts`:
+
+```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics } from '@aws-lambda-powertools/metrics';
 import { Tracer } from '@aws-lambda-powertools/tracer';
-import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface Identity {
+  sub: string;
+  username: string;
+}
 
 /**
  * Context provided to all operations.
@@ -420,26 +426,105 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  event: APIGatewayProxyEvent;
+  identity?: Identity;
 }
 ```
 
-Sau đó truyền sự kiện khi bạn xây dựng context trong `src/handler.ts`:
+Tiếp theo, viết một hàm giải quyết danh tính từ sự kiện API Gateway trong `src/identity.ts`. Cách triển khai phụ thuộc vào phương thức `auth` đã chọn:
 
-```ts {6} ins={6}
+<OptionFilter when={{ auth: 'iam' }} description="Identity resolution for IAM-authenticated APIs">
+Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ sự kiện API Gateway:
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity | undefined> => {
+  const cognitoAuthenticationProvider =
+    event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    return undefined;
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    return undefined;
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Identity resolution for Cognito-authenticated APIs">
+Với `auth: 'cognito'`, trình ủy quyền Cognito User Pools của API Gateway xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claim đã xác minh trên sự kiện tại `event.requestContext.authorizer.claims`. Chúng ta chỉ đọc các claim đó — không có cuộc gọi AWS SDK bổ sung, không có xác minh JWT thủ công.
+
+Trình tạo kết nối trình ủy quyền để chấp nhận access token của Cognito, vì vậy `username` là claim username chính tắc; chúng ta quay lại `cognito:username` trong trường hợp bạn cấu hình lại trình ủy quyền để chấp nhận ID token:
+
+```ts
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+
+export const getIdentity = (
+  event: APIGatewayProxyEvent,
+): Identity | undefined => {
+  const claims = event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    return undefined;
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[Verifying the token]
+Bạn không cần `aws-jwt-verify` hoặc bất kỳ thư viện xác minh JWT nào khác ở đây — trình ủy quyền Cognito User Pools của API Gateway đã xác minh chữ ký, issuer, scope và thời hạn vào thời điểm Lambda của bạn chạy. Nếu bất kỳ kiểm tra nào trong số đó thất bại, API Gateway trả về `401 Unauthorized` và handler của bạn không bao giờ được gọi.
+:::
+</OptionFilter>
+
+Sau đó gọi `getIdentity` trong `src/handler.ts` và thêm kết quả vào context:
+
+```ts {2,8} ins={2,8}
+import { Service } from './service.js';
+import { getIdentity } from './identity.js';
+// ...
 const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  event,
+  identity: await getIdentity(event),
 });
 ```
 
-:::note[Local Server]
-Target `serve` của `src/local-server.ts` cũng xây dựng context. Không có sự kiện API Gateway khi chạy cục bộ, vì vậy bạn có thể truyền một stub (ví dụ: `event: { requestContext: {} } as never`) để thỏa mãn kiểu.
+:::note[IAM lookup is asynchronous]
+Đối với xác thực `IAM`, `getIdentity` là `async` (nó gọi Cognito), đó là lý do tại sao chúng ta `await` nó ở trên. Đối với xác thực `cognito`, nó chỉ đọc các claim và là đồng bộ, nhưng await nó là vô hại — vì vậy mã handler giống hệt nhau cho cả hai.
 :::
 
-Tiếp theo, định nghĩa operation `Me` trong mô hình Smithy của bạn, ví dụ trong `model/src/operations/me.smithy`:
+Bây giờ định nghĩa operation `Me` trong mô hình Smithy của bạn, ví dụ trong `model/src/operations/me.smithy`:
 
 ```smithy
 $version: "2.0"
@@ -482,55 +567,7 @@ service YourService {
 }
 ```
 
-Bây giờ triển khai operation. Cách bạn trích xuất danh tính của người gọi phụ thuộc vào phương thức `auth` đã chọn:
-
-<OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
-Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ sự kiện API Gateway. Tạo `src/operations/me.ts`:
-
-```ts
-import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
-import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
-
-const cognito = new CognitoIdentityProvider();
-
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  const cognitoAuthenticationProvider =
-    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
-
-  let sub: string | undefined = undefined;
-  if (cognitoAuthenticationProvider) {
-    const providerParts = cognitoAuthenticationProvider.split(':');
-    sub = providerParts[providerParts.length - 1];
-  }
-
-  if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  const { Users } = await cognito.listUsers({
-    // Assumes user pool id is configured in lambda environment
-    UserPoolId: process.env.USER_POOL_ID!,
-    Limit: 1,
-    Filter: `sub="${sub}"`,
-  });
-
-  if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
-  }
-
-  return { sub, username: Users[0].Username! };
-};
-```
-</OptionFilter>
-
-<OptionFilter when={{ auth: 'cognito' }} description="Identity extraction for Cognito-authenticated APIs">
-Với `auth: 'cognito'`, trình ủy quyền Cognito User Pools của API Gateway xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claim đã xác minh trên sự kiện tại `event.requestContext.authorizer.claims`. Operation chỉ đọc các claim đó — không có cuộc gọi AWS SDK bổ sung, không có xác minh JWT thủ công.
-
-Trình tạo kết nối trình ủy quyền để chấp nhận access token của Cognito, vì vậy `username` là claim username chính tắc; chúng ta quay lại `cognito:username` trong trường hợp bạn cấu hình lại trình ủy quyền để chấp nhận ID token. Tạo `src/operations/me.ts`:
+Triển khai operation trong `src/operations/me.ts`, đọc danh tính đã giải quyết trực tiếp từ context:
 
 ```ts
 import { ServiceContext } from '../context.js';
@@ -540,25 +577,13 @@ import {
 } from '../generated/ssdk/index.js';
 
 export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  const claims = ctx.event.requestContext?.authorizer?.claims as
-    | Record<string, string>
-    | undefined;
-
-  const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
-
-  if (!sub || !username) {
+  if (!ctx.identity) {
     throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
-  return { sub, username };
+  return { sub: ctx.identity.sub, username: ctx.identity.username };
 };
 ```
-
-:::tip[Verifying the token]
-Bạn không cần `aws-jwt-verify` hoặc bất kỳ thư viện xác minh JWT nào khác ở đây — trình ủy quyền Cognito User Pools của API Gateway đã xác minh chữ ký, issuer, scope và thời hạn vào thời điểm Lambda của bạn chạy. Nếu bất kỳ kiểm tra nào trong số đó thất bại, API Gateway trả về `401 Unauthorized` và handler của bạn không bao giờ được gọi.
-:::
-</OptionFilter>
 
 Cuối cùng, đăng ký operation trên service của bạn trong `src/service.ts`:
 

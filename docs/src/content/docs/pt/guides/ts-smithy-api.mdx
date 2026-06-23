@@ -403,15 +403,21 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### Acessando o Usuário Chamador
 
-Quando sua API é protegida por autenticação, suas operações frequentemente precisam saber quem está chamando. O gerador não adiciona isso para você, mas como o evento bruto do API Gateway está disponível, você pode extrair a identidade do chamador em uma operação.
+Quando sua API é protegida por autenticação, suas operações frequentemente precisam saber quem está chamando. A abordagem mais limpa é resolver a identidade do chamador uma vez no handler e passá-la através do [contexto do serviço](#service-context), para que suas operações permaneçam livres de qualquer análise de evento do API Gateway.
 
-Como exemplo, vamos adicionar uma operação `Me` que retorna detalhes sobre o usuário chamador. Primeiro, torne o evento do API Gateway disponível no [contexto do serviço](#service-context) adicionando-o em `src/context.ts`:
+Como exemplo, vamos adicionar uma operação `Me` que retorna detalhes sobre o usuário chamador.
 
-```ts {4,12} ins={4,12}
+Primeiro, adicione a identidade resolvida ao contexto do serviço em `src/context.ts`:
+
+```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics } from '@aws-lambda-powertools/metrics';
 import { Tracer } from '@aws-lambda-powertools/tracer';
-import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface Identity {
+  sub: string;
+  username: string;
+}
 
 /**
  * Context provided to all operations.
@@ -420,26 +426,105 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  event: APIGatewayProxyEvent;
+  identity?: Identity;
 }
 ```
 
-Em seguida, passe o evento ao construir o contexto em `src/handler.ts`:
+Em seguida, escreva uma função que resolve a identidade a partir do evento do API Gateway em `src/identity.ts`. A implementação depende do método `auth` selecionado:
 
-```ts {6} ins={6}
+<OptionFilter when={{ auth: 'iam' }} description="Resolução de identidade para APIs autenticadas com IAM">
+Para autenticação `IAM`, procuramos o chamador no Cognito usando o sub extraído do evento do API Gateway:
+
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+
+const cognito = new CognitoIdentityProvider();
+
+export const getIdentity = async (
+  event: APIGatewayProxyEvent,
+): Promise<Identity | undefined> => {
+  const cognitoAuthenticationProvider =
+    event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+  let sub: string | undefined = undefined;
+  if (cognitoAuthenticationProvider) {
+    const providerParts = cognitoAuthenticationProvider.split(':');
+    sub = providerParts[providerParts.length - 1];
+  }
+
+  if (!sub) {
+    return undefined;
+  }
+
+  const { Users } = await cognito.listUsers({
+    // Assumes user pool id is configured in lambda environment
+    UserPoolId: process.env.USER_POOL_ID!,
+    Limit: 1,
+    Filter: `sub="${sub}"`,
+  });
+
+  if (!Users || Users.length !== 1) {
+    return undefined;
+  }
+
+  return { sub, username: Users[0].Username! };
+};
+```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'cognito' }} description="Resolução de identidade para APIs autenticadas com Cognito">
+Com `auth: 'cognito'`, o autorizador Cognito User Pools do API Gateway verifica o JWT que o chamador fornece no cabeçalho `Authorization` e coloca as claims verificadas no evento em `event.requestContext.authorizer.claims`. Nós apenas lemos essas claims — sem chamadas extras ao AWS SDK, sem verificação manual de JWT.
+
+O gerador configura o autorizador para aceitar tokens de acesso do Cognito, então `username` é a claim de nome de usuário canônica; recorremos a `cognito:username` caso você reconfigure o autorizador para aceitar tokens de ID:
+
+```ts
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import { Identity } from './context.js';
+
+export const getIdentity = (
+  event: APIGatewayProxyEvent,
+): Identity | undefined => {
+  const claims = event.requestContext?.authorizer?.claims as
+    | Record<string, string>
+    | undefined;
+
+  const sub = claims?.sub;
+  const username = claims?.username ?? claims?.['cognito:username'];
+
+  if (!sub || !username) {
+    return undefined;
+  }
+
+  return { sub, username };
+};
+```
+
+:::tip[Verificando o token]
+Você não precisa de `aws-jwt-verify` ou qualquer outra biblioteca de verificação de JWT aqui — o autorizador Cognito User Pools do API Gateway já verificou a assinatura, emissor, escopos e expiração no momento em que seu Lambda é executado. Se alguma dessas verificações falhar, o API Gateway retorna `401 Unauthorized` e seu handler nunca é invocado.
+:::
+</OptionFilter>
+
+Em seguida, chame `getIdentity` em `src/handler.ts` e adicione o resultado ao contexto:
+
+```ts {2,8} ins={2,8}
+import { Service } from './service.js';
+import { getIdentity } from './identity.js';
+// ...
 const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  event,
+  identity: await getIdentity(event),
 });
 ```
 
-:::note[Servidor Local]
-O `src/local-server.ts` do target `serve` também constrói o contexto. Não há evento do API Gateway ao executar localmente, então você pode passar um stub (por exemplo, `event: { requestContext: {} } as never`) para satisfazer o tipo.
+:::note[Consulta IAM é assíncrona]
+Para autenticação `IAM`, `getIdentity` é `async` (ela chama o Cognito), e é por isso que fazemos `await` acima. Para autenticação `cognito` ela apenas lê as claims e é síncrona, mas fazer `await` é inofensivo — então o código do handler é idêntico para ambos.
 :::
 
-Em seguida, defina a operação `Me` no seu modelo Smithy, por exemplo em `model/src/operations/me.smithy`:
+Agora defina a operação `Me` no seu modelo Smithy, por exemplo em `model/src/operations/me.smithy`:
 
 ```smithy
 $version: "2.0"
@@ -482,55 +567,7 @@ service YourService {
 }
 ```
 
-Agora implemente a operação. A maneira como você extrai a identidade do chamador depende do método `auth` selecionado:
-
-<OptionFilter when={{ auth: 'iam' }} description="Extração de identidade para APIs autenticadas com IAM">
-Para autenticação `IAM`, procuramos o chamador no Cognito usando o sub extraído do evento do API Gateway. Crie `src/operations/me.ts`:
-
-```ts
-import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
-import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
-
-const cognito = new CognitoIdentityProvider();
-
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  const cognitoAuthenticationProvider =
-    ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
-
-  let sub: string | undefined = undefined;
-  if (cognitoAuthenticationProvider) {
-    const providerParts = cognitoAuthenticationProvider.split(':');
-    sub = providerParts[providerParts.length - 1];
-  }
-
-  if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  const { Users } = await cognito.listUsers({
-    // Assumes user pool id is configured in lambda environment
-    UserPoolId: process.env.USER_POOL_ID!,
-    Limit: 1,
-    Filter: `sub="${sub}"`,
-  });
-
-  if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
-  }
-
-  return { sub, username: Users[0].Username! };
-};
-```
-</OptionFilter>
-
-<OptionFilter when={{ auth: 'cognito' }} description="Extração de identidade para APIs autenticadas com Cognito">
-Com `auth: 'cognito'`, o autorizador Cognito User Pools do API Gateway verifica o JWT que o chamador fornece no cabeçalho `Authorization` e coloca as claims verificadas no evento em `event.requestContext.authorizer.claims`. A operação apenas lê essas claims — sem chamadas extras ao AWS SDK, sem verificação manual de JWT.
-
-O gerador configura o autorizador para aceitar tokens de acesso do Cognito, então `username` é a claim de nome de usuário canônica; recorremos a `cognito:username` caso você reconfigure o autorizador para aceitar tokens de ID. Crie `src/operations/me.ts`:
+Implemente a operação em `src/operations/me.ts`, lendo a identidade resolvida diretamente do contexto:
 
 ```ts
 import { ServiceContext } from '../context.js';
@@ -540,25 +577,13 @@ import {
 } from '../generated/ssdk/index.js';
 
 export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  const claims = ctx.event.requestContext?.authorizer?.claims as
-    | Record<string, string>
-    | undefined;
-
-  const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
-
-  if (!sub || !username) {
+  if (!ctx.identity) {
     throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
-  return { sub, username };
+  return { sub: ctx.identity.sub, username: ctx.identity.username };
 };
 ```
-
-:::tip[Verificando o token]
-Você não precisa de `aws-jwt-verify` ou qualquer outra biblioteca de verificação de JWT aqui — o autorizador Cognito User Pools do API Gateway já verificou a assinatura, emissor, escopos e expiração no momento em que seu Lambda é executado. Se alguma dessas verificações falhar, o API Gateway retorna `401 Unauthorized` e seu handler nunca é invocado.
-:::
-</OptionFilter>
 
 Finalmente, registre a operação no seu serviço em `src/service.ts`:
 
