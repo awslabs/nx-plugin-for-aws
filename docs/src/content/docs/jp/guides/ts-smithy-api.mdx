@@ -403,11 +403,25 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### 呼び出しユーザーへのアクセス
 
-APIが認証で保護されている場合、オペレーションは誰が呼び出しているかを知る必要があることがよくあります。最もクリーンなアプローチは、ハンドラーで一度呼び出し元のIDを解決し、[サービスコンテキスト](#service-context)を通じて渡すことです。これにより、オペレーションはAPI Gatewayイベントの解析から解放されます。
+APIが認証で保護されている場合、オペレーションは誰が呼び出しているかを知る必要があることがよくあります。推奨されるアプローチは、ハンドラーで一度呼び出し元のIDを解決し、[サービスコンテキスト](#service-context)を通じて渡して、特定のオペレーションで使用できるようにすることです。
 
-例として、呼び出しユーザーの詳細を返す`Me`オペレーションを追加してみましょう。
+未認証のケースをSmithyエラーとしてモデル化し、適切な`403`レスポンスにシリアライズされるようにします。モデルに追加します。例えば`model/src/operations/errors.smithy`に追加し、IDを必要とする任意のオペレーションで参照します：
 
-まず、`src/context.ts`でサービスコンテキストに解決されたIDを追加します：
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+まず、`src/context.ts`でサービスコンテキストに解決されたIDを公開します。`UnauthorizedError`がハンドラーからではなく、オペレーション内から（Server SDKが`403`にシリアライズする場所で）スローされるように、関数として提供します：
 
 ```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -426,11 +440,11 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  identity?: Identity;
+  getIdentity: () => Promise<Identity>;
 }
 ```
 
-次に、`src/identity.ts`でAPI GatewayイベントからIDを解決する関数を記述します。実装は選択した`auth`メソッドによって異なります：
+次に、`src/identity.ts`でリゾルバーを記述します。呼び出し元を特定できない場合は`UnauthorizedError`をスローします。実装は選択した`auth`メソッドによって異なります：
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM認証APIのID解決">
 `IAM`認証の場合、API Gatewayイベントから抽出したsubを使用してCognitoで呼び出し元を検索します：
@@ -439,12 +453,13 @@ export interface ServiceContext {
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
 const cognito = new CognitoIdentityProvider();
 
 export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Promise<Identity | undefined> => {
+): Promise<Identity> => {
   const cognitoAuthenticationProvider =
     event.requestContext?.identity?.cognitoAuthenticationProvider;
 
@@ -455,7 +470,7 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   const { Users } = await cognito.listUsers({
@@ -466,7 +481,7 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    return undefined;
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
   }
 
   return { sub, username: Users[0].Username! };
@@ -475,38 +490,37 @@ export const getIdentity = async (
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Cognito認証APIのID解決">
-`auth: 'cognito'`の場合、API Gateway Cognito User Pools オーソライザーは、呼び出し元が`Authorization`ヘッダーで提供するJWTを検証し、検証済みのクレームを`event.requestContext.authorizer.claims`のイベントに配置します。これらのクレームを読み取るだけで、追加のAWS SDK呼び出しや手動のJWT検証は不要です。
-
-ジェネレーターはCognitoアクセストークンを受け入れるようにオーソライザーを配線するため、`username`は正規のユーザー名クレームです。IDトークンを受け入れるようにオーソライザーを再構成する場合に備えて、`cognito:username`にフォールバックします：
+`auth: 'cognito'`の場合、API Gateway Cognito User Pools オーソライザーは、呼び出し元が`Authorization`ヘッダーで提供するJWTを検証し、検証済みのクレームを`event.requestContext.authorizer.claims`のイベントに配置します：
 
 ```ts
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
-export const getIdentity = (
+export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Identity | undefined => {
+): Promise<Identity> => {
   const claims = event.requestContext?.authorizer?.claims as
     | Record<string, string>
     | undefined;
 
   const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
+  const username = claims?.username;
 
   if (!sub || !username) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   return { sub, username };
 };
 ```
 
-:::tip[トークンの検証]
+:::tip[トークン検証は不要]
 ここでは`aws-jwt-verify`や他のJWT検証ライブラリは必要ありません — API Gateway Cognito User Pools オーソライザーは、Lambdaが実行される時点で既に署名、発行者、スコープ、有効期限を検証しています。これらのチェックのいずれかが失敗した場合、API Gatewayは`401 Unauthorized`を返し、ハンドラーは呼び出されません。
 :::
 </OptionFilter>
 
-次に、`src/handler.ts`で`getIdentity`を呼び出し、結果をコンテキストに追加します：
+次に、`src/handler.ts`でリゾルバーをコンテキストに配線します：
 
 ```ts {2,8} ins={2,8}
 import { Service } from './service.js';
@@ -516,87 +530,19 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  identity: await getIdentity(event),
+  getIdentity: () => getIdentity(event),
 });
 ```
 
-:::note[IAMルックアップは非同期]
-`IAM`認証の場合、`getIdentity`は`async`です（Cognitoを呼び出すため）。そのため上記で`await`しています。`cognito`認証の場合はクレームを読み取るだけで同期的ですが、awaitしても害はありません — そのため、ハンドラーコードは両方で同一です。
-:::
-
-次に、Smithyモデルで`Me`オペレーションを定義します。例えば`model/src/operations/me.smithy`に：
-
-```smithy
-$version: "2.0"
-
-namespace your.namespace
-
-/// Return details about the calling user
-@http(method: "GET", uri: "/me")
-@readonly
-operation Me {
-    output := {
-        @required
-        sub: String
-
-        @required
-        username: String
-    }
-    errors: [
-        UnauthorizedError
-    ]
-}
-
-/// Thrown when the calling user cannot be determined
-@error("client")
-@httpError(403)
-structure UnauthorizedError {
-    @required
-    message: String
-}
-```
-
-`model/src/main.smithy`でサービスにオペレーションを登録することを忘れないでください：
-
-```smithy {4} ins={4}
-service YourService {
-    operations: [
-        Echo
-        Me
-    ]
-}
-```
-
-`src/operations/me.ts`でオペレーションを実装し、コンテキストから解決されたIDを直接読み取ります：
+これで、オペレーション内で解決されたIDを使用できます。例えば`src/operations/echo.ts`で：
 
 ```ts
 import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
 
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  if (!ctx.identity) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  return { sub: ctx.identity.sub, username: ctx.identity.username };
-};
-```
-
-最後に、`src/service.ts`でサービスにオペレーションを登録します：
-
-```ts {4,9} ins={4,9}
-import { ServiceContext } from './context.js';
-import { YourServiceService } from './generated/ssdk/index.js';
-import { Echo } from './operations/echo.js';
-import { Me } from './operations/me.js';
-
-// Register operations to the service here
-export const Service: YourServiceService<ServiceContext> = {
-  Echo,
-  Me,
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  const identity = await ctx.getIdentity();
+  return { message: `${identity.username} says ${input.message}` };
 };
 ```
 

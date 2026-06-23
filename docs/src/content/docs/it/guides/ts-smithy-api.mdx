@@ -439,12 +439,13 @@ Per l'autenticazione `IAM`, cerchiamo il chiamante in Cognito usando il sub estr
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
 const cognito = new CognitoIdentityProvider();
 
 export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Promise<Identity | undefined> => {
+): Promise<Identity> => {
   const cognitoAuthenticationProvider =
     event.requestContext?.identity?.cognitoAuthenticationProvider;
 
@@ -455,7 +456,7 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   const { Users } = await cognito.listUsers({
@@ -466,7 +467,7 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    return undefined;
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
   }
 
   return { sub, username: Users[0].Username! };
@@ -851,6 +852,16 @@ resource "aws_iam_policy" "api_invoke_policy" {
 # Allega la politica a un ruolo IAM
 resource "aws_iam_role_policy_attachment" "api_invoke_access" {
   role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+## Invocare la tua API Smithy
+
+Per invocare la tua API da un sito React, puoi usare il generatore <Link path="guides/connection/react-smithy">`connection`</Link>, che fornisce generazione type-safe del client dal tuo modello Smithy..name
   policy_arn = aws_iam_policy.api_invoke_policy.arn
 }
 ```

@@ -403,11 +403,25 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### 호출 사용자 액세스
 
-API가 인증으로 보호되는 경우, 오퍼레이션은 누가 호출하는지 알아야 하는 경우가 많습니다. 가장 깔끔한 접근 방식은 핸들러에서 호출자의 신원을 한 번 확인하고 [서비스 컨텍스트](#service-context)를 통해 전달하는 것입니다. 이렇게 하면 오퍼레이션이 API Gateway 이벤트 파싱에서 자유로워집니다.
+API가 인증으로 보호되는 경우, 오퍼레이션은 누가 호출하는지 알아야 하는 경우가 많습니다. 권장되는 접근 방식은 핸들러에서 호출자의 신원을 한 번 확인하고 [서비스 컨텍스트](#service-context)를 통해 전달하여 특정 오퍼레이션에서 사용하도록 하는 것입니다.
 
-예를 들어, 호출 사용자에 대한 세부 정보를 반환하는 `Me` 오퍼레이션을 추가해 보겠습니다.
+무단 액세스 케이스를 Smithy 오류로 모델링하여 적절한 `403` 응답으로 직렬화되도록 합니다. 예를 들어 `model/src/operations/errors.smithy`에서 모델에 추가하고, 신원이 필요한 모든 오퍼레이션에서 참조합니다:
 
-먼저 `src/context.ts`에서 서비스 컨텍스트에 확인된 신원을 추가합니다:
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+먼저 `src/context.ts`에서 서비스 컨텍스트에 확인된 신원을 노출합니다. `UnauthorizedError`가 핸들러가 아닌 오퍼레이션 내에서 발생하도록(Server SDK가 이를 `403`으로 직렬화하는 곳) 함수로 제공합니다:
 
 ```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -426,11 +440,11 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  identity?: Identity;
+  getIdentity: () => Promise<Identity>;
 }
 ```
 
-다음으로, `src/identity.ts`에서 API Gateway 이벤트로부터 신원을 확인하는 함수를 작성합니다. 구현은 선택한 `auth` 방법에 따라 다릅니다:
+다음으로, `src/identity.ts`에서 리졸버를 작성합니다. 호출자를 확인할 수 없을 때 `UnauthorizedError`를 발생시킵니다. 구현은 선택한 `auth` 방법에 따라 다릅니다:
 
 <OptionFilter when={{ auth: 'iam' }} description="Identity resolution for IAM-authenticated APIs">
 `IAM` 인증의 경우, API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다:
@@ -439,12 +453,13 @@ export interface ServiceContext {
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
 const cognito = new CognitoIdentityProvider();
 
 export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Promise<Identity | undefined> => {
+): Promise<Identity> => {
   const cognitoAuthenticationProvider =
     event.requestContext?.identity?.cognitoAuthenticationProvider;
 
@@ -455,7 +470,7 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   const { Users } = await cognito.listUsers({
@@ -466,7 +481,7 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    return undefined;
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
   }
 
   return { sub, username: Users[0].Username! };
@@ -475,38 +490,37 @@ export const getIdentity = async (
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Identity resolution for Cognito-authenticated APIs">
-`auth: 'cognito'`를 사용하면, API Gateway Cognito User Pools 권한 부여자가 호출자가 `Authorization` 헤더에 제공하는 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 이벤트에 배치합니다. 우리는 해당 클레임만 읽으면 됩니다 — 추가 AWS SDK 호출이나 수동 JWT 검증이 필요하지 않습니다.
-
-생성기는 권한 부여자가 Cognito 액세스 토큰을 수락하도록 연결하므로 `username`이 표준 사용자 이름 클레임입니다. ID 토큰을 수락하도록 권한 부여자를 재구성하는 경우를 대비하여 `cognito:username`으로 대체합니다:
+`auth: 'cognito'`를 사용하면, API Gateway Cognito User Pools 권한 부여자가 호출자가 `Authorization` 헤더에 제공하는 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 이벤트에 배치합니다:
 
 ```ts
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
-export const getIdentity = (
+export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Identity | undefined => {
+): Promise<Identity> => {
   const claims = event.requestContext?.authorizer?.claims as
     | Record<string, string>
     | undefined;
 
   const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
+  const username = claims?.username;
 
   if (!sub || !username) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   return { sub, username };
 };
 ```
 
-:::tip[토큰 검증]
+:::tip[토큰 검증 불필요]
 여기서는 `aws-jwt-verify`나 다른 JWT 검증 라이브러리가 필요하지 않습니다 — Lambda가 실행될 때까지 API Gateway Cognito User Pools 권한 부여자가 이미 서명, 발급자, 범위 및 만료를 검증했습니다. 이러한 검사 중 하나라도 실패하면 API Gateway는 `401 Unauthorized`를 반환하고 핸들러는 호출되지 않습니다.
 :::
 </OptionFilter>
 
-그런 다음 `src/handler.ts`에서 `getIdentity`를 호출하고 결과를 컨텍스트에 추가합니다:
+그런 다음 `src/handler.ts`에서 리졸버를 컨텍스트에 연결합니다:
 
 ```ts {2,8} ins={2,8}
 import { Service } from './service.js';
@@ -516,87 +530,19 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  identity: await getIdentity(event),
+  getIdentity: () => getIdentity(event),
 });
 ```
 
-:::note[IAM 조회는 비동기입니다]
-`IAM` 인증의 경우, `getIdentity`는 `async`입니다(Cognito를 호출하기 때문에). 이것이 위에서 `await`하는 이유입니다. `cognito` 인증의 경우 클레임만 읽고 동기적이지만, await하는 것은 무해합니다 — 따라서 핸들러 코드는 두 경우 모두 동일합니다.
-:::
-
-이제 Smithy 모델에서 `Me` 오퍼레이션을 정의합니다. 예를 들어 `model/src/operations/me.smithy`에서:
-
-```smithy
-$version: "2.0"
-
-namespace your.namespace
-
-/// Return details about the calling user
-@http(method: "GET", uri: "/me")
-@readonly
-operation Me {
-    output := {
-        @required
-        sub: String
-
-        @required
-        username: String
-    }
-    errors: [
-        UnauthorizedError
-    ]
-}
-
-/// Thrown when the calling user cannot be determined
-@error("client")
-@httpError(403)
-structure UnauthorizedError {
-    @required
-    message: String
-}
-```
-
-`model/src/main.smithy`에서 서비스에 오퍼레이션을 등록하는 것을 잊지 마세요:
-
-```smithy {4} ins={4}
-service YourService {
-    operations: [
-        Echo
-        Me
-    ]
-}
-```
-
-`src/operations/me.ts`에서 오퍼레이션을 구현하고, 컨텍스트에서 확인된 신원을 직접 읽습니다:
+이제 오퍼레이션에서 확인된 신원을 사용할 수 있습니다. 예를 들어 `src/operations/echo.ts`에서:
 
 ```ts
 import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
 
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  if (!ctx.identity) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  return { sub: ctx.identity.sub, username: ctx.identity.username };
-};
-```
-
-마지막으로 `src/service.ts`에서 서비스에 오퍼레이션을 등록합니다:
-
-```ts {4,9} ins={4,9}
-import { ServiceContext } from './context.js';
-import { YourServiceService } from './generated/ssdk/index.js';
-import { Echo } from './operations/echo.js';
-import { Me } from './operations/me.js';
-
-// Register operations to the service here
-export const Service: YourServiceService<ServiceContext> = {
-  Echo,
-  Me,
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  const identity = await ctx.getIdentity();
+  return { message: `${identity.username} says ${input.message}` };
 };
 ```
 

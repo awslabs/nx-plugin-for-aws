@@ -403,11 +403,25 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### 访问调用用户
 
-当您的 API 受身份验证保护时，您的操作通常需要知道是谁在调用。最简洁的方法是在处理程序中一次性解析调用者的身份，并通过[服务上下文](#service-context)传递它，这样您的操作就不需要进行任何 API Gateway 事件解析。
+当您的 API 受身份验证保护时，您的操作通常需要知道是谁在调用。推荐的方法是在处理程序中一次性解析调用者的身份，并通过[服务上下文](#service-context)传递它，以供特定操作使用。
 
-例如，让我们添加一个 `Me` 操作，返回有关调用用户的详细信息。
+我们将未授权的情况建模为 Smithy 错误，以便将其序列化为正确的 `403` 响应。将其添加到您的模型中，例如在 `model/src/operations/errors.smithy` 中，并在任何需要身份的操作上引用它：
 
-首先，在 `src/context.ts` 中将解析后的身份添加到服务上下文：
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+首先，在 `src/context.ts` 中的服务上下文上公开解析后的身份。我们将其提供为一个函数，以便 `UnauthorizedError` 从操作内部抛出（Server SDK 将其序列化为 `403`），而不是从处理程序抛出：
 
 ```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -426,11 +440,11 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  identity?: Identity;
+  getIdentity: () => Promise<Identity>;
 }
 ```
 
-接下来，在 `src/identity.ts` 中编写一个函数，从 API Gateway 事件中解析身份。实现取决于您选择的 `auth` 方法：
+接下来，在 `src/identity.ts` 中编写解析器。当无法确定调用者时，它会抛出 `UnauthorizedError`。实现取决于您选择的 `auth` 方法：
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM 身份验证 API 的身份解析">
 对于 `IAM` 身份验证，我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者：
@@ -439,12 +453,13 @@ export interface ServiceContext {
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
 const cognito = new CognitoIdentityProvider();
 
 export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Promise<Identity | undefined> => {
+): Promise<Identity> => {
   const cognitoAuthenticationProvider =
     event.requestContext?.identity?.cognitoAuthenticationProvider;
 
@@ -455,7 +470,7 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   const { Users } = await cognito.listUsers({
@@ -466,7 +481,7 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    return undefined;
+    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
   }
 
   return { sub, username: Users[0].Username! };
@@ -475,38 +490,37 @@ export const getIdentity = async (
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Cognito 身份验证 API 的身份解析">
-使用 `auth: 'cognito'` 时，API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT，并将验证后的声明放置在事件的 `event.requestContext.authorizer.claims` 上。我们只需读取这些声明——无需额外的 AWS SDK 调用，无需手动 JWT 验证。
-
-生成器将授权器配置为接受 Cognito 访问令牌，因此 `username` 是规范的用户名声明；如果您重新配置授权器以接受 ID 令牌，我们会回退到 `cognito:username`：
+使用 `auth: 'cognito'` 时，API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT，并将验证后的声明放置在事件的 `event.requestContext.authorizer.claims` 上：
 
 ```ts
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
+import { UnauthorizedError } from './generated/ssdk/index.js';
 
-export const getIdentity = (
+export const getIdentity = async (
   event: APIGatewayProxyEvent,
-): Identity | undefined => {
+): Promise<Identity> => {
   const claims = event.requestContext?.authorizer?.claims as
     | Record<string, string>
     | undefined;
 
   const sub = claims?.sub;
-  const username = claims?.username ?? claims?.['cognito:username'];
+  const username = claims?.username;
 
   if (!sub || !username) {
-    return undefined;
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
   }
 
   return { sub, username };
 };
 ```
 
-:::tip[验证令牌]
+:::tip[无需令牌验证]
 您不需要 `aws-jwt-verify` 或任何其他 JWT 验证库——API Gateway Cognito 用户池授权器在您的 Lambda 运行之前已经验证了签名、颁发者、作用域和过期时间。如果任何这些检查失败，API Gateway 会返回 `401 Unauthorized`，并且永远不会调用您的处理程序。
 :::
 </OptionFilter>
 
-然后在 `src/handler.ts` 中调用 `getIdentity` 并将结果添加到上下文：
+然后在 `src/handler.ts` 中将解析器连接到上下文：
 
 ```ts {2,8} ins={2,8}
 import { Service } from './service.js';
@@ -516,87 +530,19 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  identity: await getIdentity(event),
+  getIdentity: () => getIdentity(event),
 });
 ```
 
-:::note[IAM 查找是异步的]
-对于 `IAM` 身份验证，`getIdentity` 是 `async` 的（它调用 Cognito），这就是为什么我们在上面 `await` 它。对于 `cognito` 身份验证，它只是读取声明并且是同步的，但 await 它是无害的——因此两者的处理程序代码是相同的。
-:::
-
-现在在您的 Smithy 模型中定义 `Me` 操作，例如在 `model/src/operations/me.smithy` 中：
-
-```smithy
-$version: "2.0"
-
-namespace your.namespace
-
-/// Return details about the calling user
-@http(method: "GET", uri: "/me")
-@readonly
-operation Me {
-    output := {
-        @required
-        sub: String
-
-        @required
-        username: String
-    }
-    errors: [
-        UnauthorizedError
-    ]
-}
-
-/// Thrown when the calling user cannot be determined
-@error("client")
-@httpError(403)
-structure UnauthorizedError {
-    @required
-    message: String
-}
-```
-
-记得在 `model/src/main.smithy` 中将操作注册到您的服务：
-
-```smithy {4} ins={4}
-service YourService {
-    operations: [
-        Echo
-        Me
-    ]
-}
-```
-
-在 `src/operations/me.ts` 中实现该操作，直接从上下文中读取解析后的身份：
+现在我们可以在操作中使用解析后的身份，例如在 `src/operations/echo.ts` 中：
 
 ```ts
 import { ServiceContext } from '../context.js';
-import {
-  Me as MeOperation,
-  UnauthorizedError,
-} from '../generated/ssdk/index.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
 
-export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
-  if (!ctx.identity) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
-  }
-
-  return { sub: ctx.identity.sub, username: ctx.identity.username };
-};
-```
-
-最后，在 `src/service.ts` 中将操作注册到您的服务：
-
-```ts {4,9} ins={4,9}
-import { ServiceContext } from './context.js';
-import { YourServiceService } from './generated/ssdk/index.js';
-import { Echo } from './operations/echo.js';
-import { Me } from './operations/me.js';
-
-// Register operations to the service here
-export const Service: YourServiceService<ServiceContext> = {
-  Echo,
-  Me,
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  const identity = await ctx.getIdentity();
+  return { message: `${identity.username} says ${input.message}` };
 };
 ```
 
