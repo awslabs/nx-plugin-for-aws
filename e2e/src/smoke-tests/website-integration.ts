@@ -122,6 +122,7 @@ export interface AgentSpec {
  */
 export const writeIntegrationTestPage = (
   websiteRoot: string,
+  apiNames: string[],
   agents: AgentSpec[],
 ): string => {
   const routesDir = join(websiteRoot, 'src', 'routes');
@@ -193,37 +194,61 @@ export const Route = createFileRoute('/integration-test')({
   component: IntegrationTest,
 });
 
+// Retry a flaky invocation a few times to ride out AgentCore cold starts
+// (the first invoke can fail while the runtime pulls its container image).
+async function withRetries(fn: () => Promise<string>): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const text = await fn();
+      if (text.length > 0) return text;
+    } catch (e) {
+      lastError = e;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+  }
+  throw lastError ?? new Error('agent returned no content');
+}
+
 // Invoke a tRPC-over-WebSocket agent's \`invoke\` subscription and collect the
 // streamed reply.
 function invokeTrpcAgent(client: any): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let acc = '';
-    client.invoke.subscribe(
-      { message: 'hello' },
-      {
-        onData: (c: any) => (acc += typeof c === 'string' ? c : (c?.data ?? '')),
-        onComplete: () => resolve(acc),
-        onError: reject,
-      },
-    );
-  });
+  return withRetries(
+    () =>
+      new Promise((resolve, reject) => {
+        let acc = '';
+        client.invoke.subscribe(
+          { message: 'hello' },
+          {
+            onData: (c: any) =>
+              (acc += typeof c === 'string' ? c : (c?.data ?? '')),
+            onComplete: () => resolve(acc),
+            onError: reject,
+          },
+        );
+      }),
+  );
 }
 
 // Invoke an HTTP agent whose vended OpenAPI client streams JSONL chunks.
 async function invokeJsonlAgent(client: any): Promise<string> {
-  let acc = '';
-  for await (const chunk of client.invoke({ message: 'hello' })) {
-    acc += chunk?.content ?? '';
-  }
-  return acc;
+  return withRetries(async () => {
+    let acc = '';
+    for await (const chunk of client.invoke({ message: 'hello' })) {
+      acc += chunk?.content ?? '';
+    }
+    return acc;
+  });
 }
 
 // Invoke an AG-UI agent via its vended @ag-ui/client agent (CopilotKit).
 async function invokeAguiAgent(agents: Record<string, any>): Promise<string> {
   const agent = Object.values(agents)[0];
-  agent.messages = [{ id: 'm1', role: 'user', content: 'hello' }];
-  const res = await agent.runAgent({});
-  return (res?.newMessages ?? []).map((m: any) => m.content ?? '').join('');
+  return withRetries(async () => {
+    agent.messages = [{ id: 'm1', role: 'user', content: 'hello' }];
+    const res = await agent.runAgent({});
+    return (res?.newMessages ?? []).map((m: any) => m.content ?? '').join('');
+  });
 }
 
 function IntegrationTest() {
@@ -245,12 +270,16 @@ ${hookCalls}
       }
     };
 
-    // APIs — discovered generically from runtime-config. Every generated API
-    // exposes GET /echo; tRPC wraps the reply in result.data.message, REST and
-    // Smithy return it at the top level.
+    // APIs — only the ones the website is connected to (the runtime-config
+    // 'apis' namespace is stage-scoped and also lists APIs the website is not
+    // wired to / granted). Every generated API exposes GET /echo; tRPC wraps
+    // the reply in result.data.message, REST and Smithy return it at the top.
     const apis: Record<string, string> = runtimeConfig.apis ?? {};
-    for (const [name, baseUrl] of Object.entries(apis)) {
+    const connectedApis = ${JSON.stringify(apiNames)};
+    for (const name of connectedApis) {
+      const baseUrl = apis[name];
       await record('api:' + name, async () => {
+        if (!baseUrl) throw new Error('missing runtime-config api: ' + name);
         const trimmed = baseUrl.replace(/\\/$/, '');
         const trpc = await sigv4.fetch(
           trimmed + '/echo?input=' + encodeURIComponent(JSON.stringify({ message: name })),
@@ -374,11 +403,11 @@ export const createCognitoTestUser = async (
  */
 export const runWebsiteIntegrationTest = async (options: {
   baseUrl: string;
-  expectedApiCount: number;
+  expectedApis: string[];
   expectedAgents: AgentSpec[];
   login?: CognitoLogin;
 }): Promise<void> => {
-  const { baseUrl, expectedApiCount, expectedAgents, login } = options;
+  const { baseUrl, expectedApis, expectedAgents, login } = options;
 
   const { chromium } = await ensureIntegrationDeps();
   const browser: Browser = await chromium.launch();
@@ -465,20 +494,20 @@ export const runWebsiteIntegrationTest = async (options: {
     // Wait for every expected result to be populated.
     const expectedKeys = [
       'done',
+      ...expectedApis.map((name) => `api:${name}`),
       ...expectedAgents.map((a) => `agent:${a.className}`),
     ];
     await page.waitForFunction(
-      ({ keys, apiCount }) => {
+      (keys) => {
         const el = document.querySelector(
           '[data-testid="integration-test-results"]',
         );
         if (!el?.textContent) return false;
         const obj = JSON.parse(el.textContent);
-        const apiKeys = Object.keys(obj).filter((k) => k.startsWith('api:'));
-        return keys.every((k) => k in obj) && apiKeys.length >= apiCount;
+        return keys.every((k) => k in obj);
       },
-      { keys: expectedKeys, apiCount: expectedApiCount },
-      { timeout: 180_000 },
+      expectedKeys,
+      { timeout: 300_000 },
     );
 
     const results = JSON.parse(
@@ -495,8 +524,13 @@ export const runWebsiteIntegrationTest = async (options: {
         `Website integration failures: ${JSON.stringify(failures)}`,
       );
     }
-    const apiResults = Object.keys(results).filter((k) => k.startsWith('api:'));
-    expect(apiResults.length).toBeGreaterThanOrEqual(expectedApiCount);
+    // Every connected API and agent must have produced a result.
+    for (const name of expectedApis) {
+      expect(results[`api:${name}`]).toBe('OK');
+    }
+    for (const agent of expectedAgents) {
+      expect(results[`agent:${agent.className}`]).toBe('OK');
+    }
   } finally {
     await browser.close();
   }

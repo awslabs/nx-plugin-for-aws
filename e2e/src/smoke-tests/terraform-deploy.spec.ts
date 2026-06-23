@@ -32,6 +32,9 @@ import {
   writeIntegrationTestPage,
 } from './website-integration';
 
+// The APIs the deploy website is connected to (runtime-config 'apis' keys).
+const WEBSITE_APIS = ['MyApi', 'PyApi', 'MySmithyApi'];
+
 // The agents the deploy website is connected to, with the class names under
 // which they appear in the website's runtime-config / vended hooks.
 const WEBSITE_AGENTS: AgentSpec[] = [
@@ -91,6 +94,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           ? async (projectRoot) => {
               writeIntegrationTestPage(
                 `${projectRoot}/packages/website`,
+                WEBSITE_APIS,
                 WEBSITE_AGENTS,
               );
               await installChromium();
@@ -319,7 +323,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           );
           await runWebsiteIntegrationTest({
             baseUrl: `https://${outputs.website_distribution_domain_name}`,
-            expectedApiCount: 3,
+            expectedApis: WEBSITE_APIS,
             expectedAgents: WEBSITE_AGENTS,
             login,
           });

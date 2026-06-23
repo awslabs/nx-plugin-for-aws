@@ -512,12 +512,16 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       // Add the browser-driven integration-test page to the website. It uses
       // the website's vended hooks to invoke every connected API and agent, so
       // it must be written before the build so its imports resolve.
-      writeIntegrationTestPage(`${projectRoot}/packages/website`, [
-        { kind: 'ts-http', className: 'MyAgent' },
-        { kind: 'ts-agui', className: 'MyAguiAgent' },
-        { kind: 'py-http', className: 'MyPyAgent' },
-        { kind: 'py-agui', className: 'MyPyAguiAgent' },
-      ]);
+      writeIntegrationTestPage(
+        `${projectRoot}/packages/website`,
+        ['MyApi', 'PyApi', 'MySmithyApi'],
+        [
+          { kind: 'ts-http', className: 'MyAgent' },
+          { kind: 'ts-agui', className: 'MyAguiAgent' },
+          { kind: 'py-http', className: 'MyPyAgent' },
+          { kind: 'py-agui', className: 'MyPyAguiAgent' },
+        ],
+      );
 
       // Ensure the Playwright browser is available for the integration test.
       await installChromium();
@@ -1525,7 +1529,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     ];
     await runWebsiteIntegrationTest({
       baseUrl: 'http://127.0.0.1:4200',
-      expectedApiCount: 3,
+      expectedApis: ['MyApi', 'PyApi', 'MySmithyApi'],
       expectedAgents: agents,
     });
 
