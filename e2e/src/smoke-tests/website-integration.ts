@@ -389,19 +389,22 @@ export const runWebsiteIntegrationTest = async (options: {
 
     if (login) {
       // The deployed site auto-redirects unauthenticated users to the Cognito
-      // hosted UI. Complete the login form, then wait to land back on the app
-      // and for the post-login OAuth code exchange to settle.
+      // managed login UI. Complete the login form, then wait to land back on
+      // the app and for the post-login OAuth code exchange to settle.
       await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
-      await page
+      const username = page
         .locator('input[name="username"], input[id*="signInFormUsername"]')
-        .first()
-        .fill(login.username);
+        .first();
+      await username.waitFor({ state: 'visible', timeout: 60_000 });
+      await username.fill(login.username);
       await page
         .locator('input[name="password"], input[id*="signInFormPassword"]')
         .first()
         .fill(login.password);
       await page
-        .locator('input[type="submit"], button[type="submit"]')
+        .locator(
+          'button[type="submit"], input[type="submit"], button:has-text("Sign in")',
+        )
         .first()
         .click();
       await page.waitForURL((url) => !url.href.includes('amazoncognito.com'), {
