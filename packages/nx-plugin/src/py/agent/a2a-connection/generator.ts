@@ -12,12 +12,14 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
+  type AgentFramework,
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
+  resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import {
   addPythonDestructuredImport,
@@ -41,6 +43,18 @@ import type { PyAgentA2aConnectionGeneratorSchema } from './schema';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
+
+/** The module each framework imports the `tool` decorator from. */
+const TOOL_IMPORT_MODULE: Record<AgentFramework, string> = {
+  strands: 'strands',
+  langchain: 'langchain_core.tools',
+};
+
+/** The GritQL pattern matching each framework's agent constructor. */
+const AGENT_CONSTRUCTOR: Record<AgentFramework, string> = {
+  strands: 'yield Agent($_)',
+  langchain: 'create_agent($_)',
+};
 
 export const PY_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -88,13 +102,10 @@ export const pyAgentA2aConnectionGenerator = async (
   const targetAgentPort = targetAgentComponent.port ?? 9000;
 
   // The transform applied to agent.py depends on the source agent's framework.
-  // Both register the remote A2A agent as a tool, but Strands uses `yield
-  // Agent(...)` + the strands `@tool`, while LangChain uses `create_agent(...)`
-  // + the langchain_core `@tool`. The outbound A2A client itself is
-  // framework-agnostic (A2AAgent carries no model), so both reuse it.
-  const framework =
-    agentComponent.framework === 'langchain' ? 'langchain' : 'strands';
-  const isLangchain = framework === 'langchain';
+  // Both register the remote A2A agent as a tool, but each framework anchors on
+  // its own agent constructor and `@tool` import. The outbound A2A client itself
+  // is framework-agnostic (A2AAgent carries no model), so both reuse it.
+  const framework = resolveAgentFramework(agentComponent.framework);
 
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    A2A core client and its shared SigV4 auth helper.
@@ -173,9 +184,9 @@ export const pyAgentA2aConnectionGenerator = async (
       agentFilePath,
       agentConnectionModuleName,
       clientClassName,
-      isLangchain,
+      framework,
     );
-    await addToolToAgent(tree, agentFilePath, toolName, isLangchain);
+    await addToolToAgent(tree, agentFilePath, toolName, framework);
     await addClientToolToGetAgent(
       tree,
       agentFilePath,
@@ -183,7 +194,7 @@ export const pyAgentA2aConnectionGenerator = async (
       clientVarName,
       toolName,
       targetAgentClassName,
-      isLangchain,
+      framework,
     );
   }
 
@@ -227,13 +238,13 @@ const addImportToAgentFile = async (
   filePath: string,
   agentConnectionModuleName: string,
   clientClassName: string,
-  isLangchain: boolean,
+  framework: AgentFramework,
 ): Promise<void> => {
   await addPythonDestructuredImport(
     tree,
     filePath,
     ['tool'],
-    isLangchain ? 'langchain_core.tools' : 'strands',
+    TOOL_IMPORT_MODULE[framework],
   );
   await addPythonDestructuredImport(
     tree,
@@ -246,17 +257,16 @@ const addImportToAgentFile = async (
 /**
  * Add the A2A tool to the Agent's tools array using GritQL.
  *
- * Scoped to the agent constructor (`yield Agent($_)` for Strands,
- * `create_agent($_)` for LangChain) so unrelated `tools=` keyword arguments
- * elsewhere in the file are not touched.
+ * Scoped to the framework's agent constructor so unrelated `tools=` keyword
+ * arguments elsewhere in the file are not touched.
  */
 const addToolToAgent = async (
   tree: Tree,
   filePath: string,
   toolName: string,
-  isLangchain: boolean,
+  framework: AgentFramework,
 ): Promise<void> => {
-  const scope = isLangchain ? 'create_agent($_)' : 'yield Agent($_)';
+  const scope = AGENT_CONSTRUCTOR[framework];
   await applyGritQL(
     tree,
     filePath,
@@ -278,8 +288,7 @@ const addToolToAgent = async (
  *
  * Unlike MCP clients, A2A clients aren't context managers — we don't need
  * a `with` block around them. Creation + tool definition happen at the
- * top of the function body, anchored on the agent constructor (`yield Agent`
- * for Strands, `create_agent` for LangChain).
+ * top of the function body, anchored on the framework's agent constructor.
  */
 const addClientToolToGetAgent = async (
   tree: Tree,
@@ -288,16 +297,15 @@ const addClientToolToGetAgent = async (
   clientVarName: string,
   toolName: string,
   targetAgentClassName: string,
-  isLangchain: boolean,
+  framework: AgentFramework,
 ): Promise<void> => {
   if (await matchGritQL(tree, filePath, py(`\`${clientClassName}.create\``))) {
     return;
   }
 
-  // The tool function we'll insert. Both Strands and LangChain tools are
-  // @tool-decorated callables (the decorator's import differs, handled in
-  // addImportToAgentFile), so we define them inline in get_agent. A2AAgent is
-  // directly callable (syncs over invoke_async internally).
+  // Both frameworks' tools are @tool-decorated callables (the decorator's
+  // import differs, handled in addImportToAgentFile), defined inline in
+  // get_agent. A2AAgent is directly callable (syncs over invoke_async).
   const toolBlock = `${clientVarName} = ${clientClassName}.create()
 
     @tool
@@ -307,10 +315,9 @@ const addClientToolToGetAgent = async (
 `;
 
   // Prepend client creation + tool definition to the function body, anchored on
-  // the agent constructor (`yield Agent` for Strands, `create_agent` for
-  // LangChain). This works whether or not a prior MCP block is present since we
-  // insert before any existing statements.
-  const anchor = isLangchain ? 'create_agent($_)' : 'yield Agent($_)';
+  // the framework's agent constructor. This works whether or not a prior MCP
+  // block is present since we insert before any existing statements.
+  const anchor = AGENT_CONSTRUCTOR[framework];
   await applyGritQL(
     tree,
     filePath,

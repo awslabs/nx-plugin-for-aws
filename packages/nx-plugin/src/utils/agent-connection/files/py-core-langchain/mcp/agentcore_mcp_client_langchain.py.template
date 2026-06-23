@@ -13,11 +13,8 @@ from .auth.session import jwt_auth, plain_auth, sigv4_auth
 
 
 def _run_sync(coro):
-    """Run a coroutine to completion from sync code, even when an event loop is
-    already running on this thread (e.g. tools are loaded at agent-construction
-    time, which under uvicorn happens inside the running loop). asyncio.run()
-    refuses a running loop, so fall back to a dedicated loop on a worker thread.
-    """
+    # Tools load during agent construction, which under uvicorn runs inside a
+    # live event loop where asyncio.run() would raise — fall back to a worker.
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -27,13 +24,8 @@ def _run_sync(coro):
 
 
 def _load_tools(url: str, auth: httpx.Auth) -> list[BaseTool]:
-    # Hand langchain-mcp-adapters a CONNECTION CONFIG (not a live session), so it
-    # owns the session lifetime: get_tools() lists the server's tools once now
-    # (over a throwaway session), and every returned BaseTool keeps this config
-    # and opens a FRESH ClientSession on each invocation. The tools therefore
-    # survive past construction — there is no shared session to close. This is
-    # why the client passes the Layer-0 httpx.Auth straight through rather than
-    # entering the Layer-1 transport context (which would close on block exit).
+    # Pass a connection config so each tool opens a fresh session per call and
+    # stays usable after construction (no shared session to close).
     client = MultiServerMCPClient(
         {
             "server": {
@@ -48,15 +40,7 @@ def _load_tools(url: str, auth: httpx.Auth) -> list[BaseTool]:
 
 
 class AgentCoreMCPClientLangChain:
-    """Loads LangChain tools from an MCP server on an AgentCore runtime.
-
-    Reuses the Layer-0 session-forwarding auth builders (``sigv4_auth`` /
-    ``jwt_auth`` / ``plain_auth``) and the framework-agnostic endpoint resolver
-    (``mcp_url_from_arn`` / ``region_from_arn``) — it re-implements neither auth
-    nor URL derivation. Unlike the Strands Layer-2 client it does NOT enter the
-    Layer-1 transport context; langchain-mcp-adapters owns the session lifetime
-    so each tool opens a fresh session per call.
-    """
+    """Loads LangChain tools from an MCP server on an AgentCore runtime."""
 
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> list[BaseTool]:
@@ -76,5 +60,5 @@ class AgentCoreMCPClientLangChain:
 
     @staticmethod
     def without_auth(url: str) -> list[BaseTool]:
-        """Plain-HTTP tools — for local dev."""
+        """Plain-HTTP tools for local dev."""
         return _load_tools(url, plain_auth())

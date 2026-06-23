@@ -7,7 +7,7 @@ when:
     - ts#agent
     - py#agent
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ The generator sets up all the necessary wiring so your agent can discover and in
 
 Before using this generator, ensure you have:
 
-1. A Python project with a <Link path="guides/py-agent">Strands Agent</Link> component (any protocol)
+1. A Python project with a <Link path="guides/py-agent">Python Agent</Link> component (Strands or LangChain)
 2. A project with an Agent component generated with `--protocol=A2A` and `--auth=IAM` (either <Link path="guides/ts-agent">`ts#agent`</Link> or <Link path="guides/py-agent">`py#agent`</Link>)
 3. Both components created with `infra: agentcore`
 
@@ -50,12 +50,14 @@ The generator creates a shared `agent_connection` Python project at `packages/co
     - core
       - agentcore\_endpoints.py Framework-agnostic ARN/URL resolution
       - agentcore\_a2a\_client\_config.py Framework-agnostic A2A client config (signed `ClientConfig`)
-      - agentcore\_a2a\_client\_strands.py Strands A2A client wrapping the config
+      - agentcore\_a2a\_client\_strands.py A2A transport client wrapping the config
       - auth/ Framework-agnostic SigV4 / session-forwarding `httpx.Auth`
     - app
-      - \<target\_agent\_name>\_client\_strands.py Per-connection Strands client for each A2A agent
+      - \<target\_agent\_name>\_client\_strands.py Per-connection A2A transport client for each A2A agent
 
 </FileTree>
+
+The A2A transport (a Strands `A2AAgent`) carries no model, so both Strands and LangChain agents reuse it — only the `agent.py` tool wiring differs by framework.
 
 Additionally, the generator:
 - Transforms your agent's `agent.py` to register the remote A2A agent as a tool using `@tool`
@@ -64,8 +66,10 @@ Additionally, the generator:
 
 ## Using the Connected A2A Agent
 
-The generator transforms your agent's `agent.py` to wrap the remote A2A agent as a tool:
+The generator transforms your agent's `agent.py` to wrap the remote A2A agent as a tool. The remote agent is registered with a `@tool`-decorated delegate — the decorator's import and the agent constructor differ by framework:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
 from contextlib import contextmanager
 from strands import Agent, tool
@@ -86,10 +90,33 @@ def get_agent(session_id: str):
         tools=[ask_remote_agent],
     )
 ```
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,17}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-The `session_id` parameter is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+from my_scope_agent_connection import RemoteAgentClientStrands
 
-Under the hood, `RemoteAgentClientStrands.create(session_id=...)` returns a Strands `A2AAgent` configured with an `httpx.AsyncClient` that signs requests with SigV4 when deployed to AWS, and a plain `http://localhost:<port>/` endpoint when `SERVE_LOCAL=true`.
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+</TabItem>
+</Tabs>
+
+Under the hood, `RemoteAgentClientStrands.create()` returns a Strands `A2AAgent` (used purely as an A2A transport — it carries no model, so LangChain agents reuse it) configured with an `httpx.AsyncClient` that signs requests with SigV4 when deployed to AWS, and a plain `http://localhost:<port>/` endpoint when `SERVE_LOCAL=true`. For Strands agents the `session_id` is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
 

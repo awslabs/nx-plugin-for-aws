@@ -21,6 +21,7 @@ import {
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
+  resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
@@ -87,7 +88,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   // The transform applied to agent.py depends on the source agent's framework:
   // Strands enters a context-managed MCPClient and spreads list_tools_sync();
   // LangChain loads BaseTools and spreads them into create_agent(...).
-  const framework = agentComponent.framework === 'langchain' ? 'langchain' : 'strands';
+  const framework = resolveAgentFramework(agentComponent.framework);
   const isLangchain = framework === 'langchain';
 
   await ensurePythonAgentConnectionProject(tree);

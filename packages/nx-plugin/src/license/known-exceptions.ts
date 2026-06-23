@@ -32,11 +32,6 @@ export const MCP_INSPECTOR_EXCEPTIONS: DependencyCheckException[] = [
 ];
 
 export const AG_UI_LANGGRAPH_EXCEPTIONS: DependencyCheckException[] = [
-  // ag-ui-langgraph needs no exception from 0.0.42 onwards: the wheel declares
-  // License-Expression: MIT (PEP 639), which the python collector reads directly
-  // (it prefers License-Expression over the legacy/classifier fields). 0.0.41 and
-  // earlier shipped no license metadata and DID need an MIT exception here; if the
-  // pin is ever rolled back below 0.0.42, restore it.
   {
     package: 'jsonpatch',
     reason:

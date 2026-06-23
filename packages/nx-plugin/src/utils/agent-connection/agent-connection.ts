@@ -81,6 +81,17 @@ export type ConnectionProtocol = 'mcp' | 'gateway' | 'a2a';
 export type AgentFramework = 'strands' | 'langchain';
 
 /**
+ * Resolve an agent component's framework, defaulting to `strands`. Connection
+ * generators dispatch on the returned framework to pick the matching templates
+ * and agent.py/agent.ts transforms.
+ */
+export function resolveAgentFramework(
+  framework: string | undefined,
+): AgentFramework {
+  return framework === 'langchain' ? 'langchain' : 'strands';
+}
+
+/**
  * Framework-agnostic Layer-1 templates, keyed by protocol. These resolve the
  * endpoint and build the signed transport/client-config; they contain no
  * framework dependency.

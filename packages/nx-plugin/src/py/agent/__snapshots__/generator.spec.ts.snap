@@ -579,7 +579,6 @@ from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
-# Pass region_name explicitly so an ambient AWS_REGION doesn't shadow it.
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
 
@@ -591,11 +590,8 @@ def subtract(a: int, b: int) -> int:
 
 
 def get_agent():
-    # ChatBedrockConverse's init alias is \`model\`, not \`model_id\` (model_id=
-    # passes at runtime but fails the \`ty\` typecheck which gates build/synth).
     model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
-    # The AG-UI adapter needs a checkpointer; swap InMemorySaver for a durable
-    # one (DynamoDB / Redis) in a multi-replica deployment.
+    # Swap InMemorySaver for a durable checkpointer in a multi-replica deployment.
     return create_agent(
         model=model,
         tools=[subtract],
@@ -628,7 +624,7 @@ logging.basicConfig(level=logging.INFO)
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# LangGraph has no FastAPI-app helper, so the /invocations loop is hand-rolled.
+# LangGraph has no FastAPI-app helper, so the server is hand-rolled.
 _graph = get_agent()
 
 agui_agent = LangGraphAgent(
@@ -653,8 +649,7 @@ app.add_middleware(_SessionIdMiddleware)
 
 @app.post("/invocations")
 async def invocations(request: Request):
-    # Validate the body ourselves: AgentCore may omit Content-Type, so a typed
-    # RunAgentInput parameter would 422 even on valid JSON.
+    # Validate the body manually since AgentCore may omit Content-Type.
     accept = request.headers.get("accept") or ""
     encoder = EventEncoder(accept=accept)
     raw = await request.body()
@@ -675,15 +670,12 @@ async def invocations(request: Request):
     session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
 
     async def event_generator():
-        # Re-bind the session inside the generator: the streaming body runs in
-        # its own task, outside the middleware's context manager.
+        # Re-bind the session: the streaming body runs outside the middleware.
         with session_id_context(session_id or str(uuid.uuid4())):
             try:
                 async for event in agui_agent.run(input_data):
                     yield encoder.encode(event)
-            except (
-                Exception
-            ) as e:  # surface as an AG-UI RUN_ERROR rather than dropping the stream
+            except Exception as e:
                 yield encoder.encode(
                     RunErrorEvent(
                         type=EventType.RUN_ERROR,
@@ -697,7 +689,6 @@ async def invocations(request: Request):
 
 @app.get("/ping")
 async def ping():
-    # AgentCore container health contract: status + last-update timestamp.
     return JSONResponse({"status": "Healthy", "time_of_last_update": int(time.time())})
 "
 `;
