@@ -147,6 +147,11 @@ describe('smoke test - cdk-deploy', () => {
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
 
     try {
+      // Apply any pending sync changes (license headers, tsconfig references,
+      // the regenerated TanStack route tree) so the subsequent `deploy` does
+      // not abort on an out-of-sync workspace.
+      await runCLI(`sync`, opts);
+
       // Deploy the e2e test resources
       await runCLI(
         `deploy infra ${cdkStageName}/* --output-style=stream`,
