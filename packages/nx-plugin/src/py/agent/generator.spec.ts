@@ -1452,4 +1452,173 @@ dev-dependencies = []
       expect(agentcore).toMatchSnapshot(`agentcore.ts (${protocol}, ${auth})`);
     });
   });
+
+  describe('langchain framework', () => {
+    it('should record framework in component metadata', async () => {
+      // The mcp/gateway connection generators dispatch on this field, so it
+      // must be persisted for both the default (strands) and langchain agents.
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        infra: 'none',
+        iac: 'cdk',
+      });
+      let projectConfig = JSON.parse(
+        tree.read('apps/test-project/project.json', 'utf-8'),
+      );
+      expect(projectConfig.metadata.components[0].framework).toBe('strands');
+
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        name: 'lc-agent',
+        framework: 'langchain',
+        protocol: 'ag-ui',
+        infra: 'none',
+        iac: 'cdk',
+      });
+      projectConfig = JSON.parse(
+        tree.read('apps/test-project/project.json', 'utf-8'),
+      );
+      const lc = projectConfig.metadata.components.find(
+        (c: { name: string }) => c.name === 'lc-agent',
+      );
+      expect(lc.framework).toBe('langchain');
+    });
+
+    it('should generate langchain AG-UI agent', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        framework: 'langchain',
+        protocol: 'ag-ui',
+        infra: 'none',
+        iac: 'cdk',
+      });
+
+      // The langchain ag-ui main.py uses the LangGraph AG-UI adapter and the
+      // hand-rolled FastAPI run-loop (there is no create_strands_app for LangGraph).
+      const mainContent = tree.read(
+        'apps/test-project/proj_test_project/agent/main.py',
+        'utf-8',
+      );
+      expect(mainContent).toContain('ag_ui_langgraph');
+      expect(mainContent).toContain('LangGraphAgent');
+      expect(mainContent).not.toContain('create_strands_app');
+      expect(mainContent).not.toContain('StrandsAgent');
+
+      // The session ID is still bound for downstream forwarding.
+      expect(mainContent).toContain('session_id_context');
+      expect(mainContent).toContain(
+        'x-amzn-bedrock-agentcore-runtime-session-id',
+      );
+
+      // The langchain agent.py builds a compiled LangGraph graph with a checkpointer.
+      const agentContent = tree.read(
+        'apps/test-project/proj_test_project/agent/agent.py',
+        'utf-8',
+      );
+      expect(agentContent).toContain('create_agent');
+      expect(agentContent).toContain('ChatBedrockConverse');
+      expect(agentContent).toContain('InMemorySaver');
+      expect(agentContent).toContain('checkpointer');
+      expect(agentContent).not.toContain('from strands');
+
+      // ChatBedrockConverse's init alias is `model`, not `model_id` — `model_id=`
+      // passes at runtime but fails `ty` (which blocks build/synth/deploy).
+      expect(agentContent).toContain('ChatBedrockConverse(model=MODEL_ID');
+      expect(agentContent).not.toContain('model_id=MODEL_ID');
+    });
+
+    it('should add langchain dependencies for langchain AG-UI', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        framework: 'langchain',
+        protocol: 'ag-ui',
+        infra: 'none',
+        iac: 'cdk',
+      });
+
+      const pyProjectToml = parse(
+        tree.read('apps/test-project/pyproject.toml', 'utf-8'),
+      ) as UVPyprojectToml;
+      const deps = pyProjectToml.project.dependencies;
+      const hasDep = (name: string) =>
+        deps.some((dep) => dep.startsWith(`${name}==`));
+
+      expect(hasDep('langchain')).toBe(true);
+      expect(hasDep('langchain-aws')).toBe(true);
+      expect(hasDep('langgraph')).toBe(true);
+      expect(hasDep('ag-ui-langgraph')).toBe(true);
+      expect(hasDep('ag-ui-protocol')).toBe(true);
+
+      // None of the Strands dependencies should be present.
+      expect(hasDep('strands-agents')).toBe(false);
+      expect(hasDep('strands-agents-tools')).toBe(false);
+      expect(hasDep('ag-ui-strands')).toBe(false);
+    });
+
+    it('should reject langchain with non-ag-ui protocols', async () => {
+      // Default protocol is http
+      await expect(
+        pyAgentGenerator(tree, {
+          project: 'test-project',
+          framework: 'langchain',
+          infra: 'none',
+          iac: 'cdk',
+        }),
+      ).rejects.toThrow(/langchain/);
+
+      await expect(
+        pyAgentGenerator(tree, {
+          project: 'test-project',
+          framework: 'langchain',
+          protocol: 'http',
+          infra: 'none',
+          iac: 'cdk',
+        }),
+      ).rejects.toThrow(/langchain/);
+
+      await expect(
+        pyAgentGenerator(tree, {
+          project: 'test-project',
+          framework: 'langchain',
+          protocol: 'a2a',
+          infra: 'none',
+          iac: 'cdk',
+        }),
+      ).rejects.toThrow(/langchain/);
+    });
+
+    it('should match snapshot for langchain generated files', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        name: 'snapshot-agent',
+        framework: 'langchain',
+        protocol: 'ag-ui',
+        infra: 'none',
+        iac: 'cdk',
+      });
+
+      const initContent = tree.read(
+        'apps/test-project/proj_test_project/snapshot_agent/__init__.py',
+        'utf-8',
+      );
+      const agentContent = tree.read(
+        'apps/test-project/proj_test_project/snapshot_agent/agent.py',
+        'utf-8',
+      );
+      const mainContent = tree.read(
+        'apps/test-project/proj_test_project/snapshot_agent/main.py',
+        'utf-8',
+      );
+
+      expect(initContent).toMatchSnapshot('langchain-__init__.py');
+      expect(agentContent).toMatchSnapshot('langchain-agent.py');
+      expect(mainContent).toMatchSnapshot('langchain-main.py');
+
+      const pyprojectToml = tree.read(
+        'apps/test-project/pyproject.toml',
+        'utf-8',
+      );
+      expect(pyprojectToml).toMatchSnapshot('langchain-pyproject.toml');
+    });
+  });
 });

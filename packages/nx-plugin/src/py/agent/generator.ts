@@ -26,6 +26,8 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
+import { ensureLicenseExceptions } from '../../license/config';
+import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -92,6 +94,19 @@ export const pyAgentGenerator = async (
 
   const infra = options.infra ?? 'agentcore';
   const protocol = options.protocol ?? 'http';
+  const framework = options.framework ?? 'strands';
+
+  // The langchain framework currently ships only an AG-UI server template. The
+  // http and a2a server templates are Strands-specific by construction (http's
+  // main.py consumes a contextmanager yielding a strands.Agent; a2a uses
+  // strands.multiagent.a2a.A2AServer), and create_agent returns a compiled
+  // LangGraph graph that is incompatible with those. Fail fast rather than emit
+  // a Strands server over langchain dependencies.
+  if (framework === 'langchain' && protocol !== 'ag-ui') {
+    throw new Error(
+      `The 'langchain' framework currently supports only the 'ag-ui' protocol (got '${protocol}').`,
+    );
+  }
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -107,8 +122,10 @@ export const pyAgentGenerator = async (
   // generator wires into this agent.
   await ensurePythonAgentConnectionProject(tree);
   // The agent server imports the framework base helpers (session cache + model
-  // error logging) regardless of whether a connection client is wired in.
-  await addPythonFrameworkBase(tree);
+  // error logging) regardless of whether a connection client is wired in. The
+  // langchain framework has no base layer (its AG-UI foundation reuses only the
+  // framework-agnostic session context), so this is a no-op for langchain.
+  await addPythonFrameworkBase(tree, framework);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
   addWorkspaceDependencyToPyProject(
@@ -123,21 +140,46 @@ export const pyAgentGenerator = async (
     agentNameClassName,
     moduleName,
     agentConnectionModuleName,
+    framework,
   };
 
-  // Generate common files shared by both protocols
+  // Generate common files shared by both protocols. The agent module (agent.py)
+  // is framework-specific (Strands yields a contextmanaged Agent; LangChain
+  // returns a compiled create_agent graph), so it comes from a per-framework
+  // dir. The package __init__.py is framework-agnostic (it stays in `common`).
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common'),
+    joinPathFragments(
+      __dirname,
+      'files',
+      framework === 'langchain' ? 'common-langchain' : 'common',
+    ),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+  if (framework === 'langchain') {
+    // common-langchain only carries agent.py; the empty package __init__.py is
+    // framework-agnostic, so emit it from the shared `common` dir.
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'common'),
+      targetSourceDir,
+      templateContext,
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+  }
 
-  // Generate protocol-specific files
+  // Generate protocol-specific files. The ag-ui server is framework-specific
+  // (Strands has create_strands_app; langchain hand-rolls the FastAPI loop over
+  // ag_ui_langgraph). http and a2a are Strands-only (guarded above).
+  const protocolTemplateDir =
+    protocol === 'ag-ui' && framework === 'langchain'
+      ? 'ag-ui-langchain'
+      : protocol.toLowerCase();
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', protocol.toLowerCase()),
+    joinPathFragments(__dirname, 'files', protocolTemplateDir),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -150,12 +192,27 @@ export const pyAgentGenerator = async (
     'boto3',
     'fastapi',
     'mcp',
-    ...(protocol === 'a2a'
-      ? (['strands-agents[a2a]'] as const)
-      : protocol === 'ag-ui'
-        ? (['strands-agents', 'ag-ui-protocol', 'ag-ui-strands'] as const)
-        : (['strands-agents'] as const)),
-    'strands-agents-tools',
+    ...(framework === 'langchain'
+      ? // langchain is restricted to ag-ui (guarded above) and pulls no
+        // Strands dependencies — the LangGraph AG-UI adapter + the langchain
+        // model binding only.
+        ([
+          'ag-ui-protocol',
+          'ag-ui-langgraph',
+          'langchain',
+          'langchain-aws',
+          'langgraph',
+        ] as const)
+      : protocol === 'a2a'
+        ? (['strands-agents[a2a]', 'strands-agents-tools'] as const)
+        : protocol === 'ag-ui'
+          ? ([
+              'strands-agents',
+              'strands-agents-tools',
+              'ag-ui-protocol',
+              'ag-ui-strands',
+            ] as const)
+          : (['strands-agents', 'strands-agents-tools'] as const)),
     'uvicorn',
   ]);
   addDependenciesToDependencyGroupInPyProjectToml(tree, project.root, 'dev', [
@@ -413,10 +470,20 @@ export const pyAgentGenerator = async (
       rc: agentNameClassName,
       auth,
       protocol,
+      // The mcp / gateway connection generators dispatch on this field to pick
+      // the Strands vs LangChain Layer-2 client + agent.py transform.
+      framework,
     },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_AGENT_GENERATOR_INFO]);
+
+  // The ag-ui agent's framework adapter ships without resolvable SPDX license
+  // metadata for a couple of transitive deps, so register those exceptions so
+  // the workspace license check still passes.
+  if (protocol === 'ag-ui' && framework === 'langchain') {
+    await ensureLicenseExceptions(tree, AG_UI_LANGGRAPH_EXCEPTIONS);
+  }
 
   await formatFilesInSubtree(tree);
   return async () => {

@@ -15,6 +15,7 @@ import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generat
 import {
   addPythonClientToAgent,
   addPythonCoreClient,
+  addPythonLangchainClientToAgent,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
@@ -83,19 +84,28 @@ export const pyAgentGatewayConnectionGenerator = async (
   const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
 
+  // The transform applied to agent.py depends on the source agent's framework:
+  // Strands enters a context-managed MCPClient and spreads list_tools_sync();
+  // LangChain loads BaseTools and spreads them into create_agent(...).
+  const framework = agentComponent.framework === 'langchain' ? 'langchain' : 'strands';
+  const isLangchain = framework === 'langchain';
+
   await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'gateway');
+  await addPythonCoreClient(tree, 'gateway', framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Layer 0/1 deps for the MCP transport + signed httpx auth. The framework's
-  // own dependency (strands-agents) is added by addPythonCoreClient.
+  // Layer 0/1 deps for the MCP transport + signed httpx auth. The Strands
+  // Layer-2 client uses the strands MCPClient (strands-agents, added by
+  // addPythonCoreClient); the LangChain Layer-2 client uses
+  // langchain-mcp-adapters and must not pull Strands in.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
     'mcp',
+    ...(isLangchain ? (['langchain-mcp-adapters'] as const) : ([] as const)),
   ]);
 
   const appDir = joinPathFragments(
@@ -106,7 +116,15 @@ export const pyAgentGatewayConnectionGenerator = async (
   // Local mode points at the gateway project's local gateway port.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    isLangchain
+      ? joinPathFragments(
+          __dirname,
+          'files',
+          'langchain',
+          'agent-connection',
+          'app',
+        )
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     appDir,
     {
       gatewaySnakeCase,
@@ -127,11 +145,13 @@ export const pyAgentGatewayConnectionGenerator = async (
     agentConnectionModuleName,
     '__init__.py',
   );
+  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
+  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${gatewaySnakeCase}_client_strands`,
-    `${gatewayClassName}ClientStrands`,
+    `.app.${gatewaySnakeCase}_client_${clientModuleSuffix}`,
+    `${gatewayClassName}Client${clientSuffix}`,
   );
 
   const agentSourceDir = joinPathFragments(
@@ -141,7 +161,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${gatewayClassName}ClientStrands`;
+    const clientClassName = `${gatewayClassName}Client${clientSuffix}`;
     const clientVarName = gatewaySnakeCase;
 
     await addPythonDestructuredImport(
@@ -150,12 +170,21 @@ export const pyAgentGatewayConnectionGenerator = async (
       [clientClassName],
       agentConnectionModuleName,
     );
-    await addPythonClientToAgent(
-      tree,
-      agentFilePath,
-      clientClassName,
-      clientVarName,
-    );
+    if (isLangchain) {
+      await addPythonLangchainClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    } else {
+      await addPythonClientToAgent(
+        tree,
+        agentFilePath,
+        clientClassName,
+        clientVarName,
+      );
+    }
   }
 
   addWorkspaceDependencyToPyProject(

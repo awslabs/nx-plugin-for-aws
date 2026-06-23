@@ -1,0 +1,77 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+import boto3
+import httpx
+
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from .agentcore_endpoints import region_from_gateway_url
+from .auth.session import plain_auth, sigv4_auth
+
+
+def _run_sync(coro):
+    """Run a coroutine to completion from sync code, even when an event loop is
+    already running on this thread (e.g. tools are loaded at agent-construction
+    time, which under uvicorn happens inside the running loop). asyncio.run()
+    refuses a running loop, so fall back to a dedicated loop on a worker thread.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _load_tools(url: str, auth: httpx.Auth) -> list[BaseTool]:
+    # Hand langchain-mcp-adapters a CONNECTION CONFIG (not a live session), so it
+    # owns the session lifetime: get_tools() lists the gateway's tools once now
+    # (over a throwaway session), and every returned BaseTool keeps this config
+    # and opens a FRESH ClientSession on each invocation. The tools therefore
+    # survive past construction — there is no shared session to close. This is
+    # why the client passes the Layer-0 httpx.Auth straight through rather than
+    # entering the Layer-1 transport context (which would close on block exit).
+    client = MultiServerMCPClient(
+        {
+            "server": {
+                "transport": "streamable_http",
+                "url": url,
+                "auth": auth,
+                "terminate_on_close": False,
+            }
+        }
+    )
+    return _run_sync(client.get_tools())
+
+
+class AgentCoreGatewayMCPClientLangChain:
+    """Loads LangChain tools from an AgentCore Gateway.
+
+    Reuses the Layer-0 session-forwarding auth builders (``sigv4_auth`` /
+    ``plain_auth``) and the framework-agnostic region resolver
+    (``region_from_gateway_url``) — it re-implements neither auth nor region
+    derivation. A gateway is reached by URL (it has no ARN), so the region is
+    parsed from the gateway URL unless given explicitly. Unlike the Strands
+    Layer-2 client it does NOT enter the Layer-1 transport context;
+    langchain-mcp-adapters owns the session lifetime so each tool opens a fresh
+    session per call. The Layer-0 SigV4 auth still forwards the current
+    async-context session via the AgentCore session header, which the gateway
+    propagates to downstream MCP server targets.
+    """
+
+    @staticmethod
+    def with_iam_auth(
+        gateway_url: str,
+        region: str | None = None,
+    ) -> list[BaseTool]:
+        """SigV4-authenticated tools for an AgentCore Gateway."""
+        resolved_region = region or region_from_gateway_url(gateway_url)
+        credentials = boto3.Session(region_name=resolved_region).get_credentials()
+        return _load_tools(gateway_url, sigv4_auth(credentials, resolved_region))
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> list[BaseTool]:
+        """Plain-HTTP tools — for the local gateway started by serve-local."""
+        return _load_tools(gateway_url, plain_auth())

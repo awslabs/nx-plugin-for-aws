@@ -30,3 +30,23 @@ export const MCP_INSPECTOR_EXCEPTIONS: DependencyCheckException[] = [
     spdx: 'Apache-2.0',
   },
 ];
+
+export const AG_UI_LANGGRAPH_EXCEPTIONS: DependencyCheckException[] = [
+  // ag-ui-langgraph needs no exception from 0.0.42 onwards: the wheel declares
+  // License-Expression: MIT (PEP 639), which the python collector reads directly
+  // (it prefers License-Expression over the legacy/classifier fields). 0.0.41 and
+  // earlier shipped no license metadata and DID need an MIT exception here; if the
+  // pin is ever rolled back below 0.0.42, restore it.
+  {
+    package: 'jsonpatch',
+    reason:
+      'Unconditional dependency of langchain-core. Genuinely BSD-3-Clause (LICENSE matches the SPDX BSD-3-Clause template), but the wheel only carries the free-text "Modified BSD License" metadata, not an SPDX expression.',
+    spdx: 'BSD-3-Clause',
+  },
+  {
+    package: 'jsonpointer',
+    reason:
+      'Transitive dependency of jsonpatch (via langchain-core). Genuinely BSD-3-Clause (LICENSE matches the SPDX BSD-3-Clause template), but the wheel only carries the free-text "Modified BSD License" metadata, not an SPDX expression.',
+    spdx: 'BSD-3-Clause',
+  },
+];

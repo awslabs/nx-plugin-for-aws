@@ -345,4 +345,125 @@ dependencies = ["strands-agents"]
       'py#agent#gateway-connection',
     );
   });
+
+  describe('langchain source agent', () => {
+    const setupLangchainProjects = (tools = '[subtract]') => {
+      setupProjects();
+      tree.write(
+        'packages/my-agent/my_scope_my_agent/agent/agent.py',
+        `import os
+
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=${tools},
+        system_prompt="You are a mathematical wizard.",
+        checkpointer=InMemorySaver(),
+    )
+`,
+      );
+    };
+
+    const langchainOptions = () => ({
+      ...fullOptions(),
+      sourceComponent: {
+        ...fullOptions().sourceComponent,
+        framework: 'langchain',
+        protocol: 'ag-ui',
+      } as any,
+    });
+
+    it('vends the langchain gateway client returning BaseTools', async () => {
+      setupLangchainProjects();
+      await pyAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      const moduleDirs = tree.children('packages/common/agent_connection');
+      const moduleName = moduleDirs.find((c) =>
+        c.includes('agent_connection'),
+      )!;
+      // Langchain Layer-2 gateway client is emitted alongside the shared transport.
+      expect(
+        tree.exists(
+          `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_client_langchain.py`,
+        ),
+      ).toBe(true);
+      expect(
+        tree.exists(
+          `packages/common/agent_connection/${moduleName}/core/agentcore_gateway_mcp_transport.py`,
+        ),
+      ).toBe(true);
+
+      const client = tree
+        .read(
+          `packages/common/agent_connection/${moduleName}/app/my_gateway_client_langchain.py`,
+        )!
+        .toString();
+      expect(client).toContain('list[BaseTool]');
+      expect(client).toContain('AgentCoreGatewayMCPClientLangChain');
+      // Must not pull in the strands Layer-2 gateway client.
+      expect(client).not.toContain('AgentCoreGatewayMCPClientStrands');
+      expect(client).not.toContain('strands.tools.mcp');
+    });
+
+    it('transforms agent.py to spread tools into create_agent (no with block)', async () => {
+      setupLangchainProjects();
+      await pyAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      const agent = tree
+        .read('packages/my-agent/my_scope_my_agent/agent/agent.py')!
+        .toString();
+      expect(agent).toContain(
+        'from proj_agent_connection import MyGatewayClientLangChain',
+      );
+      expect(agent).toContain('my_gateway = MyGatewayClientLangChain.create()');
+      expect(agent).toMatch(/tools=\[subtract, \*my_gateway\]/);
+      expect(agent).not.toContain('list_tools_sync');
+      expect(agent).not.toContain('with (');
+      expect(agent).not.toContain('from strands');
+    });
+
+    it('adds langchain-mcp-adapters dep, not strands-agents', async () => {
+      setupLangchainProjects();
+      await pyAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      const connectionPyproject = tree
+        .read('packages/common/agent_connection/pyproject.toml')!
+        .toString();
+      expect(connectionPyproject).toContain('langchain-mcp-adapters');
+    });
+
+    it('is idempotent for langchain agents', async () => {
+      setupLangchainProjects();
+      await pyAgentGatewayConnectionGenerator(tree, langchainOptions());
+      await pyAgentGatewayConnectionGenerator(tree, langchainOptions());
+
+      const agent = tree
+        .read('packages/my-agent/my_scope_my_agent/agent/agent.py')!
+        .toString();
+      expect(
+        (agent.match(/MyGatewayClientLangChain\.create/g) ?? []).length,
+      ).toBe(1);
+      const toolsListMatch = agent.match(/tools=\[([^\]]*)\]/);
+      expect(toolsListMatch).toBeTruthy();
+      expect((toolsListMatch![1].match(/\*my_gateway\b/g) ?? []).length).toBe(
+        1,
+      );
+    });
+  });
 });
