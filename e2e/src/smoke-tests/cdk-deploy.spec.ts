@@ -24,6 +24,22 @@ import {
 } from './deploy-invocations';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { runSmokeTest } from './smoke-test';
+import {
+  type AgentSpec,
+  createCognitoTestUser,
+  installChromium,
+  runWebsiteIntegrationTest,
+  writeIntegrationTestPage,
+} from './website-integration';
+
+// The agents the deploy website is connected to, with the class names under
+// which they appear in the website's runtime-config / vended hooks.
+const WEBSITE_AGENTS: AgentSpec[] = [
+  { kind: 'ts-http', className: 'TsProjectAgent' },
+  { kind: 'ts-agui', className: 'MyTsAguiAgent' },
+  { kind: 'py-http', className: 'MyAgent' },
+  { kind: 'py-agui', className: 'MyPyAguiAgent' },
+];
 
 /**
  * Delete any CloudFormation stacks matching the test run prefix that were
@@ -91,7 +107,20 @@ describe('smoke test - cdk-deploy', () => {
   });
 
   it('should generate and build', async () => {
-    const { opts } = await runSmokeTest(targetDir, pkgMgr);
+    const { opts } = await runSmokeTest(
+      targetDir,
+      pkgMgr,
+      undefined,
+      // Add the browser-driven integration-test page to the website before the
+      // build so it is bundled into the deployed site.
+      async (projectRoot) => {
+        writeIntegrationTestPage(
+          `${projectRoot}/packages/website`,
+          WEBSITE_AGENTS,
+        );
+        await installChromium();
+      },
+    );
 
     // Generate an 8 digit alphanumeric random testRunId
     const testRunId = Math.random().toString(36).substring(2, 10);
@@ -284,7 +313,22 @@ describe('smoke test - cdk-deploy', () => {
       await invokeLambda(findOutput('TsFunctionArn'), 'TypeScript Function');
 
       // Website
-      await pingWebsite(findOutput('WebsiteDistributionDomainName'));
+      const websiteDomain = findOutput('WebsiteDistributionDomainName');
+      await pingWebsite(websiteDomain);
+
+      // Browser-driven website integration: log in via the Cognito hosted UI
+      // and drive the website's vended clients to invoke every connected API
+      // and agent from a real browser.
+      const login = await createCognitoTestUser(
+        findOutput('UserIdentityUserPoolId'),
+        findOutput('UserIdentityUserPoolClientId'),
+      );
+      await runWebsiteIntegrationTest({
+        baseUrl: `https://${websiteDomain}`,
+        expectedApiCount: 3,
+        expectedAgents: WEBSITE_AGENTS,
+        login,
+      });
     } finally {
       try {
         await runCLI(

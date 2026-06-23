@@ -15,6 +15,7 @@ export const runSmokeTest = async (
   dir: string,
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
+  beforeBuild?: (projectRoot: string) => void | Promise<void>,
 ) => {
   const projectRoot = await createTestWorkspace(pkgMgr, dir, 'e2e-test', 'cdk');
   const opts = {
@@ -63,6 +64,10 @@ export const runSmokeTest = async (
       'utf-8',
     ),
   );
+
+  if (beforeBuild) {
+    await beforeBuild(projectRoot);
+  }
 
   await runCLI(`sync --verbose`, opts);
   await runCLI(
