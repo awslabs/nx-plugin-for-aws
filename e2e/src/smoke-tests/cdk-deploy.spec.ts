@@ -136,6 +136,14 @@ describe('smoke test - cdk-deploy', () => {
     );
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
+    // Auto-apply sync so the main.ts rewrite and the integration-test page
+    // added before the build don't block `deploy` with a fatal "workspace is
+    // out of sync" error.
+    const nxJsonPath = `${opts.cwd}/nx.json`;
+    const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
+    nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
+    writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
+
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
 
     try {

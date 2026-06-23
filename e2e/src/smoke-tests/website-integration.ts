@@ -179,7 +179,11 @@ export const writeIntegrationTestPage = (
     ),
   ].join('\n');
 
-  const source = `import { createFileRoute } from '@tanstack/react-router';
+  const source = `/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useContext, useState } from 'react';
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
 import { useSigV4 } from '../hooks/useSigV4';
