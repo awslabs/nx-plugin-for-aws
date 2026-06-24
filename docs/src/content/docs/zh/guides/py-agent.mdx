@@ -16,7 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 生成一个用于构建带工具的AI代理的Python代理，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。使用`framework`选项选择代理框架：[Strands](https://strandsagents.com/)（默认）或[LangChain](https://docs.langchain.com/oss/python/langchain/overview)（基于[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)构建）。
 
-生成器通过服务器`protocol`暴露您的代理。Strands代理支持[HTTP](https://fastapi.tiangolo.com/)（默认）、用于与其他A2A兼容代理互操作的[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以及通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端的[AG-UI](https://docs.ag-ui.com/)协议。LangChain代理支持`ag-ui`协议。
+生成器通过服务器`protocol`暴露您的代理，两个框架都支持：[HTTP](https://fastapi.tiangolo.com/)（默认）、用于与其他A2A兼容代理互操作的[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，或通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端的[AG-UI](https://docs.ag-ui.com/)协议。
 
 ## 使用方式
 
@@ -277,14 +277,10 @@ model = ChatBedrockConverse(
 智能体的服务器协议决定其通信方式。所有选项都由[FastAPI](https://fastapi.tiangolo.com/)提供服务——区别在于入口点：
 
 - **HTTP**（默认）：标准FastAPI服务器，带有自定义`/invocations`端点、CORS和流式传输。最适合自定义客户端集成。
-- **A2A**：将[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)挂载到FastAPI应用上。最适合需要被其他A2A兼容智能体发现和调用的场景。
-- **AG-UI**：[ag-ui-strands](https://docs.ag-ui.com/)集成，通过SSE暴露[AG-UI协议](https://docs.ag-ui.com/)。最适合在React网站中通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端。
+- **A2A**：将[A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)服务器挂载到FastAPI应用上。最适合需要被其他A2A兼容智能体发现和调用的场景。
+- **AG-UI**：通过SSE暴露[AG-UI协议](https://docs.ag-ui.com/)。最适合在React网站中通过[CopilotKit](https://docs.copilotkit.ai/)直接集成前端。
 
 所有协议都暴露`/ping`端点以满足AgentCore运行时健康检查契约。A2A智能体监听端口`9000`；HTTP和AG-UI智能体监听端口`8080`。生成的Dockerfile和基础设施已为您配置。
-
-:::note[LangChain仅支持AG-UI]
-`langchain`框架目前仅支持`ag-ui`协议。如果您需要`http`或`a2a`协议，请选择默认的`strands`框架。
-:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPI服务器（HTTP协议）
@@ -373,9 +369,12 @@ SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
 ## A2A服务器（A2A协议）
 
-生成的`main.py`将`A2AServer.to_fastapi_app()`挂载到父FastAPI应用上，该应用同时暴露`/ping`端点。部署到AgentCore时，入口点会从AppConfig解析运行时的公共ARN，并在智能体卡片中发布。
+生成的`main.py`提供一个A2A端点，挂载到同时暴露`/ping`端点的父FastAPI应用上，并在其智能体卡片（`/.well-known/agent-card.json`）中发布运行时的公共URL（`AGENTCORE_RUNTIME_URL`）。连接方式取决于框架：
 
-大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。A2A服务器从`Agent`构造函数的`name`和`description`填充智能体卡片（`/.well-known/agent-card.json`）。
+- **Strands**：挂载`strands.multiagent.a2a.A2AServer.to_fastapi_app()`。
+- **LangChain**：通过`a2a` SDK的`AgentExecutor`和`A2AStarletteApplication`提供编译的图。
+
+大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI / CopilotKit server details">

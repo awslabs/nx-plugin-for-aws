@@ -16,7 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 Tạo một Python AI agent để xây dựng các agent với các công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Chọn framework agent với tùy chọn `framework`: [Strands](https://strandsagents.com/) (mặc định) hoặc [LangChain](https://docs.langchain.com/oss/python/langchain/overview) (được xây dựng trên [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)).
 
-Generator expose agent của bạn qua một `protocol` server. Các Strands agent hỗ trợ [HTTP](https://fastapi.tiangolo.com/) (mặc định), giao thức [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) để tương tác với các agent tương thích A2A khác, và giao thức [AG-UI](https://docs.ag-ui.com/) để tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/). Các LangChain agent hỗ trợ giao thức `ag-ui`.
+Generator expose agent của bạn qua một `protocol` server, được hỗ trợ bởi cả hai framework: [HTTP](https://fastapi.tiangolo.com/) (mặc định), giao thức [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) để tương tác với các agent tương thích A2A khác, hoặc giao thức [AG-UI](https://docs.ag-ui.com/) để tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/).
 
 ## Cách sử dụng
 
@@ -277,14 +277,10 @@ Tham khảo <Link path="/guides/connection/py-agent-mcp">hướng dẫn `connect
 Giao thức server của agent xác định cách nó giao tiếp. Tất cả các tùy chọn đều được phục vụ bởi [FastAPI](https://fastapi.tiangolo.com/) — entry point khác nhau:
 
 - **HTTP** (mặc định): Một FastAPI server tiêu chuẩn với endpoint `/invocations` tùy chỉnh, CORS và streaming. Tốt nhất cho các tích hợp client tùy chỉnh.
-- **A2A**: [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) được mount lên một ứng dụng FastAPI. Tốt nhất khi agent của bạn cần có thể được phát hiện và gọi bởi các agent tương thích A2A khác.
-- **AG-UI**: Tích hợp [ag-ui-strands](https://docs.ag-ui.com/), expose [giao thức AG-UI](https://docs.ag-ui.com/) qua SSE. Tốt nhất cho tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/) trong React website.
+- **A2A**: Một server [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) được mount lên một ứng dụng FastAPI. Tốt nhất khi agent của bạn cần có thể được phát hiện và gọi bởi các agent tương thích A2A khác.
+- **AG-UI**: [Giao thức AG-UI](https://docs.ag-ui.com/) qua SSE. Tốt nhất cho tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/) trong React website.
 
 Tất cả các giao thức đều expose `/ping` cho hợp đồng health check của AgentCore runtime. Các agent A2A lắng nghe trên port `9000`; các agent HTTP và AG-UI lắng nghe trên port `8080`. Dockerfile và infrastructure được tạo đã được cấu hình cho bạn.
-
-:::note[LangChain chỉ hỗ trợ AG-UI]
-Framework `langchain` hiện chỉ hỗ trợ giao thức `ag-ui`. Chọn framework `strands` mặc định nếu bạn cần giao thức `http` hoặc `a2a`.
-:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPI Server (HTTP protocol)
@@ -373,9 +369,12 @@ Vì generator tạo ra hạ tầng CDK hoặc Terraform để quản lý việc 
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
 ## A2A Server (A2A protocol)
 
-File `main.py` được tạo mount `A2AServer.to_fastapi_app()` lên một ứng dụng FastAPI cha cũng expose `/ping`. Khi được triển khai lên AgentCore, entry point resolve ARN công khai của runtime từ AppConfig và quảng cáo nó trong agent card.
+File `main.py` được tạo phục vụ một A2A endpoint được mount lên một ứng dụng FastAPI cha cũng expose `/ping`, và quảng cáo URL công khai của runtime (`AGENTCORE_RUNTIME_URL`) trong agent card của nó (`/.well-known/agent-card.json`). Cách kết nối phụ thuộc vào framework:
 
-Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh sửa `agent.py` để thay đổi các công cụ hoặc system prompt. A2A server điền thông tin agent card (`/.well-known/agent-card.json`) từ `name` và `description` trong constructor của `Agent`.
+- **Strands**: mount `strands.multiagent.a2a.A2AServer.to_fastapi_app()`.
+- **LangChain**: phục vụ compiled graph thông qua một `a2a` SDK `AgentExecutor` và `A2AStarletteApplication`.
+
+Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh sửa `agent.py` để thay đổi các công cụ hoặc system prompt.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI / CopilotKit server details">
