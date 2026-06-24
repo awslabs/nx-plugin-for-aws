@@ -13,14 +13,13 @@ import {
 } from '@nx/devkit';
 import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generator';
 import {
-  addPythonClientToAgent,
   addPythonCoreClient,
-  addPythonLangchainClientToAgent,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
+  PY_MCP_FAMILY_CONNECTIONS,
   resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
@@ -85,11 +84,12 @@ export const pyAgentGatewayConnectionGenerator = async (
   const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
   const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
 
-  // The transform applied to agent.py depends on the source agent's framework:
-  // Strands enters a context-managed MCPClient and spreads list_tools_sync();
-  // LangChain loads BaseTools and spreads them into create_agent(...).
+  // The source agent's framework selects the client shape, dependencies and the
+  // agent.py transform — see PY_MCP_FAMILY_CONNECTIONS (keyed by framework, not a
+  // boolean, so a third framework is an additive entry there). A Gateway exposes
+  // its tools over MCP, so it reuses the same wiring as an MCP server connection.
   const framework = resolveAgentFramework(agentComponent.framework);
-  const isLangchain = framework === 'langchain';
+  const connection = PY_MCP_FAMILY_CONNECTIONS[framework];
 
   await ensurePythonAgentConnectionProject(tree);
   await addPythonCoreClient(tree, 'gateway', framework);
@@ -98,15 +98,13 @@ export const pyAgentGatewayConnectionGenerator = async (
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Layer 0/1 deps for the MCP transport + signed httpx auth. The Strands
-  // Layer-2 client uses the strands MCPClient (strands-agents, added by
-  // addPythonCoreClient); the LangChain Layer-2 client uses
-  // langchain-mcp-adapters and must not pull Strands in.
+  // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
+  // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
     'mcp',
-    ...(isLangchain ? (['langchain-mcp-adapters'] as const) : ([] as const)),
+    ...connection.deps,
   ]);
 
   const appDir = joinPathFragments(
@@ -117,15 +115,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   // Local mode points at the gateway project's local gateway port.
   generateFiles(
     tree,
-    isLangchain
-      ? joinPathFragments(
-          __dirname,
-          'files',
-          'langchain',
-          'agent-connection',
-          'app',
-        )
-      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    joinPathFragments(__dirname, 'files', connection.appTemplateSubdir),
     appDir,
     {
       gatewaySnakeCase,
@@ -146,13 +136,11 @@ export const pyAgentGatewayConnectionGenerator = async (
     agentConnectionModuleName,
     '__init__.py',
   );
-  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
-  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${gatewaySnakeCase}_client_${clientModuleSuffix}`,
-    `${gatewayClassName}Client${clientSuffix}`,
+    `.app.${gatewaySnakeCase}_client_${connection.clientModuleSuffix}`,
+    `${gatewayClassName}Client${connection.clientClassSuffix}`,
   );
 
   const agentSourceDir = joinPathFragments(
@@ -162,7 +150,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${gatewayClassName}Client${clientSuffix}`;
+    const clientClassName = `${gatewayClassName}Client${connection.clientClassSuffix}`;
     const clientVarName = gatewaySnakeCase;
 
     await addPythonDestructuredImport(
@@ -171,21 +159,12 @@ export const pyAgentGatewayConnectionGenerator = async (
       [clientClassName],
       agentConnectionModuleName,
     );
-    if (isLangchain) {
-      await addPythonLangchainClientToAgent(
-        tree,
-        agentFilePath,
-        clientClassName,
-        clientVarName,
-      );
-    } else {
-      await addPythonClientToAgent(
-        tree,
-        agentFilePath,
-        clientClassName,
-        clientVarName,
-      );
-    }
+    await connection.wireClientIntoAgent(
+      tree,
+      agentFilePath,
+      clientClassName,
+      clientVarName,
+    );
   }
 
   addWorkspaceDependencyToPyProject(
