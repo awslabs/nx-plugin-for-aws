@@ -194,21 +194,19 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
   langchain: {
     // LangChain is supported for Python agents only (the TypeScript LangChain
     // agent foundation has no in-process AG-UI <-> LangGraph adapter, so it is
-    // not scaffolded — see ts#agent). Its Layer-2 client loads LangChain tools
-    // that stay usable after agent construction, so there is no base helper
-    // layer (no model-error logger / per-session agent cache) and no
-    // strands-agents dependency — its AG-UI foundation reuses only the
-    // framework-agnostic session context. The per-connection adapter dependency
-    // (langchain-mcp-adapters) is added by the connection generators.
+    // not scaffolded — see ts#agent). Its Layer-2 clients stay usable after
+    // agent construction, so there is no base helper layer (no model-error
+    // logger / per-session agent cache) and no strands-agents dependency — its
+    // AG-UI foundation reuses only the framework-agnostic session context, and
+    // its A2A client drives the a2a SDK directly rather than wrapping Strands'
+    // A2AAgent. The per-connection adapter dependency (langchain-mcp-adapters /
+    // a2a-sdk) is added by the connection generators.
     py: {
       baseReExports: [],
       protocols: {
         mcp: 'py-core-langchain/mcp',
         gateway: 'py-core-langchain/gateway',
-        // A2A is wired by reusing the framework-agnostic Strands A2A transport
-        // (A2AAgent carries no model) wrapped as a langchain tool — see the
-        // a2a-connection generator — so it needs no langchain-specific Layer-2
-        // client here.
+        a2a: 'py-core-langchain/a2a',
       },
       deps: [],
     },

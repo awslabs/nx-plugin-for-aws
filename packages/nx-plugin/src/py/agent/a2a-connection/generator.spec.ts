@@ -545,11 +545,56 @@ def get_agent():
       // tool comes from langchain_core.tools, not strands
       expect(agent).toContain('from langchain_core.tools import tool');
       expect(agent).not.toContain('from strands import');
-      expect(agent).toContain('RemoteClientStrands.create()');
+      // langchain agents wrap the strands-free A2A client
+      expect(agent).toContain('RemoteClientLangChain.create()');
+      expect(agent).not.toContain('RemoteClientStrands');
       expect(agent).toContain('def ask_remote(prompt: str)');
       expect(agent).toContain('str(remote(prompt))');
       // Spread into create_agent's tools list
       expect(agent).toMatch(/tools=\[subtract, ask_remote\]/);
+    });
+
+    it('should vend a strands-free langchain A2A client and not pull strands-agents', async () => {
+      setupLangchainHost();
+      await pyAgentA2aConnectionGenerator(tree, {
+        sourceProject: 'test.py_host',
+        targetProject: 'test.py_remote',
+        sourceComponent: LANGCHAIN_HOST,
+        targetComponent: REMOTE,
+      });
+
+      // The langchain Layer-2 A2A client is vended (not the strands one)
+      const changedPaths = tree.listChanges().map((c) => c.path);
+      expect(
+        changedPaths.find((p) =>
+          p.endsWith('core/agentcore_a2a_client_langchain.py'),
+        ),
+      ).toBeDefined();
+      const clientFile = changedPaths.find((p) =>
+        p.endsWith('app/remote_client_langchain.py'),
+      );
+      expect(clientFile).toBeDefined();
+      const client = tree.read(clientFile!, 'utf-8')!;
+      expect(client).toContain('RemoteClientLangChain');
+      expect(client).toContain('AgentCoreA2aClientLangChain.with_iam_auth');
+
+      // The core langchain A2A client uses the a2a SDK directly, no strands
+      const coreClient = tree.read(
+        changedPaths.find((p) =>
+          p.endsWith('core/agentcore_a2a_client_langchain.py'),
+        )!,
+        'utf-8',
+      )!;
+      expect(coreClient).toContain('from a2a.client import');
+      expect(coreClient).not.toContain('strands');
+
+      // The agent-connection pyproject.toml gets a2a-sdk, not strands-agents[a2a]
+      const pyproject = tree.read(
+        'packages/common/agent_connection/pyproject.toml',
+        'utf-8',
+      )!;
+      expect(pyproject).toContain('a2a-sdk');
+      expect(pyproject).not.toContain('strands-agents[a2a]');
     });
 
     it('should be idempotent for langchain agents', async () => {
@@ -567,7 +612,7 @@ def get_agent():
         targetComponent: REMOTE,
       });
       const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
-      expect((agent.match(/RemoteClientStrands\.create/g) ?? []).length).toBe(
+      expect((agent.match(/RemoteClientLangChain\.create/g) ?? []).length).toBe(
         1,
       );
       expect((agent.match(/def ask_remote\(/g) ?? []).length).toBe(1);

@@ -102,31 +102,34 @@ export const pyAgentA2aConnectionGenerator = async (
   const targetAgentPort = targetAgentComponent.port ?? 9000;
 
   // The transform applied to agent.py depends on the source agent's framework.
-  // Both register the remote A2A agent as a tool, but each framework anchors on
-  // its own agent constructor and `@tool` import. The outbound A2A client itself
-  // is framework-agnostic (A2AAgent carries no model), so both reuse it.
+  // Both register the remote A2A agent as a tool, anchored on the framework's
+  // agent constructor + `@tool` import, and each wraps a framework-specific A2A
+  // Layer-2 client (Strands' A2AAgent vs an a2a-sdk-only client) over the shared
+  // framework-agnostic A2A client config.
   const framework = resolveAgentFramework(agentComponent.framework);
+  const isLangchain = framework === 'langchain';
+  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
+  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
 
   // 1. Ensure the shared Python agent-connection project exists + has the
-  //    A2A core client and its shared SigV4 auth helper.
+  //    A2A core client (framework Layer-2) and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'a2a');
+  await addPythonCoreClient(tree, 'a2a', framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Layer 0/1 deps for the A2A client config + shared auth helper, plus the
-  // Strands A2A extra the A2A client needs (the base strands-agents dependency
-  // is added by addPythonCoreClient). The A2A client wraps the Strands
-  // `A2AAgent` purely as an A2A transport (it carries no model), so a LangChain
-  // source agent that delegates to an A2A agent also pulls in strands-agents[a2a]
-  // for that transport. The agent's own framework is unaffected — only the
-  // connection's outbound client uses it.
+  // Layer 0/1 deps for the A2A client config + shared auth helper. The Strands
+  // Layer-2 client wraps strands' `A2AAgent` (strands-agents[a2a]); the LangChain
+  // Layer-2 client drives the a2a SDK directly (a2a-sdk) and must not pull
+  // Strands in.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
-    'strands-agents[a2a]',
+    ...(isLangchain
+      ? (['a2a-sdk'] as const)
+      : (['strands-agents[a2a]'] as const)),
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -137,7 +140,15 @@ export const pyAgentA2aConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    isLangchain
+      ? joinPathFragments(
+          __dirname,
+          'files',
+          'langchain',
+          'agent-connection',
+          'app',
+        )
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     appDir,
     {
       targetAgentSnakeCase,
@@ -163,8 +174,8 @@ export const pyAgentA2aConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${targetAgentSnakeCase}_client_strands`,
-    `${targetAgentClassName}ClientStrands`,
+    `.app.${targetAgentSnakeCase}_client_${clientModuleSuffix}`,
+    `${targetAgentClassName}Client${clientSuffix}`,
   );
 
   // 3. Transform agent.py to add the A2A client import + wrap it as a tool
@@ -175,7 +186,7 @@ export const pyAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}ClientStrands`;
+    const clientClassName = `${targetAgentClassName}Client${clientSuffix}`;
     const clientVarName = targetAgentSnakeCase;
     const toolName = `ask_${targetAgentSnakeCase}`;
 
@@ -305,7 +316,7 @@ const addClientToolToGetAgent = async (
 
   // Both frameworks' tools are @tool-decorated callables (the decorator's
   // import differs, handled in addImportToAgentFile), defined inline in
-  // get_agent. A2AAgent is directly callable (syncs over invoke_async).
+  // get_agent. The client is directly callable, returning the remote's reply.
   const toolBlock = `${clientVarName} = ${clientClassName}.create()
 
     @tool
