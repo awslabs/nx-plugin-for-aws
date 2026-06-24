@@ -50,14 +50,14 @@ Le générateur crée un projet Python partagé `agent_connection` dans `package
     - core
       - agentcore\_endpoints.py Résolution ARN/URL indépendante du framework
       - agentcore\_a2a\_client\_config.py Configuration client A2A indépendante du framework (`ClientConfig` signé)
-      - agentcore\_a2a\_client\_strands.py Client de transport A2A encapsulant la configuration
+      - agentcore\_a2a\_client\_\<framework>.py Client A2A encapsulant la configuration pour le framework de votre agent
       - auth/ `httpx.Auth` SigV4 / transfert de session indépendant du framework
     - app
-      - \<target\_agent\_name>\_client\_strands.py Client de transport A2A par connexion pour chaque agent A2A
+      - \<target\_agent\_name>\_client\_\<framework>.py Client A2A par connexion pour chaque agent A2A
 
 </FileTree>
 
-Le transport A2A (un `A2AAgent` Strands) ne porte aucun modèle, donc les agents Strands et LangChain le réutilisent — seul le câblage des outils dans `agent.py` diffère selon le framework.
+Le suffixe du client correspond au framework de votre agent (`_strands` ou `_langchain`). Les deux encapsulent la même `ClientConfig` signée indépendante du framework : le client Strands encapsule un `A2AAgent` Strands, tandis que le client LangChain pilote directement le [SDK a2a](https://pypi.org/project/a2a-sdk/) afin qu'un agent LangChain n'ait aucune dépendance Strands.
 
 De plus, le générateur :
 - Transforme le fichier `agent.py` de votre agent pour enregistrer l'agent A2A distant comme outil en utilisant `@tool`
@@ -68,18 +68,17 @@ De plus, le générateur :
 
 Le générateur transforme le fichier `agent.py` de votre agent pour encapsuler l'agent A2A distant en tant qu'outil. L'agent distant est enregistré avec un délégué décoré par `@tool` — l'import du décorateur et le constructeur de l'agent diffèrent selon le framework :
 
-<Tabs syncKey="framework">
-<TabItem label="Strands">
-
-```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,15}
 from contextlib import contextmanager
 from strands import Agent, tool
 
 from my_scope_agent_connection import RemoteAgentClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    remote_agent = RemoteAgentClientStrands.create(session_id=session_id)
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
 
     @tool
     def ask_remote_agent(prompt: str) -> str:
@@ -92,16 +91,16 @@ def get_agent(session_id: str):
     )
 ```
 </TabItem>
-<TabItem label="LangChain">
-```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,17}
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,7-12,14}
 from langchain.agents import create_agent
 from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 
-from my_scope_agent_connection import RemoteAgentClientStrands
+from my_scope_agent_connection import RemoteAgentClientLangChain
 
 def get_agent():
-    remote_agent = RemoteAgentClientStrands.create()
+    remote_agent = RemoteAgentClientLangChain.create()
 
     @tool
     def ask_remote_agent(prompt: str) -> str:
@@ -117,7 +116,9 @@ def get_agent():
 </TabItem>
 </Tabs>
 
-En interne, `RemoteAgentClientStrands.create()` retourne un `A2AAgent` Strands (utilisé purement comme transport A2A — il ne porte aucun modèle, donc les agents LangChain le réutilisent) configuré avec un `httpx.AsyncClient` qui signe les requêtes avec SigV4 lorsqu'il est déployé sur AWS, et un point de terminaison `http://localhost:<port>/` simple lorsque `SERVE_LOCAL=true`. Pour les agents Strands, le `session_id` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+Les deux clients sont directement appelables, retournant la réponse de l'agent distant, et encapsulent un `httpx.AsyncClient` qui signe les requêtes avec SigV4 lorsqu'il est déployé sur AWS et utilise un point de terminaison `http://localhost:<port>/` simple lorsque `SERVE_LOCAL=true`. Le client Strands encapsule un `A2AAgent` Strands ; le client LangChain pilote directement le SDK a2a, donc il n'a aucune dépendance Strands.
+
+L'ID de session AgentCore est propagé automatiquement à l'agent distant via l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, quel que soit le framework : le serveur d'agent lie la session de la requête entrante dans un contexte asynchrone, et le `httpx.Auth` signé du client de connexion l'estampille sur chaque appel sortant — garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
 

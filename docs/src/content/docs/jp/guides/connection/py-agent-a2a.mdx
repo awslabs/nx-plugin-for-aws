@@ -50,14 +50,14 @@ import Snippet from '@components/snippet.astro';
     - core
       - agentcore\_endpoints.py フレームワークに依存しない ARN/URL 解決
       - agentcore\_a2a\_client\_config.py フレームワークに依存しない A2A クライアント設定（署名済み `ClientConfig`）
-      - agentcore\_a2a\_client\_strands.py 設定をラップする A2A トランスポートクライアント
+      - agentcore\_a2a\_client\_\<framework>.py エージェントのフレームワーク用の設定をラップする A2A クライアント
       - auth/ フレームワークに依存しない SigV4 / セッション転送 `httpx.Auth`
     - app
-      - \<target\_agent\_name>\_client\_strands.py 各 A2A エージェント用の接続ごとの A2A トランスポートクライアント
+      - \<target\_agent\_name>\_client\_\<framework>.py 各 A2A エージェント用の接続ごとの A2A クライアント
 
 </FileTree>
 
-A2A トランスポート（Strands の `A2AAgent`）はモデルを持たないため、Strands と LangChain の両方のエージェントがこれを再利用します — フレームワークによって異なるのは `agent.py` のツール配線のみです。
+クライアントのサフィックスはエージェントのフレームワーク（`_strands` または `_langchain`）に一致します。両方とも同じフレームワークに依存しない署名済み `ClientConfig` をラップします: Strands クライアントは Strands の `A2AAgent` をラップし、LangChain クライアントは [a2a SDK](https://pypi.org/project/a2a-sdk/) を直接駆動するため、LangChain エージェントは Strands の依存関係を持ちません。
 
 さらに、ジェネレーターは以下を行います:
 - エージェントの `agent.py` を変換して、リモート A2A エージェントを `@tool` を使用してツールとして登録
@@ -68,18 +68,18 @@ A2A トランスポート（Strands の `A2AAgent`）はモデルを持たない
 
 ジェネレーターは、エージェントの `agent.py` を変換して、リモート A2A エージェントをツールとしてラップします。リモートエージェントは `@tool` でデコレートされたデリゲートとして登録されます — デコレーターのインポートとエージェントのコンストラクターはフレームワークによって異なります:
 
-<Tabs syncKey="framework">
-<TabItem label="Strands">
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
 
-```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,15}
 from contextlib import contextmanager
 from strands import Agent, tool
 
 from my_scope_agent_connection import RemoteAgentClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    remote_agent = RemoteAgentClientStrands.create(session_id=session_id)
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
 
     @tool
     def ask_remote_agent(prompt: str) -> str:
@@ -92,16 +92,16 @@ def get_agent(session_id: str):
     )
 ```
 </TabItem>
-<TabItem label="LangChain">
-```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,17}
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,7-12,14}
 from langchain.agents import create_agent
 from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 
-from my_scope_agent_connection import RemoteAgentClientStrands
+from my_scope_agent_connection import RemoteAgentClientLangChain
 
 def get_agent():
-    remote_agent = RemoteAgentClientStrands.create()
+    remote_agent = RemoteAgentClientLangChain.create()
 
     @tool
     def ask_remote_agent(prompt: str) -> str:
@@ -117,7 +117,9 @@ def get_agent():
 </TabItem>
 </Tabs>
 
-内部的には、`RemoteAgentClientStrands.create()` は Strands の `A2AAgent`（純粋に A2A トランスポートとして使用され、モデルを持たないため LangChain エージェントも再利用します）を返します。これは、AWS にデプロイされた際に SigV4 でリクエストに署名する `httpx.AsyncClient` で構成され、`SERVE_LOCAL=true` の場合はプレーンな `http://localhost:<port>/` エンドポイントを使用します。Strands エージェントの場合、`session_id` は呼び出し元から渡され、[Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) の一貫性を確保します。
+両方のクライアントは直接呼び出し可能で、リモートエージェントの応答を返します。また、AWS にデプロイされた際に SigV4 でリクエストに署名し、`SERVE_LOCAL=true` の場合はプレーンな `http://localhost:<port>/` エンドポイントを使用する `httpx.AsyncClient` をラップします。Strands クライアントは Strands の `A2AAgent` をラップし、LangChain クライアントは a2a SDK を直接駆動するため、Strands の依存関係を持ちません。
+
+AgentCore セッション ID は、フレームワークに関係なく `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` ヘッダーを介してリモートエージェントに自動的に伝播されます: エージェントサーバーは受信リクエストのセッションを非同期コンテキストにバインドし、接続クライアントの署名済み `httpx.Auth` がすべての送信呼び出しにそれをスタンプします — これにより [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) の一貫性が確保されます。
 
 ## インフラストラクチャ
 

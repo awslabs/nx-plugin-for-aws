@@ -7,7 +7,7 @@ when:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -68,15 +68,17 @@ Além disso, o gerador:
 
 O gerador transforma o `agent.py` do seu agente para usar as ferramentas do servidor MCP:
 
-```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-13}
 from contextlib import contextmanager
 from strands import Agent
 
 from my_scope_agent_connection import MyMcpServerClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    my_mcp_server = MyMcpServerClientStrands.create(session_id=session_id)
+def get_agent():
+    my_mcp_server = MyMcpServerClientStrands.create()
     with (
         my_mcp_server,
     ):
@@ -86,7 +88,29 @@ def get_agent(session_id: str):
         )
 ```
 
-O parâmetro `session_id` é propagado a partir do chamador, garantindo consistência para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+O cliente Strands é um gerenciador de contexto, inserido em um bloco `with` ao redor do agente.
+</TabItem>
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,8,13}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+O cliente LangChain retorna uma lista de ferramentas carregadas via [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Cada ferramenta abre uma nova sessão MCP por chamada, então as ferramentas permanecem utilizáveis durante o tempo de vida do agente — nenhum bloco `with` é necessário.
+</TabItem>
+</Tabs>
+
+O ID de sessão do AgentCore é propagado para o servidor MCP automaticamente via o cabeçalho `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` para ambos os frameworks, garantindo consistência para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infraestrutura
 
@@ -131,25 +155,6 @@ resource "aws_iam_policy" "agent_invoke_mcp" {
 
 resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
   role       = module.story_agent.agent_core_runtime_role_arn
-  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
-}
-```
-
-O ARN do runtime AgentCore do servidor MCP é automaticamente registrado no namespace `agentcore` da <Link path="guides/runtime-config">Configuração de Runtime</Link> pelo módulo Terraform gerado, para que o agente possa descobri-lo em tempo de execução.
-</Fragment>
-</Infrastructure>
-
-## Desenvolvimento Local
-
-O gerador configura o target `serve-local` do agente para:
-1. Iniciar o(s) servidor(es) MCP conectado(s) automaticamente
-2. Definir `SERVE_LOCAL=true` para que o cliente gerado use transporte HTTP direto em vez de AgentCore
-
-Execute o agente localmente com:
-
-<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
-
-Isso iniciará tanto o agente quanto todos os servidores MCP conectados, com o agente se conectando aos servidores MCP diretamente via HTTP em suas portas locais atribuídas.rn
   policy_arn = aws_iam_policy.agent_invoke_mcp.arn
 }
 ```

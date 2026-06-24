@@ -7,7 +7,7 @@ when:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -50,12 +50,14 @@ import Infrastructure from '@components/infrastructure.astro';
     - core
       - agentcore\_endpoints.py 프레임워크에 구애받지 않는 ARN/URL 확인
       - agentcore\_mcp\_transport.py 프레임워크에 구애받지 않는 MCP 전송
-      - agentcore\_mcp\_client\_strands.py 전송을 래핑하는 Strands MCP 클라이언트
+      - agentcore\_mcp\_client\_\<framework>.py 에이전트 프레임워크용 전송을 래핑하는 MCP 클라이언트
       - auth/ 프레임워크에 구애받지 않는 SigV4 / 세션 전달 `httpx.Auth`
     - app
-      - \<mcp\_server\_name>\_client\_strands.py 각 MCP 서버에 대한 연결별 Strands 클라이언트
+      - \<mcp\_server\_name>\_client\_\<framework>.py 각 MCP 서버에 대한 연결별 클라이언트
 
 </FileTree>
+
+클라이언트 접미사는 에이전트의 프레임워크(`_strands` 또는 `_langchain`)와 일치합니다.
 
 또한 생성기는:
 - 에이전트의 `agent.py`를 변환하여 클래스 기반 클라이언트를 통해 MCP 서버의 도구를 가져오고 사용합니다
@@ -66,15 +68,17 @@ import Infrastructure from '@components/infrastructure.astro';
 
 생성기는 에이전트의 `agent.py`를 변환하여 MCP 서버의 도구를 사용합니다:
 
-```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-13}
 from contextlib import contextmanager
 from strands import Agent
 
 from my_scope_agent_connection import MyMcpServerClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    my_mcp_server = MyMcpServerClientStrands.create(session_id=session_id)
+def get_agent():
+    my_mcp_server = MyMcpServerClientStrands.create()
     with (
         my_mcp_server,
     ):
@@ -84,7 +88,29 @@ def get_agent(session_id: str):
         )
 ```
 
-`session_id` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
+Strands 클라이언트는 컨텍스트 매니저로, 에이전트를 둘러싼 `with` 블록에 진입합니다.
+</TabItem>
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,8,13}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+LangChain 클라이언트는 [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp)를 통해 로드된 도구 목록을 반환합니다. 각 도구는 호출마다 새로운 MCP 세션을 열기 때문에 에이전트의 수명 동안 도구를 계속 사용할 수 있으며 `with` 블록이 필요하지 않습니다.
+</TabItem>
+</Tabs>
+
+AgentCore 세션 ID는 두 프레임워크 모두에서 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더를 통해 MCP 서버로 자동으로 전파되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
 
 ## 인프라
 
@@ -130,24 +156,6 @@ resource "aws_iam_policy" "agent_invoke_mcp" {
 resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
   role       = module.story_agent.agent_core_runtime_role_arn
   policy_arn = aws_iam_policy.agent_invoke_mcp.arn
-}
-```
-
-MCP 서버의 AgentCore 런타임 ARN은 생성된 Terraform 모듈에 의해 <Link path="guides/runtime-config">Runtime Configuration</Link>의 `agentcore` 네임스페이스에 자동으로 등록되므로 에이전트가 런타임에 이를 검색할 수 있습니다.
-</Fragment>
-</Infrastructure>
-
-## 로컬 개발
-
-생성기는 에이전트의 `serve-local` 대상을 다음과 같이 구성합니다:
-1. 연결된 MCP 서버를 자동으로 시작
-2. `SERVE_LOCAL=true`를 설정하여 생성된 클라이언트가 AgentCore 대신 직접 HTTP 전송을 사용하도록 함
-
-다음 명령으로 에이전트를 로컬에서 실행합니다:
-
-<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
-
-이렇게 하면 에이전트와 연결된 모든 MCP 서버가 시작되며, 에이전트는 할당된 로컬 포트에서 HTTP를 통해 MCP 서버에 직접 연결됩니다.되며, 에이전트는 할당된 로컬 포트에서 HTTP를 통해 MCP 서버에 직접 연결됩니다.invoke_mcp.arn
 }
 ```
 
