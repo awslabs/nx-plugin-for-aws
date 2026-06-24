@@ -25,12 +25,22 @@ export const addPyAgentTargetToServeLocal = async (
   targetProjectName: string,
   options: PyAgentServeLocalOptions,
 ) => {
+  // AG-UI clients POST to the runtime config URL directly, so it must point at
+  // the agent's `/invocations` endpoint. HTTP agents go through the generated
+  // OpenAPI client, which appends the `/invocations` operation path itself, so
+  // its base URL must omit it (otherwise the request hits `/invocations/invocations`).
+  const protocol = (options.targetComponent?.protocol ?? 'http').toLowerCase();
+  const localUrl =
+    protocol === 'ag-ui'
+      ? `http://localhost:${options.port}/invocations`
+      : `http://localhost:${options.port}`;
+
   await addAgentTargetToServeLocal(tree, sourceProjectName, targetProjectName, {
     agentNameClassName: options.agentNameClassName,
     port: options.port,
     targetComponent: options.targetComponent,
     runtimeConfigNamespace: 'agentRuntimes',
-    localUrl: `http://localhost:${options.port}/invocations`,
+    localUrl,
     additionalDependencyTargets: options.additionalDependencyTargets,
   });
 };
