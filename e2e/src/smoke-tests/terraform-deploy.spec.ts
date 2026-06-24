@@ -176,10 +176,14 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             outputs.ts_agent_arn,
             'TypeScript Agent',
           );
-          // Python LangChain (AG-UI) agent — assert a streamed AG-UI response.
+          // Python LangChain agents across all three protocols.
           await invokeAgentCoreAgUi(
             outputs.py_langchain_agent_arn,
-            'Python LangChain Agent',
+            'Python LangChain Agent (AG-UI)',
+          );
+          await invokeAgentCoreAgent(
+            outputs.py_langchain_http_agent_arn,
+            'Python LangChain Agent (HTTP)',
           );
 
           // A2A (direct)
@@ -190,6 +194,10 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeAgentCoreA2a(
             outputs.py_a2a_agent_arn,
             'Python A2A Agent',
+          );
+          await invokeAgentCoreA2a(
+            outputs.py_langchain_a2a_agent_arn,
+            'Python LangChain A2A Agent',
           );
 
           // A2A via delegate tool (host agent -> A2A target)

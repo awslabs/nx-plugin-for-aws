@@ -1,0 +1,79 @@
+import uuid
+
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from fastapi import Request
+from langchain_core.messages import AIMessageChunk
+from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+
+from .agent import get_agent
+from .init import JsonStreamingResponse, app
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+_graph = get_agent()
+
+
+class InvokeInput(BaseModel):
+    message: str = Field(max_length=100000)
+
+
+class StreamChunk(BaseModel):
+    content: str
+
+
+def _text(chunk: AIMessageChunk) -> str:
+    if isinstance(chunk.content, str):
+        return chunk.content
+    return "".join(
+        part.get("text", "")
+        for part in chunk.content
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler for agent invocation"""
+    config = {"configurable": {"thread_id": get_current_session_id() or "default"}}
+    async for token, _meta in _graph.astream(
+        {"messages": [{"role": "user", "content": input.message}]},
+        config,
+        stream_mode="messages",
+    ):
+        if isinstance(token, AIMessageChunk):
+            text = _text(token)
+            if text:
+                yield StreamChunk(content=text)
+
+
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    """Entry point for agent invocation"""
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app.add_middleware(_SessionIdMiddleware)
+
+
+@app.get("/ping")
+def ping() -> str:
+    return PingStatus.HEALTHY
+
+
+if __name__ == "__main__":
+    uvicorn.run("<%- moduleName %>.<%- agentNameSnakeCase %>.main:app", port=8080)

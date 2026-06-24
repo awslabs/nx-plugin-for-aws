@@ -167,10 +167,18 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
-  // Python LangChain agent (AG-UI only), deployed on AgentCore so the smoke
-  // tests cover building, bundling and deploying a langchain agent runtime.
+  // Python LangChain agents across all three protocols, deployed on AgentCore so
+  // the smoke tests cover building, bundling and deploying a langchain runtime.
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=agentcore --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-http-agent --framework=langchain --protocol=http --infra=agentcore --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-a2a-agent --framework=langchain --protocol=a2a --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -341,6 +349,11 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-mcp-server --targetProject=my_py_table --no-interactive`,
+    opts,
+  );
+  // LangChain agent -> DynamoDB table (framework-agnostic workspace + serve-local wiring).
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-http-agent --targetProject=my_py_table --no-interactive`,
     opts,
   );
 

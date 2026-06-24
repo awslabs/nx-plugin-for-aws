@@ -12,6 +12,8 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { ensureLicenseExceptions } from '../../license/config';
+import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
   addPythonFrameworkBase,
@@ -26,8 +28,6 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
-import { ensureLicenseExceptions } from '../../license/config';
-import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -96,18 +96,6 @@ export const pyAgentGenerator = async (
   const protocol = options.protocol ?? 'http';
   const framework = options.framework ?? 'strands';
 
-  // The langchain framework currently ships only an AG-UI server template. The
-  // http and a2a server templates are Strands-specific by construction (http's
-  // main.py consumes a contextmanager yielding a strands.Agent; a2a uses
-  // strands.multiagent.a2a.A2AServer), and create_agent returns a compiled
-  // LangGraph graph that is incompatible with those. Fail fast rather than emit
-  // a Strands server over langchain dependencies.
-  if (framework === 'langchain' && protocol !== 'ag-ui') {
-    throw new Error(
-      `The 'langchain' framework currently supports only the 'ag-ui' protocol (got '${protocol}').`,
-    );
-  }
-
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
       'Warning: auth is ignored when no infrastructure is configured (no infrastructure is generated)',
@@ -170,12 +158,12 @@ export const pyAgentGenerator = async (
     );
   }
 
-  // Generate protocol-specific files. The ag-ui server is framework-specific
-  // (Strands has create_strands_app; langchain hand-rolls the FastAPI loop over
-  // ag_ui_langgraph). http and a2a are Strands-only (guarded above).
+  // Generate protocol-specific files. Each protocol's server entry point is
+  // framework-specific (Strands drives a strands.Agent; LangChain drives a
+  // compiled create_agent graph), so it comes from a per-framework dir.
   const protocolTemplateDir =
-    protocol === 'ag-ui' && framework === 'langchain'
-      ? 'ag-ui-langchain'
+    framework === 'langchain'
+      ? `${protocol.toLowerCase()}-langchain`
       : protocol.toLowerCase();
   generateFiles(
     tree,
@@ -184,6 +172,18 @@ export const pyAgentGenerator = async (
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+  // The langchain HTTP server reuses the framework-agnostic FastAPI scaffold
+  // (init.py: JsonStreamingResponse + the app the OpenAPI client is generated
+  // from), so emit it alongside the langchain main.py.
+  if (framework === 'langchain' && protocol === 'http') {
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'http'),
+      targetSourceDir,
+      templateContext,
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+  }
 
   addDependenciesToPyProjectToml(tree, project.root, [
     'aws-lambda-powertools',
@@ -193,15 +193,18 @@ export const pyAgentGenerator = async (
     'fastapi',
     'mcp',
     ...(framework === 'langchain'
-      ? // langchain is restricted to ag-ui (guarded above) and pulls no
-        // Strands dependencies — the LangGraph AG-UI adapter + the langchain
-        // model binding only.
+      ? // LangChain agents drive a compiled create_agent graph and pull no
+        // Strands dependencies. ag-ui adds the LangGraph AG-UI adapter; a2a adds
+        // the a2a SDK server.
         ([
-          'ag-ui-protocol',
-          'ag-ui-langgraph',
           'langchain',
           'langchain-aws',
           'langgraph',
+          ...(protocol === 'ag-ui'
+            ? (['ag-ui-protocol', 'ag-ui-langgraph'] as const)
+            : protocol === 'a2a'
+              ? (['a2a-sdk[http-server]'] as const)
+              : ([] as const)),
         ] as const)
       : protocol === 'a2a'
         ? (['strands-agents[a2a]', 'strands-agents-tools'] as const)

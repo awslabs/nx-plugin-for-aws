@@ -137,6 +137,7 @@ export const withVersions = (deps: ITsDepVersion[]) =>
  */
 export const PY_VERSIONS = {
   'a2a-sdk': '==0.3.26',
+  'a2a-sdk[http-server]': '==0.3.26',
   'ag-ui-langgraph': '==0.0.42',
   'ag-ui-protocol': '==0.1.19',
   'ag-ui-strands': '==0.2.1',

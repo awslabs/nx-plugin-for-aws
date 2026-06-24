@@ -1,0 +1,94 @@
+import logging
+import os
+import uuid
+
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.apps import A2AStarletteApplication
+from a2a.server.events import EventQueue
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
+from a2a.types import AgentCapabilities, AgentCard, Part, TextPart
+from fastapi import FastAPI, Request
+from langchain_core.messages import AIMessageChunk
+from starlette.middleware.base import BaseHTTPMiddleware
+from <%- agentConnectionModuleName %> import session_id_context
+
+from .agent import get_agent
+
+logging.basicConfig(level=logging.INFO)
+
+PORT = int(os.environ.get("PORT", "9000"))
+RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+_graph = get_agent()
+
+
+def _text(chunk: AIMessageChunk) -> str:
+    if isinstance(chunk.content, str):
+        return chunk.content
+    return "".join(
+        part.get("text", "")
+        for part in chunk.content
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+class <%= agentNameClassName %>Executor(AgentExecutor):
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        await updater.submit()
+        await updater.start_work()
+        config = {"configurable": {"thread_id": context.context_id or "default"}}
+        reply = ""
+        async for token, _meta in _graph.astream(
+            {"messages": [{"role": "user", "content": context.get_user_input()}]},
+            config,
+            stream_mode="messages",
+        ):
+            if isinstance(token, AIMessageChunk):
+                reply += _text(token)
+        await updater.add_artifact([Part(TextPart(kind="text", text=reply))])
+        await updater.complete()
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        raise Exception("cancel not supported")
+
+
+agent_card = AgentCard(
+    name="<%= agentNameClassName %>",
+    description="A LangChain/LangGraph Agent exposed via the Agent-to-Agent (A2A) protocol.",
+    url=RUNTIME_URL,
+    version="1.0.0",
+    capabilities=AgentCapabilities(streaming=True),
+    default_input_modes=["text"],
+    default_output_modes=["text"],
+    skills=[],
+)
+
+request_handler = DefaultRequestHandler(
+    agent_executor=<%= agentNameClassName %>Executor(),
+    task_store=InMemoryTaskStore(),
+)
+a2a_app = A2AStarletteApplication(agent_card=agent_card, http_handler=request_handler).build()
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app = FastAPI()
+app.add_middleware(_SessionIdMiddleware)
+
+
+@app.get("/ping")
+def ping() -> dict[str, str]:
+    return {"status": "Healthy"}
+
+
+app.mount("/", a2a_app)
