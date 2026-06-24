@@ -179,12 +179,15 @@ describe('smoke test - cdk-deploy', () => {
         findOutput('TsAgentArn'),
         'TypeScript Agent',
       );
-      // Python LangChain (AG-UI) agent — POST a RunAgentInput to /invocations
-      // and assert a streamed AG-UI response (no RUN_ERROR). Proves a deployed
-      // langchain agent runtime boots and serves over the AG-UI protocol.
+      // Python LangChain agents across all three protocols — proves a deployed
+      // langchain runtime boots and serves over each protocol.
       await invokeAgentCoreAgUi(
         findOutput('PyLangchainAgentArn'),
-        'Python LangChain Agent',
+        'Python LangChain Agent (AG-UI)',
+      );
+      await invokeAgentCoreAgent(
+        findOutput('PyLangchainHttpAgentArn'),
+        'Python LangChain Agent (HTTP)',
       );
 
       // A2A agents — invoke via the A2A JSON-RPC message/send method over
@@ -194,6 +197,10 @@ describe('smoke test - cdk-deploy', () => {
         'TypeScript A2A Agent',
       );
       await invokeAgentCoreA2a(findOutput('PyA2aAgentArn'), 'Python A2A Agent');
+      await invokeAgentCoreA2a(
+        findOutput('PyLangchainA2aAgentArn'),
+        'Python LangChain A2A Agent',
+      );
 
       // A2A connection generators — the HTTP host agents have vended A2A
       // clients for each A2A target, and the Agent tools array has the

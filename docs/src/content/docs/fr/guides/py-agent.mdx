@@ -16,7 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 Générer un agent IA Python pour créer des agents avec des outils, et optionnellement le déployer sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Choisissez le framework d'agent avec l'option `framework` : [Strands](https://strandsagents.com/) (par défaut) ou [LangChain](https://docs.langchain.com/oss/python/langchain/overview) (basé sur [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)).
 
-Le générateur expose votre agent via un `protocol` de serveur. Les agents Strands supportent [HTTP](https://fastapi.tiangolo.com/) (par défaut), le protocole [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) pour l'interopérabilité avec d'autres agents compatibles A2A, et le protocole [AG-UI](https://docs.ag-ui.com/) pour une intégration frontend directe via [CopilotKit](https://docs.copilotkit.ai/). Les agents LangChain supportent le protocole `ag-ui`.
+Le générateur expose votre agent via un `protocol` de serveur. Les deux frameworks supportent [HTTP](https://fastapi.tiangolo.com/) (par défaut), le protocole [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) pour l'interopérabilité avec d'autres agents compatibles A2A, et le protocole [AG-UI](https://docs.ag-ui.com/) pour une intégration frontend directe via [CopilotKit](https://docs.copilotkit.ai/).
 
 ## Utilisation
 
@@ -55,10 +55,10 @@ Le générateur ajoutera les fichiers suivants à votre projet Python existant. 
 </FileTree>
 </OptionFilter>
 
-<OptionFilter when={{ protocol: 'a2a' }} description="Strands A2A server layout">
+<OptionFilter when={{ protocol: 'a2a' }} description="A2A server layout">
 ### Protocole A2A
 
-Le point d'entrée utilise le [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) au lieu de FastAPI :
+Le point d'entrée expose votre agent via le protocole A2A (Strands utilise le [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) ; LangChain enveloppe le graphe dans un exécuteur [`a2a-sdk`](https://a2a-protocol.org/)), monté sur une application FastAPI :
 
 <FileTree>
   - your-project/
@@ -68,7 +68,7 @@ Le point d'entrée utilise le [Strands A2A Server](https://strandsagents.com/doc
         - agent.py Définition principale de l'agent avec des outils exemples
         - main.py Point d'entrée du serveur A2A
         - Dockerfile Point d'entrée pour héberger votre agent (exclu si `infra` est `None`)
-    - pyproject.toml Mis à jour avec les dépendances Strands
+    - pyproject.toml Mis à jour avec les dépendances du framework et A2A
     - project.json Mis à jour avec les cibles de service de l'agent
 </FileTree>
 </OptionFilter>
@@ -277,14 +277,12 @@ Pour un guide plus détaillé sur l'écriture d'agents, consultez la documentati
 Le protocole serveur de votre agent détermine comment il communique. Toutes les options sont servies par [FastAPI](https://fastapi.tiangolo.com/) — le point d'entrée diffère :
 
 - **HTTP** (par défaut) : Un serveur FastAPI standard avec un point de terminaison `/invocations` personnalisé, CORS et streaming. Idéal pour les intégrations client personnalisées.
-- **A2A** : Le [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) monté sur une application FastAPI. Idéal lorsque votre agent doit être découvrable et invocable par d'autres agents compatibles A2A.
-- **AG-UI** : L'intégration [ag-ui-strands](https://docs.ag-ui.com/), qui expose le [protocole AG-UI](https://docs.ag-ui.com/) via SSE. Idéal pour une intégration frontend directe avec [CopilotKit](https://docs.copilotkit.ai/) dans un site web React.
+- **A2A** : Un serveur [Agent-to-Agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) monté sur une application FastAPI (Strands utilise le [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) ; LangChain utilise le [`a2a-sdk`](https://a2a-protocol.org/) indépendant du framework). Idéal lorsque votre agent doit être découvrable et invocable par d'autres agents compatibles A2A.
+- **AG-UI** : Le [protocole AG-UI](https://docs.ag-ui.com/) via SSE (Strands utilise `ag-ui-strands` ; LangChain utilise `ag-ui-langgraph`). Idéal pour une intégration frontend directe avec [CopilotKit](https://docs.copilotkit.ai/) dans un site web React.
+
+Le point d'entrée du serveur diffère selon le framework (Strands génère un `Agent` géré par contexte, tandis que LangChain pilote un graphe `create_agent` compilé), mais le contrat externe pour chaque protocole est le même.
 
 Tous les protocoles exposent `/ping` pour le contrat de vérification de santé du runtime AgentCore. Les agents A2A écoutent sur le port `9000` ; les agents HTTP et AG-UI écoutent sur le port `8080`. Le Dockerfile et l'infrastructure générés sont configurés pour vous.
-
-:::note[LangChain supporte uniquement AG-UI]
-Le framework `langchain` ne supporte actuellement que le protocole `ag-ui`. Choisissez le framework `strands` par défaut si vous avez besoin du protocole `http` ou `a2a`.
-:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## Serveur FastAPI (protocole HTTP)
@@ -373,9 +371,9 @@ Le générateur fournissant une infrastructure CDK ou Terraform pour déployer v
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
 ## Serveur A2A (protocole A2A)
 
-Le fichier `main.py` généré monte `A2AServer.to_fastapi_app()` sur une application FastAPI parente qui expose également `/ping`. Lorsqu'il est déployé sur AgentCore, le point d'entrée résout l'ARN public du runtime depuis AppConfig et l'annonce dans la carte d'agent.
+Le fichier `main.py` généré monte un serveur A2A sur une application FastAPI parente qui expose également `/ping`. Les agents Strands utilisent le `A2AServer` de Strands ; les agents LangChain enveloppent le graphe compilé dans un `AgentExecutor` [`a2a-sdk`](https://a2a-protocol.org/). Lorsqu'il est déployé sur AgentCore, le point d'entrée résout l'ARN public du runtime à partir d'AppConfig et l'annonce dans la carte d'agent.
 
-La plupart des utilisateurs n'auront pas besoin de modifier ce fichier — éditez `agent.py` pour changer les outils ou le prompt système. Le serveur A2A remplit la carte d'agent (`/.well-known/agent-card.json`) à partir du `name` et de la `description` du constructeur `Agent`.
+La plupart des utilisateurs n'auront pas besoin de modifier ce fichier ; éditez `agent.py` pour changer les outils ou le prompt système. Le serveur A2A remplit la carte d'agent (`/.well-known/agent-card.json`) à partir du `name` et de la `description` de l'agent.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI / CopilotKit server details">

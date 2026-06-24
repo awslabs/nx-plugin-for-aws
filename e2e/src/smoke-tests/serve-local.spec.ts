@@ -322,6 +322,15 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=none --no-interactive`,
         opts,
       );
+      // LangChain HTTP + A2A agents exercise the other two server templates.
+      await runCLI(
+        `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-http-agent --framework=langchain --protocol=http --infra=none --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-a2a-agent --framework=langchain --protocol=a2a --infra=none --no-interactive`,
+        opts,
+      );
       await runCLI(
         `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-py-mcp --infra=none --no-interactive`,
         opts,
@@ -520,11 +529,15 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         writeFileSync(file, content);
       }
 
-      // Patch the Python LangChain agent to use the OpenAI mock. LangChain builds
+      // Patch the Python LangChain agents to use the OpenAI mock. LangChain builds
       // a ChatBedrockConverse model (not a strands Agent), so swap it for a
       // langchain ChatOpenAI pointed at the mock's OpenAI-compatible endpoint.
-      {
-        const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/my_py_langchain_agent/agent.py`;
+      for (const dir of [
+        'my_py_langchain_agent',
+        'my_py_langchain_http_agent',
+        'my_py_langchain_a2a_agent',
+      ]) {
+        const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/${dir}/agent.py`;
         let content = readFileSync(file, 'utf-8');
         content = `from langchain_openai import ChatOpenAI\n${content}`;
         content = content.replace(
@@ -601,6 +614,16 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           projectRoot,
           'packages/py_project/project.json',
           'my-py-langchain-agent-serve-local',
+        ),
+        pyLangchainHttp: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_project/project.json',
+          'my-py-langchain-http-agent-serve-local',
+        ),
+        pyLangchainA2a: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_project/project.json',
+          'my-py-langchain-a2a-agent-serve-local',
         ),
         pyMcp: getPortFromProjectJson(
           projectRoot,
@@ -1274,6 +1297,96 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await chatStreamsReply(
       projectRoot,
       'serve_local_test.py_project:my-py-langchain-agent-chat',
+      'The answer is 42',
+      STARTUP_TIMEOUT_MS,
+    );
+    await stopLast();
+  });
+
+  it('Python LangChain HTTP Agent - JSONL streaming invoke', async () => {
+    await startAndWait(
+      'serve_local_test.py_project:my-py-langchain-http-agent-serve-local',
+      ports.pyLangchainHttp,
+    );
+
+    const pingRes = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainHttp}/ping`,
+    );
+    expect(pingRes.status).toBe(200);
+
+    const res = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainHttp}/invocations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'What is 3 times 5?' }),
+      },
+    );
+    const body = await res.text();
+    const chunks = body
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    console.log(
+      `Python LangChain HTTP streamed ${chunks.length} JSONL chunks:`,
+      chunks.map((c) => c.content).join(''),
+    );
+    expect(res.status).toBe(200);
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks[0]).toHaveProperty('content');
+
+    await chatStreamsReply(
+      projectRoot,
+      'serve_local_test.py_project:my-py-langchain-http-agent-chat',
+      'The answer is 42',
+      STARTUP_TIMEOUT_MS,
+    );
+    await stopLast();
+  });
+
+  it('Python LangChain A2A Agent - card + streaming message', async () => {
+    await startAndWait(
+      'serve_local_test.py_project:my-py-langchain-a2a-agent-serve-local',
+      ports.pyLangchainA2a,
+    );
+
+    const cardRes = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainA2a}/.well-known/agent-card.json`,
+    );
+    const card = await cardRes.json();
+    expect(card.name).toBeDefined();
+
+    const streamRes = await fetch(`http://127.0.0.1:${ports.pyLangchainA2a}/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: '1',
+        method: 'message/stream',
+        params: {
+          message: {
+            messageId: 'msg-1',
+            role: 'user',
+            parts: [{ kind: 'text', text: 'What is 3 times 5?' }],
+          },
+        },
+      }),
+    });
+    const streamBody = await streamRes.text();
+    console.log(
+      `Python LangChain A2A stream (${streamRes.status}, ${streamBody.length} bytes):`,
+      streamBody.slice(0, 200),
+    );
+    expect(streamRes.status).toBe(200);
+    expect(streamBody).toContain('data:');
+
+    await chatStreamsReply(
+      projectRoot,
+      'serve_local_test.py_project:my-py-langchain-a2a-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
