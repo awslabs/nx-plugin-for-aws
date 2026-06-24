@@ -12,14 +12,13 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
-  addPythonClientToAgent,
   addPythonCoreClient,
-  addPythonLangchainClientToAgent,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
+  PY_MCP_FAMILY_CONNECTIONS,
   resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
@@ -74,11 +73,11 @@ export const pyAgentMcpConnectionGenerator = async (
   const mcpServerSnakeCase = snakeCase(mcpServerClassName);
   const mcpServerPort = mcpComponent.port ?? 8000;
 
-  // The transform applied to agent.py depends on the source agent's framework:
-  // Strands enters a context-managed MCPClient and spreads list_tools_sync();
-  // LangChain loads BaseTools and spreads them into create_agent(...).
+  // The source agent's framework selects the client shape, dependencies and the
+  // agent.py transform — see PY_MCP_FAMILY_CONNECTIONS (keyed by framework, not a
+  // boolean, so a third framework is an additive entry there).
   const framework = resolveAgentFramework(agentComponent.framework);
-  const isLangchain = framework === 'langchain';
+  const connection = PY_MCP_FAMILY_CONNECTIONS[framework];
 
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    MCP core client (framework Layer-2) and its shared SigV4 auth helper.
@@ -89,16 +88,13 @@ export const pyAgentMcpConnectionGenerator = async (
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Python deps required by the MCP core client + shared auth helper.
-  // Layer 0/1 deps for the MCP transport + signed httpx auth. The Strands
-  // Layer-2 client uses the strands MCPClient (strands-agents, added by
-  // addPythonCoreClient); the LangChain Layer-2 client uses
-  // langchain-mcp-adapters and must not pull Strands in.
+  // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
+  // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
     'mcp',
-    ...(isLangchain ? (['langchain-mcp-adapters'] as const) : ([] as const)),
+    ...connection.deps,
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -109,15 +105,7 @@ export const pyAgentMcpConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    isLangchain
-      ? joinPathFragments(
-          __dirname,
-          'files',
-          'langchain',
-          'agent-connection',
-          'app',
-        )
-      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    joinPathFragments(__dirname, 'files', connection.appTemplateSubdir),
     appDir,
     {
       mcpServerSnakeCase,
@@ -140,13 +128,11 @@ export const pyAgentMcpConnectionGenerator = async (
     agentConnectionModuleName,
     '__init__.py',
   );
-  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
-  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${mcpServerSnakeCase}_client_${clientModuleSuffix}`,
-    `${mcpServerClassName}Client${clientSuffix}`,
+    `.app.${mcpServerSnakeCase}_client_${connection.clientModuleSuffix}`,
+    `${mcpServerClassName}Client${connection.clientClassSuffix}`,
   );
 
   // 3. Transform agent.py to add MCP client import and usage
@@ -157,7 +143,7 @@ export const pyAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}Client${clientSuffix}`;
+    const clientClassName = `${mcpServerClassName}Client${connection.clientClassSuffix}`;
     const clientVarName = mcpServerSnakeCase;
 
     await addPythonDestructuredImport(
@@ -166,21 +152,12 @@ export const pyAgentMcpConnectionGenerator = async (
       [clientClassName],
       agentConnectionModuleName,
     );
-    if (isLangchain) {
-      await addPythonLangchainClientToAgent(
-        tree,
-        agentFilePath,
-        clientClassName,
-        clientVarName,
-      );
-    } else {
-      await addPythonClientToAgent(
-        tree,
-        agentFilePath,
-        clientClassName,
-        clientVarName,
-      );
-    }
+    await connection.wireClientIntoAgent(
+      tree,
+      agentFilePath,
+      clientClassName,
+      clientVarName,
+    );
   }
 
   // 4. Add workspace dependency from agent project to agent-connection project

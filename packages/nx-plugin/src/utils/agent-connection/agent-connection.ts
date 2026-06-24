@@ -540,7 +540,7 @@ export async function addTypeScriptClientToAgent(
  * connection generators — the client class must expose a static `create()`
  * returning a context manager with `list_tools_sync()` (e.g. an `MCPClient`).
  */
-export async function addPythonClientToAgent(
+async function addPythonClientToAgent(
   tree: Tree,
   agentFilePath: string,
   clientClassName: string,
@@ -662,7 +662,7 @@ const addPythonClientToGetAgent = async (
  * tools stay usable after `get_agent` returns — no `with` block is needed.
  * Mirrors {@link addPythonClientToAgent} for the Strands shape.
  */
-export async function addPythonLangchainClientToAgent(
+async function addPythonLangchainClientToAgent(
   tree: Tree,
   agentFilePath: string,
   clientClassName: string,
@@ -734,6 +734,89 @@ const addPythonLangchainClientToGetAgent = async (
     ${clientVarName} = ${clientClassName}.create()
     $body\``),
   );
+};
+
+/**
+ * Per-framework naming + template layout for a Python per-connection client.
+ * Every py#agent connection generator (mcp, gateway, a2a) names its client
+ * class `<Name>Client<suffix>`, its module `<name>_client_<suffix>`, and reads
+ * the per-connection app-client template from a per-framework sub-path of its
+ * own `files/` dir — all of which vary only by framework, so they live here as
+ * one source of truth.
+ *
+ * Keyed by {@link AgentFramework} rather than a boolean so a third framework is
+ * an additive entry here — never another `if (isLangchain)` branch in each
+ * generator.
+ */
+export interface PyClientNaming {
+  /** Class-name suffix on the per-connection app client (`<Name>Client<suffix>`). */
+  clientClassSuffix: string;
+  /** Module/file-name suffix on the per-connection app client (`<name>_client_<suffix>`). */
+  clientModuleSuffix: string;
+  /**
+   * Sub-path, under a connection generator's `files/` dir, of the per-connection
+   * app client template for this framework. Every connection generator lays its
+   * templates out the same way, so this resolves against any of them.
+   */
+  appTemplateSubdir: string;
+}
+
+export const PY_CLIENT_NAMING: Record<AgentFramework, PyClientNaming> = {
+  strands: {
+    clientClassSuffix: 'Strands',
+    clientModuleSuffix: 'strands',
+    appTemplateSubdir: joinPathFragments('agent-connection', 'app'),
+  },
+  langchain: {
+    clientClassSuffix: 'LangChain',
+    clientModuleSuffix: 'langchain',
+    appTemplateSubdir: joinPathFragments(
+      'langchain',
+      'agent-connection',
+      'app',
+    ),
+  },
+};
+
+/**
+ * How an MCP-family connection (an MCP server or an AgentCore Gateway, both of
+ * which expose tools over MCP) is wired into a Python agent of a given
+ * framework. The mcp-connection and gateway-connection generators share this:
+ * they differ only in the metadata of the thing being connected, not in how
+ * the framework's client is shaped or spliced into agent.py. A2A connections
+ * wire tools differently, so they reuse only {@link PY_CLIENT_NAMING}.
+ */
+export interface PyMcpFamilyConnection extends PyClientNaming {
+  /** Extra Python deps this framework's MCP-family client needs (beyond the shared transport). */
+  deps: IPyDepVersion[];
+  /**
+   * Splice the per-connection client into the agent's `get_agent` in agent.py.
+   * Strands enters a context-managed `MCPClient` and spreads `list_tools_sync()`;
+   * LangChain loads `BaseTool`s and spreads them into `create_agent(...)`.
+   */
+  wireClientIntoAgent: (
+    tree: Tree,
+    agentFilePath: string,
+    clientClassName: string,
+    clientVarName: string,
+  ) => Promise<void>;
+}
+
+export const PY_MCP_FAMILY_CONNECTIONS: Record<
+  AgentFramework,
+  PyMcpFamilyConnection
+> = {
+  strands: {
+    ...PY_CLIENT_NAMING.strands,
+    deps: [],
+    wireClientIntoAgent: addPythonClientToAgent,
+  },
+  langchain: {
+    ...PY_CLIENT_NAMING.langchain,
+    // langchain-mcp-adapters backs the LangChain client; it must not pull Strands in.
+    deps: ['langchain-mcp-adapters'],
+    wireClientIntoAgent: addPythonLangchainClientToAgent,
+  },
 };
 
 /**

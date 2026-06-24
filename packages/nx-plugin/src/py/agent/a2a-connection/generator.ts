@@ -19,6 +19,7 @@ import {
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
+  PY_CLIENT_NAMING,
   resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import {
@@ -39,6 +40,7 @@ import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
+import type { IPyDepVersion } from '../../../utils/versions';
 import type { PyAgentA2aConnectionGeneratorSchema } from './schema';
 
 /** Prefix a GritQL pattern with `language python` */
@@ -54,6 +56,16 @@ const TOOL_IMPORT_MODULE: Record<AgentFramework, string> = {
 const AGENT_CONSTRUCTOR: Record<AgentFramework, string> = {
   strands: 'yield Agent($_)',
   langchain: 'create_agent($_)',
+};
+
+/**
+ * The A2A transport dependency each framework's Layer-2 client needs. Strands
+ * wraps strands' `A2AAgent` (strands-agents[a2a]); LangChain drives the a2a SDK
+ * directly (a2a-sdk) and must not pull Strands in.
+ */
+const A2A_TRANSPORT_DEP: Record<AgentFramework, IPyDepVersion> = {
+  strands: 'strands-agents[a2a]',
+  langchain: 'a2a-sdk',
 };
 
 export const PY_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -101,15 +113,15 @@ export const pyAgentA2aConnectionGenerator = async (
   const targetAgentSnakeCase = snakeCase(targetAgentClassName);
   const targetAgentPort = targetAgentComponent.port ?? 9000;
 
-  // The transform applied to agent.py depends on the source agent's framework.
-  // Both register the remote A2A agent as a tool, anchored on the framework's
-  // agent constructor + `@tool` import, and each wraps a framework-specific A2A
-  // Layer-2 client (Strands' A2AAgent vs an a2a-sdk-only client) over the shared
-  // framework-agnostic A2A client config.
+  // The source agent's framework drives everything that varies: the client
+  // naming + app template (shared with the mcp/gateway generators via
+  // PY_CLIENT_NAMING), the A2A transport dep (see A2A_TRANSPORT_DEP), and the
+  // agent.py transform below. Each framework wraps its own A2A Layer-2 client
+  // (Strands' A2AAgent vs an a2a-sdk-only client) over the shared,
+  // framework-agnostic A2A client config. Keyed on the framework, not a
+  // boolean, so a third framework stays additive.
   const framework = resolveAgentFramework(agentComponent.framework);
-  const isLangchain = framework === 'langchain';
-  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
-  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
+  const naming = PY_CLIENT_NAMING[framework];
 
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    A2A core client (framework Layer-2) and its shared SigV4 auth helper.
@@ -120,16 +132,12 @@ export const pyAgentA2aConnectionGenerator = async (
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Layer 0/1 deps for the A2A client config + shared auth helper. The Strands
-  // Layer-2 client wraps strands' `A2AAgent` (strands-agents[a2a]); the LangChain
-  // Layer-2 client drives the a2a SDK directly (a2a-sdk) and must not pull
-  // Strands in.
+  // A2A client config + shared auth helper deps, plus the framework's A2A
+  // transport dep (see A2A_TRANSPORT_DEP).
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
-    ...(isLangchain
-      ? (['a2a-sdk'] as const)
-      : (['strands-agents[a2a]'] as const)),
+    A2A_TRANSPORT_DEP[framework],
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -140,15 +148,7 @@ export const pyAgentA2aConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    isLangchain
-      ? joinPathFragments(
-          __dirname,
-          'files',
-          'langchain',
-          'agent-connection',
-          'app',
-        )
-      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    joinPathFragments(__dirname, 'files', naming.appTemplateSubdir),
     appDir,
     {
       targetAgentSnakeCase,
@@ -174,8 +174,8 @@ export const pyAgentA2aConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${targetAgentSnakeCase}_client_${clientModuleSuffix}`,
-    `${targetAgentClassName}Client${clientSuffix}`,
+    `.app.${targetAgentSnakeCase}_client_${naming.clientModuleSuffix}`,
+    `${targetAgentClassName}Client${naming.clientClassSuffix}`,
   );
 
   // 3. Transform agent.py to add the A2A client import + wrap it as a tool
@@ -186,7 +186,7 @@ export const pyAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}Client${clientSuffix}`;
+    const clientClassName = `${targetAgentClassName}Client${naming.clientClassSuffix}`;
     const clientVarName = targetAgentSnakeCase;
     const toolName = `ask_${targetAgentSnakeCase}`;
 
