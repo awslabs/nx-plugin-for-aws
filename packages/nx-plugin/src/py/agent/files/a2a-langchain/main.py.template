@@ -6,13 +6,13 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, Part, TextPart
-from a2a.utils import new_task
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import AgentCapabilities, AgentCard
+from a2a.utils.message import new_agent_text_message
 from fastapi import FastAPI, Request
-from langchain_core.messages import AIMessageChunk
 from starlette.middleware.base import BaseHTTPMiddleware
-from <%- agentConnectionModuleName %> import session_id_context
+
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
 
 from .agent import get_agent
 
@@ -21,60 +21,43 @@ logging.basicConfig(level=logging.INFO)
 PORT = int(os.environ.get("PORT", "9000"))
 RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+DEFAULT_MODES = ["text/plain"]
 
 _graph = get_agent()
 
 
-def _text(chunk: AIMessageChunk) -> str:
-    if isinstance(chunk.content, str):
-        return chunk.content
-    return "".join(
-        part.get("text", "")
-        for part in chunk.content
-        if isinstance(part, dict) and part.get("type") == "text"
-    )
-
-
-class <%= agentNameClassName %>Executor(AgentExecutor):
+class _GraphAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        if context.message is None:
-            raise ValueError("A2A request is missing a message")
-        task = context.current_task or new_task(context.message)
-        await event_queue.enqueue_event(task)
-        updater = TaskUpdater(event_queue, task.id, task.context_id)
-        await updater.start_work()
-        config = {"configurable": {"thread_id": task.context_id}}
-        reply = ""
-        async for token, _meta in _graph.astream(
+        # The session bound by the middleware drives the LangGraph thread, keeping
+        # checkpointed conversation state separate per caller session.
+        session_id = get_current_session_id() or context.context_id or str(uuid.uuid4())
+        result = await _graph.ainvoke(
             {"messages": [{"role": "user", "content": context.get_user_input()}]},
-            config,
-            stream_mode="messages",
-        ):
-            if isinstance(token, AIMessageChunk):
-                reply += _text(token)
-        await updater.add_artifact([Part(TextPart(kind="text", text=reply))])
-        await updater.complete()
+            {"configurable": {"thread_id": session_id}},
+        )
+        await event_queue.enqueue_event(new_agent_text_message(result["messages"][-1].content))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        raise Exception("cancel not supported")
+        raise NotImplementedError("Cancellation is not supported.")
 
 
-agent_card = AgentCard(
+_handler = DefaultRequestHandler(
+    agent_executor=_GraphAgentExecutor(),
+    task_store=InMemoryTaskStore(),
+)
+
+_agent_card = AgentCard(
     name="<%= agentNameClassName %>",
     description="A LangChain/LangGraph Agent exposed via the Agent-to-Agent (A2A) protocol.",
     url=RUNTIME_URL,
     version="1.0.0",
-    capabilities=AgentCapabilities(streaming=True),
-    default_input_modes=["text"],
-    default_output_modes=["text"],
+    default_input_modes=DEFAULT_MODES,
+    default_output_modes=DEFAULT_MODES,
+    capabilities=AgentCapabilities(streaming=False),
     skills=[],
 )
 
-request_handler = DefaultRequestHandler(
-    agent_executor=<%= agentNameClassName %>Executor(),
-    task_store=InMemoryTaskStore(),
-)
-a2a_app = A2AStarletteApplication(agent_card=agent_card, http_handler=request_handler).build()
+a2a_app = A2AStarletteApplication(agent_card=_agent_card, http_handler=_handler).build()
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
@@ -86,7 +69,7 @@ class _SessionIdMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 
-app = FastAPI()
+app = FastAPI(title="<%= agentNameClassName %>")
 app.add_middleware(_SessionIdMiddleware)
 
 

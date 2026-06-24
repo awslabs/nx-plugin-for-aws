@@ -3,7 +3,6 @@ import uuid
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from fastapi import Request
-from langchain_core.messages import AIMessageChunk
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
@@ -24,28 +23,20 @@ class StreamChunk(BaseModel):
     content: str
 
 
-def _text(chunk: AIMessageChunk) -> str:
-    if isinstance(chunk.content, str):
-        return chunk.content
-    return "".join(
-        part.get("text", "")
-        for part in chunk.content
-        if isinstance(part, dict) and part.get("type") == "text"
-    )
-
-
-async def handle_invoke(input: InvokeInput):
+async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
-    config = {"configurable": {"thread_id": get_current_session_id() or "default"}}
-    async for token, _meta in _graph.astream(
-        {"messages": [{"role": "user", "content": input.message}]},
-        config,
-        stream_mode="messages",
-    ):
-        if isinstance(token, AIMessageChunk):
-            text = _text(token)
-            if text:
-                yield StreamChunk(content=text)
+    # The session id is the LangGraph thread id, so the checkpointer keeps memory per session.
+    config = {"configurable": {"thread_id": session_id}}
+    # Re-bind the session: the streaming body runs outside the middleware scope.
+    with session_id_context(session_id):
+        stream = _graph.astream(
+            {"messages": [{"role": "user", "content": input.message}]},
+            config,
+            stream_mode="messages",
+        )
+        async for message_chunk, _metadata in stream:
+            if isinstance(message_chunk.content, str) and message_chunk.content:
+                yield StreamChunk(content=message_chunk.content)
 
 
 @app.post(
@@ -55,7 +46,8 @@ async def handle_invoke(input: InvokeInput):
 )
 async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    return JsonStreamingResponse(handle_invoke(input))
+    session_id = get_current_session_id() or str(uuid.uuid4())
+    return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
@@ -72,6 +64,7 @@ app.add_middleware(_SessionIdMiddleware)
 
 @app.get("/ping")
 def ping() -> str:
+    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
     return PingStatus.HEALTHY
 
 

@@ -1555,86 +1555,118 @@ dev-dependencies = []
       expect(hasDep('ag-ui-strands')).toBe(false);
     });
 
-    it('should generate langchain HTTP agent streaming JSONL from the graph', async () => {
+    it('should generate langchain HTTP agent reusing the shared FastAPI app', async () => {
       await pyAgentGenerator(tree, {
         project: 'test-project',
-        name: 'lc-http',
         framework: 'langchain',
         protocol: 'http',
         infra: 'none',
         iac: 'cdk',
       });
 
-      // The langchain HTTP server reuses the framework-agnostic init.py and
-      // streams the compiled graph as JSONL StreamChunks (same wire shape as
-      // Strands HTTP), with no Strands or ag-ui dependency.
+      // The langchain http main.py drives the compiled LangGraph graph and
+      // reuses the framework-agnostic init.py (app + JsonStreamingResponse).
       const mainContent = tree.read(
-        'apps/test-project/proj_test_project/lc_http/main.py',
+        'apps/test-project/proj_test_project/agent/main.py',
         'utf-8',
       );
       expect(mainContent).toContain(
         'from .init import JsonStreamingResponse, app',
       );
-      expect(mainContent).toContain('_graph = get_agent()');
-      expect(mainContent).toContain('stream_mode="messages"');
-      expect(mainContent).toContain('StreamChunk(content=text)');
-      expect(mainContent).toContain('"/invocations"');
-      expect(mainContent).not.toContain('ag_ui');
-      expect(mainContent).not.toContain('strands');
+      expect(mainContent).toContain('get_agent');
+      expect(mainContent).toContain('astream');
+      expect(mainContent).toContain('/invocations');
+      // No Strands streaming shape leaked in.
+      expect(mainContent).not.toContain('stream_async');
+      expect(mainContent).not.toContain('with_session_id');
+      expect(mainContent).not.toContain('from strands');
 
-      // init.py (the FastAPI app the OpenAPI client is generated from) is emitted.
-      expect(
-        tree.exists('apps/test-project/proj_test_project/lc_http/init.py'),
-      ).toBe(true);
+      // The shared framework-agnostic init.py is emitted alongside it.
+      const initContent = tree.read(
+        'apps/test-project/proj_test_project/agent/init.py',
+        'utf-8',
+      );
+      expect(initContent).toContain('class JsonStreamingResponse');
+      expect(initContent).toContain('app = FastAPI(');
 
-      const pyProjectToml = parse(
-        tree.read('apps/test-project/pyproject.toml', 'utf-8'),
-      ) as UVPyprojectToml;
-      const deps = pyProjectToml.project.dependencies;
-      const hasDep = (name: string) =>
-        deps.some((dep) => dep.startsWith(`${name}==`));
-      expect(hasDep('langchain')).toBe(true);
-      expect(hasDep('langchain-aws')).toBe(true);
-      expect(hasDep('langgraph')).toBe(true);
-      expect(hasDep('strands-agents')).toBe(false);
-      expect(hasDep('ag-ui-langgraph')).toBe(false);
+      // The agent.py builds a compiled LangGraph graph, not a Strands agent.
+      const agentContent = tree.read(
+        'apps/test-project/proj_test_project/agent/agent.py',
+        'utf-8',
+      );
+      expect(agentContent).toContain('create_agent');
+      expect(agentContent).not.toContain('from strands');
     });
 
-    it('should generate langchain A2A agent over the a2a SDK server', async () => {
+    it('should generate langchain A2A agent', async () => {
       await pyAgentGenerator(tree, {
         project: 'test-project',
-        name: 'lc-a2a',
         framework: 'langchain',
         protocol: 'a2a',
         infra: 'none',
         iac: 'cdk',
       });
 
-      // The langchain A2A server drives the graph from an a2a-sdk AgentExecutor
-      // and serves it via A2AStarletteApplication wrapped in /ping — no Strands.
+      // The langchain a2a main.py exposes the LangGraph graph over the
+      // framework-agnostic a2a-sdk, not the Strands A2AServer.
       const mainContent = tree.read(
-        'apps/test-project/proj_test_project/lc_a2a/main.py',
+        'apps/test-project/proj_test_project/agent/main.py',
         'utf-8',
       );
-      expect(mainContent).toContain('from a2a.server.agent_execution import');
-      expect(mainContent).toContain('A2AStarletteApplication');
-      expect(mainContent).toContain('class LcA2aExecutor(AgentExecutor)');
-      expect(mainContent).toContain('stream_mode="messages"');
-      expect(mainContent).toContain('add_artifact');
+      expect(mainContent).toContain('get_agent');
       expect(mainContent).toContain('/ping');
-      expect(mainContent).not.toContain('strands');
+      expect(mainContent).toContain('session_id_context');
+      expect(mainContent).toContain(
+        'x-amzn-bedrock-agentcore-runtime-session-id',
+      );
+      // No Strands A2A server shape leaked in.
+      expect(mainContent).not.toContain('strands.multiagent.a2a');
+      expect(mainContent).not.toContain('A2AServer');
+      expect(mainContent).not.toContain('from strands');
+    });
 
-      const pyProjectToml = parse(
-        tree.read('apps/test-project/pyproject.toml', 'utf-8'),
-      ) as UVPyprojectToml;
-      const deps = pyProjectToml.project.dependencies;
-      const hasDep = (name: string) =>
-        deps.some(
-          (dep) => dep.startsWith(`${name}==`) || dep.startsWith(`${name}[`),
+    it('should add per-protocol langchain dependencies', async () => {
+      // Each protocol needs a clean project (deps accumulate in a shared
+      // pyproject.toml across generator runs), so build an isolated tree per
+      // call and return its langchain agent's resolved dependency list.
+      const depsFor = async (protocol: 'http' | 'a2a' | 'ag-ui') => {
+        const t = createTreeUsingTsSolutionSetup();
+        addProjectConfiguration(t, 'p', {
+          root: 'apps/p',
+          sourceRoot: 'apps/p/proj_p',
+          targets: {},
+        });
+        t.write(
+          'apps/p/pyproject.toml',
+          `[project]\nname = "proj.p"\nversion = "0.1.0"\ndependencies = []\n\n[dependency-groups]\ndev = []\n\n[tool.uv]\ndev-dependencies = []\n`,
         );
-      expect(hasDep('a2a-sdk')).toBe(true);
-      expect(hasDep('langchain')).toBe(true);
-      expect(hasDep('strands-agents')).toBe(false);
+        await pyAgentGenerator(t, {
+          project: 'p',
+          framework: 'langchain',
+          protocol,
+          infra: 'none',
+          iac: 'cdk',
+        });
+        const pyProjectToml = parse(
+          t.read('apps/p/pyproject.toml', 'utf-8'),
+        ) as UVPyprojectToml;
+        const deps = pyProjectToml.project.dependencies;
+        return (name: string) => deps.some((d) => d.startsWith(`${name}==`));
+      };
+
+      // a2a langchain pulls a2a-sdk (and never the ag-ui adapter or Strands).
+      const a2a = await depsFor('a2a');
+      expect(a2a('a2a-sdk')).toBe(true);
+      expect(a2a('langchain')).toBe(true);
+      expect(a2a('ag-ui-langgraph')).toBe(false);
+      expect(a2a('strands-agents[a2a]')).toBe(false);
+
+      // http langchain pulls only the base langchain deps (FastAPI is common).
+      const http = await depsFor('http');
+      expect(http('langchain')).toBe(true);
+      expect(http('a2a-sdk')).toBe(false);
+      expect(http('ag-ui-langgraph')).toBe(false);
+      expect(http('strands-agents')).toBe(false);
     });
 
     it('should match snapshot for langchain generated files', async () => {

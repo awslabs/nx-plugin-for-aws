@@ -159,12 +159,12 @@ export const pyAgentGenerator = async (
   }
 
   // Generate protocol-specific files. Each protocol's server entry point is
-  // framework-specific (Strands drives a strands.Agent; LangChain drives a
-  // compiled create_agent graph), so it comes from a per-framework dir.
+  // framework-specific (Strands yields a contextmanaged Agent; LangChain drives
+  // a compiled create_agent graph), so it comes from a per-framework dir
+  // `<protocol>-langchain` for LangChain, or `<protocol>` for Strands.
+  const protocolLower = protocol.toLowerCase();
   const protocolTemplateDir =
-    framework === 'langchain'
-      ? `${protocol.toLowerCase()}-langchain`
-      : protocol.toLowerCase();
+    framework === 'langchain' ? `${protocolLower}-langchain` : protocolLower;
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', protocolTemplateDir),
@@ -172,10 +172,12 @@ export const pyAgentGenerator = async (
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
-  // The langchain HTTP server reuses the framework-agnostic FastAPI scaffold
-  // (init.py: JsonStreamingResponse + the app the OpenAPI client is generated
-  // from), so emit it alongside the langchain main.py.
-  if (framework === 'langchain' && protocol === 'http') {
+  // The HTTP server's init.py (the FastAPI app + JsonStreamingResponse) is
+  // framework-agnostic and the LangChain http main.py reuses it, so emit it
+  // from the shared `http` dir. Emitted after the langchain main.py above so
+  // KeepExisting preserves that main.py and only adds init.py (the shared dir's
+  // own Strands main.py is skipped).
+  if (protocolLower === 'http' && framework === 'langchain') {
     generateFiles(
       tree,
       joinPathFragments(__dirname, 'files', 'http'),
@@ -193,9 +195,10 @@ export const pyAgentGenerator = async (
     'fastapi',
     'mcp',
     ...(framework === 'langchain'
-      ? // LangChain agents drive a compiled create_agent graph and pull no
-        // Strands dependencies. ag-ui adds the LangGraph AG-UI adapter; a2a adds
-        // the a2a SDK server.
+      ? // langchain pulls no Strands dependencies — the langchain model binding
+        // (langchain, langchain-aws, langgraph) plus the per-protocol server
+        // adapter: ag-ui-langgraph for AG-UI, a2a-sdk for A2A, nothing extra for
+        // HTTP (FastAPI is added above for every agent).
         ([
           'langchain',
           'langchain-aws',
@@ -203,7 +206,7 @@ export const pyAgentGenerator = async (
           ...(protocol === 'ag-ui'
             ? (['ag-ui-protocol', 'ag-ui-langgraph'] as const)
             : protocol === 'a2a'
-              ? (['a2a-sdk[http-server]'] as const)
+              ? (['a2a-sdk'] as const)
               : ([] as const)),
         ] as const)
       : protocol === 'a2a'
@@ -481,10 +484,11 @@ export const pyAgentGenerator = async (
 
   await addGeneratorMetricsIfApplicable(tree, [PY_AGENT_GENERATOR_INFO]);
 
-  // The ag-ui agent's framework adapter ships without resolvable SPDX license
-  // metadata for a couple of transitive deps, so register those exceptions so
-  // the workspace license check still passes.
-  if (protocol === 'ag-ui' && framework === 'langchain') {
+  // langchain-core (pulled by every langchain agent regardless of protocol)
+  // brings jsonpatch/jsonpointer, whose wheels ship without resolvable SPDX
+  // license metadata, so register those exceptions so the workspace license
+  // check still passes.
+  if (framework === 'langchain') {
     await ensureLicenseExceptions(tree, AG_UI_LANGGRAPH_EXCEPTIONS);
   }
 
