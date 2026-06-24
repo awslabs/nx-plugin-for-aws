@@ -8,6 +8,7 @@ from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, Part, TextPart
+from a2a.utils import new_task
 from fastapi import FastAPI, Request
 from langchain_core.messages import AIMessageChunk
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -36,10 +37,13 @@ def _text(chunk: AIMessageChunk) -> str:
 
 class <%= agentNameClassName %>Executor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        await updater.submit()
+        if context.message is None:
+            raise ValueError("A2A request is missing a message")
+        task = context.current_task or new_task(context.message)
+        await event_queue.enqueue_event(task)
+        updater = TaskUpdater(event_queue, task.id, task.context_id)
         await updater.start_work()
-        config = {"configurable": {"thread_id": context.context_id or "default"}}
+        config = {"configurable": {"thread_id": task.context_id}}
         reply = ""
         async for token, _meta in _graph.astream(
             {"messages": [{"role": "user", "content": context.get_user_input()}]},
