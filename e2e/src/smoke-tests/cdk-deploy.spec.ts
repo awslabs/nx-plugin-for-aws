@@ -42,6 +42,8 @@ const WEBSITE_AGENTS: AgentSpec[] = [
   { kind: 'ts-agui', className: 'MyTsAguiAgent' },
   { kind: 'py-http', className: 'MyAgent' },
   { kind: 'py-agui', className: 'MyPyAguiAgent' },
+  // LangChain agent (AG-UI protocol) — same framework-agnostic AG-UI client.
+  { kind: 'py-agui', className: 'MyPyLangchainAgent' },
 ];
 
 /**

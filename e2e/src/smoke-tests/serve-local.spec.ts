@@ -520,6 +520,9 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           { kind: 'ts-agui', className: 'MyAguiAgent' },
           { kind: 'py-http', className: 'MyPyAgent' },
           { kind: 'py-agui', className: 'MyPyAguiAgent' },
+          // LangChain agent (AG-UI protocol) — the website connects to it via
+          // the same framework-agnostic AG-UI react connection.
+          { kind: 'py-agui', className: 'MyPyLangchainAgent' },
         ],
       );
 
@@ -1520,12 +1523,14 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await waitForPort(ports.tsAgui, STARTUP_TIMEOUT_MS);
     await waitForPort(ports.pyAgent, STARTUP_TIMEOUT_MS);
     await waitForPort(ports.pyAgui, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyLangchainAgui, STARTUP_TIMEOUT_MS);
 
     const agents: AgentSpec[] = [
       { kind: 'ts-http', className: 'MyAgent' },
       { kind: 'ts-agui', className: 'MyAguiAgent' },
       { kind: 'py-http', className: 'MyPyAgent' },
       { kind: 'py-agui', className: 'MyPyAguiAgent' },
+      { kind: 'py-agui', className: 'MyPyLangchainAgent' },
     ];
     await runWebsiteIntegrationTest({
       baseUrl: 'http://127.0.0.1:4200',
