@@ -1,0 +1,41 @@
+name: PR Docs Preview - Build
+
+# Builds the documentation site for a pull request and uploads it as an
+# artifact. The companion "Deploy" workflow publishes the artifact and comments
+# the preview link on the PR. This job is not given AWS credentials.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pr-docs-preview.yml'
+
+concurrency:
+  group: pr-docs-preview-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Docs Preview
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/init-monorepo
+        with:
+          container-tools: 'false'
+      - name: Build docs
+        env:
+          # Scope every asset and link to this PR's preview subpath.
+          DOCS_BASE_PATH: /pr-${{ github.event.pull_request.number }}
+        # The docs site is self-contained Astro content; exclude the upstream
+        # build graph so the preview does not run the full plugin build/test.
+        run: pnpm nx run docs:build --exclude-task-dependencies --output-style=stream
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: docs-preview
+          path: docs/dist
+          retention-days: 1
