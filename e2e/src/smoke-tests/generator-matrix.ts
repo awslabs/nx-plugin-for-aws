@@ -169,16 +169,24 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   // Python LangChain agents across all three protocols, deployed on AgentCore so
   // the smoke tests cover building, bundling and deploying a langchain runtime.
+  // LangChain pulls a large dependency closure (langchain + langgraph), so these
+  // live in their own project — co-locating them with the zip-bundled
+  // `py-project/my-function` Lambda would push that Lambda past the 250 MB
+  // unzipped limit, since the bundle exports the whole package's deps.
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:py#project --name=py-langchain-project --projectType=application --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-http-agent --framework=langchain --protocol=http --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_langchain_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=agentcore --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-a2a-agent --framework=langchain --protocol=a2a --infra=agentcore --no-interactive`,
+    `generate @aws/nx-plugin:py#agent --project=py_langchain_project --name=my-py-langchain-http-agent --framework=langchain --protocol=http --infra=agentcore --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent --project=py_langchain_project --name=my-py-langchain-a2a-agent --framework=langchain --protocol=a2a --infra=agentcore --no-interactive`,
     opts,
   );
 
@@ -217,7 +225,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   // LangChain agent -> Python MCP server (langchain-mcp-adapters tool loading).
   await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=py_langchain_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
     opts,
   );
 
@@ -241,7 +249,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   // LangChain (AG-UI) agent -> Python A2A agent: delegates to a remote agent as
   // a langchain tool (reusing the framework-agnostic A2A transport).
   await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=py_langchain_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
     opts,
   );
 
@@ -262,7 +270,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   // LangChain agent -> gateway (langchain gateway MCP client).
   await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=@e2e-test/my-gateway --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=py_langchain_project --sourceComponent=my-py-langchain-agent --targetProject=@e2e-test/my-gateway --no-interactive`,
     opts,
   );
   await runCLI(
@@ -304,7 +312,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   // Website -> Python LangChain (AG-UI/CopilotKit) agent.
   await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-py-langchain-agent --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_langchain_project --targetComponent=my-py-langchain-agent --no-interactive`,
     opts,
   );
 
@@ -353,7 +361,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
   );
   // LangChain agent -> DynamoDB table (framework-agnostic workspace + serve-local wiring).
   await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-http-agent --targetProject=my_py_table --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=py_langchain_project --sourceComponent=my-py-langchain-http-agent --targetProject=my_py_table --no-interactive`,
     opts,
   );
 
