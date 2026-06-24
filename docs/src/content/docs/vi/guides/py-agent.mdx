@@ -16,7 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 Tạo một Python AI agent để xây dựng các agent với các công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Chọn framework agent với tùy chọn `framework`: [Strands](https://strandsagents.com/) (mặc định) hoặc [LangChain](https://docs.langchain.com/oss/python/langchain/overview) (được xây dựng trên [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)).
 
-Generator expose agent của bạn qua một `protocol` server, được hỗ trợ bởi cả hai framework: [HTTP](https://fastapi.tiangolo.com/) (mặc định), giao thức [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) để tương tác với các agent tương thích A2A khác, hoặc giao thức [AG-UI](https://docs.ag-ui.com/) để tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/).
+Generator expose agent của bạn qua một `protocol` server. Cả hai framework đều hỗ trợ [HTTP](https://fastapi.tiangolo.com/) (mặc định), giao thức [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) để tương tác với các agent tương thích A2A khác, và giao thức [AG-UI](https://docs.ag-ui.com/) để tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/).
 
 ## Cách sử dụng
 
@@ -55,10 +55,10 @@ Generator sẽ thêm các file sau vào Python project hiện có của bạn. C
 </FileTree>
 </OptionFilter>
 
-<OptionFilter when={{ protocol: 'a2a' }} description="Strands A2A server layout">
+<OptionFilter when={{ protocol: 'a2a' }} description="A2A server layout">
 ### A2A Protocol
 
-Entry point sử dụng [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) thay vì FastAPI:
+Entry point expose agent của bạn qua giao thức A2A (Strands sử dụng [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent); LangChain wrap graph trong một [`a2a-sdk`](https://a2a-protocol.org/) executor), được mount lên một ứng dụng FastAPI:
 
 <FileTree>
   - your-project/
@@ -68,7 +68,7 @@ Entry point sử dụng [Strands A2A Server](https://strandsagents.com/docs/user
         - agent.py Định nghĩa agent chính với các công cụ mẫu
         - main.py A2A server entry point
         - Dockerfile Entry point để host agent của bạn (bị loại trừ khi `infra` được đặt thành `None`)
-    - pyproject.toml Được cập nhật với các dependencies của Strands
+    - pyproject.toml Được cập nhật với các dependencies của framework và A2A
     - project.json Được cập nhật với các target serve agent
 </FileTree>
 </OptionFilter>
@@ -277,8 +277,10 @@ Tham khảo <Link path="/guides/connection/py-agent-mcp">hướng dẫn `connect
 Giao thức server của agent xác định cách nó giao tiếp. Tất cả các tùy chọn đều được phục vụ bởi [FastAPI](https://fastapi.tiangolo.com/) — entry point khác nhau:
 
 - **HTTP** (mặc định): Một FastAPI server tiêu chuẩn với endpoint `/invocations` tùy chỉnh, CORS và streaming. Tốt nhất cho các tích hợp client tùy chỉnh.
-- **A2A**: Một server [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) được mount lên một ứng dụng FastAPI. Tốt nhất khi agent của bạn cần có thể được phát hiện và gọi bởi các agent tương thích A2A khác.
-- **AG-UI**: [Giao thức AG-UI](https://docs.ag-ui.com/) qua SSE. Tốt nhất cho tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/) trong React website.
+- **A2A**: Một server [Agent-to-Agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) được mount lên một ứng dụng FastAPI (Strands sử dụng [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent); LangChain sử dụng [`a2a-sdk`](https://a2a-protocol.org/) framework-agnostic). Tốt nhất khi agent của bạn cần có thể được phát hiện và gọi bởi các agent tương thích A2A khác.
+- **AG-UI**: [Giao thức AG-UI](https://docs.ag-ui.com/) qua SSE (Strands sử dụng `ag-ui-strands`; LangChain sử dụng `ag-ui-langgraph`). Tốt nhất cho tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/) trong React website.
+
+Entry point của server khác nhau theo framework (Strands tạo ra một `Agent` được quản lý bằng context, trong khi LangChain điều khiển một graph `create_agent` đã được biên dịch), nhưng hợp đồng bên ngoài cho mỗi giao thức là giống nhau.
 
 Tất cả các giao thức đều expose `/ping` cho hợp đồng health check của AgentCore runtime. Các agent A2A lắng nghe trên port `9000`; các agent HTTP và AG-UI lắng nghe trên port `8080`. Dockerfile và infrastructure được tạo đã được cấu hình cho bạn.
 
@@ -369,12 +371,9 @@ Vì generator tạo ra hạ tầng CDK hoặc Terraform để quản lý việc 
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
 ## A2A Server (A2A protocol)
 
-File `main.py` được tạo phục vụ một A2A endpoint được mount lên một ứng dụng FastAPI cha cũng expose `/ping`, và quảng cáo URL công khai của runtime (`AGENTCORE_RUNTIME_URL`) trong agent card của nó (`/.well-known/agent-card.json`). Cách kết nối phụ thuộc vào framework:
+File `main.py` được tạo mount một A2A server lên một ứng dụng FastAPI cha cũng expose `/ping`. Các Strands agent sử dụng Strands `A2AServer`; các LangChain agent wrap compiled graph trong một [`a2a-sdk`](https://a2a-protocol.org/) `AgentExecutor`. Khi được triển khai lên AgentCore, entry point phân giải ARN công khai của runtime từ AppConfig và quảng cáo nó trong agent card.
 
-- **Strands**: mount `strands.multiagent.a2a.A2AServer.to_fastapi_app()`.
-- **LangChain**: phục vụ compiled graph thông qua một `a2a` SDK `AgentExecutor` và `A2AStarletteApplication`.
-
-Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh sửa `agent.py` để thay đổi các công cụ hoặc system prompt.
+Hầu hết người dùng sẽ không cần sửa đổi file này; chỉnh sửa `agent.py` để thay đổi các công cụ hoặc system prompt. A2A server điền agent card (`/.well-known/agent-card.json`) từ `name` và `description` của agent.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI / CopilotKit server details">
