@@ -405,25 +405,11 @@ export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => 
 
 ### Accesso all'Utente Chiamante
 
-Quando la tua API è protetta da autenticazione, le tue operazioni spesso devono sapere chi sta chiamando. L'approccio consigliato è risolvere l'identità del chiamante una volta nell'handler e passarla attraverso il [contesto del servizio](#service-context) per il consumo da parte di operazioni specifiche.
+Quando la tua API è protetta da autenticazione, le tue operazioni spesso devono sapere chi sta chiamando. L'approccio più pulito è risolvere l'identità del chiamante una volta nell'handler e passarla attraverso il [contesto del servizio](#service-context), in modo che le tue operazioni rimangano libere da qualsiasi parsing dell'evento di API Gateway.
 
-Modelleremo il caso non autorizzato come un errore Smithy in modo che venga serializzato in una risposta `403` corretta. Aggiungilo al tuo modello, ad esempio in `model/src/operations/errors.smithy`, e referenzialo su qualsiasi operazione che richiede l'identità:
+Come esempio, aggiungiamo un'operazione `Me` che restituisce i dettagli sull'utente chiamante.
 
-```smithy
-$version: "2.0"
-
-namespace your.namespace
-
-/// Thrown when the calling user cannot be determined
-@error("client")
-@httpError(403)
-structure UnauthorizedError {
-    @required
-    message: String
-}
-```
-
-Prima, esponi l'identità risolta sul contesto del servizio in `src/context.ts`. La forniamo come funzione in modo che l'`UnauthorizedError` venga lanciato dall'interno di un'operazione (dove l'SDK Server lo serializza in un `403`), piuttosto che dall'handler:
+Prima, aggiungi l'identità risolta al contesto del servizio in `src/context.ts`:
 
 ```ts {4-7,15} ins={4-7,15}
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -442,11 +428,11 @@ export interface ServiceContext {
   tracer: Tracer;
   logger: Logger;
   metrics: Metrics;
-  getIdentity: () => Promise<Identity>;
+  identity?: Identity;
 }
 ```
 
-Successivamente, scrivi il resolver in `src/identity.ts`. Lancia `UnauthorizedError` quando il chiamante non può essere determinato. L'implementazione dipende dal metodo `auth` selezionato:
+Successivamente, scrivi una funzione che risolve l'identità dall'evento di API Gateway in `src/identity.ts`. L'implementazione dipende dal metodo `auth` selezionato:
 
 <OptionFilter when={{ auth: 'iam' }} description="Identity resolution for IAM-authenticated APIs">
 Per l'autenticazione `IAM`, cerchiamo il chiamante in Cognito usando il sub estratto dall'evento di API Gateway:
@@ -492,37 +478,38 @@ export const getIdentity = async (
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Identity resolution for Cognito-authenticated APIs">
-Con `auth: 'cognito'`, l'autorizzatore Cognito User Pools di API Gateway verifica il JWT che il chiamante fornisce nell'header `Authorization` e posiziona i claim verificati sull'evento in `event.requestContext.authorizer.claims`:
+Con `auth: 'cognito'`, l'autorizzatore Cognito User Pools di API Gateway verifica il JWT che il chiamante fornisce nell'header `Authorization` e posiziona i claim verificati sull'evento in `event.requestContext.authorizer.claims`. Leggiamo semplicemente quei claim — nessuna chiamata extra all'SDK AWS, nessuna verifica manuale del JWT.
+
+Il generatore collega l'autorizzatore per accettare token di accesso Cognito, quindi `username` è il claim del nome utente canonico; ricadiamo su `cognito:username` nel caso tu riconfiguri l'autorizzatore per accettare token ID:
 
 ```ts
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { Identity } from './context.js';
-import { UnauthorizedError } from './generated/ssdk/index.js';
 
-export const getIdentity = async (
+export const getIdentity = (
   event: APIGatewayProxyEvent,
-): Promise<Identity> => {
+): Identity | undefined => {
   const claims = event.requestContext?.authorizer?.claims as
     | Record<string, string>
     | undefined;
 
   const sub = claims?.sub;
-  const username = claims?.username;
+  const username = claims?.username ?? claims?.['cognito:username'];
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    return undefined;
   }
 
   return { sub, username };
 };
 ```
 
-:::tip[Nessuna verifica del token richiesta]
+:::tip[Verifica del token]
 Non hai bisogno di `aws-jwt-verify` o di qualsiasi altra libreria di verifica JWT qui — l'autorizzatore Cognito User Pools di API Gateway ha già verificato la firma, l'emittente, gli scope e la scadenza prima che la tua Lambda venga eseguita. Se uno di questi controlli fallisce, API Gateway restituisce `401 Unauthorized` e il tuo handler non viene mai invocato.
 :::
 </OptionFilter>
 
-Quindi collega il resolver al contesto in `src/handler.ts`:
+Quindi chiama `getIdentity` in `src/handler.ts` e aggiungi il risultato al contesto:
 
 ```ts {2,8} ins={2,8}
 import { Service } from './service.js';
@@ -532,19 +519,87 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   tracer,
   logger,
   metrics,
-  getIdentity: () => getIdentity(event),
+  identity: await getIdentity(event),
 });
 ```
 
-Ora possiamo usare l'identità risolta in un'operazione, ad esempio in `src/operations/echo.ts`:
+:::note[La ricerca IAM è asincrona]
+Per l'autenticazione `IAM`, `getIdentity` è `async` (chiama Cognito), motivo per cui la attendiamo sopra. Per l'autenticazione `cognito` legge semplicemente i claim ed è sincrona, ma attenderla è innocuo — quindi il codice dell'handler è identico per entrambi.
+:::
+
+Ora definisci l'operazione `Me` nel tuo modello Smithy, ad esempio in `model/src/operations/me.smithy`:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+/// Return details about the calling user
+@http(method: "GET", uri: "/me")
+@readonly
+operation Me {
+    output := {
+        @required
+        sub: String
+
+        @required
+        username: String
+    }
+    errors: [
+        UnauthorizedError
+    ]
+}
+
+/// Thrown when the calling user cannot be determined
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    message: String
+}
+```
+
+Ricorda di registrare l'operazione sul tuo servizio in `model/src/main.smithy`:
+
+```smithy {4} ins={4}
+service YourService {
+    operations: [
+        Echo
+        Me
+    ]
+}
+```
+
+Implementa l'operazione in `src/operations/me.ts`, leggendo l'identità risolta direttamente dal contesto:
 
 ```ts
 import { ServiceContext } from '../context.js';
-import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+import {
+  Me as MeOperation,
+  UnauthorizedError,
+} from '../generated/ssdk/index.js';
 
-export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
-  const identity = await ctx.getIdentity();
-  return { message: `${identity.username} says ${input.message}` };
+export const Me: MeOperation<ServiceContext> = async (_input, ctx) => {
+  if (!ctx.identity) {
+    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+  }
+
+  return { sub: ctx.identity.sub, username: ctx.identity.username };
+};
+```
+
+Infine, registra l'operazione sul tuo servizio in `src/service.ts`:
+
+```ts {4,9} ins={4,9}
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+import { Me } from './operations/me.js';
+
+// Register operations to the service here
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  Me,
 };
 ```
 
@@ -808,6 +863,16 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access" {
 
 ## Invocare la tua API Smithy
 
+Per invocare la tua API da un sito React, puoi usare il generatore <Link path="guides/connection/react-smithy">`connection`</Link>, che fornisce generazione type-safe del client dal tuo modello Smithy..name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+## Invocare la tua API Smithy
+
 Per invocare la tua API da un sito React, puoi usare il generatore <Link path="guides/connection/react-smithy">`connection`</Link>, che fornisce generazione type-safe del client dal tuo modello Smithy.
 
 ## Connessioni
@@ -816,23 +881,23 @@ Usa il generatore <Link path="guides/connection">`connection`</Link> per integra
 
 <CardGrid>
   <ConnectionCard
-    title="React a Smithy API"
+    title="React to Smithy API"
     description="Chiama un'API Smithy da un sito React"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-smithy`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-smithy`}
     source="react"
     target="smithy"
   />
   <ConnectionCard
-    title="Smithy API a Database Relazionale"
-    description="Connetti un'API Smithy a un database relazionale Aurora"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/smithy-rdb`}
+    title="Smithy API to Relational Database"
+    description="Collega un'API Smithy a un database relazionale Aurora"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/smithy-rdb`}
     source="smithy"
     target="aurora"
   />
   <ConnectionCard
-    title="Smithy API a TypeScript DynamoDB"
-    description="Connetti un'API Smithy a una tabella DynamoDB"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/smithy-dynamodb`}
+    title="Smithy API to TypeScript DynamoDB"
+    description="Collega un'API Smithy a una tabella DynamoDB"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/smithy-dynamodb`}
     source="smithy"
     target="dynamodb"
   />
