@@ -449,9 +449,15 @@ describe('py strands agent react connection with real projects', {
       'utf-8',
     );
 
-    // Verify that the runtime config includes the agent runtime override
+    // Verify that the runtime config includes the agent runtime override. The
+    // HTTP agent is invoked through the generated OpenAPI client, which appends
+    // the `/invocations` operation path itself, so the serve-local base URL
+    // must omit it (otherwise requests hit `/invocations/invocations`).
     expect(runtimeConfigContent).toContain('runtimeConfig.agentRuntimes.');
-    expect(runtimeConfigContent).toContain('http://localhost:');
+    expect(runtimeConfigContent).toMatch(
+      /runtimeConfig\.agentRuntimes\.\w+ = 'http:\/\/localhost:\d+';/,
+    );
+    expect(runtimeConfigContent).not.toContain('/invocations');
 
     // Re-read agent project config after connection generator ran
     const updatedAgentConfig = readProjectConfiguration(
