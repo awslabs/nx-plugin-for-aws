@@ -412,6 +412,11 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-langchain-agent --no-interactive`,
         opts,
       );
+      // Website -> Python LangChain HTTP agent (OpenAPI client).
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-langchain-http-agent --no-interactive`,
+        opts,
+      );
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=postgres-db --no-interactive`,
         opts,
@@ -520,9 +525,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           { kind: 'ts-agui', className: 'MyAguiAgent' },
           { kind: 'py-http', className: 'MyPyAgent' },
           { kind: 'py-agui', className: 'MyPyAguiAgent' },
-          // LangChain agent (AG-UI protocol) — the website connects to it via
-          // the same framework-agnostic AG-UI react connection.
+          // LangChain agents — the website connects to them via the same
+          // framework-agnostic react connections (AG-UI and HTTP/OpenAPI).
           { kind: 'py-agui', className: 'MyPyLangchainAgent' },
+          { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
         ],
       );
 
@@ -1510,9 +1516,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Website integration - browser drives connected APIs + agents', async () => {
     // Starting the website's serve-local cascades every connected backend (the
-    // 3 APIs and 4 agents). Drive the website in a real browser through the
-    // integration-test page, which invokes each one via the website's vended
-    // clients — proving the full runtime-config → client → backend path works.
+    // 3 APIs and the connected agents). Drive the website in a real browser
+    // through the integration-test page, which invokes each one via the
+    // website's vended clients — proving the full
+    // runtime-config → client → backend path works.
     await startAndWait('@serve-local-test/website:serve-local', 4200);
 
     // Wait for the cascaded backends the page will reach.
@@ -1524,6 +1531,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await waitForPort(ports.pyAgent, STARTUP_TIMEOUT_MS);
     await waitForPort(ports.pyAgui, STARTUP_TIMEOUT_MS);
     await waitForPort(ports.pyLangchainAgui, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyLangchainHttp, STARTUP_TIMEOUT_MS);
 
     const agents: AgentSpec[] = [
       { kind: 'ts-http', className: 'MyAgent' },
@@ -1531,6 +1539,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       { kind: 'py-http', className: 'MyPyAgent' },
       { kind: 'py-agui', className: 'MyPyAguiAgent' },
       { kind: 'py-agui', className: 'MyPyLangchainAgent' },
+      { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
     ];
     await runWebsiteIntegrationTest({
       baseUrl: 'http://127.0.0.1:4200',

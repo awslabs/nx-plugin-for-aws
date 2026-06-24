@@ -180,12 +180,65 @@ export const writeIntegrationTestPage = (
     ),
   ].join('\n');
 
+  // Only emit the invocation helpers actually used (per the connected agent
+  // kinds), and only import `useContext` when an HTTP agent (which reads its
+  // client from a context) is present — otherwise an unused import/function
+  // fails the website's noUnusedLocals build.
+  const trpcHelper = `// Invoke a tRPC-over-WebSocket agent's \\\`invoke\\\` subscription and collect the
+// streamed reply.
+function invokeTrpcAgent(client: any): Promise<string> {
+  return withRetries(
+    () =>
+      new Promise((resolve, reject) => {
+        let acc = '';
+        client.invoke.subscribe(
+          { message: 'hello' },
+          {
+            onData: (c: any) =>
+              (acc += typeof c === 'string' ? c : (c?.data ?? '')),
+            onComplete: () => resolve(acc),
+            onError: reject,
+          },
+        );
+      }),
+  );
+}`;
+  const jsonlHelper = `// Invoke an HTTP agent whose vended OpenAPI client streams JSONL chunks.
+async function invokeJsonlAgent(client: any): Promise<string> {
+  return withRetries(async () => {
+    let acc = '';
+    for await (const chunk of client.invoke({ message: 'hello' })) {
+      acc += chunk?.content ?? '';
+    }
+    return acc;
+  });
+}`;
+  const aguiHelper = `// Invoke an AG-UI agent via its vended @ag-ui/client agent (CopilotKit).
+async function invokeAguiAgent(agents: Record<string, any>): Promise<string> {
+  const agent = Object.values(agents)[0];
+  return withRetries(async () => {
+    agent.messages = [{ id: 'm1', role: 'user', content: 'hello' }];
+    const res = await agent.runAgent({});
+    return (res?.newMessages ?? []).map((m: any) => m.content ?? '').join('');
+  });
+}`;
+  const helpers = [
+    tsHttp.length ? trpcHelper : '',
+    pyHttp.length ? jsonlHelper : '',
+    aguiAgents.length ? aguiHelper : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const reactImport = pyHttp.length
+    ? "import { useCallback, useContext, useState } from 'react';"
+    : "import { useCallback, useState } from 'react';";
+
   const source = `/**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { useCallback, useContext, useState } from 'react';
+${reactImport}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
 import { useSigV4 } from '../hooks/useSigV4';
 ${imports}
@@ -210,46 +263,7 @@ async function withRetries(fn: () => Promise<string>): Promise<string> {
   throw lastError ?? new Error('agent returned no content');
 }
 
-// Invoke a tRPC-over-WebSocket agent's \`invoke\` subscription and collect the
-// streamed reply.
-function invokeTrpcAgent(client: any): Promise<string> {
-  return withRetries(
-    () =>
-      new Promise((resolve, reject) => {
-        let acc = '';
-        client.invoke.subscribe(
-          { message: 'hello' },
-          {
-            onData: (c: any) =>
-              (acc += typeof c === 'string' ? c : (c?.data ?? '')),
-            onComplete: () => resolve(acc),
-            onError: reject,
-          },
-        );
-      }),
-  );
-}
-
-// Invoke an HTTP agent whose vended OpenAPI client streams JSONL chunks.
-async function invokeJsonlAgent(client: any): Promise<string> {
-  return withRetries(async () => {
-    let acc = '';
-    for await (const chunk of client.invoke({ message: 'hello' })) {
-      acc += chunk?.content ?? '';
-    }
-    return acc;
-  });
-}
-
-// Invoke an AG-UI agent via its vended @ag-ui/client agent (CopilotKit).
-async function invokeAguiAgent(agents: Record<string, any>): Promise<string> {
-  const agent = Object.values(agents)[0];
-  return withRetries(async () => {
-    agent.messages = [{ id: 'm1', role: 'user', content: 'hello' }];
-    const res = await agent.runAgent({});
-    return (res?.newMessages ?? []).map((m: any) => m.content ?? '').join('');
-  });
-}
+${helpers}
 
 function IntegrationTest() {
   const runtimeConfig = useRuntimeConfig();
@@ -275,7 +289,7 @@ ${hookCalls}
     // wired to / granted). Every generated API exposes GET /echo; tRPC wraps
     // the reply in result.data.message, REST and Smithy return it at the top.
     const apis: Record<string, string> = runtimeConfig.apis ?? {};
-    const connectedApis = ${JSON.stringify(apiNames)};
+    const connectedApis: string[] = ${JSON.stringify(apiNames)};
     for (const name of connectedApis) {
       const baseUrl = apis[name];
       await record('api:' + name, async () => {

@@ -315,6 +315,12 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_langchain_project --targetComponent=my-py-langchain-agent --no-interactive`,
     opts,
   );
+  // Website -> Python LangChain HTTP agent (OpenAPI client, like the Strands
+  // Python HTTP agent — exercises the langchain http protocol from the browser).
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_langchain_project --targetComponent=my-py-langchain-http-agent --no-interactive`,
+    opts,
+  );
 
   // DynamoDB table — iacProvider inherited.
   await runCLI(
