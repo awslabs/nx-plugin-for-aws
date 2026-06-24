@@ -1,0 +1,81 @@
+import logging
+import os
+import uuid
+
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.apps import A2AStarletteApplication
+from a2a.server.events import EventQueue
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import AgentCapabilities, AgentCard
+from a2a.utils.message import new_agent_text_message
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+
+from .agent import get_agent
+
+logging.basicConfig(level=logging.INFO)
+
+PORT = int(os.environ.get("PORT", "9000"))
+RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+DEFAULT_MODES = ["text/plain"]
+
+_graph = get_agent()
+
+
+class _GraphAgentExecutor(AgentExecutor):
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        # The session bound by the middleware drives the LangGraph thread, keeping
+        # checkpointed conversation state separate per caller session.
+        session_id = get_current_session_id() or context.context_id or str(uuid.uuid4())
+        result = await _graph.ainvoke(
+            {"messages": [{"role": "user", "content": context.get_user_input()}]},
+            {"configurable": {"thread_id": session_id}},
+        )
+        await event_queue.enqueue_event(new_agent_text_message(result["messages"][-1].content))
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        raise NotImplementedError("Cancellation is not supported.")
+
+
+_handler = DefaultRequestHandler(
+    agent_executor=_GraphAgentExecutor(),
+    task_store=InMemoryTaskStore(),
+)
+
+_agent_card = AgentCard(
+    name="<%= agentNameClassName %>",
+    description="A LangChain/LangGraph Agent exposed via the Agent-to-Agent (A2A) protocol.",
+    url=RUNTIME_URL,
+    version="1.0.0",
+    default_input_modes=DEFAULT_MODES,
+    default_output_modes=DEFAULT_MODES,
+    capabilities=AgentCapabilities(streaming=False),
+    skills=[],
+)
+
+a2a_app = A2AStarletteApplication(agent_card=_agent_card, http_handler=_handler).build()
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app = FastAPI(title="<%= agentNameClassName %>")
+app.add_middleware(_SessionIdMiddleware)
+
+
+@app.get("/ping")
+def ping() -> dict[str, str]:
+    return {"status": "Healthy"}
+
+
+app.mount("/", a2a_app)
