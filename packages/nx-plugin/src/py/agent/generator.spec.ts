@@ -1619,6 +1619,10 @@ dev-dependencies = []
       expect(mainContent).toContain(
         'x-amzn-bedrock-agentcore-runtime-session-id',
       );
+      // The graph reply is published as a task artifact so streaming A2A clients
+      // (e.g. the chat CLI) render it.
+      expect(mainContent).toContain('add_artifact');
+      expect(mainContent).toContain('get_current_session_id');
       // No Strands A2A server shape leaked in.
       expect(mainContent).not.toContain('strands.multiagent.a2a');
       expect(mainContent).not.toContain('A2AServer');

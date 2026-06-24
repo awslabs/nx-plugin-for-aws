@@ -6,9 +6,9 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCapabilities, AgentCard
-from a2a.utils.message import new_agent_text_message
+from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
+from a2a.types import AgentCapabilities, AgentCard, Part, TextPart
+from a2a.utils import new_task
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -28,14 +28,22 @@ _graph = get_agent()
 
 class _GraphAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        if context.message is None:
+            raise ValueError("A2A request is missing a message")
+        task = context.current_task or new_task(context.message)
+        await event_queue.enqueue_event(task)
+        updater = TaskUpdater(event_queue, task.id, task.context_id)
+        await updater.start_work()
         # The session bound by the middleware drives the LangGraph thread, keeping
         # checkpointed conversation state separate per caller session.
-        session_id = get_current_session_id() or context.context_id or str(uuid.uuid4())
+        session_id = get_current_session_id() or task.context_id
         result = await _graph.ainvoke(
             {"messages": [{"role": "user", "content": context.get_user_input()}]},
             {"configurable": {"thread_id": session_id}},
         )
-        await event_queue.enqueue_event(new_agent_text_message(result["messages"][-1].content))
+        reply = result["messages"][-1].content
+        await updater.add_artifact([Part(TextPart(kind="text", text=reply))])
+        await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         raise NotImplementedError("Cancellation is not supported.")
@@ -53,7 +61,7 @@ _agent_card = AgentCard(
     version="1.0.0",
     default_input_modes=DEFAULT_MODES,
     default_output_modes=DEFAULT_MODES,
-    capabilities=AgentCapabilities(streaming=False),
+    capabilities=AgentCapabilities(streaming=True),
     skills=[],
 )
 

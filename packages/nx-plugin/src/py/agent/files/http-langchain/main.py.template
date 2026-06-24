@@ -23,6 +23,17 @@ class StreamChunk(BaseModel):
     content: str
 
 
+def _text(content) -> str:
+    # ChatBedrockConverse streams content as a list of blocks, not a plain string.
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
 async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
     # The session id is the LangGraph thread id, so the checkpointer keeps memory per session.
@@ -35,8 +46,9 @@ async def handle_invoke(input: InvokeInput, session_id: str):
             stream_mode="messages",
         )
         async for message_chunk, _metadata in stream:
-            if isinstance(message_chunk.content, str) and message_chunk.content:
-                yield StreamChunk(content=message_chunk.content)
+            text = _text(message_chunk.content)
+            if text:
+                yield StreamChunk(content=text)
 
 
 @app.post(
