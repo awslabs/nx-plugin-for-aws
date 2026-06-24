@@ -314,6 +314,14 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=none --no-interactive`,
         opts,
       );
+      // Python LangChain agent (AG-UI only). Its serve-local exercises the
+      // langchain MCP tool loader (which loads tools at agent construction,
+      // inside uvicorn's running loop), the A2A delegation tool, and the
+      // langchain gateway client — all on the framework-agnostic seam.
+      await runCLI(
+        `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-langchain-agent --framework=langchain --protocol=ag-ui --infra=none --no-interactive`,
+        opts,
+      );
       await runCLI(
         `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-py-mcp --infra=none --no-interactive`,
         opts,
@@ -364,6 +372,12 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=my-smithy-api --no-interactive`,
         opts,
       );
+      // Website -> Python LangChain (AG-UI) agent: wires the CopilotKit runtime
+      // route into the website so the frontend can talk to the langchain agent.
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-langchain-agent --no-interactive`,
+        opts,
+      );
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=postgres-db --no-interactive`,
         opts,
@@ -378,6 +392,22 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       );
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
+        opts,
+      );
+      // LangChain agent connections: MCP (langchain-mcp-adapters tool loader),
+      // A2A (remote agent delegation as a langchain tool), and the AgentCore
+      // gateway (langchain gateway client). Exercises every connection kind the
+      // langchain framework supports in one serve-local boot.
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=my-gateway --no-interactive`,
         opts,
       );
       // Gateway wiring: {gw-agent, gw-py-agent} -> gateway -> {my-mcp,
@@ -490,12 +520,30 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         writeFileSync(file, content);
       }
 
+      // Patch the Python LangChain agent to use the OpenAI mock. LangChain builds
+      // a ChatBedrockConverse model (not a strands Agent), so swap it for a
+      // langchain ChatOpenAI pointed at the mock's OpenAI-compatible endpoint.
+      {
+        const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/my_py_langchain_agent/agent.py`;
+        let content = readFileSync(file, 'utf-8');
+        content = `from langchain_openai import ChatOpenAI\n${content}`;
+        content = content.replace(
+          /model = ChatBedrockConverse\([^)]*\)/,
+          `model = ChatOpenAI(model="mock", api_key="test", base_url="http://127.0.0.1:${LLM_MOCK_PORT}/v1")`,
+        );
+        writeFileSync(file, content);
+      }
+
       // Install openai dep for agents
       await runCLI(`pnpm add openai --filter=@serve-local-test/ts-project`, {
         cwd: projectRoot,
         prefixWithPackageManagerCmd: false,
       });
       await runCLI(`run serve_local_test.py_project:add -- openai`, opts);
+      await runCLI(
+        `run serve_local_test.py_project:add -- langchain-openai`,
+        opts,
+      );
 
       // Discover ports
       ports = {
@@ -548,6 +596,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           projectRoot,
           'packages/py_project/project.json',
           'my-py-agui-agent-serve-local',
+        ),
+        pyLangchainAgui: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_project/project.json',
+          'my-py-langchain-agent-serve-local',
         ),
         pyMcp: getPortFromProjectJson(
           projectRoot,
@@ -1171,6 +1224,56 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await chatStreamsReply(
       projectRoot,
       'serve_local_test.py_project:my-py-agui-agent-chat',
+      'The answer is 42',
+      STARTUP_TIMEOUT_MS,
+    );
+    await stopLast();
+  });
+
+  it('Python LangChain AG-UI Agent - streaming invocation with MCP + A2A + gateway connections', async () => {
+    // Starting this agent's serve-local boots the langchain MCP tool loader,
+    // the A2A delegation tool and the langchain gateway client (and, via the
+    // serve-local dependency chain, the MCP server, A2A agent and local
+    // gateway). A bare asyncio.run() in the MCP loader would crash under
+    // uvicorn's running loop, so a successful 200 + SSE stream proves the
+    // whole langchain connection surface loads and the agent runs.
+    await startAndWait(
+      'serve_local_test.py_project:my-py-langchain-agent-serve-local',
+      ports.pyLangchainAgui,
+    );
+
+    const res = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainAgui}/invocations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: 'test-thread',
+          runId: 'test-run',
+          messages: [
+            { id: 'msg-1', role: 'user', content: 'What is 3 times 5?' },
+          ],
+          state: {},
+          tools: [],
+          context: [],
+          forwardedProps: {},
+        }),
+      },
+    );
+    const body = await res.text();
+    console.log(
+      `Python LangChain AG-UI response (${res.status}, ${body.length} bytes):`,
+      body.slice(0, 200),
+    );
+    expect(res.status).toBe(200);
+    expect(body).toContain('data:');
+    // The mock model must actually drive the run, not error out (the server
+    // emits RUN_ERROR as a 'data:' event, so assert it is absent).
+    expect(body).not.toContain('RUN_ERROR');
+
+    await chatStreamsReply(
+      projectRoot,
+      'serve_local_test.py_project:my-py-langchain-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );

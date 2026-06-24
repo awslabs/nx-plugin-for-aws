@@ -1,13 +1,13 @@
 ---
-title: "Agent Python Strands vers MCP"
-description: "Connecter un Agent Python Strands à un serveur MCP"
+title: "Agent Python vers MCP"
+description: "Connecter un Agent Python à un serveur MCP"
 when:
   sourceType: py#agent
   targetType:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ Le générateur configure tout le câblage nécessaire pour que votre agent puis
 
 Avant d'utiliser ce générateur, assurez-vous d'avoir :
 
-1. Un projet Python avec un composant <Link path="guides/py-agent">Agent</Link>
+1. Un projet Python avec un composant <Link path="guides/py-agent">Python Agent</Link> (Strands ou LangChain)
 2. Un projet avec un composant serveur MCP (soit <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> soit <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
 3. Les deux composants créés avec `infra: agentcore`
 
@@ -50,12 +50,14 @@ Le générateur crée un projet Python partagé `agent_connection` dans `package
     - core
       - agentcore\_endpoints.py Résolution ARN/URL indépendante du framework
       - agentcore\_mcp\_transport.py Transport MCP indépendant du framework
-      - agentcore\_mcp\_client\_strands.py Client MCP Strands encapsulant le transport
+      - agentcore\_mcp\_client\_\<framework>.py Client MCP encapsulant le transport pour le framework de votre agent
       - auth/ `httpx.Auth` indépendant du framework pour SigV4 / transfert de session
     - app
-      - \<mcp\_server\_name>\_client\_strands.py Client Strands par connexion pour chaque serveur MCP
+      - \<mcp\_server\_name>\_client\_\<framework>.py Client par connexion pour chaque serveur MCP
 
 </FileTree>
+
+Le suffixe du client correspond au framework de votre agent (`_strands` ou `_langchain`).
 
 De plus, le générateur :
 - Transforme le fichier `agent.py` de votre agent pour importer et utiliser les outils du serveur MCP via un client basé sur une classe
@@ -66,15 +68,17 @@ De plus, le générateur :
 
 Le générateur transforme le fichier `agent.py` de votre agent pour utiliser les outils du serveur MCP :
 
-```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-13}
 from contextlib import contextmanager
 from strands import Agent
 
 from my_scope_agent_connection import MyMcpServerClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    my_mcp_server = MyMcpServerClientStrands.create(session_id=session_id)
+def get_agent():
+    my_mcp_server = MyMcpServerClientStrands.create()
     with (
         my_mcp_server,
     ):
@@ -84,7 +88,29 @@ def get_agent(session_id: str):
         )
 ```
 
-Le paramètre `session_id` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+Le client Strands est un gestionnaire de contexte, entré dans un bloc `with` autour de l'agent.
+</TabItem>
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,8,13}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+Le client LangChain retourne une liste d'outils chargés via [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Chaque outil ouvre une nouvelle session MCP par appel, de sorte que les outils restent utilisables pendant toute la durée de vie de l'agent — aucun bloc `with` n'est nécessaire.
+</TabItem>
+</Tabs>
+
+L'ID de session AgentCore est propagé automatiquement au serveur MCP via l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` pour les deux frameworks, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
 

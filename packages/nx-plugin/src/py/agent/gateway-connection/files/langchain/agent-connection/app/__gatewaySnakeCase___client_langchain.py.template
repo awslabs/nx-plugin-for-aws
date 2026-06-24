@@ -1,0 +1,34 @@
+import os
+
+from langchain_core.tools import BaseTool
+
+from <%- agentConnectionModuleName %>.core.agentcore_gateway_mcp_client_langchain import (
+    AgentCoreGatewayMCPClientLangChain,
+)
+from <%- agentConnectionModuleName %>.core.runtime_config import (
+    get_agentcore_runtime_config,
+)
+
+
+class <%- gatewayClassName %>ClientLangChain:
+    """Loads LangChain tools from the <%- gatewayClassName %> AgentCore Gateway.
+
+    Deployed: SigV4-signed tools pointing at the gateway URL. Local
+    (``SERVE_LOCAL=true``): plain-HTTP tools pointing at the local gateway
+    started by the gateway project's serve-local target. The local gateway
+    aggregates every attached MCP server but does not evaluate Cedar policies.
+    """
+
+    @staticmethod
+    def create() -> list[BaseTool]:
+        if os.environ.get("SERVE_LOCAL") == "true":
+            return AgentCoreGatewayMCPClientLangChain.without_auth(
+                gateway_url="http://localhost:<%- gatewayPort %>/mcp"
+            )
+        config = get_agentcore_runtime_config()
+        gateway_url = config.get("gateways", {}).get("<%- gatewayClassName %>")
+        if not gateway_url:
+            raise RuntimeError(
+                "No connected gateway named '<%- gatewayClassName %>' found in runtime configuration."
+            )
+        return AgentCoreGatewayMCPClientLangChain.with_iam_auth(gateway_url=gateway_url)

@@ -1,6 +1,6 @@
 ---
-title: "Agente Python Strands para Agente A2A"
-description: "Conecte um Agente Python Strands a um agente A2A remoto"
+title: "Agente Python para Agente A2A"
+description: "Conecte um Agente Python a um agente A2A remoto"
 when:
   sourceType: py#agent
   targetType:
@@ -8,7 +8,7 @@ when:
     - py#agent
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -23,7 +23,7 @@ O gerador configura toda a infraestrutura necessária para que seu agente possa 
 
 Antes de usar este gerador, certifique-se de ter:
 
-1. Um projeto Python com um componente <Link path="guides/py-agent">Agent</Link> (qualquer protocolo)
+1. Um projeto Python com um componente <Link path="guides/py-agent">Python Agent</Link> (Strands ou LangChain)
 2. Um projeto com um componente Agent gerado com `--protocol=A2A` e `--auth=IAM` (seja <Link path="guides/ts-agent">`ts#agent`</Link> ou <Link path="guides/py-agent">`py#agent`</Link>)
 3. Ambos os componentes criados com `infra: agentcore`
 
@@ -51,12 +51,14 @@ O gerador cria um projeto Python compartilhado `agent_connection` em `packages/c
     - core
       - agentcore\_endpoints.py Resolução de ARN/URL independente de framework
       - agentcore\_a2a\_client\_config.py Configuração de cliente A2A independente de framework (`ClientConfig` assinado)
-      - agentcore\_a2a\_client\_strands.py Cliente A2A Strands encapsulando a configuração
+      - agentcore\_a2a\_client\_\<framework>.py Cliente A2A encapsulando a configuração para o framework do seu agente
       - auth/ `httpx.Auth` SigV4 / encaminhamento de sessão independente de framework
     - app
-      - \<target\_agent\_name>\_client\_strands.py Cliente Strands por conexão para cada agente A2A
+      - \<target\_agent\_name>\_client\_\<framework>.py Cliente A2A por conexão para cada agente A2A
 
 </FileTree>
+
+O sufixo do cliente corresponde ao framework do seu agente (`_strands` ou `_langchain`). Ambos encapsulam o mesmo `ClientConfig` assinado independente de framework: o cliente Strands encapsula um `A2AAgent` Strands, enquanto o cliente LangChain aciona o [a2a SDK](https://pypi.org/project/a2a-sdk/) diretamente, de modo que um agente LangChain não inclui nenhuma dependência Strands.
 
 Além disso, o gerador:
 - Transforma o `agent.py` do seu agente para registrar o agente A2A remoto como uma ferramenta usando `@tool`
@@ -65,17 +67,19 @@ Além disso, o gerador:
 
 ## Usando o Agente A2A Conectado
 
-O gerador transforma o `agent.py` do seu agente para encapsular o agente A2A remoto como uma ferramenta:
+O gerador transforma o `agent.py` do seu agente para encapsular o agente A2A remoto como uma ferramenta. O agente remoto é registrado com um delegado decorado com `@tool` — a importação do decorador e o construtor do agente diferem por framework:
 
-```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-13,15}
 from contextlib import contextmanager
 from strands import Agent, tool
 
 from my_scope_agent_connection import RemoteAgentClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    remote_agent = RemoteAgentClientStrands.create(session_id=session_id)
+def get_agent():
+    remote_agent = RemoteAgentClientStrands.create()
 
     @tool
     def ask_remote_agent(prompt: str) -> str:
@@ -87,10 +91,35 @@ def get_agent(session_id: str):
         tools=[ask_remote_agent],
     )
 ```
+</TabItem>
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,7-12,14}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
 
-O parâmetro `session_id` é propagado a partir do chamador, garantindo consistência para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+from my_scope_agent_connection import RemoteAgentClientLangChain
 
-Internamente, `RemoteAgentClient.create(session_id=...)` retorna um `A2AAgent` Strands configurado com um `httpx.AsyncClient` que assina requisições com SigV4 quando implantado na AWS, e um endpoint simples `http://localhost:<port>/` quando `SERVE_LOCAL=true`.
+def get_agent():
+    remote_agent = RemoteAgentClientLangChain.create()
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+</TabItem>
+</Tabs>
+
+Ambos os clientes são diretamente chamáveis, retornando a resposta do agente remoto, e encapsulam um `httpx.AsyncClient` que assina requisições com SigV4 quando implantado na AWS e usa um endpoint simples `http://localhost:<port>/` quando `SERVE_LOCAL=true`. O cliente Strands encapsula um `A2AAgent` Strands; o cliente LangChain aciona o a2a SDK diretamente.
+
+O ID de sessão do AgentCore é propagado para o agente remoto automaticamente via cabeçalho `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, independentemente do framework: o servidor do agente vincula a sessão da requisição de entrada em um contexto assíncrono, e o `httpx.Auth` assinado do cliente de conexão o carimba em cada chamada de saída — garantindo consistência para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infraestrutura
 

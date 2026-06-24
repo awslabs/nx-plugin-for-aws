@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -46,13 +46,15 @@ O gerador emite módulos compartilhados core-gateway em seu projeto Python `agen
     - core/
       - agentcore\_endpoints.py Resolução de ARN/URL independente de framework
       - agentcore\_gateway\_mcp\_transport.py Transporte MCP Gateway independente de framework
-      - agentcore\_gateway\_mcp\_client\_strands.py Cliente MCP Strands para o Gateway implantado
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py Cliente MCP Gateway para o framework do seu agente
       - auth/ `httpx.Auth` SigV4 / encaminhamento de sessão independente de framework
     - app/
-      - \<gateway\_snake>\_client\_strands.py Wrapper de cliente Strands por Gateway
+      - \<gateway\_snake>\_client\_\<framework>.py Wrapper de cliente por Gateway
     - \_\_init\_\_.py Re-exporta o cliente do Gateway
 
 </FileTree>
+
+O sufixo do cliente corresponde ao framework do seu agente (`_strands` ou `_langchain`).
 
 Além disso, o gerador:
 
@@ -64,6 +66,8 @@ Além disso, o gerador:
 
 O gerador transforma o `agent.py` do seu agente para usar o cliente do Gateway:
 
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()` retorna um único cliente gerenciável por contexto cujo `list_tools_sync()` produz todas as ferramentas disponíveis através do Gateway:
+`MyGatewayClientStrands.create()` retorna um único `MCPClient` gerenciável por contexto cujo `list_tools_sync()` produz todas as ferramentas disponíveis através do Gateway.
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **Modo implantado** (`SERVE_LOCAL` não definido): um único `MCPClient` apontado para o endpoint MCP do Gateway, assinado com SigV4.
-- **Modo local** (`SERVE_LOCAL=true`): um `MCPClient` HTTP simples apontado para o gateway local iniciado pelo alvo `serve-local` do projeto Gateway.
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()` retorna uma lista de ferramentas carregadas via [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Cada ferramenta abre uma nova sessão por chamada, então nenhum bloco `with` é necessário.
+</TabItem>
+</Tabs>
+
+Em ambos os casos, o cliente se comporta da mesma forma por modo:
+
+- **Modo implantado** (`SERVE_LOCAL` não definido): ferramentas apontadas para o endpoint MCP do Gateway, assinado com SigV4.
+- **Modo local** (`SERVE_LOCAL=true`): ferramentas HTTP simples apontadas para o gateway local iniciado pelo alvo `serve-local` do projeto Gateway.
 
 O ID da sessão é propagado para os servidores MCP downstream automaticamente via o cabeçalho `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 

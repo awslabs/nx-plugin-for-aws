@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -46,13 +46,15 @@ import Infrastructure from '@components/infrastructure.astro';
     - core/
       - agentcore\_endpoints.py フレームワークに依存しないARN/URL解決
       - agentcore\_gateway\_mcp\_transport.py フレームワークに依存しないGateway MCPトランスポート
-      - agentcore\_gateway\_mcp\_client\_strands.py デプロイされたGateway用のStrands MCPクライアント
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py エージェントのフレームワーク用のGateway MCPクライアント
       - auth/ フレームワークに依存しないSigV4 / セッション転送 `httpx.Auth`
     - app/
-      - \<gateway\_snake>\_client\_strands.py GatewayごとのStrandsクライアントラッパー
+      - \<gateway\_snake>\_client\_\<framework>.py Gatewayごとのクライアントラッパー
     - \_\_init\_\_.py Gatewayクライアントを再エクスポート
 
 </FileTree>
+
+クライアントのサフィックスは、エージェントのフレームワーク（`_strands`または`_langchain`）と一致します。
 
 さらに、ジェネレーターは以下を行います：
 
@@ -64,6 +66,8 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ジェネレーターは、エージェントの`agent.py`をGatewayクライアントを使用するように変換します：
 
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()`は、`list_tools_sync()`がGatewayを通じて利用可能なすべてのツールを生成する、単一のコンテキスト管理可能なクライアントを返します：
+`MyGatewayClientStrands.create()`は、`list_tools_sync()`がGatewayを通じて利用可能なすべてのツールを生成する、単一のコンテキスト管理可能な`MCPClient`を返します。
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **デプロイモード**（`SERVE_LOCAL`未設定）：GatewayのMCPエンドポイントを指す単一の`MCPClient`、SigV4署名付き。
-- **ローカルモード**（`SERVE_LOCAL=true`）：Gatewayプロジェクトの`serve-local`ターゲットによって起動されたローカルゲートウェイを指すプレーンHTTPの`MCPClient`。
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()`は、[`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp)を介して読み込まれたツールのリストを返します。各ツールは呼び出しごとに新しいセッションを開くため、`with`ブロックは必要ありません。
+</TabItem>
+</Tabs>
+
+どちらの場合も、クライアントはモードごとに同じように動作します：
+
+- **デプロイモード**（`SERVE_LOCAL`未設定）：GatewayのMCPエンドポイントを指すツール、SigV4署名付き。
+- **ローカルモード**（`SERVE_LOCAL=true`）：Gatewayプロジェクトの`serve-local`ターゲットによって起動されたローカルゲートウェイを指すプレーンHTTPツール。
 
 セッションIDは`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`ヘッダーを介して、下流のMCPサーバーに自動的に伝播されます。
 

@@ -136,6 +136,8 @@ export const withVersions = (deps: ITsDepVersion[]) =>
  * Versions for Python dependencies added by generators
  */
 export const PY_VERSIONS = {
+  'a2a-sdk': '==0.3.26',
+  'ag-ui-langgraph': '==0.0.42',
   'ag-ui-protocol': '==0.1.19',
   'ag-ui-strands': '==0.2.1',
   'aws-lambda-powertools': '==3.29.0',
@@ -148,6 +150,10 @@ export const PY_VERSIONS = {
   fastapi: '==0.137.1',
   'fastapi[standard]': '==0.137.1',
   httpx: '==0.28.1',
+  langchain: '==1.3.9',
+  'langchain-aws': '==1.5.1',
+  'langchain-mcp-adapters': '==0.3.0',
+  langgraph: '==1.2.5',
   mcp: '==1.27.2',
   'pip-check-updates': '==0.28.0',
   'pip-licenses': '==5.5.5',

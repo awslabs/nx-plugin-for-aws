@@ -30,3 +30,18 @@ export const MCP_INSPECTOR_EXCEPTIONS: DependencyCheckException[] = [
     spdx: 'Apache-2.0',
   },
 ];
+
+export const AG_UI_LANGGRAPH_EXCEPTIONS: DependencyCheckException[] = [
+  {
+    package: 'jsonpatch',
+    reason:
+      'Unconditional dependency of langchain-core. Genuinely BSD-3-Clause (LICENSE matches the SPDX BSD-3-Clause template), but the wheel only carries the free-text "Modified BSD License" metadata, not an SPDX expression.',
+    spdx: 'BSD-3-Clause',
+  },
+  {
+    package: 'jsonpointer',
+    reason:
+      'Transitive dependency of jsonpatch (via langchain-core). Genuinely BSD-3-Clause (LICENSE matches the SPDX BSD-3-Clause template), but the wheel only carries the free-text "Modified BSD License" metadata, not an SPDX expression.',
+    spdx: 'BSD-3-Clause',
+  },
+];

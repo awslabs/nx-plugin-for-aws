@@ -136,7 +136,9 @@ export const getAgent = async (sessionId: string) =>
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const client = tree
-      .read('packages/common/agent-connection/src/app/my-gateway-client-strands.ts')!
+      .read(
+        'packages/common/agent-connection/src/app/my-gateway-client-strands.ts',
+      )!
       .toString();
     expect(client).toContain('export class MyGatewayClientStrands');
     expect(client).toContain("config.gateways?.['MyGateway']");
@@ -158,7 +160,9 @@ export const getAgent = async (sessionId: string) =>
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const client = tree
-      .read('packages/common/agent-connection/src/app/my-gateway-client-strands.ts')!
+      .read(
+        'packages/common/agent-connection/src/app/my-gateway-client-strands.ts',
+      )!
       .toString();
     expect(client).toContain("gatewayUrl: 'http://localhost:8123/mcp'");
     expect(client).toContain('withoutAuth');

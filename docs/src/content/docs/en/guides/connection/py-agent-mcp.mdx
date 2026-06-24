@@ -7,7 +7,7 @@ when:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ The generator sets up all the necessary wiring so your agent can discover and in
 
 Before using this generator, ensure you have:
 
-1. A Python project with a <Link path="guides/py-agent">Strands Agent</Link> component
+1. A Python project with a <Link path="guides/py-agent">Python Agent</Link> component (Strands or LangChain)
 2. A project with an MCP server component (either <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> or <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
 3. Both components created with `infra: agentcore`
 
@@ -50,12 +50,14 @@ The generator creates a shared `agent_connection` Python project at `packages/co
     - core
       - agentcore\_endpoints.py Framework-agnostic ARN/URL resolution
       - agentcore\_mcp\_transport.py Framework-agnostic MCP transport
-      - agentcore\_mcp\_client\_strands.py Strands MCP client wrapping the transport
+      - agentcore\_mcp\_client\_\<framework>.py MCP client wrapping the transport for your agent's framework
       - auth/ Framework-agnostic SigV4 / session-forwarding `httpx.Auth`
     - app
-      - \<mcp\_server\_name>\_client\_strands.py Per-connection Strands client for each MCP server
+      - \<mcp\_server\_name>\_client\_\<framework>.py Per-connection client for each MCP server
 
 </FileTree>
+
+The client suffix matches your agent's framework (`_strands` or `_langchain`).
 
 Additionally, the generator:
 - Transforms your agent's `agent.py` to import and use the MCP server's tools via a class-based client
@@ -66,15 +68,17 @@ Additionally, the generator:
 
 The generator transforms your agent's `agent.py` to use the MCP server's tools:
 
-```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-13}
 from contextlib import contextmanager
 from strands import Agent
 
 from my_scope_agent_connection import MyMcpServerClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    my_mcp_server = MyMcpServerClientStrands.create(session_id=session_id)
+def get_agent():
+    my_mcp_server = MyMcpServerClientStrands.create()
     with (
         my_mcp_server,
     ):
@@ -84,7 +88,29 @@ def get_agent(session_id: str):
         )
 ```
 
-The `session_id` parameter is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+The Strands client is a context manager, entered in a `with` block around the agent.
+</TabItem>
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/my-project/my_module/agent/agent.py" {4,8,13}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+The LangChain client returns a list of tools loaded via [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Each tool opens a fresh MCP session per call, so the tools stay usable for the agent's lifetime — no `with` block is needed.
+</TabItem>
+</Tabs>
+
+The AgentCore session ID is propagated to the MCP server automatically via the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header for both frameworks, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
 

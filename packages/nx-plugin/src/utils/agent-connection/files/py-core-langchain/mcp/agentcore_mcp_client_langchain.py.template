@@ -1,0 +1,64 @@
+import asyncio
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+
+import boto3
+import httpx
+
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from .agentcore_endpoints import mcp_url_from_arn, region_from_arn
+from .auth.session import jwt_auth, plain_auth, sigv4_auth
+
+
+def _run_sync(coro):
+    # Tools load during agent construction, which under uvicorn runs inside a
+    # live event loop where asyncio.run() would raise — fall back to a worker.
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _load_tools(url: str, auth: httpx.Auth) -> list[BaseTool]:
+    # Pass a connection config so each tool opens a fresh session per call and
+    # stays usable after construction (no shared session to close).
+    client = MultiServerMCPClient(
+        {
+            "server": {
+                "transport": "streamable_http",
+                "url": url,
+                "auth": auth,
+                "terminate_on_close": False,
+            }
+        }
+    )
+    return _run_sync(client.get_tools())
+
+
+class AgentCoreMCPClientLangChain:
+    """Loads LangChain tools from an MCP server on an AgentCore runtime."""
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> list[BaseTool]:
+        """SigV4-authenticated tools for a Bedrock AgentCore runtime."""
+        region = region_from_arn(agent_runtime_arn)
+        url = mcp_url_from_arn(agent_runtime_arn)
+        credentials = boto3.Session(region_name=region).get_credentials()
+        return _load_tools(url, sigv4_auth(credentials, region))
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> list[BaseTool]:
+        """Bearer-authenticated tools for a Bedrock AgentCore runtime."""
+        url = mcp_url_from_arn(agent_runtime_arn)
+        return _load_tools(url, jwt_auth(access_token_provider))
+
+    @staticmethod
+    def without_auth(url: str) -> list[BaseTool]:
+        """Plain-HTTP tools for local dev."""
+        return _load_tools(url, plain_auth())

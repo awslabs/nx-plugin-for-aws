@@ -2,16 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { ensureDirSync } from 'fs-extra';
+
 import TOML from '@iarna/toml';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { ensureDirSync } from 'fs-extra';
+import { join } from 'path';
 // eslint-disable-next-line
 import {
-  TS_VERSIONS,
   PY_VERSIONS,
+  TS_VERSIONS,
 } from '../../../packages/nx-plugin/src/utils/versions';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - license-check', () => {
   const pkgMgr = 'pnpm';
@@ -137,6 +138,23 @@ describe('smoke test - license-check', () => {
       .map(([name, version]) => `${name}${version}`);
     (pyToml.project as any).dependencies = pyDeps;
     writeFileSync(pyProjectTomlPath, TOML.stringify(pyToml));
+
+    // langchain pulls jsonpatch (+ its transitive jsonpointer), whose wheels
+    // declare only the free-text "Modified BSD License" — both are genuinely
+    // BSD-3-Clause. A generated langchain agent gets per-package exceptions for
+    // these via the py#agent generator; this test adds raw PY_VERSIONS without
+    // running that generator, so add the same exceptions to the config here.
+    const configPath = join(projectRoot, 'aws-nx-plugin.config.mts');
+    const config = readFileSync(configPath, 'utf-8');
+    writeFileSync(
+      configPath,
+      config.replace(
+        'exceptions: [',
+        `exceptions: [
+        { package: 'jsonpatch', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },
+        { package: 'jsonpointer', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },`,
+      ),
+    );
 
     await runCLI('uv sync --directory packages/py_deps', {
       ...opts,

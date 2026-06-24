@@ -1,0 +1,99 @@
+import asyncio
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
+
+from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
+from a2a.types import Message, Part, Role, Task, TextPart
+
+from .agentcore_a2a_client_config import AgentCoreA2aClientConfig
+
+
+def _run_sync(coro):
+    # The tool is invoked from sync agent code, which under uvicorn runs inside a
+    # live event loop where asyncio.run() would raise — fall back to a worker.
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _text(event) -> str:
+    # Collect text parts from a bare Message or a (Task, update) event.
+    parts = []
+    if isinstance(event, Message):
+        parts = event.parts
+    elif isinstance(event, tuple):
+        task, update = event
+        if isinstance(task, Task) and task.artifacts:
+            parts = [p for a in task.artifacts for p in (a.parts or [])]
+        elif update is not None and getattr(update, "status", None) and update.status.message:
+            parts = update.status.message.parts
+    return "".join(p.root.text for p in parts if getattr(p.root, "text", None))
+
+
+class _A2AClient:
+    """A synchronously-callable A2A client. Sends a text prompt to the remote
+    agent and returns its text reply. Built on the a2a SDK only — no Strands."""
+
+    def __init__(self, url: str, client_config: ClientConfig):
+        self._url = url
+        self._config = client_config
+
+    def __call__(self, prompt: str) -> str:
+        return _run_sync(self._invoke(prompt))
+
+    async def _invoke(self, prompt: str) -> str:
+        # AgentCoreA2aClientConfig always sets the signed httpx client.
+        httpx_client = self._config.httpx_client
+        if httpx_client is None:
+            raise RuntimeError("A2A client config is missing an httpx client")
+        card = await A2ACardResolver(
+            httpx_client=httpx_client, base_url=self._url
+        ).get_agent_card()
+        client = ClientFactory(self._config).create(card)
+        message = Message(
+            kind="message",
+            role=Role.user,
+            message_id=uuid4().hex,
+            parts=[Part(TextPart(kind="text", text=prompt))],
+        )
+        # The client config uses streaming=False, so the last event carries the
+        # complete response.
+        reply = ""
+        async for event in client.send_message(message):
+            text = _text(event)
+            if text:
+                reply = text
+        return reply
+
+
+class AgentCoreA2aClientLangChain:
+    """Factory for A2A clients that connect to an AgentCore runtime.
+
+    Reuses the framework-agnostic Layer-1 ``AgentCoreA2aClientConfig`` (signed
+    ``a2a.client.ClientConfig``) and drives the a2a SDK directly, so a LangChain
+    agent delegating to an A2A agent pulls in no Strands dependency."""
+
+    @staticmethod
+    def with_iam_auth(agent_runtime_arn: str) -> _A2AClient:
+        """SigV4-authenticated client for a Bedrock AgentCore runtime."""
+        return _A2AClient(*AgentCoreA2aClientConfig.with_iam_auth(agent_runtime_arn))
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> _A2AClient:
+        """Bearer-authenticated client for a Bedrock AgentCore runtime."""
+        return _A2AClient(
+            *AgentCoreA2aClientConfig.with_jwt_auth(
+                agent_runtime_arn, access_token_provider
+            )
+        )
+
+    @staticmethod
+    def without_auth(url: str) -> _A2AClient:
+        """Plain-HTTP client for local dev."""
+        return _A2AClient(*AgentCoreA2aClientConfig.without_auth(url))

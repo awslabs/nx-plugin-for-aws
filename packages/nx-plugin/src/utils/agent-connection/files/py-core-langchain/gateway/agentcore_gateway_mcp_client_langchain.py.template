@@ -1,0 +1,57 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+import boto3
+import httpx
+
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from .agentcore_endpoints import region_from_gateway_url
+from .auth.session import plain_auth, sigv4_auth
+
+
+def _run_sync(coro):
+    # Tools load during agent construction, which under uvicorn runs inside a
+    # live event loop where asyncio.run() would raise — fall back to a worker.
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _load_tools(url: str, auth: httpx.Auth) -> list[BaseTool]:
+    # Pass a connection config so each tool opens a fresh session per call and
+    # stays usable after construction (no shared session to close).
+    client = MultiServerMCPClient(
+        {
+            "server": {
+                "transport": "streamable_http",
+                "url": url,
+                "auth": auth,
+                "terminate_on_close": False,
+            }
+        }
+    )
+    return _run_sync(client.get_tools())
+
+
+class AgentCoreGatewayMCPClientLangChain:
+    """Loads LangChain tools from an AgentCore Gateway."""
+
+    @staticmethod
+    def with_iam_auth(
+        gateway_url: str,
+        region: str | None = None,
+    ) -> list[BaseTool]:
+        """SigV4-authenticated tools for an AgentCore Gateway."""
+        resolved_region = region or region_from_gateway_url(gateway_url)
+        credentials = boto3.Session(region_name=resolved_region).get_credentials()
+        return _load_tools(gateway_url, sigv4_auth(credentials, resolved_region))
+
+    @staticmethod
+    def without_auth(gateway_url: str) -> list[BaseTool]:
+        """Plain-HTTP tools for the local gateway started by serve-local."""
+        return _load_tools(gateway_url, plain_auth())

@@ -5,7 +5,7 @@ when:
   sourceType: py#agent
   targetType: agentcore-gateway
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -46,13 +46,15 @@ Il generatore emette moduli core-gateway condivisi nel tuo progetto Python `agen
     - core/
       - agentcore\_endpoints.py Risoluzione ARN/URL indipendente dal framework
       - agentcore\_gateway\_mcp\_transport.py Trasporto MCP Gateway indipendente dal framework
-      - agentcore\_gateway\_mcp\_client\_strands.py Client MCP Strands per il Gateway distribuito
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py Client MCP Gateway per il framework del tuo agent
       - auth/ `httpx.Auth` SigV4 / session-forwarding indipendente dal framework
     - app/
-      - \<gateway\_snake>\_client\_strands.py Wrapper client Strands per-Gateway
+      - \<gateway\_snake>\_client\_\<framework>.py Wrapper client per-Gateway
     - \_\_init\_\_.py Ri-esporta il client Gateway
 
 </FileTree>
+
+Il suffisso del client corrisponde al framework del tuo agent (`_strands` o `_langchain`).
 
 Inoltre, il generatore:
 
@@ -64,6 +66,8 @@ Inoltre, il generatore:
 
 Il generatore trasforma il file `agent.py` del tuo agent per utilizzare il client Gateway:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -82,10 +86,32 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()` restituisce un singolo client gestibile tramite context manager il cui `list_tools_sync()` fornisce ogni strumento disponibile attraverso il Gateway:
+`MyGatewayClientStrands.create()` restituisce un singolo `MCPClient` gestibile tramite context manager il cui `list_tools_sync()` fornisce ogni strumento disponibile attraverso il Gateway.
+</TabItem>
+<TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
+```python title="packages/example/example/my_agent/agent.py" {4,8,12}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 
-- **Modalità distribuita** (`SERVE_LOCAL` non impostato): un singolo `MCPClient` puntato all'endpoint MCP del Gateway, firmato con SigV4.
-- **Modalità locale** (`SERVE_LOCAL=true`): un `MCPClient` HTTP semplice puntato al gateway locale avviato dal target `serve-local` del progetto Gateway.
+from my_scope_agent_connection import MyGatewayClientLangChain
+
+def get_agent():
+    my_gateway = MyGatewayClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_gateway],
+    )
+```
+
+`MyGatewayClientLangChain.create()` restituisce una lista di strumenti caricati tramite [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Ogni strumento apre una nuova sessione per chiamata, quindi non è necessario un blocco `with`.
+</TabItem>
+</Tabs>
+
+In entrambi i casi il client si comporta allo stesso modo per modalità:
+
+- **Modalità distribuita** (`SERVE_LOCAL` non impostato): strumenti puntati all'endpoint MCP del Gateway, firmati con SigV4.
+- **Modalità locale** (`SERVE_LOCAL=true`): strumenti HTTP semplici puntati al gateway locale avviato dal target `serve-local` del progetto Gateway.
 
 L'ID di sessione viene propagato automaticamente ai server MCP downstream tramite l'header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
@@ -159,3 +185,4 @@ Il gateway locale sostituisce il Gateway distribuito, quindi:
 
 - **Nessuna valutazione delle policy Cedar.** Ogni strumento è visibile all'agent indipendentemente dalle policy. Utilizza il target `serve` per esercitare le policy contro il Gateway distribuito.
 - **Il prefisso del nome dello strumento è preservato.** Gli strumenti di ciascun server MCP locale sono esposti come `<target-name>___<tool-name>`, corrispondendo a ciò che emette il Gateway distribuito. Questo mantiene il system prompt dell'agent e i nomi delle azioni Cedar che referenzi coerenti tra esecuzioni locali e distribuite.
+te.

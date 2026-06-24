@@ -12,12 +12,14 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
+  type AgentFramework,
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   getPythonAgentConnectionProjectDir,
+  resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import {
   addPythonDestructuredImport,
@@ -41,6 +43,18 @@ import type { PyAgentA2aConnectionGeneratorSchema } from './schema';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
+
+/** The module each framework imports the `tool` decorator from. */
+const TOOL_IMPORT_MODULE: Record<AgentFramework, string> = {
+  strands: 'strands',
+  langchain: 'langchain_core.tools',
+};
+
+/** The GritQL pattern matching each framework's agent constructor. */
+const AGENT_CONSTRUCTOR: Record<AgentFramework, string> = {
+  strands: 'yield Agent($_)',
+  langchain: 'create_agent($_)',
+};
 
 export const PY_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -87,22 +101,35 @@ export const pyAgentA2aConnectionGenerator = async (
   const targetAgentSnakeCase = snakeCase(targetAgentClassName);
   const targetAgentPort = targetAgentComponent.port ?? 9000;
 
+  // The transform applied to agent.py depends on the source agent's framework.
+  // Both register the remote A2A agent as a tool, anchored on the framework's
+  // agent constructor + `@tool` import, and each wraps a framework-specific A2A
+  // Layer-2 client (Strands' A2AAgent vs an a2a-sdk-only client) over the shared
+  // framework-agnostic A2A client config.
+  const framework = resolveAgentFramework(agentComponent.framework);
+  const isLangchain = framework === 'langchain';
+  const clientSuffix = isLangchain ? 'LangChain' : 'Strands';
+  const clientModuleSuffix = isLangchain ? 'langchain' : 'strands';
+
   // 1. Ensure the shared Python agent-connection project exists + has the
-  //    A2A core client and its shared SigV4 auth helper.
+  //    A2A core client (framework Layer-2) and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'a2a');
+  await addPythonCoreClient(tree, 'a2a', framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Layer 0/1 deps for the A2A client config + shared auth helper, plus the
-  // Strands A2A extra the framework's A2A client needs (the base strands-agents
-  // dependency is added by addPythonCoreClient).
+  // Layer 0/1 deps for the A2A client config + shared auth helper. The Strands
+  // Layer-2 client wraps strands' `A2AAgent` (strands-agents[a2a]); the LangChain
+  // Layer-2 client drives the a2a SDK directly (a2a-sdk) and must not pull
+  // Strands in.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
-    'strands-agents[a2a]',
+    ...(isLangchain
+      ? (['a2a-sdk'] as const)
+      : (['strands-agents[a2a]'] as const)),
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -113,7 +140,15 @@ export const pyAgentA2aConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    isLangchain
+      ? joinPathFragments(
+          __dirname,
+          'files',
+          'langchain',
+          'agent-connection',
+          'app',
+        )
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     appDir,
     {
       targetAgentSnakeCase,
@@ -139,8 +174,8 @@ export const pyAgentA2aConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${targetAgentSnakeCase}_client_strands`,
-    `${targetAgentClassName}ClientStrands`,
+    `.app.${targetAgentSnakeCase}_client_${clientModuleSuffix}`,
+    `${targetAgentClassName}Client${clientSuffix}`,
   );
 
   // 3. Transform agent.py to add the A2A client import + wrap it as a tool
@@ -151,7 +186,7 @@ export const pyAgentA2aConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${targetAgentClassName}ClientStrands`;
+    const clientClassName = `${targetAgentClassName}Client${clientSuffix}`;
     const clientVarName = targetAgentSnakeCase;
     const toolName = `ask_${targetAgentSnakeCase}`;
 
@@ -160,8 +195,9 @@ export const pyAgentA2aConnectionGenerator = async (
       agentFilePath,
       agentConnectionModuleName,
       clientClassName,
+      framework,
     );
-    await addToolToAgent(tree, agentFilePath, toolName);
+    await addToolToAgent(tree, agentFilePath, toolName, framework);
     await addClientToolToGetAgent(
       tree,
       agentFilePath,
@@ -169,6 +205,7 @@ export const pyAgentA2aConnectionGenerator = async (
       clientVarName,
       toolName,
       targetAgentClassName,
+      framework,
     );
   }
 
@@ -204,7 +241,7 @@ export const pyAgentA2aConnectionGenerator = async (
 
 /**
  * Add imports to agent.py:
- *  - `tool` from `strands`
+ *  - `tool` (from `strands`, or `langchain_core.tools` for LangChain agents)
  *  - the per-connection client class from the shared agent-connection module
  */
 const addImportToAgentFile = async (
@@ -212,8 +249,14 @@ const addImportToAgentFile = async (
   filePath: string,
   agentConnectionModuleName: string,
   clientClassName: string,
+  framework: AgentFramework,
 ): Promise<void> => {
-  await addPythonDestructuredImport(tree, filePath, ['tool'], 'strands');
+  await addPythonDestructuredImport(
+    tree,
+    filePath,
+    ['tool'],
+    TOOL_IMPORT_MODULE[framework],
+  );
   await addPythonDestructuredImport(
     tree,
     filePath,
@@ -225,19 +268,21 @@ const addImportToAgentFile = async (
 /**
  * Add the A2A tool to the Agent's tools array using GritQL.
  *
- * Scoped via `$old <: within \`yield Agent($_)\`` so unrelated `tools=`
- * keyword arguments elsewhere in the file are not touched.
+ * Scoped to the framework's agent constructor so unrelated `tools=` keyword
+ * arguments elsewhere in the file are not touched.
  */
 const addToolToAgent = async (
   tree: Tree,
   filePath: string,
   toolName: string,
+  framework: AgentFramework,
 ): Promise<void> => {
+  const scope = AGENT_CONSTRUCTOR[framework];
   await applyGritQL(
     tree,
     filePath,
     py(`\`tools=$old\` where {
-  $old <: within \`yield Agent($_)\`,
+  $old <: within \`${scope}\`,
   $old <: not contains \`${toolName}\`,
   if ($old <: \`[]\`) {
     $old => \`[${toolName}]\`
@@ -250,11 +295,11 @@ const addToolToAgent = async (
 
 /**
  * Wrap the get_agent body so the remote A2A client is created and exposed
- * as a `@tool`-decorated closure before yielding the Agent.
+ * as a `@tool`-decorated closure before constructing the Agent.
  *
  * Unlike MCP clients, A2A clients aren't context managers — we don't need
  * a `with` block around them. Creation + tool definition happen at the
- * top of the function body.
+ * top of the function body, anchored on the framework's agent constructor.
  */
 const addClientToolToGetAgent = async (
   tree: Tree,
@@ -263,14 +308,15 @@ const addClientToolToGetAgent = async (
   clientVarName: string,
   toolName: string,
   targetAgentClassName: string,
+  framework: AgentFramework,
 ): Promise<void> => {
   if (await matchGritQL(tree, filePath, py(`\`${clientClassName}.create\``))) {
     return;
   }
 
-  // The tool function we'll insert. Strands tools in Python are just
-  // @tool-decorated callables, so we define them inline in get_agent.
-  // A2AAgent is directly callable (syncs over invoke_async internally).
+  // Both frameworks' tools are @tool-decorated callables (the decorator's
+  // import differs, handled in addImportToAgentFile), defined inline in
+  // get_agent. The client is directly callable, returning the remote's reply.
   const toolBlock = `${clientVarName} = ${clientClassName}.create()
 
     @tool
@@ -279,15 +325,16 @@ const addClientToolToGetAgent = async (
         return str(${clientVarName}(prompt))
 `;
 
-  // Prepend client creation + tool definition to the function body.
-  // This works whether or not a prior MCP `with` block is present since we
-  // insert before any existing statements.
+  // Prepend client creation + tool definition to the function body, anchored on
+  // the framework's agent constructor. This works whether or not a prior MCP
+  // block is present since we insert before any existing statements.
+  const anchor = AGENT_CONSTRUCTOR[framework];
   await applyGritQL(
     tree,
     filePath,
     py(`\`def get_agent($params):
     $body\` where {
-  $body <: contains \`yield Agent($_)\`,
+  $body <: contains \`${anchor}\`,
   $body <: not contains \`${clientClassName}.create\`
 } => \`def get_agent($params):
     ${toolBlock}

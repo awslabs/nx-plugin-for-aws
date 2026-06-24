@@ -550,4 +550,187 @@ dependencies = ["strands-agents"]
     );
     expect(agentPy).toMatchSnapshot('transformed-agent.py');
   });
+
+  describe('langchain source agent', () => {
+    const LANGCHAIN_AGENT = {
+      generator: 'py#agent',
+      name: 'my-agent',
+      path: 'my_scope_my_agent/agent',
+      port: 8081,
+      rc: 'MyAgent',
+      framework: 'langchain',
+      protocol: 'ag-ui',
+    };
+
+    const setupLangchainProjects = (tools = '[subtract]') => {
+      setupProjects();
+      tree.write(
+        'packages/my-agent/my_scope_my_agent/agent/agent.py',
+        `import os
+
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=${tools},
+        system_prompt="You are a mathematical wizard.",
+        checkpointer=InMemorySaver(),
+    )
+`,
+      );
+    };
+
+    const opts = {
+      sourceProject: 'my_scope.my_agent',
+      targetProject: '@test/my-api',
+      sourceComponent: LANGCHAIN_AGENT,
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'inventory-mcp',
+        path: 'src/inventory-mcp',
+        port: 8082,
+        rc: 'InventoryMcp',
+      },
+    };
+
+    it('should vend the langchain MCP client returning BaseTools', async () => {
+      setupLangchainProjects();
+      await pyAgentMcpConnectionGenerator(tree, opts);
+
+      // The langchain Layer-2 client (loads BaseTools) is vended alongside the
+      // shared transport — and the strands Layer-2 client is NOT used by the app.
+      expect(
+        tree.exists(
+          'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_client_langchain.py',
+        ),
+      ).toBe(true);
+      // Layer 1 transport is still shared.
+      expect(
+        tree.exists(
+          'packages/common/agent_connection/proj_agent_connection/core/agentcore_mcp_transport.py',
+        ),
+      ).toBe(true);
+
+      const client = tree.read(
+        'packages/common/agent_connection/proj_agent_connection/app/inventory_mcp_client_langchain.py',
+        'utf-8',
+      )!;
+      expect(client).toContain('list[BaseTool]');
+      expect(client).toContain('AgentCoreMCPClientLangChain');
+      // The langchain app client must not pull in the strands Layer-2 client.
+      expect(client).not.toContain('AgentCoreMCPClientStrands');
+      expect(client).not.toContain('strands.tools.mcp');
+    });
+
+    it('should transform agent.py to spread tools into create_agent (no with block)', async () => {
+      setupLangchainProjects();
+      await pyAgentMcpConnectionGenerator(tree, opts);
+
+      const agent = tree.read(
+        'packages/my-agent/my_scope_my_agent/agent/agent.py',
+        'utf-8',
+      )!;
+      // Import added from the shared module
+      expect(agent).toContain(
+        'from proj_agent_connection import InventoryMcpClientLangChain',
+      );
+      // Client variable is actually defined
+      expect(agent).toContain(
+        'inventory_mcp = InventoryMcpClientLangChain.create()',
+      );
+      // Tools spread into create_agent, not via list_tools_sync()
+      expect(agent).toMatch(/tools=\[subtract, \*inventory_mcp\]/);
+      expect(agent).not.toContain('list_tools_sync');
+      // No with-block wrapping and no strands import leaked in
+      expect(agent).not.toContain('with (');
+      expect(agent).not.toContain('from strands');
+    });
+
+    it('should add langchain-mcp-adapters dep, not strands-agents', async () => {
+      setupLangchainProjects();
+      await pyAgentMcpConnectionGenerator(tree, opts);
+
+      const connectionPyproject = tree.read(
+        'packages/common/agent_connection/pyproject.toml',
+        'utf-8',
+      )!;
+      expect(connectionPyproject).toContain('langchain-mcp-adapters');
+    });
+
+    it('should be idempotent for langchain agents', async () => {
+      setupLangchainProjects();
+      await pyAgentMcpConnectionGenerator(tree, opts);
+      await pyAgentMcpConnectionGenerator(tree, opts);
+
+      const agent = tree.read(
+        'packages/my-agent/my_scope_my_agent/agent/agent.py',
+        'utf-8',
+      )!;
+      expect(
+        (agent.match(/InventoryMcpClientLangChain\.create/g) ?? []).length,
+      ).toBe(1);
+      const toolsListMatch = agent.match(/tools=\[([^\]]*)\]/);
+      expect(toolsListMatch).toBeTruthy();
+      expect(
+        (toolsListMatch![1].match(/\*inventory_mcp\b/g) ?? []).length,
+      ).toBe(1);
+    });
+
+    it('should not match unrelated tools= kwargs in a langchain agent', async () => {
+      setupProjects();
+      tree.write(
+        'packages/my-agent/my_scope_my_agent/agent/agent.py',
+        `import os
+
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+from langchain_core.tools import tool
+
+
+def some_unrelated_helper(tools=[]):
+    # Unrelated function that happens to have a \`tools\` kwarg — must not be touched.
+    return tools
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name="r")
+    return create_agent(model=model, tools=[subtract])
+`,
+      );
+
+      await pyAgentMcpConnectionGenerator(tree, opts);
+
+      const agent = tree.read(
+        'packages/my-agent/my_scope_my_agent/agent/agent.py',
+        'utf-8',
+      )!;
+      // The unrelated helper's signature is unchanged
+      expect(agent).toContain('def some_unrelated_helper(tools=[]):');
+      // Only create_agent's tools list got the spread
+      expect(agent).toMatch(
+        /create_agent\(model=model, tools=\[subtract, \*inventory_mcp\]\)/,
+      );
+    });
+  });
 });

@@ -85,8 +85,11 @@ const startDaemonsManually = (): void => {
   // overlay-mount on top of that, which the kernel rejects with EINVAL.
   // Mount tmpfs on the dirs containerd/buildkit write to so their
   // overlay mounts have a non-overlay filesystem to anchor on.
-  sh('sudo mount -t tmpfs -o size=8g tmpfs /var/lib/containerd || true');
-  sh('sudo mount -t tmpfs -o size=8g tmpfs /var/lib/finch || true');
+  // /var/lib/containerd holds every built image layer for the smoke matrix
+  // (one agentcore image per agent + per MCP server), so it is sized
+  // generously — the runner has ~68 GiB RAM and these are RAM-backed.
+  sh('sudo mount -t tmpfs -o size=24g tmpfs /var/lib/containerd || true');
+  sh('sudo mount -t tmpfs -o size=12g tmpfs /var/lib/finch || true');
   sh('sudo mkdir -p /var/lib/finch/buildkit');
 
   // sudo strips PATH via secure_path, so set the daemons' env explicitly

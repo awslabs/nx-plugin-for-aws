@@ -7,7 +7,7 @@ when:
     - ts#mcp-server
     - py#mcp-server
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -22,7 +22,7 @@ Il generatore configura tutti i collegamenti necessari in modo che il tuo agente
 
 Prima di utilizzare questo generatore, assicurati di avere:
 
-1. Un progetto Python con un componente <Link path="guides/py-agent">Agent</Link>
+1. Un progetto Python con un componente <Link path="guides/py-agent">Python Agent</Link> (Strands o LangChain)
 2. Un progetto con un componente server MCP (sia <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> che <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
 3. Entrambi i componenti creati con `infra: agentcore`
 
@@ -50,12 +50,14 @@ Il generatore crea un progetto Python condiviso `agent_connection` in `packages/
     - core
       - agentcore\_endpoints.py Risoluzione ARN/URL framework-agnostic
       - agentcore\_mcp\_transport.py Trasporto MCP framework-agnostic
-      - agentcore\_mcp\_client\_strands.py Client MCP Strands che avvolge il trasporto
+      - agentcore\_mcp\_client\_\<framework>.py Client MCP che avvolge il trasporto per il framework del tuo agente
       - auth/ `httpx.Auth` framework-agnostic per SigV4 / session-forwarding
     - app
-      - \<mcp\_server\_name>\_client\_strands.py Client Strands per-connessione per ogni server MCP
+      - \<mcp\_server\_name>\_client\_\<framework>.py Client per-connessione per ogni server MCP
 
 </FileTree>
+
+Il suffisso del client corrisponde al framework del tuo agente (`_strands` o `_langchain`).
 
 Inoltre, il generatore:
 - Trasforma il file `agent.py` del tuo agente per importare e utilizzare gli strumenti del server MCP tramite un client basato su classi
@@ -66,6 +68,8 @@ Inoltre, il generatore:
 
 Il generatore trasforma il file `agent.py` del tuo agente per utilizzare gli strumenti del server MCP:
 
+<Tabs syncKey="framework">
+<TabItem label="Strands">
 ```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
 from contextlib import contextmanager
 from strands import Agent
@@ -73,8 +77,8 @@ from strands import Agent
 from my_scope_agent_connection import MyMcpServerClientStrands
 
 @contextmanager
-def get_agent(session_id: str):
-    my_mcp_server = MyMcpServerClientStrands.create(session_id=session_id)
+def get_agent():
+    my_mcp_server = MyMcpServerClientStrands.create()
     with (
         my_mcp_server,
     ):
@@ -84,7 +88,27 @@ def get_agent(session_id: str):
         )
 ```
 
-Il parametro `session_id` viene passato dal chiamante, garantendo la coerenza per [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+Il client Strands è un context manager, inserito in un blocco `with` attorno all'agente. Il parametro `session_id` viene passato dal chiamante, garantendo la coerenza per [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+</TabItem>
+<TabItem label="LangChain">
+```python title="packages/my-project/my_module/agent/agent.py" {4,9,14}
+from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
+
+from my_scope_agent_connection import MyMcpServerClientLangChain
+
+def get_agent():
+    my_mcp_server = MyMcpServerClientLangChain.create()
+    return create_agent(
+        model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
+        system_prompt="...",
+        tools=[*my_mcp_server],
+    )
+```
+
+Il client LangChain restituisce una lista di strumenti caricati tramite [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Ogni strumento apre una nuova sessione MCP per chiamata, quindi gli strumenti rimangono utilizzabili per tutta la durata dell'agente — non è necessario un blocco `with`.
+</TabItem>
+</Tabs>
 
 ## Infrastruttura
 

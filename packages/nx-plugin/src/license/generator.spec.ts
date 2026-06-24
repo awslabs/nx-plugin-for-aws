@@ -306,6 +306,53 @@ describe('license generator', () => {
       expect(config).not.toContain('@modelcontextprotocol/inspector');
     });
 
+    it('should add LangChain exceptions when a langchain agent exists (license after agent)', async () => {
+      addProjectConfiguration(tree, 'py-project', {
+        root: 'packages/py-project',
+        sourceRoot: 'packages/py-project/src',
+        metadata: {
+          components: [
+            {
+              generator: 'py#agent',
+              path: 'src/my-agent',
+              name: 'my-agent',
+              protocol: 'ag-ui',
+              framework: 'langchain',
+            },
+          ],
+        } as any,
+      });
+
+      await licenseGenerator(tree, options);
+
+      const config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+      expect(config).toContain('jsonpatch');
+      expect(config).toContain('jsonpointer');
+    });
+
+    it('should not add LangChain exceptions for a strands agent', async () => {
+      addProjectConfiguration(tree, 'py-project', {
+        root: 'packages/py-project',
+        sourceRoot: 'packages/py-project/src',
+        metadata: {
+          components: [
+            {
+              generator: 'py#agent',
+              path: 'src/my-agent',
+              name: 'my-agent',
+              protocol: 'http',
+              framework: 'strands',
+            },
+          ],
+        } as any,
+      });
+
+      await licenseGenerator(tree, options);
+
+      const config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+      expect(config).not.toContain('jsonpatch');
+    });
+
     it('should add pythonCollector when py#project runs after license generator', async () => {
       const { ensurePythonLicenseCollector } = await import('./config');
 

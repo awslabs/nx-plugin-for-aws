@@ -78,7 +78,18 @@ export type ConnectionProtocol = 'mcp' | 'gateway' | 'a2a';
  * Layer-0/1 (`core-auth`, `core-shared`, the per-protocol transports/configs)
  * is reused unchanged.
  */
-export type AgentFramework = 'strands';
+export type AgentFramework = 'strands' | 'langchain';
+
+/**
+ * Resolve an agent component's framework, defaulting to `strands`. Connection
+ * generators dispatch on the returned framework to pick the matching templates
+ * and agent.py/agent.ts transforms.
+ */
+export function resolveAgentFramework(
+  framework: string | undefined,
+): AgentFramework {
+  return framework === 'langchain' ? 'langchain' : 'strands';
+}
 
 /**
  * Framework-agnostic Layer-1 templates, keyed by protocol. These resolve the
@@ -97,17 +108,33 @@ const PY_PROTOCOL_TEMPLATES: Record<ConnectionProtocol, string> = {
 };
 
 /**
- * A framework's Layer-2 templates for one language. `base` holds the helpers
- * every connection of that framework needs (error logging, per-session agent
- * cache); `protocols` maps each *supported* protocol to the thin client that
- * wraps the matching Layer-1 transport/config in the framework's client type.
+ * A re-export the framework base emits into the agent-connection module's
+ * `__init__.py` (the agent server entry point imports these by name).
+ */
+interface BaseReExport {
+  fromModule: string;
+  importName: string;
+}
+
+/**
+ * A framework's Layer-2 templates for one language. `base` (optional) holds the
+ * helpers every connection of that framework needs (error logging, per-session
+ * agent cache); `baseReExports` lists what those helpers expose at the module
+ * root. `protocols` maps each *supported* protocol to the thin client that wraps
+ * the matching Layer-1 transport/config in the framework's client type.
+ *
+ * A framework whose Layer-2 needs no base helpers (e.g. LangChain, whose AG-UI
+ * foundation reuses only the framework-agnostic session context) omits `base`
+ * and leaves `baseReExports` empty.
  *
  * A protocol absent from `protocols` is not supported by that framework in that
  * language — callers must check before emitting. `deps` are the extra package
- * dependencies the base + client templates require.
+ * dependencies the base helpers require (per-connection client deps are added
+ * by the connection generators, not here).
  */
 interface FrameworkLanguageTemplates<Dep extends string> {
-  base: string;
+  base?: string;
+  baseReExports: BaseReExport[];
   protocols: Partial<Record<ConnectionProtocol, string>>;
   deps: Dep[];
 }
@@ -127,6 +154,16 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
   strands: {
     ts: {
       base: 'core-strands/base',
+      baseReExports: [
+        {
+          fromModule: './core/with-session-id-strands.js',
+          importName: '*',
+        },
+        {
+          fromModule: './core/model-errors-strands.js',
+          importName: '*',
+        },
+      ],
       protocols: {
         mcp: 'core-strands/mcp',
         gateway: 'core-strands/gateway',
@@ -136,12 +173,42 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
     },
     py: {
       base: 'py-core-strands/base',
+      baseReExports: [
+        {
+          fromModule: '.core.with_session_id_strands',
+          importName: 'with_session_id',
+        },
+        {
+          fromModule: '.core.model_errors_strands',
+          importName: 'log_model_errors',
+        },
+      ],
       protocols: {
         mcp: 'py-core-strands/mcp',
         gateway: 'py-core-strands/gateway',
         a2a: 'py-core-strands/a2a',
       },
       deps: ['strands-agents'],
+    },
+  },
+  langchain: {
+    // LangChain is supported for Python agents only (the TypeScript LangChain
+    // agent foundation has no in-process AG-UI <-> LangGraph adapter, so it is
+    // not scaffolded — see ts#agent). Its Layer-2 clients stay usable after
+    // agent construction, so there is no base helper layer (no model-error
+    // logger / per-session agent cache) and no strands-agents dependency — its
+    // AG-UI foundation reuses only the framework-agnostic session context, and
+    // its A2A client drives the a2a SDK directly rather than wrapping Strands'
+    // A2AAgent. The per-connection adapter dependency (langchain-mcp-adapters /
+    // a2a-sdk) is added by the connection generators.
+    py: {
+      baseReExports: [],
+      protocols: {
+        mcp: 'py-core-langchain/mcp',
+        gateway: 'py-core-langchain/gateway',
+        a2a: 'py-core-langchain/a2a',
+      },
+      deps: [],
     },
   },
 };
@@ -233,15 +300,18 @@ export async function addTypeScriptFrameworkBase(
       `The '${framework}' framework does not support TypeScript agents.`,
     );
   }
-  emitTs(tree, lang.base);
+  if (lang.base) {
+    emitTs(tree, lang.base);
+  }
 
   const indexPath = joinPathFragments(
     AGENT_CONNECTION_PROJECT_DIR,
     'src',
     'index.ts',
   );
-  await addStarExport(tree, indexPath, './core/with-session-id-strands.js');
-  await addStarExport(tree, indexPath, './core/model-errors-strands.js');
+  for (const reExport of lang.baseReExports) {
+    await addStarExport(tree, indexPath, reExport.fromModule);
+  }
 }
 
 /**
@@ -371,25 +441,23 @@ export async function addPythonFrameworkBase(
       `The '${framework}' framework does not support Python agents.`,
     );
   }
-  emitPy(tree, lang.base);
+  if (lang.base) {
+    emitPy(tree, lang.base);
+  }
 
   const moduleInitPath = joinPathFragments(
     getPythonAgentConnectionProjectDir(tree),
     getPythonAgentConnectionModuleName(tree),
     '__init__.py',
   );
-  await addPythonReExport(
-    tree,
-    moduleInitPath,
-    '.core.with_session_id_strands',
-    'with_session_id',
-  );
-  await addPythonReExport(
-    tree,
-    moduleInitPath,
-    '.core.model_errors_strands',
-    'log_model_errors',
-  );
+  for (const reExport of lang.baseReExports) {
+    await addPythonReExport(
+      tree,
+      moduleInitPath,
+      reExport.fromModule,
+      reExport.importName,
+    );
+  }
 
   if (lang.deps.length > 0) {
     addDependenciesToPyProjectToml(
@@ -581,6 +649,90 @@ const addPythonClientToGetAgent = async (
         ${clientVarName},
     ):
         $body\``),
+  );
+};
+
+/**
+ * Patch a LangChain agent.py to load connection tools and spread them into the
+ * `create_agent(...)` tools list. Used by the MCP and gateway connection
+ * generators when the source agent uses the `langchain` framework — the client
+ * class must expose a static `create()` returning a `list[BaseTool]`. The tools
+ * come from langchain-mcp-adapters' `MultiServerMCPClient`, which keeps the
+ * connection config on each tool and opens a fresh MCP session per call, so the
+ * tools stay usable after `get_agent` returns — no `with` block is needed.
+ * Mirrors {@link addPythonClientToAgent} for the Strands shape.
+ */
+export async function addPythonLangchainClientToAgent(
+  tree: Tree,
+  agentFilePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> {
+  await addPythonLangchainClientTools(tree, agentFilePath, clientVarName);
+  await addPythonLangchainClientToGetAgent(
+    tree,
+    agentFilePath,
+    clientClassName,
+    clientVarName,
+  );
+}
+
+/**
+ * Spread `*<clientVarName>` into the `create_agent(...)` tools list.
+ *
+ * Scoped via `$old <: within \`create_agent($_)\`` so only the agent's own
+ * tools= keyword argument is touched (not an unrelated function with a
+ * `tools=` parameter).
+ */
+const addPythonLangchainClientTools = async (
+  tree: Tree,
+  filePath: string,
+  clientVarName: string,
+): Promise<void> => {
+  await applyGritQL(
+    tree,
+    filePath,
+    py(`\`tools=$old\` where {
+  $old <: within \`create_agent($_)\`,
+  $old <: not contains \`*${clientVarName}\`,
+  if ($old <: \`[]\`) {
+    $old => \`[*${clientVarName}]\`
+  } else {
+    $old <: \`[$items]\` where { $items += \`, *${clientVarName}\` }
+  }
+}`),
+  );
+};
+
+/**
+ * Prepend `<clientVarName> = <clientClassName>.create()` to the get_agent body
+ * (which loads the connection's tools). No `with` block — the LangChain client
+ * hands langchain-mcp-adapters a connection config, so each tool opens its own
+ * MCP session per call and the tools are safe to use after get_agent returns.
+ * Idempotent via the `not contains <clientClassName>.create` guard.
+ */
+const addPythonLangchainClientToGetAgent = async (
+  tree: Tree,
+  filePath: string,
+  clientClassName: string,
+  clientVarName: string,
+): Promise<void> => {
+  if (
+    await matchGritQL(tree, filePath, py(`\`${clientClassName}.create()\``))
+  ) {
+    return;
+  }
+
+  await applyGritQL(
+    tree,
+    filePath,
+    py(`\`def get_agent($params):
+    $body\` where {
+  $body <: contains \`create_agent($_)\`,
+  $body <: not contains \`${clientClassName}.create\`
+} => \`def get_agent($params):
+    ${clientVarName} = ${clientClassName}.create()
+    $body\``),
   );
 };
 

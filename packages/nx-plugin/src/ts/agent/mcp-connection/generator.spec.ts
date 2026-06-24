@@ -491,7 +491,9 @@ export const getAgent = async (sessionId: string) => {
       'packages/common/agent-connection/src/app/inventory-mcp-client-strands.ts',
       'utf-8',
     );
-    expect(inventoryMcpClient).toMatchSnapshot('inventory-mcp-client-strands.ts');
+    expect(inventoryMcpClient).toMatchSnapshot(
+      'inventory-mcp-client-strands.ts',
+    );
 
     const indexTs = tree.read(
       'packages/common/agent-connection/src/index.ts',

@@ -11,6 +11,7 @@ import { runCLI, tmpProjPath } from '../utils';
 import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
+  invokeAgentCoreAgUi,
   invokeAgentCoreGatewayTool,
   invokeAgentCoreMcp,
   invokeCustomAuthApi,
@@ -177,6 +178,13 @@ describe('smoke test - cdk-deploy', () => {
       await invokeTrpcAgentCoreAgent(
         findOutput('TsAgentArn'),
         'TypeScript Agent',
+      );
+      // Python LangChain (AG-UI) agent — POST a RunAgentInput to /invocations
+      // and assert a streamed AG-UI response (no RUN_ERROR). Proves a deployed
+      // langchain agent runtime boots and serves over the AG-UI protocol.
+      await invokeAgentCoreAgUi(
+        findOutput('PyLangchainAgentArn'),
+        'Python LangChain Agent',
       );
 
       // A2A agents — invoke via the A2A JSON-RPC message/send method over
