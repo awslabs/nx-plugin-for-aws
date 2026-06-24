@@ -16,7 +16,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 ツールを使用してエージェントを構築するためのPython AIエージェントを生成し、オプションで[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。`framework`オプションでエージェントフレームワークを選択できます：[Strands](https://strandsagents.com/)（デフォルト）または[LangChain](https://docs.langchain.com/oss/python/langchain/overview)（[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)上に構築）。
 
-ジェネレーターはサーバー`protocol`を介してエージェントを公開します。Strandsエージェントは[HTTP](https://fastapi.tiangolo.com/)（デフォルト）、他のA2A互換エージェントとの相互運用性のための[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)プロトコル、および[CopilotKit](https://docs.copilotkit.ai/)を介した直接的なフロントエンド統合のための[AG-UI](https://docs.ag-ui.com/)プロトコルをサポートします。LangChainエージェントは`ag-ui`プロトコルをサポートします。
+ジェネレーターはサーバー`protocol`を介してエージェントを公開します。両方のフレームワークは[HTTP](https://fastapi.tiangolo.com/)（デフォルト）、他のA2A互換エージェントとの相互運用性のための[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)プロトコル、および[CopilotKit](https://docs.copilotkit.ai/)を介した直接的なフロントエンド統合のための[AG-UI](https://docs.ag-ui.com/)プロトコルをサポートします。
 
 ## 使用方法
 
@@ -55,10 +55,10 @@ import OptionFilter from '@components/option-filter.astro';
 </FileTree>
 </OptionFilter>
 
-<OptionFilter when={{ protocol: 'a2a' }} description="Strands A2A server layout">
+<OptionFilter when={{ protocol: 'a2a' }} description="A2A server layout">
 ### A2Aプロトコル
 
-エントリーポイントはFastAPIの代わりに[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)を使用します：
+エントリーポイントはA2Aプロトコル経由でエージェントを公開します（Strandsは[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)を使用し、LangChainはグラフを[`a2a-sdk`](https://a2a-protocol.org/)エグゼキューターでラップします）。FastAPIアプリにマウントされます：
 
 <FileTree>
   - your-project/
@@ -68,7 +68,7 @@ import OptionFilter from '@components/option-filter.astro';
         - agent.py サンプルツール付きメインエージェント定義
         - main.py A2Aサーバーエントリーポイント
         - Dockerfile エージェントホスティング用Dockerfile（`infra`が`None`の場合は生成されない）
-    - pyproject.toml Strands依存関係が追加された設定ファイル
+    - pyproject.toml フレームワークとA2A依存関係が追加された設定ファイル
     - project.json エージェントサーブターゲットが追加された設定ファイル
 </FileTree>
 </OptionFilter>
@@ -277,14 +277,12 @@ model = ChatBedrockConverse(
 エージェントのサーバープロトコルは通信方法を決定します。すべてのオプションは[FastAPI](https://fastapi.tiangolo.com/)で提供されますが、エントリーポイントが異なります：
 
 - **HTTP**（デフォルト）：カスタム`/invocations`エンドポイント、CORS、ストリーミングを備えた標準的なFastAPIサーバー。カスタムクライアント統合に最適です。
-- **A2A**：FastAPIアプリにマウントされた[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)。エージェントが他のA2A互換エージェントから検出・呼び出し可能である必要がある場合に最適です。
-- **AG-UI**：[ag-ui-strands](https://docs.ag-ui.com/)統合で、SSE経由で[AG-UIプロトコル](https://docs.ag-ui.com/)を公開します。Reactウェブサイトでの[CopilotKit](https://docs.copilotkit.ai/)との直接的なフロントエンド統合に最適です。
+- **A2A**：FastAPIアプリにマウントされた[Agent-to-Agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)サーバー（Strandsは[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)を使用し、LangChainはフレームワーク非依存の[`a2a-sdk`](https://a2a-protocol.org/)を使用します）。エージェントが他のA2A互換エージェントから検出・呼び出し可能である必要がある場合に最適です。
+- **AG-UI**：SSE経由の[AG-UIプロトコル](https://docs.ag-ui.com/)（Strandsは`ag-ui-strands`を使用し、LangChainは`ag-ui-langgraph`を使用します）。Reactウェブサイトでの[CopilotKit](https://docs.copilotkit.ai/)との直接的なフロントエンド統合に最適です。
+
+サーバーエントリーポイントはフレームワークによって異なります（Strandsはコンテキスト管理された`Agent`を生成し、LangChainはコンパイルされた`create_agent`グラフを駆動します）が、各プロトコルの外部契約は同じです。
 
 すべてのプロトコルは、AgentCoreランタイムのヘルスチェック契約用に`/ping`を公開します。A2Aエージェントはポート`9000`でリッスンします。HTTPとAG-UIエージェントはポート`8080`でリッスンします。生成されるDockerfileとインフラストラクチャは自動的に設定されます。
-
-:::note[LangChainはAG-UIのみをサポート]
-`langchain`フレームワークは現在`ag-ui`プロトコルのみをサポートしています。`http`または`a2a`プロトコルが必要な場合は、デフォルトの`strands`フレームワークを選択してください。
-:::
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPIサーバー（HTTPプロトコル）
@@ -373,9 +371,9 @@ SDKの詳細は[ドキュメント](https://aws.github.io/bedrock-agentcore-star
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
 ## A2Aサーバー（A2Aプロトコル）
 
-生成される`main.py`は`A2AServer.to_fastapi_app()`を親FastAPIアプリにマウントし、`/ping`も公開します。AgentCoreにデプロイすると、エントリーポイントはAppConfigからランタイムのパブリックARNを解決し、エージェントカードに通知します。
+生成される`main.py`は親FastAPIアプリにA2Aサーバーをマウントし、`/ping`も公開します。StrandsエージェントはStrandsの`A2AServer`を使用し、LangChainエージェントはコンパイルされたグラフを[`a2a-sdk`](https://a2a-protocol.org/)の`AgentExecutor`でラップします。AgentCoreにデプロイすると、エントリーポイントはAppConfigからランタイムのパブリックARNを解決し、エージェントカードに通知します。
 
-ほとんどのユーザーはこのファイルを変更する必要はありません。ツールやシステムプロンプトを変更するには`agent.py`を編集してください。A2Aサーバーは、`Agent`コンストラクタの`name`と`description`からエージェントカード（`/.well-known/agent-card.json`）を生成します。
+ほとんどのユーザーはこのファイルを変更する必要はありません。ツールやシステムプロンプトを変更するには`agent.py`を編集してください。A2Aサーバーは、エージェントの`name`と`description`からエージェントカード（`/.well-known/agent-card.json`）を生成します。
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI / CopilotKit server details">
