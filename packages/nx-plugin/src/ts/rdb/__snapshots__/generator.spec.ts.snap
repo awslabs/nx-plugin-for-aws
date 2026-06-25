@@ -492,6 +492,9 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    */
   readonly createDbUserBundleDir: string;
 
+  /** ORM framework used by this database project. */
+  readonly framework: 'prisma' | 'sqlmodel';
+
   /**
    * Writer instance for the Aurora cluster.
    */
@@ -568,6 +571,7 @@ export abstract class AuroraDatabase extends Construct {
       runtimeConfigKey,
       migrationBundleDir,
       createDbUserBundleDir,
+      framework,
       vpcSubnets,
       writer,
       enableRdsProxy = true,
@@ -644,23 +648,10 @@ export abstract class AuroraDatabase extends Construct {
     const databaseHostname =
       this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
     const databasePort = this.cluster.clusterEndpoint.port;
-
-    const createDbUserHandler = new Function(this, 'CreateDbUserHandler', {
-      code: Code.fromAsset(createDbUserBundleDir),
-      handler: 'index.handler',
-      runtime: Runtime.NODEJS_LATEST,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
-      architecture: Architecture.ARM_64,
-    });
+    const createDbUserHandler =
+      framework === 'sqlmodel'
+        ? this.createPythonDbUserHandler(vpc, createDbUserBundleDir)
+        : this.createNodeDbUserHandler(vpc, createDbUserBundleDir);
 
     this.cluster.connections.allowDefaultPortFrom(
       createDbUserHandler,
@@ -698,7 +689,121 @@ export abstract class AuroraDatabase extends Construct {
       region: Stack.of(this).region,
     });
 
-    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
+    const migrationHandler =
+      framework === 'sqlmodel'
+        ? this.createPythonMigrationHandler(
+            vpc,
+            migrationBundleDir,
+            databaseHostname,
+            databasePort,
+            databaseName,
+          )
+        : this.createNodeMigrationHandler(
+            vpc,
+            migrationBundleDir,
+            engine,
+            databaseHostname,
+            databasePort,
+            databaseName,
+          );
+
+    const trigger = new Trigger(this, 'MigrationTrigger', {
+      handler: migrationHandler,
+    });
+    trigger.node.addDependency(createDbUserResource);
+
+    new CfnOutput(this, 'ClusterEndpoint', {
+      value: this.cluster.clusterEndpoint.hostname,
+    });
+
+    if (this.proxy?.endpoint) {
+      new CfnOutput(this, 'ProxyEndpoint', {
+        value: this.proxy?.endpoint,
+      });
+    }
+  }
+
+  private createPythonDbUserHandler(
+    vpc: IVpc,
+    createDbUserBundleDir: string,
+  ): DockerImageFunction {
+    return new DockerImageFunction(this, 'CreateDbUserHandler', {
+      code: DockerImageCode.fromImageAsset(createDbUserBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      },
+      architecture: Architecture.ARM_64,
+    });
+  }
+
+  private createNodeDbUserHandler(
+    vpc: IVpc,
+    createDbUserBundleDir: string,
+  ): Function {
+    return new Function(this, 'CreateDbUserHandler', {
+      code: Code.fromAsset(createDbUserBundleDir),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+      architecture: Architecture.ARM_64,
+    });
+  }
+
+  private createPythonMigrationHandler(
+    vpc: IVpc,
+    migrationBundleDir: string,
+    databaseHostname: string,
+    databasePort: number,
+    databaseName: string,
+  ): DockerImageFunction {
+    const handler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      environment: {
+        HOSTNAME: databaseHostname,
+        DATABASE: databaseName,
+        PORT: databasePort.toString(),
+        DBUSER: this.dbUser,
+      },
+      architecture: Architecture.ARM_64,
+    });
+
+    this.allowDefaultPortFrom(handler);
+    this.grantConnect(handler);
+    return handler;
+  }
+
+  private createNodeMigrationHandler(
+    vpc: IVpc,
+    migrationBundleDir: string,
+    engine: AuroraDatabaseEngine,
+    databaseHostname: string,
+    databasePort: number,
+    databaseName: string,
+  ): DockerImageFunction {
+    const handler = new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
       }),
@@ -729,6 +834,7 @@ export abstract class AuroraDatabase extends Construct {
         value: this.proxy?.endpoint,
       });
     }
+    return handler;
   }
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {
@@ -1672,6 +1778,7 @@ variable "docker_image_tag" {
   default     = "proj-db-migration:latest"
 }
 
+
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
   type        = string
@@ -2267,7 +2374,6 @@ output "database_runtime_user" {
   description = "Application database user created for IAM-authenticated access."
   value       = local.database_runtime_user
 }
-
 "
 `;
 
@@ -3161,6 +3267,7 @@ variable "docker_image_tag" {
   default     = "proj-db-migration:latest"
 }
 
+
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
   type        = string
@@ -3220,10 +3327,17 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
     Statement = [
       {
         Effect = "Allow"
-        Action = ["rds-db:connect"]
-        Resource = [
-          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
+        Action = [
+          "secretsmanager:GetSecretValue"
         ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
       }
     ]
   })
@@ -3385,16 +3499,11 @@ resource "aws_iam_role_policy" "migration_handler_access" {
       {
         Effect = "Allow"
         Action = [
-          "secretsmanager:GetSecretValue"
+          "rds-db:connect"
         ]
-        Resource = [module.aurora.secret_arn]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt"
+        Resource = [
+          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
         ]
-        Resource = [module.aurora.kms_key_arn]
       }
     ]
   })
@@ -3755,7 +3864,6 @@ output "database_runtime_user" {
   description = "Application database user created for IAM-authenticated access."
   value       = local.database_runtime_user
 }
-
 "
 `;
 
@@ -4276,6 +4384,9 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    */
   readonly createDbUserBundleDir: string;
 
+  /** ORM framework used by this database project. */
+  readonly framework: 'prisma' | 'sqlmodel';
+
   /**
    * Writer instance for the Aurora cluster.
    */
@@ -4352,6 +4463,7 @@ export abstract class AuroraDatabase extends Construct {
       runtimeConfigKey,
       migrationBundleDir,
       createDbUserBundleDir,
+      framework,
       vpcSubnets,
       writer,
       enableRdsProxy = true,
@@ -4428,23 +4540,10 @@ export abstract class AuroraDatabase extends Construct {
     const databaseHostname =
       this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
     const databasePort = this.cluster.clusterEndpoint.port;
-
-    const createDbUserHandler = new Function(this, 'CreateDbUserHandler', {
-      code: Code.fromAsset(createDbUserBundleDir),
-      handler: 'index.handler',
-      runtime: Runtime.NODEJS_LATEST,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
-      architecture: Architecture.ARM_64,
-    });
+    const createDbUserHandler =
+      framework === 'sqlmodel'
+        ? this.createPythonDbUserHandler(vpc, createDbUserBundleDir)
+        : this.createNodeDbUserHandler(vpc, createDbUserBundleDir);
 
     this.cluster.connections.allowDefaultPortFrom(
       createDbUserHandler,
@@ -4482,7 +4581,121 @@ export abstract class AuroraDatabase extends Construct {
       region: Stack.of(this).region,
     });
 
-    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
+    const migrationHandler =
+      framework === 'sqlmodel'
+        ? this.createPythonMigrationHandler(
+            vpc,
+            migrationBundleDir,
+            databaseHostname,
+            databasePort,
+            databaseName,
+          )
+        : this.createNodeMigrationHandler(
+            vpc,
+            migrationBundleDir,
+            engine,
+            databaseHostname,
+            databasePort,
+            databaseName,
+          );
+
+    const trigger = new Trigger(this, 'MigrationTrigger', {
+      handler: migrationHandler,
+    });
+    trigger.node.addDependency(createDbUserResource);
+
+    new CfnOutput(this, 'ClusterEndpoint', {
+      value: this.cluster.clusterEndpoint.hostname,
+    });
+
+    if (this.proxy?.endpoint) {
+      new CfnOutput(this, 'ProxyEndpoint', {
+        value: this.proxy?.endpoint,
+      });
+    }
+  }
+
+  private createPythonDbUserHandler(
+    vpc: IVpc,
+    createDbUserBundleDir: string,
+  ): DockerImageFunction {
+    return new DockerImageFunction(this, 'CreateDbUserHandler', {
+      code: DockerImageCode.fromImageAsset(createDbUserBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      },
+      architecture: Architecture.ARM_64,
+    });
+  }
+
+  private createNodeDbUserHandler(
+    vpc: IVpc,
+    createDbUserBundleDir: string,
+  ): Function {
+    return new Function(this, 'CreateDbUserHandler', {
+      code: Code.fromAsset(createDbUserBundleDir),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+      architecture: Architecture.ARM_64,
+    });
+  }
+
+  private createPythonMigrationHandler(
+    vpc: IVpc,
+    migrationBundleDir: string,
+    databaseHostname: string,
+    databasePort: number,
+    databaseName: string,
+  ): DockerImageFunction {
+    const handler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      environment: {
+        HOSTNAME: databaseHostname,
+        DATABASE: databaseName,
+        PORT: databasePort.toString(),
+        DBUSER: this.dbUser,
+      },
+      architecture: Architecture.ARM_64,
+    });
+
+    this.allowDefaultPortFrom(handler);
+    this.grantConnect(handler);
+    return handler;
+  }
+
+  private createNodeMigrationHandler(
+    vpc: IVpc,
+    migrationBundleDir: string,
+    engine: AuroraDatabaseEngine,
+    databaseHostname: string,
+    databasePort: number,
+    databaseName: string,
+  ): DockerImageFunction {
+    const handler = new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
       }),
@@ -4496,6 +4709,7 @@ export abstract class AuroraDatabase extends Construct {
       architecture: Architecture.ARM_64,
     });
 
+<<<<<<< HEAD
     this.cluster.connections.allowDefaultPortFrom(migrationHandler);
     this.grantSecretRead(migrationHandler);
 
@@ -4512,7 +4726,22 @@ export abstract class AuroraDatabase extends Construct {
       new CfnOutput(this, 'ProxyEndpoint', {
         value: this.proxy?.endpoint,
       });
+=======
+    // The Prisma CLI uses a Rust-based MySQL driver that does not support the
+    // mysql_clear_password authentication exchange required by RDS IAM auth.
+    // MySQL migrations therefore use the admin secret, while PostgreSQL
+    // migrations generate an IAM auth token from the supplied connection details.
+    // Secret-authenticated MySQL migrations must connect directly to the Aurora
+    // cluster because the configured RDS Proxy accepts IAM authentication only.
+    if (engine.type === 'mysql') {
+      this.cluster.connections.allowDefaultPortFrom(handler);
+      this.grantSecretRead(handler);
+    } else {
+      this.allowDefaultPortFrom(handler);
+      this.grantConnect(handler);
+>>>>>>> 22f42188 (initial version)
     }
+    return handler;
   }
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {
@@ -4567,6 +4796,7 @@ export type DbProps = Omit<
   | 'databaseName'
   | 'adminUser'
   | 'createDbUserBundleDir'
+  | 'framework'
   | 'engine'
   | 'runtimeConfigKey'
   | 'migrationBundleDir'
@@ -4590,6 +4820,7 @@ export class Db extends AuroraDatabase {
         findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
         'dist/packages/db/bundle/create-db-user',
       ),
+      framework: 'prisma',
       engine: AuroraDatabaseEngines.postgres({}),
     });
   }

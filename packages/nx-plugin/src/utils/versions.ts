@@ -165,6 +165,10 @@ export const PY_VERSIONS = {
   ty: '==0.0.58',
   pynamodb: '==6.1.0',
   uvicorn: '==0.51.0',
+  sqlmodel: '==0.0.38',
+  alembic: '==1.18.4',
+  pymysql: '==1.2.0',
+  'psycopg[binary,pool]': '==3.3.4',
 } as const;
 export type IPyDepVersion = keyof typeof PY_VERSIONS;
 

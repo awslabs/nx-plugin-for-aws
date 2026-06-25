@@ -273,6 +273,7 @@ export const tsRdbGenerator = async (
         'bundle',
         'create-db-user',
       ),
+      framework: options.framework,
       dockerImageTag,
       containerEngine,
     });

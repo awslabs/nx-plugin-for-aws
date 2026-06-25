@@ -1,0 +1,2169 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py#rdb generator > should generate MySQL dependencies and templates 1`] = `
+"from collections.abc import Generator
+
+import boto3
+from sqlalchemy import event
+from sqlmodel import Session, create_engine
+
+from .utils import get_connection_url, get_database_config, is_local
+
+# Generated: must match runtimeConfigKey in config.json
+_runtime_config_key = "Db"
+
+_engine = None
+
+
+def _create_engine():
+    engine = create_engine(get_connection_url(_runtime_config_key))
+    if not is_local():
+        config = get_database_config(_runtime_config_key)
+        client = boto3.client("rds", region_name=config["region"])
+
+        @event.listens_for(engine, "do_connect")
+        def provide_iam_token(_dialect, _connection_record, _cargs, connection_params):
+            connection_params["password"] = client.generate_db_auth_token(
+                DBHostname=config["hostname"],
+                Port=config["port"],
+                DBUsername=config["dbUser"],
+            )
+
+    return engine
+
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        _engine = _create_engine()
+    return _engine
+
+
+def get_session() -> Generator[Session]:
+    with Session(get_engine()) as session:
+        yield session
+"
+`;
+
+exports[`py#rdb generator > should generate MySQL dependencies and templates 2`] = `
+"import os
+
+import boto3
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
+
+from .utils import build_database_url, with_connection_retry
+
+
+def _run_migrations() -> None:
+    hostname = os.environ["HOSTNAME"]
+    port = int(os.environ["PORT"])
+    database = os.environ["DATABASE"]
+    db_user = os.environ["DBUSER"]
+    token = boto3.client(
+        "rds", region_name=os.environ["AWS_REGION"]
+    ).generate_db_auth_token(
+        DBHostname=hostname,
+        Port=port,
+        DBUsername=db_user,
+    )
+    database_url = build_database_url(
+        db_user, hostname, port, database, password=token, ssl=False
+    )
+    alembic_cfg = Config("alembic.ini")
+    engine = create_engine(
+        database_url,
+        poolclass=NullPool,
+        connect_args={
+            "auth_plugin_map": {"mysql_clear_password": None},
+            "ssl_ca": "/etc/pki/ca-trust/source/anchors/rds-bundle.pem",
+            "ssl_verify_cert": True,
+            "ssl_verify_identity": True,
+        },
+    )
+    try:
+        with engine.connect() as connection:
+            alembic_cfg.attributes["connection"] = connection
+            command.upgrade(alembic_cfg, "head")
+    finally:
+        engine.dispose()
+
+
+def handler(_event, _context):
+    with_connection_retry(_run_migrations)
+"
+`;
+
+exports[`py#rdb generator > should generate MySQL dependencies and templates 3`] = `
+"import secrets
+from typing import Any
+
+import pymysql
+
+from .utils import get_database_secret, with_connection_retry
+
+
+def _ensure_database_user(db_user: str) -> None:
+    secret = get_database_secret()
+    connection = pymysql.connect(
+        host=secret["host"],
+        port=secret["port"],
+        database=secret["dbname"],
+        user=secret["username"],
+        password=secret["password"],
+        ssl={"ca": "/etc/pki/ca-trust/source/anchors/rds-bundle.pem"},
+        connect_timeout=10,
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'",
+                (db_user,),
+            )
+            cursor.execute(
+                "ALTER USER %s@'%%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS' REQUIRE SSL",
+                (db_user,),
+            )
+            cursor.execute(
+                f"GRANT ALL PRIVILEGES ON \`{secret['dbname']}\`.* TO %s@'%%'",
+                (db_user,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+_PHYSICAL_RESOURCE_ID_PREFIX = "db-user:"
+
+
+def _resolve_db_user(physical_resource_id: str | None) -> str:
+    if physical_resource_id and physical_resource_id.startswith(
+        _PHYSICAL_RESOURCE_ID_PREFIX
+    ):
+        return physical_resource_id[len(_PHYSICAL_RESOURCE_ID_PREFIX) :]
+    return f"db_{secrets.token_hex(8)}"
+
+
+def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    db_user = _resolve_db_user(event.get("PhysicalResourceId"))
+
+    if event.get("RequestType") != "Delete":
+        with_connection_retry(lambda: _ensure_database_user(db_user))
+
+    return {
+        "PhysicalResourceId": f"{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}",
+        "Data": {"dbUser": db_user},
+    }
+"
+`;
+
+exports[`py#rdb generator > should generate MySQL dependencies and templates 4`] = `
+"FROM public.ecr.aws/lambda/python:3.14
+
+WORKDIR \${LAMBDA_TASK_ROOT}
+
+COPY . .
+
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
+    update-ca-trust
+
+CMD ["proj_db.migration_handler.handler"]
+"
+`;
+
+exports[`py#rdb generator > should generate MySQL dependencies and templates 5`] = `
+"FROM public.ecr.aws/lambda/python:3.14
+
+WORKDIR \${LAMBDA_TASK_ROOT}
+
+COPY . .
+
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
+    update-ca-trust
+
+CMD ["proj_db.create_db_user_handler.handler"]
+"
+`;
+
+exports[`py#rdb generator > should generate Terraform modules 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.5"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
+  }
+}
+
+variable "vpc_id" {
+  description = "VPC where the Aurora cluster will be deployed."
+  type        = string
+}
+
+variable "database_subnet_ids" {
+  description = "Subnet IDs for the Aurora cluster and RDS Proxy. Private isolated subnets are fine — no outbound egress required."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the create-db-user and migration Lambda functions. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
+  type        = list(string)
+}
+
+variable "engine_version" {
+  description = "Aurora engine version."
+  type        = string
+  default     = null
+}
+
+variable "port" {
+  description = "Database port for the selected Aurora engine."
+  type        = number
+  default     = null
+}
+
+variable "serverless_min_capacity" {
+  description = "Minimum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 0.5
+}
+
+variable "serverless_max_capacity" {
+  description = "Maximum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 4
+}
+
+variable "instance_count" {
+  description = "Number of Aurora instances to create."
+  type        = number
+  default     = 1
+}
+
+variable "deletion_protection" {
+  description = "Whether deletion protection is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "skip_final_snapshot" {
+  description = "Whether to skip the final snapshot on deletion."
+  type        = bool
+  default     = false
+}
+
+variable "enable_rds_proxy" {
+  description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
+  type        = bool
+  default     = true
+}
+
+variable "enable_credential_rotation" {
+  description = "Whether to enable automatic credential rotation for the admin secret."
+  type        = bool
+  default     = true
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+variable "docker_image_tag" {
+  description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
+  type        = string
+  default     = "proj-db-migration:latest"
+}
+
+variable "create_db_user_docker_image_tag" {
+  description = "Docker image tag for the Python create-db-user handler. Defaults to the tag built by the Nx docker target."
+  type        = string
+  default     = "proj-db-create-db-user:latest"
+}
+
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+locals {
+  config                       = jsondecode(file("\${path.module}/../../../../../../../packages/db/config.json"))
+  runtime_config_key           = local.config.runtimeConfigKey
+  migration_function_name      = "db-migration-\${random_string.suffix.result}"
+  create_db_user_function_name = "db-create-db-user-\${random_string.suffix.result}"
+  database_runtime_user        = "db_\${random_string.suffix.result}"
+}
+
+module "aurora" {
+  source = "../../../core/rdb/aurora"
+  #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
+  name                                  = "db"
+  vpc_id                                = var.vpc_id
+  subnet_ids                            = var.database_subnet_ids
+  lambda_subnet_ids                     = var.lambda_subnet_ids
+  engine                                = "aurora-postgresql"
+  engine_version                        = var.engine_version
+  database_name                         = "database_name"
+  admin_user                            = "databaseUser"
+  port                                  = var.port
+  serverless_min_capacity               = var.serverless_min_capacity
+  serverless_max_capacity               = var.serverless_max_capacity
+  instance_count                        = var.instance_count
+  deletion_protection                   = var.deletion_protection
+  skip_final_snapshot                   = var.skip_final_snapshot
+  enable_rds_proxy                      = var.enable_rds_proxy
+  enable_credential_rotation            = var.enable_credential_rotation
+  enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_performance_insights           = var.enable_performance_insights
+  performance_insights_retention_period = var.performance_insights_retention_period
+  enable_backup                         = var.enable_backup
+  tags                                  = var.tags
+}
+
+resource "aws_iam_role_policy" "proxy_db_user_connect" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  role = module.aurora.proxy_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["rds-db:connect"]
+        Resource = [
+          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
+        ]
+      }
+    ]
+  })
+}
+
+
+module "add_rdb_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "database"
+  key       = local.runtime_config_key
+  value = {
+    hostname  = module.aurora.cluster_endpoint
+    port      = module.aurora.cluster_port
+    database  = module.aurora.database_name
+    adminUser = module.aurora.admin_user
+    dbUser    = local.database_runtime_user
+    region    = data.aws_region.current.region
+  }
+}
+
+resource "aws_ecr_repository" "migration_handler" {
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name                 = "db-migration-\${random_string.suffix.result}"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+resource "aws_ecr_repository_policy" "migration_handler" {
+  repository = aws_ecr_repository.migration_handler.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+      },
+      {
+        Sid    = "AllowLambdaPull"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.docker_image_tag} --format '{{.Id}}')'\\"}' "]
+}
+
+locals {
+  # Content-based, immutable image tag derived from the local image digest
+  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+}
+data "external" "create_db_user_docker_digest" {
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.create_db_user_docker_image_tag} --format '{{.Id}}')'\\"}' "]
+}
+
+locals {
+  create_db_user_image_tag = replace(data.external.create_db_user_docker_digest.result.digest, "sha256:", "")
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest    = data.external.docker_digest.result.digest
+    repository_url   = aws_ecr_repository.migration_handler.repository_url
+    docker_image_tag = var.docker_image_tag
+    image_tag        = local.image_tag
+    create_db_user_docker_digest    = data.external.create_db_user_docker_digest.result.digest
+    create_db_user_docker_image_tag = var.create_db_user_docker_image_tag
+    create_db_user_image_tag        = local.create_db_user_image_tag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URL"
+      docker tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      docker push "$REPOSITORY_URL:$IMAGE_TAG"
+      docker tag "$CREATE_DB_USER_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
+      docker push "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
+    EOT
+    environment = {
+      AWS_REGION       = data.aws_region.current.region
+      REPOSITORY_URL   = self.triggers.repository_url
+      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      IMAGE_TAG        = self.triggers.image_tag
+      CREATE_DB_USER_DOCKER_IMAGE_TAG = self.triggers.create_db_user_docker_image_tag
+      CREATE_DB_USER_IMAGE_TAG        = self.triggers.create_db_user_image_tag
+    }
+  }
+
+  depends_on = [aws_ecr_repository_policy.migration_handler]
+}
+
+resource "aws_iam_role" "migration_handler" {
+  name = "DbMigrationHandlerRole-\${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_basic_execution" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_vpc_access" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_xray" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy" "migration_handler_access" {
+  role = aws_iam_role.migration_handler.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        Resource = [
+          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "create_db_user" {
+  name = "DbCreateDbUserRole-\${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_basic_execution" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_vpc_access" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_xray" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy" "create_db_user_secret_access" {
+  role = aws_iam_role.create_db_user.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "migration_handler" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/\${local.migration_function_name}"
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "create_db_user" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/\${local.create_db_user_function_name}"
+  tags = var.tags
+}
+
+resource "aws_security_group" "migration_handler" {
+  name_prefix = "db-migration-"
+  description = "Security group for the migration Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
+  security_group_id            = aws_security_group.migration_handler.id
+  referenced_security_group_id = module.aurora.security_group_id
+  from_port   = module.aurora.cluster_port
+  to_port     = module.aurora.cluster_port
+  ip_protocol = "tcp"
+  description = "Allow outbound traffic to Aurora on database port"
+}
+
+resource "aws_vpc_security_group_egress_rule" "migration_handler_https" {
+  security_group_id = aws_security_group.migration_handler.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
+resource "aws_security_group" "create_db_user" {
+  name_prefix = "db-create-db-user-"
+  description = "Security group for the create-db-user Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "create_db_user_to_database" {
+  security_group_id            = aws_security_group.create_db_user.id
+  referenced_security_group_id = module.aurora.database_security_group_id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow outbound traffic to Aurora on database port"
+}
+
+resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
+  security_group_id = aws_security_group.create_db_user.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
+  security_group_id            = module.aurora.security_group_id
+  referenced_security_group_id = aws_security_group.migration_handler.id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound traffic from migration Lambda on database port"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "create_db_user_to_database" {
+  security_group_id            = module.aurora.database_security_group_id
+  referenced_security_group_id = aws_security_group.create_db_user.id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound traffic from create-db-user Lambda on database port"
+}
+
+resource "aws_lambda_function" "create_db_user" {
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the create-db-user handler
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
+  package_type  = "Image"
+  image_uri     = "\${aws_ecr_repository.migration_handler.repository_url}:create-db-user-\${local.create_db_user_image_tag}"
+  function_name = local.create_db_user_function_name
+  role          = aws_iam_role.create_db_user.arn
+  timeout       = 300
+  architectures = ["arm64"]
+
+  image_config {
+    command = ["proj_db.create_db_user_handler.handler"]
+  }
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = var.lambda_subnet_ids
+    security_group_ids = [aws_security_group.create_db_user.id]
+  }
+
+  environment {
+    variables = {
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    null_resource.docker_publish,
+    aws_iam_role_policy_attachment.create_db_user_basic_execution,
+    aws_iam_role_policy_attachment.create_db_user_vpc_access,
+    aws_iam_role_policy_attachment.create_db_user_xray,
+    aws_iam_role_policy.create_db_user_secret_access,
+    aws_cloudwatch_log_group.create_db_user,
+    aws_vpc_security_group_ingress_rule.create_db_user_to_database
+  ]
+}
+
+resource "null_resource" "create_db_user_trigger" {
+  triggers = {
+    cluster_arn   = module.aurora.cluster_arn
+    function_name = aws_lambda_function.create_db_user.function_name
+    db_user       = local.database_runtime_user
+    bundle_hash   = data.external.create_db_user_docker_digest.result.digest
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      output_file=$(mktemp)
+      response=$(aws lambda invoke \\
+        --region "$AWS_REGION" \\
+        --function-name "$FUNCTION_NAME" \\
+        --cli-binary-format raw-in-base64-out \\
+        --payload "{\\"RequestType\\":\\"Create\\",\\"PhysicalResourceId\\":\\"db-user:$DB_USER\\"}" \\
+        "$output_file")
+      cat "$output_file"
+      echo "$response"
+      if echo "$response" | grep -q '"FunctionError"'; then
+        rm -f "$output_file"
+        exit 1
+      fi
+      rm -f "$output_file"
+    EOT
+    environment = {
+      AWS_REGION    = data.aws_region.current.region
+      FUNCTION_NAME = self.triggers.function_name
+      DB_USER       = self.triggers.db_user
+    }
+  }
+
+  depends_on = [aws_lambda_function.create_db_user, module.aurora]
+}
+
+resource "aws_lambda_function" "migration_handler" {
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the migration handler
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the migration handler
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  #checkov:skip=CKV_AWS_272:Code signing does not apply to container image Lambda functions
+  package_type  = "Image"
+  function_name = local.migration_function_name
+  role          = aws_iam_role.migration_handler.arn
+  image_uri     = "\${aws_ecr_repository.migration_handler.repository_url}:\${local.image_tag}"
+  memory_size   = 1024
+  timeout       = 300
+  architectures = ["arm64"]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = var.lambda_subnet_ids
+    security_group_ids = [aws_security_group.migration_handler.id]
+  }
+
+  environment {
+    variables = {
+      HOSTNAME = module.aurora.cluster_endpoint
+      DATABASE = module.aurora.database_name
+      PORT     = tostring(module.aurora.cluster_port)
+      DBUSER   = local.database_runtime_user
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    null_resource.docker_publish,
+    aws_iam_role_policy_attachment.migration_handler_basic_execution,
+    aws_iam_role_policy_attachment.migration_handler_vpc_access,
+    aws_iam_role_policy_attachment.migration_handler_xray,
+    aws_iam_role_policy.migration_handler_access,
+    aws_cloudwatch_log_group.migration_handler,
+    aws_vpc_security_group_ingress_rule.migration_handler_to_database
+  ]
+}
+
+resource "null_resource" "migration_trigger" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    cluster_arn    = module.aurora.cluster_arn
+    database_ready = module.aurora.database_ready
+    function_name  = aws_lambda_function.migration_handler.function_name
+    db_user        = local.database_runtime_user
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      output_file=$(mktemp)
+      response=$(aws lambda invoke \\
+        --region "$AWS_REGION" \\
+        --function-name "$FUNCTION_NAME" \\
+        --cli-binary-format raw-in-base64-out \\
+        "$output_file")
+      cat "$output_file"
+      echo "$response"
+      if echo "$response" | grep -q '"FunctionError"'; then
+        rm -f "$output_file"
+        exit 1
+      fi
+      rm -f "$output_file"
+    EOT
+    environment = {
+      AWS_REGION    = data.aws_region.current.region
+      FUNCTION_NAME = self.triggers.function_name
+    }
+  }
+
+  depends_on = [
+    aws_lambda_function.migration_handler,
+    module.aurora,
+    null_resource.create_db_user_trigger,
+    aws_iam_role_policy.proxy_db_user_connect
+  ]
+}
+
+output "security_group_id" {
+  description = "Security group ID to allow inbound connections to the database (proxy SG if RDS Proxy is enabled, otherwise DB SG)."
+  value       = module.aurora.security_group_id
+}
+
+output "database_security_group_id" {
+  description = "Security group ID of the Aurora cluster directly, used for direct DB access rules (e.g. when RDS Proxy is disabled)."
+  value       = module.aurora.database_security_group_id
+}
+
+output "cluster_resource_id" {
+  description = "Resource ID of the Aurora cluster, used for IAM rds-db:connect policies."
+  value       = module.aurora.cluster_resource_id
+}
+
+output "proxy_resource_id" {
+  description = "Resource identifier of the RDS Proxy (prx-XXXX), used for IAM rds-db:connect policies when connecting through the proxy. Null if RDS Proxy is disabled."
+  value       = module.aurora.proxy_resource_id
+}
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key protecting Aurora and the admin credentials secret, used to grant decrypt access alongside secret_arn."
+  value       = module.aurora.kms_key_arn
+}
+
+output "cluster_arn" {
+  description = "ARN of the Aurora cluster."
+  value       = module.aurora.cluster_arn
+}
+
+output "cluster_endpoint" {
+  description = "Writer endpoint of the Aurora cluster."
+  value       = module.aurora.cluster_endpoint
+}
+
+output "reader_endpoint" {
+  description = "Reader endpoint of the Aurora cluster."
+  value       = module.aurora.reader_endpoint
+}
+
+output "cluster_port" {
+  description = "Port exposed by the Aurora cluster."
+  value       = module.aurora.cluster_port
+}
+
+output "secret_arn" {
+  description = "ARN of the generated admin credentials secret."
+  value       = module.aurora.secret_arn
+}
+
+output "database_runtime_user" {
+  description = "Application database user created for IAM-authenticated access."
+  value       = local.database_runtime_user
+}
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/env.py 1`] = `
+"from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+from sqlmodel import SQLModel
+
+# Import all models to register them in SQLModel.metadata
+from proj_db.models import *  # noqa: F401, F403
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = SQLModel.metadata
+
+
+def _get_url():
+    import json
+    import os
+
+    if os.environ.get("SERVE_LOCAL") == "true":
+        config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+        with open(config_path) as f:
+            cfg = json.load(f)["serveLocal"]
+        from sqlalchemy import URL
+
+        engine = cfg["dbEngine"]
+        if engine == "mysql":
+            driver = "mysql+pymysql"
+        else:
+            driver = "postgresql+psycopg"
+        return URL.create(
+            driver,
+            username=cfg["dbUser"],
+            password=cfg["dbPassword"],
+            host=cfg["host"],
+            port=cfg["port"],
+            database=cfg["dbName"],
+        )
+
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise ValueError("DATABASE_URL environment variable is not set")
+    return url
+
+
+def run_migrations_offline() -> None:
+    url = _get_url()
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        context.configure(
+            connection=supplied_connection,
+            target_metadata=target_metadata,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
+    connectable = engine_from_config(
+        {"sqlalchemy.url": _get_url()},
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/script.py.mako 1`] = `
+""""\${message}
+
+Revision ID: \${up_revision}
+Revises: \${down_revision | comma,n}
+Create Date: \${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+import sqlmodel
+\${imports if imports else ""}
+
+revision: str = \${repr(up_revision)}
+down_revision: Union[str, None] = \${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = \${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = \${repr(depends_on)}
+
+
+def upgrade() -> None:
+    \${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    \${downgrades if downgrades else "pass"}
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/versions/.gitkeep 1`] = `""`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/__init__.py 1`] = `
+"from .connection import get_engine, get_session, is_local
+
+__all__ = ["get_engine", "get_session", "is_local"]
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/connection.py 1`] = `
+"from collections.abc import Generator
+
+import boto3
+from sqlalchemy import event
+from sqlmodel import Session, create_engine
+
+from .utils import get_connection_url, get_database_config, is_local
+
+# Generated: must match runtimeConfigKey in config.json
+_runtime_config_key = "Db"
+
+_engine = None
+
+
+def _create_engine():
+    engine = create_engine(get_connection_url(_runtime_config_key))
+    if not is_local():
+        config = get_database_config(_runtime_config_key)
+        client = boto3.client("rds", region_name=config["region"])
+
+        @event.listens_for(engine, "do_connect")
+        def provide_iam_token(_dialect, _connection_record, _cargs, connection_params):
+            connection_params["password"] = client.generate_db_auth_token(
+                DBHostname=config["hostname"],
+                Port=config["port"],
+                DBUsername=config["dbUser"],
+            )
+
+    return engine
+
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        _engine = _create_engine()
+    return _engine
+
+
+def get_session() -> Generator[Session]:
+    with Session(get_engine()) as session:
+        yield session
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/create_db_user_handler.py 1`] = `
+"import secrets
+from typing import Any
+
+import psycopg
+from psycopg import sql as pgsql
+
+from .utils import get_database_secret, with_connection_retry
+
+
+def _ensure_database_user(db_user: str) -> None:
+    secret = get_database_secret()
+    connection = psycopg.connect(
+        host=secret["host"],
+        port=secret["port"],
+        dbname=secret["dbname"],
+        user=secret["username"],
+        password=secret["password"],
+        sslmode="verify-full",
+        sslrootcert="/etc/pki/ca-trust/source/anchors/rds-bundle.pem",
+        connect_timeout=10,
+    )
+    try:
+        connection.autocommit = False
+        with connection.cursor() as cursor:
+            db_user_ident = pgsql.Identifier(db_user)
+            db_name_ident = pgsql.Identifier(secret["dbname"])
+            cursor.execute(
+                pgsql.SQL("SELECT 1 FROM pg_roles WHERE rolname = %s"),
+                (db_user,),
+            )
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    pgsql.SQL("CREATE ROLE {} WITH LOGIN").format(db_user_ident)
+                )
+            cursor.execute(
+                pgsql.SQL(
+                    "ALTER ROLE {role} WITH LOGIN;"
+                    "GRANT ALL PRIVILEGES ON DATABASE {db} TO {role};"
+                    "GRANT USAGE, CREATE ON SCHEMA public TO {role};"
+                    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {role};"
+                    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {role};"
+                    "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO {role};"
+                    "GRANT rds_iam TO {role};"
+                ).format(role=db_user_ident, db=db_name_ident)
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+_PHYSICAL_RESOURCE_ID_PREFIX = "db-user:"
+
+
+def _resolve_db_user(physical_resource_id: str | None) -> str:
+    if physical_resource_id and physical_resource_id.startswith(
+        _PHYSICAL_RESOURCE_ID_PREFIX
+    ):
+        return physical_resource_id[len(_PHYSICAL_RESOURCE_ID_PREFIX) :]
+    return f"db_{secrets.token_hex(8)}"
+
+
+def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    db_user = _resolve_db_user(event.get("PhysicalResourceId"))
+
+    if event.get("RequestType") != "Delete":
+        with_connection_retry(lambda: _ensure_database_user(db_user))
+
+    return {
+        "PhysicalResourceId": f"{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}",
+        "Data": {"dbUser": db_user},
+    }
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/migration_handler.py 1`] = `
+"import os
+
+import boto3
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
+
+from .utils import build_database_url, with_connection_retry
+
+
+def _run_migrations() -> None:
+    hostname = os.environ["HOSTNAME"]
+    port = int(os.environ["PORT"])
+    database = os.environ["DATABASE"]
+    db_user = os.environ["DBUSER"]
+    token = boto3.client(
+        "rds", region_name=os.environ["AWS_REGION"]
+    ).generate_db_auth_token(
+        DBHostname=hostname,
+        Port=port,
+        DBUsername=db_user,
+    )
+    database_url = build_database_url(db_user, hostname, port, database, password=token)
+    alembic_cfg = Config("alembic.ini")
+    engine = create_engine(database_url, poolclass=NullPool)
+    try:
+        with engine.connect() as connection:
+            alembic_cfg.attributes["connection"] = connection
+            command.upgrade(alembic_cfg, "head")
+    finally:
+        engine.dispose()
+
+
+def handler(_event, _context):
+    with_connection_retry(_run_migrations)
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/models/__init__.py 1`] = `
+"from .example import ExampleModel
+
+__all__ = ["ExampleModel"]
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/models/example.py 1`] = `
+"from sqlmodel import Field, SQLModel
+
+
+class ExampleModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    description: str | None = None
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/utils.py 1`] = `
+"import json
+import os
+import time
+from collections.abc import Callable
+from typing import Any
+
+import boto3
+from aws_lambda_powertools.utilities.parameters import AppConfigProvider
+from sqlalchemy import URL
+
+DatabaseConfig = dict[str, Any]
+DatabaseSecret = dict[str, Any]
+
+_RDS_CA_CERT = "/etc/pki/ca-trust/source/anchors/rds-bundle.pem"
+_DB_DRIVER = "postgresql+psycopg"
+_SSL_QUERY: dict[str, str] = (
+    {"ssl_ca": _RDS_CA_CERT}
+    if _DB_DRIVER == "mysql+pymysql"
+    else {"sslmode": "verify-full", "sslrootcert": _RDS_CA_CERT}
+)
+
+
+def build_database_url(
+    username: str,
+    host: str,
+    port: int,
+    database: str,
+    password: str | None = None,
+    ssl: bool = True,
+) -> URL:
+    return URL.create(
+        _DB_DRIVER,
+        username=username,
+        password=password,
+        host=host,
+        port=port,
+        database=database,
+        query=_SSL_QUERY if ssl else {},
+    )
+
+
+def is_local() -> bool:
+    return os.environ.get("SERVE_LOCAL") == "true"
+
+
+def _get_serve_local_config() -> dict:
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+    with open(config_path) as f:
+        return json.load(f)["serveLocal"]
+
+
+def get_connection_url(runtime_config_key: str) -> URL:
+    if is_local():
+        cfg = _get_serve_local_config()
+        return build_database_url(
+            cfg["dbUser"],
+            cfg["host"],
+            cfg["port"],
+            cfg["dbName"],
+            password=cfg["dbPassword"],
+            ssl=False,
+        )
+    config = get_database_config(runtime_config_key)
+    return build_database_url(
+        config["dbUser"],
+        config["hostname"],
+        config["port"],
+        config["database"],
+    )
+
+
+def get_database_secret() -> DatabaseSecret:
+    secret_arn = os.environ.get("DATABASE_SECRET_ARN")
+    if not secret_arn:
+        raise ValueError("Missing required environment variable DATABASE_SECRET_ARN.")
+    client = boto3.client("secretsmanager")
+    response = client.get_secret_value(SecretId=secret_arn)
+    return json.loads(response["SecretString"])
+
+
+_database_config: dict[str, DatabaseConfig] = {}
+
+
+def get_database_config(runtime_config_key: str) -> DatabaseConfig:
+    if runtime_config_key not in _database_config:
+        app_id = os.environ.get("RUNTIME_CONFIG_APP_ID")
+        if not app_id:
+            raise ValueError(
+                "Missing required environment variable RUNTIME_CONFIG_APP_ID."
+            )
+        provider = AppConfigProvider(application=app_id, environment="default")
+        config = provider.get("database", transform="json")
+        if not isinstance(config, dict):
+            raise ValueError("Unexpected RuntimeConfig format: expected JSON object.")
+        db_config = config.get(runtime_config_key)
+        if not db_config:
+            raise ValueError(f"RuntimeConfig is missing database.{runtime_config_key}.")
+        _database_config[runtime_config_key] = db_config
+    return _database_config[runtime_config_key]
+
+
+_TRANSIENT_ERROR_PATTERNS = [
+    "timeout",
+    "connection refused",
+    "could not connect",
+    "connection reset",
+    "connection timed out",
+    "operationalerror",
+    "password authentication failed",
+    "access denied",
+    "temporary failure",
+]
+
+
+def is_transient_connection_error(error: Exception) -> bool:
+    error_str = str(error).lower()
+    return any(p in error_str for p in _TRANSIENT_ERROR_PATTERNS)
+
+
+def with_connection_retry[T](
+    fn: Callable[[], T],
+    max_attempts: int = 6,
+    delay_seconds: float = 10.0,
+) -> T:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == max_attempts or not is_transient_connection_error(e):
+                raise
+            wait = delay_seconds * attempt
+            print(
+                f"Transient connection error (attempt {attempt}/{max_attempts}), "
+                f"retrying in {wait:.0f}s: {e}"
+            )
+            time.sleep(wait)
+    raise RuntimeError("unreachable")
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 1`] = `
+"[alembic]
+script_location = migrations
+file_template = %%(year)d%%(month).2d%%(day).2d_%%(hour).2d%%(minute).2d_%%(rev)s_%%(slug)s
+prepend_sys_path = .
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %%(levelname)-5.5s [%%(name)s] %%(message)s
+datefmt = %%H:%%M:%%S
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 2`] = `
+"FROM public.ecr.aws/lambda/python:3.14
+
+WORKDIR \${LAMBDA_TASK_ROOT}
+
+COPY . .
+
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
+    update-ca-trust
+
+CMD ["proj_db.migration_handler.handler"]
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 3`] = `
+"FROM public.ecr.aws/lambda/python:3.14
+
+WORKDIR \${LAMBDA_TASK_ROOT}
+
+COPY . .
+
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
+    update-ca-trust
+
+CMD ["proj_db.create_db_user_handler.handler"]
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 4`] = `
+"{
+  "runtimeConfigKey": "Db",
+  "serveLocal": {
+    "containerEngine": "docker",
+    "containerName": "proj-database_name",
+    "image": "public.ecr.aws/docker/library/postgres:17.7",
+    "port": 5432,
+    "host": "localhost",
+    "dbName": "database_name",
+    "dbUser": "dbadmin",
+    "dbPassword": "password",
+    "dbEngine": "postgres"
+  }
+}
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 5`] = `
+"[tool.coverage.run]
+branch = true
+source = [ "proj_db" ]
+
+[tool.coverage.report]
+exclude_lines = [ "if TYPE_CHECKING:" ]
+show_missing = true
+
+[tool.pytest.ini_options]
+addopts = """
+ --cov
+ --cov-report html:'../../coverage/packages/db/html'
+ --cov-report xml:'../../coverage/packages/db/coverage.xml'
+ --html='../../reports/packages/db/unittests/html/index.html'
+ --junitxml='../../reports/packages/db/unittests/junit.xml'
+"""
+
+[tool.hatch.build.targets.wheel]
+packages = [ "proj_db" ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff]
+exclude = [ ".ruff_cache", ".svn", ".tox", ".venv", "dist" ]
+line-length = 120
+indent-width = 4
+
+  [tool.ruff.lint]
+  select = [ "E", "F", "UP", "B", "SIM", "I" ]
+  ignore = [ ]
+  fixable = [ "ALL" ]
+  unfixable = [ ]
+
+[project]
+name = "proj.db"
+version = "1.0.0"
+description = "Automatically generated by Nx."
+requires-python = ">=3.14"
+readme = "README.md"
+dependencies = [
+  "sqlmodel==0.0.38",
+  "alembic==1.18.4",
+  "psycopg[binary,pool]==3.3.4",
+  "boto3==1.43.29",
+  "aws-lambda-powertools==3.29.0"
+]
+
+[build-system]
+requires = [ "hatchling" ]
+build-backend = "hatchling.build"
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 6`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { readFileSync } from 'fs';
+import { Construct } from 'constructs';
+import {
+  AuroraDatabase,
+  AuroraDatabaseEngines,
+  AuroraDatabaseProps,
+} from '../../core/rdb/aurora.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const { runtimeConfigKey } = JSON.parse(
+  readFileSync(
+    path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'packages/db/config.json',
+    ),
+    'utf-8',
+  ),
+) as { runtimeConfigKey: string };
+
+export type DbProps = Omit<
+  AuroraDatabaseProps,
+  | 'databaseName'
+  | 'adminUser'
+  | 'createDbUserBundleDir'
+  | 'framework'
+  | 'engine'
+  | 'runtimeConfigKey'
+  | 'migrationBundleDir'
+>;
+
+/**
+ * CDK construct that provisions an Aurora Serverless v2 cluster.
+ */
+export class Db extends AuroraDatabase {
+  constructor(scope: Construct, id: string, props: DbProps) {
+    super(scope, id, {
+      ...props,
+      databaseName: 'database_name',
+      adminUser: 'databaseUser',
+      runtimeConfigKey,
+      migrationBundleDir: path.join(
+        findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+        'dist/packages/db/docker/migration',
+      ),
+      createDbUserBundleDir: path.join(
+        findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+        'dist/packages/db/docker/create-db-user',
+      ),
+      framework: 'sqlmodel',
+      engine: AuroraDatabaseEngines.postgres({}),
+    });
+  }
+}
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 7`] = `
+"import secrets
+from typing import Any
+
+import psycopg
+from psycopg import sql as pgsql
+
+from .utils import get_database_secret, with_connection_retry
+
+
+def _ensure_database_user(db_user: str) -> None:
+    secret = get_database_secret()
+    connection = psycopg.connect(
+        host=secret["host"],
+        port=secret["port"],
+        dbname=secret["dbname"],
+        user=secret["username"],
+        password=secret["password"],
+        sslmode="verify-full",
+        sslrootcert="/etc/pki/ca-trust/source/anchors/rds-bundle.pem",
+        connect_timeout=10,
+    )
+    try:
+        connection.autocommit = False
+        with connection.cursor() as cursor:
+            db_user_ident = pgsql.Identifier(db_user)
+            db_name_ident = pgsql.Identifier(secret["dbname"])
+            cursor.execute(
+                pgsql.SQL("SELECT 1 FROM pg_roles WHERE rolname = %s"),
+                (db_user,),
+            )
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    pgsql.SQL("CREATE ROLE {} WITH LOGIN").format(db_user_ident)
+                )
+            cursor.execute(
+                pgsql.SQL(
+                    "ALTER ROLE {role} WITH LOGIN;"
+                    "GRANT ALL PRIVILEGES ON DATABASE {db} TO {role};"
+                    "GRANT USAGE, CREATE ON SCHEMA public TO {role};"
+                    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {role};"
+                    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {role};"
+                    "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO {role};"
+                    "GRANT rds_iam TO {role};"
+                ).format(role=db_user_ident, db=db_name_ident)
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+_PHYSICAL_RESOURCE_ID_PREFIX = "db-user:"
+
+
+def _resolve_db_user(physical_resource_id: str | None) -> str:
+    if physical_resource_id and physical_resource_id.startswith(
+        _PHYSICAL_RESOURCE_ID_PREFIX
+    ):
+        return physical_resource_id[len(_PHYSICAL_RESOURCE_ID_PREFIX) :]
+    return f"db_{secrets.token_hex(8)}"
+
+
+def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    db_user = _resolve_db_user(event.get("PhysicalResourceId"))
+
+    if event.get("RequestType") != "Delete":
+        with_connection_retry(lambda: _ensure_database_user(db_user))
+
+    return {
+        "PhysicalResourceId": f"{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}",
+        "Data": {"dbUser": db_user},
+    }
+"
+`;
+
+exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 8`] = `
+"import { CfnOutput, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { CustomResource } from 'aws-cdk-lib';
+import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
+import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Architecture,
+  Code,
+  DockerImageCode,
+  DockerImageFunction,
+  Function,
+  Runtime,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import {
+  AuroraMysqlEngineVersion,
+  AuroraPostgresEngineVersion,
+  ClusterInstance,
+  Credentials,
+  DatabaseCluster,
+  DatabaseClusterEngine,
+  DatabaseClusterProps,
+  DatabaseProxy,
+  DefaultAuthScheme,
+  IClusterEngine,
+} from 'aws-cdk-lib/aws-rds';
+import { Provider } from 'aws-cdk-lib/custom-resources';
+import { Trigger } from 'aws-cdk-lib/triggers';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../runtime-config.js';
+
+export type AuroraDatabaseEngineVersion =
+  | AuroraMysqlEngineVersion
+  | AuroraPostgresEngineVersion;
+
+export interface AuroraDatabaseEngine {
+  /**
+   * Discriminant identifying the engine type.
+   */
+  readonly type: 'mysql' | 'postgres';
+
+  /**
+   * Default Aurora engine version used when one is not explicitly provided.
+   */
+  readonly defaultVersion: AuroraDatabaseEngineVersion;
+
+  /**
+   * Builds the CDK cluster engine for the provided engine version.
+   */
+  clusterEngine(version: AuroraDatabaseEngineVersion): IClusterEngine;
+}
+
+export class AuroraDatabaseEngines {
+  public static mysql({
+    defaultVersion = AuroraMysqlEngineVersion.VER_3_12_0,
+  }: {
+    defaultVersion?: AuroraMysqlEngineVersion;
+  }): AuroraDatabaseEngine {
+    return {
+      type: 'mysql',
+      defaultVersion,
+      clusterEngine: (version) =>
+        DatabaseClusterEngine.auroraMysql({
+          version: version as AuroraMysqlEngineVersion,
+        }),
+    };
+  }
+
+  public static postgres({
+    defaultVersion = AuroraPostgresEngineVersion.VER_17_7,
+  }: {
+    defaultVersion?: AuroraPostgresEngineVersion;
+  }): AuroraDatabaseEngine {
+    return {
+      type: 'postgres',
+      defaultVersion,
+      clusterEngine: (version) =>
+        DatabaseClusterEngine.auroraPostgres({
+          version: version as AuroraPostgresEngineVersion,
+        }),
+    };
+  }
+}
+
+type _AuroraDatabaseProps = Omit<
+  DatabaseClusterProps,
+  | 'credentials'
+  | 'defaultDatabaseName'
+  | 'engine'
+  | 'iamAuthentication'
+  | 'instanceProps'
+  | 'writer'
+>;
+
+export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
+  /**
+   * VPC where the Aurora cluster will be deployed.
+   */
+  readonly vpc: IVpc;
+
+  /**
+   * Aurora engine preset used to build the cluster.
+   */
+  readonly engine: AuroraDatabaseEngine;
+
+  /**
+   * The engine version to deploy.
+   *
+   * @default - engine.defaultVersion
+   */
+  readonly engineVersion?: AuroraDatabaseEngineVersion;
+
+  /**
+   * Admin username used when generating credentials.
+   */
+  readonly adminUser: string;
+
+  /**
+   * The initial database created in the cluster.
+   */
+  readonly databaseName: string;
+
+  /**
+   * RuntimeConfig key used under the \`database\` namespace.
+   */
+  readonly runtimeConfigKey: string;
+
+  /**
+   * Migration bundle used to create a migration handler Lambda.
+   */
+  readonly migrationBundleDir: string;
+
+  /**
+   * Bundle used to create or reconcile the application database user.
+   */
+  readonly createDbUserBundleDir: string;
+
+  /** ORM framework used by this database project. */
+  readonly framework: 'prisma' | 'sqlmodel';
+
+  /**
+   * Writer instance for the Aurora cluster.
+   */
+  readonly writer?: DatabaseClusterProps['writer'];
+
+  /**
+   * Whether to provision an RDS Proxy in front of the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly enableRdsProxy?: boolean;
+
+  /**
+   * Whether to enable automatic credential rotation for the admin secret.
+   *
+   * @default true
+   */
+  readonly enableCredentialRotation?: boolean;
+
+  /**
+   * Whether to enable deletion protection on the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly deletionProtection?: boolean;
+
+  /**
+   * Removal policy applied to the Aurora cluster.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
+
+  /**
+   * Whether to export Aurora engine logs to CloudWatch Logs.
+   * See https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html
+   *
+   * @default false
+   */
+  readonly enableCloudwatchLogs?: boolean;
+
+  /**
+   * Whether to enable Performance Insights on the Aurora writer instance.
+   *
+   * @default true
+   */
+  readonly enablePerformanceInsights?: boolean;
+}
+
+/**
+ * Reusable Aurora database construct that supports different Aurora engines
+ * through typed engine presets.
+ */
+export abstract class AuroraDatabase extends Construct {
+  public readonly cluster: DatabaseCluster;
+  public readonly proxy?: DatabaseProxy;
+  private readonly adminUser: string;
+  private readonly dbUser: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      vpc,
+      adminUser,
+      databaseName,
+      runtimeConfigKey,
+      migrationBundleDir,
+      createDbUserBundleDir,
+      framework,
+      vpcSubnets,
+      writer,
+      enableRdsProxy = true,
+      enableCredentialRotation = true,
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
+      enableCloudwatchLogs = false,
+      enablePerformanceInsights = true,
+      engine,
+      engineVersion,
+      ...clusterProps
+    }: AuroraDatabaseProps,
+  ) {
+    super(scope, id);
+
+    this.adminUser = adminUser;
+
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
+    this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
+      ...clusterProps,
+      vpc,
+      vpcSubnets,
+      engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      writer:
+        writer ??
+        ClusterInstance.serverlessV2('writer', {
+          enablePerformanceInsights,
+          performanceInsightEncryptionKey: enablePerformanceInsights
+            ? key
+            : undefined,
+        }),
+      credentials: Credentials.fromGeneratedSecret(adminUser, {
+        encryptionKey: key,
+      }),
+      iamAuthentication: true,
+      monitoringInterval: Duration.seconds(5),
+      cloudwatchLogsExports: enableCloudwatchLogs
+        ? engine.type === 'mysql'
+          ? ['audit', 'error', 'general', 'slowquery']
+          : ['postgresql']
+        : undefined,
+      defaultDatabaseName: databaseName,
+      storageEncrypted: true,
+      storageEncryptionKey: key,
+      deletionProtection,
+      removalPolicy,
+    });
+
+    if (enableCredentialRotation) {
+      this.cluster.addRotationSingleUser({
+        automaticallyAfter: Duration.days(30),
+        vpcSubnets: {
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
+      });
+    }
+
+    const proxyRole = enableRdsProxy
+      ? new Role(this, 'DatabaseProxyRole', {
+          assumedBy: new ServicePrincipal('rds.amazonaws.com'),
+        })
+      : undefined;
+
+    if (enableRdsProxy) {
+      this.proxy = this.cluster.addProxy('DatabaseProxy', {
+        vpc,
+        vpcSubnets,
+        defaultAuthScheme: DefaultAuthScheme.IAM_AUTH,
+        role: proxyRole,
+      });
+    }
+
+    const databaseHostname =
+      this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
+    const databasePort = this.cluster.clusterEndpoint.port;
+    const createDbUserHandler =
+      framework === 'sqlmodel'
+        ? this.createPythonDbUserHandler(vpc, createDbUserBundleDir)
+        : this.createNodeDbUserHandler(vpc, createDbUserBundleDir);
+
+    this.cluster.connections.allowDefaultPortFrom(
+      createDbUserHandler,
+      'Allow the create-db-user handler to connect to the database',
+    );
+    this.grantSecretRead(createDbUserHandler);
+
+    const createDbUserProvider = new Provider(this, 'CreateDbUserProvider', {
+      onEventHandler: createDbUserHandler,
+    });
+
+    const createDbUserResource = new CustomResource(
+      this,
+      'CreateDbUserResource',
+      {
+        serviceToken: createDbUserProvider.serviceToken,
+        properties: {
+          clusterIdentifier: this.cluster.clusterIdentifier,
+        },
+      },
+    );
+    createDbUserResource.node.addDependency(this.cluster);
+    this.dbUser = createDbUserResource.getAttString('dbUser');
+    if (this.proxy && proxyRole) {
+      this.cluster.grantConnect(proxyRole, this.dbUser);
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('database', runtimeConfigKey, {
+      hostname: databaseHostname,
+      port: databasePort,
+      database: databaseName,
+      adminUser: this.adminUser,
+      dbUser: this.dbUser,
+      region: Stack.of(this).region,
+    });
+
+    const migrationHandler =
+      framework === 'sqlmodel'
+        ? this.createPythonMigrationHandler(
+            vpc,
+            migrationBundleDir,
+            databaseHostname,
+            databasePort,
+            databaseName,
+          )
+        : this.createNodeMigrationHandler(
+            vpc,
+            migrationBundleDir,
+            engine,
+            databaseHostname,
+            databasePort,
+            databaseName,
+          );
+
+    const trigger = new Trigger(this, 'MigrationTrigger', {
+      handler: migrationHandler,
+    });
+    trigger.node.addDependency(createDbUserResource);
+
+    new CfnOutput(this, 'ClusterEndpoint', {
+      value: this.cluster.clusterEndpoint.hostname,
+    });
+
+    if (this.proxy?.endpoint) {
+      new CfnOutput(this, 'ProxyEndpoint', {
+        value: this.proxy?.endpoint,
+      });
+    }
+  }
+
+  private createPythonDbUserHandler(
+    vpc: IVpc,
+    createDbUserBundleDir: string,
+  ): DockerImageFunction {
+    return new DockerImageFunction(this, 'CreateDbUserHandler', {
+      code: DockerImageCode.fromImageAsset(createDbUserBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      },
+      architecture: Architecture.ARM_64,
+    });
+  }
+
+  private createNodeDbUserHandler(
+    vpc: IVpc,
+    createDbUserBundleDir: string,
+  ): Function {
+    return new Function(this, 'CreateDbUserHandler', {
+      code: Code.fromAsset(createDbUserBundleDir),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+      architecture: Architecture.ARM_64,
+    });
+  }
+
+  private createPythonMigrationHandler(
+    vpc: IVpc,
+    migrationBundleDir: string,
+    databaseHostname: string,
+    databasePort: number,
+    databaseName: string,
+  ): DockerImageFunction {
+    const handler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      environment: {
+        HOSTNAME: databaseHostname,
+        DATABASE: databaseName,
+        PORT: databasePort.toString(),
+        DBUSER: this.dbUser,
+      },
+      architecture: Architecture.ARM_64,
+    });
+
+    this.allowDefaultPortFrom(handler);
+    this.grantConnect(handler);
+    return handler;
+  }
+
+  private createNodeMigrationHandler(
+    vpc: IVpc,
+    migrationBundleDir: string,
+    engine: AuroraDatabaseEngine,
+    databaseHostname: string,
+    databasePort: number,
+    databaseName: string,
+  ): DockerImageFunction {
+    const handler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      environment:
+        engine.type === 'mysql'
+          ? {
+              DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+            }
+          : {
+              HOSTNAME: databaseHostname,
+              DATABASE: databaseName,
+              PORT: databasePort.toString(),
+              DBUSER: this.dbUser,
+            },
+      architecture: Architecture.ARM_64,
+    });
+
+    // The Prisma CLI uses a Rust-based MySQL driver that does not support the
+    // mysql_clear_password authentication exchange required by RDS IAM auth.
+    // MySQL migrations therefore use the admin secret, while PostgreSQL
+    // migrations generate an IAM auth token from the supplied connection details.
+    // Secret-authenticated MySQL migrations must connect directly to the Aurora
+    // cluster because the configured RDS Proxy accepts IAM authentication only.
+    if (engine.type === 'mysql') {
+      this.cluster.connections.allowDefaultPortFrom(handler);
+      this.grantSecretRead(handler);
+    } else {
+      this.allowDefaultPortFrom(handler);
+      this.grantConnect(handler);
+    }
+    return handler;
+  }
+
+  public allowDefaultPortFrom(other: IConnectable, description?: string): void {
+    if (this.proxy) {
+      this.proxy.connections.allowFrom(
+        other,
+        Port.tcp(this.cluster.clusterEndpoint.port),
+        description,
+      );
+    } else {
+      this.cluster.connections.allowDefaultPortFrom(other, description);
+    }
+  }
+
+  public grantSecretRead(grantee: IGrantable) {
+    return this.cluster.secret!.grantRead(grantee);
+  }
+
+  public grantConnect(grantee: IGrantable) {
+    return this.proxy
+      ? this.proxy.grantConnect(grantee, this.dbUser)
+      : this.cluster.grantConnect(grantee, this.dbUser);
+  }
+}
+"
+`;

@@ -1,0 +1,135 @@
+import json
+import os
+import time
+from collections.abc import Callable
+from typing import Any
+
+import boto3
+from aws_lambda_powertools.utilities.parameters import AppConfigProvider
+from sqlalchemy import URL
+
+DatabaseConfig = dict[str, Any]
+DatabaseSecret = dict[str, Any]
+
+_RDS_CA_CERT = '/etc/pki/ca-trust/source/anchors/rds-bundle.pem'
+_DB_DRIVER = '<%= engine === "mysql" ? "mysql+pymysql" : "postgresql+psycopg" %>'
+_SSL_QUERY: dict[str, str] = (
+    {'ssl_ca': _RDS_CA_CERT}
+    if _DB_DRIVER == 'mysql+pymysql'
+    else {'sslmode': 'verify-full', 'sslrootcert': _RDS_CA_CERT}
+)
+
+
+def build_database_url(
+    username: str,
+    host: str,
+    port: int,
+    database: str,
+    password: str | None = None,
+    ssl: bool = True,
+) -> URL:
+    return URL.create(
+        _DB_DRIVER,
+        username=username,
+        password=password,
+        host=host,
+        port=port,
+        database=database,
+        query=_SSL_QUERY if ssl else {},
+    )
+
+
+def is_local() -> bool:
+    return os.environ.get('SERVE_LOCAL') == 'true'
+
+
+def _get_serve_local_config() -> dict:
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
+    with open(config_path) as f:
+        return json.load(f)['serveLocal']
+
+
+def get_connection_url(runtime_config_key: str) -> URL:
+    if is_local():
+        cfg = _get_serve_local_config()
+        return build_database_url(
+            cfg['dbUser'],
+            cfg['host'],
+            cfg['port'],
+            cfg['dbName'],
+            password=cfg['dbPassword'],
+            ssl=False,
+        )
+    config = get_database_config(runtime_config_key)
+    return build_database_url(
+        config['dbUser'],
+        config['hostname'],
+        config['port'],
+        config['database'],
+    )
+
+
+def get_database_secret() -> DatabaseSecret:
+    secret_arn = os.environ.get('DATABASE_SECRET_ARN')
+    if not secret_arn:
+        raise ValueError('Missing required environment variable DATABASE_SECRET_ARN.')
+    client = boto3.client('secretsmanager')
+    response = client.get_secret_value(SecretId=secret_arn)
+    return json.loads(response['SecretString'])
+
+
+_database_config: dict[str, DatabaseConfig] = {}
+
+
+def get_database_config(runtime_config_key: str) -> DatabaseConfig:
+    if runtime_config_key not in _database_config:
+        app_id = os.environ.get('RUNTIME_CONFIG_APP_ID')
+        if not app_id:
+            raise ValueError('Missing required environment variable RUNTIME_CONFIG_APP_ID.')
+        provider = AppConfigProvider(application=app_id, environment='default')
+        config = provider.get('database', transform='json')
+        if not isinstance(config, dict):
+            raise ValueError('Unexpected RuntimeConfig format: expected JSON object.')
+        db_config = config.get(runtime_config_key)
+        if not db_config:
+            raise ValueError(f'RuntimeConfig is missing database.{runtime_config_key}.')
+        _database_config[runtime_config_key] = db_config
+    return _database_config[runtime_config_key]
+
+
+_TRANSIENT_ERROR_PATTERNS = [
+    'timeout',
+    'connection refused',
+    'could not connect',
+    'connection reset',
+    'connection timed out',
+    'operationalerror',
+    'password authentication failed',
+    'access denied',
+    'temporary failure',
+]
+
+
+def is_transient_connection_error(error: Exception) -> bool:
+    error_str = str(error).lower()
+    return any(p in error_str for p in _TRANSIENT_ERROR_PATTERNS)
+
+
+def with_connection_retry[T](
+    fn: Callable[[], T],
+    max_attempts: int = 6,
+    delay_seconds: float = 10.0,
+) -> T:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == max_attempts or not is_transient_connection_error(e):
+                raise
+            wait = delay_seconds * attempt
+            print(
+                f'Transient connection error (attempt {attempt}/{max_attempts}), '
+                f'retrying in {wait:.0f}s: {e}'
+            )
+            time.sleep(wait)
+    raise RuntimeError('unreachable')

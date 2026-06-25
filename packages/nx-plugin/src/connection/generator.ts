@@ -18,6 +18,10 @@ import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/
 import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator';
 import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator';
 import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator';
+import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator';
+import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator';
+import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator';
+import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
@@ -156,6 +160,12 @@ const CONNECTION_GENERATORS = {
     pyDynamoDBAgentConnectionGenerator(tree, options),
   'py#mcp-server -> py#dynamodb': (tree, options) =>
     pyDynamoDBMcpServerConnectionGenerator(tree, options),
+  'py#fast-api -> py#rdb': (tree, options) =>
+    pyRdbFastApiConnectionGenerator(tree, options),
+  'py#agent -> py#rdb': (tree, options) =>
+    pyRdbAgentConnectionGenerator(tree, options),
+  'py#mcp-server -> py#rdb': (tree, options) =>
+    pyRdbMcpServerConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>
@@ -427,6 +437,10 @@ const determineProjectTypeFromConfig = async (
     return 'py#dynamodb';
   }
 
+  if (isPyRdb(projectConfiguration)) {
+    return 'py#rdb';
+  }
+
   if (isAgentCoreGateway(projectConfiguration)) {
     return 'agentcore-gateway';
   }
@@ -542,6 +556,10 @@ const isTsDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
 const isPyDynamoDB = (projectConfiguration: ProjectConfiguration): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===
   PY_DYNAMODB_GENERATOR_INFO.id;
+
+const isPyRdb = (projectConfiguration: ProjectConfiguration): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  PY_RDB_GENERATOR_INFO.id;
 
 const isAgentCoreGateway = (
   projectConfiguration: ProjectConfiguration,
