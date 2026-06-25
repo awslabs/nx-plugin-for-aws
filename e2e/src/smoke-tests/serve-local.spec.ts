@@ -14,6 +14,7 @@ import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
 import {
   type AgentSpec,
+  type ApiSpec,
   installChromium,
   runWebsiteIntegrationTest,
   writeIntegrationTestPage,
@@ -22,6 +23,27 @@ import {
 const STARTUP_TIMEOUT_MS = 120_000;
 const HEALTH_CHECK_INTERVAL_MS = 2_000;
 const LLM_MOCK_PORT = 19823;
+
+// The APIs the serve-local website is connected to, with the class names
+// matching their vended `use<ClassName>Client` hooks.
+const WEBSITE_APIS: ApiSpec[] = [
+  { kind: 'trpc', className: 'MyApi' },
+  { kind: 'openapi', className: 'PyApi' },
+  { kind: 'openapi', className: 'MySmithyApi' },
+];
+
+// The agents the serve-local website is connected to, with the class names
+// under which they appear in the website's runtime-config / vended hooks.
+const WEBSITE_AGENTS: AgentSpec[] = [
+  { kind: 'ts-http', className: 'MyAgent' },
+  { kind: 'ts-agui', className: 'MyAguiAgent' },
+  { kind: 'py-http', className: 'MyPyAgent' },
+  { kind: 'py-agui', className: 'MyPyAguiAgent' },
+  // LangChain agents — the website connects to them via the same
+  // framework-agnostic react connections (AG-UI and HTTP/OpenAPI).
+  { kind: 'py-agui', className: 'MyPyLangchainAgent' },
+  { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
+];
 
 function waitForPort(port: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -519,17 +541,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       // it must be written before the build so its imports resolve.
       writeIntegrationTestPage(
         `${projectRoot}/packages/website`,
-        ['MyApi', 'PyApi', 'MySmithyApi'],
-        [
-          { kind: 'ts-http', className: 'MyAgent' },
-          { kind: 'ts-agui', className: 'MyAguiAgent' },
-          { kind: 'py-http', className: 'MyPyAgent' },
-          { kind: 'py-agui', className: 'MyPyAguiAgent' },
-          // LangChain agents — the website connects to them via the same
-          // framework-agnostic react connections (AG-UI and HTTP/OpenAPI).
-          { kind: 'py-agui', className: 'MyPyLangchainAgent' },
-          { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
-        ],
+        WEBSITE_APIS,
+        WEBSITE_AGENTS,
       );
 
       // Ensure the Playwright browser is available for the integration test.
@@ -1533,18 +1546,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await waitForPort(ports.pyLangchainAgui, STARTUP_TIMEOUT_MS);
     await waitForPort(ports.pyLangchainHttp, STARTUP_TIMEOUT_MS);
 
-    const agents: AgentSpec[] = [
-      { kind: 'ts-http', className: 'MyAgent' },
-      { kind: 'ts-agui', className: 'MyAguiAgent' },
-      { kind: 'py-http', className: 'MyPyAgent' },
-      { kind: 'py-agui', className: 'MyPyAguiAgent' },
-      { kind: 'py-agui', className: 'MyPyLangchainAgent' },
-      { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
-    ];
     await runWebsiteIntegrationTest({
       baseUrl: 'http://127.0.0.1:4200',
-      expectedApis: ['MyApi', 'PyApi', 'MySmithyApi'],
-      expectedAgents: agents,
+      expectedApis: WEBSITE_APIS,
+      expectedAgents: WEBSITE_AGENTS,
     });
 
     await stopLast();

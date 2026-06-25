@@ -26,14 +26,20 @@ import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { runTerraformSmokeTest } from './terraform-smoke-test';
 import {
   type AgentSpec,
+  type ApiSpec,
   createCognitoTestUser,
   installChromium,
   runWebsiteIntegrationTest,
   writeIntegrationTestPage,
 } from './website-integration';
 
-// The APIs the deploy website is connected to (runtime-config 'apis' keys).
-const WEBSITE_APIS = ['MyApi', 'PyApi', 'MySmithyApi'];
+// The APIs the deploy website is connected to, with the class names matching
+// their vended `use<ClassName>Client` hooks.
+const WEBSITE_APIS: ApiSpec[] = [
+  { kind: 'trpc', className: 'MyApi' },
+  { kind: 'openapi', className: 'PyApi' },
+  { kind: 'openapi', className: 'MySmithyApi' },
+];
 
 // The agents the deploy website is connected to, with the class names under
 // which they appear in the website's runtime-config / vended hooks.

@@ -4,88 +4,16 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
-
-// playwright and the Cognito SDK are installed on demand into an isolated
-// directory (see `ensureIntegrationDeps`) rather than added to the workspace
-// root, whose dependency graph is sensitive enough that adding any dep
-// reshuffles the pinned `@nx/*` peer resolution and breaks unrelated snapshot
-// tests. They are loaded with a dedicated `require` at runtime, so this file
-// has no compile-time dependency on either package.
-
-const INTEGRATION_DEPS_DIR = join(__dirname, '..', '..', '.integration-deps');
-const PLAYWRIGHT_VERSION = '1.56.1';
-const COGNITO_SDK_VERSION = '3.1068.0';
-
-// Minimal structural types for the runtime-loaded modules — just enough for
-// the helper to be type-checked without depending on the packages' own types.
-type Browser = { newPage: () => Promise<Page>; close: () => Promise<void> };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Page = any;
-interface IntegrationDeps {
-  chromium: { launch: () => Promise<Browser> };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  cognito: Record<string, any>;
-}
-
-/**
- * Install playwright and the Cognito SDK (plus the Chromium browser) into an
- * isolated directory, and return modules resolved from it. Idempotent — the
- * npm install and browser download are skipped once present.
- */
-let cachedDeps: IntegrationDeps | undefined;
-
-const ensureIntegrationDeps = async (): Promise<IntegrationDeps> => {
-  if (cachedDeps) return cachedDeps;
-
-  mkdirSync(INTEGRATION_DEPS_DIR, { recursive: true });
-  const pkgJsonPath = join(INTEGRATION_DEPS_DIR, 'package.json');
-  if (!existsSync(join(INTEGRATION_DEPS_DIR, 'node_modules'))) {
-    writeFileSync(
-      pkgJsonPath,
-      JSON.stringify(
-        {
-          name: 'website-integration-deps',
-          private: true,
-          dependencies: {
-            playwright: PLAYWRIGHT_VERSION,
-            '@aws-sdk/client-cognito-identity-provider': COGNITO_SDK_VERSION,
-          },
-        },
-        null,
-        2,
-      ),
-    );
-    execSync('npm install --no-package-lock --no-audit --no-fund', {
-      cwd: INTEGRATION_DEPS_DIR,
-      stdio: 'inherit',
-      maxBuffer: 50 * 1024 * 1024,
-    });
-  }
-
-  // Install the Chromium browser. Prefer `--with-deps` (installs the OS
-  // libraries Chromium needs, requires root) and fall back to a plain install
-  // where root/apt is unavailable but the libraries are already present.
-  const playwrightExec = (cmd: string) =>
-    execSync(`npx --yes playwright ${cmd}`, {
-      cwd: INTEGRATION_DEPS_DIR,
-      stdio: 'inherit',
-      maxBuffer: 50 * 1024 * 1024,
-    });
-  try {
-    playwrightExec('install --with-deps chromium');
-  } catch {
-    playwrightExec('install chromium');
-  }
-
-  const require = createRequire(join(INTEGRATION_DEPS_DIR, 'index.js'));
-  const playwright = require('playwright');
-  const cognito = require('@aws-sdk/client-cognito-identity-provider');
-  cachedDeps = { chromium: playwright.chromium, cognito };
-  return cachedDeps;
-};
+import {
+  AdminCreateUserCommand,
+  AdminSetUserPasswordCommand,
+  CognitoIdentityProviderClient,
+  SetUserPoolMfaConfigCommand,
+} from '@aws-sdk/client-cognito-identity-provider';
+import { generateFiles } from '@nx/devkit';
+import { type Browser, type Page, chromium } from 'playwright';
+import { FsTree, flushChanges } from 'nx/src/generators/tree';
 
 /**
  * Browser-driven website ↔ API/agent integration test.
@@ -103,6 +31,18 @@ const ensureIntegrationDeps = async (): Promise<IntegrationDeps> => {
 
 const REGION = process.env.AWS_REGION || 'us-west-2';
 
+/** A website→API connection the example page should exercise. */
+export interface ApiSpec {
+  /**
+   * Protocol of the connected API, which determines how its vended client is
+   * invoked from the browser (tRPC clients expose `echo` as a query, OpenAPI
+   * REST/Smithy clients as a method).
+   */
+  kind: 'trpc' | 'openapi';
+  /** The API's class name, matching its vended `use<ClassName>Client` hook. */
+  className: string;
+}
+
 /** A website→agent connection the example page should exercise. */
 export interface AgentSpec {
   /**
@@ -116,234 +56,57 @@ export interface AgentSpec {
 
 /**
  * Write an example page into the website's `src/routes` that invokes every
- * connected API (discovered generically from runtime-config) and the given
- * agents using the website's vended hooks, rendering each result into the DOM
- * for the browser runner to assert on. Returns the route path to navigate to.
+ * connected API and agent using the website's vended hooks/clients, rendering
+ * each result into the DOM for the browser runner to assert on. Returns the
+ * route path to navigate to.
+ *
+ * The page is rendered from `files/website-integration` via the same
+ * `generateFiles` + `Tree` machinery the generators use, so only the hooks for
+ * the connected APIs/agents are imported and called (satisfying the website's
+ * `noUnusedLocals` build).
  */
 export const writeIntegrationTestPage = (
   websiteRoot: string,
-  apiNames: string[],
+  apis: ApiSpec[],
   agents: AgentSpec[],
 ): string => {
-  const routesDir = join(websiteRoot, 'src', 'routes');
-  mkdirSync(routesDir, { recursive: true });
-
-  // Each agent contributes an import, a hook call, and an invocation. The
-  // hooks must be imported statically and called at the top level, so they are
-  // templated in per connected agent.
-  const tsHttp = agents.filter((a) => a.kind === 'ts-http');
-  const pyHttp = agents.filter((a) => a.kind === 'py-http');
-  const aguiAgents = agents.filter(
-    (a) => a.kind === 'ts-agui' || a.kind === 'py-agui',
+  const tree = new FsTree(websiteRoot, false);
+  generateFiles(
+    tree,
+    join(__dirname, '..', 'files', 'website-integration'),
+    'src',
+    {
+      apis,
+      tsHttp: agents.filter((a) => a.kind === 'ts-http'),
+      pyHttp: agents.filter((a) => a.kind === 'py-http'),
+      aguiAgents: agents.filter(
+        (a) => a.kind === 'ts-agui' || a.kind === 'py-agui',
+      ),
+    },
   );
-
-  const imports = [
-    ...tsHttp.map(
-      (a) =>
-        `import { use${a.className}AgentClient } from '../hooks/use${a.className}Agent';`,
-    ),
-    ...pyHttp.map(
-      (a) =>
-        `import { ${a.className}ClientContext } from '../components/${a.className}Provider';`,
-    ),
-    ...aguiAgents.map(
-      (a) =>
-        `import { useAgui${a.className} } from '../hooks/useAgui${a.className}';`,
-    ),
-  ].join('\n');
-
-  const hookCalls = [
-    ...tsHttp.map(
-      (a) => `  const ${a.className}Client = use${a.className}AgentClient();`,
-    ),
-    ...pyHttp.map(
-      (a) =>
-        `  const ${a.className}Client = useContext(${a.className}ClientContext)!;`,
-    ),
-    ...aguiAgents.map(
-      (a) => `  const ${a.className}Agents = useAgui${a.className}();`,
-    ),
-  ].join('\n');
-
-  const invocations = [
-    ...tsHttp.map(
-      (a) =>
-        `      ['agent:${a.className}', () => invokeTrpcAgent(${a.className}Client)],`,
-    ),
-    ...pyHttp.map(
-      (a) =>
-        `      ['agent:${a.className}', () => invokeJsonlAgent(${a.className}Client)],`,
-    ),
-    ...aguiAgents.map(
-      (a) =>
-        `      ['agent:${a.className}', () => invokeAguiAgent(${a.className}Agents)],`,
-    ),
-  ].join('\n');
-
-  // Only emit the invocation helpers actually used (per the connected agent
-  // kinds), and only import `useContext` when an HTTP agent (which reads its
-  // client from a context) is present — otherwise an unused import/function
-  // fails the website's noUnusedLocals build.
-  const trpcHelper = `// Invoke a tRPC-over-WebSocket agent's \\\`invoke\\\` subscription and collect the
-// streamed reply.
-function invokeTrpcAgent(client: any): Promise<string> {
-  return withRetries(
-    () =>
-      new Promise((resolve, reject) => {
-        let acc = '';
-        client.invoke.subscribe(
-          { message: 'hello' },
-          {
-            onData: (c: any) =>
-              (acc += typeof c === 'string' ? c : (c?.data ?? '')),
-            onComplete: () => resolve(acc),
-            onError: reject,
-          },
-        );
-      }),
-  );
-}`;
-  const jsonlHelper = `// Invoke an HTTP agent whose vended OpenAPI client streams JSONL chunks.
-async function invokeJsonlAgent(client: any): Promise<string> {
-  return withRetries(async () => {
-    let acc = '';
-    for await (const chunk of client.invoke({ message: 'hello' })) {
-      acc += chunk?.content ?? '';
-    }
-    return acc;
-  });
-}`;
-  const aguiHelper = `// Invoke an AG-UI agent via its vended @ag-ui/client agent (CopilotKit).
-async function invokeAguiAgent(agents: Record<string, any>): Promise<string> {
-  const agent = Object.values(agents)[0];
-  return withRetries(async () => {
-    agent.messages = [{ id: 'm1', role: 'user', content: 'hello' }];
-    const res = await agent.runAgent({});
-    return (res?.newMessages ?? []).map((m: any) => m.content ?? '').join('');
-  });
-}`;
-  const helpers = [
-    tsHttp.length ? trpcHelper : '',
-    pyHttp.length ? jsonlHelper : '',
-    aguiAgents.length ? aguiHelper : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-  const reactImport = pyHttp.length
-    ? "import { useCallback, useContext, useState } from 'react';"
-    : "import { useCallback, useState } from 'react';";
-
-  const source = `/**
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
- * SPDX-License-Identifier: Apache-2.0
- */
-import { createFileRoute } from '@tanstack/react-router';
-${reactImport}
-import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-import { useSigV4 } from '../hooks/useSigV4';
-${imports}
-
-export const Route = createFileRoute('/integration-test')({
-  component: IntegrationTest,
-});
-
-// Retry a flaky invocation a few times to ride out AgentCore cold starts
-// (the first invoke can fail while the runtime pulls its container image).
-async function withRetries(fn: () => Promise<string>): Promise<string> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      const text = await fn();
-      if (text.length > 0) return text;
-    } catch (e) {
-      lastError = e;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 15000));
-  }
-  throw lastError ?? new Error('agent returned no content');
-}
-
-${helpers}
-
-function IntegrationTest() {
-  const runtimeConfig = useRuntimeConfig();
-  const sigv4 = useSigV4();
-${hookCalls}
-  const [results, setResults] = useState<Record<string, string>>({});
-
-  const run = useCallback(async () => {
-    const record = async (key: string, fn: () => Promise<string>) => {
-      try {
-        const text = await fn();
-        setResults((r) => ({ ...r, [key]: text.length > 0 ? 'OK' : 'EMPTY' }));
-      } catch (e) {
-        setResults((r) => ({
-          ...r,
-          [key]: 'ERROR:' + (e instanceof Error ? e.message : String(e)),
-        }));
-      }
-    };
-
-    // APIs — only the ones the website is connected to (the runtime-config
-    // 'apis' namespace is stage-scoped and also lists APIs the website is not
-    // wired to / granted). Every generated API exposes GET /echo; tRPC wraps
-    // the reply in result.data.message, REST and Smithy return it at the top.
-    const apis: Record<string, string> = runtimeConfig.apis ?? {};
-    const connectedApis: string[] = ${JSON.stringify(apiNames)};
-    for (const name of connectedApis) {
-      const baseUrl = apis[name];
-      await record('api:' + name, async () => {
-        if (!baseUrl) throw new Error('missing runtime-config api: ' + name);
-        const trimmed = baseUrl.replace(/\\/$/, '');
-        const trpc = await sigv4.fetch(
-          trimmed + '/echo?input=' + encodeURIComponent(JSON.stringify({ message: name })),
-        );
-        if (trpc.ok) {
-          const body = await trpc.json();
-          const msg = body?.result?.data?.message ?? body?.message;
-          if (msg === name) return msg;
-        }
-        const rest = await sigv4.fetch(trimmed + '/echo?message=' + encodeURIComponent(name));
-        const body = await rest.json();
-        const msg = body?.message ?? body?.result?.data?.message;
-        if (msg !== name) throw new Error('unexpected echo: ' + JSON.stringify(body));
-        return msg;
-      });
-    }
-
-    // Agents — invoked through their vended hooks/clients.
-    const agentInvocations: [string, () => Promise<string>][] = [
-${invocations}
-    ];
-    for (const [key, fn] of agentInvocations) {
-      await record(key, fn);
-    }
-
-    setResults((r) => ({ ...r, done: 'true' }));
-  }, [runtimeConfig, sigv4]);
-
-  return (
-    <div>
-      <button data-testid="run-integration-test" onClick={run}>
-        Run
-      </button>
-      <pre data-testid="integration-test-results">{JSON.stringify(results)}</pre>
-    </div>
-  );
-}
-`;
-
-  writeFileSync(join(routesDir, 'integration-test.tsx'), source);
+  flushChanges(websiteRoot, tree.listChanges());
   return '/integration-test';
 };
 
 /**
- * Ensure the Playwright Chromium browser and the integration test's other
- * runtime dependencies are installed. Idempotent — safe to call from a smoke
- * test's setup before the workspace build.
+ * Install the Playwright Chromium browser binary. The `playwright` package is a
+ * dev dependency, but the browser itself is downloaded separately. Idempotent —
+ * safe to call from a smoke test's setup before the workspace build. Prefers
+ * `--with-deps` (installs the OS libraries Chromium needs, requires root) and
+ * falls back to a plain install where the libraries are already present.
  */
 export const installChromium = async (): Promise<void> => {
-  await ensureIntegrationDeps();
+  try {
+    execSync('npx --yes playwright install --with-deps chromium', {
+      stdio: 'inherit',
+      maxBuffer: 50 * 1024 * 1024,
+    });
+  } catch {
+    execSync('npx --yes playwright install chromium', {
+      stdio: 'inherit',
+      maxBuffer: 50 * 1024 * 1024,
+    });
+  }
 };
 
 export interface CognitoLogin {
@@ -361,14 +124,6 @@ export const createCognitoTestUser = async (
   userPoolId: string,
   userPoolWebClientId: string,
 ): Promise<CognitoLogin> => {
-  const {
-    cognito: {
-      CognitoIdentityProviderClient,
-      AdminCreateUserCommand,
-      AdminSetUserPasswordCommand,
-      SetUserPoolMfaConfigCommand,
-    },
-  } = await ensureIntegrationDeps();
   const client = new CognitoIdentityProviderClient({ region: REGION });
 
   // The generated user pool requires MFA. Turn it off for the test so the
@@ -417,13 +172,12 @@ export const createCognitoTestUser = async (
  */
 export const runWebsiteIntegrationTest = async (options: {
   baseUrl: string;
-  expectedApis: string[];
+  expectedApis: ApiSpec[];
   expectedAgents: AgentSpec[];
   login?: CognitoLogin;
 }): Promise<void> => {
   const { baseUrl, expectedApis, expectedAgents, login } = options;
 
-  const { chromium } = await ensureIntegrationDeps();
   const browser: Browser = await chromium.launch();
   const page: Page = await browser.newPage();
   page.on('console', (m) => {
@@ -508,7 +262,7 @@ export const runWebsiteIntegrationTest = async (options: {
     // Wait for every expected result to be populated.
     const expectedKeys = [
       'done',
-      ...expectedApis.map((name) => `api:${name}`),
+      ...expectedApis.map((a) => `api:${a.className}`),
       ...expectedAgents.map((a) => `agent:${a.className}`),
     ];
     await page.waitForFunction(
@@ -539,8 +293,8 @@ export const runWebsiteIntegrationTest = async (options: {
       );
     }
     // Every connected API and agent must have produced a result.
-    for (const name of expectedApis) {
-      expect(results[`api:${name}`]).toBe('OK');
+    for (const api of expectedApis) {
+      expect(results[`api:${api.className}`]).toBe('OK');
     }
     for (const agent of expectedAgents) {
       expect(results[`agent:${agent.className}`]).toBe('OK');
