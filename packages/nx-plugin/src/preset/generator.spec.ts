@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, type Tree } from '@nx/devkit';
+import { readJson, readNxJson, type Tree, updateJson } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
@@ -106,6 +106,25 @@ describe('preset generator', () => {
     const packageJson = readJson(tree, 'package.json');
     expect(packageJson.scripts.prepare).toContain('husky');
     expect(packageJson.devDependencies.husky).toBeDefined();
+  });
+
+  it('should remove Prettier in favour of Biome', async () => {
+    // The base Nx workspace scaffolds Prettier; seed it to verify removal.
+    tree.write('.prettierrc', '{ "singleQuote": true }\n');
+    tree.write('.prettierignore', '/dist\n');
+    updateJson(tree, 'package.json', (json) => {
+      json.devDependencies = { ...json.devDependencies, prettier: '^3.6.2' };
+      return json;
+    });
+
+    await presetGenerator(tree, { addTsPlugin: false, iac: 'cdk' });
+
+    expect(tree.exists('.prettierrc')).toBe(false);
+    expect(tree.exists('.prettierignore')).toBe(false);
+    expect(tree.exists('biome.json')).toBe(true);
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.devDependencies?.prettier).toBeUndefined();
+    expect(packageJson.dependencies?.prettier).toBeUndefined();
   });
 
   it('should configure MCP servers by default', async () => {

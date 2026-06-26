@@ -254,6 +254,20 @@ export const presetGenerator = async (
     tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
   }
 
+  // Remove Prettier in favour of Biome. The base Nx workspace scaffolds a
+  // Prettier config and dependency, which would otherwise sit unused alongside
+  // Biome and compete for formatting.
+  for (const prettierFile of ['.prettierrc', '.prettierignore']) {
+    if (tree.exists(prettierFile)) {
+      tree.delete(prettierFile);
+    }
+  }
+  updateJson(tree, 'package.json', (packageJson) => {
+    delete packageJson.dependencies?.prettier;
+    delete packageJson.devDependencies?.prettier;
+    return packageJson;
+  });
+
   generateFiles(
     tree, // the virtual file system
     joinPathFragments(__dirname, 'files'),
