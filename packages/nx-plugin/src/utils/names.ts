@@ -59,6 +59,24 @@ export const kebabCase = (str: string): string => {
   );
 };
 
+/**
+ * Normalise a string to a PEP 503 distribution name.
+ *
+ * PEP 503 (https://peps.python.org/pep-0503/#normalized-names) defines the
+ * canonical form of a Python project distribution name: lower-cased, with any
+ * run of `.`, `_` or `-` collapsed to a single `-`. This is the name uv writes
+ * into `uv.lock` and the form `@nxlv/python` expects when inferring workspace
+ * dependency edges from `[project].dependencies` / `[tool.uv.sources]`.
+ *
+ * Importantly this is NOT kebab-case: it does not split on camelCase humps,
+ * spaces or other punctuation, so a dotted nx id like `scope.my_lib` becomes
+ * `scope-my-lib` (and only those three separators are touched).
+ *
+ * eg. `sojourner.agent_connection` -> `sojourner-agent-connection`
+ */
+export const normalizeDistributionName = (str: string): string =>
+  str.toLowerCase().replace(/[._-]+/g, '-');
+
 // Convert a string to a dot notation string (eg. lambda_handler/my_handler.py -> lambda_handler.my_handler)
 export const toDotNotation = (str: string): string =>
   str

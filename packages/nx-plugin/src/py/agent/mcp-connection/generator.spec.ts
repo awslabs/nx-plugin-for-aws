@@ -265,8 +265,9 @@ dependencies = ["strands-agents"]
       'utf-8',
     )!;
 
-    // Check workspace dependency was added
-    expect(pyprojectContent).toContain('proj.agent_connection');
+    // Check workspace dependency was added, keyed by the PEP 503 distribution
+    // name (hyphenated, not the dotted Nx id) so @nxlv/python infers the edge.
+    expect(pyprojectContent).toContain('proj-agent-connection');
   });
 
   it('should update serve-local target with MCP dependency', async () => {
