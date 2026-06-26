@@ -24,6 +24,34 @@ import {
 } from './deploy-invocations';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { runTerraformSmokeTest } from './terraform-smoke-test';
+import {
+  type AgentSpec,
+  type ApiSpec,
+  createCognitoTestUser,
+  installChromium,
+  runWebsiteIntegrationTest,
+  writeIntegrationTestPage,
+} from './website-integration';
+
+// The APIs the deploy website is connected to, with the class names matching
+// their vended `use<ClassName>Client` hooks.
+const WEBSITE_APIS: ApiSpec[] = [
+  { kind: 'trpc', className: 'MyApi' },
+  { kind: 'openapi', className: 'PyApi' },
+  { kind: 'openapi', className: 'MySmithyApi' },
+];
+
+// The agents the deploy website is connected to, with the class names under
+// which they appear in the website's runtime-config / vended hooks.
+const WEBSITE_AGENTS: AgentSpec[] = [
+  { kind: 'ts-http', className: 'TsProjectAgent' },
+  { kind: 'ts-agui', className: 'MyTsAguiAgent' },
+  { kind: 'py-http', className: 'MyAgent' },
+  { kind: 'py-agui', className: 'MyPyAguiAgent' },
+  // LangChain agents — same framework-agnostic vended clients as Strands.
+  { kind: 'py-agui', className: 'MyPyLangchainAgent' },
+  { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
+];
 
 function readTerraformOutputs(projectRoot: string): Record<string, string> {
   // Read outputs directly (not via `nx output`) to avoid nx cache serving a stale value.
@@ -64,7 +92,24 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
     });
 
     it('should generate, deploy, exercise and destroy', async () => {
-      const { opts } = await runTerraformSmokeTest(targetDir, pkgMgr);
+      const { opts } = await runTerraformSmokeTest(
+        targetDir,
+        pkgMgr,
+        undefined,
+        // Add the browser-driven integration-test page to the website before
+        // the build so it is bundled into the deployed site. Only the
+        // application variant deploys the website.
+        config.variant === 'terraform-deploy'
+          ? async (projectRoot) => {
+              writeIntegrationTestPage(
+                `${projectRoot}/packages/website`,
+                WEBSITE_APIS,
+                WEBSITE_AGENTS,
+              );
+              await installChromium();
+            }
+          : undefined,
+      );
 
       // Per-run suffix used in the Terraform state key so concurrent runs
       // don't share state.
@@ -277,6 +322,20 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
 
           // Website
           await pingWebsite(outputs.website_distribution_domain_name);
+
+          // Browser-driven website integration: log in via the Cognito hosted
+          // UI and drive the website's vended clients to invoke every connected
+          // API and agent from a real browser.
+          const login = await createCognitoTestUser(
+            outputs.user_pool_id,
+            outputs.user_pool_client_id,
+          );
+          await runWebsiteIntegrationTest({
+            baseUrl: `https://${outputs.website_distribution_domain_name}`,
+            expectedApis: WEBSITE_APIS,
+            expectedAgents: WEBSITE_AGENTS,
+            login,
+          });
         }
       } finally {
         try {

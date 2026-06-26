@@ -63,6 +63,7 @@ resource "null_resource" "add_callback_url" {
 import boto3
 import os
 import sys
+import time
 
 # Configuration
 user_pool_id = os.environ['USER_POOL_ID']
@@ -72,12 +73,24 @@ new_callback_url = os.environ['NEW_CALLBACK_URL']
 # Initialize Cognito client
 cognito = boto3.client('cognito-idp')
 
+# A freshly created user pool / client can take several minutes to become
+# visible to describe_user_pool_client, so retry on ResourceNotFoundException.
+def describe_with_retry():
+    deadline = time.time() + 5 * 60
+    while True:
+        try:
+            return cognito.describe_user_pool_client(
+                UserPoolId=user_pool_id,
+                ClientId=client_id,
+            )
+        except cognito.exceptions.ResourceNotFoundException:
+            if time.time() >= deadline:
+                raise
+            time.sleep(5)
+
 try:
     # Get current user pool client configuration
-    response = cognito.describe_user_pool_client(
-        UserPoolId=user_pool_id,
-        ClientId=client_id
-    )
+    response = describe_with_retry()
 
     client_config = response['UserPoolClient']
     current_callback_urls = client_config.get('CallbackURLs', [])

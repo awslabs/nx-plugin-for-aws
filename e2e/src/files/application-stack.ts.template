@@ -18,9 +18,11 @@ import {
   MyPyLangchainAgent,
   MyPyLangchainHttpAgent,
   MyPyLangchainA2aAgent,
+  MyPyAguiAgent,
   TsProjectMyFunction,
   TsProjectAgent,
   MyTsA2aAgent,
+  MyTsAguiAgent,
   HostedMcpServer,
   MySmithyApi,
   MyTable,
@@ -52,9 +54,10 @@ export class ApplicationStack extends cdk.Stack {
     new PyApiHttp(this, 'PyApiHttp', {
       integrations: PyApiHttp.defaultIntegrations(this).build(),
     });
-    new MySmithyApi(this, 'MySmithyApi', {
+    const smithyapi = new MySmithyApi(this, 'MySmithyApi', {
       integrations: MySmithyApi.defaultIntegrations(this).build(),
     });
+    smithyapi.grantInvokeAccess(identity.identityPool.authenticatedRole);
     new MyApiCustom(this, 'MyApiCustom', {
       integrations: MyApiCustom.defaultIntegrations(this).build(),
     });
@@ -107,6 +110,11 @@ export class ApplicationStack extends cdk.Stack {
       value: pyLangchainA2aAgent.agentCoreRuntime.agentRuntimeArn,
     });
 
+    // AG-UI agents — connected to the website so the browser-driven website
+    // integration test can exercise the AG-UI protocol end-to-end.
+    const tsAguiAgent = new MyTsAguiAgent(this, 'MyTsAguiAgent');
+    const pyAguiAgent = new MyPyAguiAgent(this, 'MyPyAguiAgent');
+
     const pyMcp = new MyMcpServer(this, 'MyMcpServer');
     new cdk.CfnOutput(this, 'PyMcpServerArn', {
       value: pyMcp.agentCoreRuntime.agentRuntimeArn,
@@ -122,6 +130,9 @@ export class ApplicationStack extends cdk.Stack {
     pyMcp.grantInvokeAccess(pyAgent);
     // LangChain agent -> Python MCP server.
     pyMcp.grantInvokeAccess(pyLangchainAgent);
+    // The TypeScript AG-UI agent is connected to the TypeScript MCP server and
+    // calls it on startup, so it needs invoke access too.
+    tsMcp.grantInvokeAccess(tsAguiAgent);
 
     // Grant the HTTP agents permission to invoke the A2A agents so
     // we can verify A2A invocation with SigV4 end-to-end.
@@ -131,6 +142,19 @@ export class ApplicationStack extends cdk.Stack {
     pyA2aAgent.grantInvokeAccess(pyAgent);
     // LangChain agent -> Python A2A agent.
     pyA2aAgent.grantInvokeAccess(pyLangchainAgent);
+
+    // Grant the website's authenticated users permission to invoke every agent
+    // the website is connected to (HTTP + AG-UI, TypeScript + Python, plus the
+    // LangChain AG-UI and HTTP agents), so the browser-driven website
+    // integration test can invoke them with SigV4.
+    tsAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+    pyAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+    tsAguiAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+    pyAguiAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+    pyLangchainAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+    pyLangchainHttpAgent.grantInvokeAccess(
+      identity.identityPool.authenticatedRole,
+    );
 
     new MyTable(this, 'MyTable');
 

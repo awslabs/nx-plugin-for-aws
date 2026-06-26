@@ -24,6 +24,34 @@ import {
 } from './deploy-invocations';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { runSmokeTest } from './smoke-test';
+import {
+  type AgentSpec,
+  type ApiSpec,
+  createCognitoTestUser,
+  installChromium,
+  runWebsiteIntegrationTest,
+  writeIntegrationTestPage,
+} from './website-integration';
+
+// The APIs the deploy website is connected to, with the class names matching
+// their vended `use<ClassName>Client` hooks.
+const WEBSITE_APIS: ApiSpec[] = [
+  { kind: 'trpc', className: 'MyApi' },
+  { kind: 'openapi', className: 'PyApi' },
+  { kind: 'openapi', className: 'MySmithyApi' },
+];
+
+// The agents the deploy website is connected to, with the class names under
+// which they appear in the website's runtime-config / vended hooks.
+const WEBSITE_AGENTS: AgentSpec[] = [
+  { kind: 'ts-http', className: 'TsProjectAgent' },
+  { kind: 'ts-agui', className: 'MyTsAguiAgent' },
+  { kind: 'py-http', className: 'MyAgent' },
+  { kind: 'py-agui', className: 'MyPyAguiAgent' },
+  // LangChain agents — same framework-agnostic vended clients as Strands.
+  { kind: 'py-agui', className: 'MyPyLangchainAgent' },
+  { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
+];
 
 /**
  * Delete any CloudFormation stacks matching the test run prefix that were
@@ -91,7 +119,21 @@ describe('smoke test - cdk-deploy', () => {
   });
 
   it('should generate and build', async () => {
-    const { opts } = await runSmokeTest(targetDir, pkgMgr);
+    const { opts } = await runSmokeTest(
+      targetDir,
+      pkgMgr,
+      undefined,
+      // Add the browser-driven integration-test page to the website before the
+      // build so it is bundled into the deployed site.
+      async (projectRoot) => {
+        writeIntegrationTestPage(
+          `${projectRoot}/packages/website`,
+          WEBSITE_APIS,
+          WEBSITE_AGENTS,
+        );
+        await installChromium();
+      },
+    );
 
     // Generate an 8 digit alphanumeric random testRunId
     const testRunId = Math.random().toString(36).substring(2, 10);
@@ -107,9 +149,22 @@ describe('smoke test - cdk-deploy', () => {
     );
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
+    // Auto-apply sync so the main.ts rewrite and the integration-test page
+    // added before the build don't block `deploy` with a fatal "workspace is
+    // out of sync" error.
+    const nxJsonPath = `${opts.cwd}/nx.json`;
+    const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
+    nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
+    writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
+
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
 
     try {
+      // Apply any pending sync changes (license headers, tsconfig references,
+      // the regenerated TanStack route tree) so the subsequent `deploy` does
+      // not abort on an out-of-sync workspace.
+      await runCLI(`sync`, opts);
+
       // Deploy the e2e test resources
       await runCLI(
         `deploy infra ${cdkStageName}/* --output-style=stream`,
@@ -284,7 +339,22 @@ describe('smoke test - cdk-deploy', () => {
       await invokeLambda(findOutput('TsFunctionArn'), 'TypeScript Function');
 
       // Website
-      await pingWebsite(findOutput('WebsiteDistributionDomainName'));
+      const websiteDomain = findOutput('WebsiteDistributionDomainName');
+      await pingWebsite(websiteDomain);
+
+      // Browser-driven website integration: log in via the Cognito hosted UI
+      // and drive the website's vended clients to invoke every connected API
+      // and agent from a real browser.
+      const login = await createCognitoTestUser(
+        findOutput('UserIdentityUserIdentityUserPoolId'),
+        findOutput('UserIdentityUserIdentityUserPoolClientId'),
+      );
+      await runWebsiteIntegrationTest({
+        baseUrl: `https://${websiteDomain}`,
+        expectedApis: WEBSITE_APIS,
+        expectedAgents: WEBSITE_AGENTS,
+        login,
+      });
     } finally {
       try {
         await runCLI(

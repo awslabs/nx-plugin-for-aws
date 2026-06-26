@@ -1,0 +1,176 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { createFileRoute } from '@tanstack/react-router';
+import { useCallback, useState } from 'react';
+<%_ for (const api of apis) { _%>
+<%_ if (api.kind === 'trpc') { _%>
+import { use<%= api.className %>Client } from '../hooks/use<%= api.className %>';
+<%_ } else { _%>
+import { use<%= api.className %>Client } from '../hooks/use<%= api.className %>Client';
+<%_ } _%>
+<%_ } _%>
+<%_ for (const a of tsHttp) { _%>
+import { use<%= a.className %>AgentClient } from '../hooks/use<%= a.className %>Agent';
+<%_ } _%>
+<%_ for (const a of pyHttp) { _%>
+import { use<%= a.className %>Client } from '../hooks/use<%= a.className %>Client';
+<%_ } _%>
+<%_ for (const a of aguiAgents) { _%>
+import { useAgui<%= a.className %> } from '../hooks/useAgui<%= a.className %>';
+<%_ } _%>
+
+export const Route = createFileRoute('/integration-test')({
+  component: IntegrationTest,
+});
+
+// Retry a flaky invocation a few times to ride out AgentCore cold starts
+// (the first invoke can fail while the runtime pulls its container image).
+async function withRetries(fn: () => Promise<string>): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const text = await fn();
+      if (text.length > 0) return text;
+    } catch (e) {
+      lastError = e;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+  }
+  throw lastError ?? new Error('agent returned no content');
+}
+
+<%_ if (tsHttp.length) { _%>
+// Invoke a tRPC-over-WebSocket agent's `invoke` subscription and collect the
+// streamed reply.
+function invokeTrpcAgent(client: any): Promise<string> {
+  return withRetries(
+    () =>
+      new Promise((resolve, reject) => {
+        let acc = '';
+        client.invoke.subscribe(
+          { message: 'hello' },
+          {
+            onData: (c: any) =>
+              (acc += typeof c === 'string' ? c : (c?.data ?? '')),
+            onComplete: () => resolve(acc),
+            onError: reject,
+          },
+        );
+      }),
+  );
+}
+<%_ } _%>
+<%_ if (pyHttp.length) { _%>
+// Invoke an HTTP agent whose vended OpenAPI client streams JSONL chunks.
+async function invokeJsonlAgent(client: any): Promise<string> {
+  return withRetries(async () => {
+    let acc = '';
+    for await (const chunk of client.invoke({ message: 'hello' })) {
+      acc += chunk?.content ?? '';
+    }
+    return acc;
+  });
+}
+<%_ } _%>
+<%_ if (aguiAgents.length) { _%>
+// Invoke an AG-UI agent via its vended @ag-ui/client agent (CopilotKit).
+async function invokeAguiAgent(agents: Record<string, any>): Promise<string> {
+  const agent = Object.values(agents)[0];
+  return withRetries(async () => {
+    agent.messages = [{ id: 'm1', role: 'user', content: 'hello' }];
+    const res = await agent.runAgent({});
+    return (res?.newMessages ?? []).map((m: any) => m.content ?? '').join('');
+  });
+}
+<%_ } _%>
+
+function IntegrationTest() {
+<%_ for (const api of apis) { _%>
+  const <%= api.className %>Client = use<%= api.className %>Client();
+<%_ } _%>
+<%_ for (const a of tsHttp) { _%>
+  const <%= a.className %>Client = use<%= a.className %>AgentClient();
+<%_ } _%>
+<%_ for (const a of pyHttp) { _%>
+  const <%= a.className %>Client = use<%= a.className %>Client();
+<%_ } _%>
+<%_ for (const a of aguiAgents) { _%>
+  const <%= a.className %>Agents = useAgui<%= a.className %>();
+<%_ } _%>
+  const [results, setResults] = useState<Record<string, string>>({});
+
+  const run = useCallback(async () => {
+    const record = async (key: string, fn: () => Promise<string>) => {
+      try {
+        const text = await fn();
+        setResults((r) => ({ ...r, [key]: text.length > 0 ? 'OK' : 'EMPTY' }));
+      } catch (e) {
+        setResults((r) => ({
+          ...r,
+          [key]: 'ERROR:' + (e instanceof Error ? e.message : String(e)),
+        }));
+      }
+    };
+
+    // APIs — invoked through each API's vended client. Every generated API
+    // exposes an `echo` operation returning the message; tRPC clients expose it
+    // as a query, OpenAPI (REST/Smithy) clients as a method.
+    const apiInvocations: [string, () => Promise<string>][] = [
+<%_ for (const api of apis) { _%>
+<%_ if (api.kind === 'trpc') { _%>
+      [
+        'api:<%= api.className %>',
+        async () => {
+          const res = await <%= api.className %>Client.echo.query({
+            message: '<%= api.className %>',
+          });
+          return res.message;
+        },
+      ],
+<%_ } else { _%>
+      [
+        'api:<%= api.className %>',
+        async () => {
+          const res = await <%= api.className %>Client.echo({
+            message: '<%= api.className %>',
+          });
+          return res.message;
+        },
+      ],
+<%_ } _%>
+<%_ } _%>
+    ];
+    for (const [key, fn] of apiInvocations) {
+      await record(key, fn);
+    }
+
+    // Agents — invoked through their vended hooks/clients.
+    const agentInvocations: [string, () => Promise<string>][] = [
+<%_ for (const a of tsHttp) { _%>
+      ['agent:<%= a.className %>', () => invokeTrpcAgent(<%= a.className %>Client)],
+<%_ } _%>
+<%_ for (const a of pyHttp) { _%>
+      ['agent:<%= a.className %>', () => invokeJsonlAgent(<%= a.className %>Client)],
+<%_ } _%>
+<%_ for (const a of aguiAgents) { _%>
+      ['agent:<%= a.className %>', () => invokeAguiAgent(<%= a.className %>Agents)],
+<%_ } _%>
+    ];
+    for (const [key, fn] of agentInvocations) {
+      await record(key, fn);
+    }
+
+    setResults((r) => ({ ...r, done: 'true' }));
+  }, []);
+
+  return (
+    <div>
+      <button data-testid="run-integration-test" onClick={run}>
+        Run
+      </button>
+      <pre data-testid="integration-test-results">{JSON.stringify(results)}</pre>
+    </div>
+  );
+}

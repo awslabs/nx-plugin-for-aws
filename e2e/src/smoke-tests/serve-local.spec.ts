@@ -12,10 +12,38 @@ import { createConnection } from 'net';
 import * as pty from 'node-pty';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
+import {
+  type AgentSpec,
+  type ApiSpec,
+  installChromium,
+  runWebsiteIntegrationTest,
+  writeIntegrationTestPage,
+} from './website-integration';
 
 const STARTUP_TIMEOUT_MS = 120_000;
 const HEALTH_CHECK_INTERVAL_MS = 2_000;
 const LLM_MOCK_PORT = 19823;
+
+// The APIs the serve-local website is connected to, with the class names
+// matching their vended `use<ClassName>Client` hooks.
+const WEBSITE_APIS: ApiSpec[] = [
+  { kind: 'trpc', className: 'MyApi' },
+  { kind: 'openapi', className: 'PyApi' },
+  { kind: 'openapi', className: 'MySmithyApi' },
+];
+
+// The agents the serve-local website is connected to, with the class names
+// under which they appear in the website's runtime-config / vended hooks.
+const WEBSITE_AGENTS: AgentSpec[] = [
+  { kind: 'ts-http', className: 'MyAgent' },
+  { kind: 'ts-agui', className: 'MyAguiAgent' },
+  { kind: 'py-http', className: 'MyPyAgent' },
+  { kind: 'py-agui', className: 'MyPyAguiAgent' },
+  // LangChain agents — the website connects to them via the same
+  // framework-agnostic react connections (AG-UI and HTTP/OpenAPI).
+  { kind: 'py-agui', className: 'MyPyLangchainAgent' },
+  { kind: 'py-http', className: 'MyPyLangchainHttpAgent' },
+];
 
 function waitForPort(port: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -381,10 +409,34 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=my-smithy-api --no-interactive`,
         opts,
       );
+      // Website -> agent connections (TS HTTP, TS AG-UI, Python HTTP, Python
+      // AG-UI) so the browser-driven website integration test exercises every
+      // agent protocol the website can connect to, locally.
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=ts-project --targetComponent=my-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=ts-project --targetComponent=my-agui-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-agui-agent --no-interactive`,
+        opts,
+      );
       // Website -> Python LangChain (AG-UI) agent: wires the CopilotKit runtime
       // route into the website so the frontend can talk to the langchain agent.
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-langchain-agent --no-interactive`,
+        opts,
+      );
+      // Website -> Python LangChain HTTP agent (OpenAPI client).
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_project --targetComponent=my-py-langchain-http-agent --no-interactive`,
         opts,
       );
       await runCLI(
@@ -483,6 +535,18 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     return [_to_item(m) for m in ExampleModel.list_by_category(category)]
 `,
       );
+
+      // Add the browser-driven integration-test page to the website. It uses
+      // the website's vended hooks to invoke every connected API and agent, so
+      // it must be written before the build so its imports resolve.
+      writeIntegrationTestPage(
+        `${projectRoot}/packages/website`,
+        WEBSITE_APIS,
+        WEBSITE_AGENTS,
+      );
+
+      // Ensure the Playwright browser is available for the integration test.
+      await installChromium();
 
       // Lint fix + build
       await runCLI(`sync --verbose`, opts);
@@ -1463,35 +1527,30 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     await stopLast();
   });
 
-  it('Website cascade - starts connected APIs', async () => {
+  it('Website integration - browser drives connected APIs + agents', async () => {
+    // Starting the website's serve-local cascades every connected backend (the
+    // 3 APIs and the connected agents). Drive the website in a real browser
+    // through the integration-test page, which invokes each one via the
+    // website's vended clients — proving the full
+    // runtime-config → client → backend path works.
     await startAndWait('@serve-local-test/website:serve-local', 4200);
 
-    // Wait for cascaded backends
+    // Wait for the cascaded backends the page will reach.
     await waitForPort(ports.trpc, STARTUP_TIMEOUT_MS);
     await waitForPort(ports.fastApi, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.smithy, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.tsAgent, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.tsAgui, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyAgent, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyAgui, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyLangchainAgui, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyLangchainHttp, STARTUP_TIMEOUT_MS);
 
-    const htmlRes = await fetch('http://127.0.0.1:4200/');
-    const html = await htmlRes.text();
-    console.log(`Website (${htmlRes.status}): ${html.slice(0, 100)}`);
-    expect(htmlRes.status).toBe(200);
-    expect(html).toContain('<');
-
-    const trpcInput = encodeURIComponent(
-      JSON.stringify({ message: 'cascade' }),
-    );
-    const trpcRes = await fetch(
-      `http://127.0.0.1:${ports.trpc}/echo?input=${trpcInput}`,
-    );
-    const trpcBody = await trpcRes.json();
-    console.log('tRPC cascade echo:', JSON.stringify(trpcBody));
-    expect(trpcBody.result.data.message).toBe('cascade');
-
-    const fastApiRes = await fetch(
-      `http://127.0.0.1:${ports.fastApi}/echo?message=cascade`,
-    );
-    const fastApiBody = await fastApiRes.json();
-    console.log('FastAPI cascade echo:', JSON.stringify(fastApiBody));
-    expect(fastApiBody.message).toBe('cascade');
+    await runWebsiteIntegrationTest({
+      baseUrl: 'http://127.0.0.1:4200',
+      expectedApis: WEBSITE_APIS,
+      expectedAgents: WEBSITE_AGENTS,
+    });
 
     await stopLast();
   });
