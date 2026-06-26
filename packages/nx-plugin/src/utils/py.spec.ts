@@ -7,7 +7,10 @@ import { parse, stringify } from '@iarna/toml';
 import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import type { UVPyprojectToml } from './nxlv-python';
-import { addDependenciesToPyProjectToml } from './py';
+import {
+  addDependenciesToPyProjectToml,
+  addWorkspaceDependencyToPyProject,
+} from './py';
 import type { IPyDepVersion } from './versions';
 
 describe('addDependenciesToPyProjectToml', () => {
@@ -129,7 +132,10 @@ describe('addDependenciesToPyProjectToml', () => {
         },
       }),
     );
-    addDependenciesToPyProjectToml(tree, 'test-project', ['fastapi', 'uvicorn']);
+    addDependenciesToPyProjectToml(tree, 'test-project', [
+      'fastapi',
+      'uvicorn',
+    ]);
 
     const afterFirstAdd = (
       parse(
@@ -139,7 +145,10 @@ describe('addDependenciesToPyProjectToml', () => {
 
     // Re-adding the same deps must leave the list byte-identical, not move the
     // entries to the end.
-    addDependenciesToPyProjectToml(tree, 'test-project', ['fastapi', 'uvicorn']);
+    addDependenciesToPyProjectToml(tree, 'test-project', [
+      'fastapi',
+      'uvicorn',
+    ]);
 
     const afterSecondAdd = (
       parse(
@@ -488,5 +497,73 @@ describe('addDependenciesToPyProjectToml', () => {
     expect(updatedToml.project.dependencies).not.toContain('fastapi>=0.100.0');
 
     expect(updatedToml.project.dependencies).toHaveLength(4);
+  });
+});
+
+describe('addWorkspaceDependencyToPyProject', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+    tree.write(
+      'packages/consumer/pyproject.toml',
+      stringify({
+        project: { name: 'scope-consumer', version: '0.1.0', dependencies: [] },
+      } as UVPyprojectToml),
+    );
+  });
+
+  const readToml = () =>
+    parse(
+      tree.read('packages/consumer/pyproject.toml', 'utf-8'),
+    ) as UVPyprojectToml;
+
+  it('should write the PEP 503 distribution name when given a dotted Nx id', () => {
+    // Callers (eg the dynamodb connection generators) pass the dotted Nx
+    // project id; the dependency string and source key must be the hyphenated
+    // distribution name so @nxlv/python infers the workspace edge.
+    addWorkspaceDependencyToPyProject(
+      tree,
+      'packages/consumer',
+      'scope.my_lib',
+    );
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toContain('scope-my-lib');
+    expect(toml.project.dependencies).not.toContain('scope.my_lib');
+    expect((toml.tool as any).uv.sources['scope-my-lib']).toEqual({
+      workspace: true,
+    });
+    expect((toml.tool as any).uv.sources['scope.my_lib']).toBeUndefined();
+  });
+
+  it('should be idempotent for an already-normalised name', () => {
+    addWorkspaceDependencyToPyProject(
+      tree,
+      'packages/consumer',
+      'scope-my-lib',
+    );
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toEqual(['scope-my-lib']);
+    expect((toml.tool as any).uv.sources['scope-my-lib']).toEqual({
+      workspace: true,
+    });
+  });
+
+  it('should not add a duplicate when called twice with different name forms', () => {
+    addWorkspaceDependencyToPyProject(
+      tree,
+      'packages/consumer',
+      'scope.my_lib',
+    );
+    addWorkspaceDependencyToPyProject(
+      tree,
+      'packages/consumer',
+      'scope-my-lib',
+    );
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toEqual(['scope-my-lib']);
   });
 });

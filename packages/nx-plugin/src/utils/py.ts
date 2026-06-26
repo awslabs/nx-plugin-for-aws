@@ -5,6 +5,7 @@
 import { parse, stringify } from '@iarna/toml';
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
+import { normalizeDistributionName } from './names';
 import type { UVPyprojectToml } from './nxlv-python';
 import { updateToml } from './toml';
 import { type IPyDepVersion, withPyVersions } from './versions';
@@ -123,25 +124,33 @@ export const addWorkspaceDependencyToPyProject = (
     return;
   }
 
+  // The dependency string and [tool.uv.sources] key must be the PEP 503
+  // distribution name (hyphenated), not the dotted Nx project id, so that uv
+  // and @nxlv/python match it to the workspace member and the dependency edge
+  // appears in the Nx project graph. Callers may pass either form (eg a dotted
+  // `targetProject.name`); normalizing here is idempotent for names that are
+  // already normalised.
+  const distributionName = normalizeDistributionName(dependencyPackageName);
+
   updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
     // Add to [project].dependencies if not already present
     const deps = toml.project?.dependencies ?? [];
     if (
       !deps.some(
         (d) =>
-          d === dependencyPackageName ||
-          d.startsWith(`${dependencyPackageName}>=`) ||
-          d.startsWith(`${dependencyPackageName}==`),
+          d === distributionName ||
+          d.startsWith(`${distributionName}>=`) ||
+          d.startsWith(`${distributionName}==`),
       )
     ) {
-      toml.project.dependencies = [...deps, dependencyPackageName];
+      toml.project.dependencies = [...deps, distributionName];
     }
 
     // Add to [tool.uv.sources] with workspace = true
     toml.tool = toml.tool ?? {};
     (toml.tool as any).uv = (toml.tool as any).uv ?? {};
     (toml.tool as any).uv.sources = (toml.tool as any).uv.sources ?? {};
-    (toml.tool as any).uv.sources[dependencyPackageName] = {
+    (toml.tool as any).uv.sources[distributionName] = {
       workspace: true,
     };
 

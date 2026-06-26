@@ -54,20 +54,29 @@ describe('py#dynamodb fast-api-connection generator', () => {
 
   it('should add dynamodb package as workspace dependency to pyproject.toml', async () => {
     setupFastApiProject();
-    setupDynamoDBProject();
+    setupDynamoDBProject('test.db');
+
+    tree.write(
+      'packages/test.db/pyproject.toml',
+      `[project]\nname = "test-db"\nversion = "1.0.0"\ndependencies = []\n`,
+    );
 
     tree.write(
       'packages/api/pyproject.toml',
-      `[project]\nname = "test.api"\nversion = "1.0.0"\ndependencies = []\n`,
+      `[project]\nname = "test-api"\nversion = "1.0.0"\ndependencies = []\n`,
     );
 
     await pyDynamoDBFastApiConnectionGenerator(tree, {
       sourceProject: 'api',
-      targetProject: 'db',
+      targetProject: 'test.db',
     });
 
     const pyprojectContent = tree.read('packages/api/pyproject.toml', 'utf-8')!;
-    expect(pyprojectContent).toContain('db');
+    // The dependency and [tool.uv.sources] key must be the PEP 503 distribution
+    // name (hyphenated) so @nxlv/python infers the workspace dependency edge,
+    // not the dotted Nx project id.
+    expect(pyprojectContent).toContain('test-db');
+    expect(pyprojectContent).not.toContain('test.db');
   });
 
   it('should not add dependency when source has no serve-local', async () => {
