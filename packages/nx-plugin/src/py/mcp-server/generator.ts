@@ -26,6 +26,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addDevAlias,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -188,71 +189,80 @@ export const pyMcpServerGenerator = async (
     component: { info: PY_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
   });
 
-  updateProjectConfiguration(tree, project.name, {
-    ...project,
-    targets: {
-      ...project.targets,
-      // Add targets for running the MCP server
-      [`${mcpTargetPrefix}-serve-stdio`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [`uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`],
-          cwd: '{projectRoot}',
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-serve`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [
-            `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app --host 0.0.0.0 --port ${localDevPort}`,
-          ],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-          },
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-serve-local`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [
-            `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app --host 0.0.0.0 --port ${localDevPort}`,
-          ],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-            SERVE_LOCAL: 'true',
-          },
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-inspect`]: {
-        executor: 'nx:run-commands',
-        // Launch the inspector against the locally served (serve-local) HTTP
-        // server. serve-local starts the server and any connected dependencies
-        // (e.g. a local database).
-        dependsOn: [`${mcpTargetPrefix}-serve-local`],
-        options: {
-          commands: [
-            `mcp-inspector --transport http --server-url http://localhost:${localDevPort}/mcp`,
-          ],
-          cwd: '{projectRoot}',
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-inspect-stdio`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [
-            `mcp-inspector -- uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`,
-          ],
-          cwd: '{projectRoot}',
-        },
-        continuous: true,
+  const mcpTargets = {
+    ...project.targets,
+    // Add targets for running the MCP server
+    [`${mcpTargetPrefix}-serve-stdio`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [`uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`],
+        cwd: '{projectRoot}',
       },
     },
+    [`${mcpTargetPrefix}-serve`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [
+          `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app --host 0.0.0.0 --port ${localDevPort}`,
+        ],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+        },
+      },
+    },
+    [`${mcpTargetPrefix}-serve-local`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [
+          `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app --host 0.0.0.0 --port ${localDevPort}`,
+        ],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+          SERVE_LOCAL: 'true',
+        },
+      },
+    },
+    [`${mcpTargetPrefix}-inspect`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      // Launch the inspector against the locally served (serve-local) HTTP
+      // server. serve-local starts the server and any connected dependencies
+      // (e.g. a local database).
+      dependsOn: [`${mcpTargetPrefix}-serve-local`],
+      options: {
+        commands: [
+          `mcp-inspector --transport http --server-url http://localhost:${localDevPort}/mcp`,
+        ],
+        cwd: '{projectRoot}',
+      },
+    },
+    [`${mcpTargetPrefix}-inspect-stdio`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [
+          `mcp-inspector -- uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`,
+        ],
+        cwd: '{projectRoot}',
+      },
+    },
+  };
+
+  // `<mcp>-dev` aliases `<mcp>-serve-local`; the first component in a project
+  // also gets a project-level `dev` aliasing it.
+  addDevAlias(mcpTargets, `${mcpTargetPrefix}-serve-local`, {
+    devTargetName: `${mcpTargetPrefix}-dev`,
+    aliasAsProjectDev: true,
+  });
+
+  updateProjectConfiguration(tree, project.name, {
+    ...project,
+    targets: mcpTargets,
   });
 
   addDependenciesToPackageJson(

@@ -22,6 +22,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -113,7 +114,6 @@ export const tsDynamoDBGenerator = async (
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     continuous: true,
-    dependsOn: ['pull-image'],
     options: {
       commands: [
         `tsx ${scriptsDir}/start-container.ts`,
@@ -123,6 +123,7 @@ export const tsDynamoDBGenerator = async (
       cwd: '{projectRoot}',
     },
   };
+  addDevAlias(projectConfig.targets, 'serve-local');
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
   addGeneratorMetadata(tree, fullyQualifiedName, TS_DYNAMODB_GENERATOR_INFO);

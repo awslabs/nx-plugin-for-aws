@@ -140,7 +140,7 @@ export function Main() {
         projectConfig.targets['watch-generate:test-api-client'].options
           .commands,
       ).toEqual([
-        `nx watch --projects=api-model --includeDependentProjects -- nx run frontend:"generate:test-api-client"`,
+        `nx watch --projects=api-model --includeDependencies -- nx run frontend:"generate:test-api-client"`,
       ]);
 
       // Verify compile target depends on client generation

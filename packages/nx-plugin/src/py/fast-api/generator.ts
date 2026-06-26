@@ -22,6 +22,7 @@ import { resolveIac } from '../../utils/iac';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
 import {
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -102,11 +103,11 @@ export const pyFastApiProjectGenerator = async (
 
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
+    continuous: true,
     options: {
       command: `uv run fastapi dev ${normalizedModuleName}/main.py --port ${port}`,
       cwd: '{projectRoot}',
     },
-    continuous: true,
   };
 
   projectConfig.targets['serve-local'] = {
@@ -119,6 +120,8 @@ export const pyFastApiProjectGenerator = async (
       },
     },
   };
+
+  addDevAlias(projectConfig.targets, 'serve-local');
 
   projectConfig.metadata = {
     ...projectConfig.metadata,

@@ -24,9 +24,11 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { toClassName, toKebabCase } from '../../../utils/names';
 import {
   addDependencyToTargetIfNotPresent,
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { assignPort } from '../../../utils/port';
@@ -246,27 +248,27 @@ export const tsSmithyApiGenerator = async (
   // This allows the "serve" target to hot reload when the smithy model is changed
   backendProjectConfig.targets['watch-copy-ssdk'] = {
     executor: 'nx:run-commands',
-    options: {
-      command: `nx watch --projects=${modelProjectConfig.name} --includeDependentProjects -- nx run ${backendFullyQualifiedName}:copy-ssdk`,
-    },
     continuous: true,
+    options: {
+      command: `nx watch --projects=${modelProjectConfig.name} --includeDependencies -- nx run ${backendFullyQualifiedName}:copy-ssdk`,
+    },
   };
 
   // Add serve target for running the server locally
-  backendProjectConfig.targets.serve = {
+  backendProjectConfig.targets.serve = normalizeTargetKeyOrder({
     executor: 'nx:run-commands',
+    continuous: true,
+    dependsOn: ['copy-ssdk', 'watch-copy-ssdk'],
     options: {
       command: 'tsx --watch src/local-server.ts',
       cwd: '{projectRoot}',
     },
-    continuous: true,
-    dependsOn: ['copy-ssdk', 'watch-copy-ssdk'],
-  };
+  });
 
   const existingServeLocalDependsOn =
     backendProjectConfig.targets['serve-local']?.dependsOn ?? [];
 
-  backendProjectConfig.targets['serve-local'] = {
+  backendProjectConfig.targets['serve-local'] = normalizeTargetKeyOrder({
     ...backendProjectConfig.targets.serve,
     // Own copy of dependsOn so adding serve-local dependencies below doesn't
     // mutate the shared array referenced by the serve target.
@@ -277,7 +279,7 @@ export const tsSmithyApiGenerator = async (
         SERVE_LOCAL: 'true',
       },
     },
-  };
+  });
 
   // Preserve any dependencies added to serve-local by connection generators
   for (const dependency of existingServeLocalDependsOn) {
@@ -287,6 +289,8 @@ export const tsSmithyApiGenerator = async (
       dependency,
     );
   }
+
+  addDevAlias(backendProjectConfig.targets, 'serve-local');
 
   // Ignore generated code
   updateGitIgnore(tree, backendProjectConfig.root, (patterns) => [

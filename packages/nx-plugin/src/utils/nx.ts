@@ -196,6 +196,39 @@ const targetDependencyEquals = (a: TargetDependency, b: TargetDependency) => {
   return aProjects.every((p, i) => p === bProjects[i]);
 };
 
+// Order in which Nx serialises target properties when it reads then rewrites an
+// existing project.json. Authoring targets in this order keeps a generator's
+// first-run output byte-identical to subsequent runs (idempotency).
+const NX_TARGET_KEY_ORDER = [
+  'executor',
+  'dependsOn',
+  'continuous',
+  'outputs',
+  'cache',
+  'inputs',
+  'metadata',
+  'defaultConfiguration',
+  'options',
+  'configurations',
+];
+
+/**
+ * Reorder a target's keys to match Nx's own serialization order. Nx reorders
+ * target properties when it rewrites an existing project.json, so applying the
+ * same order when first authoring a target keeps generators idempotent.
+ */
+export const normalizeTargetKeyOrder = <T extends object>(target: T): T =>
+  Object.fromEntries(
+    Object.entries(target as Record<string, unknown>).sort(([a], [b]) => {
+      const ai = NX_TARGET_KEY_ORDER.indexOf(a);
+      const bi = NX_TARGET_KEY_ORDER.indexOf(b);
+      return (
+        (ai === -1 ? NX_TARGET_KEY_ORDER.length : ai) -
+        (bi === -1 ? NX_TARGET_KEY_ORDER.length : bi)
+      );
+    }),
+  ) as T;
+
 /**
  * Mutate the project to add the dependency to the target if not already present
  * Adds the target if not present.
@@ -217,5 +250,50 @@ export const addDependencyToTargetIfNotPresent = (
   // only append when the dependency is genuinely absent.
   if (!dependsOn.some((d) => targetDependencyEquals(d, dependency))) {
     dependsOn.push(dependency);
+  }
+  // Keep key order aligned with Nx's so first run matches subsequent runs.
+  project.targets[target] = normalizeTargetKeyOrder(project.targets[target]);
+};
+
+/**
+ * Build a `dev` alias target that simply runs the given serve-local target.
+ * Used to expose a consistent `dev` (or `<prefix>-dev`) entry point alongside
+ * every serve-local target across generators.
+ */
+export const createDevAliasTarget = (serveLocalTargetName: string) =>
+  normalizeTargetKeyOrder({
+    continuous: true,
+    dependsOn: [serveLocalTargetName],
+  });
+
+/**
+ * Add a `dev` alias for a serve-local target to a project's targets.
+ *
+ * - Adds `<devTargetName>` aliasing `<serveLocalTargetName>` (defaults to
+ *   `dev` -> `serve-local`). For component generators that author prefixed
+ *   targets, pass e.g. `${prefix}-serve-local` and `${prefix}-dev`.
+ * - When `aliasAsProjectDev` is true (used by component generators), every
+ *   component added to the project accumulates its `<devTargetName>` under the
+ *   project-level `dev` target, so `nx run <project>:dev` starts all
+ *   components. Nx keys tasks by `project:target`, so any serve-local
+ *   dependencies shared between components run exactly once.
+ */
+export const addDevAlias = (
+  targets: Record<string, ProjectConfiguration['targets'][string]>,
+  serveLocalTargetName: string,
+  options?: { devTargetName?: string; aliasAsProjectDev?: boolean },
+) => {
+  const devTargetName = options?.devTargetName ?? 'dev';
+  targets[devTargetName] ??= createDevAliasTarget(serveLocalTargetName);
+  if (options?.aliasAsProjectDev && devTargetName !== 'dev') {
+    targets['dev'] ??= { continuous: true, dependsOn: [] };
+    const projectDev = targets['dev'];
+    projectDev.continuous = true;
+    projectDev.dependsOn ??= [];
+    // Append in component-creation order; dedupe keeps re-runs idempotent.
+    if (!projectDev.dependsOn.includes(devTargetName)) {
+      projectDev.dependsOn.push(devTargetName);
+    }
+    targets['dev'] = normalizeTargetKeyOrder(projectDev);
   }
 };

@@ -104,7 +104,6 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
       continuous: true,
-      dependsOn: ['pull-image'],
     });
     expect(projectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',
@@ -191,7 +190,6 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
       continuous: true,
-      dependsOn: ['pull-image'],
     });
     expect(mysqlProjectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',

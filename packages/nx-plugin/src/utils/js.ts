@@ -3,15 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { dynamicImport } from '@nx/devkit/src/utils/config-utils';
+import { dirname, join } from 'node:path';
 import ts from 'typescript';
+
+// Resolve nx's dynamicImport from its config-utils module by filesystem path.
+// It is not part of @nx/devkit's exports map, but it ensures transpilers
+// (namely @swc-node/register) leave the import untouched so node performs it at
+// runtime, which allows importing data urls. package.json IS in the exports map.
+const nxDevkitRoot = dirname(require.resolve('@nx/devkit/package.json'));
+const { dynamicImport } = require(
+  join(nxDevkitRoot, 'dist/src/utils/config-utils'),
+) as {
+  dynamicImport: (modulePath: string) => Promise<Record<string, unknown>>;
+};
 
 /**
  * Imports a javascript module from a string of js code
  */
 export const importJavaScriptModule = async <T>(jsCode: string): Promise<T> => {
-  // Use nx's dynamic import to ensure that transpilers (namely @swc-node/register) don't process the import and it's
-  // instead processed by node at runtime, which allows for data urls
   const module = await dynamicImport(
     `data:text/javascript,${encodeURIComponent(jsCode)}`,
   );

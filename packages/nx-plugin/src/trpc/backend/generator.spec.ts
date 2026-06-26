@@ -209,6 +209,12 @@ describe('trpc backend generator', () => {
     expect(projectConfig.targets!['serve-local']!.options!.env).toEqual({
       SERVE_LOCAL: 'true',
     });
+
+    // dev is an alias for serve-local
+    expect(projectConfig.targets!.dev).toEqual({
+      continuous: true,
+      dependsOn: ['serve-local'],
+    });
   });
 
   it('should preserve serve-local dependsOn added by connection generators when re-run', async () => {

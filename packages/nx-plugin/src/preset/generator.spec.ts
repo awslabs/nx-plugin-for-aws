@@ -171,6 +171,17 @@ describe('preset generator', () => {
     expect(syncGenerators).toContain(TS_SYNC_GENERATOR_NAME);
     expect(syncGenerators).toContain(NX_TYPESCRIPT_SYNC_GENERATOR);
   });
+
+  it('should add a workspace dev script that runs the dev target across projects', async () => {
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iac: 'cdk',
+      containers: 'docker',
+    });
+
+    const packageJson = JSON.parse(tree.read('package.json').toString());
+    expect(packageJson.scripts.dev).toBe('nx run-many --target dev');
+  });
 });
 
 describe('isAmazonian', () => {

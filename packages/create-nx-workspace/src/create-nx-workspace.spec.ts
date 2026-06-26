@@ -87,6 +87,7 @@ describe('create-nx-workspace', () => {
         `--preset=@aws/nx-plugin@${OWN_VERSION}`,
         '--ci=skip',
         '--analytics=false',
+        '--trustThirdPartyPreset',
         '--skipGit',
       ]);
     });
@@ -158,6 +159,7 @@ describe('create-nx-workspace', () => {
         `--preset=@aws/nx-plugin@${OWN_VERSION}`,
         '--ci=skip',
         '--analytics=false',
+        '--trustThirdPartyPreset',
         '--skipGit',
       ]);
     });
@@ -191,6 +193,17 @@ describe('create-nx-workspace', () => {
       expect(result).toContain('--skipGit');
     });
 
+    it('should always pass --trustThirdPartyPreset to skip the preset trust prompt', () => {
+      expect(buildArgs(['my-project'])).toContain('--trustThirdPartyPreset');
+    });
+
+    it('should not duplicate --trustThirdPartyPreset if already provided', () => {
+      const result = buildArgs(['my-project', '--trustThirdPartyPreset']);
+      expect(
+        result.filter((a) => a.startsWith('--trustThirdPartyPreset')),
+      ).toHaveLength(1);
+    });
+
     it('should preserve other user flags', () => {
       const result = buildArgs([
         'my-project',
@@ -214,6 +227,7 @@ describe('create-nx-workspace', () => {
         `--preset=@aws/nx-plugin@${OWN_VERSION}`,
         '--ci=skip',
         '--analytics=false',
+        '--trustThirdPartyPreset',
         '--skipGit',
         '--iacProvider=CDK',
         '--no-interactive',

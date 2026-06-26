@@ -21,6 +21,7 @@ import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -138,11 +139,11 @@ export async function tsTrpcApiGenerator(
 
   projectConfig.targets.serve = {
     executor: 'nx:run-commands',
+    continuous: true,
     options: {
       commands: ['tsx --watch src/local-server.ts'],
       cwd: '{projectRoot}',
     },
-    continuous: true,
   };
 
   projectConfig.targets['serve-local'] = {
@@ -155,6 +156,8 @@ export async function tsTrpcApiGenerator(
       },
     },
   };
+
+  addDevAlias(projectConfig.targets, 'serve-local');
 
   if (options.infra !== 'none') {
     await addTypeScriptBundleTarget(tree, projectConfig, {

@@ -231,6 +231,7 @@ export const presetGenerator = async (
     type: 'module',
     scripts: {
       ...packageJson.scripts,
+      dev: 'nx run-many --target dev',
       build: 'nx run-many --target build',
       lint: 'nx run-many --target lint --configuration=fix',
       test: 'nx run-many --target test --all',

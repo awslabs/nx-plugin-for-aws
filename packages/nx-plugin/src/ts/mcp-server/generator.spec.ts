@@ -117,6 +117,17 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectConfig.targets['mcp-server-inspect-stdio'].options.commands[0],
     ).toContain('mcp-inspector -- tsx --watch ./src/mcp-server/stdio.ts');
+
+    // <mcp>-dev aliases <mcp>-serve-local, and the first component also adds a
+    // project-level dev aliasing it.
+    expect(projectConfig.targets['mcp-server-dev']).toEqual({
+      continuous: true,
+      dependsOn: ['mcp-server-serve-local'],
+    });
+    expect(projectConfig.targets['dev']).toEqual({
+      continuous: true,
+      dependsOn: ['mcp-server-dev'],
+    });
   });
 
   it('should add MCP server with custom name', async () => {

@@ -72,7 +72,6 @@ describe('ts#dynamodb generator', () => {
     expect(projectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       continuous: true,
-      dependsOn: ['pull-image'],
       options: {
         commands: [
           'tsx ../common/scripts/src/dynamodb/start-container.ts',

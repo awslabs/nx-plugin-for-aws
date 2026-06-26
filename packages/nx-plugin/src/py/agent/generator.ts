@@ -34,8 +34,10 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addDevAlias,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
@@ -403,6 +405,7 @@ export const pyAgentGenerator = async (
           [clientGenTargetName]: {
             cache: true,
             executor: 'nx:run-commands',
+            dependsOn: [openApiTargetName],
             inputs: [
               {
                 dependentTasksOutputFiles: '**/*.json',
@@ -414,54 +417,63 @@ export const pyAgentGenerator = async (
                 `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json" --outputPath="${project.root}/scripts/${agentTargetPrefix}/generated" --no-interactive`,
               ],
             },
-            dependsOn: [openApiTargetName],
           },
         }
       : {};
 
+  const agentTargets = {
+    ...project.targets,
+    ...httpOnlyTargets,
+    [`${agentTargetPrefix}-serve`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [serveCommand],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+        },
+      },
+    },
+    [`${agentTargetPrefix}-serve-local`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [serveCommand],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+          SERVE_LOCAL: 'true',
+        },
+      },
+    },
+    // HTTP chat imports the generated client, so ensure it's built first.
+    // No serve-local dependency — chat runs standalone against a local or
+    // deployed agent. normalizeTargetKeyOrder keeps the conditional dependsOn
+    // in Nx 23's serialization order so re-runs stay byte-identical.
+    [`${agentTargetPrefix}-chat`]: normalizeTargetKeyOrder({
+      executor: 'nx:run-commands',
+      options: {
+        commands: [chatCommand],
+        cwd: '{projectRoot}',
+        env: {
+          URL: chatUrl,
+        },
+      },
+      ...(protocol === 'http' ? { dependsOn: [clientGenTargetName] } : {}),
+    }),
+  };
+
+  // `<agent>-dev` aliases `<agent>-serve-local`; the first component in a
+  // project also gets a project-level `dev` aliasing it.
+  addDevAlias(agentTargets, `${agentTargetPrefix}-serve-local`, {
+    devTargetName: `${agentTargetPrefix}-dev`,
+    aliasAsProjectDev: true,
+  });
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
-    targets: sortObjectKeys({
-      ...project.targets,
-      ...httpOnlyTargets,
-      [`${agentTargetPrefix}-serve`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [serveCommand],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-          },
-        },
-        continuous: true,
-      },
-      [`${agentTargetPrefix}-serve-local`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [serveCommand],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-            SERVE_LOCAL: 'true',
-          },
-        },
-        continuous: true,
-      },
-      [`${agentTargetPrefix}-chat`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [chatCommand],
-          cwd: '{projectRoot}',
-          env: {
-            URL: chatUrl,
-          },
-        },
-        // HTTP chat imports the generated client, so ensure it's built first.
-        // No serve-local dependency — chat runs standalone against a local or
-        // deployed agent.
-        ...(protocol === 'http' ? { dependsOn: [clientGenTargetName] } : {}),
-      },
-    }),
+    targets: sortObjectKeys(agentTargets),
   });
 
   addComponentGeneratorMetadata(

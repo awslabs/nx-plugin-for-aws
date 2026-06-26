@@ -134,7 +134,7 @@ export function Main() {
     expect(
       projectConfig.targets['watch-generate:test-api-client'].options.commands,
     ).toEqual([
-      `nx watch --projects=backend --includeDependentProjects -- nx run frontend:"generate:test-api-client"`,
+      `nx watch --projects=backend --includeDependencies -- nx run frontend:"generate:test-api-client"`,
     ]);
 
     // Verify generated client is ignored by default

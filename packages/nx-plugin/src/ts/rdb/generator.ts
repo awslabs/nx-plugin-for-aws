@@ -25,6 +25,7 @@ import { kebabCase, snakeCase, toClassName } from '../../utils/names';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -204,8 +205,8 @@ export const tsRdbGenerator = async (
       cwd: '{projectRoot}',
     },
     continuous: true,
-    dependsOn: ['pull-image'],
   };
+  addDevAlias(projectConfig.targets, 'serve-local');
   projectConfig.targets['wait-for-db'] = {
     executor: 'nx:run-commands',
     dependsOn: ['serve-local'],

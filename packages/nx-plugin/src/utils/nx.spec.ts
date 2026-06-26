@@ -7,8 +7,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addDevAlias,
   addGeneratorMetadata,
   type NxGeneratorInfo,
+  normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from './nx';
 import { createTreeUsingTsSolutionSetup } from './test';
@@ -147,7 +149,12 @@ describe('addGeneratorMetadata', () => {
     );
 
     addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' });
-    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' }, { port: 4200 });
+    addGeneratorMetadata(
+      tree,
+      'test-project',
+      { id: 'ts#foo' },
+      { port: 4200 },
+    );
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
@@ -545,5 +552,100 @@ describe('addDependencyToTargetIfNotPresent', () => {
       '@e2e/website-no-router:build',
       '^build',
     ]);
+  });
+});
+
+describe('normalizeTargetKeyOrder', () => {
+  it('should order keys to match Nx serialization so generators are idempotent', () => {
+    const normalized = normalizeTargetKeyOrder({
+      options: { command: 'foo' },
+      continuous: true,
+      executor: 'nx:run-commands',
+      dependsOn: ['compile'],
+    });
+    expect(Object.keys(normalized)).toEqual([
+      'executor',
+      'dependsOn',
+      'continuous',
+      'options',
+    ]);
+  });
+
+  it('should place unknown keys after known keys, preserving value identity', () => {
+    const options = { command: 'foo' };
+    const normalized = normalizeTargetKeyOrder({
+      custom: 'x',
+      options,
+      executor: 'nx:run-commands',
+    });
+    expect(Object.keys(normalized)).toEqual(['executor', 'options', 'custom']);
+    expect(normalized.options).toBe(options);
+  });
+});
+
+describe('addDevAlias', () => {
+  it('should add a dev target aliasing serve-local', () => {
+    const targets: any = { 'serve-local': { continuous: true } };
+    addDevAlias(targets, 'serve-local');
+    expect(targets.dev).toEqual({
+      continuous: true,
+      dependsOn: ['serve-local'],
+    });
+  });
+
+  it('should not overwrite an existing dev target', () => {
+    const targets: any = {
+      'serve-local': { continuous: true },
+      dev: { continuous: true, dependsOn: ['existing'] },
+    };
+    addDevAlias(targets, 'serve-local');
+    expect(targets.dev.dependsOn).toEqual(['existing']);
+  });
+
+  it('should add a prefixed dev alias and a project-level dev for the first component', () => {
+    const targets: any = { 'my-mcp-serve-local': { continuous: true } };
+    addDevAlias(targets, 'my-mcp-serve-local', {
+      devTargetName: 'my-mcp-dev',
+      aliasAsProjectDev: true,
+    });
+    expect(targets['my-mcp-dev']).toEqual({
+      continuous: true,
+      dependsOn: ['my-mcp-serve-local'],
+    });
+    // First component also gets the project-level dev aliasing its dev target
+    expect(targets.dev).toEqual({
+      continuous: true,
+      dependsOn: ['my-mcp-dev'],
+    });
+  });
+
+  it('should accumulate each component dev target under the project dev', () => {
+    const targets: any = {
+      dev: { continuous: true, dependsOn: ['first-dev'] },
+      'second-serve-local': { continuous: true },
+    };
+    addDevAlias(targets, 'second-serve-local', {
+      devTargetName: 'second-dev',
+      aliasAsProjectDev: true,
+    });
+    expect(targets['second-dev']).toEqual({
+      continuous: true,
+      dependsOn: ['second-serve-local'],
+    });
+    // Project-level dev runs both components
+    expect(targets.dev.dependsOn).toEqual(['first-dev', 'second-dev']);
+  });
+
+  it('should not duplicate a component dev target on re-run', () => {
+    const targets: any = { 'my-mcp-serve-local': { continuous: true } };
+    addDevAlias(targets, 'my-mcp-serve-local', {
+      devTargetName: 'my-mcp-dev',
+      aliasAsProjectDev: true,
+    });
+    addDevAlias(targets, 'my-mcp-serve-local', {
+      devTargetName: 'my-mcp-dev',
+      aliasAsProjectDev: true,
+    });
+    expect(targets.dev.dependsOn).toEqual(['my-mcp-dev']);
   });
 });

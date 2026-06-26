@@ -13,7 +13,11 @@ const OWN_VERSION: string = JSON.parse(
   readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'),
 ).version;
 const PRESET = `@aws/nx-plugin@${OWN_VERSION}`;
-const DEFAULT_FLAGS = ['--ci=skip', '--analytics=false'];
+const DEFAULT_FLAGS = [
+  '--ci=skip',
+  '--analytics=false',
+  '--trustThirdPartyPreset',
+];
 
 /**
  * Detect the package manager from the npm_config_user_agent environment variable.

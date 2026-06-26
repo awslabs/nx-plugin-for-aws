@@ -21,6 +21,7 @@ import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { kebabCase, toClassName } from '../utils/names';
 import { getNpmScopePrefix } from '../utils/npm-scope';
 import {
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -96,6 +97,12 @@ export const agentcoreGatewayGenerator = async (
   project.targets ??= {};
   project.targets[`${name}-serve`] ??= localGatewayTarget(port);
   project.targets[`${name}-serve-local`] ??= localGatewayTarget(port);
+  // `<gateway>-dev` aliases `<gateway>-serve-local`; the first component in a
+  // project also gets a project-level `dev` aliasing it.
+  addDevAlias(project.targets, `${name}-serve-local`, {
+    devTargetName: `${name}-dev`,
+    aliasAsProjectDev: true,
+  });
   updateProjectConfiguration(tree, project.name, project);
 
   // Scaffold the gateway project: serve-local.ts (+ Cedar policies if requested)

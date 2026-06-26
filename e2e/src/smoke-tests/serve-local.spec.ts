@@ -94,6 +94,31 @@ async function waitForJson(
   }
 }
 
+// Wait until nothing is listening on the given port. Used between tests that
+// reuse the same fixed ports (e.g. the shared MCP servers behind the gateway)
+// so a previous serve-local chain has fully released the port before the next
+// chain tries to bind it — otherwise the new server hits EADDRINUSE.
+function waitForPortFree(port: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const attempt = () => {
+      const socket = createConnection({ port, host: '127.0.0.1' }, () => {
+        socket.destroy();
+        if (Date.now() > deadline) {
+          reject(new Error(`Port ${port} still in use after ${timeoutMs}ms`));
+          return;
+        }
+        setTimeout(attempt, HEALTH_CHECK_INTERVAL_MS);
+      });
+      socket.on('error', () => {
+        socket.destroy();
+        resolve();
+      });
+    };
+    attempt();
+  });
+}
+
 function startServer(
   cwd: string,
   target: string,
@@ -979,6 +1004,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(pyResult).toContain('8');
 
     await stopLast();
+    // The Python gateway test below reuses the same shared MCP servers; wait
+    // for their ports to be released so the next chain doesn't hit EADDRINUSE.
+    await waitForPortFree(ports.tsMcp, STARTUP_TIMEOUT_MS);
+    await waitForPortFree(ports.pyMcp, STARTUP_TIMEOUT_MS);
   });
 
   it('Python HTTP Agent - AgentCore Gateway local gateway across multiple MCP servers', async () => {
@@ -1047,6 +1076,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(pyResult).toContain('8');
 
     await stopLast();
+    // Later tests reuse the same shared MCP servers; wait for their ports to be
+    // released so the next chain doesn't hit EADDRINUSE.
+    await waitForPortFree(ports.tsMcp, STARTUP_TIMEOUT_MS);
+    await waitForPortFree(ports.pyMcp, STARTUP_TIMEOUT_MS);
   });
 
   it('AgentCore Gateway - chained local gateways (gateway -> gateway -> MCP servers)', async () => {

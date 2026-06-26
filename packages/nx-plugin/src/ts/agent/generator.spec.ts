@@ -86,6 +86,17 @@ describe('ts#agent generator', () => {
       'tsx --watch ./src/agent/index.ts',
     );
     expect(projectConfig.targets['agent-serve'].continuous).toBe(true);
+
+    // <agent>-dev aliases <agent>-serve-local, and the first component also
+    // adds a project-level dev aliasing it.
+    expect(projectConfig.targets['agent-dev']).toEqual({
+      continuous: true,
+      dependsOn: ['agent-serve-local'],
+    });
+    expect(projectConfig.targets['dev']).toEqual({
+      continuous: true,
+      dependsOn: ['agent-dev'],
+    });
   });
 
   it('should add strands agent with custom name', async () => {

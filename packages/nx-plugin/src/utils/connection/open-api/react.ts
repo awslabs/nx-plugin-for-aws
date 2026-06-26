@@ -136,7 +136,7 @@ export const addOpenApiReactClient = async (
         executor: 'nx:run-commands',
         options: {
           commands: [
-            `nx watch --projects=${specBuildProject.name} --includeDependentProjects -- nx run ${frontendProjectConfig.name}:"${clientGenTarget}"`,
+            `nx watch --projects=${specBuildProject.name} --includeDependencies -- nx run ${frontendProjectConfig.name}:"${clientGenTarget}"`,
           ],
         },
         continuous: true,

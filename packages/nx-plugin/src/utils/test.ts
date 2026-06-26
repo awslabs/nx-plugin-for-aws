@@ -3,11 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { dirname, join } from 'node:path';
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import solutionSetup from '@nx/js/src/utils/typescript/ts-solution-setup';
 import { expect, vi } from 'vitest';
 import { DEFAULT_BIOME_CONFIG } from './format';
+
+// Resolve @nx/js' internal ts-solution-setup module by filesystem path. It is
+// not part of the package's exports map, so it cannot be imported by subpath,
+// but generators reference it internally and our tests need to control its
+// isUsingTsSolutionSetup behaviour. package.json IS in the exports map.
+const nxJsRoot = dirname(require.resolve('@nx/js/package.json'));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const solutionSetup = require(
+  join(nxJsRoot, 'dist/src/utils/typescript/ts-solution-setup'),
+);
 
 export const createTreeUsingTsSolutionSetup = (): Tree => {
   vi.spyOn(solutionSetup, 'isUsingTsSolutionSetup').mockImplementation(

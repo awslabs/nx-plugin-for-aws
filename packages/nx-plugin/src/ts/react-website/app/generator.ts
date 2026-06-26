@@ -27,6 +27,7 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import {
+  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -95,6 +96,39 @@ export async function tsReactWebsiteGenerator(
       unitTestRunner: 'vitest',
       useProjectJson: true,
       style: 'css',
+      // Register the @nx/vite and @nx/vitest plugins so build/serve/test
+      // targets are inferred rather than emitting deprecated executor targets.
+      addPlugin: true,
+    });
+
+    // Pin the inferred target names. The vite production build is exposed as
+    // `bundle` (which produces the deployable artifact), leaving `build` as an
+    // aggregator over lint/compile/test/bundle. vite's own typecheck is dropped
+    // in favour of the tsc `compile`.
+    updateJson(tree, 'nx.json', (nxJson) => {
+      for (const plugin of nxJson.plugins ?? []) {
+        if (typeof plugin === 'string') continue;
+        if (plugin.plugin === '@nx/vite/plugin') {
+          plugin.options = {
+            ...plugin.options,
+            buildTargetName: 'bundle',
+            // Map both of vite's inferred dev-server targets onto `serve` so the
+            // plugin doesn't emit a separate `dev`; we author our own `dev`
+            // below as an alias for `serve-local`.
+            serveTargetName: 'serve',
+            devTargetName: 'serve',
+            previewTargetName: 'preview',
+            serveStaticTargetName: 'serve-static',
+            typecheckTargetName: 'vite:typecheck',
+          };
+        } else if (plugin.plugin === '@nx/vitest') {
+          plugin.options = {
+            ...plugin.options,
+            testTargetName: 'test',
+          };
+        }
+      }
+      return nxJson;
     });
 
     // Replace with simpler sample source code
@@ -143,9 +177,8 @@ export async function tsReactWebsiteGenerator(
   }
 
   if (!projectAlreadyExists) {
-    const buildTarget = targets['build'];
     targets['compile'] = {
-      dependsOn: ['bundle'],
+      dependsOn: ['^build'],
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
       options: {
@@ -153,43 +186,26 @@ export async function tsReactWebsiteGenerator(
         cwd: '{projectRoot}',
       },
     };
-    targets['bundle'] = {
-      ...buildTarget,
-      options: {
-        ...buildTarget.options,
-        outputPath: 'dist/{projectRoot}/bundle',
-      },
-    };
+    // bundle is the @nx/vite/plugin inferred `vite build` (writing to the
+    // bundle dir configured in vite.config) — it produces the deployable
+    // artifact. build aggregates lint/compile/test/bundle.
     targets['build'] = {
-      dependsOn: [
-        'lint',
-        'compile',
-        'bundle',
-        'test',
-        ...(buildTarget.dependsOn ?? []),
-      ],
-      options: {
-        outputPath: 'dist/{projectRoot}/bundle',
-      },
+      dependsOn: ['lint', 'compile', 'test', 'bundle'],
     };
-    targets['test'] = {
-      ...targets['test'],
+
+    // Run the website and its connected dependencies locally. Mirrors the
+    // inferred `serve` target but with the serve-local vite mode.
+    targets['serve-local'] = {
+      executor: 'nx:run-commands',
+      continuous: true,
       options: {
-        ...(targets['test']?.options ?? {}),
-        reportsDirectory: '{workspaceRoot}/coverage/{projectRoot}',
+        command: 'vite --mode serve-local',
+        cwd: '{projectRoot}',
       },
     };
 
-    // Add a serve-local target for running the website and its dependencies locally
-    targets['serve-local'] = {
-      executor: '@nx/vite:dev-server',
-      options: {
-        buildTarget: `${fullyQualifiedName}:build:development`,
-        hmr: true,
-        mode: 'serve-local',
-      },
-      continuous: true,
-    };
+    // `dev` is an alias for `serve-local`.
+    addDevAlias(targets, 'serve-local');
   }
 
   projectConfiguration.targets = sortObjectKeys(targets);
@@ -372,11 +388,13 @@ export async function tsReactWebsiteGenerator(
       );
     }
 
-    // Update build.outDir
+    // Update build.outDir. The inferred `vite build` target writes here, so
+    // point it at the bundle dir the website infrastructure consumes.
     const outDir = joinPathFragments(
       getRelativePathToRoot(tree, fullyQualifiedName),
       'dist',
       websiteContentPath,
+      'bundle',
     );
     await applyGritQL(
       tree,
@@ -498,14 +516,6 @@ export async function tsReactWebsiteGenerator(
     withVersions(dependencies),
     withVersions(devDependencies),
   );
-
-  updateJson(tree, 'package.json', (pkgJson) => {
-    pkgJson.scripts ??= {};
-    if (!pkgJson.scripts.dev) {
-      pkgJson.scripts.dev = `nx serve-local ${fullyQualifiedName}`;
-    }
-    return pkgJson;
-  });
 
   await addGeneratorMetricsIfApplicable(tree, [
     REACT_WEBSITE_APP_GENERATOR_INFO,
