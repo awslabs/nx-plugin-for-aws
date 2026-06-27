@@ -75,8 +75,9 @@ export const tsAgentGatewayConnectionGenerator = async (
 
   const gatewayClassName = gateway.rc;
   const gatewayKebabCase = kebabCase(gatewayClassName);
-  const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
-  const gatewayDevTargetName = `${gatewayKebabCase}-dev`;
+  // A gateway is its own standalone project, so it exposes plain serve / dev.
+  const gatewayServeTargetName = 'serve';
+  const gatewayDevTargetName = 'dev';
 
   const npmScope = getNpmScope(tree);
 

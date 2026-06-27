@@ -64,8 +64,6 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
     );
   }
 
-  const gatewayDevTargetName = `${kebabCase(gateway.rc)}-dev`;
-
   // The target name must match what the deployed Gateway uses
   // (`mcpServerName` on the MCP construct, derived from the project's class
   // name) so `<target>___<tool>` resolves identically locally and deployed.
@@ -77,7 +75,7 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   await attachUpstreamToLocalGateway(
     tree,
     sourceProject,
-    gatewayDevTargetName,
+    'dev',
     {
       targetName: mcpTargetName,
       port: (mcpComponent.port as number | undefined) ?? 8000,

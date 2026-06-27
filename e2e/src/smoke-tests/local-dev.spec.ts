@@ -742,12 +742,12 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         gateway: getPortFromProjectJson(
           projectRoot,
           'packages/my-gateway/project.json',
-          'my-gateway-dev',
+          'dev',
         ),
         parentGateway: getPortFromProjectJson(
           projectRoot,
           'packages/parent-gateway/project.json',
-          'parent-gateway-dev',
+          'dev',
         ),
       };
       console.log('Ports discovered:', ports);
@@ -1097,7 +1097,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     );
 
     await startAndWait(
-      '@local-dev-test/parent-gateway:parent-gateway-dev',
+      '@local-dev-test/parent-gateway:dev',
       ports.parentGateway,
     );
     // The chain is started in dependency order; wait for the inner gateway

@@ -20,7 +20,7 @@ describe('agentcore-gateway#mcp-connection generator', () => {
       projectType: 'library',
       sourceRoot: `packages/${name}`,
       targets: {
-        [`${name}-dev`]: {
+        dev: {
           executor: 'nx:run-commands',
           continuous: true,
           options: { commands: ['node -e "setInterval(()=>{}, 1000)"'] },
@@ -75,7 +75,7 @@ describe('agentcore-gateway#mcp-connection generator', () => {
 
     const { readProjectConfiguration } = await import('@nx/devkit');
     const config = readProjectConfiguration(tree, `@proj/${gw.name}`);
-    const deps = config.targets?.[`${gw.name}-dev`].dependsOn as any[];
+    const deps = config.targets?.['dev'].dependsOn as any[];
     expect(deps).toContainEqual(
       expect.objectContaining({
         projects: [`@proj/${mcp.name}`],

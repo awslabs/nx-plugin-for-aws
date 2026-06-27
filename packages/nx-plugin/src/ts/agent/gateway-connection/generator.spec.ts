@@ -66,7 +66,7 @@ export const getAgent = async (sessionId: string) =>
           port: 8100,
         },
         targets: {
-          'my-gateway-dev': {
+          dev: {
             executor: 'nx:run-commands',
             options: {
               commands: ['node -e "setInterval(()=>{}, 1000)"'],
@@ -212,7 +212,7 @@ export const getAgent = async (sessionId: string) =>
     expect(deps).toContainEqual(
       expect.objectContaining({
         projects: ['@test/my-gateway'],
-        target: 'my-gateway-dev',
+        target: 'dev',
       }),
     );
   });

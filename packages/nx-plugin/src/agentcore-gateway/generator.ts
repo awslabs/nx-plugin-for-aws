@@ -21,7 +21,6 @@ import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { kebabCase, toClassName } from '../utils/names';
 import { getNpmScopePrefix } from '../utils/npm-scope';
 import {
-  addComponentDevTarget,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -58,8 +57,8 @@ export const agentcoreGatewayGenerator = async (
 
   // local-dev.ts is the local gateway: a continuous MCP aggregator chaining
   // onto attached MCP servers' dev targets (added by the mcp-connection
-  // generator), so a single `nx run <agent>:<agent>-dev` boots the gateway and
-  // every attached MCP server together.
+  // generator), so a single `nx dev <gateway>` boots the gateway and every
+  // attached MCP server together.
   //
   // `serve` exists for parity with other generators; the deployed Gateway is
   // a managed AWS resource, so `serve`-mode agents talk to it via runtime
@@ -92,13 +91,12 @@ export const agentcoreGatewayGenerator = async (
     project = readProjectConfigurationUnqualified(tree, fullyQualifiedName);
   }
   const port = assignPort(tree, project, 8100);
-  // Re-run: keep existing targets (their dependsOn may have been populated
-  // by the mcp-connection generator), just ensure both exist.
+  // A gateway is its own standalone project, so it uses plain `serve` / `dev`
+  // targets. Re-run: keep existing targets (their dependsOn may have been
+  // populated by the mcp-connection generator), just ensure both exist.
   project.targets ??= {};
-  project.targets[`${name}-serve`] ??= localGatewayTarget(port);
-  project.targets[`${name}-dev`] ??= localGatewayTarget(port);
-  // Aggregate `<gateway>-dev` under the project-level `dev` target.
-  addComponentDevTarget(project.targets, `${name}-dev`);
+  project.targets['serve'] ??= localGatewayTarget(port);
+  project.targets['dev'] ??= localGatewayTarget(port);
   updateProjectConfiguration(tree, project.name, project);
 
   // Scaffold the gateway project: local-dev.ts (+ Cedar policies if requested)

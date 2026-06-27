@@ -80,9 +80,9 @@ export const pyAgentGatewayConnectionGenerator = async (
 
   const gatewayClassName = gateway.rc;
   const gatewaySnakeCase = snakeCase(gatewayClassName);
-  const gatewayKebabCase = gatewaySnakeCase.replace(/_/g, '-');
-  const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
-  const gatewayDevTargetName = `${gatewayKebabCase}-dev`;
+  // A gateway is its own standalone project, so it exposes plain serve / dev.
+  const gatewayServeTargetName = 'serve';
+  const gatewayDevTargetName = 'dev';
 
   // The source agent's framework selects the client shape, dependencies and the
   // agent.py transform — see PY_MCP_FAMILY_CONNECTIONS (keyed by framework, not a

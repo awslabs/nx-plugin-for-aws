@@ -77,7 +77,6 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
 
   assertNoCycle(tree, sourceProject.name, targetProject.name);
 
-  const sourceDevTargetName = `${kebabCase(sourceGateway.rc)}-dev`;
   // The target name must match the deployed Gateway target (`gatewayName` on
   // the gateway construct, the project's class name in kebab-case) so
   // `<targetGateway>___<target>___<tool>` resolves identically locally and
@@ -87,12 +86,12 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
   await attachUpstreamToLocalGateway(
     tree,
     sourceProject,
-    sourceDevTargetName,
+    'dev',
     {
       targetName: targetGatewayKebabCase,
       port: targetGateway.port,
       upstreamProjectName: targetProject.name,
-      upstreamDevTargetName: `${targetGatewayKebabCase}-dev`,
+      upstreamDevTargetName: 'dev',
     },
   );
 
@@ -139,9 +138,8 @@ const assertNoCycle = (
     ) {
       continue;
     }
-    const gateway = readAgentCoreGatewayMetadata(project);
-    const devTarget =
-      project.targets?.[`${kebabCase(gateway.rc)}-dev`];
+    readAgentCoreGatewayMetadata(project);
+    const devTarget = project.targets?.['dev'];
     for (const dep of devTarget?.dependsOn ?? []) {
       if (typeof dep !== 'string') {
         stack.push(...(dep.projects ?? []));

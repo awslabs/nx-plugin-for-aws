@@ -25,7 +25,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
       projectType: 'library',
       sourceRoot: `packages/${name}`,
       targets: {
-        [`${name}-dev`]: {
+        dev: {
           executor: 'nx:run-commands',
           continuous: true,
           options: { commands: ['node -e "setInterval(()=>{}, 1000)"'] },
@@ -58,12 +58,11 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, `@proj/${outer.name}`);
-    const deps = config.targets?.[`${outer.name}-dev`]
-      .dependsOn as any[];
+    const deps = config.targets?.['dev'].dependsOn as any[];
     expect(deps).toContainEqual(
       expect.objectContaining({
         projects: [`@proj/${inner.name}`],
-        target: `${inner.name}-dev`,
+        target: 'dev',
       }),
     );
   });
@@ -120,11 +119,8 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     expect((serveTs.match(/'inner-gateway'/g) ?? []).length).toBe(1);
 
     const config = readProjectConfiguration(tree, `@proj/${outer.name}`);
-    const deps = config.targets?.[`${outer.name}-dev`]
-      .dependsOn as any[];
-    expect(
-      deps.filter((d) => d.target === `${inner.name}-dev`).length,
-    ).toBe(1);
+    const deps = config.targets?.['dev'].dependsOn as any[];
+    expect(deps.filter((d) => d.target === 'dev').length).toBe(1);
   });
 
   it('supports chains of three gateways', async () => {
@@ -219,7 +215,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
       metadata: {} as any,
     });
     const innerConfig = readProjectConfiguration(tree, `@proj/${inner.name}`);
-    innerConfig.targets![`${inner.name}-dev`].dependsOn = [
+    innerConfig.targets!['dev'].dependsOn = [
       { projects: ['@proj/some-mcp'], target: 'some-mcp-dev' },
     ];
     updateProjectConfiguration(tree, `@proj/${inner.name}`, innerConfig);

@@ -32,13 +32,14 @@ describe('agentcore-gateway generator', () => {
       expect(tree.exists('packages/my-gateway/local-dev.ts')).toBe(true);
 
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
-      // Both `serve` and `dev` exist as continuous keep-alive
-      // aggregators — they chain `dependsOn` onto attached MCP servers'
-      // real serve targets and hold them open. They must be continuous (not
-      // `nx:noop`) so that when this aggregator is itself a dependency of an
-      // agent's continuous `dev`, Nx does not consider it "done" and
-      // tear down its continuous MCP-server dependencies.
-      for (const target of ['my-gateway-serve', 'my-gateway-dev']) {
+      // A gateway is its own standalone project, so it exposes plain `serve`
+      // and `dev` targets. Both are continuous keep-alive aggregators — they
+      // chain `dependsOn` onto attached MCP servers' real dev targets and hold
+      // them open. They must be continuous (not `nx:noop`) so that when this
+      // aggregator is itself a dependency of an agent's continuous `dev`, Nx
+      // does not consider it "done" and tear down its continuous MCP-server
+      // dependencies.
+      for (const target of ['serve', 'dev']) {
         expect(config.targets?.[target]).toBeDefined();
         expect(config.targets?.[target].executor).toBe('nx:run-commands');
         expect(config.targets?.[target].continuous).toBe(true);
@@ -102,7 +103,7 @@ describe('agentcore-gateway generator', () => {
         '// user-edited',
       );
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
-      config.targets!['my-gateway-dev'].dependsOn = [
+      config.targets!['dev'].dependsOn = [
         { projects: ['@proj/some-mcp'], target: 'some-mcp-dev' },
       ];
       const { updateProjectConfiguration } = await import('@nx/devkit');
@@ -121,7 +122,7 @@ describe('agentcore-gateway generator', () => {
       ).toContain('user-edited');
       const rerunConfig = readProjectConfiguration(tree, '@proj/my-gateway');
       expect(
-        rerunConfig.targets?.['my-gateway-dev'].dependsOn,
+        rerunConfig.targets?.['dev'].dependsOn,
       ).toContainEqual(expect.objectContaining({ target: 'some-mcp-dev' }));
       // Project metadata is unchanged on re-run
       expect((rerunConfig.metadata as any).generator).toBe(
@@ -162,7 +163,7 @@ describe('agentcore-gateway generator', () => {
       const metadata = config.metadata as any;
       expect(metadata.name).toBe('shop-front-gateway');
       expect(metadata.rc).toBe('ShopFrontGateway');
-      expect(config.targets?.['shop-front-gateway-dev']).toBeDefined();
+      expect(config.targets?.['dev']).toBeDefined();
     });
   });
 
