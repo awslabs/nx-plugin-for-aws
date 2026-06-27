@@ -34,7 +34,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addDevAlias,
+  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
@@ -352,7 +352,7 @@ export const pyAgentGenerator = async (
   }
 
   // Every protocol gets a standalone `chat.ts`. It connects to the local
-  // `serve-local` server by default, or to the deployed agent (with the
+  // `dev` server by default, or to the deployed agent (with the
   // appropriate auth) when `RUNTIME_CONFIG_APP_ID` is set.
   addAgentChatScripts(tree, {
     scriptsDir,
@@ -435,7 +435,7 @@ export const pyAgentGenerator = async (
         },
       },
     },
-    [`${agentTargetPrefix}-serve-local`]: {
+    [`${agentTargetPrefix}-dev`]: {
       executor: 'nx:run-commands',
       continuous: true,
       options: {
@@ -443,12 +443,12 @@ export const pyAgentGenerator = async (
         cwd: '{projectRoot}',
         env: {
           PORT: `${localDevPort}`,
-          SERVE_LOCAL: 'true',
+          LOCAL_DEV: 'true',
         },
       },
     },
     // HTTP chat imports the generated client, so ensure it's built first.
-    // No serve-local dependency — chat runs standalone against a local or
+    // No dev dependency — chat runs standalone against a local or
     // deployed agent. normalizeTargetKeyOrder keeps the conditional dependsOn
     // in Nx 23's serialization order so re-runs stay byte-identical.
     [`${agentTargetPrefix}-chat`]: normalizeTargetKeyOrder({
@@ -464,12 +464,8 @@ export const pyAgentGenerator = async (
     }),
   };
 
-  // `<agent>-dev` aliases `<agent>-serve-local`; the first component in a
-  // project also gets a project-level `dev` aliasing it.
-  addDevAlias(agentTargets, `${agentTargetPrefix}-serve-local`, {
-    devTargetName: `${agentTargetPrefix}-dev`,
-    aliasAsProjectDev: true,
-  });
+  // Aggregate `<agent>-dev` under the project-level `dev` target.
+  addComponentDevTarget(agentTargets, `${agentTargetPrefix}-dev`);
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

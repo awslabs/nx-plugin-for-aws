@@ -87,11 +87,15 @@ describe('ts#agent generator', () => {
     );
     expect(projectConfig.targets['agent-serve'].continuous).toBe(true);
 
-    // <agent>-dev aliases <agent>-serve-local, and the first component also
-    // adds a project-level dev aliasing it.
-    expect(projectConfig.targets['agent-dev']).toEqual({
-      continuous: true,
-      dependsOn: ['agent-serve-local'],
+    // <agent>-dev is the runner; the first component also adds a project-level
+    // dev aggregating it.
+    expect(projectConfig.targets['agent-dev'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(projectConfig.targets['agent-dev'].continuous).toBe(true);
+    expect(projectConfig.targets['agent-dev'].options.env).toEqual({
+      PORT: expect.any(String),
+      LOCAL_DEV: 'true',
     });
     expect(projectConfig.targets['dev']).toEqual({
       continuous: true,
@@ -1072,7 +1076,7 @@ describe('ts#agent generator', () => {
     expect(chatTarget.options.env.URL).toMatch(
       /^http:\/\/localhost:\d+\/invocations$/,
     );
-    // Chat runs standalone — no serve-local dependency.
+    // Chat runs standalone — no dev dependency.
     expect(chatTarget.dependsOn).toBeUndefined();
   });
 

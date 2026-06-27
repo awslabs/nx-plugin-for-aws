@@ -122,15 +122,15 @@ export const tsAgentMcpConnectionGenerator = async (
     );
   }
 
-  // 4. Set up serve-local target
+  // 4. Set up dev target
   const agentName = agentComponent.name ?? 'agent';
-  const serveLocalTargetName = `${agentName}-serve-local`;
-  const mcpServeLocalTargetName = `${mcpComponentName}-serve-local`;
+  const devTargetName = `${agentName}-dev`;
+  const mcpDevTargetName = `${mcpComponentName}-dev`;
 
-  if (sourceProject.targets?.[serveLocalTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+  if (sourceProject.targets?.[devTargetName]) {
+    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
       projects: [targetProject.name],
-      target: mcpServeLocalTargetName,
+      target: mcpDevTargetName,
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }

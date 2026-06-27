@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { addAgentTargetToServeLocal } from '../../../connection/agent-serve-local';
+import { addAgentTargetToLocalDev } from '../../../connection/agent-local-dev';
 import { kebabCase } from '../../../utils/names';
 import type { ComponentMetadata } from '../../../utils/nx';
 
-export interface PyAgentServeLocalOptions {
+export interface PyAgentLocalDevOptions {
   agentName: string;
   agentNameClassName: string;
   port: number;
@@ -16,14 +16,14 @@ export interface PyAgentServeLocalOptions {
 }
 
 /**
- * Adds the given py strands agent target project to the source project's serve-local target.
+ * Adds the given py strands agent target project to the source project's dev target.
  * Updates the runtime config provider (if it exists) to point to the local HTTP URL.
  */
-export const addPyAgentTargetToServeLocal = async (
+export const addPyAgentTargetToLocalDev = async (
   tree: Tree,
   sourceProjectName: string,
   targetProjectName: string,
-  options: PyAgentServeLocalOptions,
+  options: PyAgentLocalDevOptions,
 ) => {
   // AG-UI clients POST to the runtime config URL directly, so it must point at
   // the agent's `/invocations` endpoint. HTTP agents go through the generated
@@ -35,7 +35,7 @@ export const addPyAgentTargetToServeLocal = async (
       ? `http://localhost:${options.port}/invocations`
       : `http://localhost:${options.port}`;
 
-  await addAgentTargetToServeLocal(tree, sourceProjectName, targetProjectName, {
+  await addAgentTargetToLocalDev(tree, sourceProjectName, targetProjectName, {
     agentNameClassName: options.agentNameClassName,
     port: options.port,
     targetComponent: options.targetComponent,
@@ -49,7 +49,7 @@ export const addPyAgentTargetToServeLocal = async (
  * Build the OpenAPI client generation target names for an HTTP agent so
  * that local API changes regenerate the client.
  */
-export const openApiClientServeLocalDeps = (
+export const openApiClientLocalDevDeps = (
   agentNameClassName: string,
 ): string[] => {
   const clientGenTarget = `generate:${kebabCase(agentNameClassName)}-client`;

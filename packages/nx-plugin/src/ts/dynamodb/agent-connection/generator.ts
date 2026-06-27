@@ -30,12 +30,12 @@ export const tsDynamoDBAgentConnectionGenerator = async (
   );
 
   const agentName = options.sourceComponent?.name ?? 'agent';
-  const serveLocalTarget = `${agentName}-serve-local`;
+  const devTarget = `${agentName}-dev`;
 
-  if (sourceProject.targets?.[serveLocalTarget]) {
-    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTarget, {
+  if (sourceProject.targets?.[devTarget]) {
+    addDependencyToTargetIfNotPresent(sourceProject, devTarget, {
       projects: [targetProject.name],
-      target: 'serve-local',
+      target: 'dev',
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }

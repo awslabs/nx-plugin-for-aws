@@ -97,7 +97,7 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
     });
-    expect(projectConfig.targets['serve-local']).toEqual({
+    expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
@@ -107,7 +107,7 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',
-      dependsOn: ['serve-local'],
+      dependsOn: ['dev'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/wait-for-db.ts',
         cwd: '{projectRoot}',
@@ -115,12 +115,12 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets.prisma).toEqual({
       executor: 'nx:run-commands',
-      dependsOn: ['serve-local', 'wait-for-db'],
+      dependsOn: ['dev', 'wait-for-db'],
       options: {
         cwd: '{projectRoot}',
         command: 'prisma',
         env: {
-          SERVE_LOCAL: 'true',
+          LOCAL_DEV: 'true',
         },
       },
     });
@@ -183,7 +183,7 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
     });
-    expect(mysqlProjectConfig.targets['serve-local']).toEqual({
+    expect(mysqlProjectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
@@ -193,7 +193,7 @@ describe('ts#rdb generator', () => {
     });
     expect(mysqlProjectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',
-      dependsOn: ['serve-local'],
+      dependsOn: ['dev'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/wait-for-db.ts',
         cwd: '{projectRoot}',

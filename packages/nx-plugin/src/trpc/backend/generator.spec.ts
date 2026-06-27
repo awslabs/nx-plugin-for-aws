@@ -199,25 +199,20 @@ describe('trpc backend generator', () => {
     expect(projectConfig.targets!.serve!.options!.commands).toEqual([
       'tsx --watch src/local-server.ts',
     ]);
-    expect(projectConfig.targets).toHaveProperty('serve-local');
-    expect(projectConfig.targets!['serve-local']!.executor).toBe(
-      'nx:run-commands',
-    );
-    expect(projectConfig.targets!['serve-local']!.options!.commands).toEqual([
+    expect(projectConfig.targets).toHaveProperty('dev');
+    expect(projectConfig.targets!['dev']!.executor).toBe('nx:run-commands');
+    expect(projectConfig.targets!['dev']!.options!.commands).toEqual([
       'tsx --watch src/local-server.ts',
     ]);
-    expect(projectConfig.targets!['serve-local']!.options!.env).toEqual({
-      SERVE_LOCAL: 'true',
+    expect(projectConfig.targets!['dev']!.options!.env).toEqual({
+      LOCAL_DEV: 'true',
     });
 
-    // dev is an alias for serve-local
-    expect(projectConfig.targets!.dev).toEqual({
-      continuous: true,
-      dependsOn: ['serve-local'],
-    });
+    // dev is the local runner
+    expect(projectConfig.targets!.dev!.continuous).toBe(true);
   });
 
-  it('should preserve serve-local dependsOn added by connection generators when re-run', async () => {
+  it('should preserve dev dependsOn added by connection generators when re-run', async () => {
     const options: TsTrpcApiGeneratorSchema = {
       name: 'TestApi',
       directory: 'apps',
@@ -229,12 +224,12 @@ describe('trpc backend generator', () => {
 
     await tsTrpcApiGenerator(tree, options);
 
-    // Simulate a connection generator adding a dependsOn to serve-local
+    // Simulate a connection generator adding a dependsOn to dev
     const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
-    projectConfig.targets!['serve-local']!.dependsOn = [
+    projectConfig.targets!['dev']!.dependsOn = [
       {
         projects: ['@proj/my-table'],
-        target: 'serve-local',
+        target: 'dev',
       },
     ];
     const { updateProjectConfiguration } = await import('@nx/devkit');
@@ -244,10 +239,10 @@ describe('trpc backend generator', () => {
     await tsTrpcApiGenerator(tree, options);
 
     const updatedConfig = readProjectConfiguration(tree, '@proj/test-api');
-    expect(updatedConfig.targets!['serve-local']!.dependsOn).toEqual([
+    expect(updatedConfig.targets!['dev']!.dependsOn).toEqual([
       {
         projects: ['@proj/my-table'],
-        target: 'serve-local',
+        target: 'dev',
       },
     ]);
   });

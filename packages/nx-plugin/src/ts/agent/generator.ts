@@ -29,7 +29,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addDevAlias,
+  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -246,7 +246,7 @@ export const tsAgentGenerator = async (
   });
 
   // Every protocol gets a standalone `chat.ts`. It connects to the local
-  // `serve-local` server by default, or to the deployed agent (with the
+  // `dev` server by default, or to the deployed agent (with the
   // appropriate auth) when `RUNTIME_CONFIG_APP_ID` is set.
   const scriptsDir = joinPathFragments(
     project.root,
@@ -283,7 +283,7 @@ export const tsAgentGenerator = async (
         },
       },
     },
-    [`${agentTargetPrefix}-serve-local`]: {
+    [`${agentTargetPrefix}-dev`]: {
       executor: 'nx:run-commands',
       continuous: true,
       options: {
@@ -291,7 +291,7 @@ export const tsAgentGenerator = async (
         cwd: '{projectRoot}',
         env: {
           PORT: `${localDevPort}`,
-          SERVE_LOCAL: 'true',
+          LOCAL_DEV: 'true',
         },
       },
     },
@@ -307,12 +307,8 @@ export const tsAgentGenerator = async (
     },
   };
 
-  // `<agent>-dev` aliases `<agent>-serve-local`; the first component in a
-  // project also gets a project-level `dev` aliasing it.
-  addDevAlias(agentTargets, `${agentTargetPrefix}-serve-local`, {
-    devTargetName: `${agentTargetPrefix}-dev`,
-    aliasAsProjectDev: true,
-  });
+  // Aggregate `<agent>-dev` under the project-level `dev` target.
+  addComponentDevTarget(agentTargets, `${agentTargetPrefix}-dev`);
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

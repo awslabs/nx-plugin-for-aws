@@ -46,11 +46,11 @@ describe('py#agent#a2a-connection generator', () => {
         root: 'apps/py-host',
         sourceRoot: 'apps/py-host/py_host',
         targets: {
-          'host-serve-local': {
+          'host-dev': {
             executor: 'nx:run-commands',
             options: {
-              commands: ['echo serve-local'],
-              env: { SERVE_LOCAL: 'true' },
+              commands: ['echo dev'],
+              env: { LOCAL_DEV: 'true' },
             },
             dependsOn: [],
             continuous: true,
@@ -106,11 +106,11 @@ dependencies = ["strands-agents"]
         root: 'apps/py-remote',
         sourceRoot: 'apps/py-remote/py_remote',
         targets: {
-          'remote-serve-local': {
+          'remote-dev': {
             executor: 'nx:run-commands',
             options: {
-              commands: ['echo serve-local'],
-              env: { SERVE_LOCAL: 'true', PORT: '9001' },
+              commands: ['echo dev'],
+              env: { LOCAL_DEV: 'true', PORT: '9001' },
             },
             continuous: true,
           },
@@ -164,7 +164,7 @@ dependencies = ["strands-agents"]
     expect(clientFile).toBeDefined();
     const client = tree.read(clientFile!, 'utf-8')!;
     expect(client).toContain('RemoteClientStrands');
-    expect(client).toContain('SERVE_LOCAL');
+    expect(client).toContain('LOCAL_DEV');
     expect(client).toContain('http://localhost:9001/');
     expect(client).toContain('AgentCoreA2aClientStrands.with_iam_auth');
   });
@@ -187,7 +187,7 @@ dependencies = ["strands-agents"]
     expect(agent).toContain('ask_remote');
   });
 
-  it('should make host serve-local depend on remote serve-local', async () => {
+  it('should make host dev depend on remote dev', async () => {
     setupProjects();
     await pyAgentA2aConnectionGenerator(tree, {
       sourceProject: 'test.py_host',
@@ -197,8 +197,8 @@ dependencies = ["strands-agents"]
     });
 
     const host = JSON.parse(tree.read('apps/py-host/project.json', 'utf-8')!);
-    expect(host.targets['host-serve-local'].dependsOn).toEqual([
-      { projects: ['test.py_remote'], target: 'remote-serve-local' },
+    expect(host.targets['host-dev'].dependsOn).toEqual([
+      { projects: ['test.py_remote'], target: 'remote-dev' },
     ]);
   });
 
@@ -347,10 +347,10 @@ def get_agent(session_id: str):
     expect(toolsListMatch).toBeTruthy();
     expect((toolsListMatch![1].match(/\bask_remote\b/g) ?? []).length).toBe(1);
 
-    // The host serve-local target has the remote serve-local dep exactly once
+    // The host dev target has the remote dev dep exactly once
     const host = JSON.parse(tree.read('apps/py-host/project.json', 'utf-8')!);
-    expect(host.targets['host-serve-local'].dependsOn).toEqual([
-      { projects: ['test.py_remote'], target: 'remote-serve-local' },
+    expect(host.targets['host-dev'].dependsOn).toEqual([
+      { projects: ['test.py_remote'], target: 'remote-dev' },
     ]);
   });
 
@@ -488,11 +488,11 @@ def get_agent(session_id: str):
           root: 'apps/py-host',
           sourceRoot: 'apps/py-host/py_host',
           targets: {
-            'host-serve-local': {
+            'host-dev': {
               executor: 'nx:run-commands',
               options: {
-                commands: ['echo serve-local'],
-                env: { SERVE_LOCAL: 'true' },
+                commands: ['echo dev'],
+                env: { LOCAL_DEV: 'true' },
               },
               dependsOn: [],
               continuous: true,

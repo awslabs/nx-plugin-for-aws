@@ -17,7 +17,7 @@ describe('ts#rdb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -33,7 +33,7 @@ describe('ts#rdb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          [`${mcpServerName}-serve-local`]: {
+          [`${mcpServerName}-dev`]: {
             executor: 'nx:run-commands',
             continuous: true,
           },
@@ -84,7 +84,7 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add rdb serve-local dependency to the mcp-server prefixed serve-local', async () => {
+  it('should add rdb dev dependency to the mcp-server prefixed dev', async () => {
     setupMcpServerProject('my-service', 'my-mcp');
     setupRdbProject();
 
@@ -153,7 +153,7 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
     ).toMatchSnapshot();
   });
 
-  it('should fall back to mcp-server-serve-local when no component name', async () => {
+  it('should fall back to mcp-server-dev when no component name', async () => {
     setupMcpServerProject('my-service', 'mcp-server');
     setupRdbProject();
 
@@ -201,7 +201,7 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
     ).toMatchSnapshot();
   });
 
-  it('should not add dependency when mcp-server serve-local target does not exist', async () => {
+  it('should not add dependency when mcp-server dev target does not exist', async () => {
     tree.write(
       `packages/my-service/project.json`,
       JSON.stringify({
@@ -219,10 +219,10 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
     });
 
     const config = readProjectConfiguration(tree, 'my-service');
-    expect(config.targets?.['my-mcp-serve-local']).toBeUndefined();
+    expect(config.targets?.['my-mcp-dev']).toBeUndefined();
   });
 
-  it('should be idempotent for serve-local wiring', async () => {
+  it('should be idempotent for dev wiring', async () => {
     setupMcpServerProject('my-service', 'my-mcp');
     setupRdbProject();
 
@@ -239,12 +239,12 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
 
     const config = readProjectConfiguration(tree, 'my-service');
     const deps = (
-      config.targets?.['my-mcp-serve-local']?.dependsOn ?? []
+      config.targets?.['my-mcp-dev']?.dependsOn ?? []
     ).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });

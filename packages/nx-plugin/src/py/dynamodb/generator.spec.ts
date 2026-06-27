@@ -69,7 +69,7 @@ describe('py#dynamodb generator', () => {
         cwd: '{projectRoot}',
       },
     });
-    expect(projectConfig.targets['serve-local']).toEqual({
+    expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
       continuous: true,
       dependsOn: ['pull-image'],
@@ -181,7 +181,7 @@ describe('py#dynamodb generator', () => {
     const secondConfigJson = JSON.parse(
       tree.read('packages/other_table/config.json', 'utf-8') ?? '{}',
     );
-    expect(secondConfigJson.serveLocal.port).toBe(portOf(firstConfig));
+    expect(secondConfigJson.localDev.port).toBe(portOf(firstConfig));
   });
 
   it('should generate with infra=none then upgrade to infra=dynamodb', async () => {
@@ -195,7 +195,7 @@ describe('py#dynamodb generator', () => {
       tree.read('packages/my_table/project.json', 'utf-8'),
     );
     expect(projectJson.targets['pull-image']).toBeDefined();
-    expect(projectJson.targets['serve-local']).toBeDefined();
+    expect(projectJson.targets['dev']).toBeDefined();
 
     await pyDynamoDBGenerator(tree, defaultOptions);
 
@@ -229,7 +229,7 @@ describe('py#dynamodb generator', () => {
     const configJson = JSON.parse(
       tree.read('packages/my_table/config.json', 'utf-8') ?? '{}',
     );
-    expect(configJson.serveLocal.containerName).toBe('proj-dynamodb');
+    expect(configJson.localDev.containerName).toBe('proj-dynamodb');
     expect(tree.read('packages/my_table/config.json', 'utf-8')).toContain(
       '"tableName": "proj-custom-table-name"',
     );

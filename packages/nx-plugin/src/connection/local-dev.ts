@@ -14,21 +14,21 @@ import {
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
 
-export interface ServeLocalOptions {
+export interface LocalDevOptions {
   apiName: string;
   url: string;
   additionalDependencyTargets?: string[];
 }
 
 /**
- * Adds the given target project to the source project's serve-local target
+ * Adds the given target project to the source project's dev target
  * Updates the runtime config provider (if it exists)
  */
-export const addTargetToServeLocal = async (
+export const addTargetToLocalDev = async (
   tree: Tree,
   sourceProjectName: string,
   targetProjectName: string,
-  options: ServeLocalOptions,
+  options: LocalDevOptions,
 ) => {
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
@@ -39,27 +39,27 @@ export const addTargetToServeLocal = async (
     targetProjectName,
   );
 
-  // Target project must have a serve-local target which is continuous
+  // Target project must have a dev target which is continuous
   if (
     !(
-      targetProject.targets?.['serve-local']?.continuous &&
-      sourceProject.targets?.['serve-local']
+      targetProject.targets?.['dev']?.continuous &&
+      sourceProject.targets?.['dev']
     )
   ) {
     return;
   }
 
-  // Add a dependency on the serve-local target
-  addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {
+  // Add a dependency on the dev target
+  addDependencyToTargetIfNotPresent(sourceProject, 'dev', {
     projects: [targetProject.name],
-    target: 'serve-local',
+    target: 'dev',
   });
   for (const additional of options.additionalDependencyTargets ?? []) {
-    addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', additional);
+    addDependencyToTargetIfNotPresent(sourceProject, 'dev', additional);
   }
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
-  // Add an override to runtime-config.json for the serve-local target to use the local url
+  // Add an override to runtime-config.json for the dev target to use the local url
   const runtimeConfigProvider = joinPathFragments(
     sourceProject.root,
     'src',
@@ -72,7 +72,7 @@ export const addTargetToServeLocal = async (
     await applyGritQL(
       tree,
       runtimeConfigProvider,
-      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.apis.${className} = '${options.url}';\n  }\` where { $cond <: contains \`'serve-local'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`runtimeConfig.apis.${className}\` }`,
+      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.apis.${className} = '${options.url}';\n  }\` where { $cond <: contains \`'local-dev'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`runtimeConfig.apis.${className}\` }`,
     );
   }
 };

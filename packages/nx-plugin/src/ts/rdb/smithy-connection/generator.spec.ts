@@ -17,7 +17,7 @@ describe('ts#rdb smithy-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -30,7 +30,7 @@ describe('ts#rdb smithy-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -111,7 +111,7 @@ export const lambdaHandler = async (
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add rdb serve-local dependency to smithy backend serve-local', async () => {
+  it('should add rdb dev dependency to smithy backend dev', async () => {
     setupSmithyBackend();
     setupRdbProject();
 
@@ -180,7 +180,7 @@ export const lambdaHandler = async (
     ).toMatchSnapshot();
   });
 
-  it('should not add dependency when source has no serve-local', async () => {
+  it('should not add dependency when source has no dev', async () => {
     tree.write(
       `packages/api/project.json`,
       JSON.stringify({
@@ -197,7 +197,7 @@ export const lambdaHandler = async (
     });
 
     const config = readProjectConfiguration(tree, 'api');
-    expect(config.targets?.['serve-local']).toBeUndefined();
+    expect(config.targets?.['dev']).toBeUndefined();
   });
 
   it('should skip file injection when context.ts and handler.ts do not exist', async () => {
@@ -207,7 +207,7 @@ export const lambdaHandler = async (
         name: 'api',
         root: 'packages/api',
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -222,7 +222,7 @@ export const lambdaHandler = async (
     expect(tree.exists('packages/api/src/handler.ts')).toBe(false);
   });
 
-  it('should be idempotent for serve-local wiring', async () => {
+  it('should be idempotent for dev wiring', async () => {
     setupSmithyBackend();
     setupRdbProject();
 
@@ -236,11 +236,11 @@ export const lambdaHandler = async (
     });
 
     const config = readProjectConfiguration(tree, 'api');
-    const deps = (config.targets?.['serve-local']?.dependsOn ?? []).filter(
+    const deps = (config.targets?.['dev']?.dependsOn ?? []).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });

@@ -27,7 +27,6 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import {
-  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -114,7 +113,7 @@ export async function tsReactWebsiteGenerator(
             buildTargetName: 'bundle',
             // Map both of vite's inferred dev-server targets onto `serve` so the
             // plugin doesn't emit a separate `dev`; we author our own `dev`
-            // below as an alias for `serve-local`.
+            // below running the local-dev vite mode.
             serveTargetName: 'serve',
             devTargetName: 'serve',
             previewTargetName: 'preview',
@@ -194,18 +193,15 @@ export async function tsReactWebsiteGenerator(
     };
 
     // Run the website and its connected dependencies locally. Mirrors the
-    // inferred `serve` target but with the serve-local vite mode.
-    targets['serve-local'] = {
+    // inferred `serve` target but with the local-dev vite mode.
+    targets['dev'] = {
       executor: 'nx:run-commands',
       continuous: true,
       options: {
-        command: 'vite --mode serve-local',
+        command: 'vite --mode local-dev',
         cwd: '{projectRoot}',
       },
     };
-
-    // `dev` is an alias for `serve-local`.
-    addDevAlias(targets, 'serve-local');
   }
 
   projectConfiguration.targets = sortObjectKeys(targets);

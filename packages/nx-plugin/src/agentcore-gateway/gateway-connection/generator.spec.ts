@@ -25,7 +25,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
       projectType: 'library',
       sourceRoot: `packages/${name}`,
       targets: {
-        [`${name}-serve-local`]: {
+        [`${name}-dev`]: {
           executor: 'nx:run-commands',
           continuous: true,
           options: { commands: ['node -e "setInterval(()=>{}, 1000)"'] },
@@ -48,7 +48,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('wires serve-local dependency from source gateway to target gateway', async () => {
+  it('wires dev dependency from source gateway to target gateway', async () => {
     const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
 
@@ -58,22 +58,22 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, `@proj/${outer.name}`);
-    const deps = config.targets?.[`${outer.name}-serve-local`]
+    const deps = config.targets?.[`${outer.name}-dev`]
       .dependsOn as any[];
     expect(deps).toContainEqual(
       expect.objectContaining({
         projects: [`@proj/${inner.name}`],
-        target: `${inner.name}-serve-local`,
+        target: `${inner.name}-dev`,
       }),
     );
   });
 
-  it('registers the target gateway in the source gateway serve-local.ts', async () => {
+  it('registers the target gateway in the source gateway local-dev.ts', async () => {
     const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
 
     tree.write(
-      'packages/outer-gateway/serve-local.ts',
+      'packages/outer-gateway/local-dev.ts',
       `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [
   { name: 'already-there', url: 'http://localhost:8000/mcp' },
 ];
@@ -86,7 +86,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     });
 
     const serveTs = tree
-      .read('packages/outer-gateway/serve-local.ts')!
+      .read('packages/outer-gateway/local-dev.ts')!
       .toString();
     // Registered under the target gateway's local port, prefixing its
     // (already-prefixed) tools as <gateway>___<target>___<tool>
@@ -96,12 +96,12 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     expect(serveTs).not.toMatch(/,\s*,/);
   });
 
-  it('serve-local.ts registration is idempotent for the same gateway', async () => {
+  it('local-dev.ts registration is idempotent for the same gateway', async () => {
     const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
 
     tree.write(
-      'packages/outer-gateway/serve-local.ts',
+      'packages/outer-gateway/local-dev.ts',
       `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [];\n`,
     );
 
@@ -115,15 +115,15 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     });
 
     const serveTs = tree
-      .read('packages/outer-gateway/serve-local.ts')!
+      .read('packages/outer-gateway/local-dev.ts')!
       .toString();
     expect((serveTs.match(/'inner-gateway'/g) ?? []).length).toBe(1);
 
     const config = readProjectConfiguration(tree, `@proj/${outer.name}`);
-    const deps = config.targets?.[`${outer.name}-serve-local`]
+    const deps = config.targets?.[`${outer.name}-dev`]
       .dependsOn as any[];
     expect(
-      deps.filter((d) => d.target === `${inner.name}-serve-local`).length,
+      deps.filter((d) => d.target === `${inner.name}-dev`).length,
     ).toBe(1);
   });
 
@@ -132,11 +132,11 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     const middle = addGateway('middle-gateway', 'MiddleGateway', 8101);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8102);
     tree.write(
-      'packages/outer-gateway/serve-local.ts',
+      'packages/outer-gateway/local-dev.ts',
       `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [];\n`,
     );
     tree.write(
-      'packages/middle-gateway/serve-local.ts',
+      'packages/middle-gateway/local-dev.ts',
       `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [];\n`,
     );
 
@@ -150,10 +150,10 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     });
 
     expect(
-      tree.read('packages/outer-gateway/serve-local.ts')!.toString(),
+      tree.read('packages/outer-gateway/local-dev.ts')!.toString(),
     ).toContain("name: 'middle-gateway'");
     expect(
-      tree.read('packages/middle-gateway/serve-local.ts')!.toString(),
+      tree.read('packages/middle-gateway/local-dev.ts')!.toString(),
     ).toContain("name: 'inner-gateway'");
   });
 
@@ -206,7 +206,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     ).rejects.toThrow(/cycle/);
   });
 
-  it('cycle detection ignores non-gateway serve-local dependencies', async () => {
+  it('cycle detection ignores non-gateway dev dependencies', async () => {
     const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
     // The inner gateway already fronts an MCP server
@@ -215,12 +215,12 @@ describe('agentcore-gateway#gateway-connection generator', () => {
       root: 'packages/some-mcp',
       projectType: 'library',
       sourceRoot: 'packages/some-mcp',
-      targets: { 'some-mcp-serve-local': {} },
+      targets: { 'some-mcp-dev': {} },
       metadata: {} as any,
     });
     const innerConfig = readProjectConfiguration(tree, `@proj/${inner.name}`);
-    innerConfig.targets![`${inner.name}-serve-local`].dependsOn = [
-      { projects: ['@proj/some-mcp'], target: 'some-mcp-serve-local' },
+    innerConfig.targets![`${inner.name}-dev`].dependsOn = [
+      { projects: ['@proj/some-mcp'], target: 'some-mcp-dev' },
     ];
     updateProjectConfiguration(tree, `@proj/${inner.name}`, innerConfig);
 

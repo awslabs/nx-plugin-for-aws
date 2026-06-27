@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addDevAlias,
+  addComponentDevTarget,
   addGeneratorMetadata,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
@@ -459,58 +459,58 @@ describe('addDependencyToTargetIfNotPresent', () => {
 
   it('should add an object dependency', () => {
     const project = makeProject();
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['other-project'],
-      target: 'serve-local',
+      target: 'dev',
     });
-    expect(project.targets?.['serve-local']?.dependsOn).toEqual([
-      { projects: ['other-project'], target: 'serve-local' },
+    expect(project.targets?.['dev']?.dependsOn).toEqual([
+      { projects: ['other-project'], target: 'dev' },
     ]);
   });
 
   it('should not duplicate an object dependency with identical projects/target', () => {
     const project = makeProject();
     project.targets = {
-      'serve-local': {
-        dependsOn: [{ projects: ['other-project'], target: 'serve-local' }],
+      'dev': {
+        dependsOn: [{ projects: ['other-project'], target: 'dev' }],
       },
     };
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['other-project'],
-      target: 'serve-local',
+      target: 'dev',
     });
-    expect(project.targets['serve-local'].dependsOn).toEqual([
-      { projects: ['other-project'], target: 'serve-local' },
+    expect(project.targets['dev'].dependsOn).toEqual([
+      { projects: ['other-project'], target: 'dev' },
     ]);
   });
 
   it('should treat string-projects and single-element-array-projects as equivalent', () => {
     const project = makeProject();
     project.targets = {
-      'serve-local': {
-        dependsOn: [{ projects: 'other-project', target: 'serve-local' }],
+      'dev': {
+        dependsOn: [{ projects: 'other-project', target: 'dev' }],
       },
     };
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['other-project'],
-      target: 'serve-local',
+      target: 'dev',
     });
-    expect(project.targets['serve-local'].dependsOn).toHaveLength(1);
+    expect(project.targets['dev'].dependsOn).toHaveLength(1);
   });
 
   it('should consider object dependencies with different targets as distinct', () => {
     const project = makeProject();
     project.targets = {
-      'serve-local': {
-        dependsOn: [{ projects: ['api'], target: 'serve-local' }],
+      'dev': {
+        dependsOn: [{ projects: ['api'], target: 'dev' }],
       },
     };
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['api'],
       target: 'serve-watch',
     });
-    expect(project.targets['serve-local'].dependsOn).toEqual([
-      { projects: ['api'], target: 'serve-local' },
+    expect(project.targets['dev'].dependsOn).toEqual([
+      { projects: ['api'], target: 'dev' },
       { projects: ['api'], target: 'serve-watch' },
     ]);
   });
@@ -583,36 +583,10 @@ describe('normalizeTargetKeyOrder', () => {
   });
 });
 
-describe('addDevAlias', () => {
-  it('should add a dev target aliasing serve-local', () => {
-    const targets: any = { 'serve-local': { continuous: true } };
-    addDevAlias(targets, 'serve-local');
-    expect(targets.dev).toEqual({
-      continuous: true,
-      dependsOn: ['serve-local'],
-    });
-  });
-
-  it('should not overwrite an existing dev target', () => {
-    const targets: any = {
-      'serve-local': { continuous: true },
-      dev: { continuous: true, dependsOn: ['existing'] },
-    };
-    addDevAlias(targets, 'serve-local');
-    expect(targets.dev.dependsOn).toEqual(['existing']);
-  });
-
-  it('should add a prefixed dev alias and a project-level dev for the first component', () => {
-    const targets: any = { 'my-mcp-serve-local': { continuous: true } };
-    addDevAlias(targets, 'my-mcp-serve-local', {
-      devTargetName: 'my-mcp-dev',
-      aliasAsProjectDev: true,
-    });
-    expect(targets['my-mcp-dev']).toEqual({
-      continuous: true,
-      dependsOn: ['my-mcp-serve-local'],
-    });
-    // First component also gets the project-level dev aliasing its dev target
+describe('addComponentDevTarget', () => {
+  it('should create a project-level dev aggregating the component dev target', () => {
+    const targets: any = { 'my-mcp-dev': { continuous: true } };
+    addComponentDevTarget(targets, 'my-mcp-dev');
     expect(targets.dev).toEqual({
       continuous: true,
       dependsOn: ['my-mcp-dev'],
@@ -622,30 +596,17 @@ describe('addDevAlias', () => {
   it('should accumulate each component dev target under the project dev', () => {
     const targets: any = {
       dev: { continuous: true, dependsOn: ['first-dev'] },
-      'second-serve-local': { continuous: true },
+      'second-dev': { continuous: true },
     };
-    addDevAlias(targets, 'second-serve-local', {
-      devTargetName: 'second-dev',
-      aliasAsProjectDev: true,
-    });
-    expect(targets['second-dev']).toEqual({
-      continuous: true,
-      dependsOn: ['second-serve-local'],
-    });
+    addComponentDevTarget(targets, 'second-dev');
     // Project-level dev runs both components
     expect(targets.dev.dependsOn).toEqual(['first-dev', 'second-dev']);
   });
 
   it('should not duplicate a component dev target on re-run', () => {
-    const targets: any = { 'my-mcp-serve-local': { continuous: true } };
-    addDevAlias(targets, 'my-mcp-serve-local', {
-      devTargetName: 'my-mcp-dev',
-      aliasAsProjectDev: true,
-    });
-    addDevAlias(targets, 'my-mcp-serve-local', {
-      devTargetName: 'my-mcp-dev',
-      aliasAsProjectDev: true,
-    });
+    const targets: any = { 'my-mcp-dev': { continuous: true } };
+    addComponentDevTarget(targets, 'my-mcp-dev');
+    addComponentDevTarget(targets, 'my-mcp-dev');
     expect(targets.dev.dependsOn).toEqual(['my-mcp-dev']);
   });
 });

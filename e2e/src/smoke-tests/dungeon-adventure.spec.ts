@@ -82,7 +82,7 @@ function waitForPort(port: number, timeoutMs: number): Promise<void> {
 
 // Poll a URL until the JSON response satisfies `predicate`. Used to wait out
 // the gap between DynamoDB Local's port opening and the local table being
-// created (the serve-local cascade does both, but not atomically).
+// created (the dev cascade does both, but not atomically).
 async function waitForJson(
   url: string,
   predicate: (body: any) => boolean,
@@ -294,7 +294,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     // Wire the Game API and the Inventory MCP server to the DynamoDB table so
-    // their serve-local targets boot DynamoDB Local automatically
+    // their dev targets boot DynamoDB Local automatically
     await runCLI(
       `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-api --targetProject=@dungeon-adventure/dungeon-db --no-interactive`,
       opts,
@@ -464,12 +464,12 @@ describe('smoke test - dungeon-adventure', () => {
 
     // 5. Local end-to-end validation against DynamoDB Local
     //
-    // Every component runs fully offline: serve-local boots DynamoDB Local via
+    // Every component runs fully offline: the dev target boots DynamoDB Local via
     // the connection generators, and the Story Agent's LLM is pointed at a mock
-    // OpenAI server (same strategy as the serve-local smoke test).
+    // OpenAI server (same strategy as the local-dev smoke test).
     //
     // This part drives long-lived dev servers via detached process groups and
-    // POSIX signals, so it only runs on non-Windows (matching the serve-local
+    // POSIX signals, so it only runs on non-Windows (matching the local-dev
     // smoke test, which is Linux-only). On Windows we stop after verifying
     // generation and build above.
     if (process.platform === 'win32') {
@@ -491,29 +491,29 @@ describe('smoke test - dungeon-adventure', () => {
     const gameApiPort = getPortFromProjectJson(
       projectRoot,
       'packages/game-api/project.json',
-      'serve-local',
+      'dev',
     );
     const mcpPort = getPortFromProjectJson(
       projectRoot,
       'packages/inventory/project.json',
-      'mcp-server-serve-local',
+      'mcp-server-dev',
     );
     const agentPort = getPortFromProjectJson(
       projectRoot,
       'packages/story/project.json',
-      'agent-serve-local',
+      'agent-dev',
     );
     const dynamoPort = getPortFromProjectJson(
       projectRoot,
       'packages/dungeon-db/project.json',
-      'serve-local',
+      'dev',
     );
 
     // Bring the whole stack up with the one command the tutorial documents:
-    // game-ui:serve-local cascades through the Game API, the Story Agent (which
+    // game-ui:dev cascades through the Game API, the Story Agent (which
     // boots the Inventory MCP server) and DynamoDB Local.
     const UI_PORT = 4200;
-    await startAndWait('@dungeon-adventure/game-ui:serve-local', UI_PORT);
+    await startAndWait('@dungeon-adventure/game-ui:dev', UI_PORT);
     await waitForPort(dynamoPort, STARTUP_TIMEOUT_MS);
     await waitForPort(gameApiPort, STARTUP_TIMEOUT_MS);
     await waitForPort(mcpPort, STARTUP_TIMEOUT_MS);
@@ -527,7 +527,7 @@ describe('smoke test - dungeon-adventure', () => {
     expect(uiHtml).toContain('<');
 
     // Game API procedures against DynamoDB Local. Poll the first read until the
-    // local table has finished being created by the serve-local cascade.
+    // local table has finished being created by the dev cascade.
     const emptyGames: any = await waitForJson(
       `http://127.0.0.1:${gameApiPort}/games.query?input=${encodeURIComponent('{}')}`,
       (b) => Array.isArray(b?.result?.data?.items),

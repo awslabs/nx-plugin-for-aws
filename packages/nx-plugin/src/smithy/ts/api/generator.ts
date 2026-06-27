@@ -24,7 +24,6 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { toClassName, toKebabCase } from '../../../utils/names';
 import {
   addDependencyToTargetIfNotPresent,
-  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -265,32 +264,30 @@ export const tsSmithyApiGenerator = async (
     },
   });
 
-  const existingServeLocalDependsOn =
-    backendProjectConfig.targets['serve-local']?.dependsOn ?? [];
+  const existingDevDependsOn =
+    backendProjectConfig.targets['dev']?.dependsOn ?? [];
 
-  backendProjectConfig.targets['serve-local'] = normalizeTargetKeyOrder({
+  backendProjectConfig.targets['dev'] = normalizeTargetKeyOrder({
     ...backendProjectConfig.targets.serve,
-    // Own copy of dependsOn so adding serve-local dependencies below doesn't
+    // Own copy of dependsOn so adding dev dependencies below doesn't
     // mutate the shared array referenced by the serve target.
     dependsOn: [...(backendProjectConfig.targets.serve.dependsOn ?? [])],
     options: {
       ...backendProjectConfig.targets.serve.options,
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   });
 
-  // Preserve any dependencies added to serve-local by connection generators
-  for (const dependency of existingServeLocalDependsOn) {
+  // Preserve any dependencies added to dev by connection generators
+  for (const dependency of existingDevDependsOn) {
     addDependencyToTargetIfNotPresent(
       backendProjectConfig,
-      'serve-local',
+      'dev',
       dependency,
     );
   }
-
-  addDevAlias(backendProjectConfig.targets, 'serve-local');
 
   // Ignore generated code
   updateGitIgnore(tree, backendProjectConfig.root, (patterns) => [

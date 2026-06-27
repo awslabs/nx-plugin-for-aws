@@ -29,10 +29,10 @@ export const tsDynamoDBSmithyConnectionGenerator = async (
     options.targetProject,
   );
 
-  if (sourceProject.targets?.['serve-local']) {
-    addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {
+  if (sourceProject.targets?.['dev']) {
+    addDependencyToTargetIfNotPresent(sourceProject, 'dev', {
       projects: [targetProject.name],
-      target: 'serve-local',
+      target: 'dev',
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }

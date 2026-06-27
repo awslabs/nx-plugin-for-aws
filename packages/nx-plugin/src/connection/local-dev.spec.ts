@@ -4,23 +4,23 @@
  */
 import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
-import { addTargetToServeLocal, type ServeLocalOptions } from './serve-local';
+import { addTargetToLocalDev, type LocalDevOptions } from './local-dev';
 
-describe('serve-local', () => {
+describe('dev', () => {
   let tree: Tree;
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  describe('addTargetToServeLocal', () => {
-    const options: ServeLocalOptions = {
+  describe('addTargetToLocalDev', () => {
+    const options: LocalDevOptions = {
       apiName: 'testApi',
       url: 'http://localhost:3001',
     };
 
     it('should add target dependency when both projects have required targets', async () => {
-      // Setup source project with serve-local target
+      // Setup source project with dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -28,7 +28,7 @@ describe('serve-local', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -36,7 +36,7 @@ describe('serve-local', () => {
         }),
       );
 
-      // Setup target project with continuous serve-local target
+      // Setup target project with continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -44,7 +44,7 @@ describe('serve-local', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -53,22 +53,22 @@ describe('serve-local', () => {
         }),
       );
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = JSON.parse(
         tree.read('apps/frontend/project.json', 'utf-8'),
       );
 
-      expect(updatedProject.targets['serve-local'].dependsOn).toEqual([
+      expect(updatedProject.targets['dev'].dependsOn).toEqual([
         {
           projects: ['backend'],
-          target: 'serve-local',
+          target: 'dev',
         },
       ]);
     });
 
     it('should append to existing dependsOn array', async () => {
-      // Setup source project with serve-local target that already has dependencies
+      // Setup source project with dev target that already has dependencies
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -76,7 +76,7 @@ describe('serve-local', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
               dependsOn: [
@@ -90,7 +90,7 @@ describe('serve-local', () => {
         }),
       );
 
-      // Setup target project with continuous serve-local target
+      // Setup target project with continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -98,7 +98,7 @@ describe('serve-local', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -107,26 +107,26 @@ describe('serve-local', () => {
         }),
       );
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = JSON.parse(
         tree.read('apps/frontend/project.json', 'utf-8'),
       );
 
-      expect(updatedProject.targets['serve-local'].dependsOn).toEqual([
+      expect(updatedProject.targets['dev'].dependsOn).toEqual([
         {
           projects: ['existing-project'],
           target: 'build',
         },
         {
           projects: ['backend'],
-          target: 'serve-local',
+          target: 'dev',
         },
       ]);
     });
 
-    it('should not modify project when target project lacks continuous serve-local target', async () => {
-      // Setup source project with serve-local target
+    it('should not modify project when target project lacks continuous dev target', async () => {
+      // Setup source project with dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -134,7 +134,7 @@ describe('serve-local', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -142,7 +142,7 @@ describe('serve-local', () => {
         }),
       );
 
-      // Setup target project with non-continuous serve-local target
+      // Setup target project with non-continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -161,14 +161,14 @@ describe('serve-local', () => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
-    it('should not modify project when target project has no serve-local target', async () => {
-      // Setup source project with serve-local target
+    it('should not modify project when target project has no dev target', async () => {
+      // Setup source project with dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -176,7 +176,7 @@ describe('serve-local', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -184,7 +184,7 @@ describe('serve-local', () => {
         }),
       );
 
-      // Setup target project without serve-local target
+      // Setup target project without dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -202,14 +202,14 @@ describe('serve-local', () => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
-    it('should not modify project when source project has no serve-local target', async () => {
-      // Setup source project without serve-local target
+    it('should not modify project when source project has no dev target', async () => {
+      // Setup source project without dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -225,7 +225,7 @@ describe('serve-local', () => {
         }),
       );
 
-      // Setup target project with continuous serve-local target
+      // Setup target project with continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -233,7 +233,7 @@ describe('serve-local', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -244,14 +244,14 @@ describe('serve-local', () => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
     it('should modify runtime config when file exists', async () => {
-      // Setup source project with serve-local target
+      // Setup source project with dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -259,7 +259,7 @@ describe('serve-local', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -267,7 +267,7 @@ describe('serve-local', () => {
         }),
       );
 
-      // Setup target project with continuous serve-local target
+      // Setup target project with continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -275,7 +275,7 @@ describe('serve-local', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -289,7 +289,7 @@ describe('serve-local', () => {
         'apps/frontend/src/components/RuntimeConfig/index.tsx',
         `
 const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
-  if (import.meta.env.MODE === 'serve-local') {
+  if (import.meta.env.MODE === 'local-dev') {
     // Local development overrides will be added here
   }
   return runtimeConfig;
@@ -297,7 +297,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 `,
       );
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedRuntimeConfig = tree.read(
         'apps/frontend/src/components/RuntimeConfig/index.tsx',
@@ -311,7 +311,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
     });
 
     it('should not modify runtime config when file does not exist', async () => {
-      // Setup source project with serve-local target
+      // Setup source project with dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -319,7 +319,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -327,7 +327,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
         }),
       );
 
-      // Setup target project with continuous serve-local target
+      // Setup target project with continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -335,7 +335,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -346,7 +346,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 
       // Don't create runtime config file
       await expect(
-        addTargetToServeLocal(tree, 'frontend', 'backend', options),
+        addTargetToLocalDev(tree, 'frontend', 'backend', options),
       ).resolves.not.toThrow();
 
       // Verify runtime config file was not created
@@ -366,7 +366,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
         }),
       );
 
-      // Setup target project with continuous serve-local target
+      // Setup target project with continuous dev target
       tree.write(
         'apps/backend/project.json',
         JSON.stringify({
@@ -374,7 +374,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -385,7 +385,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
@@ -399,7 +399,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -413,7 +413,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -422,23 +422,23 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
         }),
       );
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = JSON.parse(
         tree.read('apps/frontend/project.json', 'utf-8'),
       );
 
-      expect(updatedProject.targets['serve-local'].dependsOn).toEqual([
+      expect(updatedProject.targets['dev'].dependsOn).toEqual([
         {
           projects: ['backend'],
-          target: 'serve-local',
+          target: 'dev',
         },
       ]);
     });
 
     it('should handle target project with missing targets object', async () => {
-      // Setup source project with serve-local target
+      // Setup source project with dev target
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -446,7 +446,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'serve-local': {
+            'dev': {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -466,7 +466,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToLocalDev(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);

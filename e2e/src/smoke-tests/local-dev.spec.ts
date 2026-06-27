@@ -24,7 +24,7 @@ const STARTUP_TIMEOUT_MS = 120_000;
 const HEALTH_CHECK_INTERVAL_MS = 2_000;
 const LLM_MOCK_PORT = 19823;
 
-// The APIs the serve-local website is connected to, with the class names
+// The APIs the dev website is connected to, with the class names
 // matching their vended `use<ClassName>Client` hooks.
 const WEBSITE_APIS: ApiSpec[] = [
   { kind: 'trpc', className: 'MyApi' },
@@ -32,7 +32,7 @@ const WEBSITE_APIS: ApiSpec[] = [
   { kind: 'openapi', className: 'MySmithyApi' },
 ];
 
-// The agents the serve-local website is connected to, with the class names
+// The agents the dev website is connected to, with the class names
 // under which they appear in the website's runtime-config / vended hooks.
 const WEBSITE_AGENTS: AgentSpec[] = [
   { kind: 'ts-http', className: 'MyAgent' },
@@ -68,7 +68,7 @@ function waitForPort(port: number, timeoutMs: number): Promise<void> {
 
 // Poll a URL until the JSON response satisfies `predicate`. Used to wait out
 // the gap between DynamoDB Local's port opening and the local table being
-// created (the serve-local cascade does both, but not atomically).
+// created (the dev cascade does both, but not atomically).
 async function waitForJson(
   url: string,
   predicate: (body: any) => boolean,
@@ -96,7 +96,7 @@ async function waitForJson(
 
 // Wait until nothing is listening on the given port. Used between tests that
 // reuse the same fixed ports (e.g. the shared MCP servers behind the gateway)
-// so a previous serve-local chain has fully released the port before the next
+// so a previous dev chain has fully released the port before the next
 // chain tries to bind it — otherwise the new server hits EADDRINUSE.
 function waitForPortFree(port: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -251,9 +251,9 @@ function getPortFromProjectJson(
   throw new Error(`Cannot determine port for "${targetName}" in ${relPath}`);
 }
 
-describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
+describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
   const pkgMgr = 'pnpm';
-  const targetDir = `${tmpProjPath()}/serve-local-${pkgMgr}`;
+  const targetDir = `${tmpProjPath()}/local-dev-${pkgMgr}`;
   const runningProcesses: ChildProcess[] = [];
   let llmMock: MockServer | undefined;
   let projectRoot: string;
@@ -264,8 +264,8 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
   // previous run's data leaks into this run's assertions).
   const cleanupDynamoLocal = () => {
     for (const cmd of [
-      `docker rm -f serve-local-test-dynamodb`,
-      `docker volume rm serve-local-test-dynamodb-data`,
+      `docker rm -f local-dev-test-dynamodb`,
+      `docker volume rm local-dev-test-dynamodb-data`,
     ]) {
       try {
         execSync(cmd, { stdio: 'ignore' });
@@ -306,7 +306,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       projectRoot = await createTestWorkspace(
         pkgMgr,
         targetDir,
-        'serve-local-test',
+        'local-dev-test',
         'cdk',
       );
       const opts = {
@@ -367,7 +367,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=none --no-interactive`,
         opts,
       );
-      // Python LangChain agent (AG-UI only). Its serve-local exercises the
+      // Python LangChain agent (AG-UI only). Its dev target exercises the
       // langchain MCP tool loader (which loads tools at agent construction,
       // inside uvicorn's running loop), the A2A delegation tool, and the
       // langchain gateway client — all on the framework-agnostic seam.
@@ -392,7 +392,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
         opts,
       );
-      // Python DynamoDB table, connected to the FastAPI so its serve-local
+      // Python DynamoDB table, connected to the FastAPI so its dev target
       // boots DynamoDB Local and the PynamoDB client points at it locally.
       await runCLI(
         `generate @aws/nx-plugin:py#dynamodb --name=py-table --no-interactive`,
@@ -401,7 +401,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       // AgentCore Gateway: a dedicated agent fronted only by the gateway,
       // which aggregates the same TS and Python MCP servers used by the
       // direct-connection tests above (Nx dedupes the shared continuous
-      // serve-local targets within a single task graph).
+      // dev targets within a single task graph).
       await runCLI(
         `generate @aws/nx-plugin:ts#agent --project=ts-project --name=gw-agent --infra=none --no-interactive`,
         opts,
@@ -483,7 +483,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       // LangChain agent connections: MCP (langchain-mcp-adapters tool loader),
       // A2A (remote agent delegation as a langchain tool), and the AgentCore
       // gateway (langchain gateway client). Exercises every connection kind the
-      // langchain framework supports in one serve-local boot.
+      // langchain framework supports in one dev boot.
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-langchain-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
         opts,
@@ -497,7 +497,7 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
         opts,
       );
       // Gateway wiring: {gw-agent, gw-py-agent} -> gateway -> {my-mcp,
-      // my-py-mcp}. Each agent's serve-local boots the local gateway, which
+      // my-py-mcp}. Each agent's dev target boots the local gateway, which
       // aggregates both MCP servers behind one endpoint.
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=gw-agent --targetProject=my-gateway --no-interactive`,
@@ -523,13 +523,13 @@ describe('smoke test - serve-local', { timeout: 20 * 60 * 1000 }, () => {
       );
 
       // Add DynamoDB-backed routes to the FastAPI, exercising the generated
-      // PynamoDB ExampleModel (create/get/list-by-category) so the serve-local
+      // PynamoDB ExampleModel (create/get/list-by-category) so the dev target
       // test can drive the Python DynamoDB client end-to-end over HTTP. Imports
       // are prepended so they stay at the top of the module (ruff E402).
-      const pyApiMainFile = `${projectRoot}/packages/py_api/serve_local_test_py_api/main.py`;
+      const pyApiMainFile = `${projectRoot}/packages/py_api/local_dev_test_py_api/main.py`;
       writeFileSync(
         pyApiMainFile,
-        `from serve_local_test_py_table.entities.example import ExampleModel
+        `from local_dev_test_py_table.entities.example import ExampleModel
 
 ${readFileSync(pyApiMainFile, 'utf-8')}
 
@@ -608,7 +608,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         'my_py_agui_agent',
         'gw_py_agent',
       ]) {
-        const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/${dir}/agent.py`;
+        const file = `${projectRoot}/packages/py_project/local_dev_test_py_project/${dir}/agent.py`;
         let content = readFileSync(file, 'utf-8');
         content = `from strands.models.openai import OpenAIModel\n${content}`;
         content = content.replace(
@@ -626,7 +626,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         'my_py_langchain_http_agent',
         'my_py_langchain_a2a_agent',
       ]) {
-        const file = `${projectRoot}/packages/py_project/serve_local_test_py_project/${dir}/agent.py`;
+        const file = `${projectRoot}/packages/py_project/local_dev_test_py_project/${dir}/agent.py`;
         let content = readFileSync(file, 'utf-8');
         content = `from langchain_openai import ChatOpenAI\n${content}`;
         content = content.replace(
@@ -637,13 +637,13 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       }
 
       // Install openai dep for agents
-      await runCLI(`pnpm add openai --filter=@serve-local-test/ts-project`, {
+      await runCLI(`pnpm add openai --filter=@local-dev-test/ts-project`, {
         cwd: projectRoot,
         prefixWithPackageManagerCmd: false,
       });
-      await runCLI(`run serve_local_test.py_project:add -- openai`, opts);
+      await runCLI(`run local_dev_test.py_project:add -- openai`, opts);
       await runCLI(
-        `run serve_local_test.py_project:add -- langchain-openai`,
+        `run local_dev_test.py_project:add -- langchain-openai`,
         opts,
       );
 
@@ -652,102 +652,102 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         trpc: getPortFromProjectJson(
           projectRoot,
           'packages/my-api/project.json',
-          'serve-local',
+          'dev',
         ),
         fastApi: getPortFromProjectJson(
           projectRoot,
           'packages/py_api/project.json',
-          'serve-local',
+          'dev',
         ),
         smithy: getPortFromProjectJson(
           projectRoot,
           'packages/my-smithy-api/backend/project.json',
-          'serve-local',
+          'dev',
         ),
         tsAgent: getPortFromProjectJson(
           projectRoot,
           'packages/ts-project/project.json',
-          'my-agent-serve-local',
+          'my-agent-dev',
         ),
         tsA2a: getPortFromProjectJson(
           projectRoot,
           'packages/ts-project/project.json',
-          'my-a2a-agent-serve-local',
+          'my-a2a-agent-dev',
         ),
         tsAgui: getPortFromProjectJson(
           projectRoot,
           'packages/ts-project/project.json',
-          'my-agui-agent-serve-local',
+          'my-agui-agent-dev',
         ),
         tsMcp: getPortFromProjectJson(
           projectRoot,
           'packages/ts-project/project.json',
-          'my-mcp-serve-local',
+          'my-mcp-dev',
         ),
         pyAgent: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-agent-serve-local',
+          'my-py-agent-dev',
         ),
         pyA2a: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-a2a-agent-serve-local',
+          'my-py-a2a-agent-dev',
         ),
         pyAgui: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-agui-agent-serve-local',
+          'my-py-agui-agent-dev',
         ),
         pyLangchainAgui: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-langchain-agent-serve-local',
+          'my-py-langchain-agent-dev',
         ),
         pyLangchainHttp: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-langchain-http-agent-serve-local',
+          'my-py-langchain-http-agent-dev',
         ),
         pyLangchainA2a: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-langchain-a2a-agent-serve-local',
+          'my-py-langchain-a2a-agent-dev',
         ),
         pyMcp: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'my-py-mcp-serve-local',
+          'my-py-mcp-dev',
         ),
         rdb: getPortFromProjectJson(
           projectRoot,
           'packages/postgres-db/project.json',
-          'serve-local',
+          'dev',
         ),
         pyTable: getPortFromProjectJson(
           projectRoot,
           'packages/py_table/project.json',
-          'serve-local',
+          'dev',
         ),
         gwAgent: getPortFromProjectJson(
           projectRoot,
           'packages/ts-project/project.json',
-          'gw-agent-serve-local',
+          'gw-agent-dev',
         ),
         gwPyAgent: getPortFromProjectJson(
           projectRoot,
           'packages/py_project/project.json',
-          'gw-py-agent-serve-local',
+          'gw-py-agent-dev',
         ),
         gateway: getPortFromProjectJson(
           projectRoot,
           'packages/my-gateway/project.json',
-          'my-gateway-serve-local',
+          'my-gateway-dev',
         ),
         parentGateway: getPortFromProjectJson(
           projectRoot,
           'packages/parent-gateway/project.json',
-          'parent-gateway-serve-local',
+          'parent-gateway-dev',
         ),
       };
       console.log('Ports discovered:', ports);
@@ -768,7 +768,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('tRPC API - echo', async () => {
-    await startAndWait('@serve-local-test/my-api:serve-local', ports.trpc);
+    await startAndWait('@local-dev-test/my-api:dev', ports.trpc);
     const input = encodeURIComponent(JSON.stringify({ message: 'hello' }));
     const res = await fetch(
       `http://127.0.0.1:${ports.trpc}/echo?input=${input}`,
@@ -780,13 +780,13 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('FastAPI - echo + DynamoDB persists via PynamoDB client', async () => {
-    // py_api:serve-local cascades DynamoDB Local (the FastAPI is connected to
-    // the py#dynamodb table) and sets SERVE_LOCAL=true, so the generated
+    // py_api:dev cascades DynamoDB Local (the FastAPI is connected to
+    // the py#dynamodb table) and sets LOCAL_DEV=true, so the generated
     // PynamoDB client points at the local table. Drive the echo route plus the
     // DynamoDB-backed routes over the one server lifecycle: a separate test
-    // can't restart py_api:serve-local because uvicorn's dev reloader holds the
+    // can't restart py_api:dev because uvicorn's dev reloader holds the
     // port briefly after stop (EADDRINUSE).
-    await startAndWait('serve_local_test.py_api:serve-local', ports.fastApi);
+    await startAndWait('local_dev_test.py_api:dev', ports.fastApi);
     await waitForPort(ports.pyTable, STARTUP_TIMEOUT_MS);
 
     const base = `http://127.0.0.1:${ports.fastApi}`;
@@ -840,7 +840,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Smithy API - echo', async () => {
     await startAndWait(
-      '@serve-local-test/my-smithy-api:serve-local',
+      '@local-dev-test/my-smithy-api:dev',
       ports.smithy,
     );
     const res = await fetch(
@@ -854,7 +854,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('TS HTTP Agent - WebSocket streaming invoke', async () => {
     await startAndWait(
-      '@serve-local-test/ts-project:my-agent-serve-local',
+      '@local-dev-test/ts-project:my-agent-dev',
       ports.tsAgent,
     );
 
@@ -903,11 +903,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     console.log(`TS Agent streamed ${chunks.length} chunks:`, chunks.join(''));
     expect(chunks.length).toBeGreaterThan(0);
 
-    // The standalone chat CLI connects to the running serve-local server and
+    // The standalone chat CLI connects to the running dev server and
     // streams the mock LLM's reply back through the interactive prompt.
     await chatStreamsReply(
       projectRoot,
-      '@serve-local-test/ts-project:my-agent-chat',
+      '@local-dev-test/ts-project:my-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -918,7 +918,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // The gateway fronts the TypeScript `my-mcp` and Python `my-py-mcp`
     // servers. Drive the LLM mock to call a gateway-prefixed tool
     // (`<target>___<tool>`) from each, and echo the tool result. A successful
-    // round-trip for both proves the local gateway booted under SERVE_LOCAL,
+    // round-trip for both proves the local gateway booted under LOCAL_DEV,
     // aggregated tools from every attached MCP server, and routed each call
     // to the right upstream server. This exercises the gateway's core job:
     // aggregating multiple (heterogeneous) MCP servers behind one endpoint.
@@ -948,11 +948,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       .first()
       .times(4);
 
-    // gw-agent-serve-local chains the gateway's serve-local, which starts
-    // both attached MCP servers (deduped with any other serve-local chains
+    // gw-agent-dev chains the gateway's dev target, which starts
+    // both attached MCP servers (deduped with any other dev chains
     // in the same task graph).
     await startAndWait(
-      '@serve-local-test/ts-project:gw-agent-serve-local',
+      '@local-dev-test/ts-project:gw-agent-dev',
       ports.gwAgent,
     );
 
@@ -1016,7 +1016,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // `my-mcp` and Python `my-py-mcp` servers. Drive the LLM mock to call a
     // gateway-prefixed tool (`<target>___<tool>`) from each and echo the
     // result. A successful round-trip for both proves the Python agent booted
-    // the local gateway under SERVE_LOCAL, aggregated tools from every
+    // the local gateway under LOCAL_DEV, aggregated tools from every
     // attached MCP server, and routed each call to the right upstream server.
     type MockReq = {
       lastMessage: string;
@@ -1039,11 +1039,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       .first()
       .times(4);
 
-    // gw-py-agent-serve-local chains the gateway's serve-local, which starts
-    // both attached MCP servers (deduped with any other serve-local chains in
+    // gw-py-agent-dev chains the gateway's dev target, which starts
+    // both attached MCP servers (deduped with any other dev chains in
     // the same task graph).
     await startAndWait(
-      'serve_local_test.py_project:gw-py-agent-serve-local',
+      'local_dev_test.py_project:gw-py-agent-dev',
       ports.gwPyAgent,
     );
 
@@ -1084,7 +1084,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('AgentCore Gateway - chained local gateways (gateway -> gateway -> MCP servers)', async () => {
     // parent-gateway fronts my-gateway, which fronts the TypeScript `my-mcp`
-    // and Python `my-py-mcp` servers. Starting the parent's serve-local boots
+    // and Python `my-py-mcp` servers. Starting the parent's dev target boots
     // the whole chain. Listing tools on the parent must surface my-gateway's
     // (already prefixed) tools under a second prefix
     // (`my-gateway___<target>___<tool>`), and calling one must route
@@ -1097,7 +1097,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     );
 
     await startAndWait(
-      '@serve-local-test/parent-gateway:parent-gateway-serve-local',
+      '@local-dev-test/parent-gateway:parent-gateway-dev',
       ports.parentGateway,
     );
     // The chain is started in dependency order; wait for the inner gateway
@@ -1142,7 +1142,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('TS A2A Agent - card + streaming message', async () => {
     await startAndWait(
-      '@serve-local-test/ts-project:my-a2a-agent-serve-local',
+      '@local-dev-test/ts-project:my-a2a-agent-dev',
       ports.tsA2a,
     );
 
@@ -1182,7 +1182,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      '@serve-local-test/ts-project:my-a2a-agent-chat',
+      '@local-dev-test/ts-project:my-a2a-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1191,7 +1191,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('TS AG-UI Agent - streaming invocation', async () => {
     await startAndWait(
-      '@serve-local-test/ts-project:my-agui-agent-serve-local',
+      '@local-dev-test/ts-project:my-agui-agent-dev',
       ports.tsAgui,
     );
 
@@ -1220,7 +1220,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      '@serve-local-test/ts-project:my-agui-agent-chat',
+      '@local-dev-test/ts-project:my-agui-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1229,7 +1229,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Python HTTP Agent - JSONL streaming invoke', async () => {
     await startAndWait(
-      'serve_local_test.py_project:my-py-agent-serve-local',
+      'local_dev_test.py_project:my-py-agent-dev',
       ports.pyAgent,
     );
 
@@ -1256,7 +1256,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // HTTP chat builds the generated client first, then connects.
     await chatStreamsReply(
       projectRoot,
-      'serve_local_test.py_project:my-py-agent-chat',
+      'local_dev_test.py_project:my-py-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1265,7 +1265,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Python A2A Agent - card + streaming message', async () => {
     await startAndWait(
-      'serve_local_test.py_project:my-py-a2a-agent-serve-local',
+      'local_dev_test.py_project:my-py-a2a-agent-dev',
       ports.pyA2a,
     );
 
@@ -1305,7 +1305,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      'serve_local_test.py_project:my-py-a2a-agent-chat',
+      'local_dev_test.py_project:my-py-a2a-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1314,7 +1314,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Python AG-UI Agent - streaming invocation', async () => {
     await startAndWait(
-      'serve_local_test.py_project:my-py-agui-agent-serve-local',
+      'local_dev_test.py_project:my-py-agui-agent-dev',
       ports.pyAgui,
     );
 
@@ -1343,7 +1343,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      'serve_local_test.py_project:my-py-agui-agent-chat',
+      'local_dev_test.py_project:my-py-agui-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1351,14 +1351,14 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('Python LangChain AG-UI Agent - streaming invocation with MCP + A2A + gateway connections', async () => {
-    // Starting this agent's serve-local boots the langchain MCP tool loader,
+    // Starting this agent's dev target boots the langchain MCP tool loader,
     // the A2A delegation tool and the langchain gateway client (and, via the
-    // serve-local dependency chain, the MCP server, A2A agent and local
+    // dev dependency chain, the MCP server, A2A agent and local
     // gateway). A bare asyncio.run() in the MCP loader would crash under
     // uvicorn's running loop, so a successful 200 + SSE stream proves the
     // whole langchain connection surface loads and the agent runs.
     await startAndWait(
-      'serve_local_test.py_project:my-py-langchain-agent-serve-local',
+      'local_dev_test.py_project:my-py-langchain-agent-dev',
       ports.pyLangchainAgui,
     );
 
@@ -1393,7 +1393,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      'serve_local_test.py_project:my-py-langchain-agent-chat',
+      'local_dev_test.py_project:my-py-langchain-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1402,7 +1402,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Python LangChain HTTP Agent - JSONL streaming invoke', async () => {
     await startAndWait(
-      'serve_local_test.py_project:my-py-langchain-http-agent-serve-local',
+      'local_dev_test.py_project:my-py-langchain-http-agent-dev',
       ports.pyLangchainHttp,
     );
 
@@ -1435,7 +1435,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      'serve_local_test.py_project:my-py-langchain-http-agent-chat',
+      'local_dev_test.py_project:my-py-langchain-http-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1444,7 +1444,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Python LangChain A2A Agent - card + streaming message', async () => {
     await startAndWait(
-      'serve_local_test.py_project:my-py-langchain-a2a-agent-serve-local',
+      'local_dev_test.py_project:my-py-langchain-a2a-agent-dev',
       ports.pyLangchainA2a,
     );
 
@@ -1483,7 +1483,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
     await chatStreamsReply(
       projectRoot,
-      'serve_local_test.py_project:my-py-langchain-a2a-agent-chat',
+      'local_dev_test.py_project:my-py-langchain-a2a-agent-chat',
       'The answer is 42',
       STARTUP_TIMEOUT_MS,
     );
@@ -1492,7 +1492,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('TS MCP Server - initialize handshake', async () => {
     await startAndWait(
-      '@serve-local-test/ts-project:my-mcp-serve-local',
+      '@local-dev-test/ts-project:my-mcp-dev',
       ports.tsMcp,
     );
 
@@ -1521,7 +1521,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
   it('Python MCP Server - initialize handshake', async () => {
     await startAndWait(
-      'serve_local_test.py_project:my-py-mcp-serve-local',
+      'local_dev_test.py_project:my-py-mcp-dev',
       ports.pyMcp,
     );
 
@@ -1549,10 +1549,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('PostgreSQL RDB - Docker start + ready', async () => {
-    await startAndWait('@serve-local-test/postgres-db:serve-local', ports.rdb);
+    await startAndWait('@local-dev-test/postgres-db:dev', ports.rdb);
     console.log(`Postgres listening on port ${ports.rdb}`);
 
-    await runCLI(`run @serve-local-test/postgres-db:wait-for-db`, {
+    await runCLI(`run @local-dev-test/postgres-db:wait-for-db`, {
       cwd: projectRoot,
       env: { NX_DAEMON: 'true' },
     });
@@ -1561,12 +1561,12 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('Website integration - browser drives connected APIs + agents', async () => {
-    // Starting the website's serve-local cascades every connected backend (the
+    // Starting the website's dev target cascades every connected backend (the
     // 3 APIs and the connected agents). Drive the website in a real browser
     // through the integration-test page, which invokes each one via the
     // website's vended clients — proving the full
     // runtime-config → client → backend path works.
-    await startAndWait('@serve-local-test/website:serve-local', 4200);
+    await startAndWait('@local-dev-test/website:dev', 4200);
 
     // Wait for the cascaded backends the page will reach.
     await waitForPort(ports.trpc, STARTUP_TIMEOUT_MS);

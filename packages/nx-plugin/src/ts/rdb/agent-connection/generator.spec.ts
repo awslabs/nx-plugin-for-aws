@@ -17,7 +17,7 @@ describe('ts#rdb agent-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -34,7 +34,7 @@ describe('ts#rdb agent-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          [`${agentName}-serve-local`]: {
+          [`${agentName}-dev`]: {
             executor: 'nx:run-commands',
             continuous: true,
           },
@@ -94,7 +94,7 @@ export const getAgent = async () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add rdb serve-local dependency to the agent prefixed serve-local', async () => {
+  it('should add rdb dev dependency to the agent prefixed dev', async () => {
     setupAgentProject('my-service', 'my-agent');
     setupRdbProject();
 
@@ -163,7 +163,7 @@ export const getAgent = async () => {
     ).toMatchSnapshot();
   });
 
-  it('should fall back to agent-serve-local when no component name', async () => {
+  it('should fall back to agent-dev when no component name', async () => {
     setupAgentProject('my-service', 'agent');
     setupRdbProject();
 
@@ -261,7 +261,7 @@ export const getAgent = async () => {
     ).toMatchSnapshot();
   });
 
-  it('should not add dependency when agent serve-local target does not exist', async () => {
+  it('should not add dependency when agent dev target does not exist', async () => {
     tree.write(
       `packages/my-service/project.json`,
       JSON.stringify({
@@ -279,10 +279,10 @@ export const getAgent = async () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-service');
-    expect(config.targets?.['my-agent-serve-local']).toBeUndefined();
+    expect(config.targets?.['my-agent-dev']).toBeUndefined();
   });
 
-  it('should be idempotent for serve-local wiring', async () => {
+  it('should be idempotent for dev wiring', async () => {
     setupAgentProject('my-service', 'my-agent');
     setupRdbProject();
 
@@ -299,12 +299,12 @@ export const getAgent = async () => {
 
     const config = readProjectConfiguration(tree, 'my-service');
     const deps = (
-      config.targets?.['my-agent-serve-local']?.dependsOn ?? []
+      config.targets?.['my-agent-dev']?.dependsOn ?? []
     ).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });

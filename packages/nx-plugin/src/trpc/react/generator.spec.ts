@@ -409,7 +409,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     });
   });
 
-  it('should configure serve-local integration with generated projects', async () => {
+  it('should configure dev integration with generated projects', async () => {
     // Generate a trpc backend
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
@@ -428,10 +428,10 @@ describe('trpc react generator with real react and trpc projects', () => {
       tree.read('frontend/project.json', 'utf-8'),
     );
 
-    // Verify that serve-local target now depends on backend serve-local target
-    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+    // Verify that dev target now depends on backend dev target
+    expect(frontendProject.targets['dev'].dependsOn).toContainEqual({
       projects: ['@proj/test-api'],
-      target: 'serve-local',
+      target: 'dev',
     });
 
     // Verify that the runtime config was created and modified

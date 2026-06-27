@@ -17,7 +17,7 @@ describe('ts#dynamodb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -30,7 +30,7 @@ describe('ts#dynamodb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          [`${serverName}-serve-local`]: {
+          [`${serverName}-dev`]: {
             executor: 'nx:run-commands',
             continuous: true,
           },
@@ -43,7 +43,7 @@ describe('ts#dynamodb mcp-server-connection generator', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add dynamodb serve-local dependency to mcp-server serve-local', async () => {
+  it('should add dynamodb dev dependency to mcp-server dev', async () => {
     setupMcpProject();
     setupDynamoDBProject();
 
@@ -68,7 +68,7 @@ describe('ts#dynamodb mcp-server-connection generator', () => {
     expect(readProjectConfiguration(tree, 'my-mcp')).toMatchSnapshot();
   });
 
-  it('should not add dependency when source has no matching serve-local', async () => {
+  it('should not add dependency when source has no matching dev', async () => {
     tree.write(
       `packages/my-mcp/project.json`,
       JSON.stringify({
@@ -85,7 +85,7 @@ describe('ts#dynamodb mcp-server-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-mcp');
-    expect(config.targets?.['mcp-server-serve-local']).toBeUndefined();
+    expect(config.targets?.['mcp-server-dev']).toBeUndefined();
   });
 
   it('should be idempotent', async () => {
@@ -103,12 +103,12 @@ describe('ts#dynamodb mcp-server-connection generator', () => {
 
     const config = readProjectConfiguration(tree, 'my-mcp');
     const deps = (
-      config.targets?.['mcp-server-serve-local']?.dependsOn ?? []
+      config.targets?.['mcp-server-dev']?.dependsOn ?? []
     ).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });

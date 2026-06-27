@@ -26,7 +26,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addDevAlias,
+  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -213,7 +213,7 @@ export const pyMcpServerGenerator = async (
         },
       },
     },
-    [`${mcpTargetPrefix}-serve-local`]: {
+    [`${mcpTargetPrefix}-dev`]: {
       executor: 'nx:run-commands',
       continuous: true,
       options: {
@@ -223,17 +223,17 @@ export const pyMcpServerGenerator = async (
         cwd: '{projectRoot}',
         env: {
           PORT: `${localDevPort}`,
-          SERVE_LOCAL: 'true',
+          LOCAL_DEV: 'true',
         },
       },
     },
     [`${mcpTargetPrefix}-inspect`]: {
       executor: 'nx:run-commands',
       continuous: true,
-      // Launch the inspector against the locally served (serve-local) HTTP
-      // server. serve-local starts the server and any connected dependencies
-      // (e.g. a local database).
-      dependsOn: [`${mcpTargetPrefix}-serve-local`],
+      // Launch the inspector against the locally served HTTP server. The dev
+      // target starts the server and any connected dependencies (e.g. a local
+      // database).
+      dependsOn: [`${mcpTargetPrefix}-dev`],
       options: {
         commands: [
           `mcp-inspector --transport http --server-url http://localhost:${localDevPort}/mcp`,
@@ -253,12 +253,8 @@ export const pyMcpServerGenerator = async (
     },
   };
 
-  // `<mcp>-dev` aliases `<mcp>-serve-local`; the first component in a project
-  // also gets a project-level `dev` aliasing it.
-  addDevAlias(mcpTargets, `${mcpTargetPrefix}-serve-local`, {
-    devTargetName: `${mcpTargetPrefix}-dev`,
-    aliasAsProjectDev: true,
-  });
+  // Aggregate `<mcp>-dev` under the project-level `dev` target.
+  addComponentDevTarget(mcpTargets, `${mcpTargetPrefix}-dev`);
 
   updateProjectConfiguration(tree, project.name, {
     ...project,

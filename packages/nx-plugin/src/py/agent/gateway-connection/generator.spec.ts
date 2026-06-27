@@ -21,9 +21,9 @@ describe('py#agent#gateway-connection generator', () => {
         sourceRoot: 'packages/my-agent/my_scope_my_agent',
         targets: {
           build: {},
-          'my-agent-serve-local': {
+          'my-agent-dev': {
             executor: 'nx:run-commands',
-            options: { commands: ['echo serve-local'] },
+            options: { commands: ['echo dev'] },
             dependsOn: [],
             continuous: true,
           },
@@ -76,7 +76,7 @@ dependencies = ["strands-agents"]
           port: 8100,
         },
         targets: {
-          'my-gateway-serve-local': {
+          'my-gateway-dev': {
             executor: 'nx:run-commands',
             options: {
               commands: ['node -e "setInterval(()=>{}, 1000)"'],
@@ -164,7 +164,7 @@ dependencies = ["strands-agents"]
       .toString();
     expect(client).toContain('class MyGatewayClientStrands');
     expect(client).toContain('config.get("gateways", {}).get("MyGateway")');
-    expect(client).toContain('SERVE_LOCAL');
+    expect(client).toContain('LOCAL_DEV');
   });
 
   it('points local mode at the gateway port from project metadata', async () => {
@@ -233,18 +233,18 @@ dependencies = ["strands-agents"]
     expect(agent).toContain('*my_gateway.list_tools_sync()');
   });
 
-  it('chains agent serve-local onto gateway serve-local', async () => {
+  it('chains agent dev onto gateway dev', async () => {
     setupProjects();
     await pyAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const cfg = JSON.parse(
       tree.read('packages/my-agent/project.json')!.toString(),
     );
-    const deps = cfg.targets['my-agent-serve-local'].dependsOn;
+    const deps = cfg.targets['my-agent-dev'].dependsOn;
     expect(deps).toContainEqual(
       expect.objectContaining({
         projects: ['@test/my-gateway'],
-        target: 'my-gateway-serve-local',
+        target: 'my-gateway-dev',
       }),
     );
   });

@@ -22,7 +22,6 @@ import { resolveIac } from '../../utils/iac';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
 import {
-  addDevAlias,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -110,18 +109,16 @@ export const pyFastApiProjectGenerator = async (
     },
   };
 
-  projectConfig.targets['serve-local'] = {
-    ...projectConfig.targets['serve-local'],
+  projectConfig.targets['dev'] = {
+    ...projectConfig.targets['dev'],
     ...projectConfig.targets.serve,
     options: {
       ...projectConfig.targets.serve.options,
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   };
-
-  addDevAlias(projectConfig.targets, 'serve-local');
 
   projectConfig.metadata = {
     ...projectConfig.metadata,

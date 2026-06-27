@@ -168,16 +168,16 @@ export const tsAgentA2aConnectionGenerator = async (
     );
   }
 
-  // 4. Set up serve-local target — depend on the target agent's serve-local
-  //    so running the host's serve-local also spins up the remote A2A agent.
+  // 4. Set up dev target — depend on the target agent's dev
+  //    so running the host's dev also spins up the remote A2A agent.
   const agentName = agentComponent.name ?? 'agent';
-  const serveLocalTargetName = `${agentName}-serve-local`;
-  const targetServeLocalTargetName = `${targetAgentComponentName}-serve-local`;
+  const devTargetName = `${agentName}-dev`;
+  const targetDevTargetName = `${targetAgentComponentName}-dev`;
 
-  if (sourceProject.targets?.[serveLocalTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+  if (sourceProject.targets?.[devTargetName]) {
+    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
       projects: [targetProject.name],
-      target: targetServeLocalTargetName,
+      target: targetDevTargetName,
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }

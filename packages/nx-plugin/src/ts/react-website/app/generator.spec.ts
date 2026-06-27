@@ -178,26 +178,21 @@ describe('react-website generator', () => {
     );
   });
 
-  it('should add a serve-local target with mode serve-local', async () => {
+  it('should add a dev target with mode local-dev', async () => {
     // Call the generator function
     await tsReactWebsiteGenerator(tree, options);
 
     const projectConfig = readJson(tree, 'test-app/project.json');
-    expect(projectConfig.targets).toHaveProperty('serve-local');
-    expect(projectConfig.targets['serve-local'].options.command).toContain(
-      '--mode serve-local',
+    expect(projectConfig.targets).toHaveProperty('dev');
+    expect(projectConfig.targets['dev'].executor).toBe('nx:run-commands');
+    expect(projectConfig.targets['dev'].options.command).toContain(
+      '--mode local-dev',
     );
-    expect(projectConfig.targets['serve-local'].continuous).toBeTruthy();
+    expect(projectConfig.targets['dev'].continuous).toBeTruthy();
   });
 
-  it('should add a dev target that is an alias for serve-local', async () => {
+  it('should map the inferred vite dev-server target onto serve', async () => {
     await tsReactWebsiteGenerator(tree, options);
-
-    const projectConfig = readJson(tree, 'test-app/project.json');
-    expect(projectConfig.targets.dev).toEqual({
-      continuous: true,
-      dependsOn: ['serve-local'],
-    });
 
     // The @nx/vite plugin's inferred dev-server targets are both mapped onto
     // `serve` so the plugin does not emit its own `dev` target.
@@ -421,7 +416,7 @@ describe('react-website generator', () => {
 
         // Should still have basic website targets
         expect(projectConfig.targets.build).toBeDefined();
-        expect(projectConfig.targets['serve-local']).toBeDefined();
+        expect(projectConfig.targets['dev']).toBeDefined();
       });
 
       it('should not create CDK constructs when using terraform', async () => {

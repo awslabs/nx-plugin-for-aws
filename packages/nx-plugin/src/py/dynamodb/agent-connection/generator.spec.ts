@@ -17,7 +17,7 @@ describe('py#dynamodb agent-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -30,7 +30,7 @@ describe('py#dynamodb agent-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          [`${agentName}-serve-local`]: {
+          [`${agentName}-dev`]: {
             executor: 'nx:run-commands',
             continuous: true,
           },
@@ -43,7 +43,7 @@ describe('py#dynamodb agent-connection generator', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add dynamodb serve-local dependency to agent serve-local', async () => {
+  it('should add dynamodb dev dependency to agent dev', async () => {
     setupAgentProject();
     setupDynamoDBProject();
 
@@ -98,7 +98,7 @@ describe('py#dynamodb agent-connection generator', () => {
     expect(pyprojectContent).not.toContain('test.db');
   });
 
-  it('should not add dependency when source has no matching serve-local', async () => {
+  it('should not add dependency when source has no matching dev', async () => {
     tree.write(
       `packages/my-agent/project.json`,
       JSON.stringify({
@@ -115,7 +115,7 @@ describe('py#dynamodb agent-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-agent');
-    expect(config.targets?.['agent-serve-local']).toBeUndefined();
+    expect(config.targets?.['agent-dev']).toBeUndefined();
   });
 
   it('should be idempotent', async () => {
@@ -133,12 +133,12 @@ describe('py#dynamodb agent-connection generator', () => {
 
     const config = readProjectConfiguration(tree, 'my-agent');
     const deps = (
-      config.targets?.['agent-serve-local']?.dependsOn ?? []
+      config.targets?.['agent-dev']?.dependsOn ?? []
     ).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });

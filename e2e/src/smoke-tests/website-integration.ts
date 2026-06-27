@@ -24,7 +24,7 @@ import { FsTree, flushChanges } from 'nx/src/generators/tree';
  * green run proves the end-to-end path a user's browser actually takes:
  * runtime-config → auth → generated client → backend.
  *
- * The same example page and runner are shared by the serve-local (no auth) and
+ * The same example page and runner are shared by the local-dev (no auth) and
  * cdk/terraform deploy (Cognito + SigV4) smoke tests so all three stay in
  * lock-step as the generators evolve.
  */

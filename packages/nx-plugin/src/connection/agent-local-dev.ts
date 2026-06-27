@@ -14,7 +14,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
 
-export interface AgentServeLocalOptions {
+export interface AgentLocalDevOptions {
   agentNameClassName: string;
   port: number;
   targetComponent?: ComponentMetadata;
@@ -28,24 +28,24 @@ export interface AgentServeLocalOptions {
    */
   localUrl: string;
   /**
-   * Additional targets to add as serve-local dependencies.
+   * Additional targets to add as dev dependencies.
    */
   additionalDependencyTargets?: string[];
 }
 
 /**
- * Adds a Strands Agent's component serve-local target as a dependency of the
- * source project's serve-local target, and updates the RuntimeConfig provider
+ * Adds a Strands Agent's component dev target as a dependency of the
+ * source project's dev target, and updates the RuntimeConfig provider
  * to point to the agent's local URL.
  *
  * This is the shared implementation used by both Python and TypeScript Strands
  * Agent react-connection generators.
  */
-export const addAgentTargetToServeLocal = async (
+export const addAgentTargetToLocalDev = async (
   tree: Tree,
   sourceProjectName: string,
   targetProjectName: string,
-  options: AgentServeLocalOptions,
+  options: AgentLocalDevOptions,
 ) => {
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
@@ -56,33 +56,33 @@ export const addAgentTargetToServeLocal = async (
     targetProjectName,
   );
 
-  // Determine the serve-local target name for the agent component
-  const agentServeLocalTargetName = options.targetComponent?.name
-    ? `${options.targetComponent.name}-serve-local`
-    : 'agent-serve-local';
+  // Determine the dev target name for the agent component
+  const agentDevTargetName = options.targetComponent?.name
+    ? `${options.targetComponent.name}-dev`
+    : 'agent-dev';
 
-  // Target project must have the agent serve-local target which is continuous
+  // Target project must have the agent dev target which is continuous
   if (
     !(
-      targetProject.targets?.[agentServeLocalTargetName]?.continuous &&
-      sourceProject.targets?.['serve-local']
+      targetProject.targets?.[agentDevTargetName]?.continuous &&
+      sourceProject.targets?.['dev']
     )
   ) {
     return;
   }
 
-  // Add a dependency on the agent serve-local target (so that the agent's
-  // own serve-local dependencies, such as MCP servers, are also started)
-  addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {
+  // Add a dependency on the agent dev target (so that the agent's
+  // own dev dependencies, such as MCP servers, are also started)
+  addDependencyToTargetIfNotPresent(sourceProject, 'dev', {
     projects: [targetProject.name],
-    target: agentServeLocalTargetName,
+    target: agentDevTargetName,
   });
   for (const additional of options.additionalDependencyTargets ?? []) {
-    addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', additional);
+    addDependencyToTargetIfNotPresent(sourceProject, 'dev', additional);
   }
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
-  // Add an override to runtime-config for the serve-local target to use the local url
+  // Add an override to runtime-config for the dev target to use the local url
   const runtimeConfigProvider = joinPathFragments(
     sourceProject.root,
     'src',
@@ -94,7 +94,7 @@ export const addAgentTargetToServeLocal = async (
     await applyGritQL(
       tree,
       runtimeConfigProvider,
-      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName} = '${options.localUrl}';\n  }\` where { $cond <: contains \`'serve-local'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName}\` }`,
+      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName} = '${options.localUrl}';\n  }\` where { $cond <: contains \`'local-dev'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName}\` }`,
     );
   }
 };
