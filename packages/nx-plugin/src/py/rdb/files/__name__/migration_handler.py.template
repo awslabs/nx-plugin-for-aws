@@ -1,4 +1,7 @@
 import os
+<%_ if (engine === 'mysql') { _%>
+import ssl
+<%_ } _%>
 
 import boto3
 from alembic import command
@@ -19,26 +22,17 @@ def _run_migrations() -> None:
         Port=port,
         DBUsername=db_user,
     )
-<%_ if (engine === 'mysql') { _%>
-    database_url = build_database_url(db_user, hostname, port, database, password=token, ssl=False)
-<%_ } else { _%>
     database_url = build_database_url(db_user, hostname, port, database, password=token)
-<%_ } _%>
     alembic_cfg = Config('alembic.ini')
 <%_ if (engine === 'mysql') { _%>
-    engine = create_engine(
-        database_url,
-        poolclass=NullPool,
-        connect_args={
-            'auth_plugin_map': {'mysql_clear_password': None},
-            'ssl_ca': '/etc/pki/ca-trust/source/anchors/rds-bundle.pem',
-            'ssl_verify_cert': True,
-            'ssl_verify_identity': True,
-        },
-    )
+    connect_args = {
+        'auth_plugin_map': {'mysql_clear_password': None},
+        'ssl': ssl.create_default_context(),
+    }
 <%_ } else { _%>
-    engine = create_engine(database_url, poolclass=NullPool)
+    connect_args = {'sslmode': 'verify-full'}
 <%_ } _%>
+    engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
             alembic_cfg.attributes['connection'] = connection

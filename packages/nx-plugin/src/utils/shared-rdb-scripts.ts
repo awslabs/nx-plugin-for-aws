@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -13,6 +14,7 @@ import {
   SHARED_SCRIPTS_DIR,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
+import { withVersions } from './versions';
 
 /**
  * Ensures the shared scripts package exists and adds RDB local-dev scripts
@@ -58,4 +60,6 @@ export async function sharedRdbScriptsGenerator(
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 }

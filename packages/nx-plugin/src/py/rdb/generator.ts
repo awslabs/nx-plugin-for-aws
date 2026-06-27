@@ -4,6 +4,7 @@
  */
 import { relative } from 'node:path';
 import {
+  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   installPackagesTask,
@@ -37,7 +38,7 @@ import {
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
 import { sharedRdbScriptsGenerator } from '../../utils/shared-rdb-scripts';
-import { PY_VERSIONS } from '../../utils/versions';
+import { PY_VERSIONS, withVersions } from '../../utils/versions';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import type { PyRdbGeneratorSchema } from './schema';
 
@@ -115,6 +116,12 @@ export const pyRdbGenerator = async (
   );
 
   await sharedRdbScriptsGenerator(tree);
+  // Used by local dev script wait-for-db.ts
+  addDependenciesToPackageJson(
+    tree,
+    withVersions([options.engine === 'mysql' ? 'mariadb' : 'pg']),
+    {},
+  );
   const scriptsDir = relative(
     dir,
     joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'rdb'),

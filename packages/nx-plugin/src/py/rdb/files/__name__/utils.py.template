@@ -11,13 +11,7 @@ from sqlalchemy import URL
 DatabaseConfig = dict[str, Any]
 DatabaseSecret = dict[str, Any]
 
-_RDS_CA_CERT = '/etc/pki/ca-trust/source/anchors/rds-bundle.pem'
 _DB_DRIVER = '<%= engine === "mysql" ? "mysql+pymysql" : "postgresql+psycopg" %>'
-_SSL_QUERY: dict[str, str] = (
-    {'ssl_ca': _RDS_CA_CERT}
-    if _DB_DRIVER == 'mysql+pymysql'
-    else {'sslmode': 'verify-full', 'sslrootcert': _RDS_CA_CERT}
-)
 
 
 def build_database_url(
@@ -26,7 +20,6 @@ def build_database_url(
     port: int,
     database: str,
     password: str | None = None,
-    ssl: bool = True,
 ) -> URL:
     return URL.create(
         _DB_DRIVER,
@@ -35,7 +28,6 @@ def build_database_url(
         host=host,
         port=port,
         database=database,
-        query=_SSL_QUERY if ssl else {},
     )
 
 
@@ -43,30 +35,10 @@ def is_local() -> bool:
     return os.environ.get('SERVE_LOCAL') == 'true'
 
 
-def _get_serve_local_config() -> dict:
+def get_serve_local_config() -> dict:
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
     with open(config_path) as f:
         return json.load(f)['serveLocal']
-
-
-def get_connection_url(runtime_config_key: str) -> URL:
-    if is_local():
-        cfg = _get_serve_local_config()
-        return build_database_url(
-            cfg['dbUser'],
-            cfg['host'],
-            cfg['port'],
-            cfg['dbName'],
-            password=cfg['dbPassword'],
-            ssl=False,
-        )
-    config = get_database_config(runtime_config_key)
-    return build_database_url(
-        config['dbUser'],
-        config['hostname'],
-        config['port'],
-        config['database'],
-    )
 
 
 def get_database_secret() -> DatabaseSecret:

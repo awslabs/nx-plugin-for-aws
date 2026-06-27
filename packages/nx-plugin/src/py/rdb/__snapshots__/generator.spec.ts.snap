@@ -2,12 +2,18 @@
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 1`] = `
 "from collections.abc import Generator
+import ssl
 
 import boto3
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
-from .utils import get_connection_url, get_database_config, is_local
+from .utils import (
+    get_serve_local_config,
+    build_database_url,
+    get_database_config,
+    is_local,
+)
 
 # Generated: must match runtimeConfigKey in config.json
 _runtime_config_key = "Db"
@@ -16,14 +22,30 @@ _engine = None
 
 
 def _create_engine():
-    engine = create_engine(get_connection_url(_runtime_config_key))
-    if not is_local():
+    ssl_args: dict = {} if is_local() else {"ssl": ssl.create_default_context()}
+    if is_local():
+        cfg = get_serve_local_config()
+        url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
+    else:
         config = get_database_config(_runtime_config_key)
-        client = boto3.client("rds", region_name=config["region"])
+        url = build_database_url(
+            config["dbUser"],
+            config["hostname"],
+            config["port"],
+            config["database"],
+        )
+    engine = create_engine(url, connect_args=ssl_args)
 
-        @event.listens_for(engine, "do_connect")
-        def provide_iam_token(_dialect, _connection_record, _cargs, connection_params):
-            connection_params["password"] = client.generate_db_auth_token(
+    @event.listens_for(engine, "do_connect")
+    def provide_password(_dialect, _connection_record, _cargs, connection_params):
+        if is_local():
+            connection_params["password"] = get_serve_local_config()["dbPassword"]
+        else:
+            config = get_database_config(_runtime_config_key)
+            connection_params["password"] = boto3.client(
+                "rds",
+                region_name=config["region"],
+            ).generate_db_auth_token(
                 DBHostname=config["hostname"],
                 Port=config["port"],
                 DBUsername=config["dbUser"],
@@ -47,6 +69,7 @@ def get_session() -> Generator[Session]:
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 2`] = `
 "import os
+import ssl
 
 import boto3
 from alembic import command
@@ -69,20 +92,13 @@ def _run_migrations() -> None:
         Port=port,
         DBUsername=db_user,
     )
-    database_url = build_database_url(
-        db_user, hostname, port, database, password=token, ssl=False
-    )
+    database_url = build_database_url(db_user, hostname, port, database, password=token)
     alembic_cfg = Config("alembic.ini")
-    engine = create_engine(
-        database_url,
-        poolclass=NullPool,
-        connect_args={
-            "auth_plugin_map": {"mysql_clear_password": None},
-            "ssl_ca": "/etc/pki/ca-trust/source/anchors/rds-bundle.pem",
-            "ssl_verify_cert": True,
-            "ssl_verify_identity": True,
-        },
-    )
+    connect_args = {
+        "auth_plugin_map": {"mysql_clear_password": None},
+        "ssl": ssl.create_default_context(),
+    }
+    engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
             alembic_cfg.attributes["connection"] = connection
@@ -100,6 +116,8 @@ exports[`py#rdb generator > should generate MySQL dependencies and templates 3`]
 "import secrets
 from typing import Any
 
+import ssl
+
 import pymysql
 
 from .utils import get_database_secret, with_connection_retry
@@ -113,7 +131,7 @@ def _ensure_database_user(db_user: str) -> None:
         database=secret["dbname"],
         user=secret["username"],
         password=secret["password"],
-        ssl={"ca": "/etc/pki/ca-trust/source/anchors/rds-bundle.pem"},
+        ssl=ssl.create_default_context(),
         connect_timeout=10,
     )
     try:
@@ -916,9 +934,12 @@ output "database_runtime_user" {
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/env.py 1`] = `
-"from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
+"import json
+import os
+from logging.config import fileConfig
+
 from alembic import context
+from sqlalchemy import URL, engine_from_config, pool
 from sqlmodel import SQLModel
 
 # Import all models to register them in SQLModel.metadata
@@ -932,21 +953,13 @@ if config.config_file_name is not None:
 target_metadata = SQLModel.metadata
 
 
-def _get_url():
-    import json
-    import os
-
+def _get_local_url():
     if os.environ.get("SERVE_LOCAL") == "true":
         config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
         with open(config_path) as f:
             cfg = json.load(f)["serveLocal"]
-        from sqlalchemy import URL
-
         engine = cfg["dbEngine"]
-        if engine == "mysql":
-            driver = "mysql+pymysql"
-        else:
-            driver = "postgresql+psycopg"
+        driver = "mysql+pymysql" if engine == "mysql" else "postgresql+psycopg"
         return URL.create(
             driver,
             username=cfg["dbUser"],
@@ -956,16 +969,13 @@ def _get_url():
             database=cfg["dbName"],
         )
 
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        raise ValueError("DATABASE_URL environment variable is not set")
-    return url
+    raise RuntimeError("Run alembic via nx run <project>:alembic")
 
 
+# Generates SQL script without a live DB connection (alembic upgrade head --sql)
 def run_migrations_offline() -> None:
-    url = _get_url()
     context.configure(
-        url=url,
+        url=_get_local_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -974,8 +984,10 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Runs migrations against a live DB connection
 def run_migrations_online() -> None:
     supplied_connection = config.attributes.get("connection")
+    # Connection injected by migration_handler.py (Lambda)
     if supplied_connection is not None:
         context.configure(
             connection=supplied_connection,
@@ -985,8 +997,9 @@ def run_migrations_online() -> None:
             context.run_migrations()
         return
 
+    # Local alembic commands run via nx run <project>:alembic
     connectable = engine_from_config(
-        {"sqlalchemy.url": _get_url()},
+        {"sqlalchemy.url": _get_local_url()},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
@@ -1018,20 +1031,22 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-import sqlmodel
 \${imports if imports else ""}
 
+# revision identifiers, used by Alembic.
 revision: str = \${repr(up_revision)}
-down_revision: Union[str, None] = \${repr(down_revision)}
+down_revision: Union[str, Sequence[str], None] = \${repr(down_revision)}
 branch_labels: Union[str, Sequence[str], None] = \${repr(branch_labels)}
 depends_on: Union[str, Sequence[str], None] = \${repr(depends_on)}
 
 
 def upgrade() -> None:
+    """Upgrade schema."""
     \${upgrades if upgrades else "pass"}
 
 
 def downgrade() -> None:
+    """Downgrade schema."""
     \${downgrades if downgrades else "pass"}
 "
 `;
@@ -1052,7 +1067,12 @@ import boto3
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
-from .utils import get_connection_url, get_database_config, is_local
+from .utils import (
+    get_serve_local_config,
+    build_database_url,
+    get_database_config,
+    is_local,
+)
 
 # Generated: must match runtimeConfigKey in config.json
 _runtime_config_key = "Db"
@@ -1061,14 +1081,30 @@ _engine = None
 
 
 def _create_engine():
-    engine = create_engine(get_connection_url(_runtime_config_key))
-    if not is_local():
+    ssl_args: dict = {} if is_local() else {"sslmode": "verify-full"}
+    if is_local():
+        cfg = get_serve_local_config()
+        url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
+    else:
         config = get_database_config(_runtime_config_key)
-        client = boto3.client("rds", region_name=config["region"])
+        url = build_database_url(
+            config["dbUser"],
+            config["hostname"],
+            config["port"],
+            config["database"],
+        )
+    engine = create_engine(url, connect_args=ssl_args)
 
-        @event.listens_for(engine, "do_connect")
-        def provide_iam_token(_dialect, _connection_record, _cargs, connection_params):
-            connection_params["password"] = client.generate_db_auth_token(
+    @event.listens_for(engine, "do_connect")
+    def provide_password(_dialect, _connection_record, _cargs, connection_params):
+        if is_local():
+            connection_params["password"] = get_serve_local_config()["dbPassword"]
+        else:
+            config = get_database_config(_runtime_config_key)
+            connection_params["password"] = boto3.client(
+                "rds",
+                region_name=config["region"],
+            ).generate_db_auth_token(
                 DBHostname=config["hostname"],
                 Port=config["port"],
                 DBUsername=config["dbUser"],
@@ -1109,7 +1145,6 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret["username"],
         password=secret["password"],
         sslmode="verify-full",
-        sslrootcert="/etc/pki/ca-trust/source/anchors/rds-bundle.pem",
         connect_timeout=10,
     )
     try:
@@ -1197,7 +1232,8 @@ def _run_migrations() -> None:
     )
     database_url = build_database_url(db_user, hostname, port, database, password=token)
     alembic_cfg = Config("alembic.ini")
-    engine = create_engine(database_url, poolclass=NullPool)
+    connect_args = {"sslmode": "verify-full"}
+    engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
             alembic_cfg.attributes["connection"] = connection
@@ -1243,13 +1279,7 @@ from sqlalchemy import URL
 DatabaseConfig = dict[str, Any]
 DatabaseSecret = dict[str, Any]
 
-_RDS_CA_CERT = "/etc/pki/ca-trust/source/anchors/rds-bundle.pem"
 _DB_DRIVER = "postgresql+psycopg"
-_SSL_QUERY: dict[str, str] = (
-    {"ssl_ca": _RDS_CA_CERT}
-    if _DB_DRIVER == "mysql+pymysql"
-    else {"sslmode": "verify-full", "sslrootcert": _RDS_CA_CERT}
-)
 
 
 def build_database_url(
@@ -1258,7 +1288,6 @@ def build_database_url(
     port: int,
     database: str,
     password: str | None = None,
-    ssl: bool = True,
 ) -> URL:
     return URL.create(
         _DB_DRIVER,
@@ -1267,7 +1296,6 @@ def build_database_url(
         host=host,
         port=port,
         database=database,
-        query=_SSL_QUERY if ssl else {},
     )
 
 
@@ -1275,30 +1303,10 @@ def is_local() -> bool:
     return os.environ.get("SERVE_LOCAL") == "true"
 
 
-def _get_serve_local_config() -> dict:
+def get_serve_local_config() -> dict:
     config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
     with open(config_path) as f:
         return json.load(f)["serveLocal"]
-
-
-def get_connection_url(runtime_config_key: str) -> URL:
-    if is_local():
-        cfg = _get_serve_local_config()
-        return build_database_url(
-            cfg["dbUser"],
-            cfg["host"],
-            cfg["port"],
-            cfg["dbName"],
-            password=cfg["dbPassword"],
-            ssl=False,
-        )
-    config = get_database_config(runtime_config_key)
-    return build_database_url(
-        config["dbUser"],
-        config["hostname"],
-        config["port"],
-        config["database"],
-    )
 
 
 def get_database_secret() -> DatabaseSecret:
@@ -1593,7 +1601,6 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret["username"],
         password=secret["password"],
         sslmode="verify-full",
-        sslrootcert="/etc/pki/ca-trust/source/anchors/rds-bundle.pem",
         connect_timeout=10,
     )
     try:

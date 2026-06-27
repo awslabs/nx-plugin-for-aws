@@ -1,10 +1,13 @@
 from collections.abc import Generator
+<%_ if (engine === 'mysql') { _%>
+import ssl
+<%_ } _%>
 
 import boto3
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
-from .utils import get_connection_url, get_database_config, is_local
+from .utils import get_serve_local_config, build_database_url, get_database_config, is_local
 
 # Generated: must match runtimeConfigKey in config.json
 _runtime_config_key = '<%= runtimeConfigKey %>'
@@ -13,14 +16,30 @@ _engine = None
 
 
 def _create_engine():
-    engine = create_engine(get_connection_url(_runtime_config_key))
-    if not is_local():
+<%_ if (engine === 'mysql') { _%>
+    ssl_args: dict = {} if is_local() else {'ssl': ssl.create_default_context()}
+<%_ } else { _%>
+    ssl_args: dict = {} if is_local() else {'sslmode': 'verify-full'}
+<%_ } _%>
+    if is_local():
+        cfg = get_serve_local_config()
+        url = build_database_url(cfg['dbUser'], cfg['host'], cfg['port'], cfg['dbName'])
+    else:
         config = get_database_config(_runtime_config_key)
-        client = boto3.client('rds', region_name=config['region'])
+        url = build_database_url(
+            config['dbUser'], config['hostname'], config['port'], config['database'],
+        )
+    engine = create_engine(url, connect_args=ssl_args)
 
-        @event.listens_for(engine, 'do_connect')
-        def provide_iam_token(_dialect, _connection_record, _cargs, connection_params):
-            connection_params['password'] = client.generate_db_auth_token(
+    @event.listens_for(engine, 'do_connect')
+    def provide_password(_dialect, _connection_record, _cargs, connection_params):
+        if is_local():
+            connection_params['password'] = get_serve_local_config()['dbPassword']
+        else:
+            config = get_database_config(_runtime_config_key)
+            connection_params['password'] = boto3.client(
+                'rds', region_name=config['region'],
+            ).generate_db_auth_token(
                 DBHostname=config['hostname'],
                 Port=config['port'],
                 DBUsername=config['dbUser'],
