@@ -54,20 +54,20 @@ export function getPythonAgentConnectionModuleName(tree: Tree): string {
 }
 
 /**
- * Get the Python distribution name of the shared agent-connection project.
- *
- * This is the PEP 503 hyphenated name (eg `scope-agent-connection`), NOT the
- * dotted Nx id. It is the value written into a dependent project's
- * `[project].dependencies` and `[tool.uv.sources]`, so it must be the
- * distribution name: `@nxlv/python` matches workspace dependency edges by the
- * normalised hyphenated name (it splits a dotted name on `.` and drops it).
+ * Get the shared agent-connection project as `{ name, root }`, suitable for
+ * passing to {@link addWorkspaceDependencyToPyProject} (which derives the
+ * dependency's PEP 503 distribution name from the project itself, so callers
+ * never construct the name).
  */
-export function getPythonAgentConnectionPackageName(tree: Tree): string {
-  const { distributionName } = getPyProjectDetails(tree, {
+export function getPythonAgentConnectionProject(tree: Tree): {
+  name: string;
+  root: string;
+} {
+  const { fullyQualifiedName, dir } = getPyProjectDetails(tree, {
     name: PY_AGENT_CONNECTION_NAME,
     directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
   });
-  return distributionName;
+  return { name: fullyQualifiedName, root: dir };
 }
 
 /**

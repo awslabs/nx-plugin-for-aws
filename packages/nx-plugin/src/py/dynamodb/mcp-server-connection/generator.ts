@@ -36,11 +36,7 @@ export const pyDynamoDBMcpServerConnectionGenerator = async (
     options.targetProject,
   );
 
-  addWorkspaceDependencyToPyProject(
-    tree,
-    sourceProject.root,
-    targetProject.name!,
-  );
+  addWorkspaceDependencyToPyProject(tree, sourceProject, targetProject);
 
   const mcpServerName = options.sourceComponent?.name ?? 'mcp-server';
   const serveLocalTarget = `${mcpServerName}-serve-local`;

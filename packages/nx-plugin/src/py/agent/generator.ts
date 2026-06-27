@@ -19,7 +19,7 @@ import {
   addPythonFrameworkBase,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
-  getPythonAgentConnectionPackageName,
+  getPythonAgentConnectionProject,
 } from '../../utils/agent-connection/agent-connection';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
@@ -115,11 +115,10 @@ export const pyAgentGenerator = async (
   // framework-agnostic session context), so this is a no-op for langchain.
   await addPythonFrameworkBase(tree, framework);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
-  const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
   addWorkspaceDependencyToPyProject(
     tree,
-    project.root,
-    agentConnectionPackageName,
+    project,
+    getPythonAgentConnectionProject(tree),
   );
 
   const templateContext = {
