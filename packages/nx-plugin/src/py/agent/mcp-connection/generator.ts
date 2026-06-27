@@ -30,7 +30,7 @@ import {
   addPythonCoreClient,
   getPythonAgentConnectionProjectDir,
   getPythonAgentConnectionModuleName,
-  getPythonAgentConnectionPackageName,
+  getPythonAgentConnectionProject,
   addPythonReExport,
 } from '../../../utils/agent-connection/agent-connection';
 import {
@@ -86,7 +86,6 @@ export const pyAgentMcpConnectionGenerator = async (
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
-  const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
   // Python deps required by the MCP core client + shared auth helper.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
@@ -163,8 +162,8 @@ export const pyAgentMcpConnectionGenerator = async (
   // 4. Add workspace dependency from agent project to agent-connection project
   addWorkspaceDependencyToPyProject(
     tree,
-    sourceProject.root,
-    agentConnectionPackageName,
+    sourceProject,
+    getPythonAgentConnectionProject(tree),
   );
 
   // 5. Set up serve-local target dependencies
