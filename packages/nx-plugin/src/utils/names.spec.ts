@@ -9,6 +9,7 @@ import {
   toSnakeCase,
   toDotNotation,
   kebabCase,
+  normalizeDistributionName,
   snakeCase,
 } from './names';
 
@@ -590,6 +591,45 @@ describe('names utils', () => {
         expect(kebabCase('DataTableComponent')).toBe('data-table-component');
         expect(kebabCase('SearchInputField')).toBe('search-input-field');
       });
+    });
+  });
+
+  describe('normalizeDistributionName', () => {
+    it('should hyphenate dotted scope-qualified names', () => {
+      // The crux: a dotted nx id with an underscored project segment becomes a
+      // fully hyphenated PEP 503 distribution name.
+      expect(normalizeDistributionName('sojourner.agent_connection')).toBe(
+        'sojourner-agent-connection',
+      );
+      expect(normalizeDistributionName('sojourner.agent')).toBe(
+        'sojourner-agent',
+      );
+      expect(normalizeDistributionName('proj.test_project')).toBe(
+        'proj-test-project',
+      );
+    });
+
+    it('should lower-case the name', () => {
+      expect(normalizeDistributionName('MyScope.MyLib')).toBe('myscope-mylib');
+      expect(normalizeDistributionName('Foo_Bar')).toBe('foo-bar');
+    });
+
+    it('should collapse runs of ., _ and - to a single hyphen', () => {
+      expect(normalizeDistributionName('a..b__c--d')).toBe('a-b-c-d');
+      expect(normalizeDistributionName('a._-b')).toBe('a-b');
+    });
+
+    it('should leave an already-normalised name unchanged (idempotent)', () => {
+      expect(normalizeDistributionName('sojourner-agent-connection')).toBe(
+        'sojourner-agent-connection',
+      );
+      const once = normalizeDistributionName('Some.Mixed_Name');
+      expect(normalizeDistributionName(once)).toBe(once);
+    });
+
+    it('should not split camelCase humps (this is not kebab-case)', () => {
+      // PEP 503 only touches ., _ and -; camelCase boundaries are preserved.
+      expect(normalizeDistributionName('myScope.myLib')).toBe('myscope-mylib');
     });
   });
 

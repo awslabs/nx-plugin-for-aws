@@ -34,7 +34,7 @@ import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-cons
 import {
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
-  getPythonAgentConnectionPackageName,
+  getPythonAgentConnectionProject,
 } from '../../utils/agent-connection/agent-connection';
 import { addWorkspaceDependencyToPyProject } from '../../utils/py';
 
@@ -106,11 +106,10 @@ export const pyAgentGenerator = async (
   // generator wires into this agent.
   await ensurePythonAgentConnectionProject(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
-  const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
   addWorkspaceDependencyToPyProject(
     tree,
-    project.root,
-    agentConnectionPackageName,
+    project,
+    getPythonAgentConnectionProject(tree),
   );
 
   const templateContext = {

@@ -6,7 +6,10 @@ import { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { parse, stringify } from '@iarna/toml';
 import type { UVPyprojectToml } from './nxlv-python';
-import { addDependenciesToPyProjectToml } from './py';
+import {
+  addDependenciesToPyProjectToml,
+  addWorkspaceDependencyToPyProject,
+} from './py';
 import { IPyDepVersion } from './versions';
 
 describe('addDependenciesToPyProjectToml', () => {
@@ -454,5 +457,104 @@ describe('addDependenciesToPyProjectToml', () => {
     expect(updatedToml.project.dependencies).not.toContain('fastapi>=0.100.0');
 
     expect(updatedToml.project.dependencies).toHaveLength(4);
+  });
+});
+
+describe('addWorkspaceDependencyToPyProject', () => {
+  let tree: Tree;
+
+  const dependent = { name: 'scope.consumer', root: 'packages/consumer' };
+
+  // Helper to register a dependency project with a given [project].name.
+  const writeDependency = (
+    name: string,
+    pyprojectName: string,
+    root: string,
+  ) => {
+    tree.write(
+      `${root}/pyproject.toml`,
+      stringify({
+        project: { name: pyprojectName, version: '0.1.0', dependencies: [] },
+      } as UVPyprojectToml),
+    );
+    return { name, root };
+  };
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+    tree.write(
+      'packages/consumer/pyproject.toml',
+      stringify({
+        project: { name: 'scope-consumer', version: '0.1.0', dependencies: [] },
+      } as UVPyprojectToml),
+    );
+  });
+
+  const readToml = () =>
+    parse(
+      tree.read('packages/consumer/pyproject.toml', 'utf-8'),
+    ) as UVPyprojectToml;
+
+  it('should derive the distribution name from the dependency project pyproject', () => {
+    // The dependency's [project].name is the authoritative distribution name
+    // uv writes to uv.lock; the dependent must reference that exact value so
+    // @nxlv/python infers the workspace edge.
+    const dependency = writeDependency(
+      'scope.my_lib',
+      'scope-my-lib',
+      'packages/my_lib',
+    );
+
+    addWorkspaceDependencyToPyProject(tree, dependent, dependency);
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toContain('scope-my-lib');
+    expect(toml.project.dependencies).not.toContain('scope.my_lib');
+    expect((toml.tool as any).uv.sources['scope-my-lib']).toEqual({
+      workspace: true,
+    });
+    expect((toml.tool as any).uv.sources['scope.my_lib']).toBeUndefined();
+  });
+
+  it('should normalise a dotted distribution name from an older dependency project', () => {
+    // Defensive: even if a dependency still carries a dotted [project].name,
+    // the value written into the dependent is the normalised hyphenated form.
+    const dependency = writeDependency(
+      'scope.my_lib',
+      'scope.my_lib',
+      'packages/my_lib',
+    );
+
+    addWorkspaceDependencyToPyProject(tree, dependent, dependency);
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toEqual(['scope-my-lib']);
+    expect((toml.tool as any).uv.sources['scope-my-lib']).toEqual({
+      workspace: true,
+    });
+  });
+
+  it('should fall back to the Nx project id when the dependency has no pyproject', () => {
+    addWorkspaceDependencyToPyProject(tree, dependent, {
+      name: 'scope.my_lib',
+      root: 'packages/missing',
+    });
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toEqual(['scope-my-lib']);
+  });
+
+  it('should not add a duplicate when re-run', () => {
+    const dependency = writeDependency(
+      'scope.my_lib',
+      'scope-my-lib',
+      'packages/my_lib',
+    );
+
+    addWorkspaceDependencyToPyProject(tree, dependent, dependency);
+    addWorkspaceDependencyToPyProject(tree, dependent, dependency);
+
+    const toml = readToml();
+    expect(toml.project.dependencies).toEqual(['scope-my-lib']);
   });
 });
