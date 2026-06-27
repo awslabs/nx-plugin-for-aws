@@ -17,7 +17,7 @@ import {
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
-  getPythonAgentConnectionPackageName,
+  getPythonAgentConnectionProject,
   getPythonAgentConnectionProjectDir,
   PY_CLIENT_NAMING,
   resolveAgentFramework,
@@ -130,7 +130,6 @@ export const pyAgentA2aConnectionGenerator = async (
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
-  const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
   // A2A client config + shared auth helper deps, plus the framework's A2A
   // transport dep (see A2A_TRANSPORT_DEP).
@@ -212,8 +211,8 @@ export const pyAgentA2aConnectionGenerator = async (
   // 4. Add workspace dependency from agent project to agent-connection project
   addWorkspaceDependencyToPyProject(
     tree,
-    sourceProject.root,
-    agentConnectionPackageName,
+    sourceProject,
+    getPythonAgentConnectionProject(tree),
   );
 
   // 5. Set up serve-local target dependencies — chain onto the target agent

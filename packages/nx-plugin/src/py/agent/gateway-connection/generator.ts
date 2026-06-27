@@ -17,7 +17,7 @@ import {
   addPythonReExport,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
-  getPythonAgentConnectionPackageName,
+  getPythonAgentConnectionProject,
   getPythonAgentConnectionProjectDir,
   PY_MCP_FAMILY_CONNECTIONS,
   resolveAgentFramework,
@@ -96,7 +96,6 @@ export const pyAgentGatewayConnectionGenerator = async (
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
-  const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
   // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
   // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
@@ -169,8 +168,8 @@ export const pyAgentGatewayConnectionGenerator = async (
 
   addWorkspaceDependencyToPyProject(
     tree,
-    sourceProject.root,
-    agentConnectionPackageName,
+    sourceProject,
+    getPythonAgentConnectionProject(tree),
   );
 
   const agentName = agentComponent.name ?? 'agent';

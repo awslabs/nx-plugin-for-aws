@@ -20,7 +20,7 @@ import {
 } from '../../license/config';
 import { updateGitIgnore } from '../../utils/git';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { toSnakeCase } from '../../utils/names';
+import { normalizeDistributionName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
@@ -47,9 +47,22 @@ export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
 
 export interface PyProjectDetails {
   /**
-   * Full package name including scope (eg foo.bar)
+   * Fully qualified Nx project id including scope, in dot notation (eg foo.bar).
+   * This is the identifier Nx uses (readProjectConfiguration, the project
+   * graph, target references) and is intentionally kept dotted.
    */
   readonly fullyQualifiedName: string;
+  /**
+   * PEP 503 normalised Python distribution name (eg foo-bar). This is the name
+   * written to the project's `[project].name`, the root `[tool.uv.sources]`
+   * key, and any inter-project dependency string. It is hyphenated (not dotted)
+   * so `uv` and `@nxlv/python` can match it: uv writes `uv.lock` keyed by the
+   * PEP 503 hyphenated name, and `@nxlv/python`'s dependency inference splits a
+   * dotted name on `.` and so would otherwise drop the edge entirely. Keeping
+   * the distribution name decoupled from `fullyQualifiedName` is what lets the
+   * workspace dependency edge appear in the Nx project graph.
+   */
+  readonly distributionName: string;
   /**
    * Directory of the library relative to the root
    */
@@ -78,12 +91,15 @@ export const getPyProjectDetails = (
     schema.moduleName ?? `${scope}_${normalizedName}`,
   );
   const fullyQualifiedName = `${scope}.${normalizedName}`;
+  // The Python distribution name is the PEP 503 normalised form of the
+  // fully qualified name: hyphenated, never dotted. See PyProjectDetails.
+  const distributionName = normalizeDistributionName(fullyQualifiedName);
   // NB: interactive nx generator cli can pass empty string
   const dir = joinPathFragments(
     schema.directory || '.',
     schema.subDirectory || normalizedName,
   );
-  return { dir, fullyQualifiedName, normalizedModuleName };
+  return { dir, fullyQualifiedName, distributionName, normalizedModuleName };
 };
 
 /**
@@ -93,10 +109,8 @@ export const pyProjectGenerator = async (
   tree: Tree,
   schema: PyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
-    tree,
-    schema,
-  );
+  const { dir, normalizedModuleName, fullyQualifiedName, distributionName } =
+    getPyProjectDetails(tree, schema);
 
   const pythonPlugin = withVersions(['@nxlv/python']);
   addDependenciesToPackageJson(tree, {}, pythonPlugin);
@@ -143,7 +157,14 @@ export const pyProjectGenerator = async (
     }
 
     await uvProjectGenerator(tree, {
+      // The Nx project id (and `uv.workspace.members` etc.) keys off `name`, so
+      // keep it dotted. `packageName` is the separate PEP 503 distribution name
+      // written to `[project].name` and the root `[tool.uv.sources]` key; it is
+      // hyphenated so `@nxlv/python` infers the workspace dependency edge (it
+      // splits a dotted name on `.` and would otherwise drop it). This split is
+      // the whole fix (see PyProjectDetails.distributionName).
       name: fullyQualifiedName,
+      packageName: distributionName,
       publishable: false,
       buildLockedVersions: true,
       buildBundleLocalDependencies: true,

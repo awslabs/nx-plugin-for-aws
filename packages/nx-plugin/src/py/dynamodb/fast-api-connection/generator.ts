@@ -36,11 +36,7 @@ export const pyDynamoDBFastApiConnectionGenerator = async (
     options.targetProject,
   );
 
-  addWorkspaceDependencyToPyProject(
-    tree,
-    sourceProject.root,
-    targetProject.name!,
-  );
+  addWorkspaceDependencyToPyProject(tree, sourceProject, targetProject);
 
   if (sourceProject.targets?.['serve-local']) {
     addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {

@@ -76,23 +76,32 @@ describe('py#dynamodb mcp-server-connection generator', () => {
 
   it('should add dynamodb package as workspace dependency to pyproject.toml', async () => {
     setupMcpServerProject();
-    setupDynamoDBProject();
+    setupDynamoDBProject('test.db');
+
+    tree.write(
+      'packages/test.db/pyproject.toml',
+      `[project]\nname = "test-db"\nversion = "1.0.0"\ndependencies = []\n`,
+    );
 
     tree.write(
       'packages/my-mcp-server/pyproject.toml',
-      `[project]\nname = "test.my_mcp_server"\nversion = "1.0.0"\ndependencies = []\n`,
+      `[project]\nname = "test-my-mcp-server"\nversion = "1.0.0"\ndependencies = []\n`,
     );
 
     await pyDynamoDBMcpServerConnectionGenerator(tree, {
       sourceProject: 'my-mcp-server',
-      targetProject: 'db',
+      targetProject: 'test.db',
     });
 
     const pyprojectContent = tree.read(
       'packages/my-mcp-server/pyproject.toml',
       'utf-8',
     )!;
-    expect(pyprojectContent).toContain('db');
+    // The dependency and [tool.uv.sources] key must be the PEP 503 distribution
+    // name (hyphenated) so @nxlv/python infers the workspace dependency edge,
+    // not the dotted Nx project id.
+    expect(pyprojectContent).toContain('test-db');
+    expect(pyprojectContent).not.toContain('test.db');
   });
 
   it('should not add dependency when source has no matching serve-local', async () => {

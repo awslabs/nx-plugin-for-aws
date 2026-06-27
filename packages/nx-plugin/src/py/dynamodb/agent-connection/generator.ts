@@ -36,11 +36,7 @@ export const pyDynamoDBAgentConnectionGenerator = async (
     options.targetProject,
   );
 
-  addWorkspaceDependencyToPyProject(
-    tree,
-    sourceProject.root,
-    targetProject.name!,
-  );
+  addWorkspaceDependencyToPyProject(tree, sourceProject, targetProject);
 
   const agentName = options.sourceComponent?.name ?? 'agent';
   const serveLocalTarget = `${agentName}-serve-local`;

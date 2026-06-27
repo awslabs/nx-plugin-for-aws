@@ -5,8 +5,9 @@
 import { parse, stringify } from '@iarna/toml';
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
+import { normalizeDistributionName } from './names';
 import type { UVPyprojectToml } from './nxlv-python';
-import { updateToml } from './toml';
+import { readToml, updateToml } from './toml';
 import { type IPyDepVersion, withPyVersions } from './versions';
 
 // Dedup key that distinguishes bare packages from the same package with
@@ -110,18 +111,52 @@ export const uvxCommand = (
 };
 
 /**
+ * Resolve the PEP 503 distribution name of a Python project from its
+ * `pyproject.toml` `[project].name`, falling back to normalising the supplied
+ * Nx project id when the project has no readable pyproject yet.
+ *
+ * This is the authoritative name uv writes into `uv.lock`, so it is the value
+ * that must appear in a dependent's `[project].dependencies` /
+ * `[tool.uv.sources]` for `@nxlv/python` to infer the workspace dependency
+ * edge. Always normalised so the result is a valid distribution name even if
+ * an older project still carries a dotted `[project].name`.
+ */
+const getPyDistributionName = (
+  tree: Tree,
+  project: { name?: string; root: string },
+): string => {
+  const pyprojectPath = joinPathFragments(project.root, 'pyproject.toml');
+  const projectName = tree.exists(pyprojectPath)
+    ? (readToml(tree, pyprojectPath) as unknown as UVPyprojectToml).project?.name
+    : undefined;
+  return normalizeDistributionName(projectName ?? project.name ?? '');
+};
+
+/**
  * Add a workspace dependency from one Python project to another.
  * Adds the dependency to [project].dependencies and [tool.uv.sources].
+ *
+ * Both projects are passed as Nx project configurations (not names): the
+ * dependency's PEP 503 distribution name is derived from its own
+ * `pyproject.toml` here, so callers cannot accidentally pass the dotted Nx id
+ * (which @nxlv/python splits on `.` and drops, losing the project-graph edge).
+ * This is the single entry point all generators use to wire a Python workspace
+ * dependency.
  */
 export const addWorkspaceDependencyToPyProject = (
   tree: Tree,
-  projectRoot: string,
-  dependencyPackageName: string,
+  dependentProject: { name?: string; root: string },
+  dependencyProject: { name?: string; root: string },
 ): void => {
-  const pyprojectPath = joinPathFragments(projectRoot, 'pyproject.toml');
+  const pyprojectPath = joinPathFragments(
+    dependentProject.root,
+    'pyproject.toml',
+  );
   if (!tree.exists(pyprojectPath)) {
     return;
   }
+
+  const distributionName = getPyDistributionName(tree, dependencyProject);
 
   updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
     // Add to [project].dependencies if not already present
@@ -129,19 +164,19 @@ export const addWorkspaceDependencyToPyProject = (
     if (
       !deps.some(
         (d) =>
-          d === dependencyPackageName ||
-          d.startsWith(`${dependencyPackageName}>=`) ||
-          d.startsWith(`${dependencyPackageName}==`),
+          d === distributionName ||
+          d.startsWith(`${distributionName}>=`) ||
+          d.startsWith(`${distributionName}==`),
       )
     ) {
-      toml.project.dependencies = [...deps, dependencyPackageName];
+      toml.project.dependencies = [...deps, distributionName];
     }
 
     // Add to [tool.uv.sources] with workspace = true
     toml.tool = toml.tool ?? {};
     (toml.tool as any).uv = (toml.tool as any).uv ?? {};
     (toml.tool as any).uv.sources = (toml.tool as any).uv.sources ?? {};
-    (toml.tool as any).uv.sources[dependencyPackageName] = {
+    (toml.tool as any).uv.sources[distributionName] = {
       workspace: true,
     };
 
