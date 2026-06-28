@@ -571,6 +571,23 @@ describe('normalizeTargetKeyOrder', () => {
     ]);
   });
 
+  it('should order inputs immediately before outputs', () => {
+    const normalized = normalizeTargetKeyOrder({
+      outputs: ['{options.outputPath}'],
+      options: {},
+      inputs: ['default'],
+      cache: true,
+      executor: 'nx:noop',
+    });
+    expect(Object.keys(normalized)).toEqual([
+      'executor',
+      'cache',
+      'inputs',
+      'outputs',
+      'options',
+    ]);
+  });
+
   it('should place unknown keys after known keys, preserving value identity', () => {
     const options = { command: 'foo' };
     const normalized = normalizeTargetKeyOrder({
@@ -580,6 +597,24 @@ describe('normalizeTargetKeyOrder', () => {
     });
     expect(Object.keys(normalized)).toEqual(['executor', 'options', 'custom']);
     expect(normalized.options).toBe(options);
+  });
+
+  it('should keep multiple unknown keys after known keys in their original order', () => {
+    const normalized = normalizeTargetKeyOrder({
+      zebra: 1,
+      options: {},
+      alpha: 2,
+      executor: 'nx:run-commands',
+      mike: 3,
+    });
+    // Known keys ordered first; unknown keys retain their authored order.
+    expect(Object.keys(normalized)).toEqual([
+      'executor',
+      'options',
+      'zebra',
+      'alpha',
+      'mike',
+    ]);
   });
 });
 

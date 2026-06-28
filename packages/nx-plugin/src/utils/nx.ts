@@ -196,16 +196,19 @@ const targetDependencyEquals = (a: TargetDependency, b: TargetDependency) => {
   return aProjects.every((p, i) => p === bProjects[i]);
 };
 
-// Order in which Nx serialises target properties when it reads then rewrites an
-// existing project.json. Authoring targets in this order keeps a generator's
-// first-run output byte-identical to subsequent runs (idempotency).
+// The order target properties are authored in. Nx preserves a target's
+// authored key order when it reads then rewrites an existing project.json,
+// except `options` and `configurations`, which it always moves to the end (in
+// that order). Keeping `options`/`configurations` last here therefore makes a
+// generator's first-run output byte-identical to subsequent runs (idempotency);
+// the remaining keys are ordered to read intuitively.
 const NX_TARGET_KEY_ORDER = [
   'executor',
   'dependsOn',
   'continuous',
-  'outputs',
   'cache',
   'inputs',
+  'outputs',
   'metadata',
   'defaultConfiguration',
   'options',
