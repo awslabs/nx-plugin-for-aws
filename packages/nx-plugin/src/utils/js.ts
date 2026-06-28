@@ -3,18 +3,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { dirname, join } from 'node:path';
 import ts from 'typescript';
 
-// Resolve nx's dynamicImport from its config-utils module by filesystem path.
-// It is not part of @nx/devkit's exports map, but it ensures transpilers
-// (namely @swc-node/register) leave the import untouched so node performs it at
-// runtime, which allows importing data urls. package.json IS in the exports map.
-const nxDevkitRoot = dirname(require.resolve('@nx/devkit/package.json'));
-const { dynamicImport } = require(
-  join(nxDevkitRoot, 'dist/src/utils/config-utils'),
-) as {
-  dynamicImport: (modulePath: string) => Promise<Record<string, unknown>>;
+// A real runtime `import()`, wrapped in `new Function` so transpilers (tsc's
+// CommonJS output, @swc-node/register) cannot rewrite it to `require()` —
+// `require()` cannot load the `data:` urls we import below. Under a test VM
+// (vitest) this `new Function` import has no dynamic-import callback, so we
+// fall back to a literal `import()` which the test runner wires up correctly.
+const nodeImport = new Function('modulePath', 'return import(modulePath);') as (
+  modulePath: string,
+) => Promise<Record<string, unknown>>;
+
+const dynamicImport = async (
+  modulePath: string,
+): Promise<Record<string, unknown>> => {
+  try {
+    return await nodeImport(modulePath);
+  } catch (e) {
+    if (
+      e instanceof TypeError &&
+      e.message.includes('dynamic import callback')
+    ) {
+      return import(/* @vite-ignore */ modulePath);
+    }
+    throw e;
+  }
 };
 
 /**
