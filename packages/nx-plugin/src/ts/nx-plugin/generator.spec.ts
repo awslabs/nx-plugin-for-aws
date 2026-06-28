@@ -148,6 +148,28 @@ describe('ts#nx-plugin generator', () => {
     expect(projectPackageJson.dependencies?.['@aws/nx-plugin']).toBeDefined();
   });
 
+  it('should add swc dev dependencies so nx transpiles generators without falling back to ts-node', async () => {
+    // Without @swc-node/register, nx transpiles unbuilt generators with ts-node,
+    // which forces `moduleResolution: node10` — a hard error under TypeScript 6.
+    // Simulate an external workspace (the in-repo workspace already has swc).
+    tree.write(
+      'package.json',
+      JSON.stringify({ name: 'external-workspace', version: '1.0.0' }),
+    );
+
+    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+
+    const rootPackageJson = readJson(tree, 'package.json');
+    expect(rootPackageJson.devDependencies?.['@swc-node/register']).toBeDefined();
+    expect(rootPackageJson.devDependencies?.['@swc/core']).toBeDefined();
+
+    const projectPackageJson = readJson(tree, 'test-plugin/package.json');
+    expect(
+      projectPackageJson.devDependencies?.['@swc-node/register'],
+    ).toBeDefined();
+    expect(projectPackageJson.devDependencies?.['@swc/core']).toBeDefined();
+  });
+
   it('should add generator metric to app.ts', async () => {
     await sharedConstructsGenerator(tree, { iac: 'cdk' });
 

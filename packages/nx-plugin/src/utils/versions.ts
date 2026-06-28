@@ -31,6 +31,8 @@ export const TS_VERSIONS = {
   '@nx/devkit': '23.0.1',
   '@nx/react': '23.0.1',
   'create-nx-workspace': '23.0.1',
+  '@swc-node/register': '1.11.1',
+  '@swc/core': '1.15.41',
   '@modelcontextprotocol/sdk': '1.29.0',
   '@modelcontextprotocol/inspector': '0.19.0',
   '@ag-ui/aws-strands': '0.1.0',
