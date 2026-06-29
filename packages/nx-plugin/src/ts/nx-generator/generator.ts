@@ -141,7 +141,8 @@ export const tsNxGeneratorGenerator = async (
 
     const indexPath = joinPathFragments(sourceRoot, 'index.ts');
     if (tree.exists(indexPath)) {
-      await addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
+      // NodeNext requires explicit extensions; the local plugin is ESM.
+      await addStarExport(tree, indexPath, `./${generatorSubDir}/generator.js`);
     }
 
     addComponentGeneratorMetadata(

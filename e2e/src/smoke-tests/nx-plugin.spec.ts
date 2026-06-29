@@ -13,12 +13,11 @@ import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
  * Exercises the `ts#nx-plugin` and `ts#nx-generator` generators end-to-end and,
  * crucially, *runs* the generated generator.
  *
- * Nx transpiles an unbuilt plugin generator on the fly. Without
- * `@swc-node/register` it falls back to ts-node, which forces the deprecated
- * `moduleResolution: node10` — a hard error under TypeScript 6. The `ts#nx-plugin`
- * generator therefore adds `@swc-node/register` so nx uses swc instead. This
- * test regresses if that dependency is dropped, since running the generator
- * below would then fail with `TS5107`.
+ * The generated plugin is `"type": "module"`, so Nx 23 loads its unbuilt `.ts`
+ * generators as ESM via Node's native type stripping — no swc/ts-node
+ * transpiler. This test regresses if the vended generator stops being valid
+ * ESM (e.g. `__dirname` instead of `import.meta.dirname`, or a relative import
+ * missing its `.js` extension), since loading the generator below would fail.
  */
 describe('smoke test - nx-plugin', () => {
   const pkgMgr = 'pnpm';
@@ -59,9 +58,8 @@ describe('smoke test - nx-plugin', () => {
         opts,
       );
 
-      // Run the generated generator. Nx transpiles it on the fly; this fails
-      // under TypeScript 6 unless @swc-node/register is present (otherwise nx
-      // falls back to ts-node, which forces deprecated moduleResolution=node10).
+      // Run the generated generator. Nx loads the unbuilt `.ts` source as ESM
+      // via Node's native type stripping (the plugin is `type: module`).
       await runCLI(
         `generate @nx-plugin-test/plugin:my#generator --exampleOption=test --no-interactive`,
         opts,

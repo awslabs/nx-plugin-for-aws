@@ -734,10 +734,10 @@ describe('nx-generator generator', () => {
         description: 'Generator with export test',
       });
 
-      // Check that the export was added to index.ts
+      // Check that the export was added to index.ts (NodeNext `.js` specifier)
       const indexContent = tree.read('tools/plugin/src/index.ts', 'utf-8');
       expect(indexContent).toContain(
-        "export * from './export-test/generator';",
+        "export * from './export-test/generator.js';",
       );
     });
 
