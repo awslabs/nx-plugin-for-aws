@@ -103,6 +103,7 @@ export async function formatFilesInSubtree(
       const content = ruffFixAndFormat(
         file.content.toString('utf-8'),
         file.path,
+        hasRuffConfigOnDisk(tree, file.path),
       );
       tree.write(file.path, content);
     } catch {
@@ -264,17 +265,64 @@ function getRuffCommand(): string | undefined {
 }
 
 /**
+ * Whether ruff would discover a config on disk for a file, by walking from its
+ * directory up to the workspace root looking for `.ruff.toml`, `ruff.toml`, or a
+ * `pyproject.toml` with a `[tool.ruff]` section — the same files ruff itself
+ * resolves. The walk stops at `tree.root` so a stray config in a parent of the
+ * workspace (or the home directory) is never treated as the project's. Used to
+ * decide whether to nudge ruff towards import sorting (see
+ * {@link ruffFixAndFormat}).
+ */
+function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
+  const root = path.resolve(tree.root);
+  let dir = path.resolve(root, path.dirname(filePath));
+  while (true) {
+    if (
+      existsSync(path.join(dir, '.ruff.toml')) ||
+      existsSync(path.join(dir, 'ruff.toml'))
+    ) {
+      return true;
+    }
+    const pyproject = path.join(dir, 'pyproject.toml');
+    if (
+      existsSync(pyproject) &&
+      readFileSync(pyproject, 'utf-8').includes('[tool.ruff')
+    ) {
+      return true;
+    }
+    const parent = path.dirname(dir);
+    // Stop once the workspace root has been checked (or we hit the FS root).
+    if (dir === root || parent === dir) {
+      return false;
+    }
+    dir = parent;
+  }
+}
+
+/**
  * Run ruff check --fix and ruff format on Python file content via stdin.
  * Applies all configured lint fixes (including import sorting) and formatting.
+ *
+ * When no ruff config exists on disk (`hasConfig` false) ruff falls back to its
+ * defaults, which omit isort — but generated projects enable rule `I` and their
+ * build fails on unsorted imports (I001). In that case we add `--extend-select
+ * I` so import sorting matches what the build enforces. When a config does
+ * exist we defer to it entirely, honouring the user's rule selection.
  */
-function ruffFixAndFormat(content: string, filePath: string): string {
+function ruffFixAndFormat(
+  content: string,
+  filePath: string,
+  hasConfig: boolean,
+): string {
   const ruff = getRuffCommand();
   if (!ruff) return content;
+
+  const extendSelect = hasConfig ? '' : ' --extend-select I';
 
   // First apply lint fixes (import sorting, unused imports, etc.)
   try {
     const result = execSync(
-      `${ruff} check --fix --stdin-filename ${filePath} -`,
+      `${ruff} check --fix${extendSelect} --stdin-filename ${filePath} -`,
       { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
     content = result;

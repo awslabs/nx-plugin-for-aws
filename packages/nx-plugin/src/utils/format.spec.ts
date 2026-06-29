@@ -4,7 +4,7 @@
  */
 
 import type { Tree } from '@nx/devkit';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -94,6 +94,33 @@ describe('format utils', () => {
       expect(tree.read('src/test.ts')?.toString()).toBe('const x = 1;\n');
       expect(tree.read('lib/test.ts')?.toString()).toBe('const y = 2;\n');
     });
+    it('should sort imports in Python files', async () => {
+      // isort (ruff rule I) is not in ruff's default rule set and the project
+      // config is not on disk during generation, so the formatter must opt into
+      // import sorting explicitly to match what the project's build enforces.
+      tree.write(
+        'src/__init__.py',
+        [
+          'from .b import beta',
+          'from .a import alpha',
+          '',
+          '__all__ = ["beta", "alpha"]',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - imports sorted alphabetically
+      expect(tree.read('src/__init__.py')?.toString()).toBe(
+        [
+          'from .a import alpha',
+          'from .b import beta',
+          '',
+          '__all__ = ["beta", "alpha"]',
+          '',
+        ].join('\n'),
+      );
+    });
     it('should format json and css files', async () => {
       // Setup
       tree.write('src/data.json', '{"a":1,"b":2}');
@@ -139,6 +166,49 @@ describe('format utils', () => {
       // Verify - respects the on-disk config (no semicolons, single quotes)
       expect(tree.read('src/test.ts')?.toString()).toBe(
         "const x = 1\nconst y = 'hello'\n",
+      );
+    });
+    it('should defer to an on-disk ruff config that omits import sorting', async () => {
+      // On-disk ruff config selecting rules that exclude isort (I): the
+      // formatter must honour it and leave imports unsorted rather than forcing
+      // import sorting on.
+      writeFileSync(
+        path.join(workspaceDir, 'ruff.toml'),
+        ['[lint]', 'select = ["E", "F"]', ''].join('\n'),
+      );
+      const unsorted = [
+        'from .b import beta',
+        'from .a import alpha',
+        '',
+        '__all__ = ["beta", "alpha"]',
+        '',
+      ].join('\n');
+      tree.write('src/__init__.py', unsorted);
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - imports left as-is (the on-disk config does not enable I)
+      expect(tree.read('src/__init__.py')?.toString()).toBe(unsorted);
+    });
+    it('should ignore a ruff config above the workspace root', async () => {
+      // A ruff config in a parent of the workspace (e.g. a stray config on the
+      // host) must not be treated as the project's: config discovery stops at
+      // tree.root, so import sorting is still applied.
+      const nestedRoot = path.join(workspaceDir, 'nested-workspace');
+      mkdirSync(nestedRoot);
+      tree.root = nestedRoot;
+      writeFileSync(
+        path.join(workspaceDir, 'ruff.toml'),
+        ['[lint]', 'select = ["E", "F"]', ''].join('\n'),
+      );
+      tree.write(
+        'src/__init__.py',
+        ['from .b import beta', 'from .a import alpha', ''].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - the out-of-workspace config is ignored, so imports are sorted
+      expect(tree.read('src/__init__.py')?.toString()).toBe(
+        ['from .a import alpha', 'from .b import beta', ''].join('\n'),
       );
     });
   });
