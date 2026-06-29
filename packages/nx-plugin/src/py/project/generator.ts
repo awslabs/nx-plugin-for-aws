@@ -46,6 +46,21 @@ export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
 );
 
+// Transient artifacts that pytest, coverage and ruff create and remove while
+// the test, typecheck and compile targets run concurrently. `.coverage.*` are
+// the per-process data files pytest-cov writes (`.coverage.<host>.<pid>.<rand>`)
+// before combining them. Both `ty` (which respects .gitignore) and the
+// `@nxlv/python:build` copy (which respects `ignorePaths`) would otherwise fail
+// when they read one of these mid-deletion.
+const PYTHON_TRANSIENT_ARTIFACTS = [
+  '__pycache__',
+  '.coverage',
+  '.coverage.*',
+  '.pytest_cache',
+  'pytest-cache-files-*',
+  '.ruff_cache',
+];
+
 export interface PyProjectDetails {
   /**
    * Fully qualified Nx project id including scope, in dot notation (eg foo.bar).
@@ -220,6 +235,10 @@ export const pyProjectGenerator = async (
       options: {
         ...buildTarget.options,
         outputPath: buildOutputPath,
+        // The build executor copies the project to a temp folder; exclude the
+        // executor defaults plus transient artifacts so the copy does not race
+        // a concurrent test/typecheck target deleting a file mid-copy.
+        ignorePaths: ['.venv', '.tox', 'tests', ...PYTHON_TRANSIENT_ARTIFACTS],
       },
     };
     projectConfiguration.targets.build = {
@@ -296,10 +315,7 @@ export const pyProjectGenerator = async (
   updateGitIgnore(tree, dir, (patterns) => [
     ...patterns,
     '**/__pycache__',
-    '.coverage',
-    '.pytest_cache',
-    'pytest-cache-files-*',
-    '.ruff_cache',
+    ...PYTHON_TRANSIENT_ARTIFACTS.filter((p) => p !== '__pycache__'),
   ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);

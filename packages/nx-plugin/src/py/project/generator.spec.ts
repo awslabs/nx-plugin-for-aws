@@ -162,12 +162,38 @@ describe('python project generator', () => {
       tree.read('apps/test_project/.gitignore', 'utf-8')?.split('\n') ?? [];
     expect(projectGitIgnorePatterns).toContain('**/__pycache__');
     expect(projectGitIgnorePatterns).toContain('.coverage');
+    // pytest-cov's per-process data files, deleted after they are combined.
+    expect(projectGitIgnorePatterns).toContain('.coverage.*');
     // Tool cache directories — also keeps `ty` from scanning pytest's transient
     // `pytest-cache-files-*` dirs (it respects .gitignore) and failing the
     // concurrent typecheck with an I/O error.
     expect(projectGitIgnorePatterns).toContain('.pytest_cache');
     expect(projectGitIgnorePatterns).toContain('pytest-cache-files-*');
     expect(projectGitIgnorePatterns).toContain('.ruff_cache');
+  });
+
+  it('should exclude transient artifacts from the compile copy', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+
+    // The build executor copies the project to a temp folder honouring
+    // `ignorePaths` (not .gitignore), so the transient files a concurrent
+    // test/typecheck target deletes must be excluded here to avoid an ENOENT
+    // race mid-copy.
+    const ignorePaths = projectConfig.targets.compile.options.ignorePaths;
+    expect(ignorePaths).toContain('tests');
+    expect(ignorePaths).toContain('.coverage');
+    expect(ignorePaths).toContain('.coverage.*');
+    expect(ignorePaths).toContain('.pytest_cache');
+    expect(ignorePaths).toContain('pytest-cache-files-*');
+    expect(ignorePaths).toContain('.ruff_cache');
   });
 
   it('should add a dependency on the python plugin', async () => {
