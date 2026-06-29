@@ -80,9 +80,9 @@ export const pyAgentGatewayConnectionGenerator = async (
 
   const gatewayClassName = gateway.rc;
   const gatewaySnakeCase = snakeCase(gatewayClassName);
-  const gatewayKebabCase = gatewaySnakeCase.replace(/_/g, '-');
-  const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
-  const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
+  // A gateway is its own standalone project, so it exposes plain serve / dev.
+  const gatewayServeTargetName = 'serve';
+  const gatewayDevTargetName = 'dev';
 
   // The source agent's framework selects the client shape, dependencies and the
   // agent.py transform — see PY_MCP_FAMILY_CONNECTIONS (keyed by framework, not a
@@ -174,7 +174,7 @@ export const pyAgentGatewayConnectionGenerator = async (
 
   const agentName = agentComponent.name ?? 'agent';
   const serveTargetName = `${agentName}-serve`;
-  const serveLocalTargetName = `${agentName}-serve-local`;
+  const devTargetName = `${agentName}-dev`;
   let projectConfigChanged = false;
   if (sourceProject.targets?.[serveTargetName]) {
     addDependencyToTargetIfNotPresent(sourceProject, serveTargetName, {
@@ -183,10 +183,10 @@ export const pyAgentGatewayConnectionGenerator = async (
     });
     projectConfigChanged = true;
   }
-  if (sourceProject.targets?.[serveLocalTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+  if (sourceProject.targets?.[devTargetName]) {
+    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
       projects: [targetProject.name],
-      target: gatewayServeLocalTargetName,
+      target: gatewayDevTargetName,
     });
     projectConfigChanged = true;
   }

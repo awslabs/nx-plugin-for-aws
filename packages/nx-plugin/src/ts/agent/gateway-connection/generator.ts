@@ -75,8 +75,9 @@ export const tsAgentGatewayConnectionGenerator = async (
 
   const gatewayClassName = gateway.rc;
   const gatewayKebabCase = kebabCase(gatewayClassName);
-  const gatewayServeTargetName = `${gatewayKebabCase}-serve`;
-  const gatewayServeLocalTargetName = `${gatewayKebabCase}-serve-local`;
+  // A gateway is its own standalone project, so it exposes plain serve / dev.
+  const gatewayServeTargetName = 'serve';
+  const gatewayDevTargetName = 'dev';
 
   const npmScope = getNpmScope(tree);
 
@@ -133,11 +134,11 @@ export const tsAgentGatewayConnectionGenerator = async (
     );
   }
 
-  // 4. Wire serve-local chain — agent's serve-local depends on gateway's
+  // 4. Wire dev chain — agent's dev depends on gateway's
   //    aggregator target, which transitively starts each attached MCP server.
   const agentName = agentComponent.name ?? 'agent';
   const serveTargetName = `${agentName}-serve`;
-  const serveLocalTargetName = `${agentName}-serve-local`;
+  const devTargetName = `${agentName}-dev`;
   let projectConfigChanged = false;
   if (sourceProject.targets?.[serveTargetName]) {
     addDependencyToTargetIfNotPresent(sourceProject, serveTargetName, {
@@ -146,10 +147,10 @@ export const tsAgentGatewayConnectionGenerator = async (
     });
     projectConfigChanged = true;
   }
-  if (sourceProject.targets?.[serveLocalTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+  if (sourceProject.targets?.[devTargetName]) {
+    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
       projects: [targetProject.name],
-      target: gatewayServeLocalTargetName,
+      target: gatewayDevTargetName,
     });
     projectConfigChanged = true;
   }

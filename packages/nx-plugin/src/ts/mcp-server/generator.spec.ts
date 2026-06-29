@@ -107,7 +107,7 @@ describe('ts#mcp-server generator', () => {
       'nx:run-commands',
     );
     expect(projectConfig.targets['mcp-server-inspect'].dependsOn).toContain(
-      'mcp-server-serve-local',
+      'mcp-server-dev',
     );
     expect(
       projectConfig.targets['mcp-server-inspect'].options.commands[0],
@@ -117,6 +117,21 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectConfig.targets['mcp-server-inspect-stdio'].options.commands[0],
     ).toContain('mcp-inspector -- tsx --watch ./src/mcp-server/stdio.ts');
+
+    // <mcp>-dev is the runner; the first component also adds a project-level
+    // dev aggregating it.
+    expect(projectConfig.targets['mcp-server-dev'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(projectConfig.targets['mcp-server-dev'].continuous).toBe(true);
+    expect(projectConfig.targets['mcp-server-dev'].options.env).toEqual({
+      PORT: expect.any(String),
+      LOCAL_DEV: 'true',
+    });
+    expect(projectConfig.targets['dev']).toEqual({
+      continuous: true,
+      dependsOn: ['mcp-server-dev'],
+    });
   });
 
   it('should add MCP server with custom name', async () => {
@@ -157,7 +172,7 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['custom-server-serve']).toBeDefined();
     expect(projectConfig.targets['custom-server-inspect']).toBeDefined();
     expect(projectConfig.targets['custom-server-inspect'].dependsOn).toContain(
-      'custom-server-serve-local',
+      'custom-server-dev',
     );
     expect(
       projectConfig.targets['custom-server-inspect'].options.commands[0],

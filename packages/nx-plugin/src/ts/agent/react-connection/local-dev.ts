@@ -3,21 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { addAgentTargetToServeLocal } from '../../../connection/agent-serve-local';
+import { addAgentTargetToLocalDev } from '../../../connection/agent-local-dev';
 import type { ComponentMetadata } from '../../../utils/nx';
 
-export interface TsAgentServeLocalOptions {
+export interface TsAgentLocalDevOptions {
   agentName: string;
   agentNameClassName: string;
   port: number;
   targetComponent?: ComponentMetadata;
 }
 
-export const addTsAgentTargetToServeLocal = async (
+export const addTsAgentTargetToLocalDev = async (
   tree: Tree,
   sourceProjectName: string,
   targetProjectName: string,
-  options: TsAgentServeLocalOptions,
+  options: TsAgentLocalDevOptions,
 ) => {
   const protocol = options.targetComponent?.protocol ?? 'http';
   const localUrl =
@@ -25,7 +25,7 @@ export const addTsAgentTargetToServeLocal = async (
       ? `http://localhost:${options.port}/invocations`
       : `ws://localhost:${options.port}/ws`;
 
-  await addAgentTargetToServeLocal(tree, sourceProjectName, targetProjectName, {
+  await addAgentTargetToLocalDev(tree, sourceProjectName, targetProjectName, {
     agentNameClassName: options.agentNameClassName,
     port: options.port,
     targetComponent: options.targetComponent,

@@ -32,7 +32,7 @@ export default defineConfig(() => ({
   //  plugins: [],
   // },
   build: {
-    outDir: '../dist/test-app',
+    outDir: '../dist/test-app/bundle',
     emptyOutDir: true,
     reportCompressedSize: true,
     commonjsOptions: {
@@ -88,7 +88,7 @@ export default defineConfig(() => ({
   //  plugins: [],
   // },
   build: {
-    outDir: '../dist/test-app',
+    outDir: '../dist/test-app/bundle',
     emptyOutDir: true,
     reportCompressedSize: true,
     commonjsOptions: {
@@ -1018,35 +1018,66 @@ exports[`react-website generator > Tanstack router integration > should generate
   "targetDefaults": {
     "build": {
       "cache": true,
-      "dependsOn": ["^build"],
       "inputs": ["default"]
     },
     "lint": {
       "cache": true
     },
-    "@nx/vite:build": {
-      "cache": true,
+    "test": {
       "dependsOn": ["^build"],
-      "inputs": ["default", "^default"]
+      "inputs": ["default"]
     },
     "@nx/vitest:test": {
       "cache": true,
-      "inputs": ["default", "^default"],
+      "inputs": ["default", "^production"],
       "configurations": {
         "update-snapshot": {
           "args": "--update"
         }
       }
     },
-    "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["default"]
-    },
     "compile": {
       "cache": true,
       "inputs": ["default"]
     }
   },
+  "plugins": [
+    {
+      "plugin": "@nx/js/typescript",
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        },
+        "build": {
+          "targetName": "compile",
+          "configName": "tsconfig.lib.json",
+          "buildDepsName": "build-deps",
+          "watchDepsName": "watch-deps"
+        }
+      }
+    },
+    {
+      "plugin": "@nx/vite/plugin",
+      "options": {
+        "buildTargetName": "bundle",
+        "serveTargetName": "serve",
+        "devTargetName": "serve",
+        "previewTargetName": "preview",
+        "serveStaticTargetName": "serve-static",
+        "typecheckTargetName": "vite:typecheck",
+        "buildDepsTargetName": "build-deps",
+        "watchDepsTargetName": "watch-deps"
+      }
+    },
+    {
+      "plugin": "@nx/vitest",
+      "options": {
+        "testTargetName": "test",
+        "ciTargetName": "test-ci",
+        "testMode": "watch"
+      }
+    }
+  ],
   "generators": {
     "@nx/react": {
       "application": {
@@ -1072,23 +1103,7 @@ exports[`react-website generator > Tanstack router integration > should generate
         "transitive": true
       }
     ]
-  },
-  "plugins": [
-    {
-      "plugin": "@nx/js/typescript",
-      "options": {
-        "typecheck": {
-          "targetName": "typecheck"
-        },
-        "build": {
-          "targetName": "compile",
-          "configName": "tsconfig.lib.json",
-          "buildDepsName": "build-deps",
-          "watchDepsName": "watch-deps"
-        }
-      }
-    }
-  ]
+  }
 }
 "
 `;
@@ -1107,13 +1122,11 @@ exports[`react-website generator > Tanstack router integration > should generate
     "tailwindcss": "4.2.2"
   },
   "devDependencies": {
-    "@nx/js": "22.7.5",
-    "@nx/react": "22.7.5",
-    "@nx/vite": "22.7.5",
-    "@nx/vitest": "22.7.5",
-    "@nx/web": "22.7.5",
-    "@swc-node/register": "~1.11.1",
-    "@swc/core": "~1.15.5",
+    "@nx/js": "23.0.1",
+    "@nx/react": "23.0.1",
+    "@nx/vite": "23.0.1",
+    "@nx/vitest": "23.0.1",
+    "@nx/web": "23.0.1",
     "@swc/helpers": "~0.5.18",
     "@tailwindcss/vite": "4.2.2",
     "@testing-library/dom": "10.4.0",
@@ -1125,15 +1138,12 @@ exports[`react-website generator > Tanstack router integration > should generate
     "@vitest/coverage-v8": "4.1.8",
     "@vitest/ui": "4.1.8",
     "jiti": "2.4.2",
-    "jsdom": "~22.1.0",
+    "jsdom": "^27.1.0",
     "typescript": "~5.9.2",
     "vite": "8.0.16",
     "vitest": "4.1.8"
   },
-  "type": "module",
-  "scripts": {
-    "dev": "nx serve-local @proj/test-app"
-  }
+  "type": "module"
 }
 "
 `;
@@ -1211,13 +1221,6 @@ exports[`react-website generator > Tanstack router integration > should generate
         "skip-lint": {
           "command": "node -e \\"\\""
         }
-      }
-    },
-    "test": {
-      "executor": "@nx/vitest:test",
-      "outputs": ["{options.reportsDirectory}"],
-      "options": {
-        "reportsDirectory": "{workspaceRoot}/coverage/{projectRoot}"
       }
     }
   }
@@ -2080,33 +2083,22 @@ exports[`react-website generator > Tanstack router integration > should generate
   },
   "targets": {
     "build": {
-      "dependsOn": ["lint", "compile", "bundle", "test"],
-      "options": {
-        "outputPath": "dist/{projectRoot}/bundle"
-      }
-    },
-    "bundle": {
-      "executor": "@nx/vite:build",
-      "outputs": ["{options.outputPath}"],
-      "defaultConfiguration": "production",
-      "options": {
-        "outputPath": "dist/{projectRoot}/bundle"
-      },
-      "configurations": {
-        "development": {
-          "mode": "development"
-        },
-        "production": {
-          "mode": "production"
-        }
-      }
+      "dependsOn": ["lint", "compile", "test", "bundle"]
     },
     "compile": {
-      "dependsOn": ["bundle"],
+      "dependsOn": ["^build"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/tsc"],
       "options": {
         "command": "tsc --build tsconfig.app.json",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "vite --mode local-dev",
         "cwd": "{projectRoot}"
       }
     },
@@ -2133,63 +2125,6 @@ exports[`react-website generator > Tanstack router integration > should generate
       },
       "options": {
         "command": "aws s3 cp s3://\`aws cloudformation describe-stacks --query \\"Stacks[?starts_with(StackName, 'proj-')][].Outputs[] | [?contains(OutputKey, 'TestAppWebsiteBucketName')].OutputValue\\" --output text\`/runtime-config.json \\"{projectRoot}/public/runtime-config.json\\""
-      }
-    },
-    "preview": {
-      "dependsOn": ["build"],
-      "executor": "@nx/vite:preview-server",
-      "defaultConfiguration": "development",
-      "options": {
-        "buildTarget": "@proj/test-app:build"
-      },
-      "configurations": {
-        "development": {
-          "buildTarget": "@proj/test-app:build:development"
-        },
-        "production": {
-          "buildTarget": "@proj/test-app:build:production"
-        }
-      }
-    },
-    "serve": {
-      "executor": "@nx/vite:dev-server",
-      "defaultConfiguration": "development",
-      "options": {
-        "buildTarget": "@proj/test-app:build"
-      },
-      "configurations": {
-        "development": {
-          "buildTarget": "@proj/test-app:build:development",
-          "hmr": true
-        },
-        "production": {
-          "buildTarget": "@proj/test-app:build:production",
-          "hmr": false
-        }
-      }
-    },
-    "serve-local": {
-      "executor": "@nx/vite:dev-server",
-      "options": {
-        "buildTarget": "@proj/test-app:build:development",
-        "hmr": true,
-        "mode": "serve-local"
-      },
-      "continuous": true
-    },
-    "serve-static": {
-      "executor": "@nx/web:file-server",
-      "dependsOn": ["build"],
-      "options": {
-        "buildTarget": "@proj/test-app:build",
-        "spa": true
-      }
-    },
-    "test": {
-      "executor": "@nx/vitest:test",
-      "outputs": ["{options.reportsDirectory}"],
-      "options": {
-        "reportsDirectory": "{workspaceRoot}/coverage/{projectRoot}"
       }
     }
   }
@@ -2403,9 +2338,14 @@ exports[`react-website generator > Tanstack router integration > should generate
       "@nx/react/typings/cssmodule.d.ts",
       "@nx/react/typings/image.d.ts",
       "vite/client"
-    ]
+    ],
+    "rootDir": "src",
+    "module": "esnext",
+    "moduleResolution": "bundler"
   },
   "exclude": [
+    "out-tsc",
+    "dist",
     "src/**/*.spec.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.tsx",
@@ -2458,7 +2398,10 @@ exports[`react-website generator > Tanstack router integration > should generate
       "vitest",
       "@nx/react/typings/cssmodule.d.ts",
       "@nx/react/typings/image.d.ts"
-    ]
+    ],
+    "jsx": "react-jsx",
+    "module": "esnext",
+    "moduleResolution": "bundler"
   },
   "include": [
     "vite.config.ts",
@@ -2507,7 +2450,7 @@ export default defineConfig(() => ({
   //  plugins: [],
   // },
   build: {
-    outDir: '../dist/test-app',
+    outDir: '../dist/test-app/bundle',
     emptyOutDir: true,
     reportCompressedSize: true,
     commonjsOptions: {
@@ -2540,6 +2483,7 @@ exports[`react-website generator > Tanstack router integration > should generate
       ":proj/test-app": ["./test-app/src/index.ts"],
       ":proj/common-constructs": ["./packages/common/constructs/src/index.ts"]
     },
+    "composite": true,
     "rootDir": "."
   }
 }
@@ -2548,6 +2492,9 @@ exports[`react-website generator > Tanstack router integration > should generate
 
 exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > tsconfig.json 1`] = `
 "{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "include": [],
   "references": [
     {
       "path": "./test-app"
@@ -2641,35 +2588,66 @@ exports[`react-website generator > Tanstack router integration > should generate
   "targetDefaults": {
     "build": {
       "cache": true,
-      "dependsOn": ["^build"],
       "inputs": ["default"]
     },
     "lint": {
       "cache": true
     },
-    "@nx/vite:build": {
-      "cache": true,
+    "test": {
       "dependsOn": ["^build"],
-      "inputs": ["default", "^default"]
+      "inputs": ["default"]
     },
     "@nx/vitest:test": {
       "cache": true,
-      "inputs": ["default", "^default"],
+      "inputs": ["default", "^production"],
       "configurations": {
         "update-snapshot": {
           "args": "--update"
         }
       }
     },
-    "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["default"]
-    },
     "compile": {
       "cache": true,
       "inputs": ["default"]
     }
   },
+  "plugins": [
+    {
+      "plugin": "@nx/js/typescript",
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        },
+        "build": {
+          "targetName": "compile",
+          "configName": "tsconfig.lib.json",
+          "buildDepsName": "build-deps",
+          "watchDepsName": "watch-deps"
+        }
+      }
+    },
+    {
+      "plugin": "@nx/vite/plugin",
+      "options": {
+        "buildTargetName": "bundle",
+        "serveTargetName": "serve",
+        "devTargetName": "serve",
+        "previewTargetName": "preview",
+        "serveStaticTargetName": "serve-static",
+        "typecheckTargetName": "vite:typecheck",
+        "buildDepsTargetName": "build-deps",
+        "watchDepsTargetName": "watch-deps"
+      }
+    },
+    {
+      "plugin": "@nx/vitest",
+      "options": {
+        "testTargetName": "test",
+        "ciTargetName": "test-ci",
+        "testMode": "watch"
+      }
+    }
+  ],
   "generators": {
     "@nx/react": {
       "application": {
@@ -2695,23 +2673,7 @@ exports[`react-website generator > Tanstack router integration > should generate
         "transitive": true
       }
     ]
-  },
-  "plugins": [
-    {
-      "plugin": "@nx/js/typescript",
-      "options": {
-        "typecheck": {
-          "targetName": "typecheck"
-        },
-        "build": {
-          "targetName": "compile",
-          "configName": "tsconfig.lib.json",
-          "buildDepsName": "build-deps",
-          "watchDepsName": "watch-deps"
-        }
-      }
-    }
-  ]
+  }
 }
 "
 `;
@@ -2731,13 +2693,11 @@ exports[`react-website generator > Tanstack router integration > should generate
     "tailwindcss": "4.2.2"
   },
   "devDependencies": {
-    "@nx/js": "22.7.5",
-    "@nx/react": "22.7.5",
-    "@nx/vite": "22.7.5",
-    "@nx/vitest": "22.7.5",
-    "@nx/web": "22.7.5",
-    "@swc-node/register": "~1.11.1",
-    "@swc/core": "~1.15.5",
+    "@nx/js": "23.0.1",
+    "@nx/react": "23.0.1",
+    "@nx/vite": "23.0.1",
+    "@nx/vitest": "23.0.1",
+    "@nx/web": "23.0.1",
     "@swc/helpers": "~0.5.18",
     "@tailwindcss/vite": "4.2.2",
     "@tanstack/router-generator": "1.167.17",
@@ -2753,15 +2713,12 @@ exports[`react-website generator > Tanstack router integration > should generate
     "@vitest/coverage-v8": "4.1.8",
     "@vitest/ui": "4.1.8",
     "jiti": "2.4.2",
-    "jsdom": "~22.1.0",
+    "jsdom": "^27.1.0",
     "typescript": "~5.9.2",
     "vite": "8.0.16",
     "vitest": "4.1.8"
   },
-  "type": "module",
-  "scripts": {
-    "dev": "nx serve-local @proj/test-app"
-  }
+  "type": "module"
 }
 "
 `;
@@ -2839,13 +2796,6 @@ exports[`react-website generator > Tanstack router integration > should generate
         "skip-lint": {
           "command": "node -e \\"\\""
         }
-      }
-    },
-    "test": {
-      "executor": "@nx/vitest:test",
-      "outputs": ["{options.reportsDirectory}"],
-      "options": {
-        "reportsDirectory": "{workspaceRoot}/coverage/{projectRoot}"
       }
     }
   }
@@ -3708,33 +3658,22 @@ exports[`react-website generator > Tanstack router integration > should generate
   },
   "targets": {
     "build": {
-      "dependsOn": ["lint", "compile", "bundle", "test"],
-      "options": {
-        "outputPath": "dist/{projectRoot}/bundle"
-      }
-    },
-    "bundle": {
-      "executor": "@nx/vite:build",
-      "outputs": ["{options.outputPath}"],
-      "defaultConfiguration": "production",
-      "options": {
-        "outputPath": "dist/{projectRoot}/bundle"
-      },
-      "configurations": {
-        "development": {
-          "mode": "development"
-        },
-        "production": {
-          "mode": "production"
-        }
-      }
+      "dependsOn": ["lint", "compile", "test", "bundle"]
     },
     "compile": {
-      "dependsOn": ["bundle"],
+      "dependsOn": ["^build"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/tsc"],
       "options": {
         "command": "tsc --build tsconfig.app.json",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "vite --mode local-dev",
         "cwd": "{projectRoot}"
       }
     },
@@ -3761,63 +3700,6 @@ exports[`react-website generator > Tanstack router integration > should generate
       },
       "options": {
         "command": "aws s3 cp s3://\`aws cloudformation describe-stacks --query \\"Stacks[?starts_with(StackName, 'proj-')][].Outputs[] | [?contains(OutputKey, 'TestAppWebsiteBucketName')].OutputValue\\" --output text\`/runtime-config.json \\"{projectRoot}/public/runtime-config.json\\""
-      }
-    },
-    "preview": {
-      "dependsOn": ["build"],
-      "executor": "@nx/vite:preview-server",
-      "defaultConfiguration": "development",
-      "options": {
-        "buildTarget": "@proj/test-app:build"
-      },
-      "configurations": {
-        "development": {
-          "buildTarget": "@proj/test-app:build:development"
-        },
-        "production": {
-          "buildTarget": "@proj/test-app:build:production"
-        }
-      }
-    },
-    "serve": {
-      "executor": "@nx/vite:dev-server",
-      "defaultConfiguration": "development",
-      "options": {
-        "buildTarget": "@proj/test-app:build"
-      },
-      "configurations": {
-        "development": {
-          "buildTarget": "@proj/test-app:build:development",
-          "hmr": true
-        },
-        "production": {
-          "buildTarget": "@proj/test-app:build:production",
-          "hmr": false
-        }
-      }
-    },
-    "serve-local": {
-      "executor": "@nx/vite:dev-server",
-      "options": {
-        "buildTarget": "@proj/test-app:build:development",
-        "hmr": true,
-        "mode": "serve-local"
-      },
-      "continuous": true
-    },
-    "serve-static": {
-      "executor": "@nx/web:file-server",
-      "dependsOn": ["build"],
-      "options": {
-        "buildTarget": "@proj/test-app:build",
-        "spa": true
-      }
-    },
-    "test": {
-      "executor": "@nx/vitest:test",
-      "outputs": ["{options.reportsDirectory}"],
-      "options": {
-        "reportsDirectory": "{workspaceRoot}/coverage/{projectRoot}"
       }
     }
   }
@@ -4215,9 +4097,14 @@ exports[`react-website generator > Tanstack router integration > should generate
       "@nx/react/typings/cssmodule.d.ts",
       "@nx/react/typings/image.d.ts",
       "vite/client"
-    ]
+    ],
+    "rootDir": "src",
+    "module": "esnext",
+    "moduleResolution": "bundler"
   },
   "exclude": [
+    "out-tsc",
+    "dist",
     "src/**/*.spec.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.tsx",
@@ -4270,7 +4157,10 @@ exports[`react-website generator > Tanstack router integration > should generate
       "vitest",
       "@nx/react/typings/cssmodule.d.ts",
       "@nx/react/typings/image.d.ts"
-    ]
+    ],
+    "jsx": "react-jsx",
+    "module": "esnext",
+    "moduleResolution": "bundler"
   },
   "include": [
     "vite.config.ts",
@@ -4328,7 +4218,7 @@ export default defineConfig(() => ({
   //  plugins: [],
   // },
   build: {
-    outDir: '../dist/test-app',
+    outDir: '../dist/test-app/bundle',
     emptyOutDir: true,
     reportCompressedSize: true,
     commonjsOptions: {
@@ -4361,6 +4251,7 @@ exports[`react-website generator > Tanstack router integration > should generate
       ":proj/test-app": ["./test-app/src/index.ts"],
       ":proj/common-constructs": ["./packages/common/constructs/src/index.ts"]
     },
+    "composite": true,
     "rootDir": "."
   }
 }
@@ -4369,6 +4260,9 @@ exports[`react-website generator > Tanstack router integration > should generate
 
 exports[`react-website generator > Tanstack router integration > should generate website with router correctly > tsconfig.json 1`] = `
 "{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "include": [],
   "references": [
     {
       "path": "./test-app"
@@ -4441,7 +4335,7 @@ export default defineConfig(() => ({
   //  plugins: [],
   // },
   build: {
-    outDir: '../dist/test-app',
+    outDir: '../dist/test-app/bundle',
     emptyOutDir: true,
     reportCompressedSize: true,
     commonjsOptions: {

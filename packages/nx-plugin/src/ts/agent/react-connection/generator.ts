@@ -30,7 +30,7 @@ import {
   addAgUiReactConnection,
 } from '../../react-website/agui/generator';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
-import { addTsAgentTargetToServeLocal } from './serve-local';
+import { addTsAgentTargetToLocalDev } from './local-dev';
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -75,7 +75,7 @@ export async function tsAgentReactConnectionGenerator(
       auth: auth as AgUiAuth,
     });
 
-    await addTsAgentTargetToServeLocal(
+    await addTsAgentTargetToLocalDev(
       tree,
       frontendProjectConfig.name,
       agentProjectConfig.name,
@@ -185,7 +185,7 @@ export async function tsAgentReactConnectionGenerator(
     `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\` where { $program <: not contains \`<${clientProviderName}>$_</${clientProviderName}>\` }`,
   );
 
-  await addTsAgentTargetToServeLocal(
+  await addTsAgentTargetToLocalDev(
     tree,
     frontendProjectConfig.name,
     agentProjectConfig.name,

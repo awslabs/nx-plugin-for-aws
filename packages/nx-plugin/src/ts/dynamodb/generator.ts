@@ -110,10 +110,9 @@ export const tsDynamoDBGenerator = async (
       cwd: '{projectRoot}',
     },
   };
-  projectConfig.targets['serve-local'] = {
+  projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
     continuous: true,
-    dependsOn: ['pull-image'],
     options: {
       commands: [
         `tsx ${scriptsDir}/start-container.ts`,

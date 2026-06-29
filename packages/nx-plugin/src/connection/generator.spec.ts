@@ -114,7 +114,7 @@ describe('connection generator', () => {
         root: `packages/${name}`,
         metadata: { generator: 'ts#rdb' },
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );

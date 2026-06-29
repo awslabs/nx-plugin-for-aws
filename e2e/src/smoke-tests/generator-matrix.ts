@@ -365,7 +365,7 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-mcp-server --targetProject=my_py_table --no-interactive`,
     opts,
   );
-  // LangChain agent -> DynamoDB table (framework-agnostic workspace + serve-local wiring).
+  // LangChain agent -> DynamoDB table (framework-agnostic workspace + dev wiring).
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=py_langchain_project --sourceComponent=my-py-langchain-http-agent --targetProject=my_py_table --no-interactive`,
     opts,

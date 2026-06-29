@@ -3,7 +3,7 @@
 exports[`ts#dynamodb generator > should generate scripts for finch engine 1`] = `
 "{
   "runtimeConfigKey": "MyTable",
-  "serveLocal": {
+  "localDev": {
     "port": 8000,
     "tableName": "proj-my-table",
     "image": "public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local:latest",
@@ -271,10 +271,10 @@ exports[`ts#dynamodb generator > should generate the dynamodb project > packages
 import { readFileSync } from 'fs';
 
 const {
-  serveLocal: { port, tableName },
+  localDev: { port, tableName },
   tableConfig: { globalSecondaryIndexes },
 } = JSON.parse(readFileSync('config.json', 'utf-8')) as {
-  serveLocal: { port: number; tableName: string };
+  localDev: { port: number; tableName: string };
   tableConfig: {
     globalSecondaryIndexes: {
       indexName: string;
@@ -462,7 +462,7 @@ import { readFileSync } from 'fs';
 
 const { containerEngine, image } = JSON.parse(
   readFileSync('config.json', 'utf-8'),
-).serveLocal;
+).localDev;
 
 const inspect = spawnSync(containerEngine, ['image', 'inspect', image], {
   stdio: 'ignore',
@@ -484,7 +484,7 @@ import { readFileSync } from 'fs';
 
 const { containerEngine, containerName, image, port } = JSON.parse(
   readFileSync('config.json', 'utf-8'),
-).serveLocal;
+).localDev;
 
 const containerExists = (): boolean =>
   spawnSync(containerEngine, ['container', 'inspect', containerName], {
@@ -500,11 +500,26 @@ const isRunning = (): boolean => {
   return result.status === 0 && result.stdout.trim() === 'true';
 };
 
-// Multiple dynamo table packages run serve-local in parallel sharing the same
+// Ensure the image is available locally before starting the container.
+const ensureImage = (): void => {
+  const inspect = spawnSync(containerEngine, ['image', 'inspect', image], {
+    stdio: 'ignore',
+  });
+  if (inspect.status !== 0) {
+    const pull = spawnSync(containerEngine, ['pull', image], {
+      stdio: 'inherit',
+    });
+    if (pull.status !== 0) process.exit(pull.status ?? 1);
+  }
+};
+
+// Multiple dynamo table packages run dev in parallel sharing the same
 // container. All processes stream logs, but only the one that created the
 // container stops it on exit — others just detach.
 let created = false;
 let runRetries = 0;
+
+ensureImage();
 
 for (;;) {
   if (containerExists()) {
@@ -596,17 +611,16 @@ import { fileURLToPath } from 'url';
 const runtimeConfigKey = 'MyTable';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// config.json is only present in local dev (not included in the deployed bundle); guard with SERVE_LOCAL check
-const serveLocal = () =>
-  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8'))
-    .serveLocal;
+// config.json is only present in local dev (not included in the deployed bundle); guard with LOCAL_DEV check
+const localDev = () =>
+  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8')).localDev;
 
 let _client: DynamoDBClient | undefined;
 
 export const getDynamoDBClient = (): DynamoDBClient => {
   if (!_client) {
-    if (process.env.SERVE_LOCAL === 'true') {
-      const { port } = serveLocal();
+    if (process.env.LOCAL_DEV === 'true') {
+      const { port } = localDev();
       _client = new DynamoDBClient({
         endpoint: \`http://localhost:\${port}\`,
         region: 'us-east-1',
@@ -626,8 +640,8 @@ type DynamoDBConfig = {
 let _tableName: string | undefined;
 
 export const resolveTableName = async (): Promise<string> => {
-  if (process.env.SERVE_LOCAL === 'true') {
-    const { tableName } = serveLocal();
+  if (process.env.LOCAL_DEV === 'true') {
+    const { tableName } = localDev();
     return tableName;
   }
   if (_tableName === undefined) {
@@ -907,10 +921,10 @@ exports[`ts#dynamodb generator > should generate with infra=none then upgrade to
 import { readFileSync } from 'fs';
 
 const {
-  serveLocal: { port, tableName },
+  localDev: { port, tableName },
   tableConfig: { globalSecondaryIndexes },
 } = JSON.parse(readFileSync('config.json', 'utf-8')) as {
-  serveLocal: { port: number; tableName: string };
+  localDev: { port: number; tableName: string };
   tableConfig: {
     globalSecondaryIndexes: {
       indexName: string;
@@ -1098,7 +1112,7 @@ import { readFileSync } from 'fs';
 
 const { containerEngine, image } = JSON.parse(
   readFileSync('config.json', 'utf-8'),
-).serveLocal;
+).localDev;
 
 const inspect = spawnSync(containerEngine, ['image', 'inspect', image], {
   stdio: 'ignore',
@@ -1120,7 +1134,7 @@ import { readFileSync } from 'fs';
 
 const { containerEngine, containerName, image, port } = JSON.parse(
   readFileSync('config.json', 'utf-8'),
-).serveLocal;
+).localDev;
 
 const containerExists = (): boolean =>
   spawnSync(containerEngine, ['container', 'inspect', containerName], {
@@ -1136,11 +1150,26 @@ const isRunning = (): boolean => {
   return result.status === 0 && result.stdout.trim() === 'true';
 };
 
-// Multiple dynamo table packages run serve-local in parallel sharing the same
+// Ensure the image is available locally before starting the container.
+const ensureImage = (): void => {
+  const inspect = spawnSync(containerEngine, ['image', 'inspect', image], {
+    stdio: 'ignore',
+  });
+  if (inspect.status !== 0) {
+    const pull = spawnSync(containerEngine, ['pull', image], {
+      stdio: 'inherit',
+    });
+    if (pull.status !== 0) process.exit(pull.status ?? 1);
+  }
+};
+
+// Multiple dynamo table packages run dev in parallel sharing the same
 // container. All processes stream logs, but only the one that created the
 // container stops it on exit — others just detach.
 let created = false;
 let runRetries = 0;
+
+ensureImage();
 
 for (;;) {
   if (containerExists()) {
@@ -1232,17 +1261,16 @@ import { fileURLToPath } from 'url';
 const runtimeConfigKey = 'MyTable';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// config.json is only present in local dev (not included in the deployed bundle); guard with SERVE_LOCAL check
-const serveLocal = () =>
-  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8'))
-    .serveLocal;
+// config.json is only present in local dev (not included in the deployed bundle); guard with LOCAL_DEV check
+const localDev = () =>
+  JSON.parse(readFileSync(join(__dirname, '../config.json'), 'utf-8')).localDev;
 
 let _client: DynamoDBClient | undefined;
 
 export const getDynamoDBClient = (): DynamoDBClient => {
   if (!_client) {
-    if (process.env.SERVE_LOCAL === 'true') {
-      const { port } = serveLocal();
+    if (process.env.LOCAL_DEV === 'true') {
+      const { port } = localDev();
       _client = new DynamoDBClient({
         endpoint: \`http://localhost:\${port}\`,
         region: 'us-east-1',
@@ -1262,8 +1290,8 @@ type DynamoDBConfig = {
 let _tableName: string | undefined;
 
 export const resolveTableName = async (): Promise<string> => {
-  if (process.env.SERVE_LOCAL === 'true') {
-    const { tableName } = serveLocal();
+  if (process.env.LOCAL_DEV === 'true') {
+    const { tableName } = localDev();
     return tableName;
   }
   if (_tableName === undefined) {

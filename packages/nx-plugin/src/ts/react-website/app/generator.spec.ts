@@ -143,24 +143,6 @@ describe('react-website generator', () => {
     expect(tsConfig).toMatchSnapshot('tsconfig.json');
   });
 
-  it('should add a dev script to root package.json when one does not exist', async () => {
-    await tsReactWebsiteGenerator(tree, options);
-    const packageJson = JSON.parse(tree.read('package.json').toString());
-    expect(packageJson.scripts?.dev).toBe('nx serve-local @proj/test-app');
-  });
-
-  it('should not overwrite an existing dev script in root package.json', async () => {
-    const rootPackageJson = JSON.parse(tree.read('package.json').toString());
-    rootPackageJson.scripts = {
-      ...(rootPackageJson.scripts ?? {}),
-      dev: 'echo existing',
-    };
-    tree.write('package.json', JSON.stringify(rootPackageJson));
-    await tsReactWebsiteGenerator(tree, options);
-    const packageJson = JSON.parse(tree.read('package.json').toString());
-    expect(packageJson.scripts.dev).toBe('echo existing');
-  });
-
   it('should handle custom directory option', async () => {
     await tsReactWebsiteGenerator(tree, {
       ...options,
@@ -196,17 +178,51 @@ describe('react-website generator', () => {
     );
   });
 
-  it('should add a serve-local target with mode serve-local', async () => {
+  it('should add a dev target with mode local-dev', async () => {
     // Call the generator function
     await tsReactWebsiteGenerator(tree, options);
 
     const projectConfig = readJson(tree, 'test-app/project.json');
-    expect(projectConfig.targets).toHaveProperty('serve-local');
-    expect(projectConfig.targets['serve-local'].options).toHaveProperty(
-      'mode',
-      'serve-local',
+    expect(projectConfig.targets).toHaveProperty('dev');
+    expect(projectConfig.targets['dev'].executor).toBe('nx:run-commands');
+    expect(projectConfig.targets['dev'].options.command).toContain(
+      '--mode local-dev',
     );
-    expect(projectConfig.targets['serve-local'].continuous).toBeTruthy();
+    expect(projectConfig.targets['dev'].continuous).toBeTruthy();
+  });
+
+  it('should map the inferred vite dev-server target onto serve', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+
+    // The @nx/vite plugin's inferred dev-server targets are both mapped onto
+    // `serve` so the plugin does not emit its own `dev` target.
+    const nxJson = readJson(tree, 'nx.json');
+    const vitePlugin = nxJson.plugins.find(
+      (p) => typeof p !== 'string' && p.plugin === '@nx/vite/plugin',
+    );
+    expect(vitePlugin.options.serveTargetName).toBe('serve');
+    expect(vitePlugin.options.devTargetName).toBe('serve');
+  });
+
+  it('should expose the deployable bundle via the bundle target and aggregate it under build', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+
+    // build aggregates lint/compile/test and the vite bundle
+    const projectConfig = readJson(tree, 'test-app/project.json');
+    expect(projectConfig.targets.build.dependsOn).toEqual([
+      'lint',
+      'compile',
+      'test',
+      'bundle',
+    ]);
+
+    // The vite production build (the deployable artifact) is inferred as the
+    // `bundle` target via the @nx/vite plugin.
+    const nxJson = readJson(tree, 'nx.json');
+    const vitePlugin = nxJson.plugins.find(
+      (p) => typeof p !== 'string' && p.plugin === '@nx/vite/plugin',
+    );
+    expect(vitePlugin.options.buildTargetName).toBe('bundle');
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -400,7 +416,7 @@ describe('react-website generator', () => {
 
         // Should still have basic website targets
         expect(projectConfig.targets.build).toBeDefined();
-        expect(projectConfig.targets['serve-local']).toBeDefined();
+        expect(projectConfig.targets['dev']).toBeDefined();
       });
 
       it('should not create CDK constructs when using terraform', async () => {

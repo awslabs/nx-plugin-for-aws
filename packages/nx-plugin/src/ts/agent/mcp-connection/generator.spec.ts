@@ -29,10 +29,10 @@ describe('ts#agent#mcp-connection generator', () => {
             options: { commands: ['echo serve'] },
             continuous: true,
           },
-          'my-agent-serve-local': {
+          'my-agent-dev': {
             executor: 'nx:run-commands',
             options: {
-              commands: ['echo serve-local'],
+              commands: ['echo dev'],
               env: { PORT: '8081' },
             },
             dependsOn: [],
@@ -272,7 +272,7 @@ export const getAgent = async (sessionId: string) => {
     expect(clientIndex).toBeLessThan(agentIndex);
   });
 
-  it('should update serve-local target with MCP dependency', async () => {
+  it('should update dev target with MCP dependency', async () => {
     setupProjects();
 
     await tsAgentMcpConnectionGenerator(tree, {
@@ -296,15 +296,15 @@ export const getAgent = async (sessionId: string) => {
     const config = JSON.parse(
       tree.read('packages/my-api/project.json', 'utf-8')!,
     );
-    const serveLocal = config.targets['my-agent-serve-local'];
+    const devTarget = config.targets['my-agent-dev'];
 
     // Check dependency was added
-    expect(serveLocal.dependsOn).toContainEqual({
+    expect(devTarget.dependsOn).toContainEqual({
       projects: ['@test/my-api'],
-      target: 'inventory-mcp-serve-local',
+      target: 'inventory-mcp-dev',
     });
 
-    // SERVE_LOCAL env var is set by the agent generator's serve-local target, not the connection generator
+    // LOCAL_DEV env var is set by the agent generator's dev target, not the connection generator
   });
 
   it('should not duplicate imports on second run', async () => {

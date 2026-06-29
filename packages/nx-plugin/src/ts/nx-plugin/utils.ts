@@ -80,7 +80,13 @@ export const configureTsProjectAsNxPlugin = (
       // Include dependency on @aws/nx-plugin
       [PackageJson.name]: `^${PackageJson.version}`,
     };
-    addDependenciesToPackageJson(tree, {}, deps);
-    addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
+    // Nx transpiles unbuilt plugin generators on the fly. With @swc-node/register
+    // present it uses swc; otherwise it falls back to ts-node, which forces the
+    // deprecated `moduleResolution: node10` — a hard error under TypeScript 6.
+    // Ensure swc is available so generators run regardless of the installed
+    // TypeScript version. ESM migration tracked in awslabs/nx-plugin-for-aws#814.
+    const devDeps = withVersions(['@swc-node/register', '@swc/core']);
+    addDependenciesToPackageJson(tree, {}, { ...deps, ...devDeps });
+    addDependenciesToPackageJson(tree, deps, devDeps, pluginPackageJsonPath);
   }
 };

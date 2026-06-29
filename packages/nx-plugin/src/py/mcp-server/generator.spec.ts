@@ -129,7 +129,7 @@ dev-dependencies = []
       'nx:run-commands',
     );
     expect(projectConfig.targets['mcp-server-inspect'].dependsOn).toContain(
-      'mcp-server-serve-local',
+      'mcp-server-dev',
     );
     expect(
       projectConfig.targets['mcp-server-inspect'].options.commands[0],
@@ -180,7 +180,7 @@ dev-dependencies = []
       projectConfig.targets['custom-server-serve-stdio'].options.commands,
     ).toEqual(['uv run -m proj_test_project.custom_server.stdio']);
     expect(projectConfig.targets['custom-server-inspect'].dependsOn).toContain(
-      'custom-server-serve-local',
+      'custom-server-dev',
     );
     expect(
       projectConfig.targets['custom-server-inspect'].options.commands[0],

@@ -25,8 +25,8 @@ export const AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
 /**
  * Connect an AgentCore Gateway to an MCP server.
  *
- * Chains the gateway's serve-local target to the MCP server's serve-local
- * target, and registers the server in the gateway's local serve-local.ts so
+ * Chains the gateway's dev target to the MCP server's dev
+ * target, and registers the server in the gateway's local local-dev.ts so
  * the local gateway aggregates its tools. Users must still call
  * `gateway.addMcpServer(...)` in their application stack to create the
  * actual CDK/Terraform resource.
@@ -64,8 +64,6 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
     );
   }
 
-  const gatewayServeLocalTargetName = `${kebabCase(gateway.rc)}-serve-local`;
-
   // The target name must match what the deployed Gateway uses
   // (`mcpServerName` on the MCP construct, derived from the project's class
   // name) so `<target>___<tool>` resolves identically locally and deployed.
@@ -77,12 +75,12 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   await attachUpstreamToLocalGateway(
     tree,
     sourceProject,
-    gatewayServeLocalTargetName,
+    'dev',
     {
       targetName: mcpTargetName,
       port: (mcpComponent.port as number | undefined) ?? 8000,
       upstreamProjectName: targetProject.name,
-      upstreamServeLocalTargetName: `${mcpComponentName}-serve-local`,
+      upstreamDevTargetName: `${mcpComponentName}-dev`,
     },
   );
 

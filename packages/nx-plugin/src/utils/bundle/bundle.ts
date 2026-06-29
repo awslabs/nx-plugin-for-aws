@@ -13,7 +13,10 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { applyGritQL } from '../ast';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+import {
+  addDependencyToTargetIfNotPresent,
+  normalizeTargetKeyOrder,
+} from '../nx';
 import { getRelativePathToRoot } from '../paths';
 import { withVersions } from '../versions';
 
@@ -77,14 +80,14 @@ export const addPythonBundleTarget = (
     pythonPlatform === 'aarch64-manylinux_2_28' ? 'bundle-arm' : 'bundle-x86';
 
   if (!project.targets?.[bundleTargetName]) {
-    project.targets[bundleTargetName] = {
+    project.targets[bundleTargetName] = normalizeTargetKeyOrder({
       ...createPythonBundleTarget({
         packageName: project.name,
         pythonPlatform,
         bundleTargetName,
       }),
       dependsOn: ['compile'],
-    };
+    });
   }
 
   // Add a "bundle" target which depends on either bundle-arm or bundle-x86 (or both)
@@ -142,7 +145,7 @@ export const addTypeScriptBundleTarget = async (
 
   // Add the bundle target
   if (!project.targets.bundle) {
-    project.targets.bundle = {
+    project.targets.bundle = normalizeTargetKeyOrder({
       cache: true,
       outputs: [`{workspaceRoot}/dist/{projectRoot}/bundle`],
       executor: 'nx:run-commands',
@@ -151,7 +154,7 @@ export const addTypeScriptBundleTarget = async (
         cwd: '{projectRoot}',
       },
       dependsOn: ['compile'],
-    };
+    });
   }
 
   // Add bundle to the build target

@@ -17,7 +17,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          'dev': { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -33,7 +33,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          [`${mcpServerName}-serve-local`]: {
+          [`${mcpServerName}-dev`]: {
             executor: 'nx:run-commands',
             continuous: true,
           },
@@ -46,7 +46,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add dynamodb serve-local dependency to mcp-server serve-local', async () => {
+  it('should add dynamodb dev dependency to mcp-server dev', async () => {
     setupMcpServerProject();
     setupDynamoDBProject();
 
@@ -104,7 +104,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
     expect(pyprojectContent).not.toContain('test.db');
   });
 
-  it('should not add dependency when source has no matching serve-local', async () => {
+  it('should not add dependency when source has no matching dev', async () => {
     tree.write(
       `packages/my-mcp-server/project.json`,
       JSON.stringify({
@@ -121,7 +121,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-mcp-server');
-    expect(config.targets?.['mcp-server-serve-local']).toBeUndefined();
+    expect(config.targets?.['mcp-server-dev']).toBeUndefined();
   });
 
   it('should be idempotent', async () => {
@@ -139,12 +139,12 @@ describe('py#dynamodb mcp-server-connection generator', () => {
 
     const config = readProjectConfiguration(tree, 'my-mcp-server');
     const deps = (
-      config.targets?.['mcp-server-serve-local']?.dependsOn ?? []
+      config.targets?.['mcp-server-dev']?.dependsOn ?? []
     ).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });

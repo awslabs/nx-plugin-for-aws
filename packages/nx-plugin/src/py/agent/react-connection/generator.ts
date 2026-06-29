@@ -28,9 +28,9 @@ import {
 } from '../../../utils/nx';
 import { sortObjectKeys } from '../../../utils/object';
 import {
-  addPyAgentTargetToServeLocal,
-  openApiClientServeLocalDeps,
-} from './serve-local';
+  addPyAgentTargetToLocalDev,
+  openApiClientLocalDevDeps,
+} from './local-dev';
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -66,7 +66,7 @@ export const pyAgentReactConnectionGenerator = async (
     );
   }
 
-  let additionalServeLocalDeps: string[] = [];
+  let additionalLocalDevDeps: string[] = [];
 
   if (protocol === 'ag-ui') {
     await addAgUiReactConnection(tree, {
@@ -124,7 +124,7 @@ export const pyAgentReactConnectionGenerator = async (
     });
 
     // Use the shared OpenAPI react client utility for hooks, providers, and build targets.
-    // Serve-local is handled separately below using the agent-specific serve-local target.
+    // The dev target is handled separately below using the agent-specific dev target.
     await addOpenApiReactClient(tree, {
       apiName: agentNameClassName,
       frontendProjectConfig,
@@ -135,10 +135,10 @@ export const pyAgentReactConnectionGenerator = async (
       auth,
       port: agentPort,
       isAgentRuntime: true,
-      skipServeLocal: true,
+      skipLocalDev: true,
     });
 
-    additionalServeLocalDeps = openApiClientServeLocalDeps(agentNameClassName);
+    additionalLocalDevDeps = openApiClientLocalDevDeps(agentNameClassName);
 
     // HTTP only — the AG-UI branch handles this inside addAgUiReactConnection.
     // Agent constructs publish their runtime ARN to the 'agentcore' namespace
@@ -150,7 +150,7 @@ export const pyAgentReactConnectionGenerator = async (
     });
   }
 
-  await addPyAgentTargetToServeLocal(
+  await addPyAgentTargetToLocalDev(
     tree,
     frontendProjectConfig.name,
     agentProjectConfig.name,
@@ -159,7 +159,7 @@ export const pyAgentReactConnectionGenerator = async (
       agentNameClassName,
       port: agentPort,
       targetComponent,
-      additionalDependencyTargets: additionalServeLocalDeps,
+      additionalDependencyTargets: additionalLocalDevDeps,
     },
   );
 

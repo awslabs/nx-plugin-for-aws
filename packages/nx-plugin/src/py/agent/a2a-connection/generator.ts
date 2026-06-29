@@ -215,15 +215,15 @@ export const pyAgentA2aConnectionGenerator = async (
     getPythonAgentConnectionProject(tree),
   );
 
-  // 5. Set up serve-local target dependencies — chain onto the target agent
+  // 5. Set up dev target dependencies — chain onto the target agent
   const agentName = agentComponent.name ?? 'agent';
-  const serveLocalTargetName = `${agentName}-serve-local`;
-  const targetServeLocalTargetName = `${targetAgentComponentName}-serve-local`;
+  const devTargetName = `${agentName}-dev`;
+  const targetDevTargetName = `${targetAgentComponentName}-dev`;
 
-  if (sourceProject.targets?.[serveLocalTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+  if (sourceProject.targets?.[devTargetName]) {
+    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
       projects: [targetProject.name],
-      target: targetServeLocalTargetName,
+      target: targetDevTargetName,
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }

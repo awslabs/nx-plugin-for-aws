@@ -11,7 +11,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTargetToServeLocal } from '../../../connection/serve-local';
+import { addTargetToLocalDev } from '../../../connection/local-dev';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../ast';
 import { updateGitIgnore } from '../../git';
@@ -59,11 +59,11 @@ export interface AddOpenApiReactClientOptions {
    */
   isAgentRuntime?: boolean;
   /**
-   * When true, skips the serve-local setup. Use this when the caller
-   * handles serve-local configuration separately (e.g. agent connections
-   * that use a component-specific serve-local target instead of 'serve').
+   * When true, skips the dev target setup. Use this when the caller
+   * handles dev target configuration separately (e.g. agent connections
+   * that use a component-specific dev target instead of 'serve').
    */
-  skipServeLocal?: boolean;
+  skipLocalDev?: boolean;
 }
 
 /**
@@ -81,7 +81,7 @@ export const addOpenApiReactClient = async (
     auth,
     port,
     isAgentRuntime = false,
-    skipServeLocal = false,
+    skipLocalDev = false,
   }: AddOpenApiReactClientOptions,
 ) => {
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
@@ -136,7 +136,7 @@ export const addOpenApiReactClient = async (
         executor: 'nx:run-commands',
         options: {
           commands: [
-            `nx watch --projects=${specBuildProject.name} --includeDependentProjects -- nx run ${frontendProjectConfig.name}:"${clientGenTarget}"`,
+            `nx watch --projects=${specBuildProject.name} --includeDependencies -- nx run ${frontendProjectConfig.name}:"${clientGenTarget}"`,
           ],
         },
         continuous: true,
@@ -236,10 +236,10 @@ export const addOpenApiReactClient = async (
     `\`<App />\` => \`<${providerName}><App /></${providerName}>\` where { $program <: not contains \`<${providerName}>$_</${providerName}>\` }`,
   );
 
-  // Update serve-local on the website to use our local server.
-  // Callers that handle serve-local separately (e.g. agent connections) set skipServeLocal.
-  if (!skipServeLocal) {
-    await addTargetToServeLocal(
+  // Update the dev target on the website to use our local server.
+  // Callers that handle the dev target separately (e.g. agent connections) set skipLocalDev.
+  if (!skipLocalDev) {
+    await addTargetToLocalDev(
       tree,
       frontendProjectConfig.name,
       backendProjectConfig.name,

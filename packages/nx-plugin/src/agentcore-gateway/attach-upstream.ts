@@ -22,44 +22,44 @@ export interface LocalGatewayUpstream {
    */
   port: number;
   /**
-   * Project providing the upstream's serve-local target.
+   * Project providing the upstream's dev target.
    */
   upstreamProjectName: string;
   /**
-   * Name of the upstream's serve-local target.
+   * Name of the upstream's dev target.
    */
-  upstreamServeLocalTargetName: string;
+  upstreamDevTargetName: string;
 }
 
 /**
  * Attach an upstream MCP endpoint (an MCP server or another gateway's local
  * gateway) to a gateway's local gateway.
  *
- * Chains the gateway's serve-local target onto the upstream's serve-local
- * target, and registers the upstream in the gateway's serve-local.ts so the
- * local gateway aggregates its tools.
+ * Chains the gateway's dev target onto the upstream's dev target, and
+ * registers the upstream in the gateway's local-dev.ts so the local gateway
+ * aggregates its tools.
  */
 export const attachUpstreamToLocalGateway = async (
   tree: Tree,
   gatewayProject: ProjectConfiguration,
-  gatewayServeLocalTargetName: string,
+  gatewayDevTargetName: string,
   upstream: LocalGatewayUpstream,
 ): Promise<void> => {
-  // 1. Wire serve-local chain
-  if (gatewayProject.targets?.[gatewayServeLocalTargetName]) {
+  // 1. Wire dev chain
+  if (gatewayProject.targets?.[gatewayDevTargetName]) {
     addDependencyToTargetIfNotPresent(
       gatewayProject,
-      gatewayServeLocalTargetName,
+      gatewayDevTargetName,
       {
         projects: [upstream.upstreamProjectName],
-        target: upstream.upstreamServeLocalTargetName,
+        target: upstream.upstreamDevTargetName,
       },
     );
     updateProjectConfiguration(tree, gatewayProject.name, gatewayProject);
   }
 
-  // 2. Register the upstream in the gateway's local serve-local.ts
-  const serveTsPath = joinPathFragments(gatewayProject.root, 'serve-local.ts');
+  // 2. Register the upstream in the gateway's local local-dev.ts
+  const serveTsPath = joinPathFragments(gatewayProject.root, 'local-dev.ts');
   if (tree.exists(serveTsPath)) {
     const entry = `{ name: '${upstream.targetName}', url: 'http://localhost:${upstream.port}/mcp' }`;
     await applyGritQL(

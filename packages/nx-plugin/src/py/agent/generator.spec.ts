@@ -1284,7 +1284,7 @@ dev-dependencies = []
       tree.exists('apps/test-project/scripts/agent_openapi.py'),
     ).toBeTruthy();
 
-    // Chat target chains: generate-client -> openapi, and also waits for serve-local
+    // Chat target chains: generate-client -> openapi, and also waits for dev
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
@@ -1305,7 +1305,7 @@ dev-dependencies = []
     expect(chatTarget).toBeDefined();
     expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
     // HTTP chat builds the generated client first, but runs standalone — no
-    // serve-local dependency.
+    // dev dependency.
     expect(chatTarget.dependsOn).toEqual(['agent-generate-client']);
 
     // Generated client dir should be gitignored

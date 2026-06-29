@@ -28,9 +28,9 @@ export const AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInf
 /**
  * Connect an AgentCore Gateway to another AgentCore Gateway.
  *
- * Chains the source gateway's serve-local target to the target gateway's
- * serve-local target, and registers the target gateway in the source
- * gateway's local serve-local.ts so the local gateway aggregates its tools
+ * Chains the source gateway's dev target to the target gateway's
+ * dev target, and registers the target gateway in the source
+ * gateway's local local-dev.ts so the local gateway aggregates its tools
  * (already prefixed by the target gateway) under
  * `<targetGateway>___<targetName>___<toolName>`. Users must still call
  * `gateway.addGateway(...)` in their application stack to create the
@@ -77,7 +77,6 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
 
   assertNoCycle(tree, sourceProject.name, targetProject.name);
 
-  const sourceServeLocalTargetName = `${kebabCase(sourceGateway.rc)}-serve-local`;
   // The target name must match the deployed Gateway target (`gatewayName` on
   // the gateway construct, the project's class name in kebab-case) so
   // `<targetGateway>___<target>___<tool>` resolves identically locally and
@@ -87,12 +86,12 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
   await attachUpstreamToLocalGateway(
     tree,
     sourceProject,
-    sourceServeLocalTargetName,
+    'dev',
     {
       targetName: targetGatewayKebabCase,
       port: targetGateway.port,
       upstreamProjectName: targetProject.name,
-      upstreamServeLocalTargetName: `${targetGatewayKebabCase}-serve-local`,
+      upstreamDevTargetName: 'dev',
     },
   );
 
@@ -111,7 +110,7 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
  * Reject connections that would make the local gateway graph cyclic — a
  * cycle would recurse infinitely on tools/list both locally and deployed.
  *
- * Walks gateway serve-local dependsOn edges from the target gateway; the
+ * Walks gateway dev dependsOn edges from the target gateway; the
  * source gateway must not be reachable.
  */
 const assertNoCycle = (
@@ -139,10 +138,9 @@ const assertNoCycle = (
     ) {
       continue;
     }
-    const gateway = readAgentCoreGatewayMetadata(project);
-    const serveLocal =
-      project.targets?.[`${kebabCase(gateway.rc)}-serve-local`];
-    for (const dep of serveLocal?.dependsOn ?? []) {
+    readAgentCoreGatewayMetadata(project);
+    const devTarget = project.targets?.['dev'];
+    for (const dep of devTarget?.dependsOn ?? []) {
       if (typeof dep !== 'string') {
         stack.push(...(dep.projects ?? []));
       }

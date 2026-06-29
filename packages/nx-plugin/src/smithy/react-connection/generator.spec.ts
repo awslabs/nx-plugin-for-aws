@@ -140,7 +140,7 @@ export function Main() {
         projectConfig.targets['watch-generate:test-api-client'].options
           .commands,
       ).toEqual([
-        `nx watch --projects=api-model --includeDependentProjects -- nx run frontend:"generate:test-api-client"`,
+        `nx watch --projects=api-model --includeDependencies -- nx run frontend:"generate:test-api-client"`,
       ]);
 
       // Verify compile target depends on client generation
@@ -986,7 +986,7 @@ export function Main() {
       });
     });
 
-    it('should configure serve-local integration with generated projects end-to-end', async () => {
+    it('should configure dev integration with generated projects end-to-end', async () => {
       // Generate a smithy API using the real generator (creates both model and backend projects)
       await tsSmithyApiGenerator(tree, {
         name: 'TestApi',
@@ -1006,17 +1006,17 @@ export function Main() {
         tree.read('frontend/project.json', 'utf-8'),
       );
 
-      // Verify that serve-local target now depends on backend serve-local target
-      expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+      // Verify that dev target now depends on backend dev target
+      expect(frontendProject.targets['dev'].dependsOn).toContainEqual({
         projects: ['@proj/test-api'],
-        target: 'serve-local',
+        target: 'dev',
       });
       // Should also depend on the generate target (for initial generation)
-      expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+      expect(frontendProject.targets['dev'].dependsOn).toContain(
         'generate:test-api-client',
       );
       // Should also depend on the generate watch target (for ongoing changes)
-      expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+      expect(frontendProject.targets['dev'].dependsOn).toContain(
         'watch-generate:test-api-client',
       );
 

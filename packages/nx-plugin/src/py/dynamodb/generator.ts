@@ -108,7 +108,7 @@ export const pyDynamoDBGenerator = async (
       cwd: '{projectRoot}',
     },
   };
-  projectConfig.targets['serve-local'] = {
+  projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
     continuous: true,
     dependsOn: ['pull-image'],

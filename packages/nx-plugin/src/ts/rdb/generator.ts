@@ -197,18 +197,17 @@ export const tsRdbGenerator = async (
       cwd: '{projectRoot}',
     },
   };
-  projectConfig.targets['serve-local'] = {
+  projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
     options: {
       command: `tsx ${scriptsDir}/start-container.ts`,
       cwd: '{projectRoot}',
     },
     continuous: true,
-    dependsOn: ['pull-image'],
   };
   projectConfig.targets['wait-for-db'] = {
     executor: 'nx:run-commands',
-    dependsOn: ['serve-local'],
+    dependsOn: ['dev'],
     options: {
       command: `tsx ${scriptsDir}/wait-for-db.ts`,
       cwd: '{projectRoot}',
@@ -216,12 +215,12 @@ export const tsRdbGenerator = async (
   };
   projectConfig.targets.prisma = {
     executor: 'nx:run-commands',
-    dependsOn: ['serve-local', 'wait-for-db'],
+    dependsOn: ['dev', 'wait-for-db'],
     options: {
       cwd: '{projectRoot}',
       command: 'prisma',
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   };

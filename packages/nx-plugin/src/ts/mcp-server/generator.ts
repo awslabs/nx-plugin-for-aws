@@ -30,6 +30,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -220,69 +221,74 @@ export const tsMcpServerGenerator = async (
     component: { info: TS_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
   });
 
+  const mcpTargets = {
+    ...project.targets,
+    // Add targets for running the MCP server
+    [`${mcpTargetPrefix}-serve-stdio`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [`tsx --watch ${relativeSourceDir}/stdio.ts`],
+        cwd: '{projectRoot}',
+      },
+    },
+    [`${mcpTargetPrefix}-serve`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+        },
+      },
+    },
+    [`${mcpTargetPrefix}-dev`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+          LOCAL_DEV: 'true',
+        },
+      },
+    },
+    [`${mcpTargetPrefix}-inspect`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      // Launch the inspector against the locally served HTTP server. The dev
+      // target starts the server and any connected dependencies (e.g. a local
+      // database).
+      dependsOn: [`${mcpTargetPrefix}-dev`],
+      options: {
+        commands: [
+          `mcp-inspector --transport http --server-url http://localhost:${localDevPort}/mcp`,
+        ],
+        cwd: '{projectRoot}',
+      },
+    },
+    [`${mcpTargetPrefix}-inspect-stdio`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [
+          `mcp-inspector -- tsx --watch ${relativeSourceDir}/stdio.ts`,
+        ],
+        cwd: '{projectRoot}',
+      },
+    },
+  };
+
+  // Aggregate `<mcp>-dev` under the project-level `dev` target.
+  addComponentDevTarget(mcpTargets, `${mcpTargetPrefix}-dev`);
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     // Sort targets so their order is stable regardless of insertion order on
     // first run vs re-run.
-    targets: sortObjectKeys({
-      ...project.targets,
-      // Add targets for running the MCP server
-      [`${mcpTargetPrefix}-serve-stdio`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [`tsx --watch ${relativeSourceDir}/stdio.ts`],
-          cwd: '{projectRoot}',
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-serve`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-          },
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-serve-local`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-            SERVE_LOCAL: 'true',
-          },
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-inspect`]: {
-        executor: 'nx:run-commands',
-        // Launch the inspector against the locally served (serve-local) HTTP
-        // server. serve-local starts the server and any connected dependencies
-        // (e.g. a local database).
-        dependsOn: [`${mcpTargetPrefix}-serve-local`],
-        options: {
-          commands: [
-            `mcp-inspector --transport http --server-url http://localhost:${localDevPort}/mcp`,
-          ],
-          cwd: '{projectRoot}',
-        },
-        continuous: true,
-      },
-      [`${mcpTargetPrefix}-inspect-stdio`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [
-            `mcp-inspector -- tsx --watch ${relativeSourceDir}/stdio.ts`,
-          ],
-          cwd: '{projectRoot}',
-        },
-        continuous: true,
-      },
-    }),
+    targets: sortObjectKeys(mcpTargets),
   });
 
   addComponentGeneratorMetadata(

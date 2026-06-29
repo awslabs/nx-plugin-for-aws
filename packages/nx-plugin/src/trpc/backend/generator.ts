@@ -138,20 +138,20 @@ export async function tsTrpcApiGenerator(
 
   projectConfig.targets.serve = {
     executor: 'nx:run-commands',
+    continuous: true,
     options: {
       commands: ['tsx --watch src/local-server.ts'],
       cwd: '{projectRoot}',
     },
-    continuous: true,
   };
 
-  projectConfig.targets['serve-local'] = {
-    ...projectConfig.targets['serve-local'],
+  projectConfig.targets['dev'] = {
+    ...projectConfig.targets['dev'],
     ...projectConfig.targets.serve,
     options: {
       ...projectConfig.targets.serve.options,
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   };

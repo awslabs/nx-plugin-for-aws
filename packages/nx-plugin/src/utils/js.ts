@@ -3,15 +3,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { dynamicImport } from '@nx/devkit/src/utils/config-utils';
 import ts from 'typescript';
+
+// A real runtime `import()`, wrapped in `new Function` so transpilers (tsc's
+// CommonJS output, @swc-node/register) cannot rewrite it to `require()` —
+// `require()` cannot load the `data:` urls we import below. Under a test VM
+// (vitest) this `new Function` import has no dynamic-import callback, so we
+// fall back to a literal `import()` which the test runner wires up correctly.
+const nodeImport = new Function('modulePath', 'return import(modulePath);') as (
+  modulePath: string,
+) => Promise<Record<string, unknown>>;
+
+const dynamicImport = async (
+  modulePath: string,
+): Promise<Record<string, unknown>> => {
+  try {
+    return await nodeImport(modulePath);
+  } catch (e) {
+    if (
+      e instanceof TypeError &&
+      e.message.includes('dynamic import callback')
+    ) {
+      return import(/* @vite-ignore */ modulePath);
+    }
+    throw e;
+  }
+};
 
 /**
  * Imports a javascript module from a string of js code
  */
 export const importJavaScriptModule = async <T>(jsCode: string): Promise<T> => {
-  // Use nx's dynamic import to ensure that transpilers (namely @swc-node/register) don't process the import and it's
-  // instead processed by node at runtime, which allows for data urls
   const module = await dynamicImport(
     `data:text/javascript,${encodeURIComponent(jsCode)}`,
   );

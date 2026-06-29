@@ -400,7 +400,7 @@ describe('py strands agent react connection with real projects', {
     });
   });
 
-  it('should configure serve-local integration with generated projects', async () => {
+  it('should configure dev integration with generated projects', async () => {
     // Generate a py project for the agent
     await pyProjectGenerator(tree, {
       name: 'agent-project',
@@ -431,12 +431,12 @@ describe('py strands agent react connection with real projects', {
     // Read the frontend project configuration
     const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
 
-    // Verify that serve-local target now depends on agent serve-local target
-    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+    // Verify that dev target now depends on agent dev target
+    expect(frontendProject.targets['dev'].dependsOn).toContainEqual({
       projects: expect.arrayContaining([
         expect.stringContaining('agent_project'),
       ]),
-      target: 'agent-serve-local',
+      target: 'agent-dev',
     });
 
     // Verify that the runtime config was created and modified
@@ -451,7 +451,7 @@ describe('py strands agent react connection with real projects', {
 
     // Verify that the runtime config includes the agent runtime override. The
     // HTTP agent is invoked through the generated OpenAPI client, which appends
-    // the `/invocations` operation path itself, so the serve-local base URL
+    // the `/invocations` operation path itself, so the dev base URL
     // must omit it (otherwise requests hit `/invocations/invocations`).
     expect(runtimeConfigContent).toContain('runtimeConfig.agentRuntimes.');
     expect(runtimeConfigContent).toMatch(
@@ -537,13 +537,13 @@ describe('py strands agent react connection with real projects', {
     expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
     expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
 
-    // serve-local should be wired up for the agent's continuous target
+    // dev should be wired up for the agent's continuous target
     const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
-    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+    expect(frontendProject.targets['dev'].dependsOn).toContainEqual({
       projects: expect.arrayContaining([
         expect.stringContaining('agent_project'),
       ]),
-      target: 'agent-serve-local',
+      target: 'agent-dev',
     });
   });
 });

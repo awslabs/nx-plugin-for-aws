@@ -32,7 +32,7 @@ export interface AddAgentChatScriptsOptions {
 
 /**
  * Emit the chat CLI scripts for an agent. Every protocol gets a small
- * `chat.ts` that connects to the local `serve-local` server by default, and
+ * `chat.ts` that connects to the local `dev` server by default, and
  * to the deployed agent on Bedrock AgentCore (resolved from runtime config)
  * when `RUNTIME_CONFIG_APP_ID` is set. The shared `agentcore.ts` helper
  * handles ARN resolution and request authentication.

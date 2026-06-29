@@ -364,7 +364,7 @@ describe('ts strands agent react connection with real projects', () => {
     });
   });
 
-  it('should configure serve-local integration with generated projects', async () => {
+  it('should configure dev integration with generated projects', async () => {
     // Generate a ts project for the agent
     await tsProjectGenerator(tree, {
       name: 'agent-project',
@@ -395,10 +395,10 @@ describe('ts strands agent react connection with real projects', () => {
       tree.read('frontend/project.json', 'utf-8'),
     );
 
-    // Verify that serve-local target now depends on agent serve-local target
-    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+    // Verify that dev target now depends on agent dev target
+    expect(frontendProject.targets['dev'].dependsOn).toContainEqual({
       projects: ['@proj/agent-project'],
-      target: 'agent-serve-local',
+      target: 'agent-dev',
     });
 
     // Verify that the runtime config was created and modified
@@ -418,7 +418,7 @@ describe('ts strands agent react connection with real projects', () => {
     expect(runtimeConfigContent).toContain('ws://localhost:8081/ws');
   });
 
-  it('should use AG-UI local URL in serve-local for AG-UI agents', async () => {
+  it('should use AG-UI local URL in dev for AG-UI agents', async () => {
     // Generate a ts project for the agent
     await tsProjectGenerator(tree, {
       name: 'agent-project',
@@ -451,7 +451,7 @@ describe('ts strands agent react connection with real projects', () => {
       'utf-8',
     );
 
-    // AG-UI serve-local should use http://localhost:PORT/invocations
+    // AG-UI dev should use http://localhost:PORT/invocations
     expect(runtimeConfigContent).toContain('http://localhost:8081/invocations');
     expect(runtimeConfigContent).not.toContain('ws://localhost:8081/ws');
   });

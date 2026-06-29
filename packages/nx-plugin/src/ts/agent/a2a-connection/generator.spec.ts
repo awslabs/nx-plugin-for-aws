@@ -47,11 +47,11 @@ describe('ts#agent#a2a-connection generator', () => {
             options: { commands: ['echo serve'] },
             continuous: true,
           },
-          'host-serve-local': {
+          'host-dev': {
             executor: 'nx:run-commands',
             options: {
-              commands: ['echo serve-local'],
-              env: { PORT: '8081', SERVE_LOCAL: 'true' },
+              commands: ['echo dev'],
+              env: { PORT: '8081', LOCAL_DEV: 'true' },
             },
             dependsOn: [],
             continuous: true,
@@ -88,11 +88,11 @@ export const getAgent = async (sessionId: string) =>
         root: 'apps/ts-remote',
         sourceRoot: 'apps/ts-remote/src',
         targets: {
-          'remote-serve-local': {
+          'remote-dev': {
             executor: 'nx:run-commands',
             options: {
-              commands: ['echo remote-serve-local'],
-              env: { PORT: '9000', SERVE_LOCAL: 'true' },
+              commands: ['echo remote-dev'],
+              env: { PORT: '9000', LOCAL_DEV: 'true' },
             },
             continuous: true,
           },
@@ -142,7 +142,7 @@ export const getAgent = async (sessionId: string) =>
     expect(tree.exists(clientPath)).toBe(true);
     const client = tree.read(clientPath, 'utf-8')!;
     expect(client).toContain('RemoteClientStrands');
-    expect(client).toContain('SERVE_LOCAL');
+    expect(client).toContain('LOCAL_DEV');
     expect(client).toContain('http://localhost:9000/');
     expect(client).toContain('AgentCoreA2aClientStrands.withIamAuth');
 
@@ -171,7 +171,7 @@ export const getAgent = async (sessionId: string) =>
     expect(agent).toContain('remoteTool');
   });
 
-  it('should make host serve-local depend on remote serve-local', async () => {
+  it('should make host dev depend on remote dev', async () => {
     setupProjects();
     await tsAgentA2aConnectionGenerator(tree, {
       sourceProject: '@test/ts-host',
@@ -181,8 +181,8 @@ export const getAgent = async (sessionId: string) =>
     });
 
     const host = JSON.parse(tree.read('apps/ts-host/project.json', 'utf-8')!);
-    expect(host.targets['host-serve-local'].dependsOn).toEqual([
-      { projects: ['@test/ts-remote'], target: 'remote-serve-local' },
+    expect(host.targets['host-dev'].dependsOn).toEqual([
+      { projects: ['@test/ts-remote'], target: 'remote-dev' },
     ]);
   });
 
@@ -320,10 +320,10 @@ export const getAgent = async (sessionId: string) =>
     expect(toolsArrayMatch).toBeTruthy();
     expect((toolsArrayMatch![1].match(/\bremoteTool\b/g) ?? []).length).toBe(1);
 
-    // The host serve-local target has the remote serve-local dep exactly once
+    // The host dev target has the remote dev dep exactly once
     const host = JSON.parse(tree.read('apps/ts-host/project.json', 'utf-8')!);
-    expect(host.targets['host-serve-local'].dependsOn).toEqual([
-      { projects: ['@test/ts-remote'], target: 'remote-serve-local' },
+    expect(host.targets['host-dev'].dependsOn).toEqual([
+      { projects: ['@test/ts-remote'], target: 'remote-dev' },
     ]);
   });
 

@@ -21,9 +21,9 @@ describe('ts#agent#gateway-connection generator', () => {
         sourceRoot: 'packages/my-api/src',
         targets: {
           build: {},
-          'my-agent-serve-local': {
+          'my-agent-dev': {
             executor: 'nx:run-commands',
-            options: { commands: ['echo serve-local'] },
+            options: { commands: ['echo dev'] },
             dependsOn: [],
             continuous: true,
           },
@@ -66,7 +66,7 @@ export const getAgent = async (sessionId: string) =>
           port: 8100,
         },
         targets: {
-          'my-gateway-serve-local': {
+          dev: {
             executor: 'nx:run-commands',
             options: {
               commands: ['node -e "setInterval(()=>{}, 1000)"'],
@@ -142,7 +142,7 @@ export const getAgent = async (sessionId: string) =>
       .toString();
     expect(client).toContain('export class MyGatewayClientStrands');
     expect(client).toContain("config.gateways?.['MyGateway']");
-    expect(client).toContain('SERVE_LOCAL');
+    expect(client).toContain('LOCAL_DEV');
     // create() returns a single McpClient in both modes
     expect(client).toContain('Promise<McpClient>');
   });
@@ -201,18 +201,18 @@ export const getAgent = async (sessionId: string) =>
     expect(agent).toContain('myGateway, multiply');
   });
 
-  it('chains agent serve-local onto gateway serve-local', async () => {
+  it('chains agent dev onto gateway dev', async () => {
     setupProjects();
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());
 
     const cfg = JSON.parse(
       tree.read('packages/my-api/project.json')!.toString(),
     );
-    const deps = cfg.targets['my-agent-serve-local'].dependsOn;
+    const deps = cfg.targets['my-agent-dev'].dependsOn;
     expect(deps).toContainEqual(
       expect.objectContaining({
         projects: ['@test/my-gateway'],
-        target: 'my-gateway-serve-local',
+        target: 'dev',
       }),
     );
   });

@@ -102,20 +102,20 @@ export const pyFastApiProjectGenerator = async (
 
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
+    continuous: true,
     options: {
       command: `uv run fastapi dev ${normalizedModuleName}/main.py --port ${port}`,
       cwd: '{projectRoot}',
     },
-    continuous: true,
   };
 
-  projectConfig.targets['serve-local'] = {
-    ...projectConfig.targets['serve-local'],
+  projectConfig.targets['dev'] = {
+    ...projectConfig.targets['dev'],
     ...projectConfig.targets.serve,
     options: {
       ...projectConfig.targets.serve.options,
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   };

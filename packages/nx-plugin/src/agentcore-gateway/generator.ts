@@ -55,10 +55,10 @@ export const agentcoreGatewayGenerator = async (
   const cedarPolicy = options.cedarPolicy ?? true;
   const infra = options.infra ?? 'agentcore';
 
-  // serve-local.ts is the local gateway: a continuous MCP aggregator chaining
-  // onto attached MCP servers' serve-local targets (added by the
-  // mcp-connection generator), so a single `nx run <agent>:<agent>-serve-local`
-  // boots the gateway and every attached MCP server together.
+  // local-dev.ts is the local gateway: a continuous MCP aggregator chaining
+  // onto attached MCP servers' dev targets (added by the mcp-connection
+  // generator), so a single `nx dev <gateway>` boots the gateway and every
+  // attached MCP server together.
   //
   // `serve` exists for parity with other generators; the deployed Gateway is
   // a managed AWS resource, so `serve`-mode agents talk to it via runtime
@@ -67,7 +67,7 @@ export const agentcoreGatewayGenerator = async (
     executor: 'nx:run-commands' as const,
     continuous: true,
     options: {
-      command: 'tsx serve-local.ts',
+      command: 'tsx local-dev.ts',
       cwd: '{projectRoot}',
       env: { PORT: `${port}` },
     },
@@ -91,14 +91,15 @@ export const agentcoreGatewayGenerator = async (
     project = readProjectConfigurationUnqualified(tree, fullyQualifiedName);
   }
   const port = assignPort(tree, project, 8100);
-  // Re-run: keep existing targets (their dependsOn may have been populated
-  // by the mcp-connection generator), just ensure both exist.
+  // A gateway is its own standalone project, so it uses plain `serve` / `dev`
+  // targets. Re-run: keep existing targets (their dependsOn may have been
+  // populated by the mcp-connection generator), just ensure both exist.
   project.targets ??= {};
-  project.targets[`${name}-serve`] ??= localGatewayTarget(port);
-  project.targets[`${name}-serve-local`] ??= localGatewayTarget(port);
+  project.targets['serve'] ??= localGatewayTarget(port);
+  project.targets['dev'] ??= localGatewayTarget(port);
   updateProjectConfiguration(tree, project.name, project);
 
-  // Scaffold the gateway project: serve-local.ts (+ Cedar policies if requested)
+  // Scaffold the gateway project: local-dev.ts (+ Cedar policies if requested)
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'project'),
@@ -129,7 +130,7 @@ export const agentcoreGatewayGenerator = async (
     },
   );
 
-  // serve-local.ts dependencies (+ ejs for Cedar policy rendering in the
+  // local-dev.ts dependencies (+ ejs for Cedar policy rendering in the
   // shared gateway construct)
   addDependenciesToPackageJson(
     tree,

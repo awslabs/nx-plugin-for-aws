@@ -10,7 +10,7 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { addTargetToServeLocal } from '../../connection/serve-local';
+import { addTargetToLocalDev } from '../../connection/local-dev';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -132,7 +132,7 @@ export async function reactGenerator(
     `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\` where { $program <: not contains \`<${clientProviderName}>$_</${clientProviderName}>\` }`,
   );
 
-  await addTargetToServeLocal(
+  await addTargetToLocalDev(
     tree,
     frontendProjectConfig.name,
     backendProjectConfig.name,

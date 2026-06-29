@@ -7,8 +7,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addComponentDevTarget,
   addGeneratorMetadata,
   type NxGeneratorInfo,
+  normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from './nx';
 import { createTreeUsingTsSolutionSetup } from './test';
@@ -147,7 +149,12 @@ describe('addGeneratorMetadata', () => {
     );
 
     addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' });
-    addGeneratorMetadata(tree, 'test-project', { id: 'ts#foo' }, { port: 4200 });
+    addGeneratorMetadata(
+      tree,
+      'test-project',
+      { id: 'ts#foo' },
+      { port: 4200 },
+    );
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
@@ -452,58 +459,58 @@ describe('addDependencyToTargetIfNotPresent', () => {
 
   it('should add an object dependency', () => {
     const project = makeProject();
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['other-project'],
-      target: 'serve-local',
+      target: 'dev',
     });
-    expect(project.targets?.['serve-local']?.dependsOn).toEqual([
-      { projects: ['other-project'], target: 'serve-local' },
+    expect(project.targets?.['dev']?.dependsOn).toEqual([
+      { projects: ['other-project'], target: 'dev' },
     ]);
   });
 
   it('should not duplicate an object dependency with identical projects/target', () => {
     const project = makeProject();
     project.targets = {
-      'serve-local': {
-        dependsOn: [{ projects: ['other-project'], target: 'serve-local' }],
+      'dev': {
+        dependsOn: [{ projects: ['other-project'], target: 'dev' }],
       },
     };
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['other-project'],
-      target: 'serve-local',
+      target: 'dev',
     });
-    expect(project.targets['serve-local'].dependsOn).toEqual([
-      { projects: ['other-project'], target: 'serve-local' },
+    expect(project.targets['dev'].dependsOn).toEqual([
+      { projects: ['other-project'], target: 'dev' },
     ]);
   });
 
   it('should treat string-projects and single-element-array-projects as equivalent', () => {
     const project = makeProject();
     project.targets = {
-      'serve-local': {
-        dependsOn: [{ projects: 'other-project', target: 'serve-local' }],
+      'dev': {
+        dependsOn: [{ projects: 'other-project', target: 'dev' }],
       },
     };
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['other-project'],
-      target: 'serve-local',
+      target: 'dev',
     });
-    expect(project.targets['serve-local'].dependsOn).toHaveLength(1);
+    expect(project.targets['dev'].dependsOn).toHaveLength(1);
   });
 
   it('should consider object dependencies with different targets as distinct', () => {
     const project = makeProject();
     project.targets = {
-      'serve-local': {
-        dependsOn: [{ projects: ['api'], target: 'serve-local' }],
+      'dev': {
+        dependsOn: [{ projects: ['api'], target: 'dev' }],
       },
     };
-    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+    addDependencyToTargetIfNotPresent(project, 'dev', {
       projects: ['api'],
       target: 'serve-watch',
     });
-    expect(project.targets['serve-local'].dependsOn).toEqual([
-      { projects: ['api'], target: 'serve-local' },
+    expect(project.targets['dev'].dependsOn).toEqual([
+      { projects: ['api'], target: 'dev' },
       { projects: ['api'], target: 'serve-watch' },
     ]);
   });
@@ -545,5 +552,96 @@ describe('addDependencyToTargetIfNotPresent', () => {
       '@e2e/website-no-router:build',
       '^build',
     ]);
+  });
+});
+
+describe('normalizeTargetKeyOrder', () => {
+  it('should order keys to match Nx serialization so generators are idempotent', () => {
+    const normalized = normalizeTargetKeyOrder({
+      options: { command: 'foo' },
+      continuous: true,
+      executor: 'nx:run-commands',
+      dependsOn: ['compile'],
+    });
+    expect(Object.keys(normalized)).toEqual([
+      'executor',
+      'dependsOn',
+      'continuous',
+      'options',
+    ]);
+  });
+
+  it('should order inputs immediately before outputs', () => {
+    const normalized = normalizeTargetKeyOrder({
+      outputs: ['{options.outputPath}'],
+      options: {},
+      inputs: ['default'],
+      cache: true,
+      executor: 'nx:noop',
+    });
+    expect(Object.keys(normalized)).toEqual([
+      'executor',
+      'cache',
+      'inputs',
+      'outputs',
+      'options',
+    ]);
+  });
+
+  it('should place unknown keys after known keys, preserving value identity', () => {
+    const options = { command: 'foo' };
+    const normalized = normalizeTargetKeyOrder({
+      custom: 'x',
+      options,
+      executor: 'nx:run-commands',
+    });
+    expect(Object.keys(normalized)).toEqual(['executor', 'options', 'custom']);
+    expect(normalized.options).toBe(options);
+  });
+
+  it('should keep multiple unknown keys after known keys in their original order', () => {
+    const normalized = normalizeTargetKeyOrder({
+      zebra: 1,
+      options: {},
+      alpha: 2,
+      executor: 'nx:run-commands',
+      mike: 3,
+    });
+    // Known keys ordered first; unknown keys retain their authored order.
+    expect(Object.keys(normalized)).toEqual([
+      'executor',
+      'options',
+      'zebra',
+      'alpha',
+      'mike',
+    ]);
+  });
+});
+
+describe('addComponentDevTarget', () => {
+  it('should create a project-level dev aggregating the component dev target', () => {
+    const targets: any = { 'my-mcp-dev': { continuous: true } };
+    addComponentDevTarget(targets, 'my-mcp-dev');
+    expect(targets.dev).toEqual({
+      continuous: true,
+      dependsOn: ['my-mcp-dev'],
+    });
+  });
+
+  it('should accumulate each component dev target under the project dev', () => {
+    const targets: any = {
+      dev: { continuous: true, dependsOn: ['first-dev'] },
+      'second-dev': { continuous: true },
+    };
+    addComponentDevTarget(targets, 'second-dev');
+    // Project-level dev runs both components
+    expect(targets.dev.dependsOn).toEqual(['first-dev', 'second-dev']);
+  });
+
+  it('should not duplicate a component dev target on re-run', () => {
+    const targets: any = { 'my-mcp-dev': { continuous: true } };
+    addComponentDevTarget(targets, 'my-mcp-dev');
+    addComponentDevTarget(targets, 'my-mcp-dev');
+    expect(targets.dev.dependsOn).toEqual(['my-mcp-dev']);
   });
 });

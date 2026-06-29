@@ -347,14 +347,14 @@ describe('tsSmithyApiGenerator', () => {
     );
     expect(serveTarget.options.cwd).toBe('{projectRoot}');
 
-    const serveLocalTarget = backendProjectConfig.targets['serve-local'];
-    expect(serveLocalTarget.executor).toBe('nx:run-commands');
-    expect(serveLocalTarget.continuous).toBe(true);
-    expect(serveLocalTarget.options.command).toContain(
+    const devTarget = backendProjectConfig.targets['dev'];
+    expect(devTarget.executor).toBe('nx:run-commands');
+    expect(devTarget.continuous).toBe(true);
+    expect(devTarget.options.command).toContain(
       'tsx --watch src/local-server.ts',
     );
-    expect(serveLocalTarget.options.cwd).toBe('{projectRoot}');
-    expect(serveLocalTarget.options.env).toEqual({ SERVE_LOCAL: 'true' });
+    expect(devTarget.options.cwd).toBe('{projectRoot}');
+    expect(devTarget.options.env).toEqual({ LOCAL_DEV: 'true' });
   });
 
   it('should add dependencies to package.json', async () => {
@@ -387,7 +387,7 @@ describe('tsSmithyApiGenerator', () => {
 
     // Verify dev dependencies
     expect(packageJson.devDependencies).toHaveProperty('@types/aws-lambda');
-    // tsx is used by the serve and serve-local targets to run the local server
+    // tsx is used by the serve and dev targets to run the local server
     expect(packageJson.devDependencies).toHaveProperty('tsx');
   });
 

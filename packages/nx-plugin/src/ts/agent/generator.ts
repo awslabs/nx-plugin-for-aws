@@ -29,6 +29,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
+  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -245,7 +246,7 @@ export const tsAgentGenerator = async (
   });
 
   // Every protocol gets a standalone `chat.ts`. It connects to the local
-  // `serve-local` server by default, or to the deployed agent (with the
+  // `dev` server by default, or to the deployed agent (with the
   // appropriate auth) when `RUNTIME_CONFIG_APP_ID` is set.
   const scriptsDir = joinPathFragments(
     project.root,
@@ -269,46 +270,51 @@ export const tsAgentGenerator = async (
         : `http://localhost:${localDevPort}`;
   const chatCommand = `tsx ./scripts/${agentTargetPrefix}/chat.ts`;
 
+  const agentTargets = {
+    ...project.targets,
+    [`${agentTargetPrefix}-serve`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [`tsx --watch ${relativeSourceDir}/index.ts`],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+        },
+      },
+    },
+    [`${agentTargetPrefix}-dev`]: {
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        commands: [`tsx --watch ${relativeSourceDir}/index.ts`],
+        cwd: '{projectRoot}',
+        env: {
+          PORT: `${localDevPort}`,
+          LOCAL_DEV: 'true',
+        },
+      },
+    },
+    [`${agentTargetPrefix}-chat`]: {
+      executor: 'nx:run-commands',
+      options: {
+        commands: [chatCommand],
+        cwd: '{projectRoot}',
+        env: {
+          URL: chatUrl,
+        },
+      },
+    },
+  };
+
+  // Aggregate `<agent>-dev` under the project-level `dev` target.
+  addComponentDevTarget(agentTargets, `${agentTargetPrefix}-dev`);
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     // Sort targets so their order is stable regardless of insertion order on
     // first run vs re-run.
-    targets: sortObjectKeys({
-      ...project.targets,
-      [`${agentTargetPrefix}-serve`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [`tsx --watch ${relativeSourceDir}/index.ts`],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-          },
-        },
-        continuous: true,
-      },
-      [`${agentTargetPrefix}-serve-local`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [`tsx --watch ${relativeSourceDir}/index.ts`],
-          cwd: '{projectRoot}',
-          env: {
-            PORT: `${localDevPort}`,
-            SERVE_LOCAL: 'true',
-          },
-        },
-        continuous: true,
-      },
-      [`${agentTargetPrefix}-chat`]: {
-        executor: 'nx:run-commands',
-        options: {
-          commands: [chatCommand],
-          cwd: '{projectRoot}',
-          env: {
-            URL: chatUrl,
-          },
-        },
-      },
-    }),
+    targets: sortObjectKeys(agentTargets),
   });
 
   addComponentGeneratorMetadata(

@@ -101,15 +101,15 @@ describe('fastapi project generator', () => {
     expect(projectConfig.targets.serve.options.command).toBe(
       'uv run fastapi dev proj_test_api/main.py --port 8000',
     );
-    expect(projectConfig.targets['serve-local']).toBeDefined();
-    expect(projectConfig.targets['serve-local'].executor).toBe(
+    expect(projectConfig.targets['dev']).toBeDefined();
+    expect(projectConfig.targets['dev'].executor).toBe(
       '@nxlv/python:run-commands',
     );
-    expect(projectConfig.targets['serve-local'].options.command).toBe(
+    expect(projectConfig.targets['dev'].options.command).toBe(
       'uv run fastapi dev proj_test_api/main.py --port 8000',
     );
-    expect(projectConfig.targets['serve-local'].options.env).toEqual({
-      SERVE_LOCAL: 'true',
+    expect(projectConfig.targets['dev'].options.env).toEqual({
+      LOCAL_DEV: 'true',
     });
 
     // Verify build dependencies

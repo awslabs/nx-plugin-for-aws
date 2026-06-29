@@ -29,11 +29,11 @@ describe('py#agent#mcp-connection generator', () => {
             options: { commands: ['echo serve'] },
             continuous: true,
           },
-          'my-agent-serve-local': {
+          'my-agent-dev': {
             executor: 'nx:run-commands',
             options: {
-              commands: ['echo serve-local'],
-              env: { SERVE_LOCAL: 'true' },
+              commands: ['echo dev'],
+              env: { LOCAL_DEV: 'true' },
             },
             dependsOn: [],
             continuous: true,
@@ -100,7 +100,7 @@ dependencies = ["strands-agents"]
         sourceRoot: 'packages/my-api/src',
         targets: {
           build: {},
-          'inventory-mcp-serve-local': {
+          'inventory-mcp-dev': {
             executor: 'nx:run-commands',
             options: { commands: ['echo mcp-serve'] },
             continuous: true,
@@ -270,7 +270,7 @@ dependencies = ["strands-agents"]
     expect(pyprojectContent).toContain('proj-agent-connection');
   });
 
-  it('should update serve-local target with MCP dependency', async () => {
+  it('should update dev target with MCP dependency', async () => {
     setupProjects();
 
     await pyAgentMcpConnectionGenerator(tree, {
@@ -295,11 +295,11 @@ dependencies = ["strands-agents"]
     const config = JSON.parse(
       tree.read('packages/my-agent/project.json', 'utf-8')!,
     );
-    const serveLocal = config.targets['my-agent-serve-local'];
+    const devTarget = config.targets['my-agent-dev'];
 
-    expect(serveLocal.dependsOn).toContainEqual({
+    expect(devTarget.dependsOn).toContainEqual({
       projects: ['@test/my-api'],
-      target: 'inventory-mcp-serve-local',
+      target: 'inventory-mcp-dev',
     });
   });
 
