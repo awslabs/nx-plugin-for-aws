@@ -224,12 +224,13 @@ const addSdkExport = (
 
   const sdkPath = joinPathFragments(
     pluginRoot,
+    'src',
     'sdk',
     `${SDK_EXPORT_PREFIXES[prefix]}.ts`,
   );
   const generatorExport = `${options.nameCamelCase}Generator`;
   const schemaExport = `${options.namePascalCase}GeneratorSchema`;
-  const moduleBase = `../src/${generatorSubDir}`;
+  const moduleBase = `../${generatorSubDir}`;
 
   const contents = tree.exists(sdkPath) ? tree.read(sdkPath).toString() : '';
   // Idempotent: skip if this generator is already exported

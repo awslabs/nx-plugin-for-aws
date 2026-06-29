@@ -21,7 +21,6 @@ const AWS_NX_PLUGIN_JITI_ALIASES = {
     import.meta.dirname,
     '..',
     '..',
-    '..',
     'sdk',
     'license',
   ),
