@@ -75,7 +75,7 @@ const addAgentCoreCDKInfra = async (
   // Generate app specific CDK construct
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'agent-core'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app', 'agent-core'),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -122,7 +122,13 @@ const addAgentCoreTerraformInfra = (
   // Add the AgentCore shared module
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'core', 'agent-core'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'core',
+      'agent-core',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_TERRAFORM_DIR,
@@ -139,7 +145,13 @@ const addAgentCoreTerraformInfra = (
   // Generate app specific agent core configuration
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'app', 'agent-core'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'app',
+      'agent-core',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_TERRAFORM_DIR,
@@ -264,7 +276,13 @@ const addAgentCoreGatewayCDKInfra = async (
   // loading) shared by all gateways
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'core', 'agentcore-gateway'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'core',
+      'agentcore-gateway',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -280,7 +298,13 @@ const addAgentCoreGatewayCDKInfra = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'agentcore-gateway'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'app',
+      'agentcore-gateway',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -342,7 +366,7 @@ const addAgentCoreGatewayTerraformInfra = (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       'terraform',
       'core',
@@ -364,7 +388,7 @@ const addAgentCoreGatewayTerraformInfra = (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       'terraform',
       'app',

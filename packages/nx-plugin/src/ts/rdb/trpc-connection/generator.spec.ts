@@ -17,7 +17,7 @@ describe('ts#rdb trpc-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
         ...(metadata ? { metadata } : {}),
       }),
@@ -31,7 +31,7 @@ describe('ts#rdb trpc-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );

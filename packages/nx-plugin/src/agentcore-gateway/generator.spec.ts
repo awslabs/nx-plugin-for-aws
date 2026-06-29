@@ -121,9 +121,9 @@ describe('agentcore-gateway generator', () => {
         tree.read('packages/my-gateway/policies/permit-all.cedar')!.toString(),
       ).toContain('user-edited');
       const rerunConfig = readProjectConfiguration(tree, '@proj/my-gateway');
-      expect(
-        rerunConfig.targets?.['dev'].dependsOn,
-      ).toContainEqual(expect.objectContaining({ target: 'some-mcp-dev' }));
+      expect(rerunConfig.targets?.['dev'].dependsOn).toContainEqual(
+        expect.objectContaining({ target: 'some-mcp-dev' }),
+      );
       // Project metadata is unchanged on re-run
       expect((rerunConfig.metadata as any).generator).toBe(
         AGENTCORE_GATEWAY_GENERATOR_INFO.id,

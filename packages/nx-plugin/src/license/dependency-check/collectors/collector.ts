@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { workspaceRoot } from '@nx/devkit';
+import { existsSync } from 'fs';
+import { join } from 'path';
+
 export interface CollectedDependency {
   name: string;
   version: string;
@@ -20,9 +24,6 @@ export interface LicenseCollector {
 export const npmCollector = (): LicenseCollector => ({
   name: 'npm',
   get traceCommand() {
-    const { existsSync } = require('fs');
-    const { join } = require('path');
-    const { workspaceRoot } = require('@nx/devkit');
     if (existsSync(join(workspaceRoot, 'yarn.lock')))
       return 'yarn why <package>';
     if (existsSync(join(workspaceRoot, 'bun.lockb')))

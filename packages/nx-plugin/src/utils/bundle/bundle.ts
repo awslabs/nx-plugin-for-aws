@@ -137,7 +137,7 @@ export const addTypeScriptBundleTarget = async (
   // Generate empty rolldown config if it doesn't exist
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'ts'),
+    joinPathFragments(import.meta.dirname, 'files', 'ts'),
     project.root,
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

@@ -284,7 +284,9 @@ export default AppLayout;
       expect(afterSecondRun).toEqual(afterFirstRun);
 
       // The user greeting and sign out wiring must appear exactly once
-      expect(afterSecondRun.match(/className="user-greeting"/g)).toHaveLength(1);
+      expect(afterSecondRun.match(/className="user-greeting"/g)).toHaveLength(
+        1,
+      );
       expect(afterSecondRun.match(/className="signout-link"/g)).toHaveLength(1);
       expect(afterSecondRun.match(/= useAuth\(\)/g)).toHaveLength(1);
     });

@@ -17,7 +17,6 @@
  */
 import { createRequire } from 'module';
 
-// @ts-expect-error test utility used by vite only
 const _require = createRequire(import.meta.url);
 const projectGraph = _require('nx/src/project-graph/project-graph');
 projectGraph.createProjectGraphAsync = async () => ({

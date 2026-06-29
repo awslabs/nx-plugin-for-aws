@@ -5,9 +5,9 @@
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addComponentDevTarget,
   addGeneratorMetadata,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
@@ -471,7 +471,7 @@ describe('addDependencyToTargetIfNotPresent', () => {
   it('should not duplicate an object dependency with identical projects/target', () => {
     const project = makeProject();
     project.targets = {
-      'dev': {
+      dev: {
         dependsOn: [{ projects: ['other-project'], target: 'dev' }],
       },
     };
@@ -487,7 +487,7 @@ describe('addDependencyToTargetIfNotPresent', () => {
   it('should treat string-projects and single-element-array-projects as equivalent', () => {
     const project = makeProject();
     project.targets = {
-      'dev': {
+      dev: {
         dependsOn: [{ projects: 'other-project', target: 'dev' }],
       },
     };
@@ -501,7 +501,7 @@ describe('addDependencyToTargetIfNotPresent', () => {
   it('should consider object dependencies with different targets as distinct', () => {
     const project = makeProject();
     project.targets = {
-      'dev': {
+      dev: {
         dependsOn: [{ projects: ['api'], target: 'dev' }],
       },
     };

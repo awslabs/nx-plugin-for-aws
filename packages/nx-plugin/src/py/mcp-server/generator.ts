@@ -24,9 +24,9 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -39,8 +39,9 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import type { PyMcpServerGeneratorSchema } from './schema';
 
-export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const pyMcpServerGenerator = async (
   tree: Tree,
@@ -93,7 +94,7 @@ export const pyMcpServerGenerator = async (
   // Generate example server
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'app'),
     targetSourceDir,
     {
       name,
@@ -126,7 +127,7 @@ export const pyMcpServerGenerator = async (
 
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'deploy'),
+      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
       targetSourceDir,
       {
         mcpServerNameSnakeCase,

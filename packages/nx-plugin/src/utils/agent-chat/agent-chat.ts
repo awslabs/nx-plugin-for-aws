@@ -50,7 +50,7 @@ export const addAgentChatScripts = (
   // Shared remote-resolution + auth helper, used by every protocol.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common'),
+    joinPathFragments(import.meta.dirname, 'files', 'common'),
     options.scriptsDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -62,7 +62,7 @@ export const addAgentChatScripts = (
     options.protocol === 'http' ? `http-${options.language}` : options.protocol;
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', protocolDir),
+    joinPathFragments(import.meta.dirname, 'files', protocolDir),
     options.scriptsDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

@@ -8,7 +8,7 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
+  type ProjectConfiguration,
   readProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
@@ -38,8 +38,9 @@ import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { addOpenApiGeneration } from './react/open-api';
 import type { PyFastApiProjectGeneratorSchema } from './schema';
 
-export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const FAST_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 /**
  * Generates a Python FastAPI project
@@ -142,7 +143,7 @@ export const pyFastApiProjectGenerator = async (
   // not clobber user edits (and does not reformat them nondeterministically).
   generateFiles(
     tree, // the virtual file system
-    joinPathFragments(__dirname, 'files', 'app'), // path to the file templates
+    joinPathFragments(import.meta.dirname, 'files', 'app'), // path to the file templates
     dir, // destination path of the files
     {
       name: normalizedModuleName,
@@ -166,7 +167,7 @@ export const pyFastApiProjectGenerator = async (
       generateFiles(
         tree,
         joinPathFragments(
-          __dirname,
+          import.meta.dirname,
           '..',
           '..',
           'utils',

@@ -55,7 +55,12 @@ export async function sharedConstructsGenerator(
       );
       generateFiles(
         tree,
-        joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src'),
+        joinPathFragments(
+          import.meta.dirname,
+          'files',
+          SHARED_CONSTRUCTS_DIR,
+          'src',
+        ),
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'),
         {
           npmScopePrefix,
@@ -68,7 +73,7 @@ export async function sharedConstructsGenerator(
       );
       generateFiles(
         tree,
-        joinPathFragments(__dirname, 'files', 'common', 'readme'),
+        joinPathFragments(import.meta.dirname, 'files', 'common', 'readme'),
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
         {
           fullyQualifiedName: `${npmScopePrefix}${SHARED_CONSTRUCTS_NAME}`,
@@ -136,7 +141,7 @@ export async function sharedConstructsGenerator(
       // Create the metrics.tf file with empty initial values
       generateFiles(
         tree,
-        joinPathFragments(__dirname, 'files', 'terraform'),
+        joinPathFragments(import.meta.dirname, 'files', 'terraform'),
         terraformLibPath,
         {},
         {

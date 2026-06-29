@@ -23,7 +23,7 @@ import { injectRdsCaBundleIntoDockerfile } from '../utils';
 import type { TsRdbMcpServerConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsRdbMcpServerConnectionGenerator = async (
   tree: Tree,

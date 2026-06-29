@@ -65,7 +65,7 @@ export const addAgUiReactConnection = async (
   // the generator is idempotent.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common'),
+    joinPathFragments(import.meta.dirname, 'files', 'common'),
     frontendProjectConfig.root,
     { agentName, agentNameClassName, auth },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -77,7 +77,7 @@ export const addAgUiReactConnection = async (
   }
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', theme),
+    joinPathFragments(import.meta.dirname, 'files', theme),
     frontendProjectConfig.root,
     { scopeAlias },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -86,7 +86,10 @@ export const addAgUiReactConnection = async (
   if (auth === 'iam') {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, '../../../utils/files/website/hooks/sigv4'),
+      joinPathFragments(
+        import.meta.dirname,
+        '../../../utils/files/website/hooks/sigv4',
+      ),
       joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
       {},
       { overwriteStrategy: OverwriteStrategy.KeepExisting },

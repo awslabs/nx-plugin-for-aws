@@ -32,7 +32,7 @@ import { TS_HANDLER_RETURN_TYPES } from './io';
 import type { TsLambdaFunctionGeneratorSchema } from './schema';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 /**
  * Generates a TypeScript Lambda Function to add to a TypeScript project
@@ -141,7 +141,7 @@ export const tsLambdaFunctionGenerator = async (
   // Generate the lambda handler file
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'handler'),
+    joinPathFragments(import.meta.dirname, 'files', 'handler'),
     joinPathFragments(projectConfig.sourceRoot, schema.functionPath ?? ''),
     enhancedOptions,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

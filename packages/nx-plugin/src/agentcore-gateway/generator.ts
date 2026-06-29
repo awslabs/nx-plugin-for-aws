@@ -33,7 +33,7 @@ import { withVersions } from '../utils/versions';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
 export const AGENTCORE_GATEWAY_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const agentcoreGatewayGenerator = async (
   tree: Tree,
@@ -102,7 +102,7 @@ export const agentcoreGatewayGenerator = async (
   // Scaffold the gateway project: local-dev.ts (+ Cedar policies if requested)
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'project'),
+    joinPathFragments(import.meta.dirname, 'files', 'project'),
     projectRoot,
     { nameClassName, nameKebabCase: name, port, attachedMcpServers: [] },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -110,7 +110,7 @@ export const agentcoreGatewayGenerator = async (
   if (cedarPolicy) {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'cedar'),
+      joinPathFragments(import.meta.dirname, 'files', 'cedar'),
       projectRoot,
       { nameClassName },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },

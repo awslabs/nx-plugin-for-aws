@@ -387,7 +387,7 @@ const GUIDES_RELATIVE_PROBES = [
 
 const fetchLocalGuide = (guide: string): string | undefined => {
   for (const rel of GUIDES_RELATIVE_PROBES) {
-    const candidate = path.resolve(__dirname, rel, `${guide}.mdx`);
+    const candidate = path.resolve(import.meta.dirname, rel, `${guide}.mdx`);
     try {
       if (fs.existsSync(candidate)) {
         return fs.readFileSync(candidate, 'utf-8');
@@ -447,7 +447,11 @@ export const fetchSnippet: SnippetContentProvider = async (
   snippetName: string,
 ): Promise<string> => {
   for (const rel of SNIPPETS_RELATIVE_PROBES) {
-    const candidate = path.resolve(__dirname, rel, `${snippetName}.mdx`);
+    const candidate = path.resolve(
+      import.meta.dirname,
+      rel,
+      `${snippetName}.mdx`,
+    );
     try {
       if (fs.existsSync(candidate)) {
         return fs.readFileSync(candidate, 'utf-8');

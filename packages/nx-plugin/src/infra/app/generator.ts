@@ -43,8 +43,9 @@ import { sharedInfraScriptsGenerator } from '../../utils/shared-infra-scripts';
 import { withVersions } from '../../utils/versions';
 import type { TsInfraGeneratorSchema } from './schema';
 
-export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function tsInfraGenerator(
   tree: Tree,
@@ -102,7 +103,7 @@ export async function tsInfraGenerator(
 
   generateFiles(
     tree, // the virtual file system
-    joinPathFragments(__dirname, './files/app'), // path to the file templates
+    joinPathFragments(import.meta.dirname, './files/app'), // path to the file templates
     libraryRoot, // destination path of the files
     {
       synthDir: synthDirFromProject,

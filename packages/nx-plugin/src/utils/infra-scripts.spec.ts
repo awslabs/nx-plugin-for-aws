@@ -11,7 +11,15 @@ import { importTypeScriptModule } from './js';
 // Load the actual template files and strip EJS tags for import
 const loadTemplate = (relativePath: string): string => {
   const content = readFileSync(
-    join(__dirname, 'files', 'common', 'scripts', 'src', 'infra', relativePath),
+    join(
+      import.meta.dirname,
+      'files',
+      'common',
+      'scripts',
+      'src',
+      'infra',
+      relativePath,
+    ),
     'utf-8',
   );
   // Remove EJS template expressions (e.g., <%= scopeAlias %>) and replace

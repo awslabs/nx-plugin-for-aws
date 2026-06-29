@@ -32,9 +32,9 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
@@ -53,8 +53,9 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import type { PyAgentGeneratorSchema } from './schema';
 
-export const PY_AGENT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const PY_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const pyAgentGenerator = async (
   tree: Tree,
@@ -139,7 +140,7 @@ export const pyAgentGenerator = async (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       framework === 'langchain' ? 'common-langchain' : 'common',
     ),
@@ -152,7 +153,7 @@ export const pyAgentGenerator = async (
     // framework-agnostic, so emit it from the shared `common` dir.
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'common'),
+      joinPathFragments(import.meta.dirname, 'files', 'common'),
       targetSourceDir,
       templateContext,
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -168,7 +169,7 @@ export const pyAgentGenerator = async (
     framework === 'langchain' ? `${protocolLower}-langchain` : protocolLower;
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', protocolTemplateDir),
+    joinPathFragments(import.meta.dirname, 'files', protocolTemplateDir),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -181,7 +182,7 @@ export const pyAgentGenerator = async (
   if (protocolLower === 'http' && framework === 'langchain') {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'http'),
+      joinPathFragments(import.meta.dirname, 'files', 'http'),
       targetSourceDir,
       templateContext,
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -241,7 +242,7 @@ export const pyAgentGenerator = async (
     // Add the Dockerfile
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'deploy'),
+      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
       targetSourceDir,
       {
         agentNameSnakeCase,
@@ -335,7 +336,12 @@ export const pyAgentGenerator = async (
     // Emit the OpenAPI spec generator script (shared with react-connection)
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'react-connection', 'files', 'agent'),
+      joinPathFragments(
+        import.meta.dirname,
+        'react-connection',
+        'files',
+        'agent',
+      ),
       project.root,
       {
         moduleName,

@@ -30,7 +30,7 @@ export const addOpenApiGeneration = (
   // copy so re-running does not reformat it nondeterministically
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files/fast-api'),
+    joinPathFragments(import.meta.dirname, 'files/fast-api'),
     project.root,
     {
       moduleName,

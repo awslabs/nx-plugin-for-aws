@@ -71,7 +71,7 @@ export const addRdbCdkConstructs = async (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'core', 'rdb'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core', 'rdb'),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -87,7 +87,7 @@ export const addRdbCdkConstructs = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'dbs'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app', 'dbs'),
     options,
     {
@@ -137,7 +137,7 @@ export const addRdbTerraformModules = (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'core', 'rdb'),
+    joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core', 'rdb'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core', 'rdb'),
     {},
     {
@@ -147,7 +147,7 @@ export const addRdbTerraformModules = (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'app', 'dbs'),
+    joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'dbs'),
     options,
     {

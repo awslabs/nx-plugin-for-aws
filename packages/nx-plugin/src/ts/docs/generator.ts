@@ -7,8 +7,9 @@ import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { tsAstroDocsGenerator } from '../astro-docs/generator';
 import type { TsDocsGeneratorSchema } from './schema';
 
-export const TS_DOCS_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_DOCS_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsDocsGenerator = async (
   tree: Tree,

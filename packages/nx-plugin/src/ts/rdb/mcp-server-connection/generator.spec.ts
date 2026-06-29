@@ -17,7 +17,7 @@ describe('ts#rdb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -238,9 +238,7 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
     });
 
     const config = readProjectConfiguration(tree, 'my-service');
-    const deps = (
-      config.targets?.['my-mcp-dev']?.dependsOn ?? []
-    ).filter(
+    const deps = (config.targets?.['my-mcp-dev']?.dependsOn ?? []).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&

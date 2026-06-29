@@ -10,7 +10,7 @@ import {
   updateJson,
   writeJson,
 } from '@nx/devkit';
-import PackageJson from '../../../package.json';
+import PackageJson from '../../../package.json' with { type: 'json' };
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { withVersions } from '../../utils/versions';
 
@@ -30,23 +30,6 @@ export const configureTsProjectAsNxPlugin = (
     );
   }
 
-  // Nx Plugins must use commonjs as a limitation of nx
-  // https://github.com/nrwl/nx/issues/15682
-  updateJson(tree, tsConfigPath, (tsConfig) => {
-    const { module, moduleResolution, ...rest } =
-      tsConfig.compilerOptions ?? {};
-    // Reassign module/moduleResolution last in a fixed order so re-running
-    // produces a stable key order regardless of whether a prior step removed
-    // `module` (eg configureTsProject drops a conflicting commonjs module).
-    // TypeScript 6 allows bundler + commonjs together, avoiding deprecated node/node10
-    tsConfig.compilerOptions = {
-      ...rest,
-      module: module ?? 'commonjs',
-      moduleResolution: moduleResolution ?? 'bundler',
-    };
-    return tsConfig;
-  });
-
   // Create an empty generators.json if one dosn't exist
   const generatorsJsonPath = joinPathFragments(project.root, 'generators.json');
   if (!tree.exists(generatorsJsonPath)) {
@@ -55,7 +38,8 @@ export const configureTsProjectAsNxPlugin = (
     });
   }
 
-  // Create a package.json if one doesn't exist, and configure "main" and "generators"
+  // Create a package.json if one doesn't exist, and configure "type", "main"
+  // and "generators"
   const pluginPackageJsonPath = joinPathFragments(project.root, 'package.json');
   if (!tree.exists(pluginPackageJsonPath)) {
     writeJson(tree, pluginPackageJsonPath, {
@@ -63,6 +47,9 @@ export const configureTsProjectAsNxPlugin = (
     });
   }
   updateJson(tree, pluginPackageJsonPath, (pkg) => {
+    // Mark the plugin as ESM so Nx loads its `.ts` generators as ES modules via
+    // Node's native type stripping (the workspace root is also `type: module`).
+    pkg.type ??= 'module';
     pkg.main ??= './src/index.js';
     pkg.generators ??= './generators.json';
     return pkg;
@@ -80,13 +67,10 @@ export const configureTsProjectAsNxPlugin = (
       // Include dependency on @aws/nx-plugin
       [PackageJson.name]: `^${PackageJson.version}`,
     };
-    // Nx transpiles unbuilt plugin generators on the fly. With @swc-node/register
-    // present it uses swc; otherwise it falls back to ts-node, which forces the
-    // deprecated `moduleResolution: node10` — a hard error under TypeScript 6.
-    // Ensure swc is available so generators run regardless of the installed
-    // TypeScript version. ESM migration tracked in awslabs/nx-plugin-for-aws#814.
-    const devDeps = withVersions(['@swc-node/register', '@swc/core']);
-    addDependenciesToPackageJson(tree, {}, { ...deps, ...devDeps });
-    addDependenciesToPackageJson(tree, deps, devDeps, pluginPackageJsonPath);
+    // Generated workspaces are `"type": "module"`, so Nx loads the plugin's
+    // `.ts` generators as ESM via Node's native type stripping — no swc/ts-node
+    // transpiler is required.
+    addDependenciesToPackageJson(tree, {}, deps);
+    addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
   }
 };

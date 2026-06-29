@@ -5,8 +5,12 @@
 import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
 import * as fs from 'fs';
 import * as path from 'path';
-import NxPluginForAwsPackageJson from '../../../package.json';
-import NxPluginForAwsProjectJson from '../../../project.json';
+import NxPluginForAwsPackageJson from '../../../package.json' with {
+  type: 'json',
+};
+import NxPluginForAwsProjectJson from '../../../project.json' with {
+  type: 'json',
+};
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -22,7 +26,7 @@ describe('nx-generator generator', () => {
     beforeEach(() => {
       tree = createTreeUsingTsSolutionSetup();
 
-      const pathToRoot = path.resolve(__dirname, '../../../../..');
+      const pathToRoot = path.resolve(import.meta.dirname, '../../../../..');
 
       // Copy relevant files from this repo into the tree
       [
@@ -679,7 +683,7 @@ describe('nx-generator generator', () => {
       );
     });
 
-    it('should set module to commonjs in tsconfig.json', async () => {
+    it('should not force module to commonjs in tsconfig.json', async () => {
       // Set up a tsconfig.json without module set
       writeJson(tree, 'tools/plugin/tsconfig.json', {});
 
@@ -689,11 +693,12 @@ describe('nx-generator generator', () => {
         description: 'Test module setting',
       });
 
-      // Check that module is set to commonjs in tsconfig.json
+      // Nx 23 loads `.ts` generators as ESM via native type stripping, so the
+      // plugin must not be forced to commonjs.
       const tsConfig = JSON.parse(
         tree.read('tools/plugin/tsconfig.json', 'utf-8'),
       );
-      expect(tsConfig.compilerOptions.module).toBe('commonjs');
+      expect(tsConfig.compilerOptions?.module).not.toBe('commonjs');
     });
 
     it('should work when there is no sourceRoot', async () => {

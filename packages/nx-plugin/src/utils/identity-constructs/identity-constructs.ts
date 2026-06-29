@@ -43,7 +43,7 @@ const addIdentityCdkConstructs = async (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'core'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
     options,
     {
@@ -70,7 +70,7 @@ const addIdentityTerraformModules = (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'core'),
+    joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
     options,
     {

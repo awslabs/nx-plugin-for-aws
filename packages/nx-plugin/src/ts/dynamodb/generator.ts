@@ -38,8 +38,9 @@ import { withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsDynamoDBGeneratorSchema } from './schema';
 
-export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsDynamoDBGenerator = async (
   tree: Tree,
@@ -91,7 +92,7 @@ export const tsDynamoDBGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     dir,
     templateOptions,
   );

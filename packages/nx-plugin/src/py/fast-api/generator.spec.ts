@@ -470,7 +470,10 @@ describe('fastapi project generator', () => {
     };
     await pyFastApiProjectGenerator(tree, options);
     const firstProjectJson = tree.read('apps/test_api/project.json', 'utf-8');
-    const firstInitPy = tree.read('apps/test_api/proj_test_api/init.py', 'utf-8');
+    const firstInitPy = tree.read(
+      'apps/test_api/proj_test_api/init.py',
+      'utf-8',
+    );
     const firstGenerateOpenApi = tree.read(
       'apps/test_api/scripts/generate_open_api.py',
       'utf-8',

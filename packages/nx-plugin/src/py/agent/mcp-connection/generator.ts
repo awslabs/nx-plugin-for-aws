@@ -38,7 +38,7 @@ import {
 import type { PyAgentMcpConnectionGeneratorSchema } from './schema';
 
 export const PY_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyAgentMcpConnectionGenerator = async (
   tree: Tree,
@@ -104,7 +104,11 @@ export const pyAgentMcpConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', connection.appTemplateSubdir),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      connection.appTemplateSubdir,
+    ),
     appDir,
     {
       mcpServerSnakeCase,

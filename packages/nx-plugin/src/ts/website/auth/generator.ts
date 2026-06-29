@@ -7,8 +7,9 @@ import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx';
 import { tsReactWebsiteAuthGenerator } from '../../react-website/cognito-auth/generator';
 import type { TsWebsiteAuthGeneratorSchema } from './schema';
 
-export const TS_WEBSITE_AUTH_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_WEBSITE_AUTH_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function tsWebsiteAuthGenerator(
   tree: Tree,

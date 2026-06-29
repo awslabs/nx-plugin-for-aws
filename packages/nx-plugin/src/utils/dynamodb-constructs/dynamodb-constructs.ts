@@ -63,7 +63,7 @@ export const addDynamoDBCdkConstructs = async (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'core'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
     options,
     {
@@ -73,7 +73,7 @@ export const addDynamoDBCdkConstructs = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'dynamodb'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app', 'dynamodb'),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -129,7 +129,7 @@ export const addDynamoDBTerraformModules = (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'core'),
+    joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
     options,
     {
@@ -139,7 +139,13 @@ export const addDynamoDBTerraformModules = (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'app', 'dynamodb'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'app',
+      'dynamodb',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_TERRAFORM_DIR,

@@ -42,10 +42,14 @@ import {
 } from './utils';
 
 const readGritPattern = (name: string): string =>
-  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
+  readFileSync(
+    join(import.meta.dirname, 'grit', `${name}.grit`),
+    'utf-8',
+  ).trim();
 
-export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function tsReactWebsiteAuthGenerator(
   tree: Tree,
@@ -80,7 +84,7 @@ export async function tsReactWebsiteAuthGenerator(
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'app'),
     srcRoot,
     options,
     {

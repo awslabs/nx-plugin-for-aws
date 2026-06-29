@@ -25,8 +25,9 @@ import {
 } from '../../utils/nx';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
-export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const smithyProjectGenerator = async (
   tree: Tree,
@@ -72,7 +73,7 @@ export const smithyProjectGenerator = async (
   const scope = getNpmScope(tree);
   const namespace = options.namespace ?? toKebabCase(scope).replace(/-/g, '.');
 
-  generateFiles(tree, joinPathFragments(__dirname, 'files'), dir, {
+  generateFiles(tree, joinPathFragments(import.meta.dirname, 'files'), dir, {
     namespace,
     serviceNameClassName,
     serviceNameKebabCase,

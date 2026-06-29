@@ -31,7 +31,7 @@ export async function sharedRdbScriptsGenerator(
   await ensureSharedScriptsProject(tree);
 
   const rdbScriptsDir = joinPathFragments(
-    __dirname,
+    import.meta.dirname,
     'files',
     SHARED_SCRIPTS_DIR,
     'src',

@@ -25,8 +25,9 @@ import {
 import { withVersions } from '../../utils/versions';
 import type { ReactGeneratorSchema } from './schema';
 
-export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function reactGenerator(
   tree: Tree,
@@ -53,7 +54,7 @@ export async function reactGenerator(
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     frontendProjectConfig.root,
     {
       apiName,
@@ -72,7 +73,7 @@ export async function reactGenerator(
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       '../../utils/files/website/components/tanstack-query',
     ),
     joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
@@ -85,7 +86,10 @@ export async function reactGenerator(
   if (auth === 'iam') {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, '../../utils/files/website/hooks/sigv4'),
+      joinPathFragments(
+        import.meta.dirname,
+        '../../utils/files/website/hooks/sigv4',
+      ),
       joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
       {},
       {

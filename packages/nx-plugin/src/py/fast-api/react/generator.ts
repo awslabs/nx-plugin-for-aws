@@ -14,8 +14,9 @@ import {
 import { addOpenApiGeneration } from './open-api';
 import type { FastApiReactGeneratorSchema } from './schema';
 
-export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const fastApiReactGenerator = async (
   tree: Tree,

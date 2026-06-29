@@ -44,7 +44,12 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
   tree.delete(joinPathFragments(configDir, 'src'));
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', SHARED_INFRA_CONFIG_DIR, 'src'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      SHARED_INFRA_CONFIG_DIR,
+      'src',
+    ),
     joinPathFragments(configDir, 'src'),
     {
       pkgMgrRunNx: `${displayCmds.exec} nx`,
@@ -55,7 +60,7 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
   // Generate README
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common', 'readme'),
+    joinPathFragments(import.meta.dirname, 'files', 'common', 'readme'),
     configDir,
     {
       fullyQualifiedName: `${npmScopePrefix}${SHARED_INFRA_CONFIG_NAME}`,

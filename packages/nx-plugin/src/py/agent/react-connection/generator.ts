@@ -33,7 +33,7 @@ import {
 } from './local-dev';
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyAgentReactConnectionGenerator = async (
   tree: Tree,
@@ -83,7 +83,7 @@ export const pyAgentReactConnectionGenerator = async (
     // Add OpenAPI spec generation script scoped to this agent
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files/agent'),
+      joinPathFragments(import.meta.dirname, 'files/agent'),
       agentProjectConfig.root,
       {
         moduleName,

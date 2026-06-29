@@ -27,8 +27,9 @@ import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { type ITsDepVersion, withVersions } from '../../utils/versions';
 import type { TsAstroDocsGeneratorSchema } from './schema';
 
-export const TS_ASTRO_DOCS_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_ASTRO_DOCS_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsAstroDocsGenerator = async (
   tree: Tree,
@@ -111,7 +112,7 @@ export const tsAstroDocsGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'base'),
+    joinPathFragments(import.meta.dirname, 'files', 'base'),
     dir,
     templateOptions,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -135,7 +136,7 @@ export const tsAstroDocsGenerator = async (
   if (includeTranslation) {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'translation'),
+      joinPathFragments(import.meta.dirname, 'files', 'translation'),
       dir,
       templateOptions,
       { overwriteStrategy: OverwriteStrategy.KeepExisting },

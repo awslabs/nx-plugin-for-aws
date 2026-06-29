@@ -70,7 +70,13 @@ const addLambdaFunctionCdkConstructs = async (
   // Generate app specific CDK construct
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app', 'lambda-functions'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'app',
+      'lambda-functions',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -121,7 +127,7 @@ const addLambdaFunctionTerraformModules = (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       'terraform',
       'app',

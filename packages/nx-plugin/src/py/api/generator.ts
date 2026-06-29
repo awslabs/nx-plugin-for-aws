@@ -7,8 +7,9 @@ import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { pyFastApiProjectGenerator } from '../fast-api/generator';
 import type { PyApiGeneratorSchema } from './schema';
 
-export const PY_API_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const PY_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function pyApiGenerator(
   tree: Tree,

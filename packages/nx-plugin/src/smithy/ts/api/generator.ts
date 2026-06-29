@@ -36,8 +36,9 @@ import { withVersions } from '../../../utils/versions';
 import smithyProjectGenerator from '../../project/generator';
 import type { TsSmithyApiGeneratorSchema } from './schema';
 
-export const TS_SMITHY_API_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_SMITHY_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsSmithyApiGenerator = async (
   tree: Tree,
@@ -121,7 +122,7 @@ export const tsSmithyApiGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     backendProjectConfig.sourceRoot,
     {
       apiNameClassName,
@@ -134,7 +135,7 @@ export const tsSmithyApiGenerator = async (
       generateFiles(
         tree,
         joinPathFragments(
-          __dirname,
+          import.meta.dirname,
           '..',
           '..',
           '..',
@@ -282,11 +283,7 @@ export const tsSmithyApiGenerator = async (
 
   // Preserve any dependencies added to dev by connection generators
   for (const dependency of existingDevDependsOn) {
-    addDependencyToTargetIfNotPresent(
-      backendProjectConfig,
-      'dev',
-      dependency,
-    );
+    addDependencyToTargetIfNotPresent(backendProjectConfig, 'dev', dependency);
   }
 
   // Ignore generated code

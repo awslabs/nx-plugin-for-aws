@@ -21,7 +21,7 @@ import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBAgentConnectionGeneratorSchema } from './schema';
 
 export const PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyDynamoDBAgentConnectionGenerator = async (
   tree: Tree,

@@ -14,7 +14,7 @@ import {
 import type { TsDynamoDBTrpcConnectionGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_TRPC_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsDynamoDBTrpcConnectionGenerator = async (
   tree: Tree,

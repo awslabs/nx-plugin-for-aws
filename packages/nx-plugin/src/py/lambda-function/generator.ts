@@ -36,8 +36,9 @@ import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import type { PyLambdaFunctionGeneratorSchema } from './schema';
 
-export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export interface LambdaFunctionDetails {
   /**
@@ -167,7 +168,7 @@ export const pyLambdaFunctionGenerator = async (
   // Generate the lambda handler file
   generateFiles(
     tree, // the virtual file system
-    joinPathFragments(__dirname, 'files', 'handler'), // path to the file templates
+    joinPathFragments(import.meta.dirname, 'files', 'handler'), // path to the file templates
     joinPathFragments(projectConfig.sourceRoot, schema.functionPath ?? ''),
     enhancedOptions,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -176,7 +177,7 @@ export const pyLambdaFunctionGenerator = async (
   // Generate the lambda handler test file
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'tests'),
+    joinPathFragments(import.meta.dirname, 'files', 'tests'),
     joinPathFragments(dir, 'tests'),
     enhancedOptions,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

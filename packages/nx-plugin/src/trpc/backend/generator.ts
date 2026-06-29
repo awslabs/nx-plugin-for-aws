@@ -33,8 +33,9 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import type { TsTrpcApiGeneratorSchema } from './schema';
 
-export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
   'rest-lambda::isolated',
@@ -179,7 +180,7 @@ export async function tsTrpcApiGenerator(
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     backendRoot,
     enhancedOptions,
     {
@@ -194,7 +195,7 @@ export async function tsTrpcApiGenerator(
     generateFiles(
       tree,
       joinPathFragments(
-        __dirname,
+        import.meta.dirname,
         '..',
         '..',
         'utils',

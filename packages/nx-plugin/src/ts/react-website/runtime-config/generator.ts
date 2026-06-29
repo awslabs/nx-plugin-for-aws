@@ -22,8 +22,9 @@ import {
 import { toProjectRelativePath } from '../../../utils/paths';
 import type { RuntimeConfigGeneratorSchema } from './schema';
 
-export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function runtimeConfigGenerator(
   tree: Tree,
@@ -55,7 +56,7 @@ export async function runtimeConfigGenerator(
   const npmScopePrefix = getNpmScopePrefix(tree);
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'app'),
     srcRoot,
     {
       ...options,

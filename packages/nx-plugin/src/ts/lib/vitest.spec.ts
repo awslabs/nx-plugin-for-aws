@@ -74,21 +74,20 @@ describe('vitest utils', () => {
       name: 'empty test block',
       testBlock: `test: {},`,
     },
-  ])(
-    'should add passWithNoTests producing compilable config: $name',
-    async ({ testBlock }) => {
-      tree.write('test/vitest.config.mts', wrapConfig(testBlock));
+  ])('should add passWithNoTests producing compilable config: $name', async ({
+    testBlock,
+  }) => {
+    tree.write('test/vitest.config.mts', wrapConfig(testBlock));
 
-      await configureVitest(tree, {
-        dir: 'test',
-        fullyQualifiedName: 'test',
-      });
+    await configureVitest(tree, {
+      dir: 'test',
+      fullyQualifiedName: 'test',
+    });
 
-      const content = tree.read('test/vitest.config.mts', 'utf8')!;
-      expect(content).toContain('passWithNoTests: true');
-      expectTypeScriptToCompile(tree, ['test/vitest.config.mts']);
-    },
-  );
+    const content = tree.read('test/vitest.config.mts', 'utf8')!;
+    expect(content).toContain('passWithNoTests: true');
+    expectTypeScriptToCompile(tree, ['test/vitest.config.mts']);
+  });
 
   it('should not add passWithNoTests when it is already present', async () => {
     tree.write(

@@ -35,7 +35,13 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', SHARED_SCRIPTS_DIR, 'src', 'infra'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      SHARED_SCRIPTS_DIR,
+      'src',
+      'infra',
+    ),
     joinPathFragments(scriptsDir, 'src', 'infra'),
     { scopeAlias },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -50,7 +56,7 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common', 'readme'),
+    joinPathFragments(import.meta.dirname, 'files', 'common', 'readme'),
     scriptsDir,
     {
       fullyQualifiedName: `${npmScopePrefix}${SHARED_SCRIPTS_NAME}`,

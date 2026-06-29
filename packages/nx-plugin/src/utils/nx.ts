@@ -10,7 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import * as path from 'path';
-import PackageJson from '../../package.json';
+import PackageJson from '../../package.json' with { type: 'json' };
 import { toSnakeCase } from './names';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 
@@ -19,7 +19,9 @@ export { buildGeneratorInfoList } from './generators';
 
 import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
 
-const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
+const GENERATORS = buildGeneratorInfoList(
+  path.resolve(import.meta.dirname, '..', '..'),
+);
 
 /**
  * List Nx Plugin for AWS generators
@@ -29,7 +31,7 @@ export const listGenerators = (includeHidden = false) =>
   GENERATORS.filter((g) => includeHidden || !g.hidden);
 
 /**
- * Return generator information. Call this from a generator method with __filename
+ * Return generator information. Call this from a generator method with import.meta.filename
  */
 export const getGeneratorInfo = (generatorFileName: string): GeneratorInfo => {
   const { dir, name } = path.parse(path.resolve(generatorFileName));

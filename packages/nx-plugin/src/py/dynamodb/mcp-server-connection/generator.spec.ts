@@ -17,7 +17,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -138,9 +138,7 @@ describe('py#dynamodb mcp-server-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-mcp-server');
-    const deps = (
-      config.targets?.['mcp-server-dev']?.dependsOn ?? []
-    ).filter(
+    const deps = (config.targets?.['mcp-server-dev']?.dependsOn ?? []).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&

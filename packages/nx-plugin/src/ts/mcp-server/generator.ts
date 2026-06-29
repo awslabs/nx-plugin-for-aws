@@ -28,9 +28,9 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -41,8 +41,9 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsMcpServerGeneratorSchema } from './schema';
 
-export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsMcpServerGenerator = async (
   tree: Tree,
@@ -111,7 +112,7 @@ export const tsMcpServerGenerator = async (
   // Generate example server
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     targetSourceDir,
     {
       name,

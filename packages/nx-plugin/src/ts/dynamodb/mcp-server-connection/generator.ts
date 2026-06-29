@@ -14,7 +14,7 @@ import {
 import type { TsDynamoDBMcpServerConnectionGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsDynamoDBMcpServerConnectionGenerator = async (
   tree: Tree,

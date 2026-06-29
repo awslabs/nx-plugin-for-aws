@@ -164,7 +164,7 @@ export const addOpenApiReactClient = async (
   if (auth === 'iam') {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, '../../files/website/hooks/sigv4'),
+      joinPathFragments(import.meta.dirname, '../../files/website/hooks/sigv4'),
       joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
       {},
       {
@@ -177,7 +177,7 @@ export const addOpenApiReactClient = async (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       '../../files/website/components/tanstack-query',
     ),
     joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
@@ -192,7 +192,7 @@ export const addOpenApiReactClient = async (
   // Add a hook to instantiate the client
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     frontendProjectConfig.sourceRoot,
     {
       auth,

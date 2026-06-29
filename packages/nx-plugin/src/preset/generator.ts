@@ -21,7 +21,7 @@ import * as enquirer from 'enquirer';
 import { readFileSync } from 'fs';
 import yaml from 'js-yaml';
 import { readModulePackageJson } from 'nx/src/utils/package-json';
-import GeneratorsJson from '../../generators.json';
+import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import {
   ensureAwsNxPluginConfig,
@@ -47,8 +47,9 @@ const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 // default behaviour. The user can opt-in later via `pnpm approve-builds`.
 const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
-export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const PRESET_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 const setUpWorkspaces = (tree: Tree) => {
   if (detectPackageManager() === 'pnpm') {
@@ -127,12 +128,12 @@ export function isAmazonian(): boolean {
 
 const setUpGitSecrets = (tree: Tree) => {
   const gitSecretsDir = joinPathFragments(
-    __dirname,
+    import.meta.dirname,
     'git-secrets-files',
     'git-secrets-dir',
   );
   const huskyDir = joinPathFragments(
-    __dirname,
+    import.meta.dirname,
     'git-secrets-files',
     'husky-dir',
   );
@@ -257,7 +258,7 @@ export const presetGenerator = async (
 
   generateFiles(
     tree, // the virtual file system
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     '.',
     {
       projectName: getNpmScope(tree),

@@ -27,9 +27,9 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
+  addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
-  addComponentDevTarget,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -40,8 +40,9 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
-export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsAgentGenerator = async (
   tree: Tree,
@@ -100,7 +101,7 @@ export const tsAgentGenerator = async (
   // Generate common files shared by both protocols
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common'),
+    joinPathFragments(import.meta.dirname, 'files', 'common'),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -109,7 +110,7 @@ export const tsAgentGenerator = async (
   // Generate protocol-specific files
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', protocol.toLowerCase()),
+    joinPathFragments(import.meta.dirname, 'files', protocol.toLowerCase()),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -128,7 +129,7 @@ export const tsAgentGenerator = async (
     // Add the Dockerfile
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'deploy'),
+      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
       targetSourceDir,
       {
         distDir,

@@ -69,7 +69,7 @@ const A2A_TRANSPORT_DEP: Record<AgentFramework, IPyDepVersion> = {
 };
 
 export const PY_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyAgentA2aConnectionGenerator = async (
   tree: Tree,
@@ -147,7 +147,7 @@ export const pyAgentA2aConnectionGenerator = async (
   );
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', naming.appTemplateSubdir),
+    joinPathFragments(import.meta.dirname, 'files', naming.appTemplateSubdir),
     appDir,
     {
       targetAgentSnakeCase,

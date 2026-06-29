@@ -36,7 +36,7 @@ import { withVersions } from '../../../utils/versions';
 import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
 
 export const TS_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsAgentA2aConnectionGenerator = async (
   tree: Tree,
@@ -89,7 +89,7 @@ export const tsAgentA2aConnectionGenerator = async (
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'agent-connection', 'app'),
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'app'),
     {
       targetAgentKebabCase,

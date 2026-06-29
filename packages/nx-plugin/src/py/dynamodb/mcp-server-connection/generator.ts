@@ -21,7 +21,7 @@ import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBMcpServerConnectionGeneratorSchema } from './schema';
 
 export const PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyDynamoDBMcpServerConnectionGenerator = async (
   tree: Tree,

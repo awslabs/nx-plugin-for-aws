@@ -32,7 +32,7 @@ const SYNC_STRATEGIES: Record<
   LICENSE: (tree, projectRoot, config) => {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'licenses', config.spdx),
+      joinPathFragments(import.meta.dirname, 'files', 'licenses', config.spdx),
       projectRoot,
       {
         copyrightHolder: config.copyrightHolder,

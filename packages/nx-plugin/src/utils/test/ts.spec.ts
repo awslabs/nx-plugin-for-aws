@@ -77,7 +77,7 @@ export class TypeScriptVerifier {
         execSync(`pnpm list --depth 1000 --json ${dependency}`, {
           encoding: 'utf-8',
           stdio: 'pipe',
-          cwd: path.resolve(__dirname, '../../../../../'),
+          cwd: path.resolve(import.meta.dirname, '../../../../../'),
           maxBuffer: 1024 * 1024 * 1024, // 1 GB
         }),
       );

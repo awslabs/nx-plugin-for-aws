@@ -17,7 +17,7 @@ describe('ts#rdb agent-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -298,9 +298,7 @@ export const getAgent = async () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-service');
-    const deps = (
-      config.targets?.['my-agent-dev']?.dependsOn ?? []
-    ).filter(
+    const deps = (config.targets?.['my-agent-dev']?.dependsOn ?? []).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&

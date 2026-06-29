@@ -31,7 +31,7 @@ export async function sharedDynamoDBScriptsGenerator(
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       SHARED_SCRIPTS_DIR,
       'src',

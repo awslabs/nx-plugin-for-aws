@@ -28,7 +28,7 @@ describe('dev', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -44,7 +44,7 @@ describe('dev', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -76,7 +76,7 @@ describe('dev', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
               dependsOn: [
@@ -98,7 +98,7 @@ describe('dev', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -134,7 +134,7 @@ describe('dev', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -176,7 +176,7 @@ describe('dev', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -233,7 +233,7 @@ describe('dev', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -259,7 +259,7 @@ describe('dev', () => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -275,7 +275,7 @@ describe('dev', () => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -319,7 +319,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -335,7 +335,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -374,7 +374,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -399,7 +399,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },
@@ -413,7 +413,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/backend',
           sourceRoot: 'apps/backend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/node:execute',
               continuous: true,
               options: {},
@@ -446,7 +446,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
           targets: {
-            'dev': {
+            dev: {
               executor: '@nx/webpack:dev-server',
               options: {},
             },

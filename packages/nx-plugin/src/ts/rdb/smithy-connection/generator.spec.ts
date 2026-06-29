@@ -17,7 +17,7 @@ describe('ts#rdb smithy-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -30,7 +30,7 @@ describe('ts#rdb smithy-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -207,7 +207,7 @@ export const lambdaHandler = async (
         name: 'api',
         root: 'packages/api',
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );

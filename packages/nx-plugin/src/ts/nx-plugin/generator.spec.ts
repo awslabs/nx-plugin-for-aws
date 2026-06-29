@@ -83,9 +83,10 @@ describe('ts#nx-plugin generator', () => {
   it('should configure TypeScript project as Nx Plugin', async () => {
     await tsNxPluginGenerator(tree, { name: 'test-plugin' });
 
-    // Check tsconfig.json has commonjs module
+    // Nx 23 loads `.ts` generators as ESM via native type stripping, so the
+    // plugin must not be forced to commonjs.
     const tsConfig = readJson(tree, 'test-plugin/tsconfig.json');
-    expect(tsConfig.compilerOptions?.module).toBe('commonjs');
+    expect(tsConfig.compilerOptions?.module).not.toBe('commonjs');
 
     // Check generators.json exists
     expect(tree.exists('test-plugin/generators.json')).toBe(true);
@@ -148,10 +149,10 @@ describe('ts#nx-plugin generator', () => {
     expect(projectPackageJson.dependencies?.['@aws/nx-plugin']).toBeDefined();
   });
 
-  it('should add swc dev dependencies so nx transpiles generators without falling back to ts-node', async () => {
-    // Without @swc-node/register, nx transpiles unbuilt generators with ts-node,
-    // which forces `moduleResolution: node10` — a hard error under TypeScript 6.
-    // Simulate an external workspace (the in-repo workspace already has swc).
+  it('should not add swc transpiler dev dependencies', async () => {
+    // Generated workspaces are `"type": "module"`, so Nx loads the plugin's
+    // `.ts` generators as ESM via Node's native type stripping — no swc/ts-node
+    // transpiler is required.
     tree.write(
       'package.json',
       JSON.stringify({ name: 'external-workspace', version: '1.0.0' }),
@@ -160,14 +161,14 @@ describe('ts#nx-plugin generator', () => {
     await tsNxPluginGenerator(tree, { name: 'test-plugin' });
 
     const rootPackageJson = readJson(tree, 'package.json');
-    expect(rootPackageJson.devDependencies?.['@swc-node/register']).toBeDefined();
-    expect(rootPackageJson.devDependencies?.['@swc/core']).toBeDefined();
+    expect(
+      rootPackageJson.devDependencies?.['@swc-node/register'],
+    ).toBeUndefined();
 
     const projectPackageJson = readJson(tree, 'test-plugin/package.json');
     expect(
       projectPackageJson.devDependencies?.['@swc-node/register'],
-    ).toBeDefined();
-    expect(projectPackageJson.devDependencies?.['@swc/core']).toBeDefined();
+    ).toBeUndefined();
   });
 
   it('should add generator metric to app.ts', async () => {

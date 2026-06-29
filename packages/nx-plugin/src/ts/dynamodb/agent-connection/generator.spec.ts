@@ -17,7 +17,7 @@ describe('ts#dynamodb agent-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'dev': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -102,9 +102,7 @@ describe('ts#dynamodb agent-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'my-agent');
-    const deps = (
-      config.targets?.['agent-dev']?.dependsOn ?? []
-    ).filter(
+    const deps = (config.targets?.['agent-dev']?.dependsOn ?? []).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&

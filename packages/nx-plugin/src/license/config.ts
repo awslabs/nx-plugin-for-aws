@@ -2,7 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { ProjectConfiguration, Tree } from '@nx/devkit';
+import {
+  getProjects,
+  type ProjectConfiguration,
+  readProjectConfiguration,
+  type Tree,
+  updateProjectConfiguration,
+} from '@nx/devkit';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
@@ -267,7 +273,6 @@ const hasPythonCollector = async (tree: Tree): Promise<boolean> => {
  * undefined if no project defines it.
  */
 const findLicenseCheckProjectName = (tree: Tree): string | undefined => {
-  const { getProjects } = require('@nx/devkit');
   for (const [name, config] of getProjects(tree)) {
     if (config.targets?.['license-check']) return name;
   }
@@ -286,11 +291,6 @@ export const addLicenseCheckToLintTarget = (
   tree: Tree,
   projectName: string,
 ): void => {
-  const {
-    readProjectConfiguration,
-    updateProjectConfiguration,
-  } = require('@nx/devkit');
-
   const licenseCheckProject = findLicenseCheckProjectName(tree);
   if (!licenseCheckProject) return;
 
@@ -318,7 +318,6 @@ export const addLicenseCheckToLintTarget = (
  * regardless of the order generators ran in.
  */
 export const addLicenseCheckToAllLintTargets = (tree: Tree): void => {
-  const { getProjects } = require('@nx/devkit');
   for (const [name] of getProjects(tree)) {
     addLicenseCheckToLintTarget(tree, name);
   }

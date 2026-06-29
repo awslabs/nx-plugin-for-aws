@@ -42,8 +42,9 @@ import { updateToml } from '../../utils/toml';
 import { withVersions } from '../../utils/versions';
 import type { PyProjectGeneratorSchema } from './schema';
 
-export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export interface PyProjectDetails {
   /**

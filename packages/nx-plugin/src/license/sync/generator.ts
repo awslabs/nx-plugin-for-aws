@@ -8,11 +8,11 @@ import {
   joinPathFragments,
   type Tree,
 } from '@nx/devkit';
-import { glob as fastGlob } from 'fast-glob';
+import fastGlob from 'fast-glob';
 import { minimatch } from 'minimatch';
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { basename } from 'path';
-import PackageJson from '../../../package.json';
+import PackageJson from '../../../package.json' with { type: 'json' };
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
 import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git';
 import { getGeneratorInfo } from '../../utils/nx';
@@ -28,7 +28,7 @@ import {
   syncProjectFile,
 } from './project-file-sync';
 
-export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${getGeneratorInfo(__filename).id}`;
+export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${getGeneratorInfo(import.meta.filename).id}`;
 
 interface ProjectFile {
   name: ProjectFileToSync;

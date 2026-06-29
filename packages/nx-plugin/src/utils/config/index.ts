@@ -7,8 +7,8 @@ import type { ContainersConfig } from '../containers';
 import type { IacConfig } from '../iac';
 
 export * from '../../license/config-types';
-export { Containers, ContainersConfig } from '../containers';
-export { Iac, IacConfig } from '../iac';
+export type { Containers, ContainersConfig } from '../containers';
+export type { Iac, IacConfig } from '../iac';
 
 /**
  * Configuration for the nx plugin

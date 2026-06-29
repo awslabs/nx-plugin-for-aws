@@ -8,8 +8,9 @@ import { tsTrpcApiGenerator } from '../../trpc/backend/generator';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import type { TsApiGeneratorSchema } from './schema';
 
-export const TS_API_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function tsApiGenerator(
   tree: Tree,

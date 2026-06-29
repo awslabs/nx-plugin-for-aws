@@ -23,7 +23,7 @@ import {
 import type { TsRdbTrpcConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_TRPC_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsRdbTrpcConnectionGenerator = async (
   tree: Tree,
@@ -55,7 +55,7 @@ export const tsRdbTrpcConnectionGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     sourceProject.root,
     { rdbNameKebab, rdbNameCamel, rdbNamePascal, rdbPackageAlias, engine },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

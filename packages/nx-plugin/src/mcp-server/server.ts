@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import PackageJson from '../../package.json';
+import PackageJson from '../../package.json' with { type: 'json' };
 import { listGenerators } from '../utils/nx';
 import { addCreateWorkspaceCommandTool } from './tools/create-workspace-command';
 import {
