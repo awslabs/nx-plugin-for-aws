@@ -1,0 +1,32 @@
+import { readFileSync } from 'fs';
+import { createConnection } from 'mariadb';
+
+const { port, dbName, dbUser, dbPassword, dbEngine } =
+  JSON.parse(readFileSync('config.json', 'utf-8')).localDev;
+
+const noop = () => undefined;
+const timeoutAt = Date.now() + 60000;
+
+while (Date.now() < timeoutAt) {
+  let conn: Awaited<ReturnType<typeof createConnection>> | undefined;
+  try {
+    conn = await createConnection({
+      host: 'localhost',
+      port: parseInt(port),
+      user: dbUser,
+      password: dbPassword,
+      database: dbName,
+      connectTimeout: 500,
+      allowPublicKeyRetrieval: true,
+    });
+    await conn.end();
+    console.log('Database is ready.');
+    process.exit(0);
+  } catch {
+    console.log('Database is not ready.');
+    await conn?.end().catch(noop);
+  }
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+throw new Error(`Timed out waiting for ${dbEngine} on port ${port}`);

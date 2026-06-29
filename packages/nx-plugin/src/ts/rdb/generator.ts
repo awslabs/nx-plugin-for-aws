@@ -125,7 +125,14 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
-  await sharedRdbScriptsGenerator(tree);
+  await sharedRdbScriptsGenerator(
+    tree,
+    options.engine === 'mysql' ? 'mysql' : 'postgres',
+  );
+  const waitForDbScript =
+    options.engine === 'mysql'
+      ? 'wait-for-mysql-db.ts'
+      : 'wait-for-postgres-db.ts';
   const scriptsDir = relative(
     dir,
     joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'rdb'),
@@ -209,7 +216,7 @@ export const tsRdbGenerator = async (
     executor: 'nx:run-commands',
     dependsOn: ['dev'],
     options: {
-      command: `tsx ${scriptsDir}/wait-for-db.ts`,
+      command: `tsx ${scriptsDir}/${waitForDbScript}`,
       cwd: '{projectRoot}',
     },
   };
