@@ -1,0 +1,32 @@
+import { readFileSync } from 'fs';
+import { Client } from 'pg';
+
+const { port, dbName, dbUser, dbPassword, dbEngine } =
+  JSON.parse(readFileSync('config.json', 'utf-8')).localDev;
+
+const noop = () => undefined;
+const timeoutAt = Date.now() + 60000;
+
+while (Date.now() < timeoutAt) {
+  const client = new Client({
+    host: 'localhost',
+    port: parseInt(port),
+    user: dbUser,
+    password: dbPassword,
+    database: dbName,
+    connectionTimeoutMillis: 500,
+  });
+  client.on('error', noop);
+  try {
+    await client.connect();
+    await client.end();
+    console.log('Database is ready.');
+    process.exit(0);
+  } catch {
+    console.log('Database is not ready.');
+    await client.end().catch(noop);
+  }
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+throw new Error(`Timed out waiting for ${dbEngine} on port ${port}`);

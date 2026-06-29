@@ -109,10 +109,22 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       dependsOn: ['dev'],
       options: {
-        command: 'tsx ../common/scripts/src/rdb/wait-for-db.ts',
+        command: 'tsx ../common/scripts/src/rdb/wait-for-postgres-db.ts',
         cwd: '{projectRoot}',
       },
     });
+    expect(
+      tree.exists('packages/common/scripts/src/rdb/wait-for-postgres-db.ts'),
+    ).toBe(true);
+    expect(
+      tree.exists('packages/common/scripts/src/rdb/wait-for-mysql-db.ts'),
+    ).toBe(false);
+    expect(
+      tree.read(
+        'packages/common/scripts/src/rdb/wait-for-postgres-db.ts',
+        'utf-8',
+      ),
+    ).not.toContain('mariadb');
     expect(projectConfig.targets.prisma).toEqual({
       executor: 'nx:run-commands',
       dependsOn: ['dev', 'wait-for-db'],
@@ -195,10 +207,22 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       dependsOn: ['dev'],
       options: {
-        command: 'tsx ../common/scripts/src/rdb/wait-for-db.ts',
+        command: 'tsx ../common/scripts/src/rdb/wait-for-mysql-db.ts',
         cwd: '{projectRoot}',
       },
     });
+    expect(
+      tree.exists('packages/common/scripts/src/rdb/wait-for-mysql-db.ts'),
+    ).toBe(true);
+    expect(
+      tree.exists('packages/common/scripts/src/rdb/wait-for-postgres-db.ts'),
+    ).toBe(false);
+    expect(
+      tree.read(
+        'packages/common/scripts/src/rdb/wait-for-mysql-db.ts',
+        'utf-8',
+      ),
+    ).not.toContain("import('pg')");
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeDefined();
     expect(packageJson.dependencies.mariadb).toBeDefined();
     expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
