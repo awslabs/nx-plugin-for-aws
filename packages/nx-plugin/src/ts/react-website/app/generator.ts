@@ -53,7 +53,7 @@ export type UxOption = (typeof SUPPORTED_UX_PROVIDERS)[number];
 export type Ux = UxOption;
 
 export const REACT_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export async function tsReactWebsiteGenerator(
   tree: Tree,
@@ -278,11 +278,11 @@ export async function tsReactWebsiteGenerator(
   };
   tree.delete(joinPathFragments(libraryRoot, 'src', 'app'));
   const appCommonTemplatePath = joinPathFragments(
-    __dirname,
+    import.meta.dirname,
     './files/app/common',
   );
   const appTemplatePath = joinPathFragments(
-    __dirname,
+    import.meta.dirname,
     `./files/app/${ux.toLowerCase()}`,
   );
 
@@ -310,11 +310,11 @@ export async function tsReactWebsiteGenerator(
 
   if (tanstackRouter) {
     const routerCommonTemplatePath = joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       './files/tanstack-router/common',
     );
     const routerTemplatePath = joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       `./files/tanstack-router/${ux.toLowerCase()}`,
     );
 
@@ -347,7 +347,7 @@ export async function tsReactWebsiteGenerator(
     const e2eRoot = readProjectConfiguration(tree, e2eFullyQualifiedName).root;
     generateFiles(
       tree, // the virtual file system
-      joinPathFragments(__dirname, `./files/e2e/${e2eTestRunner}`), // path to the file templates
+      joinPathFragments(import.meta.dirname, `./files/e2e/${e2eTestRunner}`), // path to the file templates
       e2eRoot, // destination path of the files
       { ...schema, ...names(fullyQualifiedName) },
       {

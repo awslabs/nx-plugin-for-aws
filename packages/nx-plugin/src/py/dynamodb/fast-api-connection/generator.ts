@@ -21,7 +21,7 @@ import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBFastApiConnectionGeneratorSchema } from './schema';
 
 export const PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyDynamoDBFastApiConnectionGenerator = async (
   tree: Tree,

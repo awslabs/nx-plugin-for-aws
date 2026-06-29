@@ -3,4 +3,4 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { createTreeUsingTsSolutionSetup } from '../../src/utils/test';
+export { formatFilesInSubtree } from '../../utils/format';

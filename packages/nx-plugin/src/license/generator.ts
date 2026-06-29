@@ -26,8 +26,9 @@ import {
 import type { LicenseGeneratorSchema } from './schema';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
 
-export const LICENSE_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const LICENSE_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export async function licenseGenerator(
   tree: Tree,

@@ -92,7 +92,14 @@ const addApiGatewayCdkConstructs = async (
   const generateCoreApiFile = (name: string) => {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'cdk', 'core', 'api', name),
+      joinPathFragments(
+        import.meta.dirname,
+        'files',
+        'cdk',
+        'core',
+        'api',
+        name,
+      ),
       joinPathFragments(
         PACKAGES_DIR,
         SHARED_CONSTRUCTS_DIR,
@@ -118,7 +125,7 @@ const addApiGatewayCdkConstructs = async (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       'cdk',
       'app',
@@ -175,7 +182,7 @@ const addApiGatewayTerraformModules = (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       'terraform',
       'core',
@@ -193,7 +200,7 @@ const addApiGatewayTerraformModules = (
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       'files',
       'terraform',
       'app',

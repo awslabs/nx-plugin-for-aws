@@ -7,8 +7,9 @@ import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx';
 import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
 import type { TsWebsiteGeneratorSchema } from './schema';
 
-export const TS_WEBSITE_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_WEBSITE_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsWebsiteGenerator = async (
   tree: Tree,

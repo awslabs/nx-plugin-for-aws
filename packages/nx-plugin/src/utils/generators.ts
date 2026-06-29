@@ -4,7 +4,7 @@
  */
 
 import * as path from 'path';
-import GeneratorsJson from '../../generators.json';
+import GeneratorsJson from '../../generators.json' with { type: 'json' };
 
 export interface GeneratorInfo {
   readonly id: string;

@@ -19,7 +19,10 @@
  * packages without proper exports.
  */
 import type { Tree } from '@nx/devkit';
+import { createRequire } from 'module';
 import path from 'path';
+
+const require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Inlined types from @nxlv/python (sourced from dist/**\/*.d.ts)

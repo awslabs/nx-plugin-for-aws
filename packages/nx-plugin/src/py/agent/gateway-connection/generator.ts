@@ -39,7 +39,7 @@ import {
 import type { PyAgentGatewayConnectionGeneratorSchema } from './schema';
 
 export const PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyAgentGatewayConnectionGenerator = async (
   tree: Tree,
@@ -114,7 +114,11 @@ export const pyAgentGatewayConnectionGenerator = async (
   // Local mode points at the gateway project's local gateway port.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', connection.appTemplateSubdir),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      connection.appTemplateSubdir,
+    ),
     appDir,
     {
       gatewaySnakeCase,

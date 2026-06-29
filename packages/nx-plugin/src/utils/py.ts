@@ -127,7 +127,8 @@ const getPyDistributionName = (
 ): string => {
   const pyprojectPath = joinPathFragments(project.root, 'pyproject.toml');
   const projectName = tree.exists(pyprojectPath)
-    ? (readToml(tree, pyprojectPath) as unknown as UVPyprojectToml).project?.name
+    ? (readToml(tree, pyprojectPath) as unknown as UVPyprojectToml).project
+        ?.name
     : undefined;
   return normalizeDistributionName(projectName ?? project.name ?? '');
 };

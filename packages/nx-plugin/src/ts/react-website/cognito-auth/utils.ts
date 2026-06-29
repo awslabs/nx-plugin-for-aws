@@ -9,7 +9,10 @@ import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
 import { kebabCase } from '../../../utils/names';
 
 const readGritPattern = (name: string): string =>
-  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
+  readFileSync(
+    join(import.meta.dirname, 'grit', `${name}.grit`),
+    'utf-8',
+  ).trim();
 
 // Leaves room for the IaC suffix (Terraform: `-<12-digit account>-<8-char hex>` = 22 chars) inside Cognito's 63-char limit.
 const MAX_DERIVED_DOMAIN_PREFIX_LENGTH = 41;

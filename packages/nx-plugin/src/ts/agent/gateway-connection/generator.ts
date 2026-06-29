@@ -34,7 +34,7 @@ import { withVersions } from '../../../utils/versions';
 import type { TsAgentGatewayConnectionGeneratorSchema } from './schema';
 
 export const TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsAgentGatewayConnectionGenerator = async (
   tree: Tree,
@@ -90,7 +90,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   //    points at the gateway project's local gateway port.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'agent-connection', 'app'),
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'app'),
     {
       gatewayKebabCase,

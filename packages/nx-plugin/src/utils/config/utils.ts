@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { generateFiles, joinPathFragments, type Tree } from '@nx/devkit';
+import { existsSync, readFileSync } from 'fs';
 import { createJiti } from 'jiti';
 import { join } from 'path';
 import { applyGritQL, matchGritQL } from '../ast';
@@ -17,14 +18,13 @@ export const AWS_NX_PLUGIN_CONFIG_FILE_NAME = 'aws-nx-plugin.config.mts';
  */
 const AWS_NX_PLUGIN_JITI_ALIASES = {
   '@aws/nx-plugin/sdk/license': join(
-    __dirname,
-    '..',
+    import.meta.dirname,
     '..',
     '..',
     'sdk',
     'license',
   ),
-  '@aws/nx-plugin': join(__dirname, '..', '..'),
+  '@aws/nx-plugin': join(import.meta.dirname, '..', '..'),
 };
 
 /**
@@ -35,7 +35,12 @@ export const ensureAwsNxPluginConfig = async (
 ): Promise<AwsNxPluginConfig> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
     // Create an empty config file if it doesn't already exist
-    generateFiles(tree, joinPathFragments(__dirname, 'files'), '.', {});
+    generateFiles(
+      tree,
+      joinPathFragments(import.meta.dirname, 'files'),
+      '.',
+      {},
+    );
   }
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   return await readAwsNxPluginConfig(tree)!;
@@ -57,7 +62,9 @@ export const readAwsNxPluginConfig = async (
   const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
   const configFilePath = join(tree.root, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
 
-  const jiti = createJiti(__filename, { alias: AWS_NX_PLUGIN_JITI_ALIASES });
+  const jiti = createJiti(import.meta.filename, {
+    alias: AWS_NX_PLUGIN_JITI_ALIASES,
+  });
 
   const mod = jiti.evalModule(source, { filename: configFilePath });
   return (mod as any).default ?? mod;
@@ -71,13 +78,14 @@ export const readAwsNxPluginConfig = async (
 export const readAwsNxPluginConfigFromDisk = (
   workspaceRoot: string,
 ): AwsNxPluginConfig | undefined => {
-  const { existsSync, readFileSync } = require('fs');
   const configPath = join(workspaceRoot, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
   if (!existsSync(configPath)) return undefined;
 
   const source = readFileSync(configPath, 'utf-8');
 
-  const jiti = createJiti(__filename, { alias: AWS_NX_PLUGIN_JITI_ALIASES });
+  const jiti = createJiti(import.meta.filename, {
+    alias: AWS_NX_PLUGIN_JITI_ALIASES,
+  });
   const mod = jiti.evalModule(source, { filename: configPath });
   return (mod as any).default ?? mod;
 };

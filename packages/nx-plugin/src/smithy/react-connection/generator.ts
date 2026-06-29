@@ -24,7 +24,7 @@ import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
 import type { SmithyReactConnectionGeneratorSchema } from './schema';
 
 export const SMITHY_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const smithyReactConnectionGenerator = async (
   tree: Tree,
@@ -55,7 +55,7 @@ export const smithyReactConnectionGenerator = async (
   // Add extensions.smithy for customising the client
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'model'),
+    joinPathFragments(import.meta.dirname, 'files', 'model'),
     modelProjectConfig.sourceRoot,
     {
       namespace,

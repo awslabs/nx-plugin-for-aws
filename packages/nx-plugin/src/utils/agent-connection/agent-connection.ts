@@ -251,7 +251,7 @@ const tsCoreDir = () =>
 const emitTs = (tree: Tree, templateDir: string) =>
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', templateDir),
+    joinPathFragments(import.meta.dirname, 'files', templateDir),
     tsCoreDir(),
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -388,7 +388,7 @@ export async function ensurePythonAgentConnectionProject(
   // Framework-agnostic runtime-config + session-context helpers.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'py-core-runtime-config'),
+    joinPathFragments(import.meta.dirname, 'files', 'py-core-runtime-config'),
     coreDir,
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -424,7 +424,7 @@ const pyCoreDir = (tree: Tree) =>
 const emitPy = (tree: Tree, templateDir: string) =>
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', templateDir),
+    joinPathFragments(import.meta.dirname, 'files', templateDir),
     pyCoreDir(tree),
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

@@ -12,12 +12,13 @@ import {
 } from '@nx/devkit';
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { relative } from 'path';
-import PackageJson from '../../../package.json';
+import PackageJson from '../../../package.json' with { type: 'json' };
 import { formatFilesInSubtree } from '../../utils/format';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 
-export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${TS_SYNC_GENERATOR_INFO.id}`;
 

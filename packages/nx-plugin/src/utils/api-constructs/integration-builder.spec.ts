@@ -20,7 +20,7 @@ describe('IntegrationBuilder type-safety', () => {
 
   // The real builder template, with aws-cdk-lib type imports redirected to a local stub
   const builderTemplate = readFileSync(
-    join(__dirname, 'files/cdk/core/api/utils/utils.ts.template'),
+    join(import.meta.dirname, 'files/cdk/core/api/utils/utils.ts.template'),
     'utf-8',
   ).replace(/'aws-cdk-lib[^']*'/g, `'./cdk-stub'`);
 

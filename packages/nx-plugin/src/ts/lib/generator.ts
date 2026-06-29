@@ -30,8 +30,9 @@ import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import type { TsProjectGeneratorSchema } from './schema';
 import { configureTsProject } from './ts-project-utils';
 
-export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export interface TsLibDetails {
   /**
@@ -91,7 +92,7 @@ export const tsProjectGenerator = async (
     tree.delete(joinPathFragments(dir, 'src'));
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files'),
+      joinPathFragments(import.meta.dirname, 'files'),
       joinPathFragments(dir),
       {
         fullyQualifiedName,

@@ -26,7 +26,7 @@ import {
 import type { TsRdbSmithyConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsRdbSmithyConnectionGenerator = async (
   tree: Tree,

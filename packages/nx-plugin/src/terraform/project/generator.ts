@@ -40,7 +40,7 @@ import type { TerraformProjectGeneratorSchema } from './schema';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export async function terraformProjectGenerator(
   tree: Tree,
@@ -253,7 +253,7 @@ export async function terraformProjectGenerator(
 
   generateFiles(
     tree, // the virtual file system
-    joinPathFragments(__dirname, `./files/${schema.type}`), // path to the file templates
+    joinPathFragments(import.meta.dirname, `./files/${schema.type}`), // path to the file templates
     lib.dir, // destination path of the files
     {
       metricsModulePath,

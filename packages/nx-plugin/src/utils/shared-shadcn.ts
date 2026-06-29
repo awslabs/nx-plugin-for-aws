@@ -51,7 +51,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
 
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', SHARED_SHADCN_DIR, 'src'),
+      joinPathFragments(import.meta.dirname, 'files', SHARED_SHADCN_DIR, 'src'),
       shadcnSrcRoot,
       {
         scopeAlias,
@@ -63,7 +63,12 @@ export async function sharedShadcnGenerator(tree: Tree) {
 
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', SHARED_SHADCN_DIR, 'readme'),
+      joinPathFragments(
+        import.meta.dirname,
+        'files',
+        SHARED_SHADCN_DIR,
+        'readme',
+      ),
       libraryRoot,
       {
         fullyQualifiedName,
@@ -116,7 +121,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
   if (!tree.exists('components.json')) {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'shadcn'),
+      joinPathFragments(import.meta.dirname, 'files', 'shadcn'),
       '.',
       {
         sharedShadcnAlias,

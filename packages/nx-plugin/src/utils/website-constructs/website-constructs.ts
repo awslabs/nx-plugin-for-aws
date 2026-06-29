@@ -66,7 +66,7 @@ const addWebsiteCdkConstructs = async (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'core'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
     options,
     {
@@ -76,7 +76,7 @@ const addWebsiteCdkConstructs = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
     options,
     {
@@ -126,7 +126,7 @@ const addWebsiteTerraformModules = (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'core'),
+    joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
     options,
     {
@@ -136,7 +136,7 @@ const addWebsiteTerraformModules = (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'terraform', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app'),
     options,
     {

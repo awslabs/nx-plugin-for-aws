@@ -20,7 +20,7 @@ import { readAgentCoreGatewayMetadata } from '../generator';
 import type { AgentcoreGatewayMcpConnectionGeneratorSchema } from './schema';
 
 export const AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 /**
  * Connect an AgentCore Gateway to an MCP server.
@@ -72,17 +72,12 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   const mcpTargetName = kebabCase(mcpComponent.rc as string);
   const mcpComponentName = mcpComponent.name ?? 'mcp-server';
 
-  await attachUpstreamToLocalGateway(
-    tree,
-    sourceProject,
-    'dev',
-    {
-      targetName: mcpTargetName,
-      port: (mcpComponent.port as number | undefined) ?? 8000,
-      upstreamProjectName: targetProject.name,
-      upstreamDevTargetName: `${mcpComponentName}-dev`,
-    },
-  );
+  await attachUpstreamToLocalGateway(tree, sourceProject, 'dev', {
+    targetName: mcpTargetName,
+    port: (mcpComponent.port as number | undefined) ?? 8000,
+    upstreamProjectName: targetProject.name,
+    upstreamDevTargetName: `${mcpComponentName}-dev`,
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [
     AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO,

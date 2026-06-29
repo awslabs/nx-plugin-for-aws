@@ -447,7 +447,10 @@ describe('metrics', () => {
       }
       await addGeneratorMetricsIfApplicable(tree, [terraformGenerator]);
 
-      const secondRunTerraform = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8');
+      const secondRunTerraform = tree.read(
+        TERRAFORM_METRICS_FILE_PATH,
+        'utf-8',
+      );
       const secondRunCdk = tree.read(METRICS_ASPECT_FILE_PATH, 'utf-8');
 
       // The terraform metrics file must not grow or reorder on re-run

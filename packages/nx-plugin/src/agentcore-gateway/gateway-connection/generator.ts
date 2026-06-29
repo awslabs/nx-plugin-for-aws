@@ -23,7 +23,7 @@ import {
 import type { AgentcoreGatewayGatewayConnectionGeneratorSchema } from './schema';
 
 export const AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 /**
  * Connect an AgentCore Gateway to another AgentCore Gateway.
@@ -83,17 +83,12 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
   // deployed.
   const targetGatewayKebabCase = kebabCase(targetGateway.rc);
 
-  await attachUpstreamToLocalGateway(
-    tree,
-    sourceProject,
-    'dev',
-    {
-      targetName: targetGatewayKebabCase,
-      port: targetGateway.port,
-      upstreamProjectName: targetProject.name,
-      upstreamDevTargetName: 'dev',
-    },
-  );
+  await attachUpstreamToLocalGateway(tree, sourceProject, 'dev', {
+    targetName: targetGatewayKebabCase,
+    port: targetGateway.port,
+    upstreamProjectName: targetProject.name,
+    upstreamDevTargetName: 'dev',
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [
     AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO,

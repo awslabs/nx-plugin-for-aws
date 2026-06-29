@@ -47,14 +47,10 @@ export const attachUpstreamToLocalGateway = async (
 ): Promise<void> => {
   // 1. Wire dev chain
   if (gatewayProject.targets?.[gatewayDevTargetName]) {
-    addDependencyToTargetIfNotPresent(
-      gatewayProject,
-      gatewayDevTargetName,
-      {
-        projects: [upstream.upstreamProjectName],
-        target: upstream.upstreamDevTargetName,
-      },
-    );
+    addDependencyToTargetIfNotPresent(gatewayProject, gatewayDevTargetName, {
+      projects: [upstream.upstreamProjectName],
+      target: upstream.upstreamDevTargetName,
+    });
     updateProjectConfiguration(tree, gatewayProject.name, gatewayProject);
   }
 

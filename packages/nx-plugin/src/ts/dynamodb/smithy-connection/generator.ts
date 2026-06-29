@@ -14,7 +14,7 @@ import {
 import type { TsDynamoDBSmithyConnectionGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_SMITHY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsDynamoDBSmithyConnectionGenerator = async (
   tree: Tree,

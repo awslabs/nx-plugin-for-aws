@@ -6,8 +6,11 @@
 import { Biome } from '@biomejs/js-api/nodejs';
 import type { Tree } from '@nx/devkit';
 import { execFileSync, execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { createRequire } from 'module';
 import path from 'path';
+
+const require = createRequire(import.meta.url);
 
 export const DEFAULT_BIOME_CONFIG = {
   $schema: 'https://biomejs.dev/schemas/2.4.16/schema.json',
@@ -206,9 +209,9 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
   // Run via node for cross-platform execution of the bin shim.
   try {
     const pkgJsonPath = require.resolve('@biomejs/biome/package.json', {
-      paths: [root, __dirname],
+      paths: [root, import.meta.dirname],
     });
-    const pkgJson = require(pkgJsonPath);
+    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
     const binRelative =
       typeof pkgJson.bin === 'string' ? pkgJson.bin : pkgJson.bin?.biome;
     if (binRelative) {

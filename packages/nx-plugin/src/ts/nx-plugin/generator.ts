@@ -27,8 +27,9 @@ import tsMcpServerGenerator from '../mcp-server/generator';
 import type { TsNxPluginGeneratorSchema } from './schema';
 import { configureTsProjectAsNxPlugin } from './utils';
 
-export const TS_NX_PLUGIN_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const TS_NX_PLUGIN_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsNxPluginGenerator = async (
   tree: Tree,
@@ -108,7 +109,7 @@ export const tsNxPluginGenerator = async (
   // Add generator MCP server
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'mcp-server'),
+    joinPathFragments(import.meta.dirname, 'files', 'mcp-server'),
     mcpPath,
     {
       name: fullyQualifiedName,

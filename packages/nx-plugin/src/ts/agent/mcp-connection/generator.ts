@@ -33,7 +33,7 @@ import { withVersions } from '../../../utils/versions';
 import type { TsAgentMcpConnectionGeneratorSchema } from './schema';
 
 export const TS_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const tsAgentMcpConnectionGenerator = async (
   tree: Tree,
@@ -77,7 +77,7 @@ export const tsAgentMcpConnectionGenerator = async (
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    joinPathFragments(import.meta.dirname, 'files', 'agent-connection', 'app'),
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'app'),
     {
       mcpServerKebabCase,

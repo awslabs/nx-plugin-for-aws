@@ -5,7 +5,7 @@
 
 import TOML from '@iarna/toml';
 import { execSync } from 'child_process';
-import { glob as fastGlob } from 'fast-glob';
+import fastGlob from 'fast-glob';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { uvxCommand } from '../../../utils/py';

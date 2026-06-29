@@ -13,7 +13,7 @@ import {
   writeJson,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
-import PackageJson from '../../../package.json';
+import PackageJson from '../../../package.json' with { type: 'json' };
 import { addStarExport, applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -28,7 +28,9 @@ import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { configureTsProjectAsNxPlugin } from '../nx-plugin/utils';
 import type { TsNxGeneratorGeneratorSchema } from './schema';
 
-export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(__filename);
+export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const tsNxGeneratorGenerator = async (
   tree: Tree,
@@ -67,7 +69,7 @@ export const tsNxGeneratorGenerator = async (
   // Add the common files, preserving any the user has already implemented
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'common'),
+    joinPathFragments(import.meta.dirname, 'files', 'common'),
     generatorDir,
     {
       ...enhancedOptions,
@@ -87,7 +89,12 @@ export const tsNxGeneratorGenerator = async (
     // Add the generator
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'nx-plugin-for-aws', 'generator'),
+      joinPathFragments(
+        import.meta.dirname,
+        'files',
+        'nx-plugin-for-aws',
+        'generator',
+      ),
       generatorDir,
       {
         ...enhancedOptions,
@@ -98,7 +105,12 @@ export const tsNxGeneratorGenerator = async (
     // Generate guide page in docs
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'nx-plugin-for-aws', 'docs'),
+      joinPathFragments(
+        import.meta.dirname,
+        'files',
+        'nx-plugin-for-aws',
+        'docs',
+      ),
       joinPathFragments('docs', 'src', 'content', 'docs', 'en', 'guides'),
       {
         ...enhancedOptions,
@@ -119,7 +131,7 @@ export const tsNxGeneratorGenerator = async (
     // Local generator in a project other than nx-plugin-for-aws
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'local'),
+      joinPathFragments(import.meta.dirname, 'files', 'local'),
       generatorDir,
       {
         ...enhancedOptions,
@@ -129,7 +141,8 @@ export const tsNxGeneratorGenerator = async (
 
     const indexPath = joinPathFragments(sourceRoot, 'index.ts');
     if (tree.exists(indexPath)) {
-      await addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
+      // NodeNext requires explicit extensions; the local plugin is ESM.
+      await addStarExport(tree, indexPath, `./${generatorSubDir}/generator.js`);
     }
 
     addComponentGeneratorMetadata(
@@ -211,12 +224,13 @@ const addSdkExport = (
 
   const sdkPath = joinPathFragments(
     pluginRoot,
+    'src',
     'sdk',
     `${SDK_EXPORT_PREFIXES[prefix]}.ts`,
   );
   const generatorExport = `${options.nameCamelCase}Generator`;
   const schemaExport = `${options.namePascalCase}GeneratorSchema`;
-  const moduleBase = `../src/${generatorSubDir}`;
+  const moduleBase = `../${generatorSubDir}`;
 
   const contents = tree.exists(sdkPath) ? tree.read(sdkPath).toString() : '';
   // Idempotent: skip if this generator is already exported

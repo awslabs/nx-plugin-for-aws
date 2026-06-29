@@ -33,7 +33,7 @@ import { runtimeConfigGenerator } from '../../react-website/runtime-config/gener
 import { addTsAgentTargetToLocalDev } from './local-dev';
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export async function tsAgentReactConnectionGenerator(
   tree: Tree,
@@ -107,7 +107,7 @@ export async function tsAgentReactConnectionGenerator(
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     frontendProjectConfig.root,
     {
       agentName,
@@ -125,7 +125,7 @@ export async function tsAgentReactConnectionGenerator(
   generateFiles(
     tree,
     joinPathFragments(
-      __dirname,
+      import.meta.dirname,
       '../../../utils/files/website/components/tanstack-query',
     ),
     joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
@@ -138,7 +138,10 @@ export async function tsAgentReactConnectionGenerator(
   if (auth === 'iam') {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, '../../../utils/files/website/hooks/sigv4'),
+      joinPathFragments(
+        import.meta.dirname,
+        '../../../utils/files/website/hooks/sigv4',
+      ),
       joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
       {},
       {

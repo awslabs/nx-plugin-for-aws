@@ -15,7 +15,10 @@ import { withVersions } from '../../utils/versions';
 import type { ConfigureProjectOptions } from './types';
 
 const readGritPattern = (name: string): string =>
-  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
+  readFileSync(
+    join(import.meta.dirname, 'grit', `${name}.grit`),
+    'utf-8',
+  ).trim();
 
 export const configureVitest = async (
   tree: Tree,
