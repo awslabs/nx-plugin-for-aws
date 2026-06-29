@@ -22,6 +22,12 @@ variable "allow_signup" {
   type        = bool
 }
 
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet) and associate it with the user pool"
+  type        = bool
+  default     = true
+}
+
 variable "callback_urls" {
   description = "Additional callback URLs for the user pool client"
   type        = list(string)
@@ -150,6 +156,11 @@ resource "aws_cognito_user_pool" "user_pool" {
   # User pool tier (equivalent to FeaturePlan.PLUS)
   user_pool_tier = "PLUS"
 
+  # Threat protection. AUDIT logs threat assessments without blocking sign-in; switch to ENFORCED to apply automatic responses.
+  user_pool_add_ons {
+    advanced_security_mode = "AUDIT"
+  }
+
   # Schema attributes
   schema {
     attribute_data_type = "String"
@@ -223,6 +234,97 @@ resource "aws_cognito_user_pool_domain" "user_pool_domain" {
   domain                   = "${var.user_pool_domain_prefix}-${data.aws_caller_identity.current.account_id}-${random_id.unique_suffix.hex}"
   user_pool_id            = aws_cognito_user_pool.user_pool.id
   managed_login_version   = 2
+}
+
+# WAFv2 Web ACL for the user pool
+resource "aws_wafv2_web_acl" "user_pool_waf" {
+  #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.user_pool_waf_logging; Checkov does not resolve the separate resource
+  count = var.enable_waf ? 1 : 0
+
+  name  = "UserPool-${random_id.unique_suffix.hex}-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "UserPoolWebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "UserPoolWebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "UserPoolWebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "user_pool_waf_association" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_cognito_user_pool.user_pool.arn
+  web_acl_arn  = aws_wafv2_web_acl.user_pool_waf[0].arn
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with `aws-waf-logs-`.
+resource "aws_cloudwatch_log_group" "user_pool_waf_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = "aws-waf-logs-UserPool-${random_id.unique_suffix.hex}"
+  retention_in_days = 30
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "user_pool_waf_logging" {
+  count = var.enable_waf ? 1 : 0
+
+  log_destination_configs = [aws_cloudwatch_log_group.user_pool_waf_logs[0].arn]
+  resource_arn            = aws_wafv2_web_acl.user_pool_waf[0].arn
 }
 
 # User Pool Client
