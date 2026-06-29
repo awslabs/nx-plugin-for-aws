@@ -1,0 +1,82 @@
+import { Construct } from 'constructs';
+import * as url from 'url';
+import { CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import {
+  ManagedPolicy,
+  PolicyStatement,
+  Role,
+  ServicePrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import { Code, Function, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Provider } from 'aws-cdk-lib/custom-resources';
+
+const ApiGatewayAccountKey = '__ApiGatewayAccount__';
+
+/**
+ * Stack-scoped singleton that configures the account-level CloudWatch Logs role
+ * used by API Gateway REST APIs for access logging.
+ *
+ * `AWS::ApiGateway::Account` is a singleton per region per account, so it is
+ * managed via an idempotent custom resource: the role is set only when none is
+ * already configured, and is never reset on delete. This keeps logging working
+ * across multiple stacks sharing an account without one clobbering another.
+ */
+export class ApiGatewayAccount extends Construct {
+  static ensure(scope: Construct): ApiGatewayAccount {
+    const stack = Stack.of(scope);
+    return (
+      (stack.node.tryFindChild(ApiGatewayAccountKey) as ApiGatewayAccount) ??
+      new ApiGatewayAccount(stack, ApiGatewayAccountKey)
+    );
+  }
+
+  public readonly resource: CustomResource;
+
+  private constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const cloudWatchRole = new Role(this, 'CloudWatchRole', {
+      assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+      managedPolicies: [
+        ManagedPolicy.fromAwsManagedPolicyName(
+          'service-role/AmazonAPIGatewayPushToCloudWatchLogs',
+        ),
+      ],
+    });
+    cloudWatchRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
+
+    const onEvent = new Function(this, 'OnEvent', {
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      timeout: Duration.minutes(2),
+      code: Code.fromAsset(
+        url.fileURLToPath(new URL('./api-gateway-account', import.meta.url)),
+      ),
+    });
+    const { region } = Stack.of(this);
+    onEvent.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['apigateway:GET', 'apigateway:PATCH'],
+        resources: [`arn:aws:apigateway:${region}::/account`],
+      }),
+    );
+    onEvent.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['iam:PassRole'],
+        resources: [cloudWatchRole.roleArn],
+      }),
+    );
+    // Read-only; inspects whichever role the account currently references
+    onEvent.addToRolePolicy(
+      new PolicyStatement({ actions: ['iam:GetRole'], resources: ['*'] }),
+    );
+
+    this.resource = new CustomResource(this, 'Resource', {
+      serviceToken: new Provider(this, 'Provider', { onEventHandler: onEvent })
+        .serviceToken,
+      resourceType: 'Custom::ApiGatewayAccount',
+      properties: { CloudWatchRoleArn: cloudWatchRole.roleArn },
+    });
+    this.resource.node.addDependency(cloudWatchRole);
+  }
+}

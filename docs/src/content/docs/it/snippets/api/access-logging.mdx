@@ -1,0 +1,33 @@
+---
+title: Registrazione degli accessi
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Per le REST API, l'infrastruttura generata abilita la [registrazione degli accessi](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html) per impostazione predefinita, scrivendo una riga JSON strutturata per richiesta in un gruppo CloudWatch Logs dedicato. Il gruppo di log è crittografato con una chiave KMS gestita dal cliente e conservato per un anno.
+
+API Gateway scrive i log di accesso utilizzando un ruolo CloudWatch Logs a livello di account. Questo ruolo è configurato nell'impostazione `AWS::ApiGateway::Account`, che è un **singleton per regione per account** — esiste un solo ruolo per ogni REST API nella regione. Per gestire questo in modo sicuro tra più stack distribuiti indipendentemente, l'infrastruttura generata:
+
+- Crea un ruolo CloudWatch Logs condiviso e lo configura sull'account solo quando non è già impostato un ruolo funzionante, in modo che le distribuzioni non sovrascrivano mai un ruolo di proprietà di un altro stack.
+- Lascia l'impostazione dell'account intatta durante la rimozione, in modo che la distruzione di uno stack non disabiliti mai la registrazione per altre REST API nella regione.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Il ruolo dell'account è gestito dal costrutto `ApiGatewayAccount`, un singleton con ambito stack risolto tramite `ApiGatewayAccount.ensure(scope)`. Ogni stage della REST API dipende da esso e il ruolo è configurato da una risorsa personalizzata supportata da Lambda.
+
+Puoi personalizzare il formato del log di accesso passando `deployOptions` durante la costruzione della tua API:
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Il ruolo dell'account è gestito dal modulo `core/api/api-gateway-account`, che viene istanziato dal modulo API generato. Configura l'account in modo idempotente e non viene mai reimpostato con `terraform destroy`.
+
+Puoi personalizzare il formato del log di accesso modificando il blocco `access_log_settings` sulla risorsa `aws_api_gateway_stage` nel modulo API generato.
+</Fragment>
+</Infrastructure>

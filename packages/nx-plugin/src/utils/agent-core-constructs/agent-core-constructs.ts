@@ -19,6 +19,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
+import { PY_VERSIONS } from '../versions';
 
 type IACProvider = { iac: Iac };
 
@@ -136,7 +137,7 @@ const addAgentCoreTerraformInfra = (
       'core',
       'agent-core',
     ),
-    { containers: options.containers },
+    { containers: options.containers, boto3Version: PY_VERSIONS.boto3 },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -406,6 +407,9 @@ const addAgentCoreGatewayTerraformInfra = (
       nameKebabCase: options.gatewayNameKebabCase,
       projectDirectory: options.projectDirectory,
       cedarPolicy: options.cedarPolicy,
+      boto3Version: PY_VERSIONS.boto3,
+      httpxVersion: PY_VERSIONS.httpx,
+      mcpVersion: PY_VERSIONS.mcp,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

@@ -1,0 +1,83 @@
+# Account-level CloudWatch Logs role used by API Gateway REST APIs for access
+# logging. The setting is a singleton per region per account, so it is managed
+# idempotently: the role is set only when none is already configured (the first
+# deployment wins, others defer) and is never reset on destroy. This keeps
+# logging working across multiple deployments sharing an account.
+
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+  }
+}
+
+data "aws_region" "current" {}
+
+resource "aws_iam_role" "cloudwatch" {
+  name_prefix = "apigw-cloudwatch-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "apigateway.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch" {
+  role       = aws_iam_role.cloudwatch.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+}
+
+# Configures the account role on create/update only; destroying this resource is
+# a no-op, so teardown never disables logging for other REST APIs in the region.
+resource "terraform_data" "account" {
+  triggers_replace = [aws_iam_role.cloudwatch.arn]
+
+  provisioner "local-exec" {
+    command = "uv run --with boto3<%= boto3Version %> python -c \"$SCRIPT\""
+    environment = {
+      ROLE_ARN = aws_iam_role.cloudwatch.arn
+      REGION   = data.aws_region.current.region
+      SCRIPT   = <<-PY
+        import os, time, boto3
+        from botocore.exceptions import ClientError
+        apigw = boto3.client("apigateway", region_name=os.environ["REGION"])
+
+        def has_live_role():
+            arn = apigw.get_account().get("cloudwatchRoleArn")
+            if not arn:
+                return False
+            try:
+                boto3.client("iam").get_role(RoleName=arn.split("/")[-1])
+                return True
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "NoSuchEntity":
+                    return False
+                raise
+
+        if not has_live_role():
+            op = {"op": "replace", "path": "/cloudwatchRoleArn", "value": os.environ["ROLE_ARN"]}
+            # Retry while the freshly created role propagates through IAM, and on throttling
+            retryable = ("BadRequestException", "TooManyRequestsException")
+            for attempt in range(12):
+                try:
+                    apigw.update_account(patchOperations=[op])
+                    break
+                except ClientError as e:
+                    if e.response["Error"]["Code"] in retryable and attempt < 11:
+                        time.sleep(5)
+                    else:
+                        raise
+      PY
+    }
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.cloudwatch]
+}

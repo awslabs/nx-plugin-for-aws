@@ -1,0 +1,33 @@
+---
+title: アクセスログ
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+REST APIの場合、生成されたインフラストラクチャはデフォルトで[アクセスログ](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html)を有効にし、リクエストごとに1行の構造化されたJSONを専用のCloudWatch Logsグループに書き込みます。ログループは顧客管理のKMSキーで暗号化され、1年間保持されます。
+
+API Gatewayは、アカウントレベルのCloudWatch Logsロールを使用してアクセスログを書き込みます。このロールは`AWS::ApiGateway::Account`設定で構成されており、これは**リージョンごと、アカウントごとのシングルトン**です。つまり、リージョン内のすべてのREST APIに対して1つのロールしか存在しません。独立してデプロイされる複数のスタック間でこれを安全に管理するため、生成されたインフラストラクチャは次のようになっています：
+
+- 共有CloudWatch Logsロールを作成し、動作中のロールがまだ設定されていない場合にのみアカウントに構成するため、デプロイメントが他のスタックが所有するロールを上書きすることはありません。
+- 破棄時にアカウント設定をそのままにするため、1つのスタックを破棄してもリージョン内の他のREST APIのログ記録が無効になることはありません。
+
+<Infrastructure>
+<Fragment slot="cdk">
+アカウントロールは`ApiGatewayAccount`コンストラクトによって管理されます。これは`ApiGatewayAccount.ensure(scope)`を介して解決されるスタックスコープのシングルトンです。各REST APIのステージはこれに依存しており、ロールはLambdaベースのカスタムリソースによって構成されます。
+
+APIを構築する際に`deployOptions`を渡すことで、アクセスログ形式をカスタマイズできます：
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+アカウントロールは`core/api/api-gateway-account`モジュールによって管理されます。これは生成されたAPIモジュールによってインスタンス化されます。アカウントを冪等的に構成し、`terraform destroy`でリセットされることはありません。
+
+生成されたAPIモジュール内の`aws_api_gateway_stage`リソースの`access_log_settings`ブロックを編集することで、アクセスログ形式をカスタマイズできます。
+</Fragment>
+</Infrastructure>

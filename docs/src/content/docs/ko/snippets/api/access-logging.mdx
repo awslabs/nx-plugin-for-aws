@@ -1,0 +1,33 @@
+---
+title: 액세스 로깅
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+REST API의 경우, 생성된 인프라는 기본적으로 [액세스 로깅](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html)을 활성화하여 요청당 하나의 구조화된 JSON 라인을 전용 CloudWatch Logs 그룹에 기록합니다. 로그 그룹은 고객 관리형 KMS 키로 암호화되며 1년 동안 보관됩니다.
+
+API Gateway는 계정 수준의 CloudWatch Logs 역할을 사용하여 액세스 로그를 작성합니다. 이 역할은 `AWS::ApiGateway::Account` 설정에 구성되며, 이는 **리전당 계정당 싱글톤**입니다 — 리전의 모든 REST API에 대해 하나의 역할만 존재합니다. 독립적으로 배포된 여러 스택에서 이를 안전하게 관리하기 위해, 생성된 인프라는:
+
+- 작동하는 역할이 아직 설정되지 않은 경우에만 공유 CloudWatch Logs 역할을 생성하고 계정에 구성하므로, 배포가 다른 스택이 소유한 역할을 덮어쓰지 않습니다.
+- 해체 시 계정 설정을 그대로 유지하므로, 하나의 스택을 삭제해도 리전의 다른 REST API에 대한 로깅이 비활성화되지 않습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+계정 역할은 `ApiGatewayAccount` 구성으로 관리되며, `ApiGatewayAccount.ensure(scope)`를 통해 해결되는 스택 범위 싱글톤입니다. 각 REST API의 스테이지는 이에 의존하며, 역할은 Lambda 기반 사용자 지정 리소스에 의해 구성됩니다.
+
+API를 구성할 때 `deployOptions`를 전달하여 액세스 로그 형식을 사용자 지정할 수 있습니다:
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+계정 역할은 `core/api/api-gateway-account` 모듈에 의해 관리되며, 생성된 API 모듈에 의해 인스턴스화됩니다. 이는 계정을 멱등적으로 구성하며 `terraform destroy` 시 재설정되지 않습니다.
+
+생성된 API 모듈의 `aws_api_gateway_stage` 리소스에서 `access_log_settings` 블록을 편집하여 액세스 로그 형식을 사용자 지정할 수 있습니다.
+</Fragment>
+</Infrastructure>

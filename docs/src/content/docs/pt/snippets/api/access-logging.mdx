@@ -1,0 +1,33 @@
+---
+title: Registro de acesso
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Para APIs REST, a infraestrutura gerada habilita o [registro de acesso](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html) por padrão, escrevendo uma linha JSON estruturada por solicitação em um grupo dedicado do CloudWatch Logs. O grupo de logs é criptografado com uma chave KMS gerenciada pelo cliente e retido por um ano.
+
+O API Gateway escreve logs de acesso usando uma função do CloudWatch Logs no nível da conta. Essa função é configurada na configuração `AWS::ApiGateway::Account`, que é um **singleton por região por conta** — há apenas uma função para cada API REST na região. Para gerenciar isso com segurança em várias pilhas implantadas independentemente, a infraestrutura gerada:
+
+- Cria uma função compartilhada do CloudWatch Logs e a configura na conta somente quando nenhuma função funcional já está definida, para que as implantações nunca substituam uma função que outra pilha possui.
+- Deixa a configuração da conta intocada na desmontagem, para que a destruição de uma pilha nunca desabilite o registro para outras APIs REST na região.
+
+<Infrastructure>
+<Fragment slot="cdk">
+A função da conta é gerenciada pelo construto `ApiGatewayAccount`, um singleton com escopo de pilha resolvido via `ApiGatewayAccount.ensure(scope)`. O estágio de cada API REST depende dele, e a função é configurada por um recurso personalizado baseado em Lambda.
+
+Você pode personalizar o formato do log de acesso passando `deployOptions` ao construir sua API:
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+A função da conta é gerenciada pelo módulo `core/api/api-gateway-account`, que é instanciado pelo módulo de API gerado. Ele configura a conta de forma idempotente e nunca é redefinido no `terraform destroy`.
+
+Você pode personalizar o formato do log de acesso editando o bloco `access_log_settings` no recurso `aws_api_gateway_stage` no módulo de API gerado.
+</Fragment>
+</Infrastructure>

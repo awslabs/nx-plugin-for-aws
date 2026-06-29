@@ -1,0 +1,33 @@
+---
+title: Journalisation des accès
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Pour les API REST, l'infrastructure générée active la [journalisation des accès](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html) par défaut, écrivant une ligne JSON structurée par requête dans un groupe CloudWatch Logs dédié. Le groupe de journaux est chiffré avec une clé KMS gérée par le client et conservé pendant un an.
+
+API Gateway écrit les journaux d'accès en utilisant un rôle CloudWatch Logs au niveau du compte. Ce rôle est configuré sur le paramètre `AWS::ApiGateway::Account`, qui est un **singleton par région par compte** — il n'y a qu'un seul rôle pour chaque API REST dans la région. Pour gérer cela en toute sécurité à travers plusieurs stacks déployées indépendamment, l'infrastructure générée :
+
+- Crée un rôle CloudWatch Logs partagé et le configure sur le compte uniquement lorsqu'aucun rôle fonctionnel n'est déjà défini, de sorte que les déploiements n'écrasent jamais un rôle appartenant à une autre stack.
+- Laisse le paramètre du compte intact lors du démontage, de sorte que la destruction d'une stack ne désactive jamais la journalisation pour les autres API REST dans la région.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Le rôle du compte est géré par le construct `ApiGatewayAccount`, un singleton à portée de stack résolu via `ApiGatewayAccount.ensure(scope)`. Chaque stage d'API REST en dépend, et le rôle est configuré par une ressource personnalisée basée sur Lambda.
+
+Vous pouvez personnaliser le format du journal d'accès en passant `deployOptions` lors de la construction de votre API :
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Le rôle du compte est géré par le module `core/api/api-gateway-account`, qui est instancié par le module API généré. Il configure le compte de manière idempotente et n'est jamais réinitialisé lors d'un `terraform destroy`.
+
+Vous pouvez personnaliser le format du journal d'accès en modifiant le bloc `access_log_settings` sur la ressource `aws_api_gateway_stage` dans le module API généré.
+</Fragment>
+</Infrastructure>
