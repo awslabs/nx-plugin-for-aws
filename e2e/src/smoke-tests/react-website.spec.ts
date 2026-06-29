@@ -40,6 +40,11 @@ describe('smoke test - react-website', () => {
         tanstackRouter: true,
       },
       {
+        name: 'website-cloudscape',
+        ux: 'cloudscape',
+        tanstackRouter: true,
+      },
+      {
         name: 'website-none-no-router',
         ux: 'none',
         tanstackRouter: false,
@@ -47,6 +52,11 @@ describe('smoke test - react-website', () => {
       {
         name: 'website-shadcn-no-router',
         ux: 'shadcn',
+        tanstackRouter: false,
+      },
+      {
+        name: 'website-cloudscape-no-router',
+        ux: 'cloudscape',
         tanstackRouter: false,
       },
     ] as const;

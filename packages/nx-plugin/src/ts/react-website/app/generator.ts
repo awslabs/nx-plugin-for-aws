@@ -61,7 +61,7 @@ export async function tsReactWebsiteGenerator(
 ) {
   const tailwind = schema.tailwind ?? true;
   const tanstackRouter = schema.tanstackRouter ?? true;
-  const ux: Ux = schema.ux ?? 'cloudscape';
+  const ux: Ux = schema.ux ?? 'shadcn';
   if (ux === 'shadcn' && !tailwind) {
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
