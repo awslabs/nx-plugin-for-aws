@@ -94,6 +94,33 @@ describe('format utils', () => {
       expect(tree.read('src/test.ts')?.toString()).toBe('const x = 1;\n');
       expect(tree.read('lib/test.ts')?.toString()).toBe('const y = 2;\n');
     });
+    it('should sort imports in Python files', async () => {
+      // isort (ruff rule I) is not in ruff's default rule set and the project
+      // config is not on disk during generation, so the formatter must opt into
+      // import sorting explicitly to match what the project's build enforces.
+      tree.write(
+        'src/__init__.py',
+        [
+          'from .b import beta',
+          'from .a import alpha',
+          '',
+          '__all__ = ["beta", "alpha"]',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - imports sorted alphabetically
+      expect(tree.read('src/__init__.py')?.toString()).toBe(
+        [
+          'from .a import alpha',
+          'from .b import beta',
+          '',
+          '__all__ = ["beta", "alpha"]',
+          '',
+        ].join('\n'),
+      );
+    });
     it('should format json and css files', async () => {
       // Setup
       tree.write('src/data.json', '{"a":1,"b":2}');

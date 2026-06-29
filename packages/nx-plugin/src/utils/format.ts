@@ -271,10 +271,14 @@ function ruffFixAndFormat(content: string, filePath: string): string {
   const ruff = getRuffCommand();
   if (!ruff) return content;
 
-  // First apply lint fixes (import sorting, unused imports, etc.)
+  // First apply lint fixes (import sorting, unused imports, etc.). During
+  // generation the file is in the virtual tree, not on disk, so ruff cannot
+  // discover the project's config and falls back to defaults — which omit
+  // isort. `--extend-select I` adds import sorting on top of those defaults so
+  // the output matches what the project's build (which enables `I`) enforces.
   try {
     const result = execSync(
-      `${ruff} check --fix --stdin-filename ${filePath} -`,
+      `${ruff} check --fix --extend-select I --stdin-filename ${filePath} -`,
       { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
     content = result;
