@@ -51,14 +51,35 @@ jobs:
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
           container-tools: 'false'
+          setup-bun: 'false'
+          setup-terraform: 'false'
       - name: Build
         run: pnpm nx run-many --target build --all --output-style=stream
+      - name: Check for mutations
+        run: git diff --ignore-space-at-eol --exit-code -- ':!**/LICENSE-THIRD-PARTY'
+  unit_tests:
+    name: Unit Tests - ${{ matrix.shard }}
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/init-monorepo
+        with:
+          aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
+          container-tools: 'false'
+          setup-bun: 'false'
+          setup-terraform: 'false'
+      - name: Unit Tests (shard ${{ matrix.shard }}/6)
+        run: pnpm nx run @aws/nx-plugin:test --output-style=stream --shard=${{ matrix.shard }}/6
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-      - name: Check for mutations
-        run: git diff --ignore-space-at-eol --exit-code -- ':!**/LICENSE-THIRD-PARTY'
   smoke_tests:
     name: Smoke Tests - ${{matrix.smoke_test}}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
