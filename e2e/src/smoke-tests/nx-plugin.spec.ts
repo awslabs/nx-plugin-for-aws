@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
@@ -67,6 +67,63 @@ describe('smoke test - nx-plugin', () => {
 
       // The sample generator writes hello.ts into target/dir.
       expect(existsSync(join(projectRoot, 'target/dir/hello.ts'))).toBe(true);
+    },
+    15 * 60 * 1000,
+  );
+
+  it(
+    'should compile and run a generator that imports from the @aws/nx-plugin SDK',
+    async () => {
+      const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
+
+      // Add a second generator to the plugin (the plugin already depends on
+      // @aws/nx-plugin, added by ts#nx-plugin).
+      await runCLI(
+        `generate @aws/nx-plugin:ts#nx-generator --project=@nx-plugin-test/plugin --name=sdk-consumer --no-interactive`,
+        opts,
+      );
+
+      // Replace its implementation so it imports a generator from the SDK and
+      // delegates to it. Exercises a vended ESM generator depending on the
+      // published @aws/nx-plugin SDK (ESM interop + native strip-types).
+      const generatorPath = join(
+        projectRoot,
+        'tools/plugin/src/sdk-consumer/generator.ts',
+      );
+      writeFileSync(
+        generatorPath,
+        [
+          `import { type Tree } from '@nx/devkit';`,
+          `import { tsProjectGenerator } from '@aws/nx-plugin/sdk/ts';`,
+          `import type { SdkConsumerGeneratorSchema } from './schema.js';`,
+          ``,
+          `export const sdkConsumerGenerator = async (`,
+          `  tree: Tree,`,
+          `  options: SdkConsumerGeneratorSchema,`,
+          `) => {`,
+          `  await tsProjectGenerator(tree, { name: 'sdk-consumed-lib' });`,
+          `};`,
+          ``,
+          `export default sdkConsumerGenerator;`,
+          ``,
+        ].join('\n'),
+        'utf-8',
+      );
+
+      // It must type-check / compile (plugin `package` target uses tsc under
+      // moduleResolution: nodenext against the installed @aws/nx-plugin types).
+      await runCLI(`run @nx-plugin-test/plugin:compile`, opts);
+
+      // And it must run: Nx loads it via native strip-types, it imports the
+      // SDK generator and delegates to it, which scaffolds a TS project.
+      await runCLI(
+        `generate @nx-plugin-test/plugin:sdk-consumer --exampleOption=test --no-interactive`,
+        opts,
+      );
+
+      expect(
+        existsSync(join(projectRoot, 'sdk-consumed-lib/src/index.ts')),
+      ).toBe(true);
     },
     15 * 60 * 1000,
   );
