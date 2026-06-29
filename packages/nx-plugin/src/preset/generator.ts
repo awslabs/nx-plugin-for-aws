@@ -160,7 +160,7 @@ const setUpGitSecrets = (tree: Tree) => {
 
 export const presetGenerator = async (
   tree: Tree,
-  { addTsPlugin, iac, gitSecrets, mcp, containers }: PresetGeneratorSchema,
+  { iac, gitSecrets, mcp, containers }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
@@ -195,7 +195,7 @@ export const presetGenerator = async (
 
   await initGenerator(tree, {
     formatter: 'none',
-    addTsPlugin: addTsPlugin ?? true,
+    addTsPlugin: true,
   });
 
   tree.delete('apps/.gitkeep');

@@ -9,7 +9,6 @@ import { Iac } from '../utils/iac';
 export type PresetContainersOption = Containers | 'infer';
 
 export interface PresetGeneratorSchema {
-  readonly addTsPlugin?: boolean;
   readonly iac: Iac;
   readonly gitSecrets?: boolean;
   readonly mcp?: boolean;

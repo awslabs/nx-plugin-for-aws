@@ -38,7 +38,6 @@ describe('preset generator', () => {
 
   it('should run successfully', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       gitSecrets: false,
       containers: 'docker',
@@ -49,7 +48,6 @@ describe('preset generator', () => {
 
   it('should store CDK iac provider in config', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'terraform',
       containers: 'docker',
     });
@@ -59,7 +57,6 @@ describe('preset generator', () => {
 
   it('should store container engine in config', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       containers: 'finch',
     });
@@ -69,7 +66,6 @@ describe('preset generator', () => {
 
   it('should store Terraform iac provider in config', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       containers: 'docker',
     });
@@ -79,7 +75,6 @@ describe('preset generator', () => {
 
   it('should not generate git-secrets files when gitSecrets is false', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       gitSecrets: false,
     });
@@ -93,7 +88,7 @@ describe('preset generator', () => {
   });
 
   it('should generate git-secrets files by default', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iac: 'cdk' });
+    await presetGenerator(tree, { iac: 'cdk' });
 
     expect(tree.exists('.git-secrets/git-secrets')).toBe(true);
     expect(tree.exists('.husky/pre-commit')).toBe(true);
@@ -109,7 +104,7 @@ describe('preset generator', () => {
   });
 
   it('should configure MCP servers by default', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iac: 'cdk' });
+    await presetGenerator(tree, { iac: 'cdk' });
 
     for (const filePath of [
       '.mcp.json',
@@ -131,7 +126,6 @@ describe('preset generator', () => {
 
   it('should not configure MCP servers when mcp is false', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       mcp: false,
     });
@@ -150,7 +144,6 @@ describe('preset generator', () => {
 
   it('should disable analytics in nx.json', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       containers: 'docker',
     });
@@ -160,7 +153,6 @@ describe('preset generator', () => {
 
   it('should register the TypeScript sync generators for compile targets', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       containers: 'docker',
     });
@@ -174,7 +166,6 @@ describe('preset generator', () => {
 
   it('should add a workspace dev script that runs the dev target across projects', async () => {
     await presetGenerator(tree, {
-      addTsPlugin: false,
       iac: 'cdk',
       containers: 'docker',
     });
