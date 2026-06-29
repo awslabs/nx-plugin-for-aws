@@ -10,13 +10,15 @@ import {
   Stage,
   ThrottleSettings,
 } from 'aws-cdk-lib/aws-apigateway';
-import { IAspect, RemovalPolicy } from 'aws-cdk-lib';
+import { IAspect, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import {
   CfnLoggingConfiguration,
   CfnWebACL,
   CfnWebACLAssociation,
 } from 'aws-cdk-lib/aws-wafv2';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../runtime-config.js';
 import { ApiGatewayAccount } from './api-gateway-account.js';
 import {
@@ -106,15 +108,20 @@ export class RestApi<
     // Account-level CloudWatch role required for REST API access logging
     const account = ApiGatewayAccount.ensure(this);
 
-    const accessLogs = new LogGroup(this, 'AccessLogs', {
-      retention: RetentionDays.ONE_MONTH,
+    // KMS key for encrypting logs at rest, usable by CloudWatch Logs
+    const logsKey = new Key(this, 'LogsKey', {
+      enableKeyRotation: true,
       removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      accessLogs,
-      ['CKV_AWS_158', 'CKV_AWS_338'],
-      'Using default CloudWatch log encryption and one month retention',
+    logsKey.grantEncryptDecrypt(
+      new ServicePrincipal(`logs.${Stack.of(this).region}.amazonaws.com`),
     );
+
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: logsKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
 
     // Create the API Gateway REST API
     this.api = new _RestApi(this, 'Api', {
@@ -202,14 +209,10 @@ export class RestApi<
       // `aws-waf-logs-` to satisfy the WAFv2 logging destination requirement.
       const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
         logGroupName: `aws-waf-logs-${apiName}-${this.node.addr.slice(-8)}`,
-        retention: RetentionDays.ONE_MONTH,
+        retention: RetentionDays.ONE_YEAR,
+        encryptionKey: logsKey,
         removalPolicy: RemovalPolicy.DESTROY,
       });
-      suppressRules(
-        wafLogGroup,
-        ['CKV_AWS_158'],
-        'Using default CloudWatch log encryption for WAF logs',
-      );
 
       new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
         resourceArn: this.webAcl.attrArn,
