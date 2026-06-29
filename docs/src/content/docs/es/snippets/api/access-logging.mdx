@@ -1,0 +1,33 @@
+---
+title: Registro de acceso
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Para las APIs REST, la infraestructura generada habilita el [registro de acceso](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html) por defecto, escribiendo una línea JSON estructurada por solicitud en un grupo de CloudWatch Logs dedicado.
+
+API Gateway escribe registros de acceso utilizando un rol de CloudWatch Logs a nivel de cuenta. Este rol se configura en el ajuste `AWS::ApiGateway::Account`, que es un **singleton por región por cuenta** — solo hay un rol para cada API REST en la región. Para gestionar esto de forma segura a través de múltiples stacks desplegados de forma independiente, la infraestructura generada:
+
+- Crea un rol compartido de CloudWatch Logs y lo configura en la cuenta solo cuando no hay un rol funcional ya establecido, por lo que los despliegues nunca sobrescriben un rol que pertenece a otro stack.
+- Deja el ajuste de la cuenta intacto durante el desmontaje, por lo que destruir un stack nunca deshabilita el registro para otras APIs REST en la región.
+
+<Infrastructure>
+<Fragment slot="cdk">
+El rol de cuenta es gestionado por el constructo `ApiGatewayAccount`, un singleton con ámbito de stack resuelto a través de `ApiGatewayAccount.ensure(scope)`. Cada etapa de la API REST depende de él, y el rol se configura mediante un recurso personalizado respaldado por Lambda.
+
+Puedes personalizar el formato del registro de acceso pasando `deployOptions` al construir tu API:
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+El rol de cuenta es gestionado por el módulo `core/api/api-gateway-account`, que es instanciado por el módulo de API generado. Configura la cuenta de forma idempotente y nunca se restablece con `terraform destroy`.
+
+Puedes personalizar el formato del registro de acceso editando el bloque `access_log_settings` en el recurso `aws_api_gateway_stage` en el módulo de API generado.
+</Fragment>
+</Infrastructure>

@@ -1,0 +1,33 @@
+---
+title: Ghi nhật ký truy cập
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Đối với REST API, cơ sở hạ tầng được tạo ra sẽ bật [ghi nhật ký truy cập](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html) theo mặc định, ghi một dòng JSON có cấu trúc cho mỗi yêu cầu vào một nhóm CloudWatch Logs chuyên dụng.
+
+API Gateway ghi nhật ký truy cập bằng cách sử dụng vai trò CloudWatch Logs ở cấp tài khoản. Vai trò này được cấu hình trên cài đặt `AWS::ApiGateway::Account`, đây là một **singleton cho mỗi vùng trên mỗi tài khoản** — chỉ có một vai trò duy nhất cho mọi REST API trong vùng. Để quản lý điều này một cách an toàn trên nhiều stack được triển khai độc lập, cơ sở hạ tầng được tạo ra sẽ:
+
+- Tạo một vai trò CloudWatch Logs được chia sẻ và cấu hình nó trên tài khoản chỉ khi chưa có vai trò hoạt động nào được thiết lập, do đó các triển khai không bao giờ ghi đè vai trò mà một stack khác sở hữu.
+- Giữ nguyên cài đặt tài khoản khi dỡ bỏ, do đó việc hủy một stack không bao giờ vô hiệu hóa ghi nhật ký cho các REST API khác trong vùng.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Vai trò tài khoản được quản lý bởi construct `ApiGatewayAccount`, một singleton có phạm vi stack được giải quyết thông qua `ApiGatewayAccount.ensure(scope)`. Mỗi stage của REST API phụ thuộc vào nó, và vai trò được cấu hình bởi một tài nguyên tùy chỉnh được hỗ trợ bởi Lambda.
+
+Bạn có thể tùy chỉnh định dạng nhật ký truy cập bằng cách truyền `deployOptions` khi xây dựng API của bạn:
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Vai trò tài khoản được quản lý bởi module `core/api/api-gateway-account`, được khởi tạo bởi module API được tạo ra. Nó cấu hình tài khoản một cách idempotent và không bao giờ được đặt lại khi chạy `terraform destroy`.
+
+Bạn có thể tùy chỉnh định dạng nhật ký truy cập bằng cách chỉnh sửa khối `access_log_settings` trên tài nguyên `aws_api_gateway_stage` trong module API được tạo ra.
+</Fragment>
+</Infrastructure>
