@@ -1,6 +1,8 @@
 import { Construct, IConstruct } from 'constructs';
 import {
+  AccessLogFormat,
   Cors,
+  LogGroupLogDestination,
   Resource,
   RestApi as _RestApi,
   RestApiProps as _RestApiProps,
@@ -16,6 +18,7 @@ import {
 } from 'aws-cdk-lib/aws-wafv2';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { RuntimeConfig } from '../runtime-config.js';
+import { ApiGatewayAccount } from './api-gateway-account.js';
 import {
   ApiIntegrations,
   OperationDetails,
@@ -100,10 +103,25 @@ export class RestApi<
     super(scope, id);
     this.integrations = integrations;
 
+    // Account-level CloudWatch role required for REST API access logging
+    const account = ApiGatewayAccount.ensure(this);
+
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_MONTH,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    suppressRules(
+      accessLogs,
+      ['CKV_AWS_158', 'CKV_AWS_338'],
+      'Using default CloudWatch log encryption and one month retention',
+    );
+
     // Create the API Gateway REST API
     this.api = new _RestApi(this, 'Api', {
       ...props,
       deployOptions: {
+        accessLogDestination: new LogGroupLogDestination(accessLogs),
+        accessLogFormat: AccessLogFormat.jsonWithStandardFields(),
         ...props.deployOptions,
         methodOptions: {
           ...props.deployOptions?.methodOptions,
@@ -116,6 +134,8 @@ export class RestApi<
         },
       },
     });
+    // Ensure the account-level role is configured before the stage is created
+    this.api.deploymentStage.node.addDependency(account.resource);
 
     if (enableWaf) {
       this.webAcl = new CfnWebACL(this, 'WebAcl', {
@@ -201,12 +221,6 @@ export class RestApi<
       this.api,
       ['CKV_AWS_120'],
       'Caching not required for this use case',
-      (c) => c instanceof Stage,
-    );
-    suppressRules(
-      this.api,
-      ['CKV_AWS_76'],
-      'API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement',
       (c) => c instanceof Stage,
     );
 

@@ -15,6 +15,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
+import { PY_VERSIONS } from '../versions';
 
 export interface AddIdentityInfraOptions {
   cognitoDomain: string;
@@ -72,7 +73,7 @@ const addIdentityTerraformModules = (
     tree,
     joinPathFragments(__dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
-    options,
+    { ...options, boto3Version: PY_VERSIONS.boto3 },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

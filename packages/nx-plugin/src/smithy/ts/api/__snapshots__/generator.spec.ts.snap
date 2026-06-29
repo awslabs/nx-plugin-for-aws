@@ -477,8 +477,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-# Note: CloudWatch logging removed due to account-level CloudWatch Logs role ARN requirement
-
 # REST API Gateway
 resource "aws_api_gateway_rest_api" "rest_api" {
   name        = var.api_name
@@ -495,10 +493,8 @@ resource "aws_api_gateway_rest_api" "rest_api" {
   tags = var.tags
 }
 
-# Note: Deployment and stage are created in the consuming module (e.g., foo-api.tf)
-# after all methods and integrations are defined
-
-# Note: CloudWatch Log Group removed due to account-level CloudWatch Logs role ARN requirement
+# Note: Deployment, stage and access logging are created in the consuming module
+# (e.g., foo-api.tf) after all methods and integrations are defined
 
 # Gateway Response for CORS (4XX errors)
 resource "aws_api_gateway_gateway_response" "cors_4xx" {
@@ -656,9 +652,7 @@ output "waf_web_acl_arn" {
   value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
-# Note: Stage and deployment outputs are provided by the consuming module
-
-# Note: CloudWatch log group outputs removed due to account-level CloudWatch Logs role ARN requirement"
+# Note: Stage, deployment and access log outputs are provided by the consuming module"
 `;
 
 exports[`tsSmithyApiGenerator > should generate smithy ts api with Terraform provider and None auth > none-auth-terraform.tf 1`] = `
@@ -757,6 +751,11 @@ resource "aws_s3_object" "lambda_zip" {
 }
 
 # Use the core REST API module
+# Account-level CloudWatch role required for REST API access logging
+module "account" {
+  source = "../../../core/api/api-gateway-account"
+}
+
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
@@ -1082,11 +1081,18 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   ]
 }
 
+# Access logs for the API Gateway stage
+resource "aws_cloudwatch_log_group" "access_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:One month retention is sufficient for access logs
+  name              = "/aws/apigateway/test-api-\${random_string.suffix.result}/access"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
 # API Gateway stage
 resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_120:API Gateway caching not required for this use case
-  #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
-  #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
   #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
@@ -1094,9 +1100,26 @@ resource "aws_api_gateway_stage" "api_stage" {
   stage_name           = "prod"
   xray_tracing_enabled = true
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.access_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
+  }
+
   tags = var.tags
 
-  depends_on = [aws_api_gateway_deployment.api_deployment]
+  # Ensure the account-level role is configured before the stage is created
+  depends_on = [aws_api_gateway_deployment.api_deployment, module.account]
 }
 
 # API Gateway Resource Policy
@@ -1752,8 +1775,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-# Note: CloudWatch logging removed due to account-level CloudWatch Logs role ARN requirement
-
 # REST API Gateway
 resource "aws_api_gateway_rest_api" "rest_api" {
   name        = var.api_name
@@ -1770,10 +1791,8 @@ resource "aws_api_gateway_rest_api" "rest_api" {
   tags = var.tags
 }
 
-# Note: Deployment and stage are created in the consuming module (e.g., foo-api.tf)
-# after all methods and integrations are defined
-
-# Note: CloudWatch Log Group removed due to account-level CloudWatch Logs role ARN requirement
+# Note: Deployment, stage and access logging are created in the consuming module
+# (e.g., foo-api.tf) after all methods and integrations are defined
 
 # Gateway Response for CORS (4XX errors)
 resource "aws_api_gateway_gateway_response" "cors_4xx" {
@@ -1931,9 +1950,7 @@ output "waf_web_acl_arn" {
   value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
-# Note: Stage and deployment outputs are provided by the consuming module
-
-# Note: CloudWatch log group outputs removed due to account-level CloudWatch Logs role ARN requirement",
+# Note: Stage, deployment and access log outputs are provided by the consuming module",
   "test-api.tf": "terraform {
   required_version = ">= 1.0"
 
@@ -2039,6 +2056,11 @@ resource "aws_s3_object" "lambda_zip" {
 }
 
 # Use the core REST API module
+# Account-level CloudWatch role required for REST API access logging
+module "account" {
+  source = "../../../core/api/api-gateway-account"
+}
+
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
@@ -2282,11 +2304,18 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   ]
 }
 
+# Access logs for the API Gateway stage
+resource "aws_cloudwatch_log_group" "access_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:One month retention is sufficient for access logs
+  name              = "/aws/apigateway/test-api-\${random_string.suffix.result}/access"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
 # API Gateway stage
 resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_120:API Gateway caching not required for this use case
-  #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
-  #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
   #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
@@ -2294,9 +2323,26 @@ resource "aws_api_gateway_stage" "api_stage" {
   stage_name           = "prod"
   xray_tracing_enabled = true
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.access_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
+  }
+
   tags = var.tags
 
-  depends_on = [aws_api_gateway_deployment.api_deployment]
+  # Ensure the account-level role is configured before the stage is created
+  depends_on = [aws_api_gateway_deployment.api_deployment, module.account]
 }
 
 # API Gateway Resource Policy
@@ -2550,8 +2596,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-# Note: CloudWatch logging removed due to account-level CloudWatch Logs role ARN requirement
-
 # REST API Gateway
 resource "aws_api_gateway_rest_api" "rest_api" {
   name        = var.api_name
@@ -2568,10 +2612,8 @@ resource "aws_api_gateway_rest_api" "rest_api" {
   tags = var.tags
 }
 
-# Note: Deployment and stage are created in the consuming module (e.g., foo-api.tf)
-# after all methods and integrations are defined
-
-# Note: CloudWatch Log Group removed due to account-level CloudWatch Logs role ARN requirement
+# Note: Deployment, stage and access logging are created in the consuming module
+# (e.g., foo-api.tf) after all methods and integrations are defined
 
 # Gateway Response for CORS (4XX errors)
 resource "aws_api_gateway_gateway_response" "cors_4xx" {
@@ -2729,9 +2771,7 @@ output "waf_web_acl_arn" {
   value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
-# Note: Stage and deployment outputs are provided by the consuming module
-
-# Note: CloudWatch log group outputs removed due to account-level CloudWatch Logs role ARN requirement",
+# Note: Stage, deployment and access log outputs are provided by the consuming module",
   "test-api.tf": "terraform {
   required_version = ">= 1.0"
 
@@ -2827,6 +2867,11 @@ resource "aws_s3_object" "lambda_zip" {
 }
 
 # Use the core REST API module
+# Account-level CloudWatch role required for REST API access logging
+module "account" {
+  source = "../../../core/api/api-gateway-account"
+}
+
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
@@ -3058,11 +3103,18 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   ]
 }
 
+# Access logs for the API Gateway stage
+resource "aws_cloudwatch_log_group" "access_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:One month retention is sufficient for access logs
+  name              = "/aws/apigateway/test-api-\${random_string.suffix.result}/access"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
 # API Gateway stage
 resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_120:API Gateway caching not required for this use case
-  #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
-  #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
   #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
@@ -3070,9 +3122,26 @@ resource "aws_api_gateway_stage" "api_stage" {
   stage_name           = "prod"
   xray_tracing_enabled = true
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.access_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
+  }
+
   tags = var.tags
 
-  depends_on = [aws_api_gateway_deployment.api_deployment]
+  # Ensure the account-level role is configured before the stage is created
+  depends_on = [aws_api_gateway_deployment.api_deployment, module.account]
 }
 
 # API Gateway Resource Policy
@@ -3348,6 +3417,11 @@ resource "aws_s3_object" "lambda_zip" {
 }
 
 # Use the core REST API module
+# Account-level CloudWatch role required for REST API access logging
+module "account" {
+  source = "../../../core/api/api-gateway-account"
+}
+
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
@@ -3673,11 +3747,18 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   ]
 }
 
+# Access logs for the API Gateway stage
+resource "aws_cloudwatch_log_group" "access_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:One month retention is sufficient for access logs
+  name              = "/aws/apigateway/custom-api-\${random_string.suffix.result}/access"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
 # API Gateway stage
 resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_120:API Gateway caching not required for this use case
-  #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
-  #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
   #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
@@ -3685,9 +3766,26 @@ resource "aws_api_gateway_stage" "api_stage" {
   stage_name           = "prod"
   xray_tracing_enabled = true
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.access_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
+  }
+
   tags = var.tags
 
-  depends_on = [aws_api_gateway_deployment.api_deployment]
+  # Ensure the account-level role is configured before the stage is created
+  depends_on = [aws_api_gateway_deployment.api_deployment, module.account]
 }
 
 # API Gateway Resource Policy

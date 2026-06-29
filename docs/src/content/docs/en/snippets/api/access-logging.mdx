@@ -1,0 +1,33 @@
+---
+title: Access logging
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+For REST APIs, the generated infrastructure enables [access logging](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html) by default, writing one structured JSON line per request to a dedicated CloudWatch Logs group.
+
+API Gateway writes access logs using an account-level CloudWatch Logs role. This role is configured on the `AWS::ApiGateway::Account` setting, which is a **singleton per region per account** — there is only one role for every REST API in the region. To manage this safely across multiple independently-deployed stacks, the generated infrastructure:
+
+- Creates a shared CloudWatch Logs role and configures it on the account only when no working role is already set, so deployments never overwrite a role another stack owns.
+- Leaves the account setting untouched on teardown, so destroying one stack never disables logging for other REST APIs in the region.
+
+<Infrastructure>
+<Fragment slot="cdk">
+The account role is managed by the `ApiGatewayAccount` construct, a stack-scoped singleton resolved via `ApiGatewayAccount.ensure(scope)`. Each REST API's stage depends on it, and the role is configured by a Lambda-backed custom resource.
+
+You can customise the access log format by passing `deployOptions` when constructing your API:
+
+```ts {3-5}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+  deployOptions: {
+    accessLogFormat: AccessLogFormat.clf(),
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+The account role is managed by the `core/api/api-gateway-account` module, which is instantiated by the generated API module. It configures the account idempotently and is never reset on `terraform destroy`.
+
+You can customise the access log format by editing the `access_log_settings` block on the `aws_api_gateway_stage` resource in the generated API module.
+</Fragment>
+</Infrastructure>
