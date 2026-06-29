@@ -14,6 +14,8 @@ const { IAMClient, GetRoleCommand } = require('@aws-sdk/client-iam');
 const apigw = new APIGatewayClient();
 const iam = new IAMClient();
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const hasLiveRole = async () => {
   const { cloudwatchRoleArn } = await apigw.send(new GetAccountCommand({}));
   if (!cloudwatchRoleArn) return false;
@@ -28,19 +30,29 @@ const hasLiveRole = async () => {
   }
 };
 
+const RETRYABLE = ['BadRequestException', 'TooManyRequestsException'];
+
+const setRole = async (value) => {
+  const command = new UpdateAccountCommand({
+    patchOperations: [{ op: 'replace', path: '/cloudwatchRoleArn', value }],
+  });
+  // Retry while the freshly created role propagates through IAM, and on throttling
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await apigw.send(command);
+    } catch (e) {
+      if (RETRYABLE.includes(e.name) && attempt < 11) {
+        await sleep(5000);
+      } else {
+        throw e;
+      }
+    }
+  }
+};
+
 exports.handler = async (event) => {
   if (event.RequestType !== 'Delete' && !(await hasLiveRole())) {
-    await apigw.send(
-      new UpdateAccountCommand({
-        patchOperations: [
-          {
-            op: 'replace',
-            path: '/cloudwatchRoleArn',
-            value: event.ResourceProperties.CloudWatchRoleArn,
-          },
-        ],
-      }),
-    );
+    await setRole(event.ResourceProperties.CloudWatchRoleArn);
   }
   return { PhysicalResourceId: 'ApiGatewayAccount' };
 };

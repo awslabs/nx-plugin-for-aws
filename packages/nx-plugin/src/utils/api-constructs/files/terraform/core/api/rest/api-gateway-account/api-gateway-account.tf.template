@@ -46,7 +46,7 @@ resource "terraform_data" "account" {
       ROLE_ARN = aws_iam_role.cloudwatch.arn
       REGION   = data.aws_region.current.region
       SCRIPT   = <<-PY
-        import os, boto3
+        import os, time, boto3
         from botocore.exceptions import ClientError
         apigw = boto3.client("apigateway", region_name=os.environ["REGION"])
 
@@ -63,7 +63,18 @@ resource "terraform_data" "account" {
                 raise
 
         if not has_live_role():
-            apigw.update_account(patchOperations=[{"op": "replace", "path": "/cloudwatchRoleArn", "value": os.environ["ROLE_ARN"]}])
+            op = {"op": "replace", "path": "/cloudwatchRoleArn", "value": os.environ["ROLE_ARN"]}
+            # Retry while the freshly created role propagates through IAM, and on throttling
+            retryable = ("BadRequestException", "TooManyRequestsException")
+            for attempt in range(12):
+                try:
+                    apigw.update_account(patchOperations=[op])
+                    break
+                except ClientError as e:
+                    if e.response["Error"]["Code"] in retryable and attempt < 11:
+                        time.sleep(5)
+                    else:
+                        raise
       PY
     }
   }
