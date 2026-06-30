@@ -180,3 +180,30 @@ export const withPyVersions = (deps: IPyDepVersion[]) =>
 export const VENDORED_VERSIONS = {
   'git-secrets': '1.3.0',
 } as const;
+
+/**
+ * Exact versions for Terraform providers used by generated `.tf` modules.
+ * Pinned exactly (no range operator) so generated infrastructure is reproducible.
+ */
+export const TERRAFORM_VERSIONS = {
+  aws: '6.52.0',
+  random: '3.9.0',
+  null: '3.3.0',
+  archive: '2.8.0',
+  external: '2.4.0',
+  local: '2.9.0',
+} as const;
+export type ITerraformProviderVersion = keyof typeof TERRAFORM_VERSIONS;
+
+/**
+ * Substitution variables exposing Terraform provider version constraints to
+ * generated `.tf` templates (e.g. `version = "<%- awsProviderVersion %>"`)
+ */
+export const terraformProviderVersions = () => ({
+  awsProviderVersion: TERRAFORM_VERSIONS.aws,
+  randomProviderVersion: TERRAFORM_VERSIONS.random,
+  nullProviderVersion: TERRAFORM_VERSIONS.null,
+  archiveProviderVersion: TERRAFORM_VERSIONS.archive,
+  externalProviderVersion: TERRAFORM_VERSIONS.external,
+  localProviderVersion: TERRAFORM_VERSIONS.local,
+});

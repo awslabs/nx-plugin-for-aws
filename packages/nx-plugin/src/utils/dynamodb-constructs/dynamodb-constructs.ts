@@ -18,6 +18,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
+import { terraformProviderVersions } from '../versions';
 
 export interface AddDynamoDBConstructOptions {
   projectName: string;
@@ -131,7 +132,7 @@ export const addDynamoDBTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -153,7 +154,7 @@ export const addDynamoDBTerraformModules = (
       'app',
       'dynamodb',
     ),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

@@ -6,6 +6,7 @@ import {
   TS_VERSIONS,
   PY_VERSIONS,
   VENDORED_VERSIONS,
+  TERRAFORM_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
 import {
   mkdtempSync,
@@ -151,6 +152,63 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
   });
 
   console.log('Updated Python versions:', updatedVersions);
+  return updatedVersions;
+};
+
+/**
+ * Compares two `major.minor.patch` version strings.
+ * @returns positive if a > b, negative if a < b, zero if equal
+ */
+const compareSemver = (a: string, b: string): number => {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) {
+      return pa[i] - pb[i];
+    }
+  }
+  return 0;
+};
+
+/**
+ * Gets updated Terraform provider versions by querying the Terraform Registry.
+ * Each provider is pinned to the latest stable release within its current major
+ * version (e.g. `6.52.0` may bump to `6.61.0`, but never to `7.x`).
+ * @returns Updated versions mapping
+ */
+const getUpdatedTerraformVersions = async (): Promise<
+  Record<string, string>
+> => {
+  const updatedVersions: Record<string, string> = {};
+
+  for (const [provider, currentVersion] of Object.entries(TERRAFORM_VERSIONS)) {
+    const major = Number(currentVersion.split('.')[0]);
+
+    // Fetch all published versions for the provider
+    const response = await fetch(
+      `https://registry.terraform.io/v1/providers/hashicorp/${provider}/versions`,
+    );
+    const { versions } = (await response.json()) as {
+      versions: { version: string }[];
+    };
+
+    // Find the latest stable release within the current major version
+    let latest = currentVersion;
+    for (const { version } of versions) {
+      // Only consider stable `major.minor.patch` releases (no pre-release tags)
+      const parsed = version.match(/^(\d+)\.\d+\.\d+$/);
+      if (!parsed || Number(parsed[1]) !== major) {
+        continue;
+      }
+      if (compareSemver(version, latest) > 0) {
+        latest = version;
+      }
+    }
+
+    updatedVersions[provider] = latest;
+  }
+
+  console.log('Updated Terraform versions:', updatedVersions);
   return updatedVersions;
 };
 
@@ -331,6 +389,18 @@ const main = async () => {
       'PY_VERSIONS',
     );
 
+    // Get updated Terraform provider versions
+    const updatedTerraformVersions = await getUpdatedTerraformVersions();
+
+    // Apply updated Terraform provider versions to the versions file
+    const terraformChanges = await applyUpdatedVersions(
+      tree,
+      TERRAFORM_VERSIONS,
+      updatedTerraformVersions,
+      'packages/nx-plugin/src/utils/versions.ts',
+      'TERRAFORM_VERSIONS',
+    );
+
     // Update vendored git-secrets
     const gitSecretsChange = await updateGitSecrets(tree);
     const vendoredChanges: VersionChange[] = gitSecretsChange
@@ -348,6 +418,7 @@ const main = async () => {
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
+      { title: 'Terraform Providers', changes: terraformChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

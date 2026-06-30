@@ -19,6 +19,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
+import { terraformProviderVersions } from '../versions';
 
 export interface AddRdbConstructOptions {
   projectName: string;
@@ -139,7 +140,7 @@ export const addRdbTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core', 'rdb'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core', 'rdb'),
-    {},
+    { ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -149,7 +150,7 @@ export const addRdbTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'dbs'),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

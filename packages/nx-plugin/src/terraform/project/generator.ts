@@ -35,7 +35,7 @@ import {
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from '../../utils/shared-constructs-constants';
-import { withVersions } from '../../utils/versions';
+import { terraformProviderVersions, withVersions } from '../../utils/versions';
 import type { TerraformProjectGeneratorSchema } from './schema';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
@@ -258,6 +258,7 @@ export async function terraformProjectGenerator(
     {
       metricsModulePath,
       stateKeyPrefix: kebabCase(lib.fullyQualifiedName),
+      ...terraformProviderVersions(),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,

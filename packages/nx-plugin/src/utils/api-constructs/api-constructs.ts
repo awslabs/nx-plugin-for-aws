@@ -18,7 +18,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { PY_VERSIONS } from '../versions';
+import { PY_VERSIONS, terraformProviderVersions } from '../versions';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
@@ -191,7 +191,7 @@ const addApiGatewayTerraformModules = (
       options.constructType,
     ),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core', 'api'),
-    { boto3Version: PY_VERSIONS.boto3 },
+    { boto3Version: PY_VERSIONS.boto3, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -209,7 +209,7 @@ const addApiGatewayTerraformModules = (
       options.constructType,
     ),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'apis'),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
