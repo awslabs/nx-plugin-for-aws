@@ -108,6 +108,9 @@ const syncAndBuild = async (cwd: string) => {
   );
 };
 
+// Each generator runs in its own isolated workspace and keeps the default
+// dependency install, so the build still verifies each generator declares the
+// dependencies it needs.
 describe('smoke test - standalone projects', () => {
   it.each(
     standalone,

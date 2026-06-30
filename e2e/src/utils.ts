@@ -152,6 +152,38 @@ function getPackageManagerCommand({
 }
 
 /**
+ * Run a bare dependency install for the package manager detected in `cwd`.
+ *
+ * Used by the smoke tests, which generate every project with
+ * `--prefer-install-dependencies=false` and then install once at the end.
+ *
+ * The generators add dependencies to `package.json` without updating the
+ * lockfile, so the install must be allowed to update it. CI sets each package
+ * manager to a frozen/immutable lockfile by default, hence the explicit flags.
+ */
+export async function runInstall(opts: {
+  cwd: string;
+  env?: RunCmdOpts['env'];
+}) {
+  const pkgMgr = detectPackageManager(opts.cwd);
+  const yarnMajor = Number(getYarnMajorVersion(opts.cwd) ?? '1');
+  const command = {
+    npm: 'npm install --legacy-peer-deps',
+    pnpm: 'pnpm install --no-frozen-lockfile',
+    // Yarn Berry (>=2) treats the lockfile as immutable in CI; classic does not
+    // and rejects the `--no-immutable` flag.
+    yarn: yarnMajor >= 2 ? 'yarn install --no-immutable' : 'yarn install',
+    bun: 'bun install --no-frozen-lockfile',
+  }[pkgMgr];
+  await runCLI(command, {
+    cwd: opts.cwd,
+    env: opts.env,
+    prefixWithPackageManagerCmd: false,
+    redirectStderr: true,
+  });
+}
+
+/**
  * Remove log colors for fail proof string search
  * @param log
  * @returns

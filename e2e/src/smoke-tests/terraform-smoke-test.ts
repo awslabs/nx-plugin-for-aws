@@ -6,7 +6,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { beforeEach, describe, it } from 'vitest';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 /**
@@ -40,9 +40,14 @@ export const runTerraformSmokeTest = async (
     onProjectCreate(projectRoot);
   }
 
+  // Every generator runs with `--prefer-install-dependencies=false` to avoid a
+  // slow install after each one; `runInstall` below installs the full
+  // accumulated set once before the build. Generators still self-install when
+  // skipping would leave a graph-critical dependency unresolvable.
+
   // Terraform application project that wires everything together.
   await runCLI(
-    `generate @aws/nx-plugin:terraform#project --name=infra --type=application --no-interactive`,
+    `generate @aws/nx-plugin:terraform#project --name=infra --type=application --no-interactive --prefer-install-dependencies=false`,
     opts,
   );
 
@@ -61,6 +66,9 @@ export const runTerraformSmokeTest = async (
   if (beforeBuild) {
     await beforeBuild(projectRoot);
   }
+
+  // Install the full set of dependencies accumulated across all generators.
+  await runInstall(opts);
 
   await runCLI(`sync --verbose`, opts);
   await runCLI(
