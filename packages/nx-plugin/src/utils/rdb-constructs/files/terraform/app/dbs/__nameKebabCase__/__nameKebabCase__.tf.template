@@ -91,9 +91,21 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs (error, general, slow query for MySQL; postgresql for PostgreSQL) to CloudWatch."
   type        = bool
   default     = false
+}
+
+variable "enable_audit_logging" {
+  description = "Whether to enable database audit logging and export the audit log to CloudWatch. PostgreSQL uses pgAudit; MySQL uses Advanced Auditing. Defaults to schema, privilege and connection events only to avoid recording data values (potential PII)."
+  type        = bool
+  default     = true
+}
+
+variable "audit_log" {
+  description = "Audit event classes captured when audit logging is enabled. PostgreSQL maps to pgaudit.log (e.g. 'ddl,role,misc'); MySQL maps to server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). Defaults exclude statement/DML logging to avoid recording data values."
+  type        = string
+  default     = null
 }
 
 variable "enable_performance_insights" {
@@ -169,6 +181,8 @@ module "aurora" {
   enable_rds_proxy                      = var.enable_rds_proxy
   enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_audit_logging                  = var.enable_audit_logging
+  audit_log                             = var.audit_log
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
   enable_backup                         = var.enable_backup
@@ -555,8 +569,9 @@ resource "aws_lambda_function" "create_db_user" {
 
   environment {
     variables = {
-      DATABASE_SECRET_ARN = module.aurora.secret_arn
-      NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+      DATABASE_SECRET_ARN  = module.aurora.secret_arn
+      NODE_EXTRA_CA_CERTS  = "/var/runtime/ca-cert.pem"
+      ENABLE_AUDIT_LOGGING = tostring(var.enable_audit_logging)
     }
   }
 
@@ -575,10 +590,11 @@ resource "aws_lambda_function" "create_db_user" {
 
 resource "null_resource" "create_db_user_trigger" {
   triggers = {
-    cluster_arn   = module.aurora.cluster_arn
-    function_name = aws_lambda_function.create_db_user.function_name
-    db_user       = local.database_runtime_user
-    bundle_hash   = data.archive_file.create_db_user_zip.output_base64sha256
+    cluster_arn          = module.aurora.cluster_arn
+    function_name        = aws_lambda_function.create_db_user.function_name
+    db_user              = local.database_runtime_user
+    bundle_hash          = data.archive_file.create_db_user_zip.output_base64sha256
+    enable_audit_logging = tostring(var.enable_audit_logging)
   }
 
   provisioner "local-exec" {

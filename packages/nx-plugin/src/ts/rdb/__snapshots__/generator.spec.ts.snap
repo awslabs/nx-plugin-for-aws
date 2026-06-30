@@ -379,6 +379,7 @@ import {
   DatabaseProxy,
   DefaultAuthScheme,
   IClusterEngine,
+  ParameterGroup,
 } from 'aws-cdk-lib/aws-rds';
 import { Provider } from 'aws-cdk-lib/custom-resources';
 import { Trigger } from 'aws-cdk-lib/triggers';
@@ -404,6 +405,26 @@ export interface AuroraDatabaseEngine {
    * Builds the CDK cluster engine for the provided engine version.
    */
   clusterEngine(version: AuroraDatabaseEngineVersion): IClusterEngine;
+
+  /**
+   * Default audit event classes captured when audit logging is enabled.
+   */
+  readonly defaultAuditLog: string;
+
+  /**
+   * Cluster parameter group parameters that enable audit logging for the engine.
+   */
+  auditParameters(auditLog: string): Record<string, string>;
+
+  /**
+   * CloudWatch log types exported when audit logging is enabled.
+   */
+  readonly auditLogExports: string[];
+
+  /**
+   * CloudWatch log types exported when general engine log export is enabled.
+   */
+  readonly cloudwatchLogExports: string[];
 }
 
 export class AuroraDatabaseEngines {
@@ -419,6 +440,15 @@ export class AuroraDatabaseEngines {
         DatabaseClusterEngine.auroraMysql({
           version: version as AuroraMysqlEngineVersion,
         }),
+      // Connection, schema and privilege events only - excludes QUERY/QUERY_DML
+      // which would log statement text and data values (potential PII).
+      defaultAuditLog: 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE',
+      auditParameters: (auditLog) => ({
+        server_audit_logging: '1',
+        server_audit_events: auditLog,
+      }),
+      auditLogExports: ['audit'],
+      cloudwatchLogExports: ['error', 'general', 'slowquery'],
     };
   }
 
@@ -434,6 +464,17 @@ export class AuroraDatabaseEngines {
         DatabaseClusterEngine.auroraPostgres({
           version: version as AuroraPostgresEngineVersion,
         }),
+      // Schema, privilege and admin events only - excludes 'read,write' which
+      // would log statement text and data values (potential PII). pgAudit also
+      // redacts cleartext passwords.
+      defaultAuditLog: 'ddl,role,misc',
+      auditParameters: (auditLog) => ({
+        shared_preload_libraries: 'pgaudit',
+        'pgaudit.log': auditLog,
+        'pgaudit.log_parameter': 'off',
+      }),
+      auditLogExports: ['postgresql'],
+      cloudwatchLogExports: ['postgresql'],
     };
   }
 }
@@ -540,6 +581,27 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
   readonly enableCloudwatchLogs?: boolean;
 
   /**
+   * Whether to enable database audit logging and export the audit log to CloudWatch Logs.
+   * Postgres uses the pgAudit extension; MySQL uses Advanced Auditing. To avoid capturing
+   * data values (potential PII), only schema, privilege and connection events are audited
+   * by default - see auditLog to customize.
+   * See https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html
+   *
+   * @default true
+   */
+  readonly enableAuditLogging?: boolean;
+
+  /**
+   * Audit event classes to capture when audit logging is enabled.
+   * Postgres values map to pgaudit.log (e.g. 'ddl,role,misc'); MySQL values map to
+   * server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). The defaults
+   * deliberately exclude statement/DML logging to avoid recording data values.
+   *
+   * @default - schema, privilege and connection events only (excludes data reads/writes)
+   */
+  readonly auditLog?: string;
+
+  /**
    * Whether to enable Performance Insights on the Aurora writer instance.
    *
    * @default true
@@ -575,6 +637,8 @@ export abstract class AuroraDatabase extends Construct {
       removalPolicy = RemovalPolicy.RETAIN,
       enableKeyRotation = true,
       enableCloudwatchLogs = false,
+      enableAuditLogging = true,
+      auditLog,
       enablePerformanceInsights = true,
       engine,
       engineVersion,
@@ -585,12 +649,33 @@ export abstract class AuroraDatabase extends Construct {
 
     this.adminUser = adminUser;
 
+    const clusterEngine = engine.clusterEngine(
+      engineVersion ?? engine.defaultVersion,
+    );
+
+    const parameterGroup = enableAuditLogging
+      ? new ParameterGroup(this, 'ParameterGroup', {
+          engine: clusterEngine,
+          parameters: engine.auditParameters(
+            auditLog ?? engine.defaultAuditLog,
+          ),
+        })
+      : undefined;
+
+    const cloudwatchLogsExports = [
+      ...new Set([
+        ...(enableCloudwatchLogs ? engine.cloudwatchLogExports : []),
+        ...(enableAuditLogging ? engine.auditLogExports : []),
+      ]),
+    ];
+
     const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
       vpc,
       vpcSubnets,
-      engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      engine: clusterEngine,
+      parameterGroup,
       writer:
         writer ??
         ClusterInstance.serverlessV2('writer', {
@@ -604,11 +689,8 @@ export abstract class AuroraDatabase extends Construct {
       }),
       iamAuthentication: true,
       monitoringInterval: Duration.seconds(5),
-      cloudwatchLogsExports: enableCloudwatchLogs
-        ? engine.type === 'mysql'
-          ? ['audit', 'error', 'general', 'slowquery']
-          : ['postgresql']
-        : undefined,
+      cloudwatchLogsExports:
+        cloudwatchLogsExports.length > 0 ? cloudwatchLogsExports : undefined,
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
       storageEncryptionKey: key,
@@ -657,6 +739,7 @@ export abstract class AuroraDatabase extends Construct {
       environment: {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
         NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+        ENABLE_AUDIT_LOGGING: String(enableAuditLogging),
       },
       architecture: Architecture.ARM_64,
     });
@@ -921,9 +1004,21 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs (error, general, slow query for MySQL; postgresql for PostgreSQL) to CloudWatch."
   type        = bool
   default     = false
+}
+
+variable "enable_audit_logging" {
+  description = "Whether to enable database audit logging and export the audit log to CloudWatch. PostgreSQL uses pgAudit; MySQL uses Advanced Auditing. Defaults to schema, privilege and connection events only to avoid recording data values (potential PII)."
+  type        = bool
+  default     = true
+}
+
+variable "audit_log" {
+  description = "Audit event classes captured when audit logging is enabled. PostgreSQL maps to pgaudit.log (e.g. 'ddl,role,misc'); MySQL maps to server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). Defaults exclude statement/DML logging to avoid recording data values."
+  type        = string
+  default     = null
 }
 
 variable "enable_performance_insights" {
@@ -969,20 +1064,43 @@ locals {
   default_engine_version = var.engine == "aurora-mysql" ? "8.0.mysql_aurora.3.12.0" : "17.7"
   parameter_group_family = var.engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql\${split(".", coalesce(var.engine_version, local.default_engine_version))[0]}"
   cluster_name           = "\${var.name}-aurora-\${random_string.suffix.result}"
+
+  # Connection, schema and privilege events only - excludes statement/DML
+  # logging which would record data values (potential PII).
+  default_audit_log = var.engine == "aurora-mysql" ? "CONNECT,QUERY_DDL,QUERY_DCL,TABLE" : "ddl,role,misc"
+  audit_log         = coalesce(var.audit_log, local.default_audit_log)
+
+  audit_parameters = var.engine == "aurora-mysql" ? {
+    server_audit_logging = "1"
+    server_audit_events  = local.audit_log
+    } : {
+    shared_preload_libraries = "pgaudit"
+    "pgaudit.log"            = local.audit_log
+    "pgaudit.log_parameter"  = "off"
+  }
+
+  create_parameter_group = var.enable_audit_logging
+
+  cloudwatch_logs_exports = distinct(concat(
+    var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["error", "general", "slowquery"] : ["postgresql"]) : [],
+    var.enable_audit_logging ? (var.engine == "aurora-mysql" ? ["audit"] : ["postgresql"]) : [],
+  ))
 }
 
 resource "aws_rds_cluster_parameter_group" "database" {
-  count = var.enable_cloudwatch_logs ? 1 : 0
+  count = local.create_parameter_group ? 1 : 0
 
   name_prefix = "\${var.name}-"
   family      = local.parameter_group_family
   description = "Parameter group for \${var.name} Aurora cluster"
 
   dynamic "parameter" {
-    for_each = var.engine == "aurora-postgresql" ? [1] : []
+    for_each = var.enable_audit_logging ? local.audit_parameters : {}
     content {
-      name  = "log_statement"
-      value = "all"
+      name  = parameter.key
+      value = parameter.value
+      # pgaudit requires shared_preload_libraries to be set at instance boot
+      apply_method = parameter.key == "shared_preload_libraries" ? "pending-reboot" : "immediate"
     }
   }
 
@@ -1104,7 +1222,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
+  #checkov:skip=CKV2_AWS_27:Audit logging is enabled by default via enable_audit_logging; query/DML logging is intentionally excluded to avoid recording potential PII
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = local.cluster_name
   engine                              = var.engine
@@ -1113,7 +1231,7 @@ resource "aws_rds_cluster" "database" {
   master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
-  db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
+  db_cluster_parameter_group_name     = local.create_parameter_group ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
   port                                = coalesce(var.port, local.default_port)
   storage_encrypted                   = true
@@ -1125,7 +1243,7 @@ resource "aws_rds_cluster" "database" {
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
+  enabled_cloudwatch_logs_exports     = length(local.cloudwatch_logs_exports) > 0 ? local.cloudwatch_logs_exports : null
 
   serverlessv2_scaling_configuration {
     min_capacity = var.serverless_min_capacity
@@ -1649,9 +1767,21 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs (error, general, slow query for MySQL; postgresql for PostgreSQL) to CloudWatch."
   type        = bool
   default     = false
+}
+
+variable "enable_audit_logging" {
+  description = "Whether to enable database audit logging and export the audit log to CloudWatch. PostgreSQL uses pgAudit; MySQL uses Advanced Auditing. Defaults to schema, privilege and connection events only to avoid recording data values (potential PII)."
+  type        = bool
+  default     = true
+}
+
+variable "audit_log" {
+  description = "Audit event classes captured when audit logging is enabled. PostgreSQL maps to pgaudit.log (e.g. 'ddl,role,misc'); MySQL maps to server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). Defaults exclude statement/DML logging to avoid recording data values."
+  type        = string
+  default     = null
 }
 
 variable "enable_performance_insights" {
@@ -1727,6 +1857,8 @@ module "aurora" {
   enable_rds_proxy                      = var.enable_rds_proxy
   enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_audit_logging                  = var.enable_audit_logging
+  audit_log                             = var.audit_log
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
   enable_backup                         = var.enable_backup
@@ -2087,8 +2219,9 @@ resource "aws_lambda_function" "create_db_user" {
 
   environment {
     variables = {
-      DATABASE_SECRET_ARN = module.aurora.secret_arn
-      NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+      DATABASE_SECRET_ARN  = module.aurora.secret_arn
+      NODE_EXTRA_CA_CERTS  = "/var/runtime/ca-cert.pem"
+      ENABLE_AUDIT_LOGGING = tostring(var.enable_audit_logging)
     }
   }
 
@@ -2107,10 +2240,11 @@ resource "aws_lambda_function" "create_db_user" {
 
 resource "null_resource" "create_db_user_trigger" {
   triggers = {
-    cluster_arn   = module.aurora.cluster_arn
-    function_name = aws_lambda_function.create_db_user.function_name
-    db_user       = local.database_runtime_user
-    bundle_hash   = data.archive_file.create_db_user_zip.output_base64sha256
+    cluster_arn          = module.aurora.cluster_arn
+    function_name        = aws_lambda_function.create_db_user.function_name
+    db_user              = local.database_runtime_user
+    bundle_hash          = data.archive_file.create_db_user_zip.output_base64sha256
+    enable_audit_logging = tostring(var.enable_audit_logging)
   }
 
   provisioner "local-exec" {
@@ -2408,9 +2542,21 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs (error, general, slow query for MySQL; postgresql for PostgreSQL) to CloudWatch."
   type        = bool
   default     = false
+}
+
+variable "enable_audit_logging" {
+  description = "Whether to enable database audit logging and export the audit log to CloudWatch. PostgreSQL uses pgAudit; MySQL uses Advanced Auditing. Defaults to schema, privilege and connection events only to avoid recording data values (potential PII)."
+  type        = bool
+  default     = true
+}
+
+variable "audit_log" {
+  description = "Audit event classes captured when audit logging is enabled. PostgreSQL maps to pgaudit.log (e.g. 'ddl,role,misc'); MySQL maps to server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). Defaults exclude statement/DML logging to avoid recording data values."
+  type        = string
+  default     = null
 }
 
 variable "enable_performance_insights" {
@@ -2456,20 +2602,43 @@ locals {
   default_engine_version = var.engine == "aurora-mysql" ? "8.0.mysql_aurora.3.12.0" : "17.7"
   parameter_group_family = var.engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql\${split(".", coalesce(var.engine_version, local.default_engine_version))[0]}"
   cluster_name           = "\${var.name}-aurora-\${random_string.suffix.result}"
+
+  # Connection, schema and privilege events only - excludes statement/DML
+  # logging which would record data values (potential PII).
+  default_audit_log = var.engine == "aurora-mysql" ? "CONNECT,QUERY_DDL,QUERY_DCL,TABLE" : "ddl,role,misc"
+  audit_log         = coalesce(var.audit_log, local.default_audit_log)
+
+  audit_parameters = var.engine == "aurora-mysql" ? {
+    server_audit_logging = "1"
+    server_audit_events  = local.audit_log
+    } : {
+    shared_preload_libraries = "pgaudit"
+    "pgaudit.log"            = local.audit_log
+    "pgaudit.log_parameter"  = "off"
+  }
+
+  create_parameter_group = var.enable_audit_logging
+
+  cloudwatch_logs_exports = distinct(concat(
+    var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["error", "general", "slowquery"] : ["postgresql"]) : [],
+    var.enable_audit_logging ? (var.engine == "aurora-mysql" ? ["audit"] : ["postgresql"]) : [],
+  ))
 }
 
 resource "aws_rds_cluster_parameter_group" "database" {
-  count = var.enable_cloudwatch_logs ? 1 : 0
+  count = local.create_parameter_group ? 1 : 0
 
   name_prefix = "\${var.name}-"
   family      = local.parameter_group_family
   description = "Parameter group for \${var.name} Aurora cluster"
 
   dynamic "parameter" {
-    for_each = var.engine == "aurora-postgresql" ? [1] : []
+    for_each = var.enable_audit_logging ? local.audit_parameters : {}
     content {
-      name  = "log_statement"
-      value = "all"
+      name  = parameter.key
+      value = parameter.value
+      # pgaudit requires shared_preload_libraries to be set at instance boot
+      apply_method = parameter.key == "shared_preload_libraries" ? "pending-reboot" : "immediate"
     }
   }
 
@@ -2591,7 +2760,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
+  #checkov:skip=CKV2_AWS_27:Audit logging is enabled by default via enable_audit_logging; query/DML logging is intentionally excluded to avoid recording potential PII
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = local.cluster_name
   engine                              = var.engine
@@ -2600,7 +2769,7 @@ resource "aws_rds_cluster" "database" {
   master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
-  db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
+  db_cluster_parameter_group_name     = local.create_parameter_group ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
   port                                = coalesce(var.port, local.default_port)
   storage_encrypted                   = true
@@ -2612,7 +2781,7 @@ resource "aws_rds_cluster" "database" {
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
+  enabled_cloudwatch_logs_exports     = length(local.cloudwatch_logs_exports) > 0 ? local.cloudwatch_logs_exports : null
 
   serverlessv2_scaling_configuration {
     min_capacity = var.serverless_min_capacity
@@ -3136,9 +3305,21 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs (error, general, slow query for MySQL; postgresql for PostgreSQL) to CloudWatch."
   type        = bool
   default     = false
+}
+
+variable "enable_audit_logging" {
+  description = "Whether to enable database audit logging and export the audit log to CloudWatch. PostgreSQL uses pgAudit; MySQL uses Advanced Auditing. Defaults to schema, privilege and connection events only to avoid recording data values (potential PII)."
+  type        = bool
+  default     = true
+}
+
+variable "audit_log" {
+  description = "Audit event classes captured when audit logging is enabled. PostgreSQL maps to pgaudit.log (e.g. 'ddl,role,misc'); MySQL maps to server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). Defaults exclude statement/DML logging to avoid recording data values."
+  type        = string
+  default     = null
 }
 
 variable "enable_performance_insights" {
@@ -3214,6 +3395,8 @@ module "aurora" {
   enable_rds_proxy                      = var.enable_rds_proxy
   enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_audit_logging                  = var.enable_audit_logging
+  audit_log                             = var.audit_log
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
   enable_backup                         = var.enable_backup
@@ -3579,8 +3762,9 @@ resource "aws_lambda_function" "create_db_user" {
 
   environment {
     variables = {
-      DATABASE_SECRET_ARN = module.aurora.secret_arn
-      NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+      DATABASE_SECRET_ARN  = module.aurora.secret_arn
+      NODE_EXTRA_CA_CERTS  = "/var/runtime/ca-cert.pem"
+      ENABLE_AUDIT_LOGGING = tostring(var.enable_audit_logging)
     }
   }
 
@@ -3599,10 +3783,11 @@ resource "aws_lambda_function" "create_db_user" {
 
 resource "null_resource" "create_db_user_trigger" {
   triggers = {
-    cluster_arn   = module.aurora.cluster_arn
-    function_name = aws_lambda_function.create_db_user.function_name
-    db_user       = local.database_runtime_user
-    bundle_hash   = data.archive_file.create_db_user_zip.output_base64sha256
+    cluster_arn          = module.aurora.cluster_arn
+    function_name        = aws_lambda_function.create_db_user.function_name
+    db_user              = local.database_runtime_user
+    bundle_hash          = data.archive_file.create_db_user_zip.output_base64sha256
+    enable_audit_logging = tostring(var.enable_audit_logging)
   }
 
   provisioner "local-exec" {
@@ -3829,6 +4014,10 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
 
   try {
     await client.query('BEGIN');
+
+    if (process.env.ENABLE_AUDIT_LOGGING === 'true') {
+      await client.query('CREATE EXTENSION IF NOT EXISTS pgaudit;');
+    }
 
     const roleExists = await client.query(
       'SELECT 1 FROM pg_roles WHERE rolname = $1',
@@ -4187,6 +4376,7 @@ import {
   DatabaseProxy,
   DefaultAuthScheme,
   IClusterEngine,
+  ParameterGroup,
 } from 'aws-cdk-lib/aws-rds';
 import { Provider } from 'aws-cdk-lib/custom-resources';
 import { Trigger } from 'aws-cdk-lib/triggers';
@@ -4212,6 +4402,26 @@ export interface AuroraDatabaseEngine {
    * Builds the CDK cluster engine for the provided engine version.
    */
   clusterEngine(version: AuroraDatabaseEngineVersion): IClusterEngine;
+
+  /**
+   * Default audit event classes captured when audit logging is enabled.
+   */
+  readonly defaultAuditLog: string;
+
+  /**
+   * Cluster parameter group parameters that enable audit logging for the engine.
+   */
+  auditParameters(auditLog: string): Record<string, string>;
+
+  /**
+   * CloudWatch log types exported when audit logging is enabled.
+   */
+  readonly auditLogExports: string[];
+
+  /**
+   * CloudWatch log types exported when general engine log export is enabled.
+   */
+  readonly cloudwatchLogExports: string[];
 }
 
 export class AuroraDatabaseEngines {
@@ -4227,6 +4437,15 @@ export class AuroraDatabaseEngines {
         DatabaseClusterEngine.auroraMysql({
           version: version as AuroraMysqlEngineVersion,
         }),
+      // Connection, schema and privilege events only - excludes QUERY/QUERY_DML
+      // which would log statement text and data values (potential PII).
+      defaultAuditLog: 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE',
+      auditParameters: (auditLog) => ({
+        server_audit_logging: '1',
+        server_audit_events: auditLog,
+      }),
+      auditLogExports: ['audit'],
+      cloudwatchLogExports: ['error', 'general', 'slowquery'],
     };
   }
 
@@ -4242,6 +4461,17 @@ export class AuroraDatabaseEngines {
         DatabaseClusterEngine.auroraPostgres({
           version: version as AuroraPostgresEngineVersion,
         }),
+      // Schema, privilege and admin events only - excludes 'read,write' which
+      // would log statement text and data values (potential PII). pgAudit also
+      // redacts cleartext passwords.
+      defaultAuditLog: 'ddl,role,misc',
+      auditParameters: (auditLog) => ({
+        shared_preload_libraries: 'pgaudit',
+        'pgaudit.log': auditLog,
+        'pgaudit.log_parameter': 'off',
+      }),
+      auditLogExports: ['postgresql'],
+      cloudwatchLogExports: ['postgresql'],
     };
   }
 }
@@ -4348,6 +4578,27 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
   readonly enableCloudwatchLogs?: boolean;
 
   /**
+   * Whether to enable database audit logging and export the audit log to CloudWatch Logs.
+   * Postgres uses the pgAudit extension; MySQL uses Advanced Auditing. To avoid capturing
+   * data values (potential PII), only schema, privilege and connection events are audited
+   * by default - see auditLog to customize.
+   * See https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html
+   *
+   * @default true
+   */
+  readonly enableAuditLogging?: boolean;
+
+  /**
+   * Audit event classes to capture when audit logging is enabled.
+   * Postgres values map to pgaudit.log (e.g. 'ddl,role,misc'); MySQL values map to
+   * server_audit_events (e.g. 'CONNECT,QUERY_DDL,QUERY_DCL,TABLE'). The defaults
+   * deliberately exclude statement/DML logging to avoid recording data values.
+   *
+   * @default - schema, privilege and connection events only (excludes data reads/writes)
+   */
+  readonly auditLog?: string;
+
+  /**
    * Whether to enable Performance Insights on the Aurora writer instance.
    *
    * @default true
@@ -4383,6 +4634,8 @@ export abstract class AuroraDatabase extends Construct {
       removalPolicy = RemovalPolicy.RETAIN,
       enableKeyRotation = true,
       enableCloudwatchLogs = false,
+      enableAuditLogging = true,
+      auditLog,
       enablePerformanceInsights = true,
       engine,
       engineVersion,
@@ -4393,12 +4646,33 @@ export abstract class AuroraDatabase extends Construct {
 
     this.adminUser = adminUser;
 
+    const clusterEngine = engine.clusterEngine(
+      engineVersion ?? engine.defaultVersion,
+    );
+
+    const parameterGroup = enableAuditLogging
+      ? new ParameterGroup(this, 'ParameterGroup', {
+          engine: clusterEngine,
+          parameters: engine.auditParameters(
+            auditLog ?? engine.defaultAuditLog,
+          ),
+        })
+      : undefined;
+
+    const cloudwatchLogsExports = [
+      ...new Set([
+        ...(enableCloudwatchLogs ? engine.cloudwatchLogExports : []),
+        ...(enableAuditLogging ? engine.auditLogExports : []),
+      ]),
+    ];
+
     const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
       vpc,
       vpcSubnets,
-      engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      engine: clusterEngine,
+      parameterGroup,
       writer:
         writer ??
         ClusterInstance.serverlessV2('writer', {
@@ -4412,11 +4686,8 @@ export abstract class AuroraDatabase extends Construct {
       }),
       iamAuthentication: true,
       monitoringInterval: Duration.seconds(5),
-      cloudwatchLogsExports: enableCloudwatchLogs
-        ? engine.type === 'mysql'
-          ? ['audit', 'error', 'general', 'slowquery']
-          : ['postgresql']
-        : undefined,
+      cloudwatchLogsExports:
+        cloudwatchLogsExports.length > 0 ? cloudwatchLogsExports : undefined,
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
       storageEncryptionKey: key,
@@ -4465,6 +4736,7 @@ export abstract class AuroraDatabase extends Construct {
       environment: {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
         NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+        ENABLE_AUDIT_LOGGING: String(enableAuditLogging),
       },
       architecture: Architecture.ARM_64,
     });
