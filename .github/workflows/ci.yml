@@ -37,24 +37,13 @@ jobs:
           setup-terraform: 'false'
       - name: Package plugins
         run: pnpm package:all --output-style=stream
-      - name: Build docs
-        env:
-          DOCS_BASE_PATH: ${{ github.ref == 'refs/heads/main' && '/nx-plugin-for-aws/preview' || '/nx-plugin-for-aws' }}
-        run: pnpm nx run docs:build --output-style=stream
-      - name: Check for mutations
-        run: git diff --ignore-space-at-eol --exit-code -- ':!**/LICENSE-THIRD-PARTY'
       - name: Upload artifact
         uses: actions/upload-artifact@v7.0.1
         with:
           name: build-artifact
           path: dist
-      - name: Upload docs artifact
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: docs-artifact
-          path: docs/dist
-  lint:
-    name: Lint
+  build:
+    name: Build
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v7
@@ -68,8 +57,17 @@ jobs:
           setup-terraform: 'false'
       - name: Lint
         run: pnpm nx run-many --target lint --all --output-style=stream
+      - name: Build docs
+        env:
+          DOCS_BASE_PATH: ${{ github.ref == 'refs/heads/main' && '/nx-plugin-for-aws/preview' || '/nx-plugin-for-aws' }}
+        run: pnpm nx run docs:build --output-style=stream
       - name: Check for mutations
         run: git diff --ignore-space-at-eol --exit-code -- ':!**/LICENSE-THIRD-PARTY'
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: docs-artifact
+          path: docs/dist
   unit_tests:
     name: Unit Tests - ${{ matrix.shard }}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
@@ -186,7 +184,7 @@ jobs:
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
   release:
     name: Release
-    needs: [package, lint, unit_tests, smoke_tests, smoke_tests_windows]
+    needs: [package, build, unit_tests, smoke_tests, smoke_tests_windows]
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}
