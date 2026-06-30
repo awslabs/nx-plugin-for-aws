@@ -1,0 +1,296 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/python:3.14-slim
+
+WORKDIR /app
+
+# Copy bundled package
+COPY . /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:\${PATH}"
+
+# Auto-instrument with AWS Distro for OpenTelemetry
+# https://aws-otel.github.io/docs/getting-started/python-sdk/auto-instr
+CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "proj_test_project.snapshot_bedrock_agent.main"]
+"
+`;
+exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
+"import { Lazy, Names } from 'aws-cdk-lib';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import {
+  PolicyStatement,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+export type SnapshotBedrockAgentProps = Omit<
+  RuntimeProps,
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+>;
+
+export class SnapshotBedrockAgent
+  extends Construct
+  implements IGrantable, IConnectable
+{
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+
+  constructor(scope: Construct, id: string, props?: SnapshotBedrockAgentProps) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/apps/test-project/docker/snapshot-bedrock-agent',
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
+
+    this.agentCoreRuntime = new Runtime(this, 'SnapshotBedrockAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
+      ...props,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props?.environmentVariables,
+      },
+    });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      SnapshotBedrockAgent: this.agentCoreRuntime.agentRuntimeArn,
+    });
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
+  }
+}
+"
+`;
+exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agents-index.ts 1`] = `
+"export * from './snapshot-bedrock-agent/snapshot-bedrock-agent.js';
+"
+`;
+exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > app-index.ts 1`] = `
+"export * from './agents/index.js';
+"
+`;
+exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > core-index.ts 1`] = `
+"export * from './app.js';
+export * from './checkov.js';
+export * from './runtime-config.js';
+export * from './workspace.js';
+"
+`;
+exports[`py#agent generator > should match snapshot for generated files > agent-__init__.py 1`] = `""`;
+exports[`py#agent generator > should match snapshot for generated files > agent-agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors
+from strands import Agent, tool
+from strands_tools import current_time
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="SnapshotAgent",
+        description="SnapshotAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=[log_model_errors],
+    )
+"
+`;
+exports[`py#agent generator > should match snapshot for generated files > agent-main.py 1`] = `
+"import uuid
+
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from fastapi import Request
+from proj_agent_connection import session_id_context, with_session_id
+from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from .agent import get_agent
+from .init import JsonStreamingResponse, app
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+_agent_ctx = with_session_id(
+    get_agent,
+    name="SnapshotAgent",
+    description="A Strands Agent exposed via HTTP streaming.",
+)
+_agent = _agent_ctx.__enter__()
+
+
+class InvokeInput(BaseModel):
+    message: str = Field(max_length=100000)
+
+
+class StreamChunk(BaseModel):
+    content: str
+
+
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler for agent invocation"""
+    stream = _agent.stream_async(input.message)
+    async for event in stream:
+        text = (
+            event.get("event", {})
+            .get("contentBlockDelta", {})
+            .get("delta", {})
+            .get("text")
+        )
+        if text is not None:
+            yield StreamChunk(content=text)
+        elif event.get("event", {}).get("messageStop") is not None:
+            yield StreamChunk(content="\\n")
+
+
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={
+        200: JsonStreamingResponse.openapi_response(
+            StreamChunk, "Stream of agent response chunks"
+        )
+    },
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    """Entry point for agent invocation"""
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app.add_middleware(_SessionIdMiddleware)
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
+
+
+if __name__ == "__main__":
+    uvicorn.run("proj_test_project.snapshot_agent.main:app", port=8080)
+"
+`;
+exports[`py#agent generator > should match snapshot for generated files > updated-pyproject.toml 1`] = `
+"[project]
+name = "proj.test_project"
+version = "0.1.0"
+dependencies = [
+  "proj-agent-connection",
+  "aws-lambda-powertools==3.29.0",
+  "aws-opentelemetry-distro==0.17.1",
+  "bedrock-agentcore==1.14.1",
+  "boto3==1.43.29",
+  "fastapi==0.137.1",
+  "mcp==1.27.2",
+  "strands-agents==1.43.0",
+  "strands-agents-tools==0.8.0",
+  "uvicorn==0.49.0"
+]
+
+[dependency-groups]
+dev = [ "fastapi[standard]==0.137.1" ]
+
+[tool.uv]
+dev-dependencies = [ ]
+
+[tool.uv.sources.proj-agent-connection]
+workspace = true
+"
+`;
