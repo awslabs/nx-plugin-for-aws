@@ -13,6 +13,7 @@ import {
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { kebabCase, toSnakeCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
@@ -22,11 +23,10 @@ import {
 } from '../../../utils/nx';
 import { Logger, UVProvider } from '../../../utils/nxlv-python';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
-import { kebabCase, toSnakeCase } from '../../../utils/names';
 import type { PyRdbFastApiConnectionGeneratorSchema } from './schema';
 
 export const PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyRdbFastApiConnectionGenerator = async (
   tree: Tree,
@@ -41,8 +41,7 @@ export const pyRdbFastApiConnectionGenerator = async (
     options.targetProject,
   );
 
-  addWorkspaceDependencyToPyProject(tree, sourceProject, targetProject
-  );
+  addWorkspaceDependencyToPyProject(tree, sourceProject, targetProject);
 
   if (sourceProject.targets?.['serve-local']) {
     addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {
@@ -61,7 +60,7 @@ export const pyRdbFastApiConnectionGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     sourceProject.root,
     { databasePackageAlias, rdbNameKebab, apiModuleName },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },

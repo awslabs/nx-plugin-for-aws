@@ -42,7 +42,8 @@ export interface AddRdbConstructOptions {
   framework: 'prisma' | 'sqlmodel';
   /** Local Docker tag for the Python create-db-user Lambda image. */
   createDbUserDockerImageTag?: string;
-  dockerImageTag: string;
+  /** Local Docker tag for the migration Lambda image. */
+  migrationDockerImageTag: string;
   containerEngine: Containers;
 }
 

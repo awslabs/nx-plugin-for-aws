@@ -21,7 +21,7 @@ import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyRdbMcpServerConnectionGeneratorSchema } from './schema';
 
 export const PY_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyRdbMcpServerConnectionGenerator = async (
   tree: Tree,

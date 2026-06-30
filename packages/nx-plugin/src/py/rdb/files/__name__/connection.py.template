@@ -7,7 +7,7 @@ import boto3
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
-from .utils import get_serve_local_config, build_database_url, get_database_config, is_local
+from .utils import get_local_dev_config, build_database_url, get_database_config, is_local_dev
 
 # Generated: must match runtimeConfigKey in config.json
 _runtime_config_key = '<%= runtimeConfigKey %>'
@@ -17,12 +17,12 @@ _engine = None
 
 def _create_engine():
 <%_ if (engine === 'mysql') { _%>
-    ssl_args: dict = {} if is_local() else {'ssl': ssl.create_default_context()}
+    ssl_args: dict = {} if is_local_dev() else {'ssl': ssl.create_default_context()}
 <%_ } else { _%>
-    ssl_args: dict = {} if is_local() else {'sslmode': 'verify-full'}
+    ssl_args: dict = {} if is_local_dev() else {'sslmode': 'verify-full'}
 <%_ } _%>
-    if is_local():
-        cfg = get_serve_local_config()
+    if is_local_dev():
+        cfg = get_local_dev_config()
         url = build_database_url(cfg['dbUser'], cfg['host'], cfg['port'], cfg['dbName'])
     else:
         config = get_database_config(_runtime_config_key)
@@ -33,8 +33,8 @@ def _create_engine():
 
     @event.listens_for(engine, 'do_connect')
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
-        if is_local():
-            connection_params['password'] = get_serve_local_config()['dbPassword']
+        if is_local_dev():
+            connection_params['password'] = get_local_dev_config()['dbPassword']
         else:
             config = get_database_config(_runtime_config_key)
             connection_params['password'] = boto3.client(

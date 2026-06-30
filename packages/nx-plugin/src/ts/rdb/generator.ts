@@ -148,7 +148,7 @@ export const tsRdbGenerator = async (
     'bundle',
     'migration',
   );
-  const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
+  const migrationDockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
 
   if (options.infra !== 'none') {
     await addTypeScriptBundleTarget(tree, projectConfig, {
@@ -239,7 +239,7 @@ export const tsRdbGenerator = async (
         cache: true,
         executor: 'nx:run-commands',
         options: {
-          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
         },
         dependsOn: ['bundle'],
       };
@@ -274,7 +274,7 @@ export const tsRdbGenerator = async (
         'create-db-user',
       ),
       framework: options.framework,
-      dockerImageTag,
+      migrationDockerImageTag,
       containerEngine,
     });
   }

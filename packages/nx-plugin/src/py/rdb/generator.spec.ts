@@ -71,9 +71,9 @@ describe('py#rdb generator', () => {
       },
       dependsOn: ['compile'],
     });
-    expect(projectConfig.targets.bundle).toEqual({
+    expect(projectConfig.targets['bundle-migration']).toEqual({
       cache: true,
-      outputs: ['{workspaceRoot}/dist/{projectRoot}/docker'],
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/migration'],
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -83,6 +83,17 @@ describe('py#rdb generator', () => {
           'ncp packages/db/migrations dist/packages/db/docker/migration/migrations',
           'ncp packages/db/alembic.ini dist/packages/db/docker/migration/alembic.ini',
           'ncp packages/db/Dockerfile.migration dist/packages/db/docker/migration/Dockerfile',
+        ],
+        parallel: false,
+      },
+      dependsOn: ['bundle-arm'],
+    });
+    expect(projectConfig.targets['bundle-create-db-user']).toEqual({
+      cache: true,
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/create-db-user'],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
           'rimraf dist/packages/db/docker/create-db-user',
           'make-dir dist/packages/db/docker/create-db-user',
           'ncp dist/packages/db/bundle-arm dist/packages/db/docker/create-db-user',
@@ -94,23 +105,32 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets.migrate).toEqual({
       executor: 'nx:run-commands',
-      dependsOn: ['serve-local', 'wait-for-db'],
+      dependsOn: ['dev', 'wait-for-db'],
       options: {
         command: 'uv run alembic upgrade head',
         cwd: '{projectRoot}',
-        env: { SERVE_LOCAL: 'true' },
+        env: { LOCAL_DEV: 'true' },
       },
     });
     expect(projectConfig.targets.alembic).toEqual({
       executor: 'nx:run-commands',
-      dependsOn: ['serve-local', 'wait-for-db'],
+      dependsOn: ['dev', 'wait-for-db'],
       options: {
         command: 'uv run alembic',
         cwd: '{projectRoot}',
-        env: { SERVE_LOCAL: 'true' },
+        env: { LOCAL_DEV: 'true' },
       },
     });
-    expect(projectConfig.targets.build.dependsOn).toContain('bundle');
+    expect(projectConfig.targets.bundle.dependsOn).toContain(
+      'bundle-migration',
+    );
+    expect(projectConfig.targets.bundle.dependsOn).toContain(
+      'bundle-create-db-user',
+    );
+    expect(projectConfig.targets.build.dependsOn).toContain('bundle-migration');
+    expect(projectConfig.targets.build.dependsOn).toContain(
+      'bundle-create-db-user',
+    );
     const databaseConstruct = tree.read(
       'packages/common/constructs/src/app/dbs/db.ts',
       'utf-8',
@@ -167,7 +187,7 @@ describe('py#rdb generator', () => {
         ],
         parallel: false,
       },
-      dependsOn: ['bundle'],
+      dependsOn: ['bundle-migration', 'bundle-create-db-user'],
     });
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
   });
@@ -176,8 +196,9 @@ describe('py#rdb generator', () => {
     await pyRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
 
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
-    expect(projectConfig.targets.bundle).toBeUndefined();
-    expect(projectConfig.targets['serve-local']).toBeDefined();
+    expect(projectConfig.targets['bundle-migration']).toBeUndefined();
+    expect(projectConfig.targets['bundle-create-db-user']).toBeUndefined();
+    expect(projectConfig.targets['dev']).toBeDefined();
     expect(projectConfig.targets.migrate).toBeDefined();
     expect(tree.exists('packages/common/constructs')).toBe(false);
   });
@@ -189,7 +210,8 @@ describe('py#rdb generator', () => {
 
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
     expect(projectConfig.metadata?.ports).toHaveLength(1);
-    expect(projectConfig.targets.bundle).toBeDefined();
+    expect(projectConfig.targets['bundle-migration']).toBeDefined();
+    expect(projectConfig.targets['bundle-create-db-user']).toBeDefined();
     const sharedConfig = JSON.parse(
       tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
     );

@@ -42,8 +42,9 @@ import { PY_VERSIONS, withVersions } from '../../utils/versions';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import type { PyRdbGeneratorSchema } from './schema';
 
-export const PY_RDB_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+export const PY_RDB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
+  import.meta.filename,
+);
 
 export const pyRdbGenerator = async (
   tree: Tree,
@@ -74,24 +75,25 @@ export const pyRdbGenerator = async (
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
+  const { engine } = options;
   const localDbPort = assignPort(
     tree,
     projectConfig,
-    options.engine === 'mysql' ? 3306 : 5432,
+    engine === 'mysql' ? 3306 : 5432,
   );
   const localDbHost = 'localhost';
-  const localDbUser = options.engine === 'mysql' ? 'root' : 'dbadmin';
+  const localDbUser = engine === 'mysql' ? 'root' : 'dbadmin';
   const localDbPassword = 'password';
   const containerName = `${getNpmScope(tree)}-${databaseName}`;
   const dockerImage =
-    options.engine === 'mysql'
+    engine === 'mysql'
       ? 'public.ecr.aws/docker/library/mysql:8.0.44'
       : 'public.ecr.aws/docker/library/postgres:17.7';
 
   const templateOptions = {
     name: normalizedModuleName,
     runtimeConfigKey: nameClassName,
-    engine: options.engine,
+    engine,
     localDbPort,
     localDbHost,
     localDbName: databaseName,
@@ -110,17 +112,17 @@ export const pyRdbGenerator = async (
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files'),
     dir,
     templateOptions,
   );
 
-  await sharedRdbScriptsGenerator(tree);
-  // Used by local dev script wait-for-db.ts
+  await sharedRdbScriptsGenerator(tree, engine);
+  // Used by local dev script wait-for-*-db.ts
   addDependenciesToPackageJson(
     tree,
-    withVersions([options.engine === 'mysql' ? 'mariadb' : 'pg']),
-    {},
+    withVersions([engine === 'mysql' ? 'mariadb' : 'pg']),
+    engine === 'mysql' ? {} : withVersions(['@types/pg']),
   );
   const scriptsDir = relative(
     dir,
@@ -140,7 +142,7 @@ export const pyRdbGenerator = async (
     'docker',
     'create-db-user',
   );
-  const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
+  const migrationDockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
   const createDbUserDockerImageTag = `${getNpmScope(tree)}-${kebabCase(
     options.name,
   )}-create-db-user:latest`;
@@ -151,9 +153,9 @@ export const pyRdbGenerator = async (
       { pythonPlatform: 'aarch64-manylinux_2_28' },
     );
 
-    projectConfig.targets.bundle = {
+    projectConfig.targets['bundle-migration'] = {
       cache: true,
-      outputs: ['{workspaceRoot}/dist/{projectRoot}/docker'],
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/migration'],
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -172,6 +174,17 @@ export const pyRdbGenerator = async (
             joinPathFragments(dir, 'Dockerfile.migration'),
             joinPathFragments(migrationBundleDir, 'Dockerfile'),
           ),
+        ],
+        parallel: false,
+      },
+      dependsOn: [bundleTargetName],
+    };
+    projectConfig.targets['bundle-create-db-user'] = {
+      cache: true,
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/create-db-user'],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
           fs.rm(createDbUserBundleDir),
           fs.mkdir(createDbUserBundleDir),
           fs.cp(bundleOutputDir, createDbUserBundleDir),
@@ -184,6 +197,16 @@ export const pyRdbGenerator = async (
       },
       dependsOn: [bundleTargetName],
     };
+    addDependencyToTargetIfNotPresent(
+      projectConfig,
+      'bundle',
+      'bundle-migration',
+    );
+    addDependencyToTargetIfNotPresent(
+      projectConfig,
+      'bundle',
+      'bundle-create-db-user',
+    );
   }
 
   projectConfig.targets['pull-image'] = {
@@ -193,7 +216,7 @@ export const pyRdbGenerator = async (
       cwd: '{projectRoot}',
     },
   };
-  projectConfig.targets['serve-local'] = {
+  projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
     continuous: true,
     options: {
@@ -204,31 +227,31 @@ export const pyRdbGenerator = async (
   };
   projectConfig.targets['wait-for-db'] = {
     executor: 'nx:run-commands',
-    dependsOn: ['serve-local'],
+    dependsOn: ['dev'],
     options: {
-      command: `tsx ${scriptsDir}/wait-for-db.ts`,
+      command: `tsx ${scriptsDir}/wait-for-${engine}-db.ts`,
       cwd: '{projectRoot}',
     },
   };
   projectConfig.targets.migrate = {
     executor: 'nx:run-commands',
-    dependsOn: ['serve-local', 'wait-for-db'],
+    dependsOn: ['dev', 'wait-for-db'],
     options: {
       command: 'uv run alembic upgrade head',
       cwd: '{projectRoot}',
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   };
   projectConfig.targets.alembic = {
     executor: 'nx:run-commands',
-    dependsOn: ['serve-local', 'wait-for-db'],
+    dependsOn: ['dev', 'wait-for-db'],
     options: {
       command: 'uv run alembic',
       cwd: '{projectRoot}',
       env: {
-        SERVE_LOCAL: 'true',
+        LOCAL_DEV: 'true',
       },
     },
   };
@@ -241,21 +264,30 @@ export const pyRdbGenerator = async (
         executor: 'nx:run-commands',
         options: {
           commands: [
-            `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+            `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
             `${containerEngine} build --platform linux/arm64 --provenance=false -t ${createDbUserDockerImageTag} ${createDbUserBundleDir}`,
           ],
           parallel: false,
         },
-        dependsOn: ['bundle'],
+        dependsOn: ['bundle-migration', 'bundle-create-db-user'],
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
     }
-    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+    addDependencyToTargetIfNotPresent(
+      projectConfig,
+      'build',
+      'bundle-migration',
+    );
+    addDependencyToTargetIfNotPresent(
+      projectConfig,
+      'build',
+      'bundle-create-db-user',
+    );
   }
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
   addGeneratorMetadata(tree, fullyQualifiedName, PY_RDB_GENERATOR_INFO, {
-    engine: options.engine,
+    engine,
   });
 
   if (options.infra !== 'none') {
@@ -270,12 +302,12 @@ export const pyRdbGenerator = async (
       databasePackageAlias: normalizedModuleName,
       databaseName,
       adminUser: databaseUser,
-      engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
+      engine,
       migrationBundleDir,
       createDbUserBundleDir,
       framework: 'sqlmodel',
       createDbUserDockerImageTag,
-      dockerImageTag,
+      migrationDockerImageTag,
       containerEngine,
     });
   }
@@ -283,7 +315,7 @@ export const pyRdbGenerator = async (
   addDependenciesToPyProjectToml(tree, dir, [
     'sqlmodel',
     'alembic',
-    ...(options.engine === 'mysql'
+    ...(engine === 'mysql'
       ? (['pymysql', 'boto3', 'aws-lambda-powertools'] as const)
       : (['psycopg[binary,pool]', 'boto3', 'aws-lambda-powertools'] as const)),
   ]);

@@ -1,18 +1,18 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 1`] = `
-"from collections.abc import Generator
-import ssl
+"import ssl
+from collections.abc import Generator
 
 import boto3
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
 from .utils import (
-    get_serve_local_config,
     build_database_url,
     get_database_config,
-    is_local,
+    get_local_dev_config,
+    is_local_dev,
 )
 
 # Generated: must match runtimeConfigKey in config.json
@@ -22,9 +22,9 @@ _engine = None
 
 
 def _create_engine():
-    ssl_args: dict = {} if is_local() else {"ssl": ssl.create_default_context()}
-    if is_local():
-        cfg = get_serve_local_config()
+    ssl_args: dict = {} if is_local_dev() else {"ssl": ssl.create_default_context()}
+    if is_local_dev():
+        cfg = get_local_dev_config()
         url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
     else:
         config = get_database_config(_runtime_config_key)
@@ -38,8 +38,8 @@ def _create_engine():
 
     @event.listens_for(engine, "do_connect")
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
-        if is_local():
-            connection_params["password"] = get_serve_local_config()["dbPassword"]
+        if is_local_dev():
+            connection_params["password"] = get_local_dev_config()["dbPassword"]
         else:
             config = get_database_config(_runtime_config_key)
             connection_params["password"] = boto3.client(
@@ -114,9 +114,8 @@ def handler(_event, _context):
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 3`] = `
 "import secrets
-from typing import Any
-
 import ssl
+from typing import Any
 
 import pymysql
 
@@ -214,19 +213,19 @@ exports[`py#rdb generator > should generate Terraform modules 1`] = `
   required_providers {
     archive = {
       source  = "hashicorp/archive"
-      version = "~> 2.5"
+      version = "2.8.0"
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.33"
+      version = "6.52.0"
     }
     null = {
       source  = "hashicorp/null"
-      version = ">= 3.0"
+      version = "3.3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.0"
+      version = "3.9.0"
     }
   }
 }
@@ -330,7 +329,7 @@ variable "tags" {
   default     = {}
 }
 
-variable "docker_image_tag" {
+variable "migration_docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
   default     = "proj-db-migration:latest"
@@ -472,7 +471,7 @@ resource "aws_ecr_repository_policy" "migration_handler" {
 }
 
 data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.docker_image_tag} --format '{{.Id}}')'\\"}' "]
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.migration_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
@@ -491,7 +490,7 @@ resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
     repository_url   = aws_ecr_repository.migration_handler.repository_url
-    docker_image_tag = var.docker_image_tag
+    migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
     create_db_user_docker_digest    = data.external.create_db_user_docker_digest.result.digest
     create_db_user_docker_image_tag = var.create_db_user_docker_image_tag
@@ -501,7 +500,7 @@ resource "null_resource" "docker_publish" {
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URL"
-      docker tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      docker tag "$MIGRATION_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
       docker push "$REPOSITORY_URL:$IMAGE_TAG"
       docker tag "$CREATE_DB_USER_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
       docker push "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
@@ -509,7 +508,7 @@ resource "null_resource" "docker_publish" {
     environment = {
       AWS_REGION       = data.aws_region.current.region
       REPOSITORY_URL   = self.triggers.repository_url
-      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      MIGRATION_DOCKER_IMAGE_TAG = self.triggers.migration_docker_image_tag
       IMAGE_TAG        = self.triggers.image_tag
       CREATE_DB_USER_DOCKER_IMAGE_TAG = self.triggers.create_db_user_docker_image_tag
       CREATE_DB_USER_IMAGE_TAG        = self.triggers.create_db_user_image_tag
@@ -939,11 +938,11 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import URL, engine_from_config, pool
-from sqlmodel import SQLModel
 
 # Import all models to register them in SQLModel.metadata
 from proj_db.models import *  # noqa: F401, F403
+from sqlalchemy import URL, engine_from_config, pool
+from sqlmodel import SQLModel
 
 config = context.config
 
@@ -953,19 +952,11 @@ if config.config_file_name is not None:
 target_metadata = SQLModel.metadata
 
 
-def render_item(type_, obj, autogen_context):
-    if type_ == "type" and type(obj).__module__.startswith("sqlmodel"):
-        autogen_context.imports.add("import sqlmodel")
-        impl_cls = obj.impl if isinstance(obj.impl, type) else type(obj.impl)
-        return f"sqlmodel.{impl_cls.__name__}()"
-    return False
-
-
 def _get_local_url():
-    if os.environ.get("SERVE_LOCAL") == "true":
+    if os.environ.get("LOCAL_DEV") == "true":
         config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
         with open(config_path) as f:
-            cfg = json.load(f)["serveLocal"]
+            cfg = json.load(f)["localDev"]
         engine = cfg["dbEngine"]
         driver = "mysql+pymysql" if engine == "mysql" else "postgresql+psycopg"
         return URL.create(
@@ -987,7 +978,6 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_item=render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -1001,7 +991,6 @@ def run_migrations_online() -> None:
         context.configure(
             connection=supplied_connection,
             target_metadata=target_metadata,
-            render_item=render_item,
         )
         with context.begin_transaction():
             context.run_migrations()
@@ -1017,7 +1006,6 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_item=render_item,
         )
         with context.begin_transaction():
             context.run_migrations()
@@ -1065,9 +1053,9 @@ def downgrade() -> None:
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/versions/.gitkeep 1`] = `""`;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/__init__.py 1`] = `
-"from .connection import get_engine, get_session, is_local
+"from .connection import get_engine, get_session, is_local_dev
 
-__all__ = ["get_engine", "get_session", "is_local"]
+__all__ = ["get_engine", "get_session", "is_local_dev"]
 "
 `;
 
@@ -1079,10 +1067,10 @@ from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
 from .utils import (
-    get_serve_local_config,
     build_database_url,
     get_database_config,
-    is_local,
+    get_local_dev_config,
+    is_local_dev,
 )
 
 # Generated: must match runtimeConfigKey in config.json
@@ -1092,9 +1080,9 @@ _engine = None
 
 
 def _create_engine():
-    ssl_args: dict = {} if is_local() else {"sslmode": "verify-full"}
-    if is_local():
-        cfg = get_serve_local_config()
+    ssl_args: dict = {} if is_local_dev() else {"sslmode": "verify-full"}
+    if is_local_dev():
+        cfg = get_local_dev_config()
         url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
     else:
         config = get_database_config(_runtime_config_key)
@@ -1108,8 +1096,8 @@ def _create_engine():
 
     @event.listens_for(engine, "do_connect")
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
-        if is_local():
-            connection_params["password"] = get_serve_local_config()["dbPassword"]
+        if is_local_dev():
+            connection_params["password"] = get_local_dev_config()["dbPassword"]
         else:
             config = get_database_config(_runtime_config_key)
             connection_params["password"] = boto3.client(
@@ -1266,13 +1254,16 @@ __all__ = ["ExampleModel"]
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/models/example.py 1`] = `
-"from sqlmodel import Field, SQLModel
+"from sqlalchemy import Column, String
+from sqlmodel import Field, SQLModel
 
 
 class ExampleModel(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    name: str
-    description: str | None = None
+    name: str = Field(sa_column=Column(String(255), nullable=False))
+    description: str | None = Field(
+        default=None, sa_column=Column(String(255), nullable=True)
+    )
 "
 `;
 
@@ -1310,14 +1301,14 @@ def build_database_url(
     )
 
 
-def is_local() -> bool:
-    return os.environ.get("SERVE_LOCAL") == "true"
+def is_local_dev() -> bool:
+    return os.environ.get("LOCAL_DEV") == "true"
 
 
-def get_serve_local_config() -> dict:
+def get_local_dev_config() -> dict:
     config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
     with open(config_path) as f:
-        return json.load(f)["serveLocal"]
+        return json.load(f)["localDev"]
 
 
 def get_database_secret() -> DatabaseSecret:
@@ -1464,7 +1455,7 @@ CMD ["proj_db.create_db_user_handler.handler"]
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 4`] = `
 "{
   "runtimeConfigKey": "Db",
-  "serveLocal": {
+  "localDev": {
     "containerEngine": "docker",
     "containerName": "proj-database_name",
     "image": "public.ecr.aws/docker/library/postgres:17.7",

@@ -120,10 +120,10 @@ variable "tags" {
   default     = {}
 }
 
-variable "docker_image_tag" {
+variable "migration_docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
-  default     = "<%= dockerImageTag %>"
+  default     = "<%= migrationDockerImageTag %>"
 }
 
 <%_ if (framework === 'sqlmodel') { _%>
@@ -305,7 +305,7 @@ resource "aws_ecr_repository_policy" "migration_handler" {
 }
 
 data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containerEngine %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containerEngine %> inspect ${var.migration_docker_image_tag} --format '{{.Id}}')'\"}' "]
 }
 
 locals {
@@ -326,7 +326,7 @@ resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
     repository_url   = aws_ecr_repository.migration_handler.repository_url
-    docker_image_tag = var.docker_image_tag
+    migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
 <%_ if (framework === 'sqlmodel') { _%>
     create_db_user_docker_digest    = data.external.create_db_user_docker_digest.result.digest
@@ -338,7 +338,7 @@ resource "null_resource" "docker_publish" {
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region "$AWS_REGION" | <%= containerEngine %> login --username AWS --password-stdin "$REPOSITORY_URL"
-      <%= containerEngine %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      <%= containerEngine %> tag "$MIGRATION_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
       <%= containerEngine %> push "$REPOSITORY_URL:$IMAGE_TAG"
 <%_ if (framework === 'sqlmodel') { _%>
       <%= containerEngine %> tag "$CREATE_DB_USER_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
@@ -348,7 +348,7 @@ resource "null_resource" "docker_publish" {
     environment = {
       AWS_REGION       = data.aws_region.current.region
       REPOSITORY_URL   = self.triggers.repository_url
-      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      MIGRATION_DOCKER_IMAGE_TAG = self.triggers.migration_docker_image_tag
       IMAGE_TAG        = self.triggers.image_tag
 <%_ if (framework === 'sqlmodel') { _%>
       CREATE_DB_USER_DOCKER_IMAGE_TAG = self.triggers.create_db_user_docker_image_tag

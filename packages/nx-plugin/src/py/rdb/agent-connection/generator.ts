@@ -21,7 +21,7 @@ import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyRdbAgentConnectionGeneratorSchema } from './schema';
 
 export const PY_RDB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
-  getGeneratorInfo(__filename);
+  getGeneratorInfo(import.meta.filename);
 
 export const pyRdbAgentConnectionGenerator = async (
   tree: Tree,
