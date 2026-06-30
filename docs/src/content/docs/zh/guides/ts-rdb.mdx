@@ -701,6 +701,46 @@ module "my_database" {
 </Fragment>
 </Infrastructure>
 
+### 审计日志
+
+审计日志**默认启用**，并将查询级别的审计跟踪导出到 [CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html)，为您提供谁连接以及进行了哪些架构和权限更改的记录。这为检测和调查未经授权的数据访问提供了审计跟踪。Aurora PostgreSQL 使用 [pgAudit](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html) 扩展；Aurora MySQL 使用[高级审计](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html)。
+
+为了最小化记录个人身份信息 (PII) 的风险，默认配置**仅审计连接、架构 (DDL) 和权限 (DCL) 事件** — 它故意排除语句和数据操作 (DML) 日志记录，后者会捕获查询中嵌入的行值。pgAudit 还会从日志中编辑明文密码。
+
+:::caution[审计日志和 PII]
+扩展 `auditLog` 以包含数据读取/写入（PostgreSQL 的 `read,write` 或 MySQL 的 `QUERY`/`QUERY_DML`）将捕获完整的语句文本，包括 `WHERE` 和 `VALUES` 子句中的任何值。仅当您的合规要求证明其合理性时才这样做，并确保目标日志组的访问受到严格限制。考虑使用 [CloudWatch Logs 数据保护策略](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html)来屏蔽敏感数据，并根据您的合规需求调整日志保留期。
+:::
+
+您可以自定义审计的事件类别，或完全禁用审计日志：
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableAuditLogging: true, // default
+  auditLog: 'ddl,role,misc', // pgAudit classes (PostgreSQL); default shown
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_audit_logging = true               # default
+  audit_log            = "ddl,role,misc"    # pgAudit classes (PostgreSQL); default shown
+}
+```
+</Fragment>
+</Infrastructure>
+
+对于更严格的合规要求，其中审计跟踪必须防篡改且超出数据库管理员的控制范围，请考虑使用 [Database Activity Streams](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/DBActivityStreams.html)。请注意，活动流会捕获每个语句的完整 SQL 文本，包括任何 PII。
+
 ### 加密密钥轮换
 
 用于加密 Aurora 集群及其凭证密钥的 KMS 密钥默认启用自动密钥轮换。如果您的安全策略在外部管理轮换，请禁用它。

@@ -701,6 +701,46 @@ module "my_database" {
 </Fragment>
 </Infrastructure>
 
+### Registro de Auditoría
+
+El registro de auditoría está **habilitado por defecto** y exporta un registro de auditoría a nivel de consulta a [CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html), proporcionándote un registro de quién se conectó y qué cambios de esquema y privilegios se realizaron. Esto proporciona un registro de auditoría para detectar e investigar el acceso no autorizado a datos. Aurora PostgreSQL utiliza la extensión [pgAudit](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html); Aurora MySQL utiliza [Advanced Auditing](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html).
+
+Para minimizar el riesgo de registrar información de identificación personal (PII), la configuración predeterminada audita **solo eventos de conexión, esquema (DDL) y privilegios (DCL)** — excluye deliberadamente el registro de sentencias y manipulación de datos (DML), que capturaría valores de filas incrustados en las consultas. pgAudit además redacta contraseñas en texto claro del registro.
+
+:::caution[Registros de auditoría y PII]
+Expandir `auditLog` para incluir lecturas/escrituras de datos (`read,write` para PostgreSQL o `QUERY`/`QUERY_DML` para MySQL) capturará el texto completo de las sentencias, incluyendo cualquier valor en las cláusulas `WHERE` y `VALUES`. Solo haz esto si tus requisitos de cumplimiento lo justifican, y asegúrate de que el acceso al grupo de registros de destino esté estrictamente restringido. Considera una [política de protección de datos de CloudWatch Logs](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html) para enmascarar datos sensibles, y ajusta la retención de registros según tus necesidades de cumplimiento.
+:::
+
+Puedes personalizar las clases de eventos auditados, o deshabilitar el registro de auditoría por completo:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableAuditLogging: true, // default
+  auditLog: 'ddl,role,misc', // pgAudit classes (PostgreSQL); default shown
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_audit_logging = true               # default
+  audit_log            = "ddl,role,misc"    # pgAudit classes (PostgreSQL); default shown
+}
+```
+</Fragment>
+</Infrastructure>
+
+Para requisitos de cumplimiento más estrictos donde el registro de auditoría debe ser resistente a manipulaciones y estar fuera del alcance de los administradores de bases de datos, considera [Database Activity Streams](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/DBActivityStreams.html). Ten en cuenta que los flujos de actividad capturan el texto SQL completo de cada sentencia, incluyendo cualquier PII.
+
 ### Rotación de Clave de Cifrado
 
 La clave KMS utilizada para cifrar el clúster Aurora y su secreto de credenciales tiene habilitada la rotación automática de claves por defecto. Deshabilítala si tu política de seguridad gestiona la rotación externamente.

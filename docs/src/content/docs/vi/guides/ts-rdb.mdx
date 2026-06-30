@@ -710,6 +710,46 @@ module "my_database" {
 </Fragment>
 </Infrastructure>
 
+### Audit Logging
+
+Audit logging được **bật theo mặc định** và xuất audit trail ở cấp độ query sang [CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html), cung cấp cho bạn bản ghi về ai đã kết nối và những thay đổi schema và privilege nào đã được thực hiện. Điều này cung cấp audit trail để phát hiện và điều tra truy cập dữ liệu trái phép. Aurora PostgreSQL sử dụng extension [pgAudit](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html); Aurora MySQL sử dụng [Advanced Auditing](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html).
+
+Để giảm thiểu rủi ro ghi lại thông tin nhận dạng cá nhân (PII), cấu hình mặc định chỉ audit **các sự kiện connection, schema (DDL) và privilege (DCL)** — nó cố ý loại trừ statement và data manipulation (DML) logging, vốn sẽ ghi lại các giá trị hàng được nhúng trong các query. pgAudit cũng ẩn các mật khẩu dạng cleartext khỏi log.
+
+:::caution[Audit logs và PII]
+Mở rộng `auditLog` để bao gồm data reads/writes (`read,write` cho PostgreSQL hoặc `QUERY`/`QUERY_DML` cho MySQL) sẽ ghi lại toàn bộ văn bản statement, bao gồm bất kỳ giá trị nào trong các mệnh đề `WHERE` và `VALUES`. Chỉ làm điều này nếu yêu cầu tuân thủ của bạn biện minh cho nó, và đảm bảo quyền truy cập vào log group đích được hạn chế chặt chẽ. Cân nhắc sử dụng [CloudWatch Logs data protection policy](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html) để che giấu dữ liệu nhạy cảm, và điều chỉnh thời gian lưu giữ log theo nhu cầu tuân thủ của bạn.
+:::
+
+Bạn có thể tùy chỉnh các lớp sự kiện được audit, hoặc tắt hoàn toàn audit logging:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableAuditLogging: true, // default
+  auditLog: 'ddl,role,misc', // pgAudit classes (PostgreSQL); default shown
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_audit_logging = true               # default
+  audit_log            = "ddl,role,misc"    # pgAudit classes (PostgreSQL); default shown
+}
+```
+</Fragment>
+</Infrastructure>
+
+Đối với các yêu cầu tuân thủ nghiêm ngặt hơn khi audit trail phải chống giả mạo và nằm ngoài tầm với của database administrators, hãy cân nhắc [Database Activity Streams](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/DBActivityStreams.html). Lưu ý rằng activity streams ghi lại toàn bộ văn bản SQL của mọi statement, bao gồm cả PII.
+
 ### Encryption Key Rotation
 
 KMS key được sử dụng để mã hóa Aurora cluster và credentials secret của nó có tính năng tự động xoay key được bật theo mặc định. Tắt nó nếu chính sách bảo mật của bạn quản lý việc xoay key từ bên ngoài.

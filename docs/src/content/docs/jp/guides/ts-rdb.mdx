@@ -701,6 +701,46 @@ module "my_database" {
 </Fragment>
 </Infrastructure>
 
+### 監査ログ
+
+監査ログは**デフォルトで有効**になっており、クエリレベルの監査証跡を[CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html)にエクスポートします。これにより、誰が接続し、どのようなスキーマや権限の変更が行われたかの記録が得られます。これは、不正なデータアクセスを検出・調査するための監査証跡を提供します。Aurora PostgreSQLは[pgAudit](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html)拡張機能を使用し、Aurora MySQLは[Advanced Auditing](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html)を使用します。
+
+個人識別情報（PII）を記録するリスクを最小限に抑えるため、デフォルト設定では**接続、スキーマ（DDL）、権限（DCL）イベントのみ**を監査します。これは、クエリに埋め込まれた行の値をキャプチャするステートメントおよびデータ操作（DML）ログを意図的に除外しています。pgAuditはさらに、ログから平文パスワードを編集します。
+
+:::caution[監査ログとPII]
+`auditLog`を拡張してデータの読み取り/書き込みを含める（PostgreSQLの場合は`read,write`、MySQLの場合は`QUERY`/`QUERY_DML`）と、`WHERE`句や`VALUES`句の値を含む完全なステートメントテキストがキャプチャされます。コンプライアンス要件がそれを正当化する場合にのみこれを行い、宛先ログループへのアクセスが厳しく制限されていることを確認してください。機密データをマスクするために[CloudWatch Logsデータ保護ポリシー](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html)を検討し、コンプライアンスニーズに合わせてログ保持期間を調整してください。
+:::
+
+監査対象のイベントクラスをカスタマイズしたり、監査ログを完全に無効にしたりできます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableAuditLogging: true, // default
+  auditLog: 'ddl,role,misc', // pgAudit classes (PostgreSQL); default shown
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_audit_logging = true               # default
+  audit_log            = "ddl,role,misc"    # pgAudit classes (PostgreSQL); default shown
+}
+```
+</Fragment>
+</Infrastructure>
+
+監査証跡が改ざん防止され、データベース管理者の手の届かないところにある必要があるより厳格なコンプライアンス要件については、[Database Activity Streams](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/DBActivityStreams.html)を検討してください。アクティビティストリームは、PIIを含むすべてのステートメントの完全なSQLテキストをキャプチャすることに注意してください。
+
 ### 暗号化キーのローテーション
 
 Auroraクラスターとその認証情報シークレットの暗号化に使用されるKMSキーは、デフォルトで自動キーローテーションが有効になっています。セキュリティポリシーが外部でローテーションを管理している場合は、無効にします。

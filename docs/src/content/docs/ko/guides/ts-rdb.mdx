@@ -701,6 +701,46 @@ module "my_database" {
 </Fragment>
 </Infrastructure>
 
+### 감사 로깅
+
+감사 로깅은 **기본적으로 활성화**되어 있으며 쿼리 수준의 감사 추적을 [CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html)로 내보내어 누가 연결했고 어떤 스키마 및 권한 변경이 이루어졌는지 기록합니다. 이는 무단 데이터 액세스를 탐지하고 조사하기 위한 감사 추적을 제공합니다. Aurora PostgreSQL은 [pgAudit](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html) 확장을 사용하고, Aurora MySQL은 [Advanced Auditing](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html)을 사용합니다.
+
+개인 식별 정보(PII) 기록 위험을 최소화하기 위해 기본 구성은 **연결, 스키마(DDL) 및 권한(DCL) 이벤트만** 감사합니다. 쿼리에 포함된 행 값을 캡처하는 문장 및 데이터 조작(DML) 로깅은 의도적으로 제외됩니다. pgAudit는 추가로 로그에서 평문 비밀번호를 편집합니다.
+
+:::caution[감사 로그와 PII]
+`auditLog`를 확장하여 데이터 읽기/쓰기를 포함하면(PostgreSQL의 경우 `read,write` 또는 MySQL의 경우 `QUERY`/`QUERY_DML`) `WHERE` 및 `VALUES` 절의 값을 포함한 전체 문장 텍스트가 캡처됩니다. 규정 준수 요구 사항이 정당화하는 경우에만 이를 수행하고, 대상 로그 그룹의 액세스가 엄격하게 제한되도록 하세요. 민감한 데이터를 마스킹하려면 [CloudWatch Logs 데이터 보호 정책](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html)을 고려하고, 규정 준수 요구 사항에 맞게 로그 보존 기간을 조정하세요.
+:::
+
+감사되는 이벤트 클래스를 사용자 정의하거나 감사 로깅을 완전히 비활성화할 수 있습니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableAuditLogging: true, // default
+  auditLog: 'ddl,role,misc', // pgAudit classes (PostgreSQL); default shown
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_audit_logging = true               # default
+  audit_log            = "ddl,role,misc"    # pgAudit classes (PostgreSQL); default shown
+}
+```
+</Fragment>
+</Infrastructure>
+
+감사 추적이 변조 방지되어야 하고 데이터베이스 관리자의 범위를 벗어나야 하는 더 엄격한 규정 준수 요구 사항의 경우 [Database Activity Streams](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/DBActivityStreams.html)를 고려하세요. 활동 스트림은 PII를 포함한 모든 문장의 전체 SQL 텍스트를 캡처한다는 점에 유의하세요.
+
 ### 암호화 키 로테이션
 
 Aurora 클러스터와 자격 증명 시크릿을 암호화하는 데 사용되는 KMS 키는 기본적으로 자동 키 로테이션이 활성화되어 있습니다. 보안 정책이 외부에서 로테이션을 관리하는 경우 비활성화하세요.
