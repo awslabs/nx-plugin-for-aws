@@ -131,6 +131,32 @@ runs:
         key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
         restore-keys: |
           ${{ runner.os }}-pnpm-store-
+    # Smoke tests generate workspaces that install with npm and yarn, hitting
+    # the public registry uncached on every run. Persist their download caches
+    # (keyed on the versions the generators pin) to avoid re-downloading.
+    - name: Get npm/yarn cache directories
+      id: pm-cache
+      shell: bash
+      run: |
+        echo "NPM_PATH=$(npm config get cache)" >> $GITHUB_OUTPUT
+        echo "YARN_CLASSIC_PATH=${HOME}/.cache/yarn" >> $GITHUB_OUTPUT
+        echo "YARN_BERRY_PATH=${HOME}/.yarn/berry/cache" >> $GITHUB_OUTPUT
+    - uses: actions/cache@v4
+      name: Setup npm cache
+      with:
+        path: ${{ steps.pm-cache.outputs.NPM_PATH }}
+        key: ${{ runner.os }}-npm-cache-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}
+        restore-keys: |
+          ${{ runner.os }}-npm-cache-
+    - uses: actions/cache@v4
+      name: Setup yarn cache
+      with:
+        path: |
+          ${{ steps.pm-cache.outputs.YARN_CLASSIC_PATH }}
+          ${{ steps.pm-cache.outputs.YARN_BERRY_PATH }}
+        key: ${{ runner.os }}-yarn-cache-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}
+        restore-keys: |
+          ${{ runner.os }}-yarn-cache-
     - name: Update NPM
       if: ${{ runner.os != 'Windows' }}
       shell: bash
