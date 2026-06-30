@@ -18,7 +18,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { PY_VERSIONS } from '../versions';
+import { PY_VERSIONS, terraformProviderVersions } from '../versions';
 
 export interface AddWebsiteInfraOptions {
   websiteProjectName: string;
@@ -129,7 +129,11 @@ const addWebsiteTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
-    { ...options, boto3Version: PY_VERSIONS.boto3 },
+    {
+      ...options,
+      boto3Version: PY_VERSIONS.boto3,
+      ...terraformProviderVersions(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -139,7 +143,7 @@ const addWebsiteTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app'),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

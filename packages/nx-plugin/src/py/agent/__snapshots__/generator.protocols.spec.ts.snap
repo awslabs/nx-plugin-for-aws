@@ -1,5 +1,100 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`py#agent generator > should match snapshot for Terraform generated files > terraform-agent.tf 1`] = `
+"variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). The agent reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
+  type        = string
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "TerraformSnapshotAgent"
+  docker_image_tag = "proj-terraform-snapshot-agent:latest"
+  server_protocol = "HTTP"
+
+  env = merge({
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+  }, var.env)
+  additional_iam_policy_statements = concat([
+    {
+      Effect   = "Allow"
+      Action   = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    },
+    # Grant access for the agent to invoke bedrock models
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ], var.additional_iam_policy_statements)
+  tags = var.tags
+}
+
+# Add agent runtime ARN to runtime config
+module "add_agent_runtime_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "agentRuntimes"
+  value     = { "TerraformSnapshotAgent" = module.agent_core_runtime.agent_core_runtime_arn }
+
+  depends_on = [module.agent_core_runtime]
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the agent core runtime role"
+  value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
+  value       = var.appconfig_application_id
+}
+"
+`;
+
 exports[`py#agent generator > should match snapshot for Terraform generated files > terraform-agent-core-runtime.tf 1`] = `
 "terraform {
   required_version = ">= 1.0"
@@ -7,15 +102,15 @@ exports[`py#agent generator > should match snapshot for Terraform generated file
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.52"
+      version = "6.52.0"
     }
     null = {
       source  = "hashicorp/null"
-      version = ">= 3.0"
+      version = "3.3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.0"
+      version = "3.9.0"
     }
   }
 }
@@ -435,100 +530,6 @@ output "agent_runtime_id" {
 output "agent_runtime_version" {
   description = "Version of the Bedrock Agent Core runtime"
   value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_version
-}
-"
-`;
-exports[`py#agent generator > should match snapshot for Terraform generated files > terraform-agent.tf 1`] = `
-"variable "env" {
-  description = "Environment variables to pass to the agent core runtime"
-  type        = map(string)
-  default     = {}
-}
-
-variable "additional_iam_policy_statements" {
-  description = "Additional IAM policy statements to attach to the agent core runtime role"
-  type = list(object({
-    Effect   = string
-    Action   = list(string)
-    Resource = list(string)
-  }))
-  default = []
-}
-
-variable "tags" {
-  description = "Tags to apply to resources"
-  type        = map(string)
-  default     = {}
-}
-
-variable "appconfig_application_id" {
-  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). The agent reads its runtime configuration from this application."
-  type        = string
-}
-
-variable "appconfig_application_arn" {
-  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
-  type        = string
-}
-
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "TerraformSnapshotAgent"
-  docker_image_tag = "proj-terraform-snapshot-agent:latest"
-  server_protocol = "HTTP"
-
-  env = merge({
-    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
-  }, var.env)
-  additional_iam_policy_statements = concat([
-    {
-      Effect   = "Allow"
-      Action   = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = ["\${var.appconfig_application_arn}/*"]
-    },
-    # Grant access for the agent to invoke bedrock models
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ]
-      Resource = [
-        "arn:aws:bedrock:*:*:foundation-model/*",
-        "arn:aws:bedrock:*:*:inference-profile/*"
-      ]
-    }
-  ], var.additional_iam_policy_statements)
-  tags = var.tags
-}
-
-# Add agent runtime ARN to runtime config
-module "add_agent_runtime_to_runtime_config" {
-  source = "../../../core/runtime-config/entry"
-
-  namespace = "agentcore"
-  key       = "agentRuntimes"
-  value     = { "TerraformSnapshotAgent" = module.agent_core_runtime.agent_core_runtime_arn }
-
-  depends_on = [module.agent_core_runtime]
-}
-
-output "agent_core_runtime_role_arn" {
-  description = "ARN of the agent core runtime role"
-  value       = module.agent_core_runtime.agent_core_runtime_role_arn
-}
-
-output "agent_core_runtime_arn" {
-  description = "ARN of the Bedrock Agent Core runtime"
-  value       = module.agent_core_runtime.agent_core_runtime_arn
-}
-
-output "appconfig_application_id" {
-  description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
-  value       = var.appconfig_application_id
 }
 "
 `;

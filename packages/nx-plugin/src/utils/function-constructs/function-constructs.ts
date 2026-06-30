@@ -18,6 +18,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
+import { terraformProviderVersions } from '../versions';
 
 export interface AddLambdaFunctionConstructOptions {
   functionProjectName: string;
@@ -143,6 +144,7 @@ const addLambdaFunctionTerraformModules = (
     {
       ...options,
       runtime: options.runtime === 'python' ? 'python3.14' : 'nodejs22.x',
+      ...terraformProviderVersions(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

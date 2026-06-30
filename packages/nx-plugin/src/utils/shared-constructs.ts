@@ -25,7 +25,7 @@ import {
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from './shared-constructs-constants';
-import { withVersions } from './versions';
+import { terraformProviderVersions, withVersions } from './versions';
 
 export interface SharedConstructsGeneratorOptions {
   iac: Iac;
@@ -143,7 +143,7 @@ export async function sharedConstructsGenerator(
         tree,
         joinPathFragments(import.meta.dirname, 'files', 'terraform'),
         terraformLibPath,
-        {},
+        { ...terraformProviderVersions() },
         {
           overwriteStrategy: OverwriteStrategy.KeepExisting,
         },
