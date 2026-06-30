@@ -41,10 +41,7 @@ export const pyRdbFastApiConnectionGenerator = async (
     options.targetProject,
   );
 
-  addWorkspaceDependencyToPyProject(
-    tree,
-    sourceProject.root,
-    targetProject.name!,
+  addWorkspaceDependencyToPyProject(tree, sourceProject, targetProject
   );
 
   if (sourceProject.targets?.['serve-local']) {
