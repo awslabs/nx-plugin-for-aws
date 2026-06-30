@@ -19,4 +19,6 @@ export interface LicenseGeneratorSchema {
    * Whether to configure dependency license allowlist checking.
    */
   dependencyCheck?: boolean;
+
+  preferInstallDependencies?: boolean;
 }

@@ -22,7 +22,7 @@ describe('infra generator', () => {
   const options: TsInfraGeneratorSchema = {
     name: 'test',
     directory: 'packages',
-    skipInstall: true,
+    preferInstallDependencies: false,
   };
 
   beforeEach(() => {
@@ -200,7 +200,7 @@ describe('infra generator', () => {
     const customOptions: TsInfraGeneratorSchema = {
       name: 'custom-infra',
       directory: 'packages',
-      skipInstall: true,
+      preferInstallDependencies: false,
     };
     await tsInfraGenerator(tree, customOptions);
     // Snapshot project configuration with custom name

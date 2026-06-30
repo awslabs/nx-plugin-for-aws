@@ -13,4 +13,5 @@ export interface PresetGeneratorSchema {
   readonly gitSecrets?: boolean;
   readonly mcp?: boolean;
   readonly containers?: PresetContainersOption;
+  readonly preferInstallDependencies?: boolean;
 }

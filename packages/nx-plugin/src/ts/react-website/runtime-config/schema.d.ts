@@ -4,4 +4,5 @@
  */
 export interface RuntimeConfigGeneratorSchema {
   project: string;
+  preferInstallDependencies?: boolean;
 }

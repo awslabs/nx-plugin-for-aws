@@ -9,4 +9,5 @@ export interface PyProjectGeneratorSchema {
   readonly directory?: string;
   readonly subDirectory?: string;
   readonly moduleName?: string;
+  readonly preferInstallDependencies?: boolean;
 }

@@ -13,4 +13,5 @@ export interface AgentcoreGatewayGeneratorSchema {
   cedarPolicy?: boolean;
   infra?: 'agentcore' | 'none';
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

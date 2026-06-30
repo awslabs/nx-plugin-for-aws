@@ -6,7 +6,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -20,6 +19,7 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { FsCommands } from '../../../utils/fs';
 import { updateGitIgnore } from '../../../utils/git';
 import { resolveIac } from '../../../utils/iac';
+import { installDeps } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { toClassName, toKebabCase } from '../../../utils/names';
 import {
@@ -77,6 +77,7 @@ export const tsSmithyApiGenerator = async (
       namespace: options.namespace,
       directory: dir,
       subDirectory: 'model',
+      preferInstallDependencies: false,
     });
 
     // Generate the backend project
@@ -84,6 +85,7 @@ export const tsSmithyApiGenerator = async (
       name: options.name,
       directory: dir,
       subDirectory: 'backend',
+      preferInstallDependencies: false,
     });
   }
 
@@ -319,9 +321,9 @@ export const tsSmithyApiGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [TS_SMITHY_API_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 };
 
 const getIntegrationPattern = (

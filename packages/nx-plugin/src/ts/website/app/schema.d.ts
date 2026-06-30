@@ -13,10 +13,10 @@ export interface TsWebsiteGeneratorSchema {
   framework?: WebsiteFramework;
   directory?: string;
   subDirectory?: string;
-  skipInstall?: boolean;
   tanstackRouter?: boolean;
   tailwind?: boolean;
   ux?: UxOption;
   infra?: WebsiteInfraOption;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

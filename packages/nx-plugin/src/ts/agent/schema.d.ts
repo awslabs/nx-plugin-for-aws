@@ -19,4 +19,5 @@ export interface TsAgentGeneratorSchema {
   auth?: TsAgentAuth;
   protocol?: AgentProtocol;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

@@ -466,7 +466,7 @@ describe('fastapi react generator with real react and trpc projects', {
     // Generate a react website
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
-      skipInstall: true,
+      preferInstallDependencies: false,
       iac: 'cdk',
     });
   });

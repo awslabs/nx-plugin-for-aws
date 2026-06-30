@@ -5,7 +5,6 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type ProjectConfiguration,
@@ -19,6 +18,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
 import {
@@ -26,7 +26,6 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
 } from '../../utils/nx';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import {
@@ -78,6 +77,7 @@ export const pyFastApiProjectGenerator = async (
       subDirectory: schema.subDirectory,
       moduleName: normalizedModuleName,
       type: 'application',
+      preferInstallDependencies: false,
     });
   }
 
@@ -227,10 +227,9 @@ export const pyFastApiProjectGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return async () => {
-    await new UVProvider(tree.root, new Logger(), tree).install();
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, schema.preferInstallDependencies, {
+    languages: ['typescript', 'python'],
+  });
 };
 
 const getIntegrationPattern = (

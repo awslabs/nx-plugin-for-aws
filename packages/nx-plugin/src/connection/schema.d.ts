@@ -8,4 +8,5 @@ export interface ConnectionGeneratorSchema {
   targetProject: string;
   sourceComponent?: string;
   targetComponent?: string;
+  preferInstallDependencies?: boolean;
 }

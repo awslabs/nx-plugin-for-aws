@@ -5,7 +5,6 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -13,6 +12,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../utils/format';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
   addDependencyToTargetIfNotPresent,
@@ -37,7 +37,10 @@ export const tsNxPluginGenerator = async (
 ): Promise<GeneratorCallback> => {
   // Generate a TypeScript project as the base
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);
-  await tsProjectGenerator(tree, options);
+  await tsProjectGenerator(tree, {
+    ...options,
+    preferInstallDependencies: false,
+  });
 
   // Configure the typescript project as an Nx Plugin
   configureTsProjectAsNxPlugin(tree, fullyQualifiedName);
@@ -96,6 +99,7 @@ export const tsNxPluginGenerator = async (
     project: fullyQualifiedName,
     infra: 'none',
     iac: 'cdk', // not used
+    preferInstallDependencies: false,
   });
 
   const mcpPath = joinPathFragments(project.sourceRoot, 'mcp-server');
@@ -122,9 +126,9 @@ export const tsNxPluginGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [TS_NX_PLUGIN_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 };
 
 export default tsNxPluginGenerator;

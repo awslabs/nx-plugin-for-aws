@@ -981,7 +981,7 @@ export function Main() {
       // Generate a react website
       await tsReactWebsiteGenerator(tree, {
         name: 'frontend',
-        skipInstall: true,
+        preferInstallDependencies: false,
         iac: 'cdk',
       });
     });

@@ -19,4 +19,5 @@ export interface PyAgentGeneratorSchema {
   auth?: PyAgentAuth;
   protocol?: AgentProtocol;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

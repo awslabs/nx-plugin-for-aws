@@ -21,7 +21,7 @@ describe('ts#astro-docs generator', () => {
   it('should generate a docs site with default options (translation + blog enabled)', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     // Default directory is '.' and default subDirectory is kebab-case of the name
@@ -83,7 +83,7 @@ describe('ts#astro-docs generator', () => {
   it('should add astro + starlight + translation dependencies to the root package.json', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const packageJson = readJson(tree, 'package.json');
@@ -104,7 +104,7 @@ describe('ts#astro-docs generator', () => {
   it('should use the project name as the site title', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'my-cool-docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const astroConfig = tree.read('my-cool-docs/astro.config.mjs', 'utf-8');
@@ -114,7 +114,7 @@ describe('ts#astro-docs generator', () => {
   it('should default subDirectory to the kebab-case project name', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'MyDocsSite',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     // Should land at my-docs-site/ (kebab-cased)
@@ -126,7 +126,7 @@ describe('ts#astro-docs generator', () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
       noTranslation: true,
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(tree.exists('docs/scripts/translate.ts')).toBeFalsy();
@@ -148,7 +148,7 @@ describe('ts#astro-docs generator', () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
       noBlog: true,
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(
@@ -172,7 +172,7 @@ describe('ts#astro-docs generator', () => {
       name: 'my-docs',
       directory: 'sites',
       subDirectory: 'docs-site',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(tree.exists('sites/docs-site/project.json')).toBeTruthy();
@@ -186,7 +186,7 @@ describe('ts#astro-docs generator', () => {
   it('should add generator metadata to the project configuration', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const projectConfig = readJson(tree, 'docs/project.json');
@@ -204,14 +204,17 @@ describe('ts#astro-docs generator', () => {
 
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expectHasMetricTags(tree, TS_ASTRO_DOCS_GENERATOR_INFO.metric);
   });
 
   it('should be idempotent when re-run with the same options', async () => {
-    await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
 
     const projectCountAfterFirstRun = getProjects(tree).size;
     const indexAfterFirstRun = tree.read(
@@ -220,7 +223,10 @@ describe('ts#astro-docs generator', () => {
     );
 
     await expect(
-      tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true }),
+      tsAstroDocsGenerator(tree, {
+        name: 'docs',
+        preferInstallDependencies: false,
+      }),
     ).resolves.toBeDefined();
 
     expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
@@ -233,14 +239,17 @@ describe('ts#astro-docs generator', () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
       noBlog: true,
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(
       tree.exists('docs/src/content/docs/en/blog/welcome.mdx'),
     ).toBeFalsy();
 
-    await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
 
     expect(
       tree.exists('docs/src/content/docs/en/blog/welcome.mdx'),
@@ -255,10 +264,13 @@ describe('ts#astro-docs generator', () => {
   });
 
   it('should create a second independent project when run with a different name', async () => {
-    await tsAstroDocsGenerator(tree, { name: 'docs', skipInstall: true });
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
     await tsAstroDocsGenerator(tree, {
       name: 'other-docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(tree.exists('docs/project.json')).toBeTruthy();

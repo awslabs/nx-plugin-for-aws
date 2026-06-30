@@ -8,4 +8,5 @@ export interface TsNxGeneratorGeneratorSchema {
   name: string;
   directory?: string;
   description?: string;
+  preferInstallDependencies?: boolean;
 }

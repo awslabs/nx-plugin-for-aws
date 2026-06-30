@@ -6,7 +6,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -28,6 +27,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -40,7 +40,6 @@ import {
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
 import { assignPort } from '../../utils/port';
@@ -506,10 +505,9 @@ export const pyAgentGenerator = async (
   }
 
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript', 'python'],
+  });
 };
 
 export default pyAgentGenerator;

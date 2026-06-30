@@ -6,7 +6,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -20,6 +19,7 @@ import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -31,7 +31,6 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { toProjectRelativePath } from '../../utils/paths';
 import { assignPort } from '../../utils/port';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
@@ -286,10 +285,9 @@ export const pyMcpServerGenerator = async (
   await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript', 'python'],
+  });
 };
 
 export default pyMcpServerGenerator;

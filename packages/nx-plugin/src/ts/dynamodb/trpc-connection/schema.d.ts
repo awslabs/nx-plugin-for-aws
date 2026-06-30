@@ -9,4 +9,5 @@
 export interface TsDynamoDBTrpcConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  preferInstallDependencies?: boolean;
 }

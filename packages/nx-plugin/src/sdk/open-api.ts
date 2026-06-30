@@ -4,8 +4,8 @@
  */
 
 export {
-  openApiTsClientGenerator,
   buildOpenApiCodeGenerationData,
+  openApiTsClientGenerator,
 } from '../open-api/ts-client/generator';
 export type { OpenApiTsClientGeneratorSchema } from '../open-api/ts-client/schema';
 

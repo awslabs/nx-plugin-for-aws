@@ -15,4 +15,5 @@ export interface PyMcpServerGeneratorSchema {
   infra?: PyMcpServerInfra;
   auth?: PyMcpServerAuth;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

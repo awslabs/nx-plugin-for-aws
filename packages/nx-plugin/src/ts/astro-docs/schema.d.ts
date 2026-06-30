@@ -24,7 +24,7 @@ export interface TsAstroDocsGeneratorSchema {
    */
   noBlog?: boolean;
   /**
-   * Skip installing dependencies after the generator runs.
+   * Whether to prefer installing dependencies after the generator runs.
    */
-  skipInstall?: boolean;
+  preferInstallDependencies?: boolean;
 }

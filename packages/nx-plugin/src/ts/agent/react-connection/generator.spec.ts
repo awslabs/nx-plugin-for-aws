@@ -359,7 +359,7 @@ describe('ts strands agent react connection with real projects', () => {
     // Generate a React website
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
-      skipInstall: true,
+      preferInstallDependencies: false,
       iac: 'cdk',
     });
   });

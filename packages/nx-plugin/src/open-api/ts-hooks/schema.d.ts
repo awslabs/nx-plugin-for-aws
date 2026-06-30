@@ -6,4 +6,5 @@
 export interface OpenApiTsHooksGeneratorSchema {
   openApiSpecPath: string;
   outputPath: string;
+  preferInstallDependencies?: boolean;
 }

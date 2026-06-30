@@ -7,7 +7,6 @@ import {
   detectPackageManager,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   readJson,
@@ -24,6 +23,7 @@ import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -310,9 +310,9 @@ export const tsMcpServerGenerator = async (
   await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 };
 
 export default tsMcpServerGenerator;

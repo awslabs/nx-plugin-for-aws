@@ -5,7 +5,6 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -24,6 +23,7 @@ import {
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDeps } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
 import {
@@ -203,9 +203,9 @@ export const pyAgentGatewayConnectionGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 };
 
 export default pyAgentGatewayConnectionGenerator;

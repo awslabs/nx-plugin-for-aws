@@ -14,4 +14,5 @@ export interface TsRdbGeneratorSchema {
   databaseName?: string;
   framework: 'prisma';
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

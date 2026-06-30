@@ -5,7 +5,6 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -16,6 +15,7 @@ import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
@@ -74,6 +74,7 @@ export async function tsTrpcApiGenerator(
       name: backendName,
       directory: options.directory,
       subDirectory: options.subDirectory,
+      preferInstallDependencies: false,
     });
   }
 
@@ -247,9 +248,9 @@ export async function tsTrpcApiGenerator(
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 }
 
 const validateTrpcInfraAndIntegrationPatternCombination = (

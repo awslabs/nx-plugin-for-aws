@@ -134,6 +134,7 @@ export interface ResolvedConnectionOptions {
   targetProject: string;
   sourceComponent?: ComponentMetadata;
   targetComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }
 
 const CONNECTION_GENERATORS = {
@@ -157,16 +158,19 @@ const CONNECTION_GENERATORS = {
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       backendProjectName: options.targetProject,
+      preferInstallDependencies: options.preferInstallDependencies,
     }),
   'react -> py#fast-api': (tree, options) =>
     fastApiReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       fastApiProjectName: options.targetProject,
+      preferInstallDependencies: options.preferInstallDependencies,
     }),
   'react -> smithy': (tree, options) =>
     smithyReactConnectionGenerator(tree, {
       frontendProjectName: options.sourceProject,
       smithyModelOrBackendProjectName: options.targetProject,
+      preferInstallDependencies: options.preferInstallDependencies,
     }),
   'react -> ts#agent': (tree, options) =>
     tsAgentReactConnectionGenerator(tree, options),
@@ -226,6 +230,7 @@ export const connectionGenerator = async (
     targetProject: options.targetProject,
     sourceComponent: resolved.sourceComponent,
     targetComponent: resolved.targetComponent,
+    preferInstallDependencies: options.preferInstallDependencies,
   });
 };
 

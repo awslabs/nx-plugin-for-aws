@@ -6,4 +6,5 @@
 export interface OpenApiTsMetadataGeneratorSchema {
   openApiSpecPath: string;
   outputPath: string;
+  preferInstallDependencies?: boolean;
 }

@@ -9,4 +9,5 @@
 export interface TsDynamoDBSmithyConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  preferInstallDependencies?: boolean;
 }

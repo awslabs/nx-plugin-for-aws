@@ -7,7 +7,6 @@ import { relative } from 'node:path';
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
   type Tree,
@@ -17,6 +16,7 @@ import { resolveContainers } from '../../utils/containers';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -26,7 +26,6 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { assignSharedPort } from '../../utils/port';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -65,6 +64,7 @@ export const pyDynamoDBGenerator = async (
       directory: options.directory,
       subDirectory: options.subDirectory,
       type: 'library',
+      preferInstallDependencies: false,
     });
   }
 
@@ -148,10 +148,9 @@ export const pyDynamoDBGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [PY_DYNAMODB_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript', 'python'],
+  });
 };
 
 export default pyDynamoDBGenerator;

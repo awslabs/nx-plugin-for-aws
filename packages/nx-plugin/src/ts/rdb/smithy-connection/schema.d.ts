@@ -9,4 +9,5 @@
 export interface TsRdbSmithyConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  preferInstallDependencies?: boolean;
 }

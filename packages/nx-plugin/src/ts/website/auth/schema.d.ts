@@ -9,4 +9,5 @@ export interface TsWebsiteAuthGeneratorSchema {
   allowSignup: boolean;
   cognitoDomain?: string;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

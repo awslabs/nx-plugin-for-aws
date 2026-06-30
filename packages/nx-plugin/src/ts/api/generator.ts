@@ -28,6 +28,7 @@ export async function tsApiGenerator(
         directory: options.directory,
         subDirectory: options.subDirectory,
         iac: options.iac,
+        preferInstallDependencies: options.preferInstallDependencies,
       });
     case 'smithy':
       return tsSmithyApiGenerator(tree, {
@@ -42,6 +43,7 @@ export async function tsApiGenerator(
         directory: options.directory,
         subDirectory: options.subDirectory,
         iac: options.iac,
+        preferInstallDependencies: options.preferInstallDependencies,
       });
   }
 }

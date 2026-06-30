@@ -9,4 +9,5 @@
 export interface TsRdbTrpcConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  preferInstallDependencies?: boolean;
 }

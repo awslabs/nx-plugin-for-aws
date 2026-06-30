@@ -13,4 +13,5 @@ export interface TerraformProjectGeneratorSchema {
   type: ProjectType;
   directory?: string;
   subDirectory?: string;
+  preferInstallDependencies?: boolean;
 }

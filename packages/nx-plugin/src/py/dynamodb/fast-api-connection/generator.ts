@@ -4,11 +4,11 @@
  */
 import {
   type GeneratorCallback,
-  installPackagesTask,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDeps } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
   addDependencyToTargetIfNotPresent,
@@ -16,7 +16,6 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { Logger, UVProvider } from '../../../utils/nxlv-python';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBFastApiConnectionGeneratorSchema } from './schema';
 
@@ -50,10 +49,9 @@ export const pyDynamoDBFastApiConnectionGenerator = async (
     PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO,
   ]);
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript', 'python'],
+  });
 };
 
 export default pyDynamoDBFastApiConnectionGenerator;

@@ -7,7 +7,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
   type Tree,
@@ -20,6 +19,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
+import { installDeps } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
@@ -74,6 +74,7 @@ export const tsRdbGenerator = async (
     await tsProjectGenerator(tree, {
       name: options.name,
       directory: options.directory,
+      preferInstallDependencies: false,
     });
   }
 
@@ -308,9 +309,9 @@ export const tsRdbGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [TS_RDB_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 };
 
 export default tsRdbGenerator;

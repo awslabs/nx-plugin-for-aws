@@ -4,7 +4,6 @@
  */
 import {
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -18,6 +17,7 @@ import {
 } from '../../../ts/react-website/agui/generator';
 import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDeps } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
 import {
@@ -168,9 +168,9 @@ export const pyAgentReactConnectionGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () => installDeps(tree, options.preferInstallDependencies, {
+    languages: ['typescript'],
+  });
 };
 
 /**

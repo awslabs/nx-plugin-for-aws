@@ -19,7 +19,7 @@ describe('ts lib generator', () => {
   it('should generate library with default options', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-lib',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
     // Verify directory structure
     expect(tree.exists('test-lib')).toBeTruthy();
@@ -46,7 +46,7 @@ describe('ts lib generator', () => {
     await tsProjectGenerator(tree, {
       name: 'test-lib',
       directory: 'libs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
     // Verify directory structure
     expect(tree.exists('libs/test-lib')).toBeTruthy();
@@ -69,7 +69,7 @@ describe('ts lib generator', () => {
       name: 'test-lib',
       subDirectory: 'test-lib',
       directory: 'feature',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
     // Verify directory structure
     expect(tree.exists('feature/test-lib')).toBeTruthy();
@@ -92,7 +92,7 @@ describe('ts lib generator', () => {
       name: 'test-lib',
       directory: 'feature',
       subDirectory: '', // Empty string should fall back to normalized name
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
     // Verify directory structure - should use normalized name (test-lib) as subdirectory
     expect(tree.exists('feature/test-lib')).toBeTruthy();
@@ -103,11 +103,11 @@ describe('ts lib generator', () => {
   it('should not configure duplicate @nx/js/typescript plugin entries', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-1',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
     await tsProjectGenerator(tree, {
       name: 'test-2',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const jsPlugins = readNxJson(tree).plugins.filter(
@@ -119,7 +119,7 @@ describe('ts lib generator', () => {
   it('should configure named inputs in nx.json', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-1',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const namedInputs = readNxJson(tree).namedInputs;
@@ -136,12 +136,12 @@ describe('ts lib generator', () => {
   it('should not duplicate named inputs in nx.json', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-1',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     await tsProjectGenerator(tree, {
       name: 'test-2',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const namedInputs = readNxJson(tree).namedInputs;
@@ -155,7 +155,7 @@ describe('ts lib generator', () => {
   it('should configure target defaults in nx.json', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-1',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const targetDefaults = readNxJson(tree).targetDefaults;
@@ -174,12 +174,12 @@ describe('ts lib generator', () => {
   it('should not configure duplicate inputs in nx.json target defaults', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-1',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     await tsProjectGenerator(tree, {
       name: 'test-2',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const targetDefaults = readNxJson(tree).targetDefaults;
@@ -199,7 +199,7 @@ describe('ts lib generator', () => {
     // Call the generator function
     await tsProjectGenerator(tree, {
       name: 'test-lib',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(readJson(tree, 'test-lib/project.json').metadata).toHaveProperty(
@@ -212,7 +212,7 @@ describe('ts lib generator', () => {
     // Call the generator function
     await tsProjectGenerator(tree, {
       name: 'test-lib',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     // No vite configuration as we build with tsc
@@ -230,7 +230,7 @@ describe('ts lib generator', () => {
     // Call the generator function
     await tsProjectGenerator(tree, {
       name: 'test-lib',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     // Verify the metric was added to app.ts
@@ -238,7 +238,10 @@ describe('ts lib generator', () => {
   });
 
   it('should be idempotent when re-run with same options', async () => {
-    await tsProjectGenerator(tree, { name: 'test-lib', skipInstall: true });
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
 
     // User edits the generated source
     const indexPath = 'test-lib/src/index.ts';
@@ -249,7 +252,10 @@ describe('ts lib generator', () => {
     // Re-running with the same options must not throw, must preserve user code,
     // and must not change the project's targets.
     await expect(
-      tsProjectGenerator(tree, { name: 'test-lib', skipInstall: true }),
+      tsProjectGenerator(tree, {
+        name: 'test-lib',
+        preferInstallDependencies: false,
+      }),
     ).resolves.toBeDefined();
 
     expect(tree.read(indexPath, 'utf-8')).toBe('// my code\n');
