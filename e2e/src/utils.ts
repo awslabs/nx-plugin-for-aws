@@ -252,6 +252,12 @@ export const createTestWorkspace = async (
       cwd: targetDir,
       prefixWithPackageManagerCmd: false,
       redirectStderr: true,
+      // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`,
+      // which installs into a cache dir keyed on the package set. Concurrent
+      // standalone cases would otherwise share one `_npx` cache and corrupt it
+      // (a half-written module surfaces as MODULE_NOT_FOUND), so give each
+      // workspace its own npm cache.
+      env: { npm_config_cache: join(targetDir, '.npm-cache') },
     },
   );
   return join(targetDir, name);
