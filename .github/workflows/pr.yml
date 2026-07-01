@@ -209,6 +209,35 @@ jobs:
         with:
           # The standalone smoke test builds no containers.
           container-tools: 'false'
+      - name: Diagnose Windows runner
+        if: ${{ matrix.shard == 1 }}
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "=== CPU / memory ==="
+          Get-CimInstance Win32_ComputerSystem | Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory | Format-List
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-List
+          Write-Host "=== OS ==="
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          Write-Host "=== Docker ==="
+          try { docker version } catch { Write-Host "docker not available: $_" }
+          try { docker info --format '{{.OSType}} {{.ServerVersion}}' } catch { Write-Host "docker info failed: $_" }
+          try { docker buildx version } catch { Write-Host "buildx not available: $_" }
+          Write-Host "=== WSL ==="
+          try { wsl --status } catch { Write-Host "wsl status failed: $_" }
+          try { wsl --list --verbose } catch { Write-Host "wsl list failed: $_" }
+          Write-Host "=== Hyper-V / virtualization ==="
+          try { (Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled } catch {}
+          try { Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux, VirtualMachinePlatform | Select-Object FeatureName, State | Format-Table } catch { Write-Host "feature query failed: $_" }
+          Write-Host "=== Defender ==="
+          try { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled | Format-List } catch { Write-Host "Get-MpComputerStatus failed: $_" }
+          try { Get-MpPreference | Select-Object DisableRealtimeMonitoring, ExclusionPath | Format-List } catch { Write-Host "Get-MpPreference failed: $_" }
+          Write-Host "=== Third-party AV ==="
+          try { Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | Select-Object displayName | Format-Table } catch { Write-Host "AV query failed: $_" }
+          Write-Host "=== biome timing (repo, small subset) ==="
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          try { pnpm exec biome check packages/nx-plugin/src/connection 2>&1 | Select-Object -Last 3 } catch { Write-Host "biome failed: $_" }
+          $sw.Stop(); Write-Host "biome check elapsed: $($sw.Elapsed.TotalSeconds)s"
       - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/4)
         # Each case's build already uses multiple cores, so cap the per-shard
         # case concurrency on the Windows fleet to avoid oversubscribing it
