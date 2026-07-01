@@ -4,7 +4,7 @@
  */
 
 import { execSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { output, type PackageManager } from '@nx/devkit';
@@ -246,21 +246,36 @@ export const createTestWorkspace = async (
   name: string,
   iac?: 'cdk' | 'terraform',
 ): Promise<string> => {
-  await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
-    {
-      cwd: targetDir,
-      prefixWithPackageManagerCmd: false,
-      redirectStderr: true,
-      // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`,
-      // which installs into a cache dir keyed on the package set. Concurrent
-      // standalone cases would otherwise share one `_npx` cache and corrupt it
-      // (a half-written module surfaces as MODULE_NOT_FOUND), so give each
-      // workspace its own npm cache.
-      env: { npm_config_cache: join(targetDir, '.npm-cache') },
-    },
-  );
-  return join(targetDir, name);
+  const workspaceDir = join(targetDir, name);
+  // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`, which
+  // installs into a cache dir keyed on the package set. Under heavy concurrency
+  // (especially on the slower Windows runners) that npx step can corrupt its
+  // cache or fail transiently — a half-written module surfaces as
+  // MODULE_NOT_FOUND. Give each workspace its own npm cache and retry a couple
+  // of times, wiping any partial workspace between attempts, so one flaky create
+  // doesn't fail the whole shard.
+  const attempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    if (existsSync(workspaceDir)) {
+      rmSync(workspaceDir, { force: true, recursive: true });
+    }
+    try {
+      await runCLI(
+        `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
+        {
+          cwd: targetDir,
+          prefixWithPackageManagerCmd: false,
+          redirectStderr: true,
+          env: { npm_config_cache: join(targetDir, '.npm-cache') },
+        },
+      );
+      break;
+    } catch (e) {
+      if (attempt >= attempts) throw e;
+      console.log(`create workspace attempt ${attempt} failed, retrying: ${e}`);
+    }
+  }
+  return workspaceDir;
 };
 
 // The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.
