@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { spawnSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 // eslint-disable-next-line @nx/enforce-module-boundaries
 import { TS_VERSIONS } from '../../nx-plugin/src/utils/versions';
@@ -35,6 +35,19 @@ export const detectPackageManager = (): string | undefined => {
 
 export const shouldSkipGit = (flagArgs: string[]): boolean =>
   flagArgs.some((a) => a === '--skipGit' || a === '--skipGit=true');
+
+/**
+ * Determine whether the given directory is already inside a git repository.
+ */
+export const isGitRepo = (dir: string): boolean => {
+  if (!existsSync(dir)) return false;
+  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
+    cwd: dir,
+    stdio: 'pipe',
+    shell: process.platform === 'win32',
+  });
+  return result.status === 0 && result.stdout?.toString().trim() === 'true';
+};
 
 export const buildArgs = (args: string[]): string[] => {
   const positionalArgs = args.filter((a) => !a.startsWith('-'));
@@ -130,7 +143,11 @@ export const createNxWorkspace = (args: string[]): number => {
     const positionalArgs = args.filter((a) => !a.startsWith('-'));
     const workspaceName = positionalArgs[0];
     if (workspaceName) {
-      initGitRepo(resolve(workspaceName));
+      const workspaceDir = resolve(workspaceName);
+      // Skip git init if the target directory is already a git repository
+      if (!isGitRepo(workspaceDir)) {
+        initGitRepo(workspaceDir);
+      }
     }
   }
 
