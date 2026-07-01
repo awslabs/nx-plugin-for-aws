@@ -134,17 +134,17 @@ jobs:
       - name: Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
   # The standalone smoke test generates and builds every generator, component and
-  # connection permutation in its own workspace. It's sharded across machines
-  # (NX_E2E_SHARD=<index>/<total>) so the many cases run in parallel rather than
-  # serialising on one runner.
+  # connection permutation in its own workspace. Each case's build saturates the
+  # machine's cores, so cases run sequentially within a shard and parallelism
+  # comes from sharding across machines (NX_E2E_SHARD=<index>/<total>).
   smoke_tests_standalone:
-    name: Smoke Tests - standalone (${{matrix.shard}}/4)
+    name: Smoke Tests - standalone (${{matrix.shard}}/8)
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
     needs: package
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -158,57 +158,53 @@ jobs:
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
           enable-uv-cache: 'false'
-      - name: Smoke Test - standalone (shard ${{ matrix.shard }}/4)
+      - name: Smoke Test - standalone (shard ${{ matrix.shard }}/8)
         env:
-          NX_E2E_SHARD: ${{ matrix.shard }}/4
+          NX_E2E_SHARD: ${{ matrix.shard }}/8
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
-  diagnose_windows_runner:
-    name: Diagnose Windows runner
+  probe_windows_containers:
+    name: Probe Windows container options
     runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Diagnose
+      - name: Probe container capabilities
         shell: pwsh
         continue-on-error: true
         run: |
-          Write-Host "=== CPU / memory ==="
-          Get-CimInstance Win32_ComputerSystem | Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory | Format-List
-          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-List
-          Write-Host "=== free disk ==="
-          Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free | Format-Table
-          Write-Host "=== OS ==="
-          (Get-CimInstance Win32_OperatingSystem).Caption
-          Write-Host "=== Docker (native Windows daemon?) ==="
-          try { docker version } catch { Write-Host "docker not available: $_" }
-          try { docker info --format 'OSType={{.OSType}} Server={{.ServerVersion}}' } catch { Write-Host "docker info failed: $_" }
-          try { docker buildx version } catch { Write-Host "buildx not available: $_" }
-          Write-Host "=== WSL ==="
-          try { wsl --status } catch { Write-Host "wsl status failed: $_" }
-          try { wsl --version } catch { Write-Host "wsl --version failed: $_" }
-          try { wsl --list --online } catch { Write-Host "wsl list online failed: $_" }
-          Write-Host "=== virtualization features ==="
-          try { (Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled } catch {}
-          try { Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux, VirtualMachinePlatform, Microsoft-Hyper-V-All | Select-Object FeatureName, State | Format-Table } catch { Write-Host "feature query failed: $_" }
-          try { systeminfo | Select-String 'Hyper-V' } catch {}
-          Write-Host "=== Defender / AV (biome slowness suspect) ==="
-          try { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled, AMServiceEnabled | Format-List } catch { Write-Host "Get-MpComputerStatus failed: $_" }
-          try { Get-MpPreference | Select-Object DisableRealtimeMonitoring, ExclusionPath, ExclusionProcess | Format-List } catch { Write-Host "Get-MpPreference failed: $_" }
-          try { Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | Select-Object displayName, productState | Format-Table } catch { Write-Host "AV query failed: $_" }
-          Write-Host "=== biome timing on a tiny dir (warm binary) ==="
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%402.4.16/biome-win32-x64.exe -OutFile biome.exe -UseBasicParsing
-          '{ "root": true }' | Out-File -Encoding utf8 biome.json
-          New-Item -ItemType Directory -Force -Path tinydir | Out-Null
-          1..15 | ForEach-Object { "export const x$_ = $_;" | Out-File -Encoding utf8 "tinydir/f$_.ts" }
-          $sw = [System.Diagnostics.Stopwatch]::StartNew()
-          .\biome.exe check tinydir 2>&1 | Select-Object -Last 2
-          $sw.Stop(); Write-Host "biome check (15 files, tinydir) elapsed: $($sw.Elapsed.TotalSeconds)s"
-          # Time again with the current dir excluded to test whether traversal of node_modules etc dominates
-          $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
-          .\biome.exe check --files-ignore-unknown=true tinydir 2>&1 | Select-Object -Last 2
-          $sw2.Stop(); Write-Host "biome check (2nd run) elapsed: $($sw2.Elapsed.TotalSeconds)s"
+          function Section($n) { Write-Host "`n========== $n ==========" }
+
+          Section "Docker service state"
+          Get-Service -Name docker,com.docker.service -ErrorAction SilentlyContinue | Select-Object Name, Status, StartType | Format-Table
+          Write-Host "Attempting to start docker service..."
+          try { Start-Service docker -ErrorAction Stop; Write-Host "started docker service" } catch { Write-Host "start docker failed: $_" }
+          Start-Sleep -Seconds 5
+          try { docker version } catch { Write-Host "docker version failed: $_" }
+          try { docker info --format 'OSType={{.OSType}} Isolation={{.Isolation}} Server={{.ServerVersion}}' } catch { Write-Host "docker info failed: $_" }
+
+          Section "Can the daemon switch to Linux containers? (LCOW / dockerd --experimental)"
+          try { & 'C:\Program Files\Docker\Docker\DockerCli.exe' -SwitchLinuxEngine; Write-Host "switched to linux engine" } catch { Write-Host "no DockerCli switch: $_" }
+          try { docker info --format 'OSType={{.OSType}}' } catch { Write-Host "docker info (post-switch) failed: $_" }
+
+          Section "Try to run a Linux container"
+          try { docker run --rm public.ecr.aws/docker/library/hello-world:linux 2>&1 | Select-Object -First 5 } catch { Write-Host "linux run failed: $_" }
+
+          Section "buildx availability"
+          try { docker buildx version } catch { Write-Host "buildx missing: $_" }
+
+          Section "Finch"
+          try { finch version } catch { Write-Host "finch not installed: $_" }
+          try { winget --version } catch { Write-Host "winget not available: $_" }
+          try { choco --version } catch { Write-Host "choco not available: $_" }
+
+          Section "WSL feature enablement (requires admin; report only)"
+          try { dism /online /get-featureinfo /featurename:Microsoft-Windows-Subsystem-Linux 2>&1 | Select-String 'State' } catch { Write-Host "dism WSL query failed: $_" }
+          try { dism /online /get-featureinfo /featurename:VirtualMachinePlatform 2>&1 | Select-String 'State' } catch { Write-Host "dism VMP query failed: $_" }
+          try { wsl --version } catch { Write-Host "wsl --version failed (WSL app not present)" }
+
+          Section "Are we admin?"
+          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $p = New-Object Security.Principal.WindowsPrincipal($id)
+          Write-Host "IsAdmin: $($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          Write-Host "User: $($id.Name)"
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
     runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
@@ -217,7 +213,6 @@ jobs:
       fail-fast: false
       matrix:
         smoke_test:
-          - dungeon-adventure
           - git-secrets
     steps:
       - uses: actions/checkout@v7
@@ -230,19 +225,19 @@ jobs:
           path: dist
       - uses: ./.github/actions/init-monorepo
         with:
-          # Only dungeon-adventure needs Docker (DynamoDB Local); skip the
-          # WSL2 Docker setup for the others.
-          container-tools: ${{ matrix.smoke_test == 'dungeon-adventure' }}
+          # No container builds needed; skip the WSL2 Docker setup (the Windows
+          # fleet has no Linux Docker daemon).
+          container-tools: 'false'
       - name: Windows Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
   smoke_tests_windows_standalone:
-    name: Windows Smoke Tests - standalone (${{matrix.shard}}/4)
+    name: Windows Smoke Tests - standalone (${{matrix.shard}}/8)
     runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
     needs: package
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -256,12 +251,10 @@ jobs:
         with:
           # The standalone smoke test builds no containers.
           container-tools: 'false'
-      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/4)
-        # Each case's build already uses multiple cores, so cap the per-shard
-        # case concurrency on the Windows fleet to avoid oversubscribing it
-        # (16-way overwhelmed the runner: multi-minute lint/build steps and
-        # flaky tool failures). Sharding provides the cross-machine parallelism.
+      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/8)
+        # The Windows fleet has no Linux Docker daemon, so skip the Smithy cases
+        # that build a Linux image via `docker build` (covered on Linux).
         env:
-          NX_E2E_SHARD: ${{ matrix.shard }}/4
-          NX_E2E_MAX_CONCURRENCY: 2
+          NX_E2E_SHARD: ${{ matrix.shard }}/8
+          NX_E2E_SKIP_DOCKER: 'true'
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone

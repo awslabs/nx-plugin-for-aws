@@ -94,12 +94,25 @@ const { standalone, components } = categorizeGenerators();
 // source order) so heavy Python/agent cases spread evenly rather than clumping
 // into one shard. Discovery stays programmatic — only the run is split, so
 // coverage still evolves automatically. Defaults to 1/1 (run everything).
+//
+// Each case runs a full `nx run-many --target build --all`, which already
+// parallelises across the machine's cores. Cases therefore run sequentially
+// (a plain `describe`, not `describe.concurrent`): overlapping them would
+// multiply into an N×cores process storm that starves nx's plugin workers and
+// inflates wall-clock. Parallelism comes from sharding across machines instead.
 const [shardIndex, shardTotal] = (process.env.NX_E2E_SHARD ?? '1/1')
   .split('/')
   .map(Number);
 let shardCursor = 0;
 const forThisShard = <T>(cases: T[]): T[] =>
   cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
+
+// Some Smithy connections build the Smithy model via `docker build` of a Linux
+// image, which needs a Linux Docker daemon + buildx. Set NX_E2E_SKIP_DOCKER=true
+// on runners without one (e.g. the Windows fleet, which can't run Linux Docker)
+// to skip those cases — they stay covered on Linux.
+const skipDocker = process.env.NX_E2E_SKIP_DOCKER === 'true';
+const needsDocker = (key: string): boolean => key.includes('ts#smithy-api');
 
 const freshWorkspace = async (generator: string): Promise<string> => {
   const targetDir = join(
@@ -125,9 +138,8 @@ const syncAndBuild = async (cwd: string) => {
 
 // Each generator runs in its own isolated workspace and keeps the default
 // dependency install, so the build still verifies each generator declares the
-// dependencies it needs. Because the workspaces are fully isolated, the cases
-// run concurrently (bounded by `maxConcurrency` in the vitest config).
-describe.concurrent('smoke test - standalone projects', () => {
+// dependencies it needs.
+describe('smoke test - standalone projects', () => {
   it.each(
     forThisShard(standalone),
   )('should generate and build $generator in isolation', async ({
@@ -143,7 +155,7 @@ describe.concurrent('smoke test - standalone projects', () => {
   });
 });
 
-describe.concurrent('smoke test - standalone components', () => {
+describe('smoke test - standalone components', () => {
   it.each(
     forThisShard(components),
   )('should generate and build $generator on its own project', async ({
@@ -327,7 +339,7 @@ const buildAgentEndpoint = async (
 const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
   connection,
   key: `${connection.source} -> ${connection.target}`,
-}));
+})).filter(({ key }) => !(skipDocker && needsDocker(key)));
 
 // Exercises each supported connection end-to-end in its own isolated workspace:
 // generate the source and target projects, run the connection generator, then
@@ -335,7 +347,7 @@ const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
 // connection generators) by proving the real generators wire up projects that
 // build. Cases are derived from SUPPORTED_CONNECTIONS so new connections are
 // picked up automatically.
-describe.concurrent('smoke test - standalone connections', () => {
+describe('smoke test - standalone connections', () => {
   it.each(
     forThisShard(connectionCases),
   )('should generate and build the $key connection', async ({

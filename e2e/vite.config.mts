@@ -67,10 +67,10 @@ export default defineConfig({
     reporters: [['default', { summary: false }]],
     disableConsoleIntercept: true,
     fileParallelism: false,
-    // Concurrent `it`s (e.g. the standalone smoke test's isolated cases) overlap
-    // up to this many at a time. Each case spawns an nx build that itself uses
-    // multiple cores, so the wins plateau once the runner's cores are saturated.
-    // Tunable via NX_E2E_MAX_CONCURRENCY.
+    // Cap for any `it.concurrent` cases. The smoke tests run their cases
+    // sequentially (each already spawns an nx build that saturates the
+    // machine's cores), parallelising across sharded machines instead, so this
+    // mainly bounds incidental concurrency. Tunable via NX_E2E_MAX_CONCURRENCY.
     maxConcurrency: Number(process.env.NX_E2E_MAX_CONCURRENCY ?? 16),
     globalSetup: 'src/global-setup.ts',
     coverage: { reportsDirectory: '../coverage/e2e', provider: 'v8' },

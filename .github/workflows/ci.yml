@@ -154,13 +154,13 @@ jobs:
   # (NX_E2E_SHARD=<index>/<total>) so the many cases run in parallel rather than
   # serialising on one runner.
   smoke_tests_standalone:
-    name: Smoke Tests - standalone (${{matrix.shard}}/4)
+    name: Smoke Tests - standalone (${{matrix.shard}}/8)
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
     needs: package
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -174,9 +174,9 @@ jobs:
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
           enable-uv-cache: 'false'
-      - name: Smoke Test - standalone (shard ${{ matrix.shard }}/4)
+      - name: Smoke Test - standalone (shard ${{ matrix.shard }}/8)
         env:
-          NX_E2E_SHARD: ${{ matrix.shard }}/4
+          NX_E2E_SHARD: ${{ matrix.shard }}/8
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
@@ -186,7 +186,6 @@ jobs:
       fail-fast: false
       matrix:
         smoke_test:
-          - dungeon-adventure
           - git-secrets
     steps:
       - uses: actions/checkout@v7
@@ -199,25 +198,19 @@ jobs:
           path: dist
       - uses: ./.github/actions/init-monorepo
         with:
-          # Only dungeon-adventure needs Docker (DynamoDB Local); skip the
-          # WSL2 Docker setup for the others.
-          container-tools: ${{ matrix.smoke_test == 'dungeon-adventure' }}
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.DEPLOY_INTEG_TESTS_ROLE_ARN }}
-          aws-region: us-west-2
-          role-duration-seconds: 10800
+          # No container builds needed; skip the WSL2 Docker setup (the Windows
+          # fleet has no Linux Docker daemon).
+          container-tools: 'false'
       - name: Windows Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
   smoke_tests_windows_standalone:
-    name: Windows Smoke Tests - standalone (${{matrix.shard}}/4)
+    name: Windows Smoke Tests - standalone (${{matrix.shard}}/8)
     runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
     needs: package
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -231,14 +224,12 @@ jobs:
         with:
           # The standalone smoke test builds no containers.
           container-tools: 'false'
-      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/4)
-        # Each case's build already uses multiple cores, so cap the per-shard
-        # case concurrency on the Windows fleet to avoid oversubscribing it
-        # (16-way overwhelmed the runner: multi-minute lint/build steps and
-        # flaky tool failures). Sharding provides the cross-machine parallelism.
+      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/8)
+        # The Windows fleet has no Linux Docker daemon, so skip the Smithy cases
+        # that build a Linux image via `docker build` (covered on Linux).
         env:
-          NX_E2E_SHARD: ${{ matrix.shard }}/4
-          NX_E2E_MAX_CONCURRENCY: 2
+          NX_E2E_SHARD: ${{ matrix.shard }}/8
+          NX_E2E_SKIP_DOCKER: 'true'
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
   release:
     name: Release
