@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { describe, it } from 'vitest';
 import { SUPPORTED_CONNECTIONS } from '../../../packages/nx-plugin/src/connection/supported-connections';
-import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 /**
  * Verifies that every generator builds in isolation, so a project generator
@@ -167,36 +167,36 @@ interface ConnectionEndpoint {
 // to the generator(s) that produce it, keyed by the same identifiers the
 // connection generator resolves projects to. `suffix` disambiguates the two
 // sides so a self-referential connection (e.g. ts#agent -> ts#agent) gets two
-// distinct components. Generators run with --prefer-install-dependencies=false
-// so a single install runs before the connection generator and build.
+// distinct components. Each generator keeps its default dependency install so
+// both the pnpm and uv lockfiles are synced before the build.
 const ENDPOINT_BUILDERS: Record<
   string,
   (opts: { cwd: string }, suffix: string) => Promise<ConnectionEndpoint>
 > = {
   'ts#react-website': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=website-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#website --name=website-${s} --no-interactive`,
       opts,
     );
     return { project: `website-${s}` };
   },
   'ts#trpc-api': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --framework=trpc --name=trpc-api-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#api --framework=trpc --name=trpc-api-${s} --no-interactive`,
       opts,
     );
     return { project: `trpc-api-${s}` };
   },
   'ts#smithy-api': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --framework=smithy --name=smithy-api-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#api --framework=smithy --name=smithy-api-${s} --no-interactive`,
       opts,
     );
     return { project: `smithy-api-${s}` };
   },
   'py#fast-api': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:py#api --name=fast-api-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:py#api --name=fast-api-${s} --no-interactive`,
       opts,
     );
     // Python projects are referenced by their unqualified snake_case name.
@@ -204,72 +204,72 @@ const ENDPOINT_BUILDERS: Record<
   },
   'ts#rdb': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#rdb --name=rdb-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#rdb --name=rdb-${s} --no-interactive`,
       opts,
     );
     return { project: `rdb-${s}` };
   },
   'ts#dynamodb': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#dynamodb --name=ts-table-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#dynamodb --name=ts-table-${s} --no-interactive`,
       opts,
     );
     return { project: `ts-table-${s}` };
   },
   'py#dynamodb': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:py#dynamodb --name=py-table-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:py#dynamodb --name=py-table-${s} --no-interactive`,
       opts,
     );
     return { project: `py_table_${s}` };
   },
   'agentcore-gateway': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:agentcore-gateway --name=gateway-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:agentcore-gateway --name=gateway-${s} --no-interactive`,
       opts,
     );
     return { project: `gateway-${s}` };
   },
   'ts#agent': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#project --name=ts-host-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#project --name=ts-host-${s} --no-interactive`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#agent --project=ts-host-${s} --name=agent-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#agent --project=ts-host-${s} --name=agent-${s} --infra=none --no-interactive`,
       opts,
     );
     return { project: `ts-host-${s}`, component: `agent-${s}` };
   },
   'py#agent': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:py#project --name=py-host-${s} --projectType=application --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=py-host-${s} --projectType=application --no-interactive`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#agent --project=py_host_${s} --name=agent-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:py#agent --project=py_host_${s} --name=agent-${s} --infra=none --no-interactive`,
       opts,
     );
     return { project: `py_host_${s}`, component: `agent-${s}` };
   },
   'ts#mcp-server': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:ts#project --name=ts-mcp-host-${s} --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#project --name=ts-mcp-host-${s} --no-interactive`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#mcp-server --project=ts-mcp-host-${s} --name=mcp-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:ts#mcp-server --project=ts-mcp-host-${s} --name=mcp-${s} --infra=none --no-interactive`,
       opts,
     );
     return { project: `ts-mcp-host-${s}`, component: `mcp-${s}` };
   },
   'py#mcp-server': async (opts, s) => {
     await runCLI(
-      `generate @aws/nx-plugin:py#project --name=py-mcp-host-${s} --projectType=application --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=py-mcp-host-${s} --projectType=application --no-interactive`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#mcp-server --project=py_mcp_host_${s} --name=mcp-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      `generate @aws/nx-plugin:py#mcp-server --project=py_mcp_host_${s} --name=mcp-${s} --infra=none --no-interactive`,
       opts,
     );
     return { project: `py_mcp_host_${s}`, component: `mcp-${s}` };
@@ -301,11 +301,11 @@ const buildAgentEndpoint = async (
   const hostProject =
     lang === 'py' ? `py_host_${suffix}` : `${lang}-host-${suffix}`;
   await runCLI(
-    `generate @aws/nx-plugin:${hostGen} --name=${hostName} ${lang === 'py' ? '--projectType=application ' : ''}--prefer-install-dependencies=false --no-interactive`,
+    `generate @aws/nx-plugin:${hostGen} --name=${hostName} ${lang === 'py' ? '--projectType=application ' : ''}--no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:${lang}#agent --project=${hostProject} --name=agent-${suffix} --protocol=${protocol} --infra=none --prefer-install-dependencies=false --no-interactive`,
+    `generate @aws/nx-plugin:${lang}#agent --project=${hostProject} --name=agent-${suffix} --protocol=${protocol} --infra=none --no-interactive`,
     opts,
   );
   return { project: hostProject, component: `agent-${suffix}` };
@@ -347,11 +347,6 @@ describe.concurrent('smoke test - standalone connections', () => {
             targetProtocol,
           )
         : await ENDPOINT_BUILDERS[connection.target](opts, 'tgt');
-
-    // Install once now that every project has been generated with
-    // --prefer-install-dependencies=false, so the connection generator and
-    // build resolve dependencies.
-    await runInstall({ cwd, env: { NX_DAEMON: 'false' } });
 
     const sourceComponent = source.component
       ? ` --sourceComponent=${source.component}`
