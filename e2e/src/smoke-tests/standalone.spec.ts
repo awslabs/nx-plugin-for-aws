@@ -6,18 +6,20 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { describe, it } from 'vitest';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { SUPPORTED_CONNECTIONS } from '../../../packages/nx-plugin/src/connection/supported-connections';
+import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
 
 /**
  * Verifies that every generator builds in isolation, so a project generator
  * that forgets a dependency is caught here rather than being masked by another
  * generator happening to add it in a shared workspace.
  *
- * Cases are derived from `generators.json`, so new generators are picked up
- * automatically. Each runs with default arguments, supplying only the required
- * `name` / `project` we control. Generators with other unsatisfiable required
- * arguments (e.g. `connection`, which needs a source and target project) are
- * skipped.
+ * Project and component generator cases are derived from `generators.json`, so
+ * new generators are picked up automatically. Each runs with default arguments,
+ * supplying only the required `name` / `project` we control. Generators with
+ * other unsatisfiable required arguments (e.g. `connection`, which needs a
+ * source and target project) are skipped here and instead covered by the
+ * connection matrix below, derived from `SUPPORTED_CONNECTIONS`.
  */
 
 const PLUGIN_ROOT = join(__dirname, '../../../packages/nx-plugin');
@@ -150,6 +152,218 @@ describe.concurrent('smoke test - standalone components', () => {
       `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
       opts,
     );
+    await syncAndBuild(cwd);
+  });
+});
+
+// How to reference an endpoint in a connection command: the project to pass as
+// source/target, and (for component-typed endpoints) the component to select.
+interface ConnectionEndpoint {
+  project: string;
+  component?: string;
+}
+
+// Builds the source/target projects a connection needs. Each endpoint type maps
+// to the generator(s) that produce it, keyed by the same identifiers the
+// connection generator resolves projects to. `suffix` disambiguates the two
+// sides so a self-referential connection (e.g. ts#agent -> ts#agent) gets two
+// distinct components. Generators run with --prefer-install-dependencies=false
+// so a single install runs before the connection generator and build.
+const ENDPOINT_BUILDERS: Record<
+  string,
+  (opts: { cwd: string }, suffix: string) => Promise<ConnectionEndpoint>
+> = {
+  'ts#react-website': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#website --name=website-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `website-${s}` };
+  },
+  'ts#trpc-api': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#api --framework=trpc --name=trpc-api-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `trpc-api-${s}` };
+  },
+  'ts#smithy-api': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#api --framework=smithy --name=smithy-api-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `smithy-api-${s}` };
+  },
+  'py#fast-api': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:py#api --name=fast-api-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    // Python projects are referenced by their unqualified snake_case name.
+    return { project: `fast_api_${s}` };
+  },
+  'ts#rdb': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#rdb --name=rdb-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `rdb-${s}` };
+  },
+  'ts#dynamodb': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#dynamodb --name=ts-table-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `ts-table-${s}` };
+  },
+  'py#dynamodb': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:py#dynamodb --name=py-table-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `py_table_${s}` };
+  },
+  'agentcore-gateway': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:agentcore-gateway --name=gateway-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `gateway-${s}` };
+  },
+  'ts#agent': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#project --name=ts-host-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#agent --project=ts-host-${s} --name=agent-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `ts-host-${s}`, component: `agent-${s}` };
+  },
+  'py#agent': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:py#project --name=py-host-${s} --projectType=application --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:py#agent --project=py_host_${s} --name=agent-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `py_host_${s}`, component: `agent-${s}` };
+  },
+  'ts#mcp-server': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#project --name=ts-mcp-host-${s} --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#mcp-server --project=ts-mcp-host-${s} --name=mcp-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `ts-mcp-host-${s}`, component: `mcp-${s}` };
+  },
+  'py#mcp-server': async (opts, s) => {
+    await runCLI(
+      `generate @aws/nx-plugin:py#project --name=py-mcp-host-${s} --projectType=application --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:py#mcp-server --project=py_mcp_host_${s} --name=mcp-${s} --infra=none --prefer-install-dependencies=false --no-interactive`,
+      opts,
+    );
+    return { project: `py_mcp_host_${s}`, component: `mcp-${s}` };
+  },
+};
+
+// Some agent connections require a specific target protocol. A2A agents connect
+// as tools (agent -> agent), while a React website can only connect to an HTTP
+// or AG-UI agent. Override the target agent's protocol per connection.
+const TARGET_PROTOCOL_OVERRIDE: Record<string, 'a2a' | 'ag-ui' | 'http'> = {
+  'ts#agent -> ts#agent': 'a2a',
+  'ts#agent -> py#agent': 'a2a',
+  'py#agent -> ts#agent': 'a2a',
+  'py#agent -> py#agent': 'a2a',
+};
+
+const buildAgentEndpoint = async (
+  type: string,
+  opts: { cwd: string },
+  suffix: string,
+  protocol?: 'a2a' | 'ag-ui' | 'http',
+): Promise<ConnectionEndpoint> => {
+  if (!protocol) {
+    return ENDPOINT_BUILDERS[type](opts, suffix);
+  }
+  const lang = type === 'py#agent' ? 'py' : 'ts';
+  const hostGen = lang === 'py' ? 'py#project' : 'ts#project';
+  const hostName = `${lang}-host-${suffix}`;
+  const hostProject =
+    lang === 'py' ? `py_host_${suffix}` : `${lang}-host-${suffix}`;
+  await runCLI(
+    `generate @aws/nx-plugin:${hostGen} --name=${hostName} ${lang === 'py' ? '--projectType=application ' : ''}--prefer-install-dependencies=false --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:${lang}#agent --project=${hostProject} --name=agent-${suffix} --protocol=${protocol} --infra=none --prefer-install-dependencies=false --no-interactive`,
+    opts,
+  );
+  return { project: hostProject, component: `agent-${suffix}` };
+};
+
+const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
+  connection,
+  key: `${connection.source} -> ${connection.target}`,
+}));
+
+// Exercises each supported connection end-to-end in its own isolated workspace:
+// generate the source and target projects, run the connection generator, then
+// sync and build. This complements the unit tests (which mock the underlying
+// connection generators) by proving the real generators wire up projects that
+// build. Cases are derived from SUPPORTED_CONNECTIONS so new connections are
+// picked up automatically.
+describe.concurrent('smoke test - standalone connections', () => {
+  it.each(
+    connectionCases,
+  )('should generate and build the $key connection', async ({
+    connection,
+    key,
+  }) => {
+    const cwd = await freshWorkspace(`connection-${key}`);
+    const opts = { cwd, env: { NX_DAEMON: 'false' } };
+
+    const targetProtocol = TARGET_PROTOCOL_OVERRIDE[key];
+
+    const source =
+      connection.source === 'ts#agent' || connection.source === 'py#agent'
+        ? await buildAgentEndpoint(connection.source, opts, 'src')
+        : await ENDPOINT_BUILDERS[connection.source](opts, 'src');
+    const target =
+      connection.target === 'ts#agent' || connection.target === 'py#agent'
+        ? await buildAgentEndpoint(
+            connection.target,
+            opts,
+            'tgt',
+            targetProtocol,
+          )
+        : await ENDPOINT_BUILDERS[connection.target](opts, 'tgt');
+
+    // Install once now that every project has been generated with
+    // --prefer-install-dependencies=false, so the connection generator and
+    // build resolve dependencies.
+    await runInstall({ cwd, env: { NX_DAEMON: 'false' } });
+
+    const sourceComponent = source.component
+      ? ` --sourceComponent=${source.component}`
+      : '';
+    const targetComponent = target.component
+      ? ` --targetComponent=${target.component}`
+      : '';
+    await runCLI(
+      `generate @aws/nx-plugin:connection --sourceProject=${source.project} --targetProject=${target.project}${sourceComponent}${targetComponent} --no-interactive`,
+      opts,
+    );
+
     await syncAndBuild(cwd);
   });
 });

@@ -244,7 +244,7 @@ describe('connection generator', () => {
           targetProject: 'api',
         });
         expect(result.connection).toEqual({
-          source: 'react',
+          source: 'ts#react-website',
           target: 'ts#trpc-api',
         });
         expect(result.sourceComponent).toBeUndefined();
@@ -259,7 +259,7 @@ describe('connection generator', () => {
           targetProject: 'api',
         });
         expect(result.connection).toEqual({
-          source: 'react',
+          source: 'ts#react-website',
           target: 'py#fast-api',
         });
       });
@@ -272,8 +272,8 @@ describe('connection generator', () => {
           targetProject: 'api-model',
         });
         expect(result.connection).toEqual({
-          source: 'react',
-          target: 'smithy',
+          source: 'ts#react-website',
+          target: 'ts#smithy-api',
         });
       });
 
@@ -351,7 +351,7 @@ describe('connection generator', () => {
           targetProject: 'api',
         });
         expect(result.connection).toEqual({
-          source: 'react',
+          source: 'ts#react-website',
           target: 'ts#trpc-api',
         });
         expect(result.sourceComponent).toBeUndefined();
@@ -371,7 +371,7 @@ describe('connection generator', () => {
           targetProject: 'api',
         });
         expect(result.connection).toEqual({
-          source: 'react',
+          source: 'ts#react-website',
           target: 'ts#trpc-api',
         });
         expect(result.targetComponent).toBeUndefined();
@@ -389,7 +389,7 @@ describe('connection generator', () => {
           targetProject: 'api',
         });
         expect(result.connection).toEqual({
-          source: 'react',
+          source: 'ts#react-website',
           target: 'ts#trpc-api',
         });
       });
@@ -397,7 +397,7 @@ describe('connection generator', () => {
 
     describe('with component-level connections (custom supported connections)', () => {
       const customConnections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -511,7 +511,7 @@ describe('connection generator', () => {
               sourceComponent: 'rc',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
       });
 
       it('should succeed when found by path', async () => {
@@ -525,7 +525,7 @@ describe('connection generator', () => {
               sourceComponent: 'src/rc',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
       });
 
       it('should succeed when found by generator', async () => {
@@ -539,7 +539,7 @@ describe('connection generator', () => {
               sourceComponent: 'ts#rc',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
       });
     });
 
@@ -585,7 +585,7 @@ describe('connection generator', () => {
               targetComponent: 'h',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
       });
 
       it('should succeed when found by path', async () => {
@@ -601,7 +601,7 @@ describe('connection generator', () => {
               targetComponent: 'src/h.ts',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
       });
 
       it('should succeed when found by generator', async () => {
@@ -615,7 +615,7 @@ describe('connection generator', () => {
               targetComponent: 'ts#lf',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
       });
     });
 
@@ -632,7 +632,7 @@ describe('connection generator', () => {
           targetComponent: 'tc',
         });
         expect(result.connection).toEqual({
-          source: 'react',
+          source: 'ts#react-website',
           target: 'ts#trpc-api',
         });
       });
@@ -678,7 +678,7 @@ describe('connection generator', () => {
               targetProject: 'api',
             })
           ).connection,
-        ).toEqual({ source: 'react', target: 'ts#trpc-api' });
+        ).toEqual({ source: 'ts#react-website', target: 'ts#trpc-api' });
         // Empty list fails
         await expect(
           resolveConnection(
@@ -767,11 +767,11 @@ describe('connection generator', () => {
         setupTrpcProject('t', [{ generator: 'ct', path: 'p', name: 'c' }]);
         await expect(
           resolveConnection(tree, { sourceProject: 's', targetProject: 't' }, [
-            { source: 'react', target: 'ts#trpc-api' },
+            { source: 'ts#react-website', target: 'ts#trpc-api' },
             { source: 'cs', target: 'ct' },
           ]),
         ).rejects.toThrow(
-          /Ambiguous.*react -> ts#trpc-api.*c \(cs\) -> c \(ct\)/,
+          /Ambiguous.*ts#react-website -> ts#trpc-api.*c \(cs\) -> c \(ct\)/,
         );
       });
 
@@ -859,7 +859,9 @@ describe('connection generator', () => {
 
     it('should identify react by main.tsx', async () => {
       setupReactProject();
-      expect(await determineProjectType(tree, 'frontend')).toBe('react');
+      expect(await determineProjectType(tree, 'frontend')).toBe(
+        'ts#react-website',
+      );
     });
 
     it('should identify react using sourceRoot', async () => {
@@ -872,12 +874,16 @@ describe('connection generator', () => {
         }),
       );
       tree.write('apps/frontend/source/main.tsx', '');
-      expect(await determineProjectType(tree, 'frontend')).toBe('react');
+      expect(await determineProjectType(tree, 'frontend')).toBe(
+        'ts#react-website',
+      );
     });
 
     it('should identify smithy (model project)', async () => {
       setupSmithyProject();
-      expect(await determineProjectType(tree, 'api-model')).toBe('smithy');
+      expect(await determineProjectType(tree, 'api-model')).toBe(
+        'ts#smithy-api',
+      );
     });
 
     it('should identify smithy (backend project)', async () => {
@@ -889,7 +895,9 @@ describe('connection generator', () => {
           metadata: { generator: 'ts#smithy-api' },
         }),
       );
-      expect(await determineProjectType(tree, 'api-backend')).toBe('smithy');
+      expect(await determineProjectType(tree, 'api-backend')).toBe(
+        'ts#smithy-api',
+      );
     });
 
     it('should return undefined for unknown', async () => {
@@ -912,7 +920,7 @@ describe('connection generator', () => {
       });
     });
 
-    it('should call trpcReactGenerator for react -> ts#trpc-api', async () => {
+    it('should call trpcReactGenerator for ts#react-website -> ts#trpc-api', async () => {
       setupReactProject();
       setupTrpcProject();
       await connectionGenerator(tree, {
@@ -1039,7 +1047,7 @@ describe('connection generator', () => {
 
   describe('resolveConnection edge cases', () => {
     const customConnections: Connection[] = [
-      { source: 'react', target: 'ts#trpc-api' },
+      { source: 'ts#react-website', target: 'ts#trpc-api' },
       { source: 'comp-src', target: 'comp-tgt' },
     ];
 
@@ -1233,7 +1241,7 @@ describe('connection generator', () => {
       });
 
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'ts#trpc-api',
       });
       expect(result.sourceComponent).toBeUndefined();
@@ -1243,7 +1251,7 @@ describe('connection generator', () => {
     it('should resolve mixed: component-level source + project-level target', async () => {
       // Source matches via component, target is trpc (project-level)
       setupUnknownProject('source', [
-        { generator: 'react', path: 'src/app', name: 'react-app' },
+        { generator: 'ts#react-website', path: 'src/app', name: 'react-app' },
       ]);
       setupTrpcProject('target');
 
@@ -1253,7 +1261,7 @@ describe('connection generator', () => {
       });
 
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'ts#trpc-api',
       });
       expect(result.sourceComponent?.name).toBe('react-app');
@@ -1320,7 +1328,7 @@ describe('connection generator', () => {
 
     it('should disambiguate with sourceComponent when multiple connections match', async () => {
       const connections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -1361,7 +1369,7 @@ describe('connection generator', () => {
 
     it('should disambiguate with targetComponent when multiple connections match', async () => {
       const connections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -1391,7 +1399,7 @@ describe('connection generator', () => {
 
     it('should disambiguate with both sourceComponent and targetComponent', async () => {
       const connections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -1434,14 +1442,14 @@ describe('connection generator', () => {
         sourceComponent: 'rc',
       });
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'ts#trpc-api',
       });
     });
 
     it('should disambiguate to project-level connection with "." sentinel on source', async () => {
       const connections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -1461,7 +1469,7 @@ describe('connection generator', () => {
         ),
       ).rejects.toThrow(/Ambiguous/);
 
-      // With "." on source: narrows to project-level, resolves react -> ts#trpc-api
+      // With "." on source: narrows to project-level, resolves ts#react-website -> ts#trpc-api
       const result = await resolveConnection(
         tree,
         {
@@ -1472,7 +1480,7 @@ describe('connection generator', () => {
         connections,
       );
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'ts#trpc-api',
       });
       expect(result.sourceComponent).toBeUndefined();
@@ -1480,7 +1488,7 @@ describe('connection generator', () => {
 
     it('should disambiguate to project-level connection with "." sentinel on target', async () => {
       const connections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -1502,7 +1510,7 @@ describe('connection generator', () => {
         connections,
       );
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'ts#trpc-api',
       });
       expect(result.targetComponent).toBeUndefined();
@@ -1510,7 +1518,7 @@ describe('connection generator', () => {
 
     it('should disambiguate with "." on both sides', async () => {
       const connections: Connection[] = [
-        { source: 'react', target: 'ts#trpc-api' },
+        { source: 'ts#react-website', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
@@ -1532,7 +1540,7 @@ describe('connection generator', () => {
         connections,
       );
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'ts#trpc-api',
       });
       expect(result.sourceComponent).toBeUndefined();
@@ -1587,10 +1595,10 @@ describe('connection generator', () => {
           targetProject: 'target',
           sourceComponent: 'my-comp',
         },
-        [{ source: 'react', target: 'comp-tgt' }],
+        [{ source: 'ts#react-website', target: 'comp-tgt' }],
       );
       expect(result.connection).toEqual({
-        source: 'react',
+        source: 'ts#react-website',
         target: 'comp-tgt',
       });
     });
@@ -1654,7 +1662,7 @@ describe('connection generator', () => {
           sourceComponent: 'my-comp',
         },
         [
-          { source: 'react', target: 'some-target' },
+          { source: 'ts#react-website', target: 'some-target' },
           { source: 'comp-src', target: 'some-target' },
         ],
       );
