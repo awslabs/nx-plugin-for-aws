@@ -88,6 +88,19 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
+// Optional sharding across machines: set NX_E2E_SHARD=<index>/<total> (1-based)
+// to run only a slice of the cases, mirroring the unit-test shards. Cases are
+// distributed round-robin (via a cursor shared across all three groups in
+// source order) so heavy Python/agent cases spread evenly rather than clumping
+// into one shard. Discovery stays programmatic — only the run is split, so
+// coverage still evolves automatically. Defaults to 1/1 (run everything).
+const [shardIndex, shardTotal] = (process.env.NX_E2E_SHARD ?? '1/1')
+  .split('/')
+  .map(Number);
+let shardCursor = 0;
+const forThisShard = <T>(cases: T[]): T[] =>
+  cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
+
 const freshWorkspace = async (generator: string): Promise<string> => {
   const targetDir = join(
     tmpProjPath(),
@@ -116,7 +129,7 @@ const syncAndBuild = async (cwd: string) => {
 // run concurrently (bounded by `maxConcurrency` in the vitest config).
 describe.concurrent('smoke test - standalone projects', () => {
   it.each(
-    standalone,
+    forThisShard(standalone),
   )('should generate and build $generator in isolation', async ({
     generator,
     hasName,
@@ -132,7 +145,7 @@ describe.concurrent('smoke test - standalone projects', () => {
 
 describe.concurrent('smoke test - standalone components', () => {
   it.each(
-    components,
+    forThisShard(components),
   )('should generate and build $generator on its own project', async ({
     generator,
     hasName,
@@ -324,7 +337,7 @@ const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
 // picked up automatically.
 describe.concurrent('smoke test - standalone connections', () => {
   it.each(
-    connectionCases,
+    forThisShard(connectionCases),
   )('should generate and build the $key connection', async ({
     connection,
     key,

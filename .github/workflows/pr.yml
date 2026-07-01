@@ -100,7 +100,6 @@ jobs:
           - bun
           - no-interactive
           - dungeon-adventure
-          - standalone
           - terraform
           - rdb
           - trpc-api
@@ -134,6 +133,35 @@ jobs:
           enable-uv-cache: 'false'
       - name: Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
+  # The standalone smoke test generates and builds every generator, component and
+  # connection permutation in its own workspace. It's sharded across machines
+  # (NX_E2E_SHARD=<index>/<total>) so the many cases run in parallel rather than
+  # serialising on one runner.
+  smoke_tests_standalone:
+    name: Smoke Tests - standalone (${{matrix.shard}}/4)
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: build-artifact
+          path: dist
+      - uses: ./.github/actions/init-monorepo
+        with:
+          aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
+          enable-uv-cache: 'false'
+      - name: Smoke Test - standalone (shard ${{ matrix.shard }}/4)
+        env:
+          NX_E2E_SHARD: ${{ matrix.shard }}/4
+        run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
     runs-on: windows-latest
@@ -142,7 +170,6 @@ jobs:
       fail-fast: false
       matrix:
         smoke_test:
-          - standalone
           - dungeon-adventure
           - git-secrets
     steps:
@@ -158,8 +185,31 @@ jobs:
           path: dist
       - uses: ./.github/actions/init-monorepo
       - name: Windows Smoke Test - ${{ matrix.smoke_test }}
-        # windows-latest has far fewer cores than the Linux runners, so cap the
-        # standalone matrix's concurrency to avoid oversubscribing the runner.
-        env:
-          NX_E2E_MAX_CONCURRENCY: 4
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
+  smoke_tests_windows_standalone:
+    name: Windows Smoke Tests - standalone (${{matrix.shard}}/4)
+    runs-on: windows-latest
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Disable Windows Defender real-time monitoring
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: build-artifact
+          path: dist
+      - uses: ./.github/actions/init-monorepo
+      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/4)
+        # windows-latest has far fewer cores than the Linux runners, so cap
+        # concurrency to avoid oversubscribing the runner.
+        env:
+          NX_E2E_SHARD: ${{ matrix.shard }}/4
+          NX_E2E_MAX_CONCURRENCY: 4
+        run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
