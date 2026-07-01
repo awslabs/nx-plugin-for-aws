@@ -107,6 +107,12 @@ let shardCursor = 0;
 const forThisShard = <T>(cases: T[]): T[] =>
   cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
 
+// Cases for this shard, split by group. With many shards some groups can be
+// empty for a given shard; `describe.skipIf` avoids vitest's "No test found in
+// suite" error for an empty `it.each`.
+const shardStandalone = forThisShard(standalone);
+const shardComponents = forThisShard(components);
+
 const freshWorkspace = async (generator: string): Promise<string> => {
   const targetDir = join(
     tmpProjPath(),
@@ -132,47 +138,53 @@ const syncAndBuild = async (cwd: string) => {
 // Each generator runs in its own isolated workspace and keeps the default
 // dependency install, so the build still verifies each generator declares the
 // dependencies it needs.
-describe('smoke test - standalone projects', () => {
-  it.each(
-    forThisShard(standalone),
-  )('should generate and build $generator in isolation', async ({
-    generator,
-    hasName,
-  }) => {
-    const cwd = await freshWorkspace(generator);
-    await runCLI(
-      `generate @aws/nx-plugin:${generator} ${hasName ? '--name=test' : ''} --no-interactive`,
-      { cwd, env: { NX_DAEMON: 'false' } },
-    );
-    await syncAndBuild(cwd);
-  });
-});
+describe.skipIf(shardStandalone.length === 0)(
+  'smoke test - standalone projects',
+  () => {
+    it.each(
+      shardStandalone,
+    )('should generate and build $generator in isolation', async ({
+      generator,
+      hasName,
+    }) => {
+      const cwd = await freshWorkspace(generator);
+      await runCLI(
+        `generate @aws/nx-plugin:${generator} ${hasName ? '--name=test' : ''} --no-interactive`,
+        { cwd, env: { NX_DAEMON: 'false' } },
+      );
+      await syncAndBuild(cwd);
+    });
+  },
+);
 
-describe('smoke test - standalone components', () => {
-  it.each(
-    forThisShard(components),
-  )('should generate and build $generator on its own project', async ({
-    generator,
-    hasName,
-  }) => {
-    const cwd = await freshWorkspace(generator);
-    const opts = { cwd, env: { NX_DAEMON: 'false' } };
+describe.skipIf(shardComponents.length === 0)(
+  'smoke test - standalone components',
+  () => {
+    it.each(
+      shardComponents,
+    )('should generate and build $generator on its own project', async ({
+      generator,
+      hasName,
+    }) => {
+      const cwd = await freshWorkspace(generator);
+      const opts = { cwd, env: { NX_DAEMON: 'false' } };
 
-    const baseGenerator =
-      COMPONENT_BASE_OVERRIDES[generator] ??
-      (generator.startsWith('py') ? 'py#project' : 'ts#project');
+      const baseGenerator =
+        COMPONENT_BASE_OVERRIDES[generator] ??
+        (generator.startsWith('py') ? 'py#project' : 'ts#project');
 
-    await runCLI(
-      `generate @aws/nx-plugin:${baseGenerator} --name=base --no-interactive`,
-      opts,
-    );
-    await runCLI(
-      `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
-      opts,
-    );
-    await syncAndBuild(cwd);
-  });
-});
+      await runCLI(
+        `generate @aws/nx-plugin:${baseGenerator} --name=base --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
+        opts,
+      );
+      await syncAndBuild(cwd);
+    });
+  },
+);
 
 // How to reference an endpoint in a connection command: the project to pass as
 // source/target, and (for component-typed endpoints) the component to select.
@@ -329,10 +341,12 @@ const buildAgentEndpoint = async (
   return { project: hostProject, component: `agent-${suffix}` };
 };
 
-const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
-  connection,
-  key: `${connection.source} -> ${connection.target}`,
-}));
+const shardConnectionCases = forThisShard(
+  SUPPORTED_CONNECTIONS.map((connection) => ({
+    connection,
+    key: `${connection.source} -> ${connection.target}`,
+  })),
+);
 
 // Exercises each supported connection end-to-end in its own isolated workspace:
 // generate the source and target projects, run the connection generator, then
@@ -340,43 +354,46 @@ const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
 // connection generators) by proving the real generators wire up projects that
 // build. Cases are derived from SUPPORTED_CONNECTIONS so new connections are
 // picked up automatically.
-describe('smoke test - standalone connections', () => {
-  it.each(
-    forThisShard(connectionCases),
-  )('should generate and build the $key connection', async ({
-    connection,
-    key,
-  }) => {
-    const cwd = await freshWorkspace(`connection-${key}`);
-    const opts = { cwd, env: { NX_DAEMON: 'false' } };
+describe.skipIf(shardConnectionCases.length === 0)(
+  'smoke test - standalone connections',
+  () => {
+    it.each(
+      shardConnectionCases,
+    )('should generate and build the $key connection', async ({
+      connection,
+      key,
+    }) => {
+      const cwd = await freshWorkspace(`connection-${key}`);
+      const opts = { cwd, env: { NX_DAEMON: 'false' } };
 
-    const targetProtocol = TARGET_PROTOCOL_OVERRIDE[key];
+      const targetProtocol = TARGET_PROTOCOL_OVERRIDE[key];
 
-    const source =
-      connection.source === 'ts#agent' || connection.source === 'py#agent'
-        ? await buildAgentEndpoint(connection.source, opts, 'src')
-        : await ENDPOINT_BUILDERS[connection.source](opts, 'src');
-    const target =
-      connection.target === 'ts#agent' || connection.target === 'py#agent'
-        ? await buildAgentEndpoint(
-            connection.target,
-            opts,
-            'tgt',
-            targetProtocol,
-          )
-        : await ENDPOINT_BUILDERS[connection.target](opts, 'tgt');
+      const source =
+        connection.source === 'ts#agent' || connection.source === 'py#agent'
+          ? await buildAgentEndpoint(connection.source, opts, 'src')
+          : await ENDPOINT_BUILDERS[connection.source](opts, 'src');
+      const target =
+        connection.target === 'ts#agent' || connection.target === 'py#agent'
+          ? await buildAgentEndpoint(
+              connection.target,
+              opts,
+              'tgt',
+              targetProtocol,
+            )
+          : await ENDPOINT_BUILDERS[connection.target](opts, 'tgt');
 
-    const sourceComponent = source.component
-      ? ` --sourceComponent=${source.component}`
-      : '';
-    const targetComponent = target.component
-      ? ` --targetComponent=${target.component}`
-      : '';
-    await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=${source.project} --targetProject=${target.project}${sourceComponent}${targetComponent} --no-interactive`,
-      opts,
-    );
+      const sourceComponent = source.component
+        ? ` --sourceComponent=${source.component}`
+        : '';
+      const targetComponent = target.component
+        ? ` --targetComponent=${target.component}`
+        : '';
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=${source.project} --targetProject=${target.project}${sourceComponent}${targetComponent} --no-interactive`,
+        opts,
+      );
 
-    await syncAndBuild(cwd);
-  });
-});
+      await syncAndBuild(cwd);
+    });
+  },
+);

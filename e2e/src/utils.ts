@@ -247,18 +247,15 @@ export const createTestWorkspace = async (
   iac?: 'cdk' | 'terraform',
 ): Promise<string> => {
   const workspaceDir = join(targetDir, name);
+  const npmCacheDir = join(targetDir, '.npm-cache');
   // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`, which
-  // installs into a cache dir keyed on the package set. Under heavy concurrency
-  // (especially on the slower Windows runners) that npx step can corrupt its
-  // cache or fail transiently — a half-written module surfaces as
-  // MODULE_NOT_FOUND. Give each workspace its own npm cache and retry a couple
-  // of times, wiping any partial workspace between attempts, so one flaky create
-  // doesn't fail the whole shard.
+  // installs into a cache dir keyed on the package set. A flaky download or
+  // interrupted install can corrupt that cache — a half-written module surfaces
+  // as MODULE_NOT_FOUND. Give each workspace its own npm cache and retry a
+  // couple of times, wiping the partial workspace and cache between attempts,
+  // so one flaky create doesn't fail the whole shard.
   const attempts = 3;
   for (let attempt = 1; ; attempt++) {
-    if (existsSync(workspaceDir)) {
-      rmSync(workspaceDir, { force: true, recursive: true });
-    }
     try {
       await runCLI(
         `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
@@ -266,13 +263,18 @@ export const createTestWorkspace = async (
           cwd: targetDir,
           prefixWithPackageManagerCmd: false,
           redirectStderr: true,
-          env: { npm_config_cache: join(targetDir, '.npm-cache') },
+          env: { npm_config_cache: npmCacheDir },
         },
       );
       break;
     } catch (e) {
       if (attempt >= attempts) throw e;
       console.log(`create workspace attempt ${attempt} failed, retrying: ${e}`);
+      for (const dir of [workspaceDir, npmCacheDir]) {
+        if (existsSync(dir)) {
+          rmSync(dir, { force: true, recursive: true });
+        }
+      }
     }
   }
   return workspaceDir;
