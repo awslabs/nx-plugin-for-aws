@@ -186,6 +186,7 @@ jobs:
       fail-fast: false
       matrix:
         smoke_test:
+          - dungeon-adventure
           - git-secrets
     steps:
       - uses: actions/checkout@v7
@@ -198,9 +199,9 @@ jobs:
           path: dist
       - uses: ./.github/actions/init-monorepo
         with:
-          # No container builds needed; skip the WSL2 Docker setup (the Windows
-          # fleet has no Linux Docker daemon).
-          container-tools: 'false'
+          # dungeon-adventure builds an agentcore agent Docker image; git-secrets
+          # builds no containers.
+          container-tools: ${{ matrix.smoke_test == 'dungeon-adventure' }}
       - name: Windows Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
   smoke_tests_windows_standalone:
@@ -222,14 +223,12 @@ jobs:
           path: dist
       - uses: ./.github/actions/init-monorepo
         with:
-          # The standalone smoke test builds no containers.
-          container-tools: 'false'
+          # Agent and MCP server components build agentcore Docker images, so the
+          # standalone matrix needs the WSL2 Docker backend.
+          container-tools: 'true'
       - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/8)
-        # The Windows fleet has no Linux Docker daemon, so skip the Smithy cases
-        # that build a Linux image via `docker build` (covered on Linux).
         env:
           NX_E2E_SHARD: ${{ matrix.shard }}/8
-          NX_E2E_SKIP_DOCKER: 'true'
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
   release:
     name: Release

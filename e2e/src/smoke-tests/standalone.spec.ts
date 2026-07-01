@@ -107,13 +107,6 @@ let shardCursor = 0;
 const forThisShard = <T>(cases: T[]): T[] =>
   cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
 
-// Some Smithy connections build the Smithy model via `docker build` of a Linux
-// image, which needs a Linux Docker daemon + buildx. Set NX_E2E_SKIP_DOCKER=true
-// on runners without one (e.g. the Windows fleet, which can't run Linux Docker)
-// to skip those cases — they stay covered on Linux.
-const skipDocker = process.env.NX_E2E_SKIP_DOCKER === 'true';
-const needsDocker = (key: string): boolean => key.includes('ts#smithy-api');
-
 const freshWorkspace = async (generator: string): Promise<string> => {
   const targetDir = join(
     tmpProjPath(),
@@ -339,7 +332,7 @@ const buildAgentEndpoint = async (
 const connectionCases = SUPPORTED_CONNECTIONS.map((connection) => ({
   connection,
   key: `${connection.source} -> ${connection.target}`,
-})).filter(({ key }) => !(skipDocker && needsDocker(key)));
+}));
 
 // Exercises each supported connection end-to-end in its own isolated workspace:
 // generate the source and target projects, run the connection generator, then
