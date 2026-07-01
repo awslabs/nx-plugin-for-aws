@@ -64,3 +64,9 @@ When all v1.0 workstreams are complete (see #718), remove the
 `--specifier premajor --preid rc` logic from the `main` release step in
 `ci.yml` so `nx release` resolves a stable `1.0.0` bump. See #737 for the full
 cutover checklist.
+
+### Re-triggering a release
+
+The release and docs-deploy steps only run on `push` events. Re-running a
+stuck CI run preserves the original `push` event, so a rerun still publishes;
+a manual `workflow_dispatch` run intentionally does not.
