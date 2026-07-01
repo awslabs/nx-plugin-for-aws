@@ -1,26 +1,25 @@
 # Release Strategy
 
-This repository uses a dual-branch release strategy to support parallel development of 1.0 release candidates alongside stable 0.x patches.
+This repository releases 1.0 release candidates from `main`. Each release
+candidate is published to **both** the `latest` and `next` npm dist-tags so the
+default install path resolves to the current RC while `@next` continues to work
+for anyone already pinned to it.
 
-## Branches
+## Branch
 
-| Branch        | Purpose                            | npm dist-tag | Version format             |
-| ------------- | ---------------------------------- | ------------ | -------------------------- |
-| `main`        | 1.0 development (breaking changes) | `next`       | `1.0.0-rc.N`               |
-| `release/0.x` | Stable patches for current users   | `latest`     | `0.121.x`, `0.122.x`, etc. |
+| Branch | Purpose                | npm dist-tags     | Version format |
+| ------ | ---------------------- | ----------------- | -------------- |
+| `main` | 1.0 release candidates | `latest` + `next` | `1.0.0-rc.N`   |
 
 ## How It Works
 
-- **`main`** CI uses `--specifier premajor --preid rc` for the first RC (producing `1.0.0-rc.0`), then `--preid rc` for subsequent RCs (auto-incrementing to `1.0.0-rc.1`, `1.0.0-rc.2`, etc.). These publish to the `next` dist-tag.
-- **`release/0.x`** CI runs `nx release` without `--preid`, producing normal semver bumps. These publish to the `latest` dist-tag.
-- **Docs** deploy only from `release/0.x`, keeping the public site on stable content.
-- **Slack notifications** skip prerelease versions.
+- **`main`** CI uses `--specifier premajor --preid rc` for the first RC (producing `1.0.0-rc.0`), then `--preid rc` for subsequent RCs (auto-incrementing to `1.0.0-rc.1`, `1.0.0-rc.2`, etc.).
+- Each RC is published to the `latest` dist-tag, then the `next` dist-tag is pointed at the same version.
+- **Docs** deploy from `main` on every release.
 
 ## For Contributors
 
-### New features and breaking changes (targeting 1.0)
-
-Target `main` as usual:
+All work targets `main`:
 
 ```bash
 git checkout main
@@ -30,82 +29,46 @@ git commit -m "feat(ts#api): consolidate API generators"
 gh pr create --base main
 ```
 
-### Bug fixes for current stable users
-
-Target `release/0.x`:
-
-```bash
-git checkout release/0.x
-git checkout -b fix/my-bugfix
-# ... make changes ...
-git commit -m "fix(ts#trpc-api): correct router import path"
-gh pr create --base release/0.x
-```
-
-### Cherry-picking fixes between branches
-
-If a fix applies to both branches:
-
-```bash
-# Fix on release/0.x first (since it's simpler)
-git checkout release/0.x
-git checkout -b fix/my-bugfix
-# ... commit and merge via PR ...
-
-# Then cherry-pick to main
-git checkout main
-git cherry-pick <commit-sha>
-git push origin main
-```
-
 ## For Maintainers
 
-### Consuming prereleases
+### Consuming the release candidate
 
-Users opt into release candidates explicitly:
+The default install resolves to the current RC:
 
 ```bash
+npm install @aws/nx-plugin
+# @next resolves to the same version:
 npm install @aws/nx-plugin@next
 # or pin a specific RC:
 npm install @aws/nx-plugin@1.0.0-rc.1
 ```
 
-The default `npm install @aws/nx-plugin` always resolves to the stable 0.x version.
-
 ### Manual release (if needed)
 
-On `main` (first prerelease):
+First prerelease:
 
 ```bash
 pnpm nx release --skip-publish --specifier premajor --preid rc
-pnpm nx release publish --tag next
-# Publishes 1.0.0-rc.0 to "next" dist-tag
+pnpm nx release publish --tag latest
+# Point "next" at the same version:
+for pkg in @aws/nx-plugin @aws/nx-plugin-mcp @aws/create-nx-workspace; do
+  npm dist-tag add "$pkg@$(git describe --tags --abbrev=0 | sed 's/^v//')" next
+done
 ```
 
-On `main` (subsequent prereleases, after v1.0.0-rc.0 tag exists):
+Subsequent prereleases (after the first `v1.0.0-rc.N` tag exists):
 
 ```bash
 pnpm nx release --skip-publish --preid rc
-pnpm nx release publish --tag next
-# Publishes 1.0.0-rc.N to "next" dist-tag
-```
-
-On `release/0.x` (stable):
-
-```bash
-pnpm nx release --skip-publish
 pnpm nx release publish --tag latest
-# Publishes 0.x.y to "latest" dist-tag
+for pkg in @aws/nx-plugin @aws/nx-plugin-mcp @aws/create-nx-workspace; do
+  npm dist-tag add "$pkg@$(git describe --tags --abbrev=0 | sed 's/^v//')" next
+done
 ```
 
 ### Final cutover to 1.0
 
-When all v1.0 workstreams are complete (see #718):
-
-1. Remove the `--specifier premajor --preid rc` logic from the `main` branch release step in `ci.yml`
-2. Change the `NPM_DIST_TAG` condition in `ci.yml` back to unconditional `latest`
-3. Remove the `release/0.x` branch condition from `deploy_docs`
-4. Publish `1.0.0` to `latest`
-5. Archive `release/0.x`
-
-See #737 for the full cutover checklist.
+When all v1.0 workstreams are complete (see #718), remove the
+`--specifier premajor --preid rc` logic from the `main` release step in
+`ci.yml` so `nx release` resolves a stable `1.0.0` bump. See #737 for the full
+cutover checklist.
