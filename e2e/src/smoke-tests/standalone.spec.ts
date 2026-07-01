@@ -110,8 +110,9 @@ const syncAndBuild = async (cwd: string) => {
 
 // Each generator runs in its own isolated workspace and keeps the default
 // dependency install, so the build still verifies each generator declares the
-// dependencies it needs.
-describe('smoke test - standalone projects', () => {
+// dependencies it needs. Because the workspaces are fully isolated, the cases
+// run concurrently (bounded by `maxConcurrency` in the vitest config).
+describe.concurrent('smoke test - standalone projects', () => {
   it.each(
     standalone,
   )('should generate and build $generator in isolation', async ({
@@ -127,7 +128,7 @@ describe('smoke test - standalone projects', () => {
   });
 });
 
-describe('smoke test - standalone components', () => {
+describe.concurrent('smoke test - standalone components', () => {
   it.each(
     components,
   )('should generate and build $generator on its own project', async ({
