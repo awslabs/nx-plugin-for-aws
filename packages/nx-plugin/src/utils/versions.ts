@@ -73,7 +73,7 @@ export const TS_VERSIONS = {
   '@astrojs/starlight': '0.40.0',
   astro: '6.4.8',
   aws4fetch: '1.0.20',
-  'aws-cdk': '2.1128.1',
+  'aws-cdk': '2.1129.0',
   'aws-cdk-lib': '2.260.0',
   'aws-xray-sdk-core': '3.12.0',
   constructs: '10.6.0',
