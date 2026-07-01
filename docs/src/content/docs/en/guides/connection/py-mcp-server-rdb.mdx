@@ -1,0 +1,117 @@
+---
+title: Python MCP Server to Relational Database
+description: Connect a Python MCP Server to a Relational Database
+when:
+  sourceType: py#mcp-server
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator wires a <Link path="guides/py-mcp-server">Python MCP Server</Link> to a <Link path="guides/py-rdb">Python Relational Database</Link> project, making the database session available to all tools registered in the server.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/py-mcp-server">`py#mcp-server`</Link> project
+2. A <Link path="guides/py-rdb">`py#rdb`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your MCP server project as the source and your relational database project as the target. If the project contains multiple MCP server components, specify `sourceComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator adds the database package as a workspace dependency and updates the MCP server's `<mcp-server-name>-dev` target to depend on the database's `dev` target so both start together during local development. No source files are modified.
+
+## Using the Database in MCP Tools
+
+Import `get_session` or `get_engine` from your database package and use them inside your MCP server tools:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import Session, select
+from my_scope.my_db import get_engine
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example records."""
+    with Session(get_engine()) as session:
+        items = session.exec(select(ExampleModel)).all()
+        return str([item.model_dump() for item in items])
+```
+
+## Multiple Databases
+
+Running the generator again with a different target adds the second database alongside the first. Both engines are available to all tools:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from my_scope.my_db import get_engine as get_my_db
+from my_scope.other_db import get_engine as get_other_db
+```
+
+## Infrastructure
+
+The generated MCP server construct implements `IGrantable` and `IConnectable`, so you can grant network and IAM access to the database directly on the construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` opens the security group rule so the MCP server runtime can reach the database port. `grantConnect` grants IAM `rds-db:connect` permission to the server's execution role.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Pass the database module outputs into your MCP server module so it can reach the database and read its runtime configuration:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Ensure the MCP server's execution role has `rds-db:connect` permission and that its security group can reach the database security group on the database port.
+
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
+
+This starts the MCP server and all connected databases. The `LOCAL_DEV=true` environment variable causes the database client to connect to its local Docker database instead of Aurora.

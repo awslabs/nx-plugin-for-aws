@@ -17,7 +17,7 @@ describe('py#rdb fast-api-connection generator', () => {
         name,
         root: `packages/${name}`,
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -31,7 +31,7 @@ describe('py#rdb fast-api-connection generator', () => {
         root: `packages/${name}`,
         metadata: { apiName },
         targets: {
-          'serve-local': { executor: 'nx:run-commands', continuous: true },
+          dev: { executor: 'nx:run-commands', continuous: true },
         },
       }),
     );
@@ -41,7 +41,7 @@ describe('py#rdb fast-api-connection generator', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add rdb serve-local dependency to fast-api serve-local', async () => {
+  it('should add rdb dev dependency to fast-api dev', async () => {
     setupFastApiProject();
     setupRdbProject();
 
@@ -70,7 +70,7 @@ describe('py#rdb fast-api-connection generator', () => {
     expect(tree.read('packages/api/pyproject.toml', 'utf-8')).toContain('db');
   });
 
-  it('should not add dependency when source has no serve-local', async () => {
+  it('should not add dependency when source has no dev target', async () => {
     tree.write(
       `packages/api/project.json`,
       JSON.stringify({
@@ -87,7 +87,7 @@ describe('py#rdb fast-api-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'api');
-    expect(config.targets?.['serve-local']).toBeUndefined();
+    expect(config.targets?.['dev']).toBeUndefined();
   });
 
   it('should generate SessionDep dependency file', async () => {
@@ -118,11 +118,11 @@ describe('py#rdb fast-api-connection generator', () => {
     });
 
     const config = readProjectConfiguration(tree, 'api');
-    const deps = (config.targets?.['serve-local']?.dependsOn ?? []).filter(
+    const deps = (config.targets?.['dev']?.dependsOn ?? []).filter(
       (d: any) =>
         typeof d === 'object' &&
         d.projects?.includes('db') &&
-        d.target === 'serve-local',
+        d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
   });
