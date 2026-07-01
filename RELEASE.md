@@ -1,20 +1,21 @@
 # Release Strategy
 
 This repository releases 1.0 release candidates from `main`. Each release
-candidate is published to **both** the `latest` and `next` npm dist-tags so the
-default install path resolves to the current RC while `@next` continues to work
-for anyone already pinned to it.
+candidate is published to the `latest` npm dist-tag so the default install path
+resolves to the current RC (there is no separate `next` line to opt into).
 
 ## Branch
 
-| Branch | Purpose                | npm dist-tags     | Version format |
-| ------ | ---------------------- | ----------------- | -------------- |
-| `main` | 1.0 release candidates | `latest` + `next` | `1.0.0-rc.N`   |
+| Branch | Purpose                | npm dist-tag | Version format |
+| ------ | ---------------------- | ------------ | -------------- |
+| `main` | 1.0 release candidates | `latest`     | `1.0.0-rc.N`   |
 
 ## How It Works
 
 - **`main`** CI uses `--specifier premajor --preid rc` for the first RC (producing `1.0.0-rc.0`), then `--preid rc` for subsequent RCs (auto-incrementing to `1.0.0-rc.1`, `1.0.0-rc.2`, etc.).
-- Each RC is published to the `latest` dist-tag, then the `next` dist-tag is pointed at the same version.
+- Each RC is published to the `latest` dist-tag.
+- Publishing uses npm OIDC trusted publishing, which authenticates only `npm publish` and sets a single dist-tag per version. There is no token available for post-publish dist-tag management, so `latest` is the one tag we set.
+- The previously used `next` dist-tag is no longer updated — it is redundant now that the RC is the default install.
 - **Docs** deploy from `main` on every release.
 
 ## For Contributors
@@ -37,8 +38,6 @@ The default install resolves to the current RC:
 
 ```bash
 npm install @aws/nx-plugin
-# @next resolves to the same version:
-npm install @aws/nx-plugin@next
 # or pin a specific RC:
 npm install @aws/nx-plugin@1.0.0-rc.1
 ```
@@ -50,10 +49,6 @@ First prerelease:
 ```bash
 pnpm nx release --skip-publish --specifier premajor --preid rc
 pnpm nx release publish --tag latest
-# Point "next" at the same version:
-for pkg in @aws/nx-plugin @aws/nx-plugin-mcp @aws/create-nx-workspace; do
-  npm dist-tag add "$pkg@$(git describe --tags --abbrev=0 | sed 's/^v//')" next
-done
 ```
 
 Subsequent prereleases (after the first `v1.0.0-rc.N` tag exists):
@@ -61,9 +56,6 @@ Subsequent prereleases (after the first `v1.0.0-rc.N` tag exists):
 ```bash
 pnpm nx release --skip-publish --preid rc
 pnpm nx release publish --tag latest
-for pkg in @aws/nx-plugin @aws/nx-plugin-mcp @aws/create-nx-workspace; do
-  npm dist-tag add "$pkg@$(git describe --tags --abbrev=0 | sed 's/^v//')" next
-done
 ```
 
 ### Final cutover to 1.0
