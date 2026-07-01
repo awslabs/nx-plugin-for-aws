@@ -5,12 +5,12 @@ concurrency:
 
 on:
   push:
-    branches: [main, 'release/0.x']
+    branches: [main]
   workflow_dispatch:
 
 env:
-  CI: 'true'
-  NX_DAEMON: 'true'
+  CI: "true"
+  NX_DAEMON: "true"
 
 permissions:
   pull-requests: write
@@ -33,8 +33,8 @@ jobs:
       - uses: ./.github/actions/init-monorepo
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
-          setup-bun: 'false'
-          setup-terraform: 'false'
+          setup-bun: "false"
+          setup-terraform: "false"
       - name: Package plugins
         run: pnpm package:all --output-style=stream
       - name: Upload artifact
@@ -52,14 +52,12 @@ jobs:
       - uses: ./.github/actions/init-monorepo
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
-          container-tools: 'false'
-          setup-bun: 'false'
-          setup-terraform: 'false'
+          container-tools: "false"
+          setup-bun: "false"
+          setup-terraform: "false"
       - name: Lint
         run: pnpm nx run-many --target lint --all --output-style=stream
       - name: Build docs
-        env:
-          DOCS_BASE_PATH: ${{ github.ref == 'refs/heads/main' && '/nx-plugin-for-aws/preview' || '/nx-plugin-for-aws' }}
         run: pnpm nx run docs:build --output-style=stream
       - name: Check for mutations
         run: git diff --ignore-space-at-eol --exit-code -- ':!**/LICENSE-THIRD-PARTY'
@@ -82,9 +80,9 @@ jobs:
       - uses: ./.github/actions/init-monorepo
         with:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
-          container-tools: 'false'
-          setup-bun: 'false'
-          setup-terraform: 'false'
+          container-tools: "false"
+          setup-bun: "false"
+          setup-terraform: "false"
       - name: Unit Tests (shard ${{ matrix.shard }}/10)
         run: pnpm nx run @aws/nx-plugin:test --output-style=stream --shard=${{ matrix.shard }}/10
       - name: Upload coverage reports to Codecov
@@ -141,7 +139,7 @@ jobs:
           # local-dev (and other) smoke tests spawn many uv dev servers that
           # are killed mid-run; the post-job `uv cache prune` can then hang and
           # fail the job even when all tests passed. The cache buys little here.
-          enable-uv-cache: 'false'
+          enable-uv-cache: "false"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -210,65 +208,36 @@ jobs:
       - name: Release
         if: ${{ steps.should_skip_release.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
         env:
-          # NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_DIST_TAG: ${{ github.ref == 'refs/heads/release/0.x' && 'latest' || 'next' }}
+          # Publishing uses npm OIDC trusted publishing (no token needed).
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
-          HUSKY: '0'
+          HUSKY: "0"
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/release/0.x" ]; then
-            pnpm nx release --skip-publish
+          CURRENT_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
+          if echo "$CURRENT_VERSION" | grep -q "rc"; then
+            pnpm nx release --skip-publish --preid rc
           else
-            CURRENT_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
-            if echo "$CURRENT_VERSION" | grep -q "rc"; then
-              pnpm nx release --skip-publish --preid rc
-            else
-              pnpm nx release --skip-publish --specifier premajor --preid rc
-            fi
+            pnpm nx release --skip-publish --specifier premajor --preid rc
           fi
-          pnpm nx release publish --tag "$NPM_DIST_TAG"
+          # Publish the release candidate to "latest" so the default install
+          # path resolves to it.
+          pnpm nx release publish --tag latest
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
-    if: ${{ (github.ref == 'refs/heads/release/0.x' || github.ref == 'refs/heads/main') && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
     needs: [release]
     steps:
-      - name: Download docs artifact (this branch)
+      - name: Download docs artifact
         uses: actions/download-artifact@v8
         with:
           name: docs-artifact
-          path: docs-this-branch
-      - name: Download docs artifact (other branch)
-        uses: dawidd6/action-download-artifact@v21
-        with:
-          workflow: ci.yml
-          branch: ${{ github.ref == 'refs/heads/main' && 'release/0.x' || 'main' }}
-          name: docs-artifact
-          path: docs-other-branch
-          if_no_artifact_found: warn
-        continue-on-error: true
-      - name: Merge docs artifacts
-        run: |
-          mkdir -p docs-site
-          if [ "${{ github.ref }}" = "refs/heads/release/0.x" ]; then
-            cp -r docs-this-branch/* docs-site/
-            if [ -d docs-other-branch ] && [ "$(ls -A docs-other-branch 2>/dev/null)" ]; then
-              mkdir -p docs-site/preview
-              cp -r docs-other-branch/* docs-site/preview/
-            fi
-          else
-            if [ -d docs-other-branch ] && [ "$(ls -A docs-other-branch 2>/dev/null)" ]; then
-              cp -r docs-other-branch/* docs-site/
-            fi
-            mkdir -p docs-site/preview
-            cp -r docs-this-branch/* docs-site/preview/
-          fi
+          path: docs-site
       - name: Setup Pages
         uses: actions/configure-pages@v6
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: 'docs-site'
+          path: "docs-site"
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
