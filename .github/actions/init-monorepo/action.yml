@@ -81,59 +81,24 @@ runs:
       if: ${{ runner.os != 'Windows' && inputs.container-tools == 'true' }}
       uses: docker/setup-buildx-action@v3
     - name: Set up WSL2 Docker for Linux builds (Windows)
-      if: ${{ runner.os == 'Windows' && inputs.container-tools == 'true' }}
+      if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       run: |
-        $ErrorActionPreference = 'Stop'
-        # The generated Smithy/agent/mcp builds run `docker build` of a Linux
-        # image. Windows has no native Linux Docker daemon, so run Docker Engine
-        # inside WSL2 Ubuntu and forward `docker` to it via a shim.
-        #
-        # WSL2 requires the WSL + VirtualMachinePlatform optional features, and
-        # enabling those needs a reboot — impossible mid-build. So the Windows
-        # EC2 fleet AMI must ship with WSL2 enabled and an Ubuntu distro
-        # registered; this step then just installs/starts Docker inside it. If
-        # WSL isn't ready we fail with guidance rather than attempting a
-        # reboot-requiring install.
-        Write-Host '=== Checking WSL2 availability ==='
-        $wslOk = $false
-        try {
-          $distros = (wsl --list --quiet) -join "`n"
-          if ($LASTEXITCODE -eq 0 -and $distros -match '\S') {
-            Write-Host "Registered WSL distros:`n$distros"
-            $wslOk = $true
-          }
-        } catch { }
-        if (-not $wslOk) {
-          $wsl = (Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux).State
-          $vmp = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State
-          throw @"
-        WSL2 is not available on this runner (WSL feature: $wsl, VirtualMachinePlatform: $vmp, no distro registered).
-        Enabling these features requires a reboot, which isn't possible mid-build, so the
-        Windows EC2 fleet AMI must be pre-provisioned with WSL2 enabled and an Ubuntu distro
-        registered. Bake that into the fleet's custom AMI, then this step will start Docker in it.
-        "@
-        }
+        # Windows runners only have Docker in Windows-container mode.
+        # Install Ubuntu + Docker Engine in WSL2 to build Linux images.
+        # See .github/scripts/setup-wsl-docker.sh for the full setup.
+        wsl --install Ubuntu-24.04 --no-launch
+        wsl --set-default Ubuntu-24.04
 
-        # Pick the registered distro (prefer Ubuntu) and expose it to the docker
-        # shim and later steps.
-        $distro = ((wsl --list --quiet) -split "`n" | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() } | Sort-Object { $_ -notmatch 'Ubuntu' })[0]
-        Write-Host "Using WSL distro: $distro"
-        "WSL_DOCKER_DISTRO=$distro" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-        Write-Host '=== Installing/starting Docker Engine + Buildx inside WSL2 ==='
-        # Convert setup script to LF line endings and run it in WSL2. The script
-        # is idempotent: on a pre-provisioned AMI the apt installs are no-ops and
-        # it just (re)starts the daemon.
+        # Convert setup script to LF line endings and run it in WSL2
         $script = Get-Content "${{ github.workspace }}/.github/scripts/setup-wsl-docker.sh" -Raw
         $lfScript = $script -replace "`r`n", "`n"
         $tmpScript = "$env:RUNNER_TEMP/setup-wsl-docker.sh"
         [System.IO.File]::WriteAllText($tmpScript, $lfScript)
-        $wslPath = wsl -d $distro wslpath ($tmpScript -replace '\\','/')
-        wsl -d $distro -u root -- bash $wslPath
-        if ($LASTEXITCODE -ne 0) { throw "Docker Engine setup in WSL2 failed (exit $LASTEXITCODE)" }
+        $wslPath = wsl -d Ubuntu-24.04 wslpath ($tmpScript -replace '\\','/')
+        wsl -d Ubuntu-24.04 -u root -- bash $wslPath
 
-        # Install docker.cmd wrapper that forwards to the WSL2 Linux daemon.
+        # Install docker.cmd wrapper that forwards to WSL2 Linux daemon
         # See .github/scripts/docker-wsl.cmd for the wrapper logic.
         $wrapperDir = "C:\docker-wsl"
         New-Item -ItemType Directory -Path $wrapperDir -Force | Out-Null
@@ -141,7 +106,6 @@ runs:
         echo "$wrapperDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         $env:PATH = "$wrapperDir;$env:PATH"
 
-        Write-Host '=== Verifying docker shim ==='
         docker version
         docker buildx ls
     - name: Set up terraform (non-Windows)
