@@ -8,7 +8,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { installDeps } from '../../../utils/install';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
   addDependencyToTargetIfNotPresent,
@@ -52,9 +52,10 @@ export const pyDynamoDBMcpServerConnectionGenerator = async (
     PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO,
   ]);
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript', 'python'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 
 export default pyDynamoDBMcpServerConnectionGenerator;

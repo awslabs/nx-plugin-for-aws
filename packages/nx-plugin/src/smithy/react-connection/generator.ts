@@ -12,7 +12,7 @@ import {
 } from '@nx/devkit';
 import { addOpenApiReactClient } from '../../utils/connection/open-api/react';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
   getGeneratorInfo,
@@ -87,9 +87,10 @@ export const smithyReactConnectionGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 const resolveProjectConfig = (

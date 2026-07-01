@@ -13,7 +13,7 @@ import { addTargetToLocalDev } from '../../connection/local-dev';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName } from '../../utils/names';
 import { toScopeAlias } from '../../utils/npm-scope';
@@ -174,8 +174,9 @@ export async function reactGenerator(
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 export default reactGenerator;

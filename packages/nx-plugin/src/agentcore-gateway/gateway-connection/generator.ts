@@ -4,7 +4,7 @@
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import {
@@ -93,9 +93,10 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 /**

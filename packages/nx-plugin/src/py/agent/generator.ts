@@ -27,7 +27,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -505,9 +505,10 @@ export const pyAgentGenerator = async (
   }
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript', 'python'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 
 export default pyAgentGenerator;

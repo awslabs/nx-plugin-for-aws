@@ -20,7 +20,7 @@ import { addHookResultToRouterProviderContext } from '../../../utils/ast/website
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
-import { installDeps } from '../../../utils/install';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
@@ -180,8 +180,9 @@ export async function tsReactWebsiteAuthGenerator(
   await addGeneratorMetricsIfApplicable(tree, [COGNITO_AUTH_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 export default tsReactWebsiteAuthGenerator;

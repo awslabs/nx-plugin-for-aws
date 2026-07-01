@@ -15,7 +15,7 @@ import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
@@ -248,9 +248,10 @@ export async function tsTrpcApiGenerator(
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 
 const validateTrpcInfraAndIntegrationPatternCombination = (

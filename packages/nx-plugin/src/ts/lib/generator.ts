@@ -15,7 +15,7 @@ import {
 } from '@nx/devkit';
 import { libraryGenerator } from '@nx/js';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toKebabCase } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
@@ -209,11 +209,12 @@ export const tsProjectGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  // `installDeps` ensures vitest resolves for the `typescript` language (the
+  // `installDependencies` ensures vitest resolves for the `typescript` language (the
   // generated vitest.config.mts imports it and Nx loads that config when
   // computing the project graph), so a deferred install still runs when needed.
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 export default tsProjectGenerator;

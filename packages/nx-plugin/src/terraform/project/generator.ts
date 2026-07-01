@@ -19,7 +19,7 @@ import {
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
 import { updateGitIgnore } from '../../utils/git';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import {
@@ -317,9 +317,10 @@ export async function terraformProjectGenerator(
   // `@nx-extend/terraform` is registered as an Nx plugin in nx.json, so Nx
   // loads it when computing the project graph — it must resolve even if the
   // caller would otherwise prefer to defer installing.
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript'],
-    ensureResolvable: [NX_EXTEND_PLUGIN],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+      ensureResolvable: [NX_EXTEND_PLUGIN],
+    });
 }
 export default terraformProjectGenerator;

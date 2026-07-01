@@ -74,9 +74,27 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 - After running a generator, use the \`nx show projects\` command to check which projects have been added (if any)
 - Carefully examine the files that have been generated and always refer back to the generator guide when working in a generated project
 - Generate all projects into the \`packages/\` directory
-- When running multiple generators in sequence, pass \`--prefer-install-dependencies=false\` on each one to avoid a slow dependency install after every generator, then install once at the end (or let the final generator install by omitting the flag). This is a preference, not a guarantee — a generator still installs on its own if skipping would leave a dependency unresolvable that a later \`nx\` command needs to compute the project graph, so you don't have to reason about which generators are "safe" to defer.
 - After making changes to your projects, fix linting issues, then run a full build
 - When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load:runtime-config target after a deployment to point a local website at a sandbox stack.
+
+## Batching Generators
+
+When scaffolding several projects in one go, chain generators to avoid a slow dependency install after every generator:
+
+- **Chain generators** with \`&&\` in a single command. Pass \`--prefer-install-dependencies=false\` on each generator except the last so dependencies install once at the end, for example:
+
+${PACKAGE_MANAGERS.map(
+  (pm) => `  \`\`\`bash
+  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:ts#infra --no-interactive --name=infra', pm)} && \\
+    ${buildNxCommand('sync', pm)}
+  \`\`\``,
+).join('\n')}
+
+- **\`--prefer-install-dependencies=false\`** asks a generator to defer its dependency install so the batch installs once at the end (the final generator above omits the flag and installs everything).
+- **\`nx sync\`** is required before building — generators modify TypeScript project references.
 
 ## Detailed Guides
 

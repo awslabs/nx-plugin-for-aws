@@ -18,7 +18,7 @@ import {
   ensurePythonLicenseCollector,
 } from '../../license/config';
 import { updateGitIgnore } from '../../utils/git';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { normalizeDistributionName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -326,8 +326,9 @@ export const pyProjectGenerator = async (
   // is added regardless of which generator runs first.
   addLicenseCheckToLintTarget(tree, fullyQualifiedName);
 
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript', 'python'],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 export default pyProjectGenerator;

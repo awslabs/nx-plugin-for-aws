@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as devkit from '@nx/devkit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installDeps } from './install';
+import { installDependencies } from './install';
 
 const install = vi.fn();
 
@@ -43,7 +43,7 @@ const createWorkspace = (installedPackages: string[] = []) => {
   return { root } as devkit.Tree;
 };
 
-describe('installDeps', () => {
+describe('installDependencies', () => {
   const cleanups: string[] = [];
   const workspace = (installedPackages: string[] = []) => {
     const tree = createWorkspace(installedPackages);
@@ -62,7 +62,7 @@ describe('installDeps', () => {
   });
 
   it('installs typescript dependencies', async () => {
-    await installDeps(workspace(['vitest']), true, {
+    await installDependencies(workspace(['vitest']), true, {
       languages: ['typescript'],
     });
     expect(devkit.installPackagesTask).toHaveBeenCalledOnce();
@@ -70,13 +70,13 @@ describe('installDeps', () => {
   });
 
   it('installs python dependencies', async () => {
-    await installDeps(workspace(), true, { languages: ['python'] });
+    await installDependencies(workspace(), true, { languages: ['python'] });
     expect(install).toHaveBeenCalledOnce();
     expect(devkit.installPackagesTask).not.toHaveBeenCalled();
   });
 
   it('installs both typescript and python dependencies', async () => {
-    await installDeps(workspace(['vitest']), true, {
+    await installDependencies(workspace(['vitest']), true, {
       languages: ['typescript', 'python'],
     });
     expect(devkit.installPackagesTask).toHaveBeenCalledOnce();
@@ -84,7 +84,7 @@ describe('installDeps', () => {
   });
 
   it('installs by default when the preference is undefined', async () => {
-    await installDeps(workspace(['vitest']), undefined, {
+    await installDependencies(workspace(['vitest']), undefined, {
       languages: ['typescript'],
     });
     expect(devkit.installPackagesTask).toHaveBeenCalledOnce();
@@ -92,7 +92,7 @@ describe('installDeps', () => {
 
   it('defers when preferInstallDependencies is false and graph deps are installed', async () => {
     // vitest is implied for typescript and is present in the workspace.
-    await installDeps(workspace(['vitest']), false, {
+    await installDependencies(workspace(['vitest']), false, {
       languages: ['typescript'],
     });
     expect(devkit.installPackagesTask).not.toHaveBeenCalled();
@@ -102,23 +102,27 @@ describe('installDeps', () => {
     // `@nxlv/python` (implied for python) is not installed, so the install must
     // run regardless of the defer preference. Use a scoped name that cannot
     // exist in any ancestor node_modules so the assertion is deterministic.
-    await installDeps(workspace(), false, { languages: ['python'] });
+    await installDependencies(workspace(), false, { languages: ['python'] });
     expect(install).toHaveBeenCalledOnce();
   });
 
   it('installs despite the defer preference when an extra ensureResolvable package is missing', async () => {
-    await installDeps(workspace(['vitest']), false, {
+    await installDependencies(workspace(['vitest']), false, {
       languages: ['typescript'],
-      ensureResolvable: ['@aws-nx-test/definitely-not-installed'],
+      ensureResolvable: ['@tailwindcss/vite'],
     });
     expect(devkit.installPackagesTask).toHaveBeenCalledOnce();
   });
 
   it('defers when all extra ensureResolvable packages are installed', async () => {
-    await installDeps(workspace(['vitest', '@tailwindcss/vite']), false, {
-      languages: ['typescript'],
-      ensureResolvable: ['@tailwindcss/vite'],
-    });
+    await installDependencies(
+      workspace(['vitest', '@tailwindcss/vite']),
+      false,
+      {
+        languages: ['typescript'],
+        ensureResolvable: ['@tailwindcss/vite'],
+      },
+    );
     expect(devkit.installPackagesTask).not.toHaveBeenCalled();
   });
 
@@ -131,7 +135,7 @@ describe('installDeps', () => {
     const parent = workspace(['vitest']);
     const child = join(parent.root, 'child');
     mkdirSync(child, { recursive: true });
-    await installDeps({ root: child } as devkit.Tree, false, {
+    await installDependencies({ root: child } as devkit.Tree, false, {
       languages: ['typescript'],
     });
     expect(devkit.installPackagesTask).toHaveBeenCalledOnce();
@@ -153,7 +157,7 @@ describe('installDeps', () => {
         exports: { '.': './dist/index.mjs' },
       }),
     );
-    await installDeps(tree, false, {
+    await installDependencies(tree, false, {
       languages: ['typescript'],
       ensureResolvable: ['@tailwindcss/vite'],
     });

@@ -5,7 +5,7 @@
 import type { Tree } from '@nx/devkit';
 import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { installDeps } from '../../../utils/install';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
   getGeneratorInfo,
@@ -56,9 +56,10 @@ export const fastApiReactGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [FAST_API_REACT_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default fastApiReactGenerator;

@@ -19,7 +19,7 @@ import {
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { installDeps } from '../../../utils/install';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
@@ -154,9 +154,10 @@ export const tsAgentMcpConnectionGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default tsAgentMcpConnectionGenerator;

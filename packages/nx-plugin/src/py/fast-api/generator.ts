@@ -18,7 +18,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
 import {
@@ -227,9 +227,10 @@ export const pyFastApiProjectGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript', 'python'],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 
 const getIntegrationPattern = (

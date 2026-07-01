@@ -28,7 +28,7 @@ import {
 } from '../utils/config/utils';
 import { inferContainers } from '../utils/containers';
 import { DEFAULT_BIOME_CONFIG, formatFilesInSubtree } from '../utils/format';
-import { installDeps } from '../utils/install';
+import { installDependencies } from '../utils/install';
 import { configureMcpServers } from '../utils/mcp';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { getNpmScope } from '../utils/npm-scope';
@@ -294,9 +294,10 @@ export const presetGenerator = async (
   }
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default presetGenerator;

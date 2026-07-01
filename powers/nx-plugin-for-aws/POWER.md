@@ -152,7 +152,7 @@ Add capabilities to existing projects:
 - Run `nx sync` after adding dependencies between TypeScript projects
 - Install dependencies at the workspace root, not in individual projects
 - Use `nx reset` to reset the Nx daemon when unexpected issues arise
-- When running several generators in sequence, pass `--prefer-install-dependencies=false` on each to avoid a slow install after every generator, then install once at the end (or let the final generator install by omitting the flag). It's a preference, not a guarantee — a generator still installs on its own when skipping would leave a dependency unresolvable that a later `nx` command needs for project-graph computation, so you don't have to reason about which generators are safe to defer
+- When running several generators in sequence, pass `--prefer-install-dependencies=false` on each to avoid a slow install after every generator, then install once at the end (or let the final generator install by omitting the flag)
 - After running generators, use `nx show projects` to verify what was created
 - Fix lint issues with `nx run-many --target lint --configuration=fix --all`
 - Generate all projects into the `packages/` directory
@@ -182,7 +182,7 @@ When the user wants a full workspace created in one go, you can chain generators
     pnpm build
   ```
 
-- **`--prefer-install-dependencies=false`** asks a generator to defer its dependency install so the batch installs once at the end (the final generator above omits the flag and installs everything). It's a preference, not a guarantee: a generator still installs on its own when skipping would break a later `nx` command's project-graph computation, so the chain is safe regardless of ordering.
+- **`--prefer-install-dependencies=false`** asks a generator to defer its dependency install so the batch installs once at the end (the final generator above omits the flag and installs everything).
 - Use a **timeout of 300000ms** (5 minutes) for workspace creation (downloads dependencies).
 - **`nx sync`** is required before building — generators modify TypeScript project references.
 

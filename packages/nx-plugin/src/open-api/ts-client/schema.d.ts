@@ -6,5 +6,4 @@
 export interface OpenApiTsClientGeneratorSchema {
   openApiSpecPath: string;
   outputPath: string;
-  preferInstallDependencies?: boolean;
 }

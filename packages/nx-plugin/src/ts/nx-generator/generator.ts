@@ -15,7 +15,7 @@ import camelCase from 'lodash.camelcase';
 import PackageJson from '../../../package.json' with { type: 'json' };
 import { addStarExport, applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import {
@@ -190,9 +190,10 @@ export const tsNxGeneratorGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 const incrementMetric = (metrics: string[]): string => {

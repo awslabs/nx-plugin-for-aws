@@ -22,7 +22,7 @@ import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -330,9 +330,10 @@ export const tsAgentGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [TS_AGENT_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, options.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default tsAgentGenerator;

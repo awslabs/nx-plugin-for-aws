@@ -22,7 +22,7 @@ import {
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
-import { installDeps } from '../../../utils/install';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
@@ -521,12 +521,13 @@ export async function tsReactWebsiteGenerator(
   // The generated vite.config.mts imports these, and Nx's inferred `@nx/vite`
   // plugin loads that config when computing the project graph — so they must be
   // installed even if the caller would otherwise prefer to defer.
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript'],
-    ensureResolvable: [
-      ...(tailwind ? ['@tailwindcss/vite'] : []),
-      ...(tanstackRouter ? ['@tanstack/router-plugin'] : []),
-    ],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+      ensureResolvable: [
+        ...(tailwind ? (['@tailwindcss/vite'] as const) : []),
+        ...(tanstackRouter ? (['@tanstack/router-plugin'] as const) : []),
+      ],
+    });
 }
 export default tsReactWebsiteGenerator;

@@ -13,7 +13,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toKebabCase } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
@@ -176,9 +176,10 @@ export const tsAstroDocsGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [TS_ASTRO_DOCS_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default tsAstroDocsGenerator;

@@ -14,7 +14,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
   toClassName,
@@ -200,8 +200,9 @@ export const pyLambdaFunctionGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript', 'python'],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 export default pyLambdaFunctionGenerator;

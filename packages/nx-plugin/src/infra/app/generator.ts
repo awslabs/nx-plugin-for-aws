@@ -18,7 +18,7 @@ import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
 import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
-import { installDeps } from '../../utils/install';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
@@ -251,8 +251,9 @@ export async function tsInfraGenerator(
   await addGeneratorMetricsIfApplicable(tree, [INFRA_APP_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => installDeps(tree, schema.preferInstallDependencies, {
-    languages: ['typescript'],
-  });
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 export default tsInfraGenerator;
