@@ -69,9 +69,9 @@ export default defineConfig({
     fileParallelism: false,
     // Concurrent `it`s (e.g. the standalone smoke test's isolated cases) overlap
     // up to this many at a time. Each case spawns an nx build that itself uses
-    // multiple cores, so keep this modest to avoid oversubscribing CI runners.
+    // multiple cores, so the wins plateau once the runner's cores are saturated.
     // Tunable via NX_E2E_MAX_CONCURRENCY.
-    maxConcurrency: Number(process.env.NX_E2E_MAX_CONCURRENCY ?? 8),
+    maxConcurrency: Number(process.env.NX_E2E_MAX_CONCURRENCY ?? 16),
     globalSetup: 'src/global-setup.ts',
     coverage: { reportsDirectory: '../coverage/e2e', provider: 'v8' },
     pool: 'threads',
