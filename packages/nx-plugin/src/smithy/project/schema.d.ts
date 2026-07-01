@@ -8,4 +8,5 @@ export interface SmithyProjectGeneratorSchema {
   namespace?: string;
   directory?: string;
   subDirectory?: string;
+  preferInstallDependencies?: boolean;
 }

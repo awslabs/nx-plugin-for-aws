@@ -14,4 +14,5 @@ export interface TsTrpcApiGeneratorSchema {
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

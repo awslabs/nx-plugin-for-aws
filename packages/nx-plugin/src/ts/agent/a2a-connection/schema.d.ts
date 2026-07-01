@@ -12,4 +12,5 @@ export interface TsAgentA2aConnectionGeneratorSchema {
   targetProject: string;
   sourceComponent?: ComponentMetadata;
   targetComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

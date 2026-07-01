@@ -16,7 +16,7 @@ describe('ts#docs generator', () => {
   it('should delegate to tsAstroDocsGenerator and produce a docs site', async () => {
     await tsDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(tree.exists('docs/project.json')).toBeTruthy();
@@ -28,7 +28,7 @@ describe('ts#docs generator', () => {
   it('should set generator metadata to ts#docs with framework field', async () => {
     await tsDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const projectConfig = readJson(tree, 'docs/project.json');
@@ -39,7 +39,7 @@ describe('ts#docs generator', () => {
   it('should default framework to astro', async () => {
     await tsDocsGenerator(tree, {
       name: 'docs',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const projectConfig = readJson(tree, 'docs/project.json');
@@ -50,7 +50,7 @@ describe('ts#docs generator', () => {
     await tsDocsGenerator(tree, {
       name: 'docs',
       framework: 'astro',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     const projectConfig = readJson(tree, 'docs/project.json');
@@ -62,7 +62,7 @@ describe('ts#docs generator', () => {
     await tsDocsGenerator(tree, {
       name: 'docs',
       noTranslation: true,
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(tree.exists('docs/scripts/translate.ts')).toBeFalsy();
@@ -74,7 +74,7 @@ describe('ts#docs generator', () => {
     await tsDocsGenerator(tree, {
       name: 'docs',
       noBlog: true,
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(
@@ -87,7 +87,7 @@ describe('ts#docs generator', () => {
       name: 'my-docs',
       directory: 'sites',
       subDirectory: 'docs-site',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
 
     expect(tree.exists('sites/docs-site/project.json')).toBeTruthy();

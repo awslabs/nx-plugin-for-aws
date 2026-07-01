@@ -51,6 +51,12 @@ describe('smoke test - idempotency', () => {
         maxBuffer: 50 * 1024 * 1024,
       });
 
+    // Install after every generator (preferInstallDependencies: true) so all
+    // lockfiles — including `uv.lock`, which is only synced by an install — are
+    // complete before the baseline snapshot. Deferring would leave lockfiles
+    // partially written, and re-running would complete them, producing a diff
+    // that looks like a (false) idempotency failure.
+
     // CDK-specific infrastructure projects (mirrors runSmokeTest).
     await runCLI(
       `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
@@ -62,7 +68,7 @@ describe('smoke test - idempotency', () => {
     );
 
     // First pass — scaffold the full matrix.
-    await runGeneratorMatrix(opts);
+    await runGeneratorMatrix(opts, { preferInstallDependencies: true });
 
     // Terraform project alongside CDK (mirrors runSmokeTest).
     await runCLI(
@@ -86,7 +92,7 @@ describe('smoke test - idempotency', () => {
       `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive`,
       opts,
     );
-    await runGeneratorMatrix(opts);
+    await runGeneratorMatrix(opts, { preferInstallDependencies: true });
     await runCLI(
       `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive`,
       opts,

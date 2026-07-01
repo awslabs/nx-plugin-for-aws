@@ -5,4 +5,5 @@
 export interface SmithyReactConnectionGeneratorSchema {
   frontendProjectName: string;
   smithyModelOrBackendProjectName: string;
+  preferInstallDependencies?: boolean;
 }

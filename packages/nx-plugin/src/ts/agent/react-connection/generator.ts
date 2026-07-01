@@ -5,7 +5,6 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -15,6 +14,7 @@ import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName } from '../../../utils/names';
 import { toScopeAlias } from '../../../utils/npm-scope';
@@ -92,9 +92,10 @@ export async function tsAgentReactConnectionGenerator(
     ]);
 
     await formatFilesInSubtree(tree);
-    return () => {
-      installPackagesTask(tree);
-    };
+    return () =>
+      installDependencies(tree, options.preferInstallDependencies, {
+        languages: ['typescript'],
+      });
   }
 
   // Ensure the agent project has a wildcard path entry in tsconfig.base.json
@@ -152,6 +153,7 @@ export async function tsAgentReactConnectionGenerator(
 
   await runtimeConfigGenerator(tree, {
     project: frontendProjectConfig.name,
+    preferInstallDependencies: false,
   });
 
   // update main.tsx
@@ -233,9 +235,10 @@ export async function tsAgentReactConnectionGenerator(
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 export default tsAgentReactConnectionGenerator;
 

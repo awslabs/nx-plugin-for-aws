@@ -58,4 +58,5 @@ export interface TsLambdaFunctionGeneratorSchema {
   readonly event?: EventSource;
   readonly infra?: LambdaInfraOption;
   readonly iac: IacOption;
+  readonly preferInstallDependencies?: boolean;
 }

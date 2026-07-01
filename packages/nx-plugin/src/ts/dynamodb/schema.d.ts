@@ -12,4 +12,5 @@ export interface TsDynamoDBGeneratorSchema {
   tableName?: string;
   infra: 'dynamodb' | 'none';
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

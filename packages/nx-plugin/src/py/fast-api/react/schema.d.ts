@@ -5,4 +5,5 @@
 export interface FastApiReactGeneratorSchema {
   frontendProjectName: string;
   fastApiProjectName: string;
+  preferInstallDependencies?: boolean;
 }

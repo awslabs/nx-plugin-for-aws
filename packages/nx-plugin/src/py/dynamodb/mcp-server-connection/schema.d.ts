@@ -11,4 +11,5 @@ export interface PyDynamoDBMcpServerConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   sourceComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

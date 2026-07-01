@@ -10,5 +10,5 @@ export interface TsProjectGeneratorSchema {
   // TODO: test and consider exposing alternate bundlers
   // bundler?: LibraryGeneratorSchema['bundler'];
   subDirectory?: string;
-  skipInstall?: boolean;
+  preferInstallDependencies?: boolean;
 }

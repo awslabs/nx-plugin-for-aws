@@ -9,4 +9,5 @@ export interface TsAgentGatewayConnectionGeneratorSchema {
   targetProject: string;
   sourceComponent?: ComponentMetadata;
   targetComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

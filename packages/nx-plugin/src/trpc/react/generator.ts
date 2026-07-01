@@ -5,7 +5,6 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -14,6 +13,7 @@ import { addTargetToLocalDev } from '../../connection/local-dev';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName } from '../../utils/names';
 import { toScopeAlias } from '../../utils/npm-scope';
@@ -100,6 +100,7 @@ export async function reactGenerator(
 
   await runtimeConfigGenerator(tree, {
     project: frontendProjectConfig.name,
+    preferInstallDependencies: false,
   });
 
   // update main.tsx
@@ -173,8 +174,9 @@ export async function reactGenerator(
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 export default reactGenerator;

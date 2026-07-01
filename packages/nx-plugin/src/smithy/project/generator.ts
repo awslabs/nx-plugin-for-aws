@@ -6,7 +6,6 @@ import {
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   type Tree,
 } from '@nx/devkit';
@@ -14,6 +13,7 @@ import { getTsLibDetails } from '../../ts/lib/generator';
 import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -92,9 +92,10 @@ export const smithyProjectGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [SMITHY_PROJECT_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default smithyProjectGenerator;

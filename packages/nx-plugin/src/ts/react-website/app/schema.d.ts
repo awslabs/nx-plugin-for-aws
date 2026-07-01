@@ -11,7 +11,7 @@ export interface TsReactWebsiteGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  skipInstall?: boolean;
+  preferInstallDependencies?: boolean;
   tanstackRouter?: boolean;
   tailwind?: boolean;
   ux?: UxOption;

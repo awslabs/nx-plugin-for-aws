@@ -151,6 +151,7 @@ Add capabilities to existing projects:
 - Run `nx sync` after adding dependencies between TypeScript projects
 - Install dependencies at the workspace root, not in individual projects
 - Use `nx reset` to reset the Nx daemon when unexpected issues arise
+- When running several generators in sequence, pass `--prefer-install-dependencies=false` on each to avoid a slow install after every generator, then install once at the end (or let the final generator install by omitting the flag)
 - After running generators, use `nx show projects` to verify what was created
 - Fix lint issues with `nx run-many --target lint --configuration=fix --all`
 - Generate all projects into the `packages/` directory
@@ -166,20 +167,21 @@ When the user wants a full workspace created in one go, you can chain generators
   pnpm create @aws/nx-workspace my-app --iacProvider=CDK --no-interactive
   ```
 
-- **Chain generators** with `&&` in a single Bash call after workspace creation, for example:
+- **Chain generators** with `&&` in a single Bash call after workspace creation. Pass `--prefer-install-dependencies=false` on each generator except the last so dependencies install once at the end, for example:
 
   ```bash
   cd my-app && \
-    pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM && \
-    pnpm nx g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --uxProvider=Shadcn && \
-    pnpm nx g @aws/nx-plugin:ts#react-website#auth --no-interactive --project=@my-app/my-app-website --cognitoDomain=my-app-auth && \
-    pnpm nx g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api && \
+    pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM --prefer-install-dependencies=false && \
+    pnpm nx g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --uxProvider=Shadcn --prefer-install-dependencies=false && \
+    pnpm nx g @aws/nx-plugin:ts#react-website#auth --no-interactive --project=@my-app/my-app-website --cognitoDomain=my-app-auth --prefer-install-dependencies=false && \
+    pnpm nx g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false && \
     pnpm nx g @aws/nx-plugin:ts#infra --no-interactive --name=infra && \
     pnpm nx sync && \
     pnpm lint && \
     pnpm build
   ```
 
+- **`--prefer-install-dependencies=false`** asks a generator to defer its dependency install so the batch installs once at the end (the final generator above omits the flag and installs everything).
 - Use a **timeout of 300000ms** (5 minutes) for workspace creation (downloads dependencies).
 - **`nx sync`** is required before building — generators modify TypeScript project references.
 

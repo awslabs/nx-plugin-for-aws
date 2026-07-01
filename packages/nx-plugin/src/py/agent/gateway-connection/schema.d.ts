@@ -9,4 +9,5 @@ export interface PyAgentGatewayConnectionGeneratorSchema {
   targetProject: string;
   sourceComponent?: ComponentMetadata;
   targetComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

@@ -11,4 +11,5 @@ export interface TsDynamoDBMcpServerConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   sourceComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

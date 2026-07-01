@@ -12,4 +12,5 @@ export interface PyDynamoDBGeneratorSchema {
   tableName?: string;
   infra: 'dynamodb' | 'none';
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

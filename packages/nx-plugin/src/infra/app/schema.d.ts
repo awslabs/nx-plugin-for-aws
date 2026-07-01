@@ -8,6 +8,6 @@ export interface TsInfraGeneratorSchema {
   subDirectory?: string;
   //   unitTestRunner?: 'jest' | 'vitest' | 'none';
   //   linter?: Linter;
-  skipInstall?: boolean;
+  preferInstallDependencies?: boolean;
   stageConfig?: boolean;
 }

@@ -56,4 +56,5 @@ export interface PyLambdaFunctionGeneratorSchema {
   readonly event?: EventSource;
   readonly infra?: LambdaInfraOption;
   readonly iac: IacOption;
+  readonly preferInstallDependencies?: boolean;
 }

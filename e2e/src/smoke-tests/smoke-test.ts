@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { PackageManager } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import { afterEach, beforeEach, describe, it } from 'vitest';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 export const runSmokeTest = async (
@@ -29,13 +29,18 @@ export const runSmokeTest = async (
     onProjectCreate(projectRoot);
   }
 
+  // Every generator runs with `--prefer-install-dependencies=false` to avoid a
+  // slow install after each one; `runInstall` below installs the full
+  // accumulated set once before the build. Generators still self-install when
+  // skipping would leave a graph-critical dependency unresolvable.
+
   // CDK-specific infrastructure projects (not part of the shared matrix).
   await runCLI(
-    `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
+    `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive --prefer-install-dependencies=false`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive`,
+    `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive --prefer-install-dependencies=false`,
     opts,
   );
 
@@ -43,7 +48,7 @@ export const runSmokeTest = async (
 
   // Extra: generate a terraform project alongside CDK to verify both coexist.
   await runCLI(
-    `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive`,
+    `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive --prefer-install-dependencies=false`,
     opts,
   );
 
@@ -68,6 +73,9 @@ export const runSmokeTest = async (
   if (beforeBuild) {
     await beforeBuild(projectRoot);
   }
+
+  // Install the full set of dependencies accumulated across all generators.
+  await runInstall(opts);
 
   await runCLI(`sync --verbose`, opts);
   await runCLI(

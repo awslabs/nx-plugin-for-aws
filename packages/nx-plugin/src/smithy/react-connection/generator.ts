@@ -5,7 +5,6 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type ProjectConfiguration,
@@ -13,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addOpenApiReactClient } from '../../utils/connection/open-api/react';
 import { formatFilesInSubtree } from '../../utils/format';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
   getGeneratorInfo,
@@ -87,9 +87,10 @@ export const smithyReactConnectionGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 const resolveProjectConfig = (

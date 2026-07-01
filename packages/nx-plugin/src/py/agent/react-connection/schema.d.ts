@@ -12,4 +12,5 @@ export interface PyAgentReactConnectionGeneratorSchema {
   targetProject: string;
   sourceComponent?: ComponentMetadata;
   targetComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

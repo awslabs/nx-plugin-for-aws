@@ -27,8 +27,5 @@ export interface TsDocsGeneratorSchema {
    * Opt out of the starlight-blog plugin and sample blog post.
    */
   noBlog?: boolean;
-  /**
-   * Skip installing dependencies after the generator runs.
-   */
-  skipInstall?: boolean;
+  preferInstallDependencies?: boolean;
 }

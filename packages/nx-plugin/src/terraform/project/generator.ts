@@ -8,7 +8,6 @@ import {
   detectPackageManager,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   readNxJson,
@@ -20,6 +19,7 @@ import {
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
 import { updateGitIgnore } from '../../utils/git';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import {
@@ -314,8 +314,13 @@ export async function terraformProjectGenerator(
     });
   }
 
-  return () => {
-    installPackagesTask(tree);
-  };
+  // `@nx-extend/terraform` is registered as an Nx plugin in nx.json, so Nx
+  // loads it when computing the project graph — it must resolve even if the
+  // caller would otherwise prefer to defer installing.
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+      ensureResolvable: [NX_EXTEND_PLUGIN],
+    });
 }
 export default terraformProjectGenerator;

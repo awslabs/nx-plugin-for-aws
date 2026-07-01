@@ -15,4 +15,5 @@ export interface TsMcpServerGeneratorSchema {
   infra?: TsMcpServerInfra;
   auth?: TsMcpServerAuth;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

@@ -11,4 +11,5 @@ export interface TsRdbMcpServerConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   sourceComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

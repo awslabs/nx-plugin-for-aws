@@ -8,7 +8,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
   type Tree,
@@ -18,6 +17,7 @@ import { resolveContainers } from '../../utils/containers';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -68,6 +68,7 @@ export const tsDynamoDBGenerator = async (
     await tsProjectGenerator(tree, {
       name: options.name,
       directory: options.directory,
+      preferInstallDependencies: false,
     });
   }
 
@@ -154,9 +155,10 @@ export const tsDynamoDBGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default tsDynamoDBGenerator;

@@ -14,7 +14,7 @@ describe('configureBiomeLint', () => {
     tree = createTreeUsingTsSolutionSetup();
     await tsProjectGenerator(tree, {
       name: 'test',
-      skipInstall: true,
+      preferInstallDependencies: false,
     });
   });
 

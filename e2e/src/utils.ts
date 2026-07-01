@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,22 +47,44 @@ export async function runCLI(
     }`;
     const execCmd = () =>
       new Promise<string>((resolve, reject) => {
-        try {
-          const result = execSync(commandToRun, {
-            cwd: opts.cwd || tmpProjPath(),
-            env: {
-              PATH: process.env.PATH,
-              ...process.env,
-              ...opts.env,
-            },
-            encoding: 'utf-8',
-            stdio: 'inherit',
-            maxBuffer: 50 * 1024 * 1024,
-          });
-          resolve(result);
-        } catch (e) {
-          reject(e);
-        }
+        // `spawn` (not the blocking `execSync`) so multiple `runCLI` calls can
+        // run concurrently — isolated smoke-test cases overlap instead of
+        // serialising on a blocked event loop. Output is streamed through to
+        // the parent as it arrives (preserving live logs) and captured for the
+        // return value and error handling.
+        const child = spawn(commandToRun, {
+          cwd: opts.cwd || tmpProjPath(),
+          env: {
+            PATH: process.env.PATH,
+            ...process.env,
+            ...opts.env,
+          },
+          shell: true,
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout?.on('data', (chunk) => {
+          stdout += chunk;
+          process.stdout.write(chunk);
+        });
+        child.stderr?.on('data', (chunk) => {
+          stderr += chunk;
+          process.stderr.write(chunk);
+        });
+        child.on('error', reject);
+        child.on('close', (code) => {
+          if (code === 0) {
+            resolve(stdout);
+          } else {
+            const err = new Error(
+              `Command failed: ${commandToRun}\n${stderr}`,
+            ) as Error & { stdout: string; stderr: string; status: number };
+            err.stdout = stdout;
+            err.stderr = stderr;
+            err.status = code ?? 1;
+            reject(err);
+          }
+        });
       });
     const logs = await (opts.retry ? backOff(execCmd) : execCmd());
     if (opts.verbose) {
@@ -149,6 +171,38 @@ function getPackageManagerCommand({
       runNxSilent: `bun nx`,
     },
   }[packageManager.trim() as PackageManager];
+}
+
+/**
+ * Run a bare dependency install for the package manager detected in `cwd`.
+ *
+ * Used by the smoke tests, which generate every project with
+ * `--prefer-install-dependencies=false` and then install once at the end.
+ *
+ * The generators add dependencies to `package.json` without updating the
+ * lockfile, so the install must be allowed to update it. CI sets each package
+ * manager to a frozen/immutable lockfile by default, hence the explicit flags.
+ */
+export async function runInstall(opts: {
+  cwd: string;
+  env?: RunCmdOpts['env'];
+}) {
+  const pkgMgr = detectPackageManager(opts.cwd);
+  const yarnMajor = Number(getYarnMajorVersion(opts.cwd) ?? '1');
+  const command = {
+    npm: 'npm install --legacy-peer-deps',
+    pnpm: 'pnpm install --no-frozen-lockfile',
+    // Yarn Berry (>=2) treats the lockfile as immutable in CI; classic does not
+    // and rejects the `--no-immutable` flag.
+    yarn: yarnMajor >= 2 ? 'yarn install --no-immutable' : 'yarn install',
+    bun: 'bun install --no-frozen-lockfile',
+  }[pkgMgr];
+  await runCLI(command, {
+    cwd: opts.cwd,
+    env: opts.env,
+    prefixWithPackageManagerCmd: false,
+    redirectStderr: true,
+  });
 }
 
 /**

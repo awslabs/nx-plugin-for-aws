@@ -9,4 +9,5 @@
 export interface PyDynamoDBFastApiConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  preferInstallDependencies?: boolean;
 }

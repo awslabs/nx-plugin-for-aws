@@ -10,4 +10,5 @@ export interface TsReactWebsiteAuthGeneratorSchema {
   allowSignup: boolean;
   cognitoDomain?: string;
   iac: IacOption;
+  preferInstallDependencies?: boolean;
 }

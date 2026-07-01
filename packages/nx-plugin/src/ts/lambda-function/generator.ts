@@ -6,7 +6,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -17,6 +16,7 @@ import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { pascalCase, toClassName, toKebabCase } from '../../utils/names';
 import {
@@ -176,9 +176,10 @@ export const tsLambdaFunctionGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default tsLambdaFunctionGenerator;

@@ -2,12 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  type GeneratorCallback,
-  installPackagesTask,
-  type Tree,
-} from '@nx/devkit';
+import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../utils/format';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import {
@@ -96,9 +93,10 @@ export const agentcoreGatewayGatewayConnectionGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 /**

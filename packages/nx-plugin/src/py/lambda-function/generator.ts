@@ -5,7 +5,6 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -15,6 +14,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import {
   toClassName,
@@ -29,7 +29,6 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
@@ -201,9 +200,9 @@ export const pyLambdaFunctionGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  return async () => {
-    await new UVProvider(tree.root, new Logger(), tree).install();
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 export default pyLambdaFunctionGenerator;

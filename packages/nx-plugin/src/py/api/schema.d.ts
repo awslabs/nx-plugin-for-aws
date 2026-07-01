@@ -14,4 +14,5 @@ export interface PyApiGeneratorSchema {
   readonly subDirectory?: string;
   readonly moduleName?: string;
   readonly iac: IacOption;
+  readonly preferInstallDependencies?: boolean;
 }

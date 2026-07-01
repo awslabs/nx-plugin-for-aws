@@ -4,11 +4,11 @@
  */
 import {
   type GeneratorCallback,
-  installPackagesTask,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
   addDependencyToTargetIfNotPresent,
@@ -16,7 +16,6 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { Logger, UVProvider } from '../../../utils/nxlv-python';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyDynamoDBAgentConnectionGeneratorSchema } from './schema';
 
@@ -53,10 +52,10 @@ export const pyDynamoDBAgentConnectionGenerator = async (
     PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO,
   ]);
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 
 export default pyDynamoDBAgentConnectionGenerator;

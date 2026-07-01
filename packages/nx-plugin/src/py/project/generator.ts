@@ -6,7 +6,6 @@ import {
   addDependenciesToPackageJson,
   ensurePackage,
   type GeneratorCallback,
-  installPackagesTask,
   joinPathFragments,
   readNxJson,
   readProjectConfiguration,
@@ -19,6 +18,7 @@ import {
   ensurePythonLicenseCollector,
 } from '../../license/config';
 import { updateGitIgnore } from '../../utils/git';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { normalizeDistributionName, toSnakeCase } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -31,9 +31,7 @@ import {
 } from '../../utils/nx';
 import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import {
-  Logger,
   migrateToSharedVenvGenerator,
-  UVProvider,
   uvProjectGenerator,
 } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
@@ -328,9 +326,9 @@ export const pyProjectGenerator = async (
   // is added regardless of which generator runs first.
   addLicenseCheckToLintTarget(tree, fullyQualifiedName);
 
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 export default pyProjectGenerator;

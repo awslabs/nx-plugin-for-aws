@@ -6,7 +6,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type ProjectConfiguration,
@@ -19,6 +18,7 @@ import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
 import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
@@ -54,7 +54,10 @@ export async function tsInfraGenerator(
   const lib = getTsLibDetails(tree, schema);
 
   if (!projectExists(tree, lib.fullyQualifiedName)) {
-    await tsProjectGenerator(tree, schema);
+    await tsProjectGenerator(tree, {
+      ...schema,
+      preferInstallDependencies: false,
+    });
   }
 
   // CDK shells out to a container engine to build image assets. Default
@@ -248,8 +251,9 @@ export async function tsInfraGenerator(
   await addGeneratorMetricsIfApplicable(tree, [INFRA_APP_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, schema.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 }
 export default tsInfraGenerator;

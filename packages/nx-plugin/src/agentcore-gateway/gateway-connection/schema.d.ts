@@ -9,4 +9,5 @@ export interface AgentcoreGatewayGatewayConnectionGeneratorSchema {
   targetProject: string;
   sourceComponent?: ComponentMetadata;
   targetComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

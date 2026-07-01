@@ -7,7 +7,6 @@ import {
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type ProjectConfiguration,
@@ -17,6 +16,7 @@ import {
 import { addAgentCoreGatewayInfra } from '../utils/agent-core-constructs/agent-core-constructs';
 import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
+import { installDependencies } from '../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { kebabCase, toClassName } from '../utils/names';
 import { getNpmScopePrefix } from '../utils/npm-scope';
@@ -159,9 +159,10 @@ export const agentcoreGatewayGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 /**

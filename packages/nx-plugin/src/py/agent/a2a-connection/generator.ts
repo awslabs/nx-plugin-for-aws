@@ -5,7 +5,6 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -28,6 +27,7 @@ import {
   matchGritQL,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
 import {
@@ -233,9 +233,10 @@ export const pyAgentA2aConnectionGenerator = async (
   ]);
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 /**

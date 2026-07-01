@@ -77,6 +77,25 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 - After making changes to your projects, fix linting issues, then run a full build
 - When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load:runtime-config target after a deployment to point a local website at a sandbox stack.
 
+## Batching Generators
+
+When scaffolding several projects in one go, chain generators to avoid a slow dependency install after every generator:
+
+- **Chain generators** with \`&&\` in a single command. Pass \`--prefer-install-dependencies=false\` on each generator except the last so dependencies install once at the end, for example:
+
+${PACKAGE_MANAGERS.map(
+  (pm) => `  \`\`\`bash
+  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:ts#infra --no-interactive --name=infra', pm)} && \\
+    ${buildNxCommand('sync', pm)}
+  \`\`\``,
+).join('\n')}
+
+- **\`--prefer-install-dependencies=false\`** asks a generator to defer its dependency install so the batch installs once at the end (the final generator above omits the flag and installs everything).
+- **\`nx sync\`** is required before building — generators modify TypeScript project references.
+
 ## Detailed Guides
 
 Please refer to the below documentation for important details regarding workspaces and working with TypeScript or Python projects.

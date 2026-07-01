@@ -7,7 +7,6 @@ import {
   detectPackageManager,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   readNxJson,
@@ -29,6 +28,7 @@ import {
 } from '../utils/config/utils';
 import { inferContainers } from '../utils/containers';
 import { DEFAULT_BIOME_CONFIG, formatFilesInSubtree } from '../utils/format';
+import { installDependencies } from '../utils/install';
 import { configureMcpServers } from '../utils/mcp';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { getNpmScope } from '../utils/npm-scope';
@@ -161,7 +161,13 @@ const setUpGitSecrets = (tree: Tree) => {
 
 export const presetGenerator = async (
   tree: Tree,
-  { iac, gitSecrets, mcp, containers }: PresetGeneratorSchema,
+  {
+    iac,
+    gitSecrets,
+    mcp,
+    containers,
+    preferInstallDependencies,
+  }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
@@ -288,9 +294,10 @@ export const presetGenerator = async (
   }
 
   await formatFilesInSubtree(tree);
-  return () => {
-    installPackagesTask(tree);
-  };
+  return () =>
+    installDependencies(tree, preferInstallDependencies, {
+      languages: ['typescript'],
+    });
 };
 
 export default presetGenerator;
