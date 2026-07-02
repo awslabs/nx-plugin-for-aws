@@ -82,6 +82,50 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
+// The CodeBuild Windows runner lacks Docker (agents, MCP servers and rdb build a
+// Docker image) and can't run checkov (ts#infra and terraform#project). These
+// stay covered on the Linux standalone leg and the windows-latest
+// dungeon-adventure test.
+const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
+
+const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([
+  'ts#agent',
+  'py#agent',
+  'ts#mcp-server',
+  'py#mcp-server',
+  'ts#rdb',
+  'ts#infra',
+  'terraform#project',
+]);
+
+// A connection is unsupported when either endpoint's project is. Matched exactly
+// against each side of the key.
+const CONNECTION_UNSUPPORTED_ENDPOINTS = new Set([
+  'ts#agent',
+  'py#agent',
+  'ts#mcp-server',
+  'py#mcp-server',
+  'ts#smithy-api',
+  'ts#rdb',
+]);
+
+const connectionUnsupported = (key: string): boolean =>
+  key
+    .split('->')
+    .map((side) => side.trim())
+    .some((endpoint) => CONNECTION_UNSUPPORTED_ENDPOINTS.has(endpoint));
+
+const keepForRunner = <T extends { generator?: string; unsupported?: boolean }>(
+  cases: T[],
+): T[] =>
+  CODEBUILD_WINDOWS
+    ? cases.filter(
+        (c) =>
+          !c.unsupported &&
+          !(c.generator && CODEBUILD_WINDOWS_UNSUPPORTED.has(c.generator)),
+      )
+    : cases;
+
 // Optional cross-machine sharding via NX_E2E_SHARD=<index>/<total> (1-based),
 // round-robin across a cursor shared by all groups in source order. Cases run
 // sequentially within a shard (each build already saturates the cores);
@@ -94,9 +138,10 @@ const forThisShard = <T>(cases: T[]): T[] =>
   cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
 
 // Sliced per group; a group can be empty for a shard, so its describe is
-// skipped to avoid vitest's empty-`it.each` error.
-const shardStandalone = forThisShard(standalone);
-const shardComponents = forThisShard(components);
+// skipped to avoid vitest's empty-`it.each` error. Unsupported cases are dropped
+// first (on the CodeBuild Windows runner) so the remainder shards evenly.
+const shardStandalone = forThisShard(keepForRunner(standalone));
+const shardComponents = forThisShard(keepForRunner(components));
 
 const freshWorkspace = async (generator: string): Promise<string> => {
   const targetDir = join(
@@ -349,9 +394,10 @@ const connectionCases = Object.entries(CONNECTION_CASES).flatMap(
     factories.map((factory, i) => ({
       key: factories.length > 1 ? `${key} #${i + 1}` : key,
       factory,
+      unsupported: connectionUnsupported(key),
     })),
 );
-const shardConnectionCases = forThisShard(connectionCases);
+const shardConnectionCases = forThisShard(keepForRunner(connectionCases));
 
 // Exercises each supported connection end-to-end (the unit tests mock the
 // underlying connection generators; this proves they wire up buildable projects).
