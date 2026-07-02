@@ -80,23 +80,52 @@ runs:
     - name: Set up Docker Buildx
       if: ${{ runner.os != 'Windows' && inputs.container-tools == 'true' }}
       uses: docker/setup-buildx-action@v3
+    - name: Cache WSL2 Docker distro (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      id: wsl-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}\wsl-distro\ubuntu-docker.tar
+        key: ${{ runner.os }}-wsl-docker-${{ hashFiles('.github/scripts/install-wsl-docker.sh') }}
     - name: Set up WSL2 Docker for Linux builds (Windows)
       if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       run: |
         # Windows runners only have Docker in Windows-container mode.
         # Install Ubuntu + Docker Engine in WSL2 to build Linux images.
-        # See .github/scripts/setup-wsl-docker.sh for the full setup.
-        wsl --install Ubuntu-24.04 --no-launch
+        # The configured distro (Ubuntu + Docker Engine + primed buildx/binfmt
+        # images) is cached as an exported tarball; on a cache hit we import it
+        # instead of re-running the apt install and image pulls.
+        $tarDir = "$env:RUNNER_TEMP\wsl-distro"
+        $tar = "$tarDir\ubuntu-docker.tar"
+        $installDir = "$env:RUNNER_TEMP\wsl-ubuntu"
+
+        # Helper: convert a repo script to LF and run it in WSL2 as root.
+        function Invoke-WslScript($relPath) {
+          $script = Get-Content "${{ github.workspace }}/$relPath" -Raw
+          $lfScript = $script -replace "`r`n", "`n"
+          $tmpScript = "$env:RUNNER_TEMP/$(Split-Path $relPath -Leaf)"
+          [System.IO.File]::WriteAllText($tmpScript, $lfScript)
+          $wslPath = wsl -d Ubuntu-24.04 wslpath ($tmpScript -replace '\\','/')
+          wsl -d Ubuntu-24.04 -u root -- bash $wslPath
+          if ($LASTEXITCODE -ne 0) { throw "WSL script $relPath failed with exit code $LASTEXITCODE" }
+        }
+
+        if ("${{ steps.wsl-cache.outputs.cache-hit }}" -eq "true") {
+          New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+          wsl --import Ubuntu-24.04 $installDir $tar
+        } else {
+          wsl --install Ubuntu-24.04 --no-launch
+          Invoke-WslScript ".github/scripts/install-wsl-docker.sh"
+          New-Item -ItemType Directory -Path $tarDir -Force | Out-Null
+          # Terminate the distro so the exported tarball is a clean snapshot.
+          wsl --terminate Ubuntu-24.04
+          wsl --export Ubuntu-24.04 $tar
+        }
         wsl --set-default Ubuntu-24.04
 
-        # Convert setup script to LF line endings and run it in WSL2
-        $script = Get-Content "${{ github.workspace }}/.github/scripts/setup-wsl-docker.sh" -Raw
-        $lfScript = $script -replace "`r`n", "`n"
-        $tmpScript = "$env:RUNNER_TEMP/setup-wsl-docker.sh"
-        [System.IO.File]::WriteAllText($tmpScript, $lfScript)
-        $wslPath = wsl -d Ubuntu-24.04 wslpath ($tmpScript -replace '\\','/')
-        wsl -d Ubuntu-24.04 -u root -- bash $wslPath
+        # Start the daemon and select the buildx builder (runs every job).
+        Invoke-WslScript ".github/scripts/start-wsl-docker.sh"
 
         # Install docker.cmd wrapper that forwards to WSL2 Linux daemon
         # See .github/scripts/docker-wsl.cmd for the wrapper logic.
