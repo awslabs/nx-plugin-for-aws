@@ -82,23 +82,25 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
-// The CodeBuild Windows runner has no Docker daemon and no Terraform toolchain
-// (nor the `.py` file association uvx console-script shims like checkov need).
-// NX_E2E_SKIP_DOCKER=true skips the cases that depend on those — every one is
-// still covered in full on the Linux standalone leg and the windows-latest
+// The CodeBuild Windows runner has no Docker daemon, and its image can't run
+// the checkov build step (uvx installs a console-script shim that needs the
+// `.py` file association, which the image lacks). NX_E2E_SKIP_DOCKER=true skips
+// the cases that depend on either — all are still covered in full on the Linux
+// standalone leg, and CDK+checkov also runs on the windows-latest
 // dungeon-adventure test.
 const SKIP_DOCKER = process.env.NX_E2E_SKIP_DOCKER === 'true';
 
 // Standalone project/component generators skipped on that runner: agents, MCP
-// servers and rdb build a Docker image with their default arguments;
-// `terraform#project`'s build runs Terraform + checkov. `agentcore-gateway`
-// and the DynamoDB generators build neither and are kept.
+// servers and rdb build a Docker image with their default arguments; `ts#infra`
+// and `terraform#project` run checkov as part of their build. `agentcore-gateway`
+// and the DynamoDB generators do neither and are kept.
 const DOCKER_GENERATORS = new Set([
   'ts#agent',
   'py#agent',
   'ts#mcp-server',
   'py#mcp-server',
   'ts#rdb',
+  'ts#infra',
   'terraform#project',
 ]);
 
