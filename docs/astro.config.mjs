@@ -540,20 +540,20 @@ export default defineConfig({
               ],
             },
             {
-              label: 'connection',
+              label: 'Connecting Projects',
+              translations: {
+                jp: 'プロジェクトの接続',
+                ko: '프로젝트 연결',
+                fr: 'Connexion des projets',
+                it: 'Connessione dei progetti',
+                es: 'Conexión de proyectos',
+                pt: 'Conexão de projetos',
+                zh: '连接项目',
+                vi: 'Kết nối dự án',
+              },
               items: [
                 {
-                  label: 'Connecting Projects',
-                  translations: {
-                    jp: 'プロジェクトの接続',
-                    ko: '프로젝트 연결',
-                    fr: 'Connexion des projets',
-                    it: 'Connessione dei progetti',
-                    es: 'Conexión de proyectos',
-                    pt: 'Conexão de projetos',
-                    zh: '连接项目',
-                    vi: 'Kết nối dự án',
-                  },
+                  label: 'connection',
                   link: '/guides/connection',
                 },
                 {
@@ -563,106 +563,6 @@ export default defineConfig({
                 {
                   label: 'Local Development',
                   link: '/guides/local-development',
-                },
-                {
-                  label: 'React → FastAPI',
-                  link: '/guides/connection/react-fastapi',
-                },
-                {
-                  label: 'React → tRPC',
-                  link: '/guides/connection/react-trpc',
-                },
-                {
-                  label: 'React → Smithy',
-                  link: '/guides/connection/react-smithy',
-                },
-                {
-                  label: 'React → Python Agent',
-                  link: '/guides/connection/react-py-agent',
-                },
-                {
-                  label: 'React → TypeScript Agent',
-                  link: '/guides/connection/react-ts-agent',
-                },
-                {
-                  label: 'React → AG-UI Agent',
-                  link: '/guides/connection/react-agui',
-                },
-                {
-                  label: 'Python Agent → MCP Server',
-                  link: '/guides/connection/py-agent-mcp',
-                },
-                {
-                  label: 'TypeScript Agent → MCP Server',
-                  link: '/guides/connection/ts-agent-mcp',
-                },
-                {
-                  label: 'Python Agent → A2A Agent',
-                  link: '/guides/connection/py-agent-a2a',
-                },
-                {
-                  label: 'TypeScript Agent → A2A Agent',
-                  link: '/guides/connection/ts-agent-a2a',
-                },
-                {
-                  label: 'tRPC API → Relational Database',
-                  link: '/guides/connection/trpc-rdb',
-                },
-                {
-                  label: 'Smithy API → Relational Database',
-                  link: '/guides/connection/smithy-rdb',
-                },
-                {
-                  label: 'TypeScript Agent → Relational Database',
-                  link: '/guides/connection/ts-agent-rdb',
-                },
-                {
-                  label: 'MCP Server → Relational Database',
-                  link: '/guides/connection/ts-mcp-server-rdb',
-                },
-                {
-                  label: 'tRPC API → DynamoDB',
-                  link: '/guides/connection/trpc-dynamodb',
-                },
-                {
-                  label: 'Smithy API → DynamoDB',
-                  link: '/guides/connection/smithy-dynamodb',
-                },
-                {
-                  label: 'TypeScript Agent → DynamoDB',
-                  link: '/guides/connection/ts-agent-dynamodb',
-                },
-                {
-                  label: 'MCP Server → DynamoDB',
-                  link: '/guides/connection/ts-mcp-server-dynamodb',
-                },
-                {
-                  label: 'FastAPI → DynamoDB',
-                  link: '/guides/connection/py-fast-api-dynamodb',
-                },
-                {
-                  label: 'Python Agent → DynamoDB',
-                  link: '/guides/connection/py-agent-dynamodb',
-                },
-                {
-                  label: 'Python MCP Server → DynamoDB',
-                  link: '/guides/connection/py-mcp-server-dynamodb',
-                },
-                {
-                  label: 'AgentCore Gateway → MCP Server',
-                  link: '/guides/connection/agentcore-gateway-mcp',
-                },
-                {
-                  label: 'AgentCore Gateway → AgentCore Gateway',
-                  link: '/guides/connection/agentcore-gateway-gateway',
-                },
-                {
-                  label: 'TypeScript Agent → AgentCore Gateway',
-                  link: '/guides/connection/ts-agent-gateway',
-                },
-                {
-                  label: 'Python Agent → AgentCore Gateway',
-                  link: '/guides/connection/py-agent-gateway',
                 },
               ],
             },
