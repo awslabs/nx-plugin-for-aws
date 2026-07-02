@@ -82,6 +82,51 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
+// Generators whose `build` compiles a Docker image (agentcore-hosted agents and
+// MCP servers, the Smithy build container, and the rdb migration image). On
+// runners without a Docker daemon (e.g. CodeBuild Windows), set
+// NX_E2E_SKIP_DOCKER=true to skip these; the Linux jobs still cover them fully.
+const SKIP_DOCKER = process.env.NX_E2E_SKIP_DOCKER === 'true';
+
+// Standalone project/component generators that build a Docker image with their
+// default arguments. `agentcore-gateway` and the DynamoDB generators do not.
+const DOCKER_GENERATORS = new Set([
+  'ts#agent',
+  'py#agent',
+  'ts#mcp-server',
+  'py#mcp-server',
+  'ts#rdb',
+]);
+
+// Connection endpoints (as they appear in a CONNECTION_CASES key) whose project
+// builds a Docker image. Matched exactly against each side of the key so
+// `agentcore-gateway` — which does not build an image — is never caught.
+const DOCKER_CONNECTION_ENDPOINTS = new Set([
+  'ts#agent',
+  'py#agent',
+  'ts#mcp-server',
+  'py#mcp-server',
+  'ts#smithy-api',
+  'ts#rdb',
+]);
+
+const connectionIsDockerBound = (key: string): boolean =>
+  key
+    .split('->')
+    .map((side) => side.trim())
+    .some((endpoint) => DOCKER_CONNECTION_ENDPOINTS.has(endpoint));
+
+const keepForRunner = <T extends { generator?: string; dockerBound?: boolean }>(
+  cases: T[],
+): T[] =>
+  SKIP_DOCKER
+    ? cases.filter(
+        (c) =>
+          !c.dockerBound &&
+          !(c.generator && DOCKER_GENERATORS.has(c.generator)),
+      )
+    : cases;
+
 // Optional cross-machine sharding via NX_E2E_SHARD=<index>/<total> (1-based),
 // round-robin across a cursor shared by all groups in source order. Cases run
 // sequentially within a shard (each build already saturates the cores);
@@ -94,9 +139,10 @@ const forThisShard = <T>(cases: T[]): T[] =>
   cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
 
 // Sliced per group; a group can be empty for a shard, so its describe is
-// skipped to avoid vitest's empty-`it.each` error.
-const shardStandalone = forThisShard(standalone);
-const shardComponents = forThisShard(components);
+// skipped to avoid vitest's empty-`it.each` error. Docker-bound cases are
+// dropped first (when NX_E2E_SKIP_DOCKER is set) so the remainder shards evenly.
+const shardStandalone = forThisShard(keepForRunner(standalone));
+const shardComponents = forThisShard(keepForRunner(components));
 
 const freshWorkspace = async (generator: string): Promise<string> => {
   const targetDir = join(
@@ -349,9 +395,10 @@ const connectionCases = Object.entries(CONNECTION_CASES).flatMap(
     factories.map((factory, i) => ({
       key: factories.length > 1 ? `${key} #${i + 1}` : key,
       factory,
+      dockerBound: connectionIsDockerBound(key),
     })),
 );
-const shardConnectionCases = forThisShard(connectionCases);
+const shardConnectionCases = forThisShard(keepForRunner(connectionCases));
 
 // Exercises each supported connection end-to-end (the unit tests mock the
 // underlying connection generators; this proves they wire up buildable projects).

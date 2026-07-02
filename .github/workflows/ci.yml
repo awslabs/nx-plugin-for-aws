@@ -206,29 +206,43 @@ jobs:
           role-duration-seconds: 10800
       - name: Windows Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=${{ matrix.smoke_test }}
+  # The standalone Windows leg runs on CodeBuild Windows runners, which have no
+  # Docker daemon. NX_E2E_SKIP_DOCKER drops the cases whose build compiles a
+  # Docker image (agents, MCP servers, Smithy, rdb) — those stay covered on the
+  # Linux standalone leg and the windows-latest dungeon-adventure test.
   smoke_tests_windows_standalone:
-    name: Windows Smoke Tests - standalone (${{matrix.shard}}/12)
-    runs-on: windows-latest
+    name: Windows Smoke Tests - standalone (${{matrix.shard}}/6)
+    runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
     needs: package
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Disable Windows Defender real-time monitoring
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        shell: pwsh
+        run: |
+          # Not present on every Windows image; best-effort.
+          try { Set-MpPreference -DisableRealtimeMonitoring $true } catch { }
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
           name: build-artifact
           path: dist
       - uses: ./.github/actions/init-monorepo
-      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/12)
+        with:
+          # CodeBuild Windows runners have no Docker; skip the WSL2 Docker setup
+          # (container-tools) and Terraform (standalone workspaces use CDK).
+          container-tools: "false"
+          setup-bun: "false"
+          setup-terraform: "false"
+      - name: Windows Smoke Test - standalone (shard ${{ matrix.shard }}/6)
         env:
-          NX_E2E_SHARD: ${{ matrix.shard }}/12
+          NX_E2E_SHARD: ${{ matrix.shard }}/6
+          NX_E2E_SKIP_DOCKER: "true"
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
   release:
     name: Release
