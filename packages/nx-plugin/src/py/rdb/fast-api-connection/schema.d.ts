@@ -9,4 +9,5 @@
 export interface PyRdbFastApiConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  preferInstallDependencies?: boolean;
 }

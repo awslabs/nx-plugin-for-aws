@@ -7,7 +7,6 @@ import {
   addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
   type Tree,
@@ -18,6 +17,7 @@ import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
+import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -28,7 +28,6 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx';
-import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { assignPort } from '../../utils/port';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
@@ -323,10 +322,10 @@ export const pyRdbGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [PY_RDB_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 
 export default pyRdbGenerator;

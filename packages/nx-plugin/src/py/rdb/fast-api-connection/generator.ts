@@ -5,13 +5,13 @@
 import {
   type GeneratorCallback,
   generateFiles,
-  installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toSnakeCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
@@ -21,7 +21,6 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { Logger, UVProvider } from '../../../utils/nxlv-python';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyRdbFastApiConnectionGeneratorSchema } from './schema';
 
@@ -70,10 +69,10 @@ export const pyRdbFastApiConnectionGenerator = async (
     PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO,
   ]);
   await formatFilesInSubtree(tree);
-  return async () => {
-    installPackagesTask(tree);
-    await new UVProvider(tree.root, new Logger(), tree).install();
-  };
+  return () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['typescript', 'python'],
+    });
 };
 
 export default pyRdbFastApiConnectionGenerator;

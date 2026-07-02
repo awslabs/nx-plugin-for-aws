@@ -11,4 +11,5 @@ export interface PyRdbAgentConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   sourceComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }

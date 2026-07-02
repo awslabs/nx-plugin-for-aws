@@ -11,4 +11,5 @@ export interface PyRdbGeneratorSchema {
   databaseUser?: string;
   databaseName?: string;
   iac?: 'inherit' | 'cdk' | 'terraform';
+  preferInstallDependencies?: boolean;
 }

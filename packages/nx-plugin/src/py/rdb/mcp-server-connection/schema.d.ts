@@ -11,4 +11,5 @@ export interface PyRdbMcpServerConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   sourceComponent?: ComponentMetadata;
+  preferInstallDependencies?: boolean;
 }
