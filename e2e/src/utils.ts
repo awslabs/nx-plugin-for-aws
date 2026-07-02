@@ -4,7 +4,7 @@
  */
 
 import { execSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { output, type PackageManager } from '@nx/devkit';
@@ -246,15 +246,38 @@ export const createTestWorkspace = async (
   name: string,
   iac?: 'cdk' | 'terraform',
 ): Promise<string> => {
-  await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
-    {
-      cwd: targetDir,
-      prefixWithPackageManagerCmd: false,
-      redirectStderr: true,
-    },
-  );
-  return join(targetDir, name);
+  const workspaceDir = join(targetDir, name);
+  const npmCacheDir = join(targetDir, '.npm-cache');
+  // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`, which
+  // installs into a cache dir keyed on the package set. A flaky download or
+  // interrupted install can corrupt that cache — a half-written module surfaces
+  // as MODULE_NOT_FOUND. Give each workspace its own npm cache and retry a
+  // couple of times, wiping the partial workspace and cache between attempts,
+  // so one flaky create doesn't fail the whole shard.
+  const attempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await runCLI(
+        `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
+        {
+          cwd: targetDir,
+          prefixWithPackageManagerCmd: false,
+          redirectStderr: true,
+          env: { npm_config_cache: npmCacheDir },
+        },
+      );
+      break;
+    } catch (e) {
+      if (attempt >= attempts) throw e;
+      console.log(`create workspace attempt ${attempt} failed, retrying: ${e}`);
+      for (const dir of [workspaceDir, npmCacheDir]) {
+        if (existsSync(dir)) {
+          rmSync(dir, { force: true, recursive: true });
+        }
+      }
+    }
+  }
+  return workspaceDir;
 };
 
 // The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.

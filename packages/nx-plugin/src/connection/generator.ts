@@ -44,26 +44,16 @@ import {
 } from '../utils/nx';
 import { readToml } from '../utils/toml';
 import type { ConnectionGeneratorSchema } from './schema';
+import {
+  type Connection,
+  type ConnectionKey,
+  SUPPORTED_CONNECTIONS,
+  type SUPPORTED_PROJECT_TYPES,
+} from './supported-connections';
 
-/**
- * List of supported source and target project types for connections.
- * These can be project-level types (determined by introspection) or
- * component generator ids (from component metadata).
- */
-const SUPPORTED_PROJECT_TYPES = [
-  'ts#trpc-api',
-  'py#fast-api',
-  'react',
-  'smithy',
-  'ts#rdb',
-  'ts#dynamodb',
-  'py#dynamodb',
-  'agentcore-gateway',
-] as const;
+export type { Connection };
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
-
-export type Connection = { source: string; target: string };
 
 /**
  * Sentinel value for sourceComponent/targetComponent that means
@@ -80,48 +70,6 @@ export interface ResolvedConnection {
   readonly sourceComponent?: ComponentMetadata;
   readonly targetComponent?: ComponentMetadata;
 }
-
-/**
- * Enumerates the supported project connections.
- * Source and target can be project-level types or component generator ids.
- */
-const SUPPORTED_CONNECTIONS = [
-  { source: 'ts#trpc-api', target: 'ts#rdb' },
-  { source: 'ts#trpc-api', target: 'ts#dynamodb' },
-  { source: 'ts#agent', target: 'ts#rdb' },
-  { source: 'smithy', target: 'ts#rdb' },
-  { source: 'smithy', target: 'ts#dynamodb' },
-  { source: 'ts#mcp-server', target: 'ts#rdb' },
-  { source: 'ts#mcp-server', target: 'ts#dynamodb' },
-  { source: 'react', target: 'ts#trpc-api' },
-  { source: 'react', target: 'py#fast-api' },
-  { source: 'react', target: 'smithy' },
-  { source: 'react', target: 'ts#agent' },
-  { source: 'react', target: 'py#agent' },
-  { source: 'ts#agent', target: 'ts#mcp-server' },
-  { source: 'ts#agent', target: 'py#mcp-server' },
-  { source: 'ts#agent', target: 'ts#dynamodb' },
-  { source: 'py#agent', target: 'ts#mcp-server' },
-  { source: 'py#agent', target: 'py#mcp-server' },
-  { source: 'ts#agent', target: 'ts#agent' },
-  { source: 'ts#agent', target: 'py#agent' },
-  { source: 'py#agent', target: 'ts#agent' },
-  { source: 'py#agent', target: 'py#agent' },
-  { source: 'ts#agent', target: 'agentcore-gateway' },
-  { source: 'py#agent', target: 'agentcore-gateway' },
-  { source: 'agentcore-gateway', target: 'ts#mcp-server' },
-  { source: 'agentcore-gateway', target: 'py#mcp-server' },
-  { source: 'agentcore-gateway', target: 'agentcore-gateway' },
-  { source: 'py#fast-api', target: 'py#dynamodb' },
-  { source: 'py#agent', target: 'py#dynamodb' },
-  { source: 'py#mcp-server', target: 'py#dynamodb' },
-] as const satisfies readonly Connection[];
-
-type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
-  ? C extends Connection
-    ? `${C['source']} -> ${C['target']}`
-    : never
-  : never;
 
 /**
  * Generators for each connection type
@@ -142,7 +90,7 @@ const CONNECTION_GENERATORS = {
     tsRdbTrpcConnectionGenerator(tree, options),
   'ts#agent -> ts#rdb': (tree, options) =>
     tsRdbAgentConnectionGenerator(tree, options),
-  'smithy -> ts#rdb': (tree, options) =>
+  'ts#smithy-api -> ts#rdb': (tree, options) =>
     tsRdbSmithyConnectionGenerator(tree, options),
   'ts#mcp-server -> ts#rdb': (tree, options) =>
     tsRdbMcpServerConnectionGenerator(tree, options),
@@ -150,31 +98,31 @@ const CONNECTION_GENERATORS = {
     tsDynamoDBTrpcConnectionGenerator(tree, options),
   'ts#agent -> ts#dynamodb': (tree, options) =>
     tsDynamoDBAgentConnectionGenerator(tree, options),
-  'smithy -> ts#dynamodb': (tree, options) =>
+  'ts#smithy-api -> ts#dynamodb': (tree, options) =>
     tsDynamoDBSmithyConnectionGenerator(tree, options),
   'ts#mcp-server -> ts#dynamodb': (tree, options) =>
     tsDynamoDBMcpServerConnectionGenerator(tree, options),
-  'react -> ts#trpc-api': (tree, options) =>
+  'ts#react-website -> ts#trpc-api': (tree, options) =>
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       backendProjectName: options.targetProject,
       preferInstallDependencies: options.preferInstallDependencies,
     }),
-  'react -> py#fast-api': (tree, options) =>
+  'ts#react-website -> py#fast-api': (tree, options) =>
     fastApiReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       fastApiProjectName: options.targetProject,
       preferInstallDependencies: options.preferInstallDependencies,
     }),
-  'react -> smithy': (tree, options) =>
+  'ts#react-website -> ts#smithy-api': (tree, options) =>
     smithyReactConnectionGenerator(tree, {
       frontendProjectName: options.sourceProject,
       smithyModelOrBackendProjectName: options.targetProject,
       preferInstallDependencies: options.preferInstallDependencies,
     }),
-  'react -> ts#agent': (tree, options) =>
+  'ts#react-website -> ts#agent': (tree, options) =>
     tsAgentReactConnectionGenerator(tree, options),
-  'react -> py#agent': (tree, options) =>
+  'ts#react-website -> py#agent': (tree, options) =>
     pyAgentReactConnectionGenerator(tree, options),
   'ts#agent -> ts#mcp-server': (tree, options) =>
     tsAgentMcpConnectionGenerator(tree, options),
@@ -460,11 +408,11 @@ const determineProjectTypeFromConfig = async (
   }
 
   if (isSmithyApi(tree, projectConfiguration)) {
-    return 'smithy';
+    return 'ts#smithy-api';
   }
 
   if (isReact(tree, projectConfiguration)) {
-    return 'react';
+    return 'ts#react-website';
   }
 
   if (isRdb(projectConfiguration)) {
