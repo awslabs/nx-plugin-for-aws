@@ -46,6 +46,7 @@ import { readToml } from '../utils/toml';
 import type { ConnectionGeneratorSchema } from './schema';
 import {
   type Connection,
+  type ConnectionKey,
   SUPPORTED_CONNECTIONS,
   type SUPPORTED_PROJECT_TYPES,
 } from './supported-connections';
@@ -69,12 +70,6 @@ export interface ResolvedConnection {
   readonly sourceComponent?: ComponentMetadata;
   readonly targetComponent?: ComponentMetadata;
 }
-
-type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
-  ? C extends Connection
-    ? `${C['source']} -> ${C['target']}`
-    : never
-  : never;
 
 /**
  * Generators for each connection type

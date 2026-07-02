@@ -5,11 +5,8 @@
 
 export type Connection = { source: string; target: string };
 
-/**
- * List of supported source and target project types for connections.
- * These can be project-level types (determined by introspection) or
- * component generator ids (from component metadata).
- */
+// Supported source/target project types: either project-level types (resolved
+// by introspection) or component generator ids (from component metadata).
 export const SUPPORTED_PROJECT_TYPES = [
   'ts#trpc-api',
   'py#fast-api',
@@ -21,14 +18,9 @@ export const SUPPORTED_PROJECT_TYPES = [
   'agentcore-gateway',
 ] as const;
 
-/**
- * Enumerates the supported project connections.
- * Source and target can be project-level types or component generator ids.
- *
- * This is the single source of truth for supported connections, kept in a
- * dependency-free module so it can be imported by the e2e connection matrix
- * without pulling in the generator implementation graph.
- */
+// The single source of truth for supported connections, in a dependency-free
+// module so the e2e connection matrix can import it without pulling in the
+// generator implementation graph.
 export const SUPPORTED_CONNECTIONS = [
   { source: 'ts#trpc-api', target: 'ts#rdb' },
   { source: 'ts#trpc-api', target: 'ts#dynamodb' },
@@ -60,3 +52,12 @@ export const SUPPORTED_CONNECTIONS = [
   { source: 'py#agent', target: 'py#dynamodb' },
   { source: 'py#mcp-server', target: 'py#dynamodb' },
 ] as const satisfies readonly Connection[];
+
+// `<source> -> <target>` string union of every supported connection. Used to
+// key exhaustive maps so a new connection is a compile error until handled.
+export type ConnectionKey =
+  (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
+    ? C extends Connection
+      ? `${C['source']} -> ${C['target']}`
+      : never
+    : never;
