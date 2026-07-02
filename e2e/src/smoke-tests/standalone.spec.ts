@@ -82,20 +82,24 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
-// Generators whose `build` compiles a Docker image (agentcore-hosted agents and
-// MCP servers, the Smithy build container, and the rdb migration image). On
-// runners without a Docker daemon (e.g. CodeBuild Windows), set
-// NX_E2E_SKIP_DOCKER=true to skip these; the Linux jobs still cover them fully.
+// The CodeBuild Windows runner has no Docker daemon and no Terraform toolchain
+// (nor the `.py` file association uvx console-script shims like checkov need).
+// NX_E2E_SKIP_DOCKER=true skips the cases that depend on those — every one is
+// still covered in full on the Linux standalone leg and the windows-latest
+// dungeon-adventure test.
 const SKIP_DOCKER = process.env.NX_E2E_SKIP_DOCKER === 'true';
 
-// Standalone project/component generators that build a Docker image with their
-// default arguments. `agentcore-gateway` and the DynamoDB generators do not.
+// Standalone project/component generators skipped on that runner: agents, MCP
+// servers and rdb build a Docker image with their default arguments;
+// `terraform#project`'s build runs Terraform + checkov. `agentcore-gateway`
+// and the DynamoDB generators build neither and are kept.
 const DOCKER_GENERATORS = new Set([
   'ts#agent',
   'py#agent',
   'ts#mcp-server',
   'py#mcp-server',
   'ts#rdb',
+  'terraform#project',
 ]);
 
 // Connection endpoints (as they appear in a CONNECTION_CASES key) whose project
