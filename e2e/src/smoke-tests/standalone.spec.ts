@@ -82,19 +82,13 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
-// The CodeBuild Windows runner has no Docker daemon, and its image can't run
-// the checkov build step (uvx installs a console-script shim that needs the
-// `.py` file association, which the image lacks). NX_E2E_SKIP_DOCKER=true skips
-// the cases that depend on either — all are still covered in full on the Linux
-// standalone leg, and CDK+checkov also runs on the windows-latest
+// The CodeBuild Windows runner lacks Docker (agents, MCP servers and rdb build a
+// Docker image) and can't run checkov (ts#infra and terraform#project). These
+// stay covered on the Linux standalone leg and the windows-latest
 // dungeon-adventure test.
-const SKIP_DOCKER = process.env.NX_E2E_SKIP_DOCKER === 'true';
+const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
 
-// Standalone project/component generators skipped on that runner: agents, MCP
-// servers and rdb build a Docker image with their default arguments; `ts#infra`
-// and `terraform#project` run checkov as part of their build. `agentcore-gateway`
-// and the DynamoDB generators do neither and are kept.
-const DOCKER_GENERATORS = new Set([
+const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([
   'ts#agent',
   'py#agent',
   'ts#mcp-server',
@@ -104,10 +98,9 @@ const DOCKER_GENERATORS = new Set([
   'terraform#project',
 ]);
 
-// Connection endpoints (as they appear in a CONNECTION_CASES key) whose project
-// builds a Docker image. Matched exactly against each side of the key so
-// `agentcore-gateway` — which does not build an image — is never caught.
-const DOCKER_CONNECTION_ENDPOINTS = new Set([
+// A connection is unsupported when either endpoint's project is. Matched exactly
+// against each side of the key.
+const CONNECTION_UNSUPPORTED_ENDPOINTS = new Set([
   'ts#agent',
   'py#agent',
   'ts#mcp-server',
@@ -116,20 +109,20 @@ const DOCKER_CONNECTION_ENDPOINTS = new Set([
   'ts#rdb',
 ]);
 
-const connectionIsDockerBound = (key: string): boolean =>
+const connectionUnsupported = (key: string): boolean =>
   key
     .split('->')
     .map((side) => side.trim())
-    .some((endpoint) => DOCKER_CONNECTION_ENDPOINTS.has(endpoint));
+    .some((endpoint) => CONNECTION_UNSUPPORTED_ENDPOINTS.has(endpoint));
 
-const keepForRunner = <T extends { generator?: string; dockerBound?: boolean }>(
+const keepForRunner = <T extends { generator?: string; unsupported?: boolean }>(
   cases: T[],
 ): T[] =>
-  SKIP_DOCKER
+  CODEBUILD_WINDOWS
     ? cases.filter(
         (c) =>
-          !c.dockerBound &&
-          !(c.generator && DOCKER_GENERATORS.has(c.generator)),
+          !c.unsupported &&
+          !(c.generator && CODEBUILD_WINDOWS_UNSUPPORTED.has(c.generator)),
       )
     : cases;
 
@@ -145,8 +138,8 @@ const forThisShard = <T>(cases: T[]): T[] =>
   cases.filter(() => shardCursor++ % shardTotal === shardIndex - 1);
 
 // Sliced per group; a group can be empty for a shard, so its describe is
-// skipped to avoid vitest's empty-`it.each` error. Docker-bound cases are
-// dropped first (when NX_E2E_SKIP_DOCKER is set) so the remainder shards evenly.
+// skipped to avoid vitest's empty-`it.each` error. Unsupported cases are dropped
+// first (on the CodeBuild Windows runner) so the remainder shards evenly.
 const shardStandalone = forThisShard(keepForRunner(standalone));
 const shardComponents = forThisShard(keepForRunner(components));
 
@@ -401,7 +394,7 @@ const connectionCases = Object.entries(CONNECTION_CASES).flatMap(
     factories.map((factory, i) => ({
       key: factories.length > 1 ? `${key} #${i + 1}` : key,
       factory,
-      dockerBound: connectionIsDockerBound(key),
+      unsupported: connectionUnsupported(key),
     })),
 );
 const shardConnectionCases = forThisShard(keepForRunner(connectionCases));
