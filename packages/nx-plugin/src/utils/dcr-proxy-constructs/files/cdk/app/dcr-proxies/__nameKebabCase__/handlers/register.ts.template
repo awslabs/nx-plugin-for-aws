@@ -1,0 +1,76 @@
+import type {
+  APIGatewayProxyHandlerV2,
+  APIGatewayProxyStructuredResultV2,
+} from 'aws-lambda';
+
+const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID!;
+const ALLOWED_REDIRECT_PATTERNS = (
+  JSON.parse(process.env.ALLOWED_REDIRECT_PATTERNS ?? '[]') as string[]
+).map((s) => new RegExp(s));
+
+interface RegisterRequest {
+  redirect_uris?: unknown;
+  [key: string]: unknown;
+}
+
+function jsonResponse(
+  statusCode: number,
+  body: unknown,
+): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+  if (!event.body) {
+    return jsonResponse(400, {
+      error: 'invalid_client_metadata',
+      error_description: 'request body is required',
+    });
+  }
+
+  let req: RegisterRequest;
+  try {
+    req = JSON.parse(event.body) as RegisterRequest;
+  } catch {
+    return jsonResponse(400, {
+      error: 'invalid_client_metadata',
+      error_description: 'request body must be valid JSON',
+    });
+  }
+
+  const redirectUris = req.redirect_uris;
+  if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+    return jsonResponse(400, {
+      error: 'invalid_redirect_uri',
+      error_description: 'redirect_uris is required and must be a non-empty array',
+    });
+  }
+
+  for (const uri of redirectUris) {
+    if (typeof uri !== 'string') {
+      return jsonResponse(400, {
+        error: 'invalid_redirect_uri',
+        error_description: 'each redirect_uri must be a string',
+      });
+    }
+    const matched = ALLOWED_REDIRECT_PATTERNS.some((p) => p.test(uri));
+    if (!matched) {
+      return jsonResponse(400, {
+        error: 'invalid_redirect_uri',
+        error_description: `redirect_uri not allowed: ${uri}`,
+      });
+    }
+  }
+
+  return jsonResponse(201, {
+    client_id: COGNITO_CLIENT_ID,
+    redirect_uris: redirectUris,
+    token_endpoint_auth_method: 'none',
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+  });
+};

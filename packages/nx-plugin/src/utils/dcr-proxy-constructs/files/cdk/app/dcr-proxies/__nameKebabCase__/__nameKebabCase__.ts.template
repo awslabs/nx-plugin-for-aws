@@ -1,0 +1,263 @@
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { Construct } from 'constructs';
+import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+export interface CorsOptions {
+  readonly allowOrigins?: string[];
+  readonly allowHeaders?: string[];
+  readonly maxAge?: Duration;
+}
+
+export interface ThrottlingOptions {
+  readonly rateLimit?: number;
+  readonly burstLimit?: number;
+}
+
+export interface <%- nameClassName %>Props {
+  readonly userPool: cognito.IUserPool;
+  readonly userPoolClient: cognito.IUserPoolClient;
+  readonly cognitoDomain: cognito.UserPoolDomain;
+
+  /**
+   * Full URL of the upstream MCP server (e.g. AgentCore Runtime/Gateway
+   * endpoint). The proxy forwards requests on its `/mcp` path to this URL and
+   * rewrites the upstream `WWW-Authenticate` header so MCP clients discover
+   * this proxy as the protected-resource metadata host.
+   */
+  readonly upstreamUrl: string;
+
+  readonly allowedRedirectPatterns?: RegExp[];
+
+  readonly cors?: CorsOptions | false;
+  readonly throttling?: ThrottlingOptions;
+  readonly reservedConcurrentExecutions?: number;
+
+  readonly lambdaEnvironment?: Record<string, string>;
+  readonly logRetention?: logs.RetentionDays;
+  readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Timeout applied to the MCP proxy Lambda. Defaults to 29 seconds (the
+   * API Gateway HTTP API integration limit).
+   */
+  readonly mcpProxyTimeout?: Duration;
+  readonly mcpProxyMemorySize?: number;
+}
+
+const DEFAULT_CORS_HEADERS = [
+  'authorization',
+  'content-type',
+  'mcp-protocol-version',
+];
+const DEFAULT_RATE_LIMIT = 50;
+const DEFAULT_BURST_LIMIT = 100;
+
+const HANDLERS_DIR = url.fileURLToPath(new URL('./handlers', import.meta.url));
+
+const entry = (file: string): string => path.join(HANDLERS_DIR, file);
+
+/**
+ * OAuth Dynamic Client Registration (DCR) proxy for Amazon Cognito.
+ *
+ * Lets MCP clients (Claude Code, Kiro CLI, MCP Inspector, ...) authenticate
+ * against an Amazon Cognito User Pool while keeping the Hosted UI flow intact,
+ * supporting RFC 7591 Dynamic Client Registration, and never exposing the
+ * Cognito App Client secret to the client.
+ */
+export class <%- nameClassName %> extends Construct {
+  readonly httpApi: apigwv2.HttpApi;
+  readonly proxyUrl: string;
+  readonly mcpUrl: string;
+  readonly metadataUrl: string;
+  readonly authServerMetadataUrl: string;
+  readonly tokenEndpoint: string;
+  readonly registrationEndpoint: string;
+
+  constructor(scope: Construct, id: string, props: <%- nameClassName %>Props) {
+    super(scope, id);
+
+    const region = Stack.of(this).region;
+    const logRetentionDefault =
+      props.logRetention ?? logs.RetentionDays.ONE_WEEK;
+    const removalPolicyDefault = props.removalPolicy ?? RemovalPolicy.DESTROY;
+
+    const clientSecret = new secretsmanager.Secret(this, 'CognitoClientSecret', {
+      secretStringValue: props.userPoolClient.userPoolClientSecret,
+      removalPolicy: removalPolicyDefault,
+    });
+
+    const cognitoIssuer = `https://cognito-idp.${region}.amazonaws.com/${props.userPool.userPoolId}`;
+    const hostedUiBase = props.cognitoDomain.baseUrl();
+
+    const baseEnv: Record<string, string> = {
+      COGNITO_USER_POOL_ID: props.userPool.userPoolId,
+      COGNITO_CLIENT_ID: props.userPoolClient.userPoolClientId,
+      COGNITO_CLIENT_SECRET_ARN: clientSecret.secretArn,
+      COGNITO_ISSUER: cognitoIssuer,
+      COGNITO_HOSTED_UI_BASE: hostedUiBase,
+      COGNITO_REGION: region,
+      ALLOWED_REDIRECT_PATTERNS: JSON.stringify(
+        (props.allowedRedirectPatterns ?? []).map((r) => r.source),
+      ),
+      ...(props.lambdaEnvironment ?? {}),
+    };
+
+    const makeFn = (
+      id_: string,
+      file: string,
+      overrides?: Partial<nodejs.NodejsFunctionProps>,
+    ): nodejs.NodejsFunction => {
+      const logGroup = new logs.LogGroup(this, `${id_}LogGroup`, {
+        retention: logRetentionDefault,
+        removalPolicy: removalPolicyDefault,
+      });
+
+      return new nodejs.NodejsFunction(this, id_, {
+        entry: entry(file),
+        handler: 'handler',
+        runtime: lambda.Runtime.NODEJS_20_X,
+        architecture: lambda.Architecture.ARM_64,
+        timeout: Duration.seconds(10),
+        memorySize: 256,
+        environment: baseEnv,
+        logGroup,
+        reservedConcurrentExecutions: props.reservedConcurrentExecutions,
+        bundling: {
+          target: 'node20',
+          format: nodejs.OutputFormat.CJS,
+          minify: true,
+          sourceMap: true,
+          externalModules: ['@aws-sdk/*'],
+        },
+        ...overrides,
+      });
+    };
+
+    const protectedResourceFn = makeFn(
+      'ProtectedResourceFn',
+      'protected-resource-metadata.ts',
+    );
+    const authServerFn = makeFn(
+      'AuthServerFn',
+      'authorization-server-metadata.ts',
+    );
+    const registerFn = makeFn('RegisterFn', 'register.ts');
+    const authorizeFn = makeFn('AuthorizeFn', 'authorize.ts');
+    const tokenFn = makeFn('TokenFn', 'token.ts');
+
+    clientSecret.grantRead(tokenFn);
+
+    const corsPreflight =
+      props.cors === false
+        ? undefined
+        : {
+            allowOrigins: props.cors?.allowOrigins ?? ['*'],
+            allowMethods: [
+              apigwv2.CorsHttpMethod.GET,
+              apigwv2.CorsHttpMethod.POST,
+              apigwv2.CorsHttpMethod.DELETE,
+              apigwv2.CorsHttpMethod.OPTIONS,
+            ],
+            allowHeaders: props.cors?.allowHeaders ?? DEFAULT_CORS_HEADERS,
+            maxAge: props.cors?.maxAge ?? Duration.minutes(10),
+          };
+
+    this.httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
+      apiName: `${id}-mcp-auth-proxy`,
+      description: 'MCP-compatible OAuth proxy for Amazon Cognito',
+      corsPreflight,
+    });
+
+    const stage = this.httpApi.defaultStage!.node
+      .defaultChild as apigwv2.CfnStage;
+    stage.defaultRouteSettings = {
+      throttlingRateLimit: props.throttling?.rateLimit ?? DEFAULT_RATE_LIMIT,
+      throttlingBurstLimit: props.throttling?.burstLimit ?? DEFAULT_BURST_LIMIT,
+    };
+
+    this.proxyUrl = this.httpApi.apiEndpoint;
+    this.mcpUrl = `${this.proxyUrl}/mcp`;
+    this.metadataUrl = `${this.proxyUrl}/.well-known/oauth-protected-resource`;
+    this.authServerMetadataUrl = `${this.proxyUrl}/.well-known/oauth-authorization-server`;
+    this.tokenEndpoint = `${this.proxyUrl}/oauth/token`;
+    this.registrationEndpoint = `${this.proxyUrl}/register`;
+
+    this.httpApi.addRoutes({
+      path: '/.well-known/oauth-protected-resource',
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new integrations.HttpLambdaIntegration(
+        'ProtectedResourceInt',
+        protectedResourceFn,
+      ),
+    });
+
+    this.httpApi.addRoutes({
+      path: '/.well-known/oauth-authorization-server',
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new integrations.HttpLambdaIntegration(
+        'AuthServerInt',
+        authServerFn,
+      ),
+    });
+
+    this.httpApi.addRoutes({
+      path: '/.well-known/openid-configuration',
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new integrations.HttpLambdaIntegration(
+        'OpenIdConfigInt',
+        authServerFn,
+      ),
+    });
+
+    this.httpApi.addRoutes({
+      path: '/register',
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new integrations.HttpLambdaIntegration(
+        'RegisterInt',
+        registerFn,
+      ),
+    });
+
+    this.httpApi.addRoutes({
+      path: '/authorize',
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new integrations.HttpLambdaIntegration(
+        'AuthorizeInt',
+        authorizeFn,
+      ),
+    });
+
+    this.httpApi.addRoutes({
+      path: '/oauth/token',
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new integrations.HttpLambdaIntegration('TokenInt', tokenFn),
+    });
+
+    const mcpProxyFn = makeFn('McpProxyFn', 'mcp-proxy.ts', {
+      timeout: props.mcpProxyTimeout ?? Duration.seconds(29),
+      memorySize: props.mcpProxyMemorySize ?? 512,
+      environment: {
+        ...baseEnv,
+        UPSTREAM_URL: props.upstreamUrl,
+        PROXY_METADATA_URL: this.metadataUrl,
+      },
+    });
+
+    this.httpApi.addRoutes({
+      path: '/mcp',
+      methods: [apigwv2.HttpMethod.ANY],
+      integration: new integrations.HttpLambdaIntegration(
+        'McpProxyInt',
+        mcpProxyFn,
+      ),
+    });
+  }
+}
