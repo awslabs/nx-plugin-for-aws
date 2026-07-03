@@ -533,11 +533,11 @@ describe('cognito-auth generator', () => {
       .read('packages/common/constructs/src/core/user-identity.ts', 'utf-8')
       ?.toString();
     // Reserved words "cognito" and "aws" should be stripped, leaving collapsed hyphens
-    expect(userIdentity).not.toMatch(/domain: `[^`]*cognito[^`]*`/i);
-    expect(userIdentity).not.toMatch(/domain: `[^`]*aws[^`]*`/i);
-    expect(userIdentity).not.toMatch(/domain: `[^`]*amazon[^`]*`/i);
+    expect(userIdentity).not.toMatch(/domainPrefix: `[^`]*cognito[^`]*`/i);
+    expect(userIdentity).not.toMatch(/domainPrefix: `[^`]*aws[^`]*`/i);
+    expect(userIdentity).not.toMatch(/domainPrefix: `[^`]*amazon[^`]*`/i);
     // The remaining derived prefix should still match the Cognito pattern.
-    const match = userIdentity?.match(/domain: `([^`$]+?)-\$\{/);
+    const match = userIdentity?.match(/domainPrefix: `([^`$]+?)-\$\{/);
     expect(match).toBeTruthy();
     expect(match![1]).toMatch(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
   });
