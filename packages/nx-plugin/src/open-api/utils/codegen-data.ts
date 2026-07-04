@@ -61,33 +61,26 @@ const compositeMemberSchemas = (
 export const buildOpenApiCodeGenData = (
   inSpec: Spec,
 ): CodeGenData => {
-  // Ensure spec is ready for codegen
   const spec = normaliseOpenApiSpecForCodeGen(inSpec);
-
-  // Build the initial data, which we will augment with additional information
   const data = buildClientData(spec);
 
-  // Ensure the models have their links set when they are arrays/dictionaries
+  // Set array/dictionary links and composite members before augmentation reads
+  // them.
   ensureModelLinks(spec, data);
-
-  // Resolve the composed models/primitives for composite schemas so the
-  // templates can render them
   resolveComposedModels(data);
 
   const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
 
-  // Augment each service's operations with additional data
   for (const service of data.services) {
     augmentService(spec, service, modelsByName);
   }
 
-  // All operations across all services
   const allOperations = uniqBy(
     data.services.flatMap((s) => s.operations),
     (o) => o.uniqueName,
   );
 
-  // Add additional models for each operation's request parameters
+  // A model per operation request parameter position (query/path/body/...).
   data.models = [
     ...data.models,
     ...allOperations.flatMap((op) =>
@@ -95,8 +88,6 @@ export const buildOpenApiCodeGenData = (
     ),
   ];
 
-  // Augment every model (including the request parameter models just added)
-  // with schema-derived and language-specific data
   for (const model of data.models) {
     augmentModel(spec, model, modelsByName);
   }
@@ -105,10 +96,8 @@ export const buildOpenApiCodeGenData = (
     model.typescriptType = model.typescriptName;
   }
 
-  // Order models lexicographically by name
   data.models = orderBy(data.models, (d) => d.name);
-
-  // Order services so default appears first, then otherwise by name
+  // Default service first, then by name.
   data.services = orderBy(data.services, (s) =>
     s.name === 'Default' ? '' : s.name,
   );
@@ -122,7 +111,7 @@ export const buildOpenApiCodeGenData = (
     untaggedOperations,
     info: spec.info,
     allOperations,
-    vendorExtensions: extractVendorExtensions(spec),
+    vendorExtensions: vendorExtensionsOf(spec ?? {}),
     className: toClassName(spec.info.title),
   };
 };
@@ -137,20 +126,14 @@ const augmentService = (
   service: Service,
   modelsByName: { [name: string]: Model },
 ): void => {
-  // Model names each operation needs to import, accumulated across operations
-  const modelImports: string[] = [];
+  const modelImports = service.operations.flatMap((op) =>
+    augmentOperation(spec, op, modelsByName),
+  );
 
-  for (const op of service.operations) {
-    modelImports.push(...augmentOperation(spec, op, modelsByName));
-  }
-
-  // Lexicographical ordering of operations
   service.operations = orderBy(service.operations, (op) => op.uniqueName);
-
   service.modelImports = orderBy(
     uniqBy([...service.imports, ...modelImports], (x) => x),
   );
-
   service.className = `${service.name}Api`;
   service.nameSnakeCase = snakeCase(service.name);
 };
@@ -168,40 +151,30 @@ const augmentOperation = (
 
   assignOperationNames(op, specOp);
 
-  // Add vendor extensions
-  op.vendorExtensions = op.vendorExtensions ?? {};
-  copyVendorExtensions(specOp ?? {}, op.vendorExtensions);
+  op.vendorExtensions = vendorExtensionsOf(specOp ?? {});
 
-  const modelImports: string[] = [];
-  if (specOp) {
-    modelImports.push(...augmentResponses(spec, op, specOp, modelsByName));
-  }
-  modelImports.push(...augmentParameters(spec, op, specOp, modelsByName));
+  const modelImports = [
+    ...(specOp ? augmentResponses(spec, op, specOp, modelsByName) : []),
+    ...augmentParameters(spec, op, specOp, modelsByName),
+  ];
 
-  // Add language types to response models
   op.responses.forEach(addLanguageTypes);
-
-  // Sort responses by code
   op.responses = orderBy(op.responses, (r) => r.code);
-  // Result is the lowest successful response, otherwise the 2XX or default response
-  const result = op.responses.find(
-    (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
-  );
-  op.result =
-    result ??
-    op.responses.find((r) => r.code === '2XX' || r.code === 'default');
 
-  // Add variants of operation name (after uniqueName is set)
+  // Result is the lowest successful response, otherwise the 2XX or default.
+  op.result =
+    op.responses.find(
+      (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
+    ) ?? op.responses.find((r) => r.code === '2XX' || r.code === 'default');
+
   op.operationIdPascalCase = pascalCase(op.uniqueName);
   op.operationIdSnakeCase = toPythonName('operation', op.uniqueName);
 
-  // Add request type name (after operationIdPascalCase is set)
-  if (op.parameters && op.parameters.length > 0) {
+  if (op.parameters.length > 0) {
     const baseRequestTypeName = `${op.operationIdPascalCase}Request`;
-    const hasConflict = !!spec.components?.schemas?.[baseRequestTypeName];
     // Use the OperationRequest suffix when the standard Request name clashes
-    // with an existing schema, otherwise the standard Request suffix.
-    op.requestTypeName = hasConflict
+    // with an existing schema.
+    op.requestTypeName = spec.components?.schemas?.[baseRequestTypeName]
       ? `${op.operationIdPascalCase}OperationRequest`
       : baseRequestTypeName;
   }
@@ -219,19 +192,15 @@ const assignOperationNames = (
   op: Operation,
   specOp: OpenAPIV3.OperationObject | undefined,
 ): void => {
-  op.name = op.id ?? op.name;
-  op.uniqueName = op.name;
-
   const deduplicatedOpId = specOp?.['x-aws-nx-deduplicated-op-id'] as
     | string
     | undefined;
-  if (deduplicatedOpId) {
-    op.uniqueName = deduplicatedOpId;
-  }
-
   const dotNotationOpId = specOp?.['x-aws-nx-deduplicated-dot-op-id'] as
     | string
     | undefined;
+
+  op.name = op.id ?? op.name;
+  op.uniqueName = deduplicatedOpId ?? op.name;
   if (dotNotationOpId) {
     op.dotNotationName = dotNotationOpId;
   }
@@ -461,20 +430,16 @@ const buildRequestParameterModels = (
     );
   };
 
-  // Group the parameters we will create models for by their position (ie 'in'
-  // in the openapi spec, eg body, query, path, header, etc)
-  const parametersByPosition: { [position: string]: Model[] } = {};
-  for (const parameter of op.parameters) {
-    if (parameter.in === 'body' && canInlineBody(parameter)) {
-      continue;
-    }
-    parametersByPosition[parameter.in] = [
-      ...(parametersByPosition[parameter.in] ?? []),
-      parameter,
-    ];
-  }
+  // Group parameters by their position (`in`: query/path/header/cookie/body),
+  // dropping any body that can be inlined.
+  const parametersByPosition = op.parameters
+    .filter((p) => !(p.in === 'body' && canInlineBody(p)))
+    .reduce<{ [position: string]: Model[] }>(
+      (acc, p) => ({ ...acc, [p.in]: [...(acc[p.in] ?? []), p] }),
+      {},
+    );
 
-  // Ensure that if we have an explicit (non-inlined) body parameter, it's called "body"
+  // An explicit (non-inlined) body parameter is named "body".
   const requestBodyParameter = parametersByPosition['body']?.[0];
   if (requestBodyParameter) {
     requestBodyParameter.name = 'body';
@@ -504,7 +469,6 @@ const augmentModel = (
   model: Model,
   modelsByName: { [name: string]: Model },
 ): void => {
-  // Add a snake_case name
   model.nameSnakeCase = toPythonName('model', model.name);
 
   const matchingSpecModel = spec?.components?.schemas?.[model.name];
@@ -512,25 +476,17 @@ const augmentModel = (
     const specModel = resolveIfRef(spec, matchingSpecModel);
 
     augmentModelFromSchema(spec, model, specModel, modelsByName);
-
     model.deprecated = specModel.deprecated || false;
 
-    // Augment properties with schema-derived data
     for (const property of model.properties) {
       const matchingSpecProperty = specModel.properties?.[property.name];
       if (matchingSpecProperty) {
         const specProperty = resolveIfRef(spec, matchingSpecProperty);
-        augmentModelFromSchema(
-          spec,
-          property,
-          specProperty,
-          modelsByName,
-        );
+        augmentModelFromSchema(spec, property, specProperty, modelsByName);
       }
     }
   }
 
-  // Add language-specific names/types to properties
   model.properties.forEach(addLanguageTypes);
 };
 
@@ -544,28 +500,20 @@ const groupOperationsByTag = (
   operationsByTag: { [tag: string]: Operation[] };
   untaggedOperations: Operation[];
 } => {
-  const operationsByTag: { [tag: string]: Operation[] } = {};
-  const untaggedOperations: Operation[] = [];
-  allOperations.forEach((op) => {
-    const tags = op.tags;
-    if (tags && tags.length > 0) {
-      tags.map(camelCase).forEach((tag) => {
-        operationsByTag[tag] = [...(operationsByTag[tag] ?? []), op];
-      });
-    } else {
-      untaggedOperations.push(op);
-    }
-  });
-  return { operationsByTag, untaggedOperations };
-};
+  const isTagged = (op: Operation): boolean => !!op.tags && op.tags.length > 0;
 
-/**
- * Collect the top-level vendor extensions (`x-*`) declared on the spec.
- */
-const extractVendorExtensions = (spec: Spec): VendorExtensions => {
-  const vendorExtensions: VendorExtensions = {};
-  copyVendorExtensions(spec ?? {}, vendorExtensions);
-  return vendorExtensions;
+  const operationsByTag = allOperations
+    .filter(isTagged)
+    .flatMap((op) => op.tags!.map((tag) => [camelCase(tag), op] as const))
+    .reduce<{ [tag: string]: Operation[] }>(
+      (acc, [tag, op]) => ({ ...acc, [tag]: [...(acc[tag] ?? []), op] }),
+      {},
+    );
+
+  return {
+    operationsByTag,
+    untaggedOperations: allOperations.filter((op) => !isTagged(op)),
+  };
 };
 
 /**
@@ -636,18 +584,12 @@ const getSpecOperation = (
   ];
 
 /**
- * Copy vendor extensions from the first parameter to the second
+ * The `x-*` vendor extensions declared on an object.
  */
-const copyVendorExtensions = (
-  object: object,
-  vendorExtensions: VendorExtensions,
-) => {
-  Object.entries(object ?? {}).forEach(([key, value]) => {
-    if (key.startsWith('x-')) {
-      vendorExtensions[key] = value;
-    }
-  });
-};
+const vendorExtensionsOf = (object: object): VendorExtensions =>
+  Object.fromEntries(
+    Object.entries(object ?? {}).filter(([key]) => key.startsWith('x-')),
+  );
 
 const augmentModelFromSchema = (
   spec: Spec,
@@ -660,10 +602,7 @@ const augmentModelFromSchema = (
   model.deprecated = !!schema.deprecated;
   model.openapiType = schema.type;
   model.isEnum = !!schema.enum && schema.enum.length > 0;
-
-  // Copy any schema vendor extensions
-  model.vendorExtensions = {};
-  copyVendorExtensions(schema, model.vendorExtensions);
+  model.vendorExtensions = vendorExtensionsOf(schema);
 
   // A "dictionary" has only additional properties; an "interface" may mix
   // explicit and additional properties.
@@ -694,41 +633,31 @@ const augmentModelFromSchema = (
   }
 
   // Pattern properties can have different value types per pattern, so the model
-  // is an interface rather than a dictionary
+  // is an interface rather than a dictionary.
   if (schema.patternProperties) {
     const patternProperties = resolveIfRef(spec, schema.patternProperties);
-
-    const patternPropertiesModels: PatternPropertyModel[] = [];
 
     if (model.export === 'dictionary') {
       model.export = 'interface';
     }
 
-    for (const [pattern, patternProperty] of Object.entries(
-      patternProperties,
-    )) {
-      const patternPropertyModel = buildOrReferenceModel(
-        spec,
-        modelsByName,
-        patternProperty,
-      );
-      if (patternPropertyModel) {
-        patternPropertiesModels.push({
-          pattern,
-          model: patternPropertyModel,
-        });
-      }
-    }
-
     model.hasPatternProperties = true;
-    model.patternPropertiesModels = patternPropertiesModels;
+    model.patternPropertiesModels = Object.entries(patternProperties)
+      .map(([pattern, patternProperty]) => ({
+        pattern,
+        model: buildOrReferenceModel(spec, modelsByName, patternProperty),
+      }))
+      .filter((entry): entry is PatternPropertyModel => !!entry.model);
   }
 
   addLanguageTypes(model);
 
   visited.add(model);
 
-  // Also apply to array items recursively
+  const recurse = (target: Model, subSchema: OpenApiSchema): void =>
+    augmentModelFromSchema(spec, target, subSchema, modelsByName, visited);
+
+  // Array element type.
   if (
     model.export === 'array' &&
     model.link &&
@@ -736,17 +665,11 @@ const augmentModelFromSchema = (
     schema.items &&
     !visited.has(model.link)
   ) {
-    const subSchema = resolveIfRef(spec, schema.items);
-    augmentModelFromSchema(
-      spec,
-      model.link,
-      subSchema,
-      modelsByName,
-      visited,
-    );
+    recurse(model.link, resolveIfRef(spec, schema.items));
   }
 
-  // Also apply to object properties recursively
+  // Dictionary value type (additionalProperties may be `true` rather than a
+  // schema).
   if (
     model.export === 'dictionary' &&
     model.link &&
@@ -755,48 +678,28 @@ const augmentModelFromSchema = (
     !visited.has(model.link)
   ) {
     const subSchema = resolveIfRef(spec, schema.additionalProperties);
-    // Additional properties can be "true" rather than a type
     if (subSchema !== true) {
-      augmentModelFromSchema(
-        spec,
-        model.link,
-        subSchema,
-        modelsByName,
-        visited,
-      );
+      recurse(model.link, subSchema);
     }
   }
 
-  for (const property of model.properties.filter(
-    (p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)],
-  )) {
-    const subSchema = resolveIfRef(
-      spec,
-      schema.properties![trim(property.name, `"'`)],
+  model.properties
+    .filter((p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)])
+    .forEach((property) =>
+      recurse(
+        property,
+        resolveIfRef(spec, schema.properties![trim(property.name, `"'`)]),
+      ),
     );
-    augmentModelFromSchema(
-      spec,
-      property,
-      subSchema,
-      modelsByName,
-      visited,
-    );
-  }
 
   if (COMPOSED_SCHEMA_TYPES.has(model.export)) {
     const memberSchemas = compositeMemberSchemas(schema, model.export);
-    for (let i = 0; i < model.properties.length; i++) {
+    model.properties.forEach((property, i) => {
       const subSchema = resolveIfRef(spec, memberSchemas[i]);
       if (subSchema) {
-        augmentModelFromSchema(
-          spec,
-          model.properties[i],
-          subSchema,
-          modelsByName,
-          visited,
-        );
+        recurse(property, subSchema);
       }
-    }
+    });
   }
 };
 
@@ -960,9 +863,8 @@ const ensureModelLink = (
 };
 
 /**
- * Mutates the given data to ensure composite models (ie allOf, oneOf, anyOf) have the necessary
- * properties for representing them in generated code. Adds `composedModels` and `composedPrimitives`
- * which contain the models and primitive types that each model is composed of.
+ * Populate `composedModels` and `composedPrimitives` on each composite model
+ * (allOf/anyOf/oneOf) with the models and primitive types it is composed of.
  */
 const resolveComposedModels = (data: ClientData) => {
   const visited = new Set<Model>();
@@ -974,74 +876,59 @@ const resolveComposedModel = (
   model: Model,
   visited: Set<Model>,
 ) => {
-  if (COMPOSED_SCHEMA_TYPES.has(model.export) && !visited.has(model)) {
-    visited.add(model);
-
-    // Find the models/primitives which this is composed from
-    const composedModelReferences = model.properties.filter(
-      (p) => !p.name && p.export === 'reference',
-    );
-    const composedPrimitives = model.properties.filter(
-      (p) => !p.name && p.export !== 'reference',
-    );
-
-    const modelsByName = Object.fromEntries(
-      data.models.map((m) => [m.name, m]),
-    );
-    let composedModels = composedModelReferences.flatMap((r) =>
-      modelsByName[r.type] ? [modelsByName[r.type]] : [],
-    );
-    // Resolve recursively so all-of mixins include nested all-of properties
-    composedModels.forEach((m) => resolveComposedModel(data, m, visited));
-
-    // Enums serialise as primitives, so group them with the primitives
-    composedPrimitives.push(
-      ...composedModels.filter((m) => m.export === 'enum'),
-    );
-    composedModels = composedModels.filter((m) => m.export !== 'enum');
-
-    // Composing multiple arrays of non-primitives is not distinguishable at
-    // runtime, so it's validated away below.
-    // TODO: honour `discriminator` to support this case.
-    const isPrimitiveArray = (m: Model) => {
-      if (m.link && ['array', 'dictionary'].includes(m.export)) {
-        return isPrimitiveArray(m.link);
-      }
-      return (
-        PRIMITIVE_TYPES.has(m.type) &&
-        !['date', 'date-time'].includes(m.format ?? '')
-      );
-    };
-    const arrayComposedModels = composedPrimitives.filter(
-      (m) => m.export === 'array' && !isPrimitiveArray(m),
-    );
-    if (arrayComposedModels.length > 1) {
-      throw new Error(
-        `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
-      );
-    }
-
-    // For all-of models, we include all composed model properties.
-    if (model.export === 'all-of') {
-      if (composedPrimitives.length > 0) {
-        throw new Error(
-          `Schema "${model.name}" defines allOf with non-object types. allOf may only compose object types in the OpenAPI specification.`,
-        );
-      }
-    }
-
-    model.composedModels = composedModels;
-    model.composedPrimitives = composedPrimitives;
+  if (!COMPOSED_SCHEMA_TYPES.has(model.export) || visited.has(model)) {
+    return;
   }
+  visited.add(model);
+
+  const members = model.properties.filter((p) => !p.name);
+  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
+  const referenced = members
+    .filter((p) => p.export === 'reference')
+    .flatMap((r) => (modelsByName[r.type] ? [modelsByName[r.type]] : []));
+
+  // Resolve recursively so all-of mixins include nested all-of properties
+  referenced.forEach((m) => resolveComposedModel(data, m, visited));
+
+  // Enums serialise as primitives, so group them with the primitives
+  const composedModels = referenced.filter((m) => m.export !== 'enum');
+  const composedPrimitives = [
+    ...members.filter((p) => p.export !== 'reference'),
+    ...referenced.filter((m) => m.export === 'enum'),
+  ];
+
+  // Composing multiple arrays of non-primitives is not distinguishable at
+  // runtime, so it's validated away.
+  // TODO: honour `discriminator` to support this case.
+  const isPrimitiveArray = (m: Model): boolean =>
+    m.link && ['array', 'dictionary'].includes(m.export)
+      ? isPrimitiveArray(m.link)
+      : PRIMITIVE_TYPES.has(m.type) &&
+        !['date', 'date-time'].includes(m.format ?? '');
+  const arrayComposedModels = composedPrimitives.filter(
+    (m) => m.export === 'array' && !isPrimitiveArray(m),
+  );
+  if (arrayComposedModels.length > 1) {
+    throw new Error(
+      `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
+    );
+  }
+
+  if (model.export === 'all-of' && composedPrimitives.length > 0) {
+    throw new Error(
+      `Schema "${model.name}" defines allOf with non-object types. allOf may only compose object types in the OpenAPI specification.`,
+    );
+  }
+
+  model.composedModels = composedModels;
+  model.composedPrimitives = composedPrimitives;
 };
 
 /**
- * Mutates the given model to add language specific types and names
+ * Add language-specific names and types to a model.
  */
 const addLanguageTypes = (model: Model) => {
-  // Trim any surrounding quotes from name
   model.name = trim(model.name, `"'`);
-
   model.typescriptName = toTypeScriptName(model.name);
   model.typescriptType = toTypeScriptType(model);
   model.pythonName = toPythonName('property', model.name);
@@ -1092,33 +979,23 @@ const augmentInfiniteQuery = (op: Operation) => {
  * - `'property'` / `{ inputToken: 'property' }` — the input property to page on
  * - `false` / `{ enabled: false }` — disable pagination
  */
-const getCursorOptions = (op: Operation) => {
-  const cursorExtension = op.vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR];
+const getCursorOptions = (
+  op: Operation,
+): { paginationDisabled: boolean; cursorPropertyName: string } => {
+  const cursor = op.vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR];
 
-  // Defaults: pagination enabled, paging on a property named 'cursor'
-  let paginationDisabled = false;
-  let cursorPropertyName = 'cursor';
-
-  if (cursorExtension === false) {
-    paginationDisabled = true;
-  } else if (typeof cursorExtension === 'string') {
-    cursorPropertyName = cursorExtension;
-  } else if (cursorExtension && typeof cursorExtension === 'object') {
-    const cursorOptions = cursorExtension as {
-      enabled?: boolean;
-      inputToken?: unknown;
-    };
-    if (cursorOptions.enabled === false) {
-      paginationDisabled = true;
-    }
-    if (typeof cursorOptions.inputToken === 'string') {
-      cursorPropertyName = cursorOptions.inputToken;
-    }
+  // Defaults: pagination enabled, paging on a property named 'cursor'.
+  if (cursor === false) {
+    return { paginationDisabled: true, cursorPropertyName: 'cursor' };
   }
-
+  if (typeof cursor === 'string') {
+    return { paginationDisabled: false, cursorPropertyName: cursor };
+  }
+  const options = (cursor ?? {}) as { enabled?: boolean; inputToken?: unknown };
   return {
-    paginationDisabled,
-    cursorPropertyName,
+    paginationDisabled: options.enabled === false,
+    cursorPropertyName:
+      typeof options.inputToken === 'string' ? options.inputToken : 'cursor',
   };
 };
 

@@ -199,8 +199,8 @@ export const toPythonName = (
 ) => {
   const nameSnakeCase = snakeCase(name);
 
-  // Check if the name is a reserved word. Reserved words that overlap with TypeScript will already be escaped
-  // with a leading _ by @hey-api/openapi-ts, so we remove this to test
+  // Names overlapping a TypeScript reserved word carry a leading `_`; strip it
+  // before testing against the Python keyword set.
   if (PYTHON_KEYWORDS.has(name.startsWith('_') ? name.slice(1) : name)) {
     const nameSuffix = `_${nameSnakeCase}`;
     switch (namedEntity) {
