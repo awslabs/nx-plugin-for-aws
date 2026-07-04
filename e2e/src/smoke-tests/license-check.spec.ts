@@ -41,6 +41,28 @@ describe('smoke test - license-check', () => {
     };
 
     await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
+
+    // The default allowlist covers only the a2z broadly-pre-approved licenses.
+    // A handful of genuinely-permissive licenses used by common npm deps are no
+    // longer broadly allowed and need explicit per-package exceptions:
+    //   - MIT-0: the AWS Lambda Powertools packages
+    //   - BlueOak-1.0.0: minimatch, rimraf
+    const configPath = join(projectRoot, 'aws-nx-plugin.config.mts');
+    const config = readFileSync(configPath, 'utf-8');
+    writeFileSync(
+      configPath,
+      config.replace(
+        'exceptions: [',
+        `exceptions: [
+        { package: '@aws-lambda-powertools/logger', reason: 'MIT-0', spdx: 'MIT-0' },
+        { package: '@aws-lambda-powertools/metrics', reason: 'MIT-0', spdx: 'MIT-0' },
+        { package: '@aws-lambda-powertools/parameters', reason: 'MIT-0', spdx: 'MIT-0' },
+        { package: '@aws-lambda-powertools/parser', reason: 'MIT-0', spdx: 'MIT-0' },
+        { package: '@aws-lambda-powertools/tracer', reason: 'MIT-0', spdx: 'MIT-0' },
+        { package: 'minimatch', reason: 'BlueOak-1.0.0', spdx: 'BlueOak-1.0.0' },
+        { package: 'rimraf', reason: 'BlueOak-1.0.0', spdx: 'BlueOak-1.0.0' },`,
+      ),
+    );
   });
 
   it('passes license-check with TS_VERSIONS dependencies', async () => {
