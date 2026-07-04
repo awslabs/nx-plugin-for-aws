@@ -323,5 +323,174 @@ describe('openapi codegen data utils', () => {
         'operation-value',
       );
     });
+
+    it('should throw for allOf composing non-object types', () => {
+      const specWithInvalidAllOf: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            StringAndPet: {
+              allOf: [{ type: 'string' }, { $ref: '#/components/schemas/Pet' }],
+            },
+          },
+        },
+      };
+
+      expect(() => buildOpenApiCodeGenData(specWithInvalidAllOf)).toThrow(
+        /allOf with non-object types/,
+      );
+    });
+
+    it('should classify operations as query or mutation by method', async () => {
+      const data = await buildOpenApiCodeGenData(sampleSpec);
+
+      const listPetsOp = data.allOperations.find(
+        (op) => op.name === 'listPets',
+      );
+      expect(listPetsOp).toMatchObject({ isQuery: true, isMutation: false });
+
+      const createPetOp = data.allOperations.find(
+        (op) => op.name === 'createPet',
+      );
+      expect(createPetOp).toMatchObject({ isQuery: false, isMutation: true });
+    });
+
+    it('should let x-query and x-mutation override the method default', async () => {
+      const specWithOverrides: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/pets': {
+            get: {
+              operationId: 'listPets',
+              ...{ 'x-mutation': true },
+              responses: {
+                '200': {
+                  description: 'List of pets',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/Pet' },
+                    },
+                  },
+                },
+              },
+            },
+            post: {
+              operationId: 'queryPets',
+              ...{ 'x-query': true },
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/NewPet' },
+                  },
+                },
+              },
+              responses: {
+                '200': {
+                  description: 'Queried pets',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/Pet' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const data = await buildOpenApiCodeGenData(specWithOverrides);
+
+      const getOp = data.allOperations.find((op) => op.name === 'listPets');
+      expect(getOp).toMatchObject({ isMutation: true, isQuery: false });
+
+      const postOp = data.allOperations.find((op) => op.name === 'queryPets');
+      expect(postOp).toMatchObject({ isMutation: false, isQuery: true });
+    });
+
+    const paginatedSpec = (
+      cursorExtension: Record<string, unknown>,
+      cursorParamName = 'cursor',
+    ): Spec => ({
+      ...sampleSpec,
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            ...cursorExtension,
+            parameters: [
+              {
+                name: cursorParamName,
+                in: 'query',
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'List of pets',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Pet' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    it('should treat a query with a cursor parameter as an infinite query', async () => {
+      const data = await buildOpenApiCodeGenData(paginatedSpec({}));
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isInfiniteQuery).toBe(true);
+      expect(op.infiniteQueryCursorProperty).toMatchObject({ name: 'cursor' });
+    });
+
+    it('should page on the property named by a string x-cursor', async () => {
+      const data = await buildOpenApiCodeGenData(
+        paginatedSpec({ 'x-cursor': 'nextToken' }, 'nextToken'),
+      );
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isInfiniteQuery).toBe(true);
+      expect(op.infiniteQueryCursorProperty).toMatchObject({
+        name: 'nextToken',
+      });
+    });
+
+    it('should page on the property named by x-cursor inputToken', async () => {
+      const data = await buildOpenApiCodeGenData(
+        paginatedSpec({ 'x-cursor': { inputToken: 'nextToken' } }, 'nextToken'),
+      );
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isInfiniteQuery).toBe(true);
+      expect(op.infiniteQueryCursorProperty).toMatchObject({
+        name: 'nextToken',
+      });
+    });
+
+    it('should disable pagination when x-cursor is false', async () => {
+      const data = await buildOpenApiCodeGenData(
+        paginatedSpec({ 'x-cursor': false }),
+      );
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isInfiniteQuery).toBe(false);
+      expect(op.infiniteQueryCursorProperty).toBeUndefined();
+    });
+
+    it('should disable pagination when x-cursor sets enabled to false', async () => {
+      const data = await buildOpenApiCodeGenData(
+        paginatedSpec({ 'x-cursor': { enabled: false } }),
+      );
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isInfiniteQuery).toBe(false);
+      expect(op.infiniteQueryCursorProperty).toBeUndefined();
+    });
   });
 });
