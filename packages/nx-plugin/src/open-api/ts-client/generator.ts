@@ -35,7 +35,7 @@ export const buildOpenApiCodeGenerationData = async (
   specPath: string,
 ) => {
   const spec = await parseOpenApiSpec(tree, specPath);
-  return await buildOpenApiCodeGenData(spec);
+  return buildOpenApiCodeGenData(spec);
 };
 
 /**

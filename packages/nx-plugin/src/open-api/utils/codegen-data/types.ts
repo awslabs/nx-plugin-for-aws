@@ -90,7 +90,7 @@ export interface Model {
   /** Whether an array enforces uniqueness (rendered as a `Set`). */
   uniqueItems?: boolean;
   /** For arrays/dictionaries, the model describing the element/value type. */
-  link?: Model | Model[] | null;
+  link?: Model | null;
   /** Child properties (for interfaces) or members (for composites). */
   properties: Model[];
   /** Enum members, when `export === 'enum'`. */
@@ -145,8 +145,6 @@ export interface Model {
   isPrimitive?: boolean;
   /** True when the schema declares an enum. */
   isEnum?: boolean;
-  /** Unique referenced model names to import (excludes self-references). */
-  uniqueImports?: string[];
 
   // ---- Streaming augmentation (response models) ----------------------------
   /** True for JSON-lines streaming responses. */
@@ -187,7 +185,6 @@ export interface Operation {
   /** Dot-notation name (tag-qualified), used for metadata keys. */
   dotNotationName?: string;
   operationIdPascalCase?: string;
-  operationIdKebabCase?: string;
   operationIdSnakeCase?: string;
   /** The generated request type name (e.g. `FooRequest`). */
   requestTypeName?: string;
@@ -223,7 +220,6 @@ export interface Service {
   /** All model names the service (API client) needs to import. */
   modelImports?: string[];
   className?: string;
-  classNameSnakeCase?: string;
   nameSnakeCase?: string;
 }
 
@@ -267,13 +263,6 @@ export const createModel = (overrides: Partial<Model> = {}): Model => ({
   in: '',
   ...overrides,
 });
-
-export const flattenModelLink = (link?: Model | Model[] | null): Model =>
-  link === undefined || link === null
-    ? undefined
-    : Array.isArray(link)
-      ? link[0]
-      : link;
 
 // Model types which indicate it is composed (ie inherits/mixin's another schema)
 export const COMPOSED_SCHEMA_TYPES = new Set<ModelExport>([
