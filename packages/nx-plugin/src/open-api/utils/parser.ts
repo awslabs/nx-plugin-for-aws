@@ -3,18 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * Parses an OpenAPI spec into the initial {@link ClientData} structure consumed
- * by {@link buildOpenApiCodeGenData}, which then enriches it with
- * language-specific and code-generation fields.
- *
- * The spec must already have been run through
- * {@link normaliseOpenApiSpecForCodeGen}, which hoists inline
- * object/enum/composite schemas into named components and inlines refs to
- * primitives, so that every non-primitive is a named schema and every operation
- * has an `operationId`.
- */
-
 import type { OpenAPIV3 } from 'openapi-types';
 import {
   type ClientData,
@@ -123,8 +111,6 @@ const parseResponseCode = (code: string): number | string =>
 const collectImports = (models: Model[]): string[] => [
   ...new Set(models.flatMap((m) => m.imports)),
 ];
-
-// --- Models -----------------------------------------------------------------
 
 /**
  * The structural fields (export/type/link/properties/enum/imports/format) a
@@ -327,8 +313,6 @@ const buildModels = (spec: Spec): Model[] =>
       buildDefinitionModel(spec, name, resolveIfRef(spec, schemaOrRef)),
     ),
   );
-
-// --- Services & operations --------------------------------------------------
 
 /**
  * The synthetic `body` parameter for an operation's request body.
