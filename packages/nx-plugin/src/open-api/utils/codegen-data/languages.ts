@@ -5,7 +5,7 @@
 
 import camelCase from 'lodash.camelcase';
 import { snakeCase, toClassName } from '../../../utils/names';
-import { flattenModelLink, type Model, PRIMITIVE_TYPES } from './types';
+import { type Model, PRIMITIVE_TYPES } from './types';
 
 const toTypescriptPrimitive = (property: Model): string => {
   if (
@@ -23,7 +23,7 @@ const toTypescriptPrimitive = (property: Model): string => {
  * Return the typescript type for the given model
  */
 export const toTypeScriptType = (property: Model): string => {
-  const propertyLink = flattenModelLink(property.link);
+  const propertyLink = property.link;
   switch (property.export) {
     case 'enum':
     case 'generic':
@@ -120,7 +120,7 @@ const toPythonPrimitive = (property: Model): string => {
  * Return the python type for a given property
  */
 export const toPythonType = (property: Model): string => {
-  const propertyLink = flattenModelLink(property.link);
+  const propertyLink = property.link;
   switch (property.export) {
     case 'generic':
     case 'reference':

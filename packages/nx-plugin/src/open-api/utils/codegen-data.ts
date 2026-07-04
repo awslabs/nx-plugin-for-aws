@@ -9,7 +9,6 @@ import trim from 'lodash.trim';
 import uniqBy from 'lodash.uniqby';
 import type { OpenAPIV3 } from 'openapi-types';
 import {
-  kebabCase,
   pascalCase,
   snakeCase,
   toClassName,
@@ -29,7 +28,6 @@ import {
   type CodeGenData,
   type CollectionFormat,
   createModel,
-  flattenModelLink,
   type Model,
   type ModelExport,
   type Operation,
@@ -60,9 +58,9 @@ const compositeMemberSchemas = (
 /**
  * Build the data structure used to generate code from an OpenAPI spec.
  */
-export const buildOpenApiCodeGenData = async (
+export const buildOpenApiCodeGenData = (
   inSpec: Spec,
-): Promise<CodeGenData> => {
+): CodeGenData => {
   // Ensure spec is ready for codegen
   const spec = normaliseOpenApiSpecForCodeGen(inSpec);
 
@@ -80,7 +78,7 @@ export const buildOpenApiCodeGenData = async (
 
   // Augment each service's operations with additional data
   for (const service of data.services) {
-    await augmentService(spec, service, modelsByName);
+    augmentService(spec, service, modelsByName);
   }
 
   // All operations across all services
@@ -100,7 +98,7 @@ export const buildOpenApiCodeGenData = async (
   // Augment every model (including the request parameter models just added)
   // with schema-derived and language-specific data
   for (const model of data.models) {
-    await augmentModel(spec, model, modelsByName);
+    augmentModel(spec, model, modelsByName);
   }
   for (const model of data.models) {
     model.typescriptName = toTypeScriptModelName(model.name);
@@ -134,16 +132,16 @@ export const buildOpenApiCodeGenData = async (
  * generation (names, imports, result/request types, behavioural flags), and
  * compute the set of models the service (ie API client) needs to import.
  */
-const augmentService = async (
+const augmentService = (
   spec: Spec,
   service: Service,
   modelsByName: { [name: string]: Model },
-): Promise<void> => {
+): void => {
   // Model names each operation needs to import, accumulated across operations
   const modelImports: string[] = [];
 
   for (const op of service.operations) {
-    modelImports.push(...(await augmentOperation(spec, op, modelsByName)));
+    modelImports.push(...augmentOperation(spec, op, modelsByName));
   }
 
   // Lexicographical ordering of operations
@@ -154,7 +152,6 @@ const augmentService = async (
   );
 
   service.className = `${service.name}Api`;
-  service.classNameSnakeCase = snakeCase(service.className);
   service.nameSnakeCase = snakeCase(service.name);
 };
 
@@ -162,11 +159,11 @@ const augmentService = async (
  * Augment a single operation with all the data the templates need, returning
  * the names of the models it references (for the service's import list).
  */
-const augmentOperation = async (
+const augmentOperation = (
   spec: Spec,
   op: Operation,
   modelsByName: { [name: string]: Model },
-): Promise<string[]> => {
+): string[] => {
   const specOp = getSpecOperation(spec, op);
 
   assignOperationNames(op, specOp);
@@ -177,13 +174,9 @@ const augmentOperation = async (
 
   const modelImports: string[] = [];
   if (specOp) {
-    modelImports.push(
-      ...(await augmentResponses(spec, op, specOp, modelsByName)),
-    );
+    modelImports.push(...augmentResponses(spec, op, specOp, modelsByName));
   }
-  modelImports.push(
-    ...(await augmentParameters(spec, op, specOp, modelsByName)),
-  );
+  modelImports.push(...augmentParameters(spec, op, specOp, modelsByName));
 
   // Add language types to response models
   op.responses.forEach(addLanguageTypes);
@@ -200,7 +193,6 @@ const augmentOperation = async (
 
   // Add variants of operation name (after uniqueName is set)
   op.operationIdPascalCase = pascalCase(op.uniqueName);
-  op.operationIdKebabCase = kebabCase(op.uniqueName);
   op.operationIdSnakeCase = toPythonName('operation', op.uniqueName);
 
   // Add request type name (after operationIdPascalCase is set)
@@ -250,12 +242,12 @@ const assignOperationNames = (
  * void responses and streaming item schemas. Returns the response model names
  * to import.
  */
-const augmentResponses = async (
+const augmentResponses = (
   spec: Spec,
   op: Operation,
   specOp: OpenAPIV3.OperationObject,
   modelsByName: { [name: string]: Model },
-): Promise<string[]> => {
+): string[] => {
   const modelImports = op.responses
     .filter((r) => r.export === 'reference')
     .map((r) => r.type);
@@ -297,7 +289,7 @@ const augmentResponses = async (
         Object.values(specResponse.content)[0];
       const responseSchema = resolveIfRef(spec, responseContent.schema);
       if (responseSchema) {
-        await augmentModelFromSchema(
+        augmentModelFromSchema(
           spec,
           response,
           responseSchema,
@@ -309,7 +301,7 @@ const augmentResponses = async (
         'itemSchema' in responseContent
       ) {
         response.isJsonlStreaming = true;
-        response.itemSchemaModel = await buildOrReferenceModel(
+        response.itemSchemaModel = buildOrReferenceModel(
           spec,
           modelsByName,
           responseContent.itemSchema as OpenApiSchemaOrRef,
@@ -326,12 +318,12 @@ const augmentResponses = async (
  * request bodies and query/header collection formats. Returns the parameter
  * model names to import.
  */
-const augmentParameters = async (
+const augmentParameters = (
   spec: Spec,
   op: Operation,
   specOp: OpenAPIV3.OperationObject | undefined,
   modelsByName: { [name: string]: Model },
-): Promise<string[]> => {
+): string[] => {
   const specParametersByName = Object.fromEntries(
     (specOp?.parameters ?? []).map((p) => {
       const param = resolveIfRef(spec, p);
@@ -349,7 +341,7 @@ const augmentParameters = async (
     const specParameter = specParametersByName[parameter.prop];
     const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
     if (specParameterSchema) {
-      await augmentModelFromSchema(
+      augmentModelFromSchema(
         spec,
         parameter,
         specParameterSchema,
@@ -358,7 +350,7 @@ const augmentParameters = async (
     }
 
     if (parameter.in === 'body') {
-      await augmentBodyParameter(spec, parameter, specOp, modelsByName);
+      augmentBodyParameter(spec, parameter, specOp, modelsByName);
     } else if (
       (parameter.in === 'query' || parameter.in === 'header') &&
       specParameter
@@ -380,12 +372,12 @@ const augmentParameters = async (
  * spec's `parameters`, so it is resolved from `requestBody` here) and record
  * its acceptable media types.
  */
-const augmentBodyParameter = async (
+const augmentBodyParameter = (
   spec: Spec,
   parameter: Model,
   specOp: OpenAPIV3.OperationObject | undefined,
   modelsByName: { [name: string]: Model },
-): Promise<void> => {
+): void => {
   // The request body parameter is named 'body' downstream.
   parameter.name = 'body';
   parameter.prop = 'body';
@@ -399,7 +391,7 @@ const augmentBodyParameter = async (
       specBody.content?.[parameter.mediaType]?.schema,
     );
     if (bodySchema) {
-      await augmentModelFromSchema(spec, parameter, bodySchema, modelsByName);
+      augmentModelFromSchema(spec, parameter, bodySchema, modelsByName);
     }
   }
   // Track all the media types that can be accepted in the request body
@@ -507,11 +499,11 @@ const buildRequestParameterModels = (
  * Augment a single model with schema-derived data (from its matching spec
  * schema, if any) and language-specific names and types.
  */
-const augmentModel = async (
+const augmentModel = (
   spec: Spec,
   model: Model,
   modelsByName: { [name: string]: Model },
-): Promise<void> => {
+): void => {
   // Add a snake_case name
   model.nameSnakeCase = toPythonName('model', model.name);
 
@@ -519,20 +511,7 @@ const augmentModel = async (
   if (matchingSpecModel) {
     const specModel = resolveIfRef(spec, matchingSpecModel);
 
-    await augmentModelFromSchema(spec, model, specModel, modelsByName);
-
-    // Add unique imports (property references, excluding self for recursive models)
-    model.uniqueImports = orderBy(
-      uniqBy(
-        [
-          ...model.imports,
-          ...model.properties
-            .filter((p) => p.export === 'reference')
-            .map((p) => p.type),
-        ],
-        (x) => x,
-      ),
-    ).filter((modelImport) => modelImport !== model.name);
+    augmentModelFromSchema(spec, model, specModel, modelsByName);
 
     model.deprecated = specModel.deprecated || false;
 
@@ -541,7 +520,7 @@ const augmentModel = async (
       const matchingSpecProperty = specModel.properties?.[property.name];
       if (matchingSpecProperty) {
         const specProperty = resolveIfRef(spec, matchingSpecProperty);
-        await augmentModelFromSchema(
+        augmentModelFromSchema(
           spec,
           property,
           specProperty,
@@ -594,10 +573,10 @@ const extractVendorExtensions = (spec: Spec): VendorExtensions => {
  * Only primitives are supported since we only return one model.
  * For non-primitives, it assumes all referenced subschemas are already models
  */
-const buildModelForPrimitive = async (
+const buildModelForPrimitive = (
   originalSpec: Spec,
   schema: OpenApiSchema,
-): Promise<Model> => {
+): Model => {
   const targetSchemaName = '___aws_nx_plugin_openapi_tmp_schema___';
 
   const spec: Spec = {
@@ -621,7 +600,7 @@ const buildModelForPrimitive = async (
   }
 
   ensureModelLinks(spec, data);
-  await augmentModelFromSchema(
+  augmentModelFromSchema(
     spec,
     model,
     schema,
@@ -631,18 +610,18 @@ const buildModelForPrimitive = async (
   return model;
 };
 
-const buildOrReferenceModel = async (
+const buildOrReferenceModel = (
   spec: Spec,
   modelsByName: { [name: string]: Model },
   schema: OpenApiSchemaOrRef,
-): Promise<Model> => {
+): Model => {
   if (isRef(schema)) {
     const name = splitRef(schema.$ref)[2];
     return modelsByName[name];
   }
   // Non referenced schemas won't have a top-level model created as they are
   // primitives, so we build the model here
-  return await buildModelForPrimitive(spec, schema);
+  return buildModelForPrimitive(spec, schema);
 };
 
 /**
@@ -670,7 +649,7 @@ const copyVendorExtensions = (
   });
 };
 
-const augmentModelFromSchema = async (
+const augmentModelFromSchema = (
   spec: Spec,
   model: Model,
   schema: OpenApiSchema,
@@ -689,7 +668,7 @@ const augmentModelFromSchema = async (
   // A "dictionary" has only additional properties; an "interface" may mix
   // explicit and additional properties.
   if (schema.additionalProperties) {
-    const additionalPropertiesModel = await buildOrReferenceModel(
+    const additionalPropertiesModel = buildOrReferenceModel(
       spec,
       modelsByName,
       schema.additionalProperties === true ? {} : schema.additionalProperties,
@@ -728,7 +707,7 @@ const augmentModelFromSchema = async (
     for (const [pattern, patternProperty] of Object.entries(
       patternProperties,
     )) {
-      const patternPropertyModel = await buildOrReferenceModel(
+      const patternPropertyModel = buildOrReferenceModel(
         spec,
         modelsByName,
         patternProperty,
@@ -749,20 +728,18 @@ const augmentModelFromSchema = async (
 
   visited.add(model);
 
-  const modelLink = flattenModelLink(model.link);
-
   // Also apply to array items recursively
   if (
     model.export === 'array' &&
-    modelLink &&
+    model.link &&
     'items' in schema &&
     schema.items &&
-    !visited.has(modelLink)
+    !visited.has(model.link)
   ) {
     const subSchema = resolveIfRef(spec, schema.items);
-    await augmentModelFromSchema(
+    augmentModelFromSchema(
       spec,
-      modelLink,
+      model.link,
       subSchema,
       modelsByName,
       visited,
@@ -775,14 +752,14 @@ const augmentModelFromSchema = async (
     model.link &&
     'additionalProperties' in schema &&
     schema.additionalProperties &&
-    !visited.has(modelLink)
+    !visited.has(model.link)
   ) {
     const subSchema = resolveIfRef(spec, schema.additionalProperties);
     // Additional properties can be "true" rather than a type
     if (subSchema !== true) {
-      await augmentModelFromSchema(
+      augmentModelFromSchema(
         spec,
-        modelLink,
+        model.link,
         subSchema,
         modelsByName,
         visited,
@@ -797,7 +774,7 @@ const augmentModelFromSchema = async (
       spec,
       schema.properties![trim(property.name, `"'`)],
     );
-    await augmentModelFromSchema(
+    augmentModelFromSchema(
       spec,
       property,
       subSchema,
@@ -811,7 +788,7 @@ const augmentModelFromSchema = async (
     for (let i = 0; i < model.properties.length; i++) {
       const subSchema = resolveIfRef(spec, memberSchemas[i]);
       if (subSchema) {
-        await augmentModelFromSchema(
+        augmentModelFromSchema(
           spec,
           model.properties[i],
           subSchema,
@@ -945,7 +922,7 @@ const ensureModelLink = (
       ensureModelLink(
         spec,
         modelsByName,
-        flattenModelLink(model.link),
+        model.link,
         schema.additionalProperties,
         visited,
       );
@@ -957,13 +934,7 @@ const ensureModelLink = (
         model.link = modelsByName[name];
       }
     } else if (model.link) {
-      ensureModelLink(
-        spec,
-        modelsByName,
-        flattenModelLink(model.link),
-        schema.items,
-        visited,
-      );
+      ensureModelLink(spec, modelsByName, model.link, schema.items, visited);
     }
   }
 
@@ -1034,7 +1005,7 @@ const resolveComposedModel = (
     // TODO: honour `discriminator` to support this case.
     const isPrimitiveArray = (m: Model) => {
       if (m.link && ['array', 'dictionary'].includes(m.export)) {
-        return isPrimitiveArray(flattenModelLink(m.link));
+        return isPrimitiveArray(m.link);
       }
       return (
         PRIMITIVE_TYPES.has(m.type) &&

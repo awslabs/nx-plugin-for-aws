@@ -54,15 +54,6 @@ const HTTP_METHODS = [
 
 type HttpMethod = (typeof HTTP_METHODS)[number];
 
-/**
- * A stable sort (preserves original order of equal elements).
- */
-const stableSort = <T>(items: T[], compare: (a: T, b: T) => number): T[] =>
-  items
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => compare(a.item, b.item) || a.index - b.index)
-    .map(({ item }) => item);
-
 const schemaType = (schema: Schema): string | string[] | undefined =>
   (schema as { type?: string | string[] }).type;
 
@@ -423,10 +414,10 @@ export class OpenApiParser {
       params.push(body);
     }
 
-    // Order parameters required-first with a stable sort that preserves the
-    // original relative order within each group (the body parameter takes part
-    // in the sort at its appended position).
-    return stableSort(params, (a, b) =>
+    // Order parameters required-first. `Array.prototype.sort` is stable, so the
+    // original relative order within each group is preserved (the body
+    // parameter takes part in the sort at its appended position).
+    return params.sort((a, b) =>
       a.isRequired === b.isRequired ? 0 : a.isRequired ? -1 : 1,
     );
   }
