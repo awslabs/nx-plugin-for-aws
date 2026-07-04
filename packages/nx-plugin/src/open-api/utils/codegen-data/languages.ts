@@ -95,7 +95,7 @@ const toPythonPrimitive = (property: Model): string => {
   } else if (property.type === 'binary') {
     return 'bytearray';
   } else if (property.type === 'number') {
-    if ((property as any).openapiType === 'integer') {
+    if (property.openapiType === 'integer') {
       return 'int';
     }
 
