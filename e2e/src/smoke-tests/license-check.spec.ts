@@ -152,7 +152,20 @@ describe('smoke test - license-check', () => {
         'exceptions: [',
         `exceptions: [
         { package: 'jsonpatch', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },
-        { package: 'jsonpointer', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },`,
+        { package: 'jsonpointer', reason: 'BSD-3-Clause (free-text metadata)', spdx: 'BSD-3-Clause' },
+        // The following declare only free-text "BSD" metadata (no SPDX id). The
+        // default allowlist no longer carries a free-text BSD catch-all, so each
+        // needs an explicit exception. All are genuinely BSD-licensed.
+        { package: 'Jinja2', reason: 'BSD-3-Clause (free-text "BSD License" metadata)', spdx: 'BSD-3-Clause' },
+        { package: 'aws-requests-auth', reason: 'BSD-3-Clause (free-text "BSD License" metadata)', spdx: 'BSD-3-Clause' },
+        { package: 'mpmath', reason: 'BSD-3-Clause (free-text "BSD" metadata)', spdx: 'BSD-3-Clause' },
+        { package: 'prompt_toolkit', reason: 'BSD-3-Clause (free-text "BSD License" metadata)', spdx: 'BSD-3-Clause' },
+        { package: 'pyasn1_modules', reason: 'BSD-2-Clause (free-text "BSD" metadata)', spdx: 'BSD-2-Clause' },
+        { package: 'sympy', reason: 'BSD-3-Clause (free-text "BSD" metadata)', spdx: 'BSD-3-Clause' },
+        // MPL-2.0 (file-level weak copyleft) is intentionally excluded from the
+        // default allowlist; these transitive deps need explicit exceptions.
+        { package: 'certifi', reason: 'MPL-2.0 (file-level weak copyleft), acceptable for redistribution', spdx: 'MPL-2.0' },
+        { package: 'orjson', reason: 'MPL-2.0 AND (Apache-2.0 OR MIT), acceptable for redistribution', spdx: 'MPL-2.0' },`,
       ),
     );
 
