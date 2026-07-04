@@ -58,14 +58,10 @@ export interface PatternPropertyModel {
  * property, parameter, or response). It is produced by the parser
  * (`../parser.ts`) and progressively augmented by `../codegen-data.ts` with
  * language-specific and code-generation fields before being handed to the
- * templates.
- *
- * Fields are grouped by the stage that populates them. All augmentation fields
- * are optional because they are absent on the raw parser output and only
- * present once the relevant augmentation pass has run.
+ * templates. Augmentation fields are optional as they are absent on raw parser
+ * output.
  */
 export interface Model {
-  // ---- Core structural fields (populated by the parser) --------------------
   /** The schema, property, or parameter name. */
   name: string;
   /** How this model should be rendered. */
@@ -98,7 +94,6 @@ export interface Model {
   /** Names of other models this model references (for import generation). */
   imports: string[];
 
-  // ---- Parameter / response fields (populated by the parser) ---------------
   /** Where a parameter appears; `''` for non-parameter models. */
   in: ModelIn;
   /** The source property name for a parameter (body parameters use `body`). */
@@ -110,7 +105,6 @@ export interface Model {
   /** The response status code, for response models. */
   code?: number | string;
 
-  // ---- Schema-derived augmentation (augmentModelFromSchema) ----------------
   /** The raw OpenAPI `type` (used to distinguish integer from number). */
   openapiType?: string | string[];
   /** Vendor extensions (`x-*`) copied from the schema. */
@@ -124,13 +118,11 @@ export interface Model {
   /** The models describing each pattern's values. */
   patternPropertiesModels?: PatternPropertyModel[];
 
-  // ---- Composite augmentation (resolveComposedModels) ----------------------
   /** For composites: the referenced (object) models composed together. */
   composedModels?: Model[];
   /** For composites: the primitive/enum/array members composed together. */
   composedPrimitives?: Model[];
 
-  // ---- Language augmentation (addLanguageTypes) ----------------------------
   /** The TypeScript identifier for this model/property. */
   typescriptName?: string;
   /** The rendered TypeScript type. */
@@ -146,13 +138,11 @@ export interface Model {
   /** True when the schema declares an enum. */
   isEnum?: boolean;
 
-  // ---- Streaming augmentation (response models) ----------------------------
   /** True for JSON-lines streaming responses. */
   isJsonlStreaming?: boolean;
   /** The model describing each streamed item. */
   itemSchemaModel?: Model;
 
-  // ---- Parameter serialisation augmentation --------------------------------
   /** Collection serialisation format for array query/header parameters. */
   collectionFormat?: CollectionFormat;
 }
@@ -165,7 +155,6 @@ export type VendorExtensions = { [key: string]: unknown };
  * parser and augmented by `../codegen-data.ts`.
  */
 export interface Operation {
-  // ---- Core fields (populated by the parser) -------------------------------
   id: string;
   name: string;
   method: string;
@@ -179,7 +168,6 @@ export interface Operation {
   parametersBody?: Model | null;
   responses: Model[];
 
-  // ---- Naming augmentation -------------------------------------------------
   /** Deduplicated operation name used throughout generated code. */
   uniqueName?: string;
   /** Dot-notation name (tag-qualified), used for metadata keys. */
@@ -189,15 +177,12 @@ export interface Operation {
   /** The generated request type name (e.g. `FooRequest`). */
   requestTypeName?: string;
 
-  // ---- Response augmentation -----------------------------------------------
   /** The response model used as the operation's result. */
   result?: Model;
 
-  // ---- Request-body augmentation -------------------------------------------
   /** The explicit body parameter when the body is not inlined. */
   explicitRequestBodyParameter?: Model;
 
-  // ---- Behavioural augmentation --------------------------------------------
   vendorExtensions?: VendorExtensions;
   isMutation?: boolean;
   isQuery?: boolean;
@@ -216,7 +201,6 @@ export interface Service {
   operations: Operation[];
   imports: string[];
 
-  // ---- Augmentation --------------------------------------------------------
   /** All model names the service (API client) needs to import. */
   modelImports?: string[];
   className?: string;
