@@ -30,8 +30,7 @@ import { isRef, resolveIfRef, splitRef } from './refs';
 import type { OpenApiSchema as Schema, Spec } from './types';
 
 /**
- * The set of OpenAPI primitive `type` values, mapped to the internal model
- * `type` used by the code generator.
+ * OpenAPI primitive `type` values mapped to the internal model `type`.
  */
 const PRIMITIVE_TYPE_MAP: { [openApiType: string]: string } = {
   string: 'string',
@@ -54,6 +53,8 @@ const HTTP_METHODS = [
 
 type HttpMethod = (typeof HTTP_METHODS)[number];
 
+type SchemaOrRef = Schema | OpenAPIV3.ReferenceObject;
+
 const schemaType = (schema: Schema): string | string[] | undefined =>
   (schema as { type?: string | string[] }).type;
 
@@ -67,7 +68,7 @@ const isNullable = (schema: Schema): boolean => {
 };
 
 /**
- * Resolve the "primary" type of a schema, ignoring 'null' in a 3.1 type array.
+ * The "primary" type of a schema, ignoring 'null' in a 3.1 type array.
  */
 const primaryType = (schema: Schema): string | undefined => {
   const type = schemaType(schema);
@@ -84,13 +85,8 @@ const compositeExport = (schema: Schema): ModelExport | undefined => {
   return undefined;
 };
 
-const compositeMembers = (
-  schema: Schema,
-): (Schema | OpenAPIV3.ReferenceObject)[] =>
-  (schema.allOf ?? schema.anyOf ?? schema.oneOf ?? []) as (
-    | Schema
-    | OpenAPIV3.ReferenceObject
-  )[];
+const compositeMembers = (schema: Schema): SchemaOrRef[] =>
+  (schema.allOf ?? schema.anyOf ?? schema.oneOf ?? []) as SchemaOrRef[];
 
 /**
  * A schema is a "dictionary" (map) when it is an object with no explicit
@@ -103,384 +99,8 @@ const isDictionarySchema = (schema: Schema): boolean => {
   return !hasProperties && !schema.patternProperties;
 };
 
-export class OpenApiParser {
-  constructor(private readonly spec: Spec) {}
-
-  /**
-   * Build the full client data structure from the spec.
-   */
-  public build(): ClientData {
-    return {
-      models: this.buildModels(),
-      services: [this.buildDefaultService()],
-    };
-  }
-
-  // --- Models ---------------------------------------------------------------
-
-  private buildModels(): Model[] {
-    const schemas = this.spec.components?.schemas ?? {};
-    const models = Object.entries(schemas).map(([name, schemaOrRef]) =>
-      this.buildDefinitionModel(name, resolveIfRef(this.spec, schemaOrRef)),
-    );
-    this.collapseDiscriminatorProperties(models);
-    return models;
-  }
-
-  /**
-   * Build a model for a top-level named schema (a definition).
-   */
-  private buildDefinitionModel(name: string, schema: Schema): Model {
-    const model = createModel({
-      name,
-      description: schema.description ?? null,
-      deprecated: !!schema.deprecated,
-      isNullable: isNullable(schema),
-    });
-    this.populateModelFromSchema(model, schema);
-    return model;
-  }
-
-  /**
-   * Build a model for an inline sub-schema (property value, array item,
-   * dictionary value, composite member, parameter, or response).
-   */
-  private buildInlineModel(
-    schemaOrRef: Schema | OpenAPIV3.ReferenceObject,
-  ): Model {
-    if (isRef(schemaOrRef)) {
-      const name = splitRef(schemaOrRef.$ref)[2];
-      return createModel({
-        export: 'reference',
-        type: name,
-        imports: [name],
-      });
-    }
-
-    const schema = schemaOrRef;
-    const model = createModel({
-      description: schema.description ?? null,
-      deprecated: !!schema.deprecated,
-      isNullable: isNullable(schema),
-      isReadOnly: !!schema.readOnly,
-    });
-    this.populateModelFromSchema(model, schema);
-    return model;
-  }
-
-  /**
-   * Populate a model's structural fields (export/type/link/properties/imports)
-   * from a schema.
-   */
-  private populateModelFromSchema(model: Model, schema: Schema): void {
-    // Enums (string enums are hoisted to definitions by normalise; integer and
-    // other enums may remain inline on properties).
-    if (isEnumSchema(schema)) {
-      model.export = 'enum';
-      model.type = 'string';
-      model.enum = schema.enum!.map(
-        (value): EnumMember => ({ value: value as EnumMember['value'] }),
-      );
-      return;
-    }
-
-    // Composite schemas (allOf/anyOf/oneOf).
-    const composite = compositeExport(schema);
-    if (composite) {
-      model.export = composite;
-      model.type = 'unknown';
-      model.properties = compositeMembers(schema).map((member) =>
-        this.buildInlineModel(member),
-      );
-      model.imports = collectImports(model.properties);
-      return;
-    }
-
-    const type = primaryType(schema);
-
-    // Arrays.
-    if (type === 'array') {
-      model.export = 'array';
-      const items = (schema as { items?: Schema | OpenAPIV3.ReferenceObject })
-        .items;
-      this.applyCollectionValue(model, items);
-      return;
-    }
-
-    // Dictionaries (maps): objects with additionalProperties / bare objects.
-    if (isDictionarySchema(schema)) {
-      model.export = 'dictionary';
-      this.applyDictionaryValue(model, schema);
-      return;
-    }
-
-    // Objects with properties → interface.
-    if (type === 'object' || schema.properties || schema.patternProperties) {
-      model.export = 'interface';
-      model.type = 'unknown';
-      model.properties = this.buildProperties(schema);
-      model.imports = collectImports(model.properties);
-      return;
-    }
-
-    // A schema with no type (e.g. `{}`) is treated as an untyped object.
-    if (type === undefined) {
-      model.export = 'interface';
-      model.type = 'unknown';
-      return;
-    }
-
-    // Primitives.
-    model.export = 'generic';
-    model.type = primitiveType(schema);
-    if (schema.format) {
-      model.format = schema.format;
-    }
-  }
-
-  /**
-   * Apply the value type of a dictionary (map) to a model.
-   */
-  private applyDictionaryValue(model: Model, schema: Schema): void {
-    const additional = schema.additionalProperties;
-    if (additional && additional !== true) {
-      // additionalProperties with a schema (or a ref).
-      this.applyCollectionValue(model, additional);
-    } else if (schema.properties && additional !== true) {
-      // An object with an (empty) `properties` map but no additionalProperties
-      // renders as `{}` (a dictionary with no value type / link).
-      model.type = 'unknown';
-      model.link = null;
-    } else {
-      // `additionalProperties: true`, or a bare `{ type: 'object' }` → an "any"
-      // value type (represented as an interface/unknown link).
-      model.type = 'unknown';
-      model.link = createModel({ export: 'interface', type: 'unknown' });
-    }
-  }
-
-  /**
-   * Apply the value type of a collection (array items / dictionary values) to a
-   * model, setting `type`, `link` and `imports`.
-   *
-   * - ref value → `type` is the referenced model name; `link` is left null and
-   *   resolved later by `ensureModelLinks`.
-   * - non-ref value → recurse to build a `link` model, propagating the
-   *   (innermost) type and imports up the collection chain.
-   */
-  private applyCollectionValue(
-    model: Model,
-    value: Schema | OpenAPIV3.ReferenceObject | undefined,
-  ): void {
-    if (value && isRef(value)) {
-      model.type = splitRef(value.$ref)[2];
-      model.imports = [model.type];
-      model.link = null;
-      return;
-    }
-
-    const link = createModel();
-    this.populateModelFromSchema(link, (value ?? {}) as Schema);
-    model.link = link;
-    model.type = link.type;
-    model.imports = [...link.imports];
-  }
-
-  /**
-   * Build the property models for an object schema.
-   */
-  private buildProperties(schema: Schema): Model[] {
-    const required = new Set(schema.required ?? []);
-    return Object.entries(schema.properties ?? {}).map(([name, propSchema]) => {
-      const property = this.buildInlineModel(propSchema);
-      property.name = name;
-      property.isRequired = required.has(name);
-      return property;
-    });
-  }
-
-  /**
-   * When a composite schema declares a `discriminator` with an explicit
-   * `mapping`, collapse the discriminator property in each mapped schema from
-   * its enum reference to the bare primitive type: `export` stays `reference`,
-   * `type` becomes the primitive (e.g. `string`), and `imports` are cleared.
-   * The referenced enum models are left in place. This drops the literal
-   * narrowing but keeps the emitted code valid.
-   */
-  private collapseDiscriminatorProperties(models: Model[]): void {
-    const modelsByName = new Map(models.map((m) => [m.name, m]));
-    const schemas = this.spec.components?.schemas ?? {};
-
-    for (const schemaOrRef of Object.values(schemas)) {
-      const discriminator = (resolveIfRef(this.spec, schemaOrRef) as Schema)
-        .discriminator;
-      if (!discriminator?.propertyName || !discriminator.mapping) continue;
-
-      for (const mappedRef of Object.values(discriminator.mapping)) {
-        if (typeof mappedRef !== 'string' || !mappedRef.startsWith('#/')) {
-          continue;
-        }
-        const mappedModel = modelsByName.get(splitRef(mappedRef)[2]);
-        const property = mappedModel?.properties.find(
-          (p) => p.name === discriminator.propertyName,
-        );
-        if (property?.export !== 'reference') continue;
-
-        const referenced = modelsByName.get(property.type);
-        if (referenced?.export !== 'enum') continue;
-
-        property.type = referenced.type;
-        property.imports = [];
-      }
-    }
-  }
-
-  // --- Services & operations ------------------------------------------------
-
-  private buildDefaultService(): Service {
-    const operations = this.buildOperations();
-    return {
-      name: 'Default',
-      operations,
-      imports: [...new Set(operations.flatMap((op) => op.imports))],
-    };
-  }
-
-  private buildOperations(): Operation[] {
-    return Object.entries(this.spec.paths ?? {}).flatMap(
-      ([path, pathItemOrRef]) => {
-        const pathItem = resolveIfRef(this.spec, pathItemOrRef) as
-          | OpenAPIV3.PathItemObject
-          | undefined;
-        if (!pathItem) return [];
-        return HTTP_METHODS.flatMap((method: HttpMethod) => {
-          const specOp = pathItem[method as OpenAPIV3.HttpMethods];
-          return specOp ? [this.buildOperation(path, method, specOp)] : [];
-        });
-      },
-    );
-  }
-
-  private buildOperation(
-    path: string,
-    method: string,
-    specOp: OpenAPIV3.OperationObject,
-  ): Operation {
-    const parameters = this.buildParameters(specOp);
-    const responses = this.buildResponses(specOp);
-    const id = (specOp as { operationId: string }).operationId;
-
-    return {
-      id,
-      name: id,
-      method: method.toUpperCase(),
-      path,
-      description: specOp.description ?? null,
-      tags: specOp.tags ?? null,
-      deprecated: !!specOp.deprecated,
-      parameters,
-      parametersBody: parameters.find((p) => p.in === 'body') ?? null,
-      responses,
-      imports: collectImports([...parameters, ...responses]),
-    };
-  }
-
-  /**
-   * Build the parameter models for an operation, including a synthetic body
-   * parameter for the request body. The body parameter object is the same
-   * reference stored on `parametersBody`, so downstream mutations propagate to
-   * both.
-   */
-  private buildParameters(specOp: OpenAPIV3.OperationObject): Model[] {
-    const params: Model[] = (specOp.parameters ?? []).flatMap((p) => {
-      const param = resolveIfRef(this.spec, p) as
-        | OpenAPIV3.ParameterObject
-        | undefined;
-      if (!param) return [];
-      const model = this.buildInlineModel((param.schema ?? {}) as Schema);
-      model.name = param.name;
-      model.prop = param.name;
-      model.in = param.in as ModelIn;
-      model.mediaType = null;
-      model.isRequired = !!param.required;
-      if (param.description) {
-        model.description = param.description;
-      }
-      return [model];
-    });
-
-    const body = this.buildRequestBody(specOp);
-    if (body) {
-      params.push(body);
-    }
-
-    // Order parameters required-first. `Array.prototype.sort` is stable, so the
-    // original relative order within each group is preserved (the body
-    // parameter takes part in the sort at its appended position).
-    return params.sort((a, b) =>
-      a.isRequired === b.isRequired ? 0 : a.isRequired ? -1 : 1,
-    );
-  }
-
-  /**
-   * Build the synthetic `body` parameter for an operation's request body.
-   */
-  private buildRequestBody(specOp: OpenAPIV3.OperationObject): Model | null {
-    const requestBody = resolveIfRef(this.spec, specOp.requestBody) as
-      | OpenAPIV3.RequestBodyObject
-      | undefined;
-    if (!requestBody?.content) return null;
-
-    const mediaType = preferredMediaType(requestBody.content);
-    const model = this.buildInlineModel(
-      (requestBody.content[mediaType]?.schema ?? {}) as Schema,
-    );
-    model.name = 'requestBody';
-    model.prop = 'requestBody';
-    model.in = 'body';
-    model.mediaType = mediaType;
-    model.isRequired = !!requestBody.required;
-    return model;
-  }
-
-  /**
-   * Build the response models for an operation.
-   */
-  private buildResponses(specOp: OpenAPIV3.OperationObject): Model[] {
-    return Object.entries(specOp.responses ?? {}).flatMap(
-      ([code, resOrRef]) => {
-        const response = resolveIfRef(this.spec, resOrRef) as
-          | OpenAPIV3.ResponseObject
-          | undefined;
-        if (!response) return [];
-
-        const content = response.content ?? {};
-        const mediaType = Object.keys(content).length
-          ? preferredMediaType(content)
-          : undefined;
-        const responseSchema = mediaType
-          ? (content[mediaType]?.schema as
-              | Schema
-              | OpenAPIV3.ReferenceObject
-              | undefined)
-          : undefined;
-
-        const model = responseSchema
-          ? this.buildInlineModel(responseSchema)
-          : createModel({ export: 'generic', type: 'void' });
-
-        model.name = '';
-        model.code = parseResponseCode(code);
-        model.in = 'response';
-        model.description = response.description ?? null;
-        return [model];
-      },
-    );
-  }
-}
-
 /**
- * Determine the internal primitive type name for a primitive schema.
+ * The internal primitive type name for a primitive schema.
  */
 const primitiveType = (schema: Schema): string => {
   const type = primaryType(schema);
@@ -498,15 +118,362 @@ const parseResponseCode = (code: string): number | string =>
   /^\d+$/.test(code) ? parseInt(code, 10) : code;
 
 /**
- * Collect the unique imports declared across a set of models, in first-seen
- * order.
+ * The unique imports declared across a set of models, in first-seen order.
  */
 const collectImports = (models: Model[]): string[] => [
   ...new Set(models.flatMap((m) => m.imports)),
 ];
 
+// --- Models -----------------------------------------------------------------
+
+/**
+ * The structural fields (export/type/link/properties/enum/imports/format) a
+ * schema contributes to a model.
+ */
+const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
+  if (isEnumSchema(schema)) {
+    return {
+      export: 'enum',
+      type: 'string',
+      enum: schema.enum!.map(
+        (value): EnumMember => ({ value: value as EnumMember['value'] }),
+      ),
+    };
+  }
+
+  const composite = compositeExport(schema);
+  if (composite) {
+    const properties = compositeMembers(schema).map((member) =>
+      buildInlineModel(spec, member),
+    );
+    return {
+      export: composite,
+      type: 'unknown',
+      properties,
+      imports: collectImports(properties),
+    };
+  }
+
+  const type = primaryType(schema);
+
+  if (type === 'array') {
+    const items = (schema as { items?: SchemaOrRef }).items;
+    return { export: 'array', ...collectionValue(spec, items) };
+  }
+
+  if (isDictionarySchema(schema)) {
+    return { export: 'dictionary', ...dictionaryValue(spec, schema) };
+  }
+
+  if (type === 'object' || schema.properties || schema.patternProperties) {
+    const properties = buildProperties(spec, schema);
+    return {
+      export: 'interface',
+      type: 'unknown',
+      properties,
+      imports: collectImports(properties),
+    };
+  }
+
+  // A schema with no type (e.g. `{}`) is an untyped object.
+  if (type === undefined) {
+    return { export: 'interface', type: 'unknown' };
+  }
+
+  return {
+    export: 'generic',
+    type: primitiveType(schema),
+    ...(schema.format ? { format: schema.format } : {}),
+  };
+};
+
+/**
+ * The value type of a collection (array items / dictionary values): a `type`,
+ * `link` and `imports`.
+ *
+ * - ref value → `type` is the referenced model name; `link` is left null and
+ *   resolved later by `ensureModelLinks`.
+ * - non-ref value → a `link` model carrying the (innermost) type and imports.
+ */
+const collectionValue = (
+  spec: Spec,
+  value: SchemaOrRef | undefined,
+): Partial<Model> => {
+  if (value && isRef(value)) {
+    const type = splitRef(value.$ref)[2];
+    return { type, imports: [type], link: null };
+  }
+  const link = createModel(schemaStructure(spec, (value ?? {}) as Schema));
+  return { link, type: link.type, imports: [...link.imports] };
+};
+
+/**
+ * The value type of a dictionary (map).
+ */
+const dictionaryValue = (spec: Spec, schema: Schema): Partial<Model> => {
+  const additional = schema.additionalProperties;
+  if (additional && additional !== true) {
+    return collectionValue(spec, additional);
+  }
+  if (schema.properties && additional !== true) {
+    // An object with an (empty) `properties` map but no additionalProperties
+    // renders as `{}`.
+    return { type: 'unknown', link: null };
+  }
+  // `additionalProperties: true`, or a bare `{ type: 'object' }` → an "any"
+  // value type.
+  return {
+    type: 'unknown',
+    link: createModel({ export: 'interface', type: 'unknown' }),
+  };
+};
+
+/**
+ * A model for an inline sub-schema (property value, array item, dictionary
+ * value, composite member, parameter, or response).
+ */
+const buildInlineModel = (spec: Spec, schemaOrRef: SchemaOrRef): Model => {
+  if (isRef(schemaOrRef)) {
+    const name = splitRef(schemaOrRef.$ref)[2];
+    return createModel({ export: 'reference', type: name, imports: [name] });
+  }
+  return createModel({
+    description: schemaOrRef.description ?? null,
+    deprecated: !!schemaOrRef.deprecated,
+    isNullable: isNullable(schemaOrRef),
+    isReadOnly: !!schemaOrRef.readOnly,
+    ...schemaStructure(spec, schemaOrRef),
+  });
+};
+
+/**
+ * A model for a top-level named schema (a definition).
+ */
+const buildDefinitionModel = (spec: Spec, name: string, schema: Schema): Model =>
+  createModel({
+    name,
+    description: schema.description ?? null,
+    deprecated: !!schema.deprecated,
+    isNullable: isNullable(schema),
+    ...schemaStructure(spec, schema),
+  });
+
+/**
+ * The property models for an object schema.
+ */
+const buildProperties = (spec: Spec, schema: Schema): Model[] => {
+  const required = new Set(schema.required ?? []);
+  return Object.entries(schema.properties ?? {}).map(([name, propSchema]) => ({
+    ...buildInlineModel(spec, propSchema),
+    name,
+    isRequired: required.has(name),
+  }));
+};
+
+/**
+ * A `{ modelName → { propertyName } }` map of the discriminator properties
+ * declared by composite schemas with an explicit `mapping`.
+ */
+const discriminatorTargets = (spec: Spec): Map<string, Set<string>> => {
+  const targets = new Map<string, Set<string>>();
+  for (const schemaOrRef of Object.values(spec.components?.schemas ?? {})) {
+    const { discriminator } = resolveIfRef(spec, schemaOrRef) as Schema;
+    if (!discriminator?.propertyName || !discriminator.mapping) continue;
+    for (const mappedRef of Object.values(discriminator.mapping)) {
+      if (typeof mappedRef !== 'string' || !mappedRef.startsWith('#/')) continue;
+      const modelName = splitRef(mappedRef)[2];
+      const properties = targets.get(modelName) ?? new Set<string>();
+      properties.add(discriminator.propertyName);
+      targets.set(modelName, properties);
+    }
+  }
+  return targets;
+};
+
+/**
+ * For discriminated composites, collapse each mapped schema's discriminator
+ * property from its enum reference to the bare primitive type (`export` stays
+ * `reference`, `type` becomes the primitive, `imports` are cleared). The
+ * referenced enum models are left in place. This drops the literal narrowing
+ * but keeps the emitted code valid.
+ */
+const collapseDiscriminators = (spec: Spec, models: Model[]): Model[] => {
+  const targets = discriminatorTargets(spec);
+  if (targets.size === 0) return models;
+
+  const byName = new Map(models.map((m) => [m.name, m]));
+  return models.map((model) => {
+    const properties = targets.get(model.name);
+    if (!properties) return model;
+    return {
+      ...model,
+      properties: model.properties.map((property) => {
+        if (!properties.has(property.name) || property.export !== 'reference') {
+          return property;
+        }
+        const referenced = byName.get(property.type);
+        return referenced?.export === 'enum'
+          ? { ...property, type: referenced.type, imports: [] }
+          : property;
+      }),
+    };
+  });
+};
+
+const buildModels = (spec: Spec): Model[] =>
+  collapseDiscriminators(
+    spec,
+    Object.entries(spec.components?.schemas ?? {}).map(([name, schemaOrRef]) =>
+      buildDefinitionModel(spec, name, resolveIfRef(spec, schemaOrRef)),
+    ),
+  );
+
+// --- Services & operations --------------------------------------------------
+
+/**
+ * The synthetic `body` parameter for an operation's request body.
+ */
+const buildRequestBody = (
+  spec: Spec,
+  specOp: OpenAPIV3.OperationObject,
+): Model | null => {
+  const requestBody = resolveIfRef(spec, specOp.requestBody) as
+    | OpenAPIV3.RequestBodyObject
+    | undefined;
+  if (!requestBody?.content) return null;
+
+  const mediaType = preferredMediaType(requestBody.content);
+  return {
+    ...buildInlineModel(
+      spec,
+      (requestBody.content[mediaType]?.schema ?? {}) as Schema,
+    ),
+    name: 'requestBody',
+    prop: 'requestBody',
+    in: 'body',
+    mediaType,
+    isRequired: !!requestBody.required,
+  };
+};
+
+/**
+ * The parameter models for an operation, including a synthetic body parameter.
+ * Ordered required-first with a stable sort (`Array.prototype.sort`), so the
+ * original relative order within each group is preserved.
+ */
+const buildParameters = (
+  spec: Spec,
+  specOp: OpenAPIV3.OperationObject,
+): Model[] => {
+  const declared: Model[] = (specOp.parameters ?? []).flatMap((p) => {
+    const param = resolveIfRef(spec, p) as OpenAPIV3.ParameterObject | undefined;
+    if (!param) return [];
+    const base = buildInlineModel(spec, (param.schema ?? {}) as Schema);
+    return [
+      {
+        ...base,
+        name: param.name,
+        prop: param.name,
+        in: param.in as ModelIn,
+        mediaType: null,
+        isRequired: !!param.required,
+        description: param.description ? param.description : base.description,
+      },
+    ];
+  });
+
+  const body = buildRequestBody(spec, specOp);
+  const params = body ? [...declared, body] : declared;
+
+  return [...params].sort((a, b) =>
+    a.isRequired === b.isRequired ? 0 : a.isRequired ? -1 : 1,
+  );
+};
+
+/**
+ * The response models for an operation.
+ */
+const buildResponses = (
+  spec: Spec,
+  specOp: OpenAPIV3.OperationObject,
+): Model[] =>
+  Object.entries(specOp.responses ?? {}).flatMap(([code, resOrRef]) => {
+    const response = resolveIfRef(spec, resOrRef) as
+      | OpenAPIV3.ResponseObject
+      | undefined;
+    if (!response) return [];
+
+    const content = response.content ?? {};
+    const mediaType = Object.keys(content).length
+      ? preferredMediaType(content)
+      : undefined;
+    const responseSchema = mediaType
+      ? (content[mediaType]?.schema as SchemaOrRef | undefined)
+      : undefined;
+
+    return [
+      {
+        ...(responseSchema
+          ? buildInlineModel(spec, responseSchema)
+          : createModel({ export: 'generic', type: 'void' })),
+        name: '',
+        code: parseResponseCode(code),
+        in: 'response' as ModelIn,
+        description: response.description ?? null,
+      },
+    ];
+  });
+
+const buildOperation = (
+  spec: Spec,
+  path: string,
+  method: string,
+  specOp: OpenAPIV3.OperationObject,
+): Operation => {
+  const parameters = buildParameters(spec, specOp);
+  const responses = buildResponses(spec, specOp);
+  const id = (specOp as { operationId: string }).operationId;
+
+  return {
+    id,
+    name: id,
+    method: method.toUpperCase(),
+    path,
+    description: specOp.description ?? null,
+    tags: specOp.tags ?? null,
+    deprecated: !!specOp.deprecated,
+    parameters,
+    parametersBody: parameters.find((p) => p.in === 'body') ?? null,
+    responses,
+    imports: collectImports([...parameters, ...responses]),
+  };
+};
+
+const buildOperations = (spec: Spec): Operation[] =>
+  Object.entries(spec.paths ?? {}).flatMap(([path, pathItemOrRef]) => {
+    const pathItem = resolveIfRef(spec, pathItemOrRef) as
+      | OpenAPIV3.PathItemObject
+      | undefined;
+    if (!pathItem) return [];
+    return HTTP_METHODS.flatMap((method: HttpMethod) => {
+      const specOp = pathItem[method as OpenAPIV3.HttpMethods];
+      return specOp ? [buildOperation(spec, path, method, specOp)] : [];
+    });
+  });
+
+const buildDefaultService = (spec: Spec): Service => {
+  const operations = buildOperations(spec);
+  return {
+    name: 'Default',
+    operations,
+    imports: [...new Set(operations.flatMap((op) => op.imports))],
+  };
+};
+
 /**
  * Build the initial client data structure from a (normalised) OpenAPI spec.
  */
-export const buildClientData = (spec: Spec): ClientData =>
-  new OpenApiParser(spec).build();
+export const buildClientData = (spec: Spec): ClientData => ({
+  models: buildModels(spec),
+  services: [buildDefaultService(spec)],
+});
