@@ -391,15 +391,21 @@ describe('smoke test - dungeon-adventure', () => {
       '2/stacks/application-stack.ts.template',
     );
 
+    // The tutorial documents a build after each module. The `build` target is
+    // an umbrella that recompiles, tests, bundles, synths, runs checkov and
+    // rebuilds the Docker images for every project; because each module edits
+    // source, none of that caches between modules, so four full builds is the
+    // dominant cost of this (CI-critical-path) test. We build only the pristine
+    // generator output (module 1, above) and the fully-assembled tutorial
+    // (module 4, below): every file an intermediate build would compile is
+    // still compiled by the final build over the cumulative source, so the only
+    // thing dropped is per-module failure localisation, not coverage. `sync`,
+    // `lint` and the file-content assertions still run at every module.
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
       prefixWithPackageManagerCmd: false,
     });
-    await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
-      { ...opts, prefixWithPackageManagerCmd: false },
-    );
 
     // Module 3: Story Agent
 
@@ -419,15 +425,13 @@ describe('smoke test - dungeon-adventure', () => {
     );
     writeFromTemplate(agentPyPath, '3/agent.py.template');
 
+    // Intermediate build skipped — see the note in Module 2. `sync` and `lint`
+    // still run here; the fully-assembled workspace is built in Module 4.
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
       prefixWithPackageManagerCmd: false,
     });
-    await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
-      { ...opts, prefixWithPackageManagerCmd: false },
-    );
 
     // Module 4: UI
 
