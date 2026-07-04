@@ -14,6 +14,7 @@ import {
   createTestWorkspace,
   getDungeonAdventureElectroDbDependencies,
   runCLI,
+  runInstall,
   tmpProjPath,
 } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
@@ -186,7 +187,11 @@ describe('smoke test - dungeon-adventure', () => {
   const pkgMgr = 'pnpm';
   const targetDir = `${tmpProjPath()}/dungeon-adventure-${pkgMgr}`;
   const projectRoot = `${targetDir}/dungeon-adventure`;
-  const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
+  // Keep the Nx daemon on so the project graph and TypeScript state stay warm
+  // across the tutorial's repeated sync/lint/build invocations. This matters
+  // most on Windows, where the dungeon-adventure smoke test is the CI critical
+  // path and a cold graph per command dominates its runtime.
+  const opts = { cwd: projectRoot, env: { NX_DAEMON: 'true' } };
   const runningProcesses: ChildProcess[] = [];
   let llmMock: MockServer | undefined;
 
@@ -246,67 +251,79 @@ describe('smoke test - dungeon-adventure', () => {
 
     await createTestWorkspace(pkgMgr, targetDir, 'dungeon-adventure', 'cdk');
 
+    // Every generator runs with `--prefer-install-dependencies=false` so the
+    // per-generator package install is deferred; `runInstall` below installs the
+    // full accumulated set once before the first sync/build. This mirrors the
+    // generic smoke test and removes ~a dozen redundant installs — the single
+    // biggest chunk of the generation phase, especially on Windows. Generators
+    // still self-install when skipping would leave a graph-critical dependency
+    // unresolvable (see utils/install.ts).
+    const preferNoInstall = '--prefer-install-dependencies=false';
     await runCLI(
-      `generate @aws/nx-plugin:ts#api --name=GameApi --no-interactive`,
+      `generate @aws/nx-plugin:ts#api --name=GameApi --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#project --name=story --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=story --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#agent --project=story --auth=cognito --protocol=ag-ui --no-interactive`,
+      `generate @aws/nx-plugin:py#agent --project=story --auth=cognito --protocol=ag-ui --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#project --name=inventory --no-interactive`,
+      `generate @aws/nx-plugin:ts#project --name=inventory --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#mcp-server --project=inventory --no-interactive`,
+      `generate @aws/nx-plugin:ts#mcp-server --project=inventory --no-interactive ${preferNoInstall}`,
       opts,
     );
     // The DynamoDB table backing the game's state, with local development
     // support via DynamoDB Local
     await runCLI(
-      `generate @aws/nx-plugin:ts#dynamodb --name=DungeonDb --no-interactive`,
+      `generate @aws/nx-plugin:ts#dynamodb --name=DungeonDb --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#website --name=GameUI --ux=shadcn --no-interactive`,
+      `generate @aws/nx-plugin:ts#website --name=GameUI --ux=shadcn --no-interactive ${preferNoInstall}`,
       opts,
     );
     // No need to allow signup for the e2e tests
     await runCLI(
-      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=@dungeon-adventure/game-api --no-interactive`,
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=@dungeon-adventure/game-api --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=story --targetProject=inventory --no-interactive`,
+      `generate @aws/nx-plugin:connection --sourceProject=story --targetProject=inventory --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=story --no-interactive`,
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=story --no-interactive ${preferNoInstall}`,
       opts,
     );
     // Wire the Game API and the Inventory MCP server to the DynamoDB table so
     // their dev targets boot DynamoDB Local automatically
     await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-api --targetProject=@dungeon-adventure/dungeon-db --no-interactive`,
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-api --targetProject=@dungeon-adventure/dungeon-db --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/inventory --targetProject=@dungeon-adventure/dungeon-db --no-interactive`,
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/inventory --targetProject=@dungeon-adventure/dungeon-db --no-interactive ${preferNoInstall}`,
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
+      `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive ${preferNoInstall}`,
       opts,
     );
+
+    // Install the full set of dependencies accumulated across all generators
+    // above, in one pass, before the first sync/build.
+    await runInstall(opts);
 
     // Check application stack matches application-stack.ts.original.template
     const applicationStackPath = `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`;
