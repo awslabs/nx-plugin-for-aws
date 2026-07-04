@@ -1,8 +1,11 @@
 import * as cdk from 'aws-cdk-lib';
 import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as triggers from 'aws-cdk-lib/triggers';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import ejs from 'ejs';
 import * as fs from 'node:fs';
@@ -24,6 +27,20 @@ export interface AgentCoreGatewayProps {
    * Additional variables available to the Cedar policy EJS templates.
    */
   readonly cedarPolicyVariables?: Record<string, string>;
+  /**
+   * Whether to create an AWS WAFv2 web ACL with the default managed rule
+   * groups (`AWSManagedRulesCommonRuleSet` and
+   * `AWSManagedRulesKnownBadInputsRuleSet`) and associate it with the
+   * gateway. AWS WAF inspects every inbound request before it reaches a
+   * target, protecting the gateway from web exploits, bot traffic, and
+   * volumetric attacks.
+   *
+   * The web ACL is `REGIONAL` and created in the gateway's region, as
+   * required for AgentCore Gateway associations.
+   *
+   * @default true
+   */
+  readonly enableWaf?: boolean;
 }
 
 /**
@@ -33,6 +50,8 @@ export interface AgentCoreGatewayProps {
 export class AgentCoreGateway extends Construct implements iam.IGrantable {
   public readonly gateway: agentcore.Gateway;
   public readonly policyEngine?: agentcore.CfnPolicyEngine;
+  /** The WAFv2 web ACL associated with the gateway, if WAF is enabled. */
+  public readonly webAcl?: wafv2.CfnWebACL;
   private readonly policies: agentcore.CfnPolicy[] = [];
   private targetReadinessProbe?: triggers.TriggerFunction;
   private readonly targetRuntimeArns: string[] = [];
@@ -41,6 +60,11 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
     super(scope, id);
 
     this.gateway = new agentcore.Gateway(this, 'Gateway', {
+      // AgentCore appends an 11-character suffix to the gateway name to form
+      // the gateway id, which must not exceed 50 characters. The Gateway L2
+      // otherwise defaults the name to a 48-character generated string, so the
+      // id overflows. Cap the name at 39 characters (39 + 11 = 50) instead.
+      gatewayName: cdk.Names.uniqueResourceName(this, { maxLength: 39 }),
       protocolConfiguration: new agentcore.McpProtocolConfiguration({
         searchType: agentcore.McpGatewaySearchType.SEMANTIC,
         supportedVersions: [agentcore.MCPProtocolVersion.MCP_2025_03_26],
@@ -128,6 +152,110 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
         }
       }
     }
+
+    if (props?.enableWaf ?? true) {
+      this.webAcl = this.createWebAcl();
+    }
+  }
+
+  /**
+   * Create a regional WAFv2 web ACL with the default AWS managed rule groups,
+   * associate it with the gateway, and log blocked/counted requests to
+   * CloudWatch. AWS WAF evaluates every inbound request inline before it
+   * reaches a target; when no web ACL is associated there is zero overhead.
+   *
+   * The failure mode (how the gateway behaves when AWS WAF cannot be
+   * evaluated) defaults to the service's security-first `FAIL_CLOSE`. It is a
+   * control-plane-only setting, not exposed through CloudFormation.
+   */
+  private createWebAcl(): wafv2.CfnWebACL {
+    const metricPrefix = cdk.Names.uniqueResourceName(this, { maxLength: 40 });
+
+    const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
+      defaultAction: { allow: {} },
+      // AgentCore Gateway requires a REGIONAL web ACL in the gateway's region;
+      // CloudFront (global) web ACLs are not supported.
+      scope: 'REGIONAL',
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: `${metricPrefix}WebAcl`,
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        {
+          name: 'CRSRule',
+          priority: 0,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+              // Count instead of Block: the CRS 8 KB body limit is too
+              // restrictive for typical MCP tool payloads.
+              ruleActionOverrides: [
+                {
+                  name: 'SizeRestrictions_BODY',
+                  actionToUse: { count: {} },
+                },
+              ],
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${metricPrefix}WebAcl-CRS`,
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+        {
+          name: 'KnownBadInputsRule',
+          priority: 1,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${metricPrefix}WebAcl-KnownBadInputs`,
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+      ],
+    });
+
+    new wafv2.CfnWebACLAssociation(this, 'WebAclAssociation', {
+      resourceArn: this.gateway.gatewayArn,
+      webAclArn: webAcl.attrArn,
+    });
+
+    // Send WAF request logs to CloudWatch. The log group name must start with
+    // `aws-waf-logs-` to satisfy the WAFv2 logging destination requirement.
+    const logsKey = new kms.Key(this, 'WebAclLogsKey', {
+      enableKeyRotation: true,
+    });
+    logsKey.grantEncryptDecrypt(
+      new iam.ServicePrincipal(
+        `logs.${cdk.Stack.of(this).region}.amazonaws.com`,
+      ),
+    );
+    const wafLogGroup = new logs.LogGroup(this, 'WebAclLogs', {
+      logGroupName: `aws-waf-logs-${metricPrefix}-${this.node.addr.slice(-8)}`,
+      retention: logs.RetentionDays.ONE_YEAR,
+      encryptionKey: logsKey,
+    });
+
+    new wafv2.CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
+      resourceArn: webAcl.attrArn,
+      logDestinationConfigs: [wafLogGroup.logGroupArn],
+    });
+
+    return webAcl;
   }
 
   /**

@@ -298,6 +298,43 @@ describe('agentcore-gateway generator', () => {
       expect(construct).not.toContain('toPascalCase');
     });
 
+    it('caps the gateway name so the service suffix keeps the id within 50 chars', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      // AgentCore appends an 11-char suffix to the name to form the gateway
+      // id (max 50). The Gateway L2 otherwise defaults to a 48-char name, so
+      // an explicit 39-char-capped name is required (39 + 11 = 50).
+      expect(construct).toContain(
+        "gatewayName: cdk.Names.uniqueResourceName(this, { maxLength: 39 })",
+      );
+    });
+
+    it('protects the gateway with a regional WAF web ACL by default', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      // WAF is opt-out (enabled unless enableWaf is explicitly false).
+      expect(construct).toContain('enableWaf');
+      expect(construct).toContain('props?.enableWaf ?? true');
+      // AgentCore Gateway requires a REGIONAL web ACL associated with the
+      // gateway's own ARN.
+      expect(construct).toContain('new wafv2.CfnWebACL(');
+      expect(construct).toContain("scope: 'REGIONAL'");
+      expect(construct).toContain('new wafv2.CfnWebACLAssociation(');
+      expect(construct).toContain('resourceArn: this.gateway.gatewayArn');
+      // Default AWS managed rule groups.
+      expect(construct).toContain('AWSManagedRulesCommonRuleSet');
+      expect(construct).toContain('AWSManagedRulesKnownBadInputsRuleSet');
+      // WAF request logging to a CloudWatch log group named `aws-waf-logs-*`.
+      expect(construct).toContain('new wafv2.CfnLoggingConfiguration(');
+      expect(construct).toContain('aws-waf-logs-');
+    });
+
     it('URL-encodes the runtime ARN correctly for the MCP target endpoint', () => {
       const construct = tree
         .read(
@@ -338,6 +375,20 @@ describe('agentcore-gateway generator', () => {
       expect(coreFiles.length).toBeGreaterThan(0);
     });
 
+    it('caps the gateway name so the service suffix keeps the id within 50 chars', () => {
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      // AgentCore appends an 11-char suffix to form the gateway id (max 50).
+      // With the "-<8 hex>" suffix, truncate the class-name prefix to 30 so
+      // the name stays within 39 chars (39 + 11 = 50).
+      expect(module).toContain(
+        'name        = "${substr("MyGateway", 0, 30)}-${random_id.unique_suffix.hex}"',
+      );
+    });
+
     it('does not emit the CDK construct when iac is terraform', () => {
       expect(
         tree.exists(
@@ -359,6 +410,31 @@ describe('agentcore-gateway generator', () => {
         .toString();
       expect(module).toContain('data "external" "rendered_policies"');
       expect(module).toContain('render-cedar.cjs');
+    });
+
+    it('protects the gateway with a regional WAF web ACL by default', () => {
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      expect(module).toContain('variable "enable_waf"');
+      expect(module).toContain('resource "aws_wafv2_web_acl" "gateway_waf"');
+      expect(module).toContain('scope = "REGIONAL"');
+      // Associated with the gateway's own ARN.
+      expect(module).toContain(
+        'resource "aws_wafv2_web_acl_association" "gateway_waf"',
+      );
+      expect(module).toContain(
+        'resource_arn = aws_bedrockagentcore_gateway.this.gateway_arn',
+      );
+      // Default AWS managed rule groups + `aws-waf-logs-` logging.
+      expect(module).toContain('AWSManagedRulesCommonRuleSet');
+      expect(module).toContain('AWSManagedRulesKnownBadInputsRuleSet');
+      expect(module).toContain(
+        'resource "aws_wafv2_web_acl_logging_configuration" "gateway_waf_logging"',
+      );
+      expect(module).toContain('aws-waf-logs-');
     });
 
     it('emits a tool_dependencies-gated readiness probe routed through gateway_url', () => {

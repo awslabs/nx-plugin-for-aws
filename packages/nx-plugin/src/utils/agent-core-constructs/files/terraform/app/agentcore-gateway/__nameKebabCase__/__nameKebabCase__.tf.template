@@ -34,6 +34,12 @@ variable "tool_dependencies" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_waf" {
+  description = "Whether to create an AWS WAFv2 web ACL with the default managed rule groups (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet) and associate it with the gateway. AWS WAF inspects every inbound request before it reaches a target. The web ACL is REGIONAL and created in the gateway's region, as required for AgentCore Gateway associations."
+  type        = bool
+  default     = true
+}
 <%_ if (cedarPolicy) { _%>
 
 variable "policy_dependencies" {
@@ -141,7 +147,11 @@ resource "aws_bedrockagentcore_policy_engine" "this" {
 <%_ } _%>
 
 resource "aws_bedrockagentcore_gateway" "this" {
-  name        = "<%- nameClassName %>-${random_id.unique_suffix.hex}"
+  # AgentCore appends an 11-character suffix to the gateway name to form the
+  # gateway id, which must not exceed 50 characters. With the "-<8 hex>"
+  # suffix below, cap the name at 39 characters (39 + 11 = 50) by truncating
+  # the class-name prefix to 30 characters.
+  name        = "${substr("<%- nameClassName %>", 0, 30)}-${random_id.unique_suffix.hex}"
   description = "AgentCore Gateway for <%- nameClassName %>"
   role_arn    = aws_iam_role.gateway_role.arn
 
@@ -163,6 +173,111 @@ resource "aws_bedrockagentcore_gateway" "this" {
 
   depends_on = [aws_iam_role_policy.gateway_role_policy]
 <%_ } _%>
+}
+
+# AWS WAFv2 protection for the gateway. AWS WAF inspects every inbound request
+# inline before it reaches a target. AgentCore Gateway requires a REGIONAL web
+# ACL in the gateway's region; CloudFront (global) web ACLs are not supported.
+# The failure mode (behaviour when AWS WAF cannot be evaluated) defaults to the
+# service's security-first FAIL_CLOSE and is a control-plane-only setting.
+resource "aws_wafv2_web_acl" "gateway_waf" {
+  #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.gateway_waf_logging; Checkov does not resolve the separate resource
+  count = var.enable_waf ? 1 : 0
+
+  name  = "<%- nameClassName %>-waf-${random_id.unique_suffix.hex}"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+
+        # Count instead of Block: the CRS 8 KB body limit is too restrictive
+        # for typical MCP tool payloads.
+        rule_action_override {
+          name = "SizeRestrictions_BODY"
+          action_to_use {
+            count {}
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "<%- nameClassName %>WebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "<%- nameClassName %>WebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "<%- nameClassName %>WebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "gateway_waf" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_bedrockagentcore_gateway.this.gateway_arn
+  web_acl_arn  = aws_wafv2_web_acl.gateway_waf[0].arn
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with
+# `aws-waf-logs-`.
+resource "aws_cloudwatch_log_group" "gateway_waf_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to one year which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = "aws-waf-logs-<%- nameKebabCase %>-${random_id.unique_suffix.hex}"
+  retention_in_days = 365
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "gateway_waf_logging" {
+  count = var.enable_waf ? 1 : 0
+
+  log_destination_configs = [aws_cloudwatch_log_group.gateway_waf_logs[0].arn]
+  resource_arn            = aws_wafv2_web_acl.gateway_waf[0].arn
 }
 <%_ if (cedarPolicy) { _%>
 
@@ -332,4 +447,9 @@ output "gateway_url" {
 output "gateway_role_arn" {
   description = "ARN of the IAM role assumed by the gateway service"
   value       = aws_iam_role.gateway_role.arn
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAFv2 web ACL associated with the gateway, or null if WAF is disabled"
+  value       = var.enable_waf ? aws_wafv2_web_acl.gateway_waf[0].arn : null
 }

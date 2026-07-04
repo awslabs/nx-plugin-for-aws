@@ -74,8 +74,37 @@ The generated construct creates the following AWS resources:
 - An `AgentCore::Gateway` configured for the MCP protocol with `GatewayAuthorizer.usingAwsIam()` (inbound IAM authentication)
 - An `AgentCore::PolicyEngine` running in `ENFORCE` mode, attached to the Gateway (omitted when `cedarPolicy: false`)
 - One `AgentCore::Policy` per `.cedar` file in `policies/`
+- An AWS WAFv2 web ACL associated with the Gateway, with request logging to CloudWatch (enabled by default — see <a href="#aws-waf-protection">AWS WAF Protection</a>)
 
 The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> so agents can discover it at runtime.
+
+## AWS WAF Protection
+
+By default, the generated infrastructure protects your Gateway with an [AWS WAF](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-waf.html) web ACL. AWS WAF inspects every inbound request inline _before_ it reaches a target, defending the Gateway against web exploits, bot traffic, and volumetric attacks. Requests that match a block rule are rejected before they reach any target.
+
+The web ACL is `REGIONAL` (as required for AgentCore Gateway associations — CloudFront/global web ACLs are not supported) and includes the following AWS Managed Rule groups:
+
+- **`AWSManagedRulesCommonRuleSet`** — protection against common web exploits. The `SizeRestrictions_BODY` rule is set to `Count` rather than `Block`, since its 8&nbsp;KB body limit is too restrictive for typical MCP tool payloads.
+- **`AWSManagedRulesKnownBadInputsRuleSet`** — blocks request patterns known to be invalid and associated with exploitation.
+
+WAF request logs are sent to a CloudWatch log group (named `aws-waf-logs-*`) so you can inspect blocked and counted requests.
+
+If AWS WAF is unreachable or times out during evaluation, the Gateway uses its **failure mode** to decide whether to block or allow the request. This defaults to the service's security-first `FAIL_CLOSE` (block). The failure mode is a control-plane-only setting (configured via the `UpdateGateway` API) and is not exposed through CloudFormation or Terraform.
+
+### Customizing or disabling WAF
+
+The web ACL is created with the default managed rule groups. To add your own rules (for example, rate-based rules or IP allow/deny lists), extend the vended construct or module, or reference the exposed web ACL:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+The `AgentCoreGateway` construct accepts an `enableWaf` prop (default `true`) and exposes the created web ACL as `webAcl`. Pass `enableWaf: false` to skip WAF entirely, for example when you associate your own centrally-managed web ACL.
+  </Fragment>
+  <Fragment slot="terraform">
+The Gateway module accepts an `enable_waf` variable (default `true`) and outputs the created web ACL ARN as `waf_web_acl_arn`. Set `enable_waf = false` to skip WAF entirely, for example when you associate your own centrally-managed web ACL.
+  </Fragment>
+</Infrastructure>
+
+We recommend testing new AWS WAF rules in `Count` mode before switching them to `Block`, and monitoring the `WafBlocks`, `WafFailOpens`, and `WafFailCloses` CloudWatch metrics in the `AWS/Bedrock-AgentCore` namespace to tune your rules.
 
 ## Writing Policies
 
