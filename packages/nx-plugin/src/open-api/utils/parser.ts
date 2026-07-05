@@ -321,9 +321,10 @@ const buildRequestBody = (
   spec: Spec,
   specOp: OpenAPIV3.OperationObject,
 ): Model | null => {
-  const requestBody = resolveIfRef(spec, specOp.requestBody) as
-    | OpenAPIV3.RequestBodyObject
-    | undefined;
+  const requestBody = resolveIfRef<OpenAPIV3.RequestBodyObject | undefined>(
+    spec,
+    specOp.requestBody,
+  );
   if (!requestBody?.content) return null;
 
   const mediaType = preferredMediaType(requestBody.content);
@@ -350,7 +351,7 @@ const buildParameters = (
   specOp: OpenAPIV3.OperationObject,
 ): Model[] => {
   const declared: Model[] = (specOp.parameters ?? []).flatMap((p) => {
-    const param = resolveIfRef(spec, p) as OpenAPIV3.ParameterObject | undefined;
+    const param = resolveIfRef<OpenAPIV3.ParameterObject | undefined>(spec, p);
     if (!param) return [];
     const base = buildInlineModel(spec, (param.schema ?? {}) as Schema);
     return [
@@ -382,9 +383,10 @@ const buildResponses = (
   specOp: OpenAPIV3.OperationObject,
 ): Model[] =>
   Object.entries(specOp.responses ?? {}).flatMap(([code, resOrRef]) => {
-    const response = resolveIfRef(spec, resOrRef) as
-      | OpenAPIV3.ResponseObject
-      | undefined;
+    const response = resolveIfRef<OpenAPIV3.ResponseObject | undefined>(
+      spec,
+      resOrRef,
+    );
     if (!response) return [];
 
     const content = response.content ?? {};
@@ -435,9 +437,10 @@ const buildOperation = (
 
 const buildOperations = (spec: Spec): Operation[] =>
   Object.entries(spec.paths ?? {}).flatMap(([path, pathItemOrRef]) => {
-    const pathItem = resolveIfRef(spec, pathItemOrRef) as
-      | OpenAPIV3.PathItemObject
-      | undefined;
+    const pathItem = resolveIfRef<OpenAPIV3.PathItemObject | undefined>(
+      spec,
+      pathItemOrRef,
+    );
     if (!pathItem) return [];
     return HTTP_METHODS.flatMap((method: HttpMethod) => {
       const specOp = pathItem[method as OpenAPIV3.HttpMethods];
