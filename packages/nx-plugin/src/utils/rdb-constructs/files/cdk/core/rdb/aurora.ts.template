@@ -350,29 +350,19 @@ export abstract class AuroraDatabase extends Construct {
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
       vpc,
-      environment: engine.type === 'mysql' ? {
+      environment: {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-      } : {
-        HOSTNAME: databaseHostname,
-        DATABASE: databaseName,
-        PORT: databasePort.toString(),
-        DBUSER: this.dbUser,
       },
       architecture: Architecture.ARM_64,
     });
 
-    if (engine.type === 'mysql') {
-      this.cluster.connections.allowDefaultPortFrom(migrationHandler);
-      this.grantSecretRead(migrationHandler);
-    } else {
-      this.allowDefaultPortFrom(migrationHandler);
-      this.grantConnect(migrationHandler);
-    }
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+    this.grantSecretRead(migrationHandler);
 
-    const trigger = new Trigger(this, 'MigrationTrigger', {
+    const migrationTrigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
     });
-    trigger.node.addDependency(createDbUserResource);
+    migrationTrigger.node.addDependency(createDbUserResource);
 
     new CfnOutput(this, 'ClusterEndpoint', {
       value: this.cluster.clusterEndpoint.hostname,

@@ -127,10 +127,7 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
-  await sharedRdbScriptsGenerator(
-    tree,
-    options.engine === 'mysql' ? 'mysql' : 'postgres',
-  );
+  await sharedRdbScriptsGenerator(tree, options.engine);
   const waitForDbScript =
     options.engine === 'mysql'
       ? 'wait-for-mysql-db.ts'
@@ -266,7 +263,7 @@ export const tsRdbGenerator = async (
       databasePackageAlias: toScopeAlias(fullyQualifiedName),
       databaseName,
       adminUser: databaseUser,
-      engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
+      engine: options.engine,
       migrationBundleDir,
       createDbUserBundleDir: joinPathFragments(
         'dist',
