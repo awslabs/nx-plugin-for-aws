@@ -42,7 +42,7 @@ import {
   type VendorExtensions,
 } from './codegen-data/types';
 import { normaliseOpenApiSpecForCodeGen } from './normalise';
-import { buildClientData } from './parser';
+import { buildClientData, buildInlineModel } from './parser';
 import { isRef, resolveIfRef, splitRef } from './refs';
 import type { OpenApiSchema, OpenApiSchemaOrRef, Spec } from './types';
 
@@ -504,42 +504,9 @@ const groupOperationsByTag = (
 };
 
 /**
- * Build a model for a particular primitive schema.
- * Only primitives are supported since we only return one model.
- * For non-primitives, it assumes all referenced subschemas are already models
+ * Resolve a schema to its model: an existing named model for a `$ref`, or a
+ * freshly built-and-augmented model for an inline (nested value) schema.
  */
-const buildModelForPrimitive = (
-  originalSpec: Spec,
-  schema: OpenApiSchema,
-): Model => {
-  const targetSchemaName = '___aws_nx_plugin_openapi_tmp_schema___';
-
-  const spec: Spec = {
-    openapi: '3.1.0',
-    info: { title: 'tmp', version: '1.0.0' },
-    paths: {},
-    components: {
-      schemas: {
-        ...originalSpec.components?.schemas,
-        [targetSchemaName]: schema,
-      },
-    },
-  };
-  const data = buildClientData(spec);
-
-  const model = data.models.find((m) => m.name === targetSchemaName);
-  if (!model) {
-    throw new Error(
-      `Failed to construct model for schema ${JSON.stringify(schema)}`,
-    );
-  }
-
-  ensureModelLinks(spec, data);
-  augmentModelFromSchema(spec, model, schema, indexModelsByName(data.models));
-
-  return model;
-};
-
 const buildOrReferenceModel = (
   spec: Spec,
   modelsByName: ModelsByName,
@@ -549,9 +516,10 @@ const buildOrReferenceModel = (
     const name = splitRef(schema.$ref)[2];
     return modelsByName[name];
   }
-  // Non referenced schemas won't have a top-level model created as they are
-  // primitives, so we build the model here
-  return buildModelForPrimitive(spec, schema);
+  const model = buildInlineModel(spec, schema);
+  ensureModelLink(spec, modelsByName, model, schema, new Set());
+  augmentModelFromSchema(spec, model, schema, modelsByName);
+  return model;
 };
 
 /**
@@ -713,13 +681,6 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
       spec?.components?.schemas?.[model.name],
     );
     if (schema) {
-      // Object schemas should be typed as the model we will create
-      if (
-        schema.type === 'object' &&
-        (schema.properties || schema.patternProperties)
-      ) {
-        model.type = model.name;
-      }
       ensureModelLink(spec, modelsByName, model, schema, visited);
     }
   });

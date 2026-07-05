@@ -219,7 +219,7 @@ const dictionaryValue = (spec: Spec, schema: Schema): Partial<Model> => {
  * A model for an inline sub-schema (property value, array item, dictionary
  * value, composite member, parameter, or response).
  */
-const buildInlineModel = (spec: Spec, schemaOrRef: SchemaOrRef): Model => {
+export const buildInlineModel = (spec: Spec, schemaOrRef: SchemaOrRef): Model => {
   if (isRef(schemaOrRef)) {
     const name = splitRef(schemaOrRef.$ref)[2];
     return createModel({ export: 'reference', type: name, imports: [name] });
@@ -234,16 +234,27 @@ const buildInlineModel = (spec: Spec, schemaOrRef: SchemaOrRef): Model => {
 };
 
 /**
- * A model for a top-level named schema (a definition).
+ * A model for a top-level named schema (a definition). Object definitions are
+ * typed as their own name (the type the generator emits for them).
  */
-const buildDefinitionModel = (spec: Spec, name: string, schema: Schema): Model =>
-  createModel({
+const buildDefinitionModel = (
+  spec: Spec,
+  name: string,
+  schema: Schema,
+): Model => {
+  const structure = schemaStructure(spec, schema);
+  const isNamedObject =
+    schema.type === 'object' &&
+    !!(schema.properties || schema.patternProperties);
+  return createModel({
     name,
     description: schema.description ?? null,
     deprecated: !!schema.deprecated,
     isNullable: isNullable(schema),
-    ...schemaStructure(spec, schema),
+    ...structure,
+    ...(isNamedObject ? { type: name } : {}),
   });
+};
 
 /**
  * The property models for an object schema.
