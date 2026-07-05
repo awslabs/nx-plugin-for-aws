@@ -22,7 +22,6 @@ import {
   toTypeScriptType,
 } from './codegen-data/languages';
 import {
-  type ClientData,
   COLLECTION_TYPES,
   COMPOSED_SCHEMA_TYPES,
   type CodeGenData,
@@ -31,7 +30,6 @@ import {
   DEFAULT_SERVICE_NAME,
   indexModelsByName,
   type Model,
-  type ModelExport,
   type ModelsByName,
   type Operation,
   type PatternPropertyModel,
@@ -42,35 +40,23 @@ import {
   type VendorExtensions,
 } from './codegen-data/types';
 import { normaliseOpenApiSpecForCodeGen } from './normalise';
-import { buildClientData } from './parser';
+import {
+  buildClientData,
+  buildInlineModel,
+  compositeMemberSchemas,
+  getSpecOperation,
+  getSpecParametersByName,
+  linkModel,
+} from './parser';
 import { isRef, resolveIfRef, splitRef } from './refs';
 import type { OpenApiSchema, OpenApiSchemaOrRef, Spec } from './types';
 
 /**
- * Return the member sub-schemas of a composite (allOf/anyOf/oneOf) schema, in
- * order, for the given composite `export` kind.
- */
-const compositeMemberSchemas = (
-  schema: OpenApiSchema,
-  compositeExport: ModelExport,
-): OpenApiSchemaOrRef[] => {
-  const keyword = camelCase(compositeExport) as 'allOf' | 'anyOf' | 'oneOf';
-  return (schema[keyword] as OpenApiSchemaOrRef[] | undefined) ?? [];
-};
-
-/**
  * Build the data structure used to generate code from an OpenAPI spec.
  */
-export const buildOpenApiCodeGenData = (
-  inSpec: Spec,
-): CodeGenData => {
+export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
   const spec = normaliseOpenApiSpecForCodeGen(inSpec);
   const data = buildClientData(spec);
-
-  // Set array/dictionary links and composite members before augmentation reads
-  // them.
-  ensureModelLinks(spec, data);
-  resolveComposedModels(data);
 
   const modelsByName = indexModelsByName(data.models);
 
@@ -303,7 +289,12 @@ const augmentParameters = (
     const specParameter = specParametersByName[parameter.prop];
     const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
     if (specParameterSchema) {
-      augmentModelFromSchema(spec, parameter, specParameterSchema, modelsByName);
+      augmentModelFromSchema(
+        spec,
+        parameter,
+        specParameterSchema,
+        modelsByName,
+      );
     }
 
     if (parameter.in === 'body') {
@@ -504,42 +495,9 @@ const groupOperationsByTag = (
 };
 
 /**
- * Build a model for a particular primitive schema.
- * Only primitives are supported since we only return one model.
- * For non-primitives, it assumes all referenced subschemas are already models
+ * Resolve a schema to its model: an existing named model for a `$ref`, or a
+ * freshly built-and-augmented model for an inline (nested value) schema.
  */
-const buildModelForPrimitive = (
-  originalSpec: Spec,
-  schema: OpenApiSchema,
-): Model => {
-  const targetSchemaName = '___aws_nx_plugin_openapi_tmp_schema___';
-
-  const spec: Spec = {
-    openapi: '3.1.0',
-    info: { title: 'tmp', version: '1.0.0' },
-    paths: {},
-    components: {
-      schemas: {
-        ...originalSpec.components?.schemas,
-        [targetSchemaName]: schema,
-      },
-    },
-  };
-  const data = buildClientData(spec);
-
-  const model = data.models.find((m) => m.name === targetSchemaName);
-  if (!model) {
-    throw new Error(
-      `Failed to construct model for schema ${JSON.stringify(schema)}`,
-    );
-  }
-
-  ensureModelLinks(spec, data);
-  augmentModelFromSchema(spec, model, schema, indexModelsByName(data.models));
-
-  return model;
-};
-
 const buildOrReferenceModel = (
   spec: Spec,
   modelsByName: ModelsByName,
@@ -549,35 +507,11 @@ const buildOrReferenceModel = (
     const name = splitRef(schema.$ref)[2];
     return modelsByName[name];
   }
-  // Non referenced schemas won't have a top-level model created as they are
-  // primitives, so we build the model here
-  return buildModelForPrimitive(spec, schema);
+  const model = buildInlineModel(spec, schema);
+  linkModel(spec, modelsByName, model, schema);
+  augmentModelFromSchema(spec, model, schema, modelsByName);
+  return model;
 };
-
-/**
- * Look up the spec operation object for a parsed operation.
- */
-const getSpecOperation = (
-  spec: Spec,
-  op: Operation,
-): OpenAPIV3.OperationObject | undefined =>
-  (spec.paths?.[op.path] as OpenAPIV3.PathItemObject | undefined)?.[
-    op.method.toLowerCase() as OpenAPIV3.HttpMethods
-  ];
-
-/**
- * An operation's resolved parameters indexed by name.
- */
-const getSpecParametersByName = (
-  spec: Spec,
-  specOp: OpenAPIV3.OperationObject | undefined,
-): { [name: string]: OpenAPIV3.ParameterObject } =>
-  Object.fromEntries(
-    (specOp?.parameters ?? []).map((p) => {
-      const param = resolveIfRef(spec, p);
-      return [param.name, param];
-    }),
-  );
 
 /**
  * The `x-*` vendor extensions declared on an object.
@@ -697,223 +631,6 @@ const augmentModelFromSchema = (
       }
     });
   }
-};
-
-/**
- * Ensure that the "link" property of all dictionary/array models and properties are set recursively
- */
-const ensureModelLinks = (spec: Spec, data: ClientData) => {
-  const modelsByName = indexModelsByName(data.models);
-  const visited = new Set<Model>();
-
-  // Ensure set for all models
-  data.models.forEach((model) => {
-    const schema = resolveIfRef<OpenApiSchema | undefined>(
-      spec,
-      spec?.components?.schemas?.[model.name],
-    );
-    if (schema) {
-      // Object schemas should be typed as the model we will create
-      if (
-        schema.type === 'object' &&
-        (schema.properties || schema.patternProperties)
-      ) {
-        model.type = model.name;
-      }
-      ensureModelLink(spec, modelsByName, model, schema, visited);
-    }
-  });
-
-  // Ensure set for all parameters and responses
-  data.services.forEach((service) => {
-    service.operations.forEach((op) => {
-      const specOp = getSpecOperation(spec, op);
-      const specParametersByName = getSpecParametersByName(spec, specOp);
-
-      op.parameters.forEach((parameter) => {
-        const specParameter = specParametersByName[parameter.prop];
-        const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
-
-        if (specParameterSchema) {
-          ensureModelLink(
-            spec,
-            modelsByName,
-            parameter,
-            specParameterSchema,
-            visited,
-          );
-        } else if (parameter.in === 'body') {
-          // Body is not in the "parameters" section of the OpenAPI spec so we handle it in an explicit case here
-          const specBody = resolveIfRef(spec, specOp?.requestBody);
-          const specBodySchema = resolveIfRef(
-            spec,
-            specBody?.content?.[parameter.mediaType]?.schema,
-          );
-
-          if (specBodySchema) {
-            ensureModelLink(
-              spec,
-              modelsByName,
-              parameter,
-              specBodySchema,
-              visited,
-            );
-          }
-        }
-      });
-
-      op.responses.forEach((response) => {
-        const specResponse = resolveIfRef(
-          spec,
-          specOp?.responses?.[response.code],
-        );
-        const mediaTypes = Object.keys(specResponse?.content ?? {});
-        mediaTypes.forEach((mediaType) => {
-          const responseSchema = resolveIfRef(
-            spec,
-            specResponse?.content?.[mediaType]?.schema,
-          );
-          if (responseSchema) {
-            ensureModelLink(
-              spec,
-              modelsByName,
-              response,
-              responseSchema,
-              visited,
-            );
-          }
-        });
-      });
-    });
-  });
-};
-
-const ensureModelLink = (
-  spec: Spec,
-  modelsByName: ModelsByName,
-  model: Model,
-  schema: OpenApiSchema,
-  visited: Set<Model>,
-) => {
-  if (visited.has(model)) {
-    return;
-  }
-
-  visited.add(model);
-
-  if (
-    model.export === 'dictionary' &&
-    'additionalProperties' in schema &&
-    schema.additionalProperties
-  ) {
-    if (isRef(schema.additionalProperties)) {
-      const name = splitRef(schema.additionalProperties.$ref)[2];
-      if (modelsByName[name] && !model.link) {
-        model.link = modelsByName[name];
-      }
-    } else if (model.link && typeof schema.additionalProperties !== 'boolean') {
-      ensureModelLink(
-        spec,
-        modelsByName,
-        model.link,
-        schema.additionalProperties,
-        visited,
-      );
-    }
-  } else if (model.export === 'array' && 'items' in schema && schema.items) {
-    if (isRef(schema.items)) {
-      const name = splitRef(schema.items.$ref)[2];
-      if (modelsByName[name] && !model.link) {
-        model.link = modelsByName[name];
-      }
-    } else if (model.link) {
-      ensureModelLink(spec, modelsByName, model.link, schema.items, visited);
-    }
-  }
-
-  model.properties
-    .filter((p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)])
-    .forEach((property) => {
-      const subSchema = resolveIfRef(
-        spec,
-        schema.properties![trim(property.name, `"'`)],
-      );
-      ensureModelLink(spec, modelsByName, property, subSchema, visited);
-    });
-
-  if (COMPOSED_SCHEMA_TYPES.has(model.export)) {
-    const memberSchemas = compositeMemberSchemas(schema, model.export);
-    model.properties.forEach((property, i) => {
-      const subSchema = resolveIfRef(spec, memberSchemas[i]);
-      if (subSchema) {
-        ensureModelLink(spec, modelsByName, property, subSchema, visited);
-      }
-    });
-  }
-};
-
-/**
- * Populate `composedModels` and `composedPrimitives` on each composite model
- * (allOf/anyOf/oneOf) with the models and primitive types it is composed of.
- */
-const resolveComposedModels = (data: ClientData) => {
-  const modelsByName = indexModelsByName(data.models);
-  const visited = new Set<Model>();
-  data.models.forEach((model) =>
-    resolveComposedModel(modelsByName, model, visited),
-  );
-};
-
-const resolveComposedModel = (
-  modelsByName: ModelsByName,
-  model: Model,
-  visited: Set<Model>,
-) => {
-  if (!COMPOSED_SCHEMA_TYPES.has(model.export) || visited.has(model)) {
-    return;
-  }
-  visited.add(model);
-
-  const members = model.properties.filter((p) => !p.name);
-  const referenced = members
-    .filter((p) => p.export === 'reference')
-    .flatMap((r) => (modelsByName[r.type] ? [modelsByName[r.type]] : []));
-
-  // Resolve recursively so all-of mixins include nested all-of properties
-  referenced.forEach((m) => resolveComposedModel(modelsByName, m, visited));
-
-  // Enums serialise as primitives, so group them with the primitives
-  const composedModels = referenced.filter((m) => m.export !== 'enum');
-  const composedPrimitives = [
-    ...members.filter((p) => p.export !== 'reference'),
-    ...referenced.filter((m) => m.export === 'enum'),
-  ];
-
-  // Composing multiple arrays of non-primitives is not distinguishable at
-  // runtime, so it's validated away.
-  // TODO: honour `discriminator` to support this case.
-  const isPrimitiveArray = (m: Model): boolean =>
-    m.link && COLLECTION_TYPES.has(m.export)
-      ? isPrimitiveArray(m.link)
-      : PRIMITIVE_TYPES.has(m.type) &&
-        !['date', 'date-time'].includes(m.format ?? '');
-  const arrayComposedModels = composedPrimitives.filter(
-    (m) => m.export === 'array' && !isPrimitiveArray(m),
-  );
-  if (arrayComposedModels.length > 1) {
-    throw new Error(
-      `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
-    );
-  }
-
-  if (model.export === 'all-of' && composedPrimitives.length > 0) {
-    throw new Error(
-      `Schema "${model.name}" defines allOf with non-object types. allOf may only compose object types in the OpenAPI specification.`,
-    );
-  }
-
-  model.composedModels = composedModels;
-  model.composedPrimitives = composedPrimitives;
 };
 
 const addLanguageTypes = (model: Model) => {
