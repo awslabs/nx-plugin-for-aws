@@ -21,6 +21,7 @@ import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import {
@@ -74,6 +75,7 @@ export const tsRdbGenerator = async (
     await tsProjectGenerator(tree, {
       name: options.name,
       directory: options.directory,
+      module: options.module,
       preferInstallDependencies: false,
     });
   }
@@ -118,6 +120,7 @@ export const tsRdbGenerator = async (
     containerEngine,
     containerName,
     dockerImage,
+    ...esmVars(tree),
   };
 
   generateFiles(

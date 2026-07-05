@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Iac } from '../iac';
+import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
@@ -66,7 +67,7 @@ export const addDynamoDBCdkConstructs = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -82,7 +83,7 @@ export const addDynamoDBCdkConstructs = async (
       'app',
       'dynamodb',
     ),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Iac } from '../iac';
+import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
@@ -108,7 +109,7 @@ const addApiGatewayCdkConstructs = async (
         'core',
         'api',
       ),
-      {},
+      { ...esmVars(tree) },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
@@ -140,7 +141,7 @@ const addApiGatewayCdkConstructs = async (
       'app',
       'apis',
     ),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

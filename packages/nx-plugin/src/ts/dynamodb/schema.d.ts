@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { IacOption } from '../../utils/iac';
+import type { ModuleFormatOption } from '../../utils/module-format';
 
 export interface TsDynamoDBGeneratorSchema {
   name: string;
@@ -12,5 +13,6 @@ export interface TsDynamoDBGeneratorSchema {
   tableName?: string;
   infra: 'dynamodb' | 'none';
   iac: IacOption;
+  module?: ModuleFormatOption;
   preferInstallDependencies?: boolean;
 }

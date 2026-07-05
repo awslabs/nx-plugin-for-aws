@@ -24,6 +24,7 @@ import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { isEsmWorkspace } from '../../utils/module-format';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
@@ -88,14 +89,10 @@ export const tsMcpServerGenerator = async (
 
   // Generate esm if the module system is esm, otherwise commonjs. Projects
   // don't typically have their own package.json (dependencies are declared in
-  // the workspace root), so fall back to the root which is esm by default.
-  const esm =
-    readJson(
-      tree,
-      tree.exists(projectPackageJsonPath)
-        ? projectPackageJsonPath
-        : 'package.json',
-    ).type === 'module';
+  // the workspace root), so fall back to the workspace format when absent.
+  const esm = tree.exists(projectPackageJsonPath)
+    ? readJson(tree, projectPackageJsonPath).type === 'module'
+    : isEsmWorkspace(tree);
 
   // Generate example server
   generateFiles(

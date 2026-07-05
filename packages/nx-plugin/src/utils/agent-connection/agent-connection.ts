@@ -13,6 +13,7 @@ import pyProjectGenerator, {
 } from '../../py/project/generator';
 import tsProjectGenerator from '../../ts/lib/generator';
 import { addStarExport, applyGritQL, matchGritQL } from '../ast';
+import { esmVars } from '../module-format';
 import { addDependenciesToPyProjectToml } from '../py';
 import type { IPyDepVersion } from '../versions';
 
@@ -253,7 +254,7 @@ const emitTs = (tree: Tree, templateDir: string) =>
     tree,
     joinPathFragments(import.meta.dirname, 'files', templateDir),
     tsCoreDir(),
-    {},
+    { ...esmVars(tree) },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 

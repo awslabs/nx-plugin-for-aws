@@ -21,6 +21,7 @@ import { updateGitIgnore } from '../../../utils/git';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { esmVars } from '../../../utils/module-format';
 import { toClassName, toKebabCase } from '../../../utils/names';
 import {
   addDependencyToTargetIfNotPresent,
@@ -85,6 +86,7 @@ export const tsSmithyApiGenerator = async (
       name: options.name,
       directory: dir,
       subDirectory: 'backend',
+      module: options.module,
       preferInstallDependencies: false,
     });
   }
@@ -129,6 +131,7 @@ export const tsSmithyApiGenerator = async (
     {
       apiNameClassName,
       port,
+      ...esmVars(tree),
     },
   );
 
