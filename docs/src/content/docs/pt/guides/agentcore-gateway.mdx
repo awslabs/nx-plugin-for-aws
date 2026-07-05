@@ -74,8 +74,93 @@ O construto gerado cria os seguintes recursos AWS:
 - Um `AgentCore::Gateway` configurado para o protocolo MCP com `GatewayAuthorizer.usingAwsIam()` (autenticação IAM de entrada)
 - Um `AgentCore::PolicyEngine` executando em modo `ENFORCE`, anexado ao Gateway (omitido quando `cedarPolicy: false`)
 - Uma `AgentCore::Policy` por arquivo `.cedar` em `policies/`
+- Um AWS WAFv2 Web ACL associado ao Gateway, com registro de requisições no CloudWatch (habilitado por padrão — veja <a href="#aws-waf">AWS WAF</a>)
 
 A URL do Gateway é automaticamente registrada no namespace `agentcore.gateways.<ClassName>` da <Link path="guides/runtime-config">Configuração de Runtime</Link> para que os agentes possam descobri-la em tempo de execução.
+
+## AWS WAF
+
+Por padrão, o construto gerado associa um [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL ao Gateway. O AWS WAF inspeciona cada requisição de entrada inline _antes_ de alcançar um alvo, protegendo seu Gateway de explorações web, tráfego de bots e ataques volumétricos. O Web ACL usa o conjunto de regras padrão gerenciado pela AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) e [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), fornecendo proteção contra explorações web comuns, incluindo o OWASP Top 10. Os logs de requisições do WAF são gravados em um grupo do CloudWatch Logs.
+
+O Web ACL é `REGIONAL` e criado na região do Gateway, conforme exigido para associações do AgentCore Gateway — Web ACLs do CloudFront (globais) não são suportados.
+
+#### Arquitetura
+
+As requisições alcançam o Gateway através do AWS WAF, que roteia requisições permitidas para o Gateway e seus alvos de servidor MCP downstream:
+
+```d2 inline=true
+direction: right
+
+client: Client {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/client.svg
+}
+
+waf: WAF {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/waf.svg
+}
+
+gateway: AgentCore Gateway\n(MCP, IAM auth) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
+targets: Downstream MCP Servers\n(Gateway targets) {
+  shape: rectangle
+}
+
+cw: CloudWatch\n(WAF Logs) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
+  near: bottom-right
+}
+
+client -> waf
+waf -> gateway
+gateway -> targets
+waf -> cw
+```
+
+:::caution[Desvio de SizeRestrictions_BODY dos padrões]
+A regra `SizeRestrictions_BODY` do `AWSManagedRulesCommonRuleSet` é substituída para `Count` em vez de `Block`, já que o limite de 8 KB da regra é muito restritivo para cargas úteis típicas de ferramentas MCP. Requisições superdimensionadas ainda serão registradas como métricas para que você possa monitorá-las. Consulte o guia [AWS WAF body size limits](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) para mais detalhes.
+:::
+
+Se o AWS WAF estiver inacessível ou expirar durante a avaliação, o Gateway usa seu **modo de falha** para decidir se deve bloquear ou permitir a requisição. Isso é padronizado para o `FAIL_CLOSE` (bloquear) com prioridade de segurança do serviço. O modo de falha é uma configuração apenas do plano de controle (configurada via API [`UpdateGateway`](https://docs.aws.amazon.com/bedrock-agentcore-control/latest/APIReference/API_UpdateGateway.html)) e não é exposta através do CloudFormation ou Terraform. Recomendamos testar novas regras do AWS WAF no modo `Count` antes de alterá-las para `Block`, e monitorar as métricas `WafBlocks`, `WafFailOpens` e `WafFailCloses` do CloudWatch no namespace `AWS/Bedrock-AgentCore` para ajustar suas regras.
+
+Você pode editar o construto Gateway gerado para adicionar, remover ou ajustar regras (por exemplo, para adicionar [regras baseadas em taxa](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) ou grupos de regras gerenciadas adicionais).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Para desativar (por exemplo, para anexar seu próprio Web ACL), defina `enableWaf` como `false` na chamada `super` em seu construto Gateway gerado:
+
+```ts {6}
+export class MyGateway extends AgentCoreGateway {
+  public readonly gatewayName = 'my-gateway';
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      enableWaf: false,
+    });
+    // ...
+  }
+}
+```
+
+O construto expõe o Web ACL criado como `webAcl` para configuração adicional.
+</Fragment>
+<Fragment slot="terraform">
+Para desativar (por exemplo, para anexar seu próprio Web ACL), defina `enable_waf` como `false` no módulo Gateway:
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+O módulo produz o ARN do Web ACL criado como `waf_web_acl_arn` para configuração adicional.
+</Fragment>
+</Infrastructure>
 
 ## Escrevendo Políticas
 

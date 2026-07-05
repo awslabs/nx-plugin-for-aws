@@ -74,8 +74,93 @@ Le construct généré crée les ressources AWS suivantes :
 - Une `AgentCore::Gateway` configurée pour le protocole MCP avec `GatewayAuthorizer.usingAwsIam()` (authentification IAM entrante)
 - Un `AgentCore::PolicyEngine` fonctionnant en mode `ENFORCE`, attaché à la Gateway (omis lorsque `cedarPolicy: false`)
 - Une `AgentCore::Policy` par fichier `.cedar` dans `policies/`
+- Une Web ACL AWS WAFv2 associée à la Gateway, avec journalisation des requêtes vers CloudWatch (activée par défaut — voir <a href="#aws-waf">AWS WAF</a>)
 
 L'URL de la Gateway est automatiquement enregistrée dans l'espace de noms `agentcore.gateways.<ClassName>` de la <Link path="guides/runtime-config">Configuration d'exécution</Link> afin que les agents puissent la découvrir au moment de l'exécution.
+
+## AWS WAF
+
+Par défaut, le construct généré associe une Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) à la Gateway. AWS WAF inspecte chaque requête entrante en ligne _avant_ qu'elle n'atteigne une cible, protégeant votre Gateway contre les exploits web, le trafic de bots et les attaques volumétriques. La Web ACL utilise l'ensemble de règles par défaut géré par AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) et [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), offrant une protection contre les exploits web courants, y compris le Top 10 de l'OWASP. Les journaux de requêtes WAF sont écrits dans un groupe de journaux CloudWatch Logs.
+
+La Web ACL est `REGIONAL` et créée dans la région de la Gateway, comme requis pour les associations AgentCore Gateway — les Web ACL CloudFront (globales) ne sont pas prises en charge.
+
+#### Architecture
+
+Les requêtes atteignent la Gateway via AWS WAF, qui route les requêtes autorisées vers la Gateway et ses serveurs MCP cibles en aval :
+
+```d2 inline=true
+direction: right
+
+client: Client {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/client.svg
+}
+
+waf: WAF {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/waf.svg
+}
+
+gateway: AgentCore Gateway\n(MCP, IAM auth) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
+targets: Downstream MCP Servers\n(Gateway targets) {
+  shape: rectangle
+}
+
+cw: CloudWatch\n(WAF Logs) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
+  near: bottom-right
+}
+
+client -> waf
+waf -> gateway
+gateway -> targets
+waf -> cw
+```
+
+:::caution[Déviation de SizeRestrictions_BODY par rapport aux valeurs par défaut]
+La règle `SizeRestrictions_BODY` de `AWSManagedRulesCommonRuleSet` est remplacée par `Count` plutôt que `Block`, car la limite de 8 Ko de la règle est trop restrictive pour les charges utiles d'outils MCP typiques. Les requêtes surdimensionnées seront toujours enregistrées en tant que métriques afin que vous puissiez les surveiller. Consultez le guide [AWS WAF body size limits](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) pour plus de détails.
+:::
+
+Si AWS WAF est inaccessible ou expire pendant l'évaluation, la Gateway utilise son **mode d'échec** pour décider de bloquer ou d'autoriser la requête. Par défaut, il s'agit du `FAIL_CLOSE` (blocage) axé sur la sécurité du service. Le mode d'échec est un paramètre du plan de contrôle uniquement (configuré via l'API [`UpdateGateway`](https://docs.aws.amazon.com/bedrock-agentcore-control/latest/APIReference/API_UpdateGateway.html)) et n'est pas exposé via CloudFormation ou Terraform. Nous recommandons de tester les nouvelles règles AWS WAF en mode `Count` avant de les basculer en `Block`, et de surveiller les métriques CloudWatch `WafBlocks`, `WafFailOpens` et `WafFailCloses` dans l'espace de noms `AWS/Bedrock-AgentCore` pour ajuster vos règles.
+
+Vous pouvez modifier le construct Gateway généré pour ajouter, supprimer ou ajuster des règles (par exemple, pour ajouter des [règles basées sur le taux](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) ou des groupes de règles gérées supplémentaires).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pour désactiver (par exemple, pour attacher votre propre Web ACL), définissez `enableWaf` sur `false` dans l'appel `super` de votre construct Gateway généré :
+
+```ts {6}
+export class MyGateway extends AgentCoreGateway {
+  public readonly gatewayName = 'my-gateway';
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      enableWaf: false,
+    });
+    // ...
+  }
+}
+```
+
+Le construct expose la Web ACL créée en tant que `webAcl` pour une configuration supplémentaire.
+</Fragment>
+<Fragment slot="terraform">
+Pour désactiver (par exemple, pour attacher votre propre Web ACL), définissez `enable_waf` sur `false` dans le module Gateway :
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+Le module génère l'ARN de la Web ACL créée en tant que `waf_web_acl_arn` pour une configuration supplémentaire.
+</Fragment>
+</Infrastructure>
 
 ## Écriture de politiques
 
@@ -93,15 +178,13 @@ Par exemple, pour autoriser uniquement un rôle d'agent spécifique à invoquer 
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= tsAgentRoleArn %>/*"
-};
+);
 ```
 
-Passez l'ARN du rôle en tant que variable de modèle (voir <a href="#template-variables">Variables de modèle</a> ci-dessous) plutôt que de le coder en dur ou de le faire correspondre par motif. Resynthétisez ou replanifiez pour déployer la nouvelle politique.
+Passez le nom du rôle en tant que variable de modèle (voir <a href="#template-variables">Variables de modèle</a> ci-dessous) plutôt que de le coder en dur. Resynthétisez ou replanifiez pour déployer la nouvelle politique.
 
 ### Variables de modèle
 
@@ -116,18 +199,21 @@ Référencez toujours ces variables plutôt que de coder en dur les valeurs.
 
 #### Ajouter vos propres variables
 
-Ajoutez de nouvelles variables là où les politiques sont rendues, par exemple pour passer l'ARN du rôle d'exécution d'un agent à l'exemple `ts-agent-divide.cedar` ci-dessus :
+Ajoutez de nouvelles variables là où les politiques sont rendues, par exemple pour passer le nom du rôle d'exécution d'un agent à l'exemple `ts-agent-divide.cedar` ci-dessus :
 
 <Infrastructure>
 <Fragment slot="cdk">
-Dans `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, ajoutez à l'objet passé à `ejs.render` :
+Dans `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, passez `cedarPolicyVariables` au construct partagé :
 
-```ts {3}
-ejs.render(raw, {
-  gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
-  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
-  // ...
-}),
+```ts {4-6}
+super(scope, id, {
+  cedarPolicyPath: path.join(
+    ...
+  ),
+  cedarPolicyVariables: {
+    tsAgentRoleName: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleName),
+  },
+});
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -135,9 +221,9 @@ Dans `packages/common/terraform/src/app/gateways/<name>/<name>.tf`, ajoutez à l
 
 ```hcl {4}
 query = {
-  template       = "${local.policies_dir}/${each.value}"
-  gatewayArn     = aws_bedrockagentcore_gateway.this.gateway_arn
-  tsAgentRoleArn = var.ts_agent_role_arn
+  template        = "${local.policies_dir}/${each.value}"
+  gatewayArn      = aws_bedrockagentcore_gateway.this.gateway_arn
+  tsAgentRoleName = var.ts_agent_role_name
   # ...
 }
 ```
@@ -163,9 +249,9 @@ Le générateur fournit une politique par défaut qui autorise tout appelant IAM
 permit (
   principal is AgentCore::IamEntity,
   action,
-  resource == AgentCore::Gateway::"${gateway_arn}"
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ) when {
-  principal.id like "arn:aws:*::${account_id}:*"
+  principal.id like "arn:aws:*::<%= accountId %>:*"
 };
 ```
 
@@ -179,11 +265,13 @@ Pour les Gateways générées par ce plugin, tous les appelants sont des princip
 principal is AgentCore::IamEntity
 ```
 
-L'attribut `id` du principal contient l'ARN IAM de l'appelant. Les appelants arrivent généralement sous forme d'ARN de rôle assumé STS avec un suffixe de session généré, donc passez l'ARN exact du rôle en tant que variable de modèle et faites correspondre le suffixe de session avec `like` :
+Les appelants sont évalués en tant qu'ARN de rôle assumé STS avec le nom de session supprimé, de sorte qu'un rôle peut être mis en correspondance exactement — aucun caractère générique n'est nécessaire :
 
 ```cedar
-principal.id like "<%= myAgentRoleArn %>/*"
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
+
+La même valeur est disponible en tant que `principal.id` pour les clauses `when`. Réservez `like` pour les véritables motifs, tels que la correspondance à l'échelle du compte dans le `permit-all.cedar` par défaut.
 
 Les invocations d'outils atteignent le moteur de politiques sous forme d'actions avec la forme :
 

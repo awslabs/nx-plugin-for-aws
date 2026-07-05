@@ -74,8 +74,93 @@ import OptionFilter from '@components/option-filter.astro';
 - 一个为 MCP 协议配置的 `AgentCore::Gateway`，使用 `GatewayAuthorizer.usingAwsIam()`（入站 IAM 身份验证）
 - 一个以 `ENFORCE` 模式运行的 `AgentCore::PolicyEngine`，附加到 Gateway（当 `cedarPolicy: false` 时省略）
 - `policies/` 中每个 `.cedar` 文件对应一个 `AgentCore::Policy`
+- 与 Gateway 关联的 AWS WAFv2 Web ACL，并将请求日志记录到 CloudWatch（默认启用——参见 <a href="#aws-waf">AWS WAF</a>）
 
 Gateway URL 会自动注册到 <Link path="guides/runtime-config">运行时配置</Link>的 `agentcore.gateways.<ClassName>` 命名空间中，以便代理可以在运行时发现它。
+
+## AWS WAF
+
+默认情况下，生成的构造会将 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL 与 Gateway 关联。AWS WAF 在请求到达目标_之前_内联检查每个入站请求，保护您的 Gateway 免受 Web 漏洞、机器人流量和容量攻击。Web ACL 使用 AWS 托管的默认规则集（[`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) 和 [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)），提供针对常见 Web 漏洞（包括 OWASP Top 10）的保护。WAF 请求日志会写入 CloudWatch Logs 日志组。
+
+Web ACL 是 `REGIONAL` 的，并在 Gateway 的区域中创建，这是 AgentCore Gateway 关联所必需的——不支持 CloudFront（全局）Web ACL。
+
+#### 架构
+
+请求通过 AWS WAF 到达 Gateway，WAF 将允许的请求路由到 Gateway 及其下游 MCP 服务器目标：
+
+```d2 inline=true
+direction: right
+
+client: Client {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/client.svg
+}
+
+waf: WAF {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/waf.svg
+}
+
+gateway: AgentCore Gateway\n(MCP, IAM auth) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
+targets: Downstream MCP Servers\n(Gateway targets) {
+  shape: rectangle
+}
+
+cw: CloudWatch\n(WAF Logs) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
+  near: bottom-right
+}
+
+client -> waf
+waf -> gateway
+gateway -> targets
+waf -> cw
+```
+
+:::caution[SizeRestrictions_BODY 偏离默认值]
+`AWSManagedRulesCommonRuleSet` 中的 `SizeRestrictions_BODY` 规则被覆盖为 `Count` 而不是 `Block`，因为该规则的 8 KB 限制对于典型的 MCP 工具负载来说过于严格。超大请求仍将记录为指标，以便您可以监控它们。有关更多详细信息，请参阅 [AWS WAF 正文大小限制](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html)指南。
+:::
+
+如果 AWS WAF 在评估期间无法访问或超时，Gateway 会使用其**故障模式**来决定是阻止还是允许请求。这默认为服务的安全优先 `FAIL_CLOSE`（阻止）。故障模式是仅控制平面的设置（通过 [`UpdateGateway`](https://docs.aws.amazon.com/bedrock-agentcore-control/latest/APIReference/API_UpdateGateway.html) API 配置），不通过 CloudFormation 或 Terraform 公开。我们建议在将新的 AWS WAF 规则切换到 `Block` 之前先在 `Count` 模式下测试它们，并监控 `AWS/Bedrock-AgentCore` 命名空间中的 `WafBlocks`、`WafFailOpens` 和 `WafFailCloses` CloudWatch 指标以调整您的规则。
+
+您可以编辑生成的 Gateway 构造以添加、删除或调整规则（例如，添加[基于速率的规则](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html)或其他托管规则组）。
+
+<Infrastructure>
+<Fragment slot="cdk">
+要选择退出（例如，附加您自己的 Web ACL），请在生成的 Gateway 构造中的 `super` 调用上将 `enableWaf` 设置为 `false`：
+
+```ts {6}
+export class MyGateway extends AgentCoreGateway {
+  public readonly gatewayName = 'my-gateway';
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      enableWaf: false,
+    });
+    // ...
+  }
+}
+```
+
+该构造将创建的 Web ACL 公开为 `webAcl` 以进行进一步配置。
+</Fragment>
+<Fragment slot="terraform">
+要选择退出（例如，附加您自己的 Web ACL），请在 Gateway 模块上将 `enable_waf` 设置为 `false`：
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+该模块将创建的 Web ACL ARN 输出为 `waf_web_acl_arn` 以进行进一步配置。
+</Fragment>
+</Infrastructure>
 
 ## 编写策略
 
@@ -93,15 +178,13 @@ Cedar 是 AgentCore Gateway 用于授权工具调用的策略语言。流经 Gat
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= tsAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= tsAgentRoleArn %>/*"
-};
+);
 ```
 
-将角色 ARN 作为模板变量传入（参见下面的<a href="#template-variables">模板变量</a>），而不是硬编码或模式匹配它。重新合成或重新计划以部署新策略。
+将角色名称作为模板变量传入（参见下面的<a href="#template-variables">模板变量</a>），而不是硬编码它。重新合成或重新计划以部署新策略。
 
 ### 模板变量
 
@@ -116,18 +199,21 @@ permit (
 
 #### 添加您自己的变量
 
-添加新变量到策略渲染的位置，例如将代理的执行角色 ARN 传递给上面的 `ts-agent-divide.cedar` 示例：
+添加新变量到策略渲染的位置，例如将代理的执行角色名称传递给上面的 `ts-agent-divide.cedar` 示例：
 
 <Infrastructure>
 <Fragment slot="cdk">
-在 `packages/common/constructs/src/app/gateways/<name>/<name>.ts` 中，添加到传递给 `ejs.render` 的对象：
+在 `packages/common/constructs/src/app/gateways/<name>/<name>.ts` 中，将 `cedarPolicyVariables` 传递给共享构造：
 
-```ts {3}
-ejs.render(raw, {
-  gatewayArn: cdk.Token.asString(this.gateway.gatewayArn),
-  tsAgentRoleArn: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleArn),
-  // ...
-}),
+```ts {4-6}
+super(scope, id, {
+  cedarPolicyPath: path.join(
+    ...
+  ),
+  cedarPolicyVariables: {
+    tsAgentRoleName: cdk.Token.asString(tsAgent.agentCoreRuntime.role.roleName),
+  },
+});
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -179,11 +265,13 @@ permit (
 principal is AgentCore::IamEntity
 ```
 
-主体的 `id` 属性保存调用者的 IAM ARN。调用者通常以带有生成的会话后缀的 STS assumed-role ARN 到达，因此将确切的角色 ARN 作为模板变量传入，并使用 `like` 匹配会话后缀：
+调用者被评估为去除会话名称的 STS assumed-role ARN，因此可以精确匹配角色——不需要通配符：
 
 ```cedar
-principal.id like "<%= myAgentRoleArn %>/*"
+principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
+
+相同的值可作为 `principal.id` 用于 `when` 子句。将 `like` 保留用于真正的模式，例如默认 `permit-all.cedar` 中的账户范围匹配。
 
 工具调用以以下形式的操作到达策略引擎：
 
@@ -213,12 +301,10 @@ resource == AgentCore::Gateway::"<%= gatewayArn %>"
 
 ```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
 forbid (
-  principal is AgentCore::IamEntity,
+  principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= pyAgentRoleName %>",
   action == AgentCore::Action::"ts-mcp___divide",
   resource == AgentCore::Gateway::"<%= gatewayArn %>"
-) when {
-  principal.id like "<%= pyAgentRoleArn %>/*"
-};
+);
 ```
 
 这会拒绝 Python 代理角色调用 `ts-mcp___divide`，同时为所有其他调用者保留更广泛的 `permit-all.cedar`。
