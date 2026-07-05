@@ -28,6 +28,7 @@ import {
   type CodeGenData,
   type CollectionFormat,
   createModel,
+  DEFAULT_SERVICE_NAME,
   indexModelsByName,
   type Model,
   type ModelExport,
@@ -101,7 +102,7 @@ export const buildOpenApiCodeGenData = (
   data.models = orderBy(data.models, (d) => d.name);
   // Default service first, then by name.
   data.services = orderBy(data.services, (s) =>
-    s.name === 'Default' ? '' : s.name,
+    s.name === DEFAULT_SERVICE_NAME ? '' : s.name,
   );
 
   const { operationsByTag, untaggedOperations } =
@@ -232,7 +233,7 @@ const augmentResponses = (
     ) {
       const composedPrimitives = (
         modelsByName[response.type].composedPrimitives ?? []
-      ).filter((p) => !['array', 'dictionary'].includes(p.export));
+      ).filter((p) => !COLLECTION_TYPES.has(p.export));
       if (composedPrimitives.length > 0) {
         throw new Error(
           `Operation "${op.method} ${op.path}" returns a composite schema of primitives with ${camelCase(modelsByName[response.type].export)}, which cannot be distinguished at runtime`,
@@ -892,7 +893,7 @@ const resolveComposedModel = (
   // runtime, so it's validated away.
   // TODO: honour `discriminator` to support this case.
   const isPrimitiveArray = (m: Model): boolean =>
-    m.link && ['array', 'dictionary'].includes(m.export)
+    m.link && COLLECTION_TYPES.has(m.export)
       ? isPrimitiveArray(m.link)
       : PRIMITIVE_TYPES.has(m.type) &&
         !['date', 'date-time'].includes(m.format ?? '');
@@ -915,9 +916,6 @@ const resolveComposedModel = (
   model.composedPrimitives = composedPrimitives;
 };
 
-/**
- * Add language-specific names and types to a model.
- */
 const addLanguageTypes = (model: Model) => {
   model.name = trim(model.name, `"'`);
   model.typescriptName = toTypeScriptName(model.name);
@@ -930,24 +928,17 @@ const addLanguageTypes = (model: Model) => {
     !COLLECTION_TYPES.has(model.export);
 };
 
-/**
- * Determine whether or not an operation is a mutation
- */
 const isOperationMutation = (op: Operation): boolean => {
-  // Let the user override whether an operation is a query or mutation using x-mutation/x-query
+  // x-mutation/x-query override the HTTP-method default.
   const { vendorExtensions } = op;
   if (vendorExtensions?.[VENDOR_EXTENSIONS.MUTATION]) {
     return true;
   } else if (vendorExtensions?.[VENDOR_EXTENSIONS.QUERY]) {
     return false;
   }
-  // Assume a restful API and treat mutative HTTP methods as mutations
   return ['PATCH', 'POST', 'PUT', 'DELETE'].includes(op.method);
 };
 
-/**
- * Add infinite query details to the operation
- */
 const augmentInfiniteQuery = (op: Operation) => {
   const { paginationDisabled, cursorPropertyName } = getCursorOptions(op);
 

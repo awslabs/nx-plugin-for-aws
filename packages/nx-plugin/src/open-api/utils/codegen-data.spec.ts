@@ -94,8 +94,8 @@ describe('openapi codegen data utils', () => {
       },
     };
 
-    it('should generate code gen data with correct structure', async () => {
-      const data = await buildOpenApiCodeGenData(sampleSpec);
+    it('should generate code gen data with correct structure', () => {
+      const data = buildOpenApiCodeGenData(sampleSpec);
 
       // Verify basic structure
       expect(data).toHaveProperty('info', sampleSpec.info);
@@ -105,8 +105,8 @@ describe('openapi codegen data utils', () => {
       expect(data).toHaveProperty('vendorExtensions');
     });
 
-    it('should process models correctly', async () => {
-      const data = await buildOpenApiCodeGenData(sampleSpec);
+    it('should process models correctly', () => {
+      const data = buildOpenApiCodeGenData(sampleSpec);
 
       // Find the Pet model
       const petModel = data.models.find((m) => m.name === 'Pet');
@@ -142,8 +142,8 @@ describe('openapi codegen data utils', () => {
       });
     });
 
-    it('should process operations correctly', async () => {
-      const data = await buildOpenApiCodeGenData(sampleSpec);
+    it('should process operations correctly', () => {
+      const data = buildOpenApiCodeGenData(sampleSpec);
 
       // Verify operations were processed
       expect(data.allOperations).toHaveLength(2);
@@ -183,7 +183,7 @@ describe('openapi codegen data utils', () => {
       });
     });
 
-    it('should handle composite models', async () => {
+    it('should handle composite models', () => {
       const specWithComposite: Spec = {
         ...sampleSpec,
         components: {
@@ -204,7 +204,7 @@ describe('openapi codegen data utils', () => {
         },
       };
 
-      const data = await buildOpenApiCodeGenData(specWithComposite);
+      const data = buildOpenApiCodeGenData(specWithComposite);
 
       // Find the composite model
       const compositeModel = data.models.find((m) => m.name === 'CompositePet');
@@ -214,7 +214,7 @@ describe('openapi codegen data utils', () => {
       expect(compositeModel).toHaveProperty('composedPrimitives');
     });
 
-    it('should handle array and dictionary types', async () => {
+    it('should handle array and dictionary types', () => {
       const specWithCollections: Spec = {
         ...sampleSpec,
         components: {
@@ -236,7 +236,7 @@ describe('openapi codegen data utils', () => {
         },
       };
 
-      const data = await buildOpenApiCodeGenData(specWithCollections);
+      const data = buildOpenApiCodeGenData(specWithCollections);
 
       // Check array type
       const arrayModel = data.models.find((m) => m.name === 'PetArray');
@@ -251,7 +251,7 @@ describe('openapi codegen data utils', () => {
       expect(dictModel.link).toBeDefined();
     });
 
-    it('should handle operations without operationId', async () => {
+    it('should handle operations without operationId', () => {
       const specWithoutOperationId: Spec = {
         ...sampleSpec,
         paths: {
@@ -275,14 +275,14 @@ describe('openapi codegen data utils', () => {
         },
       };
 
-      const data = await buildOpenApiCodeGenData(specWithoutOperationId);
+      const data = buildOpenApiCodeGenData(specWithoutOperationId);
 
       // Should generate an operation name based on path and method
       const operation = data.allOperations[0];
       expect(operation.name).toBe('getPets');
     });
 
-    it('should handle vendor extensions', async () => {
+    it('should handle vendor extensions', () => {
       const specWithExtensions: Spec = {
         ...sampleSpec,
         ...{ 'x-custom-root': 'root-value' },
@@ -308,7 +308,7 @@ describe('openapi codegen data utils', () => {
         },
       };
 
-      const data = await buildOpenApiCodeGenData(specWithExtensions);
+      const data = buildOpenApiCodeGenData(specWithExtensions);
 
       // Check root level extensions
       expect(data.vendorExtensions).toHaveProperty(
@@ -342,8 +342,8 @@ describe('openapi codegen data utils', () => {
       );
     });
 
-    it('should classify operations as query or mutation by method', async () => {
-      const data = await buildOpenApiCodeGenData(sampleSpec);
+    it('should classify operations as query or mutation by method', () => {
+      const data = buildOpenApiCodeGenData(sampleSpec);
 
       const listPetsOp = data.allOperations.find(
         (op) => op.name === 'listPets',
@@ -356,7 +356,7 @@ describe('openapi codegen data utils', () => {
       expect(createPetOp).toMatchObject({ isQuery: false, isMutation: true });
     });
 
-    it('should let x-query and x-mutation override the method default', async () => {
+    it('should let x-query and x-mutation override the method default', () => {
       const specWithOverrides: Spec = {
         ...sampleSpec,
         paths: {
@@ -400,7 +400,7 @@ describe('openapi codegen data utils', () => {
         },
       };
 
-      const data = await buildOpenApiCodeGenData(specWithOverrides);
+      const data = buildOpenApiCodeGenData(specWithOverrides);
 
       const getOp = data.allOperations.find((op) => op.name === 'listPets');
       expect(getOp).toMatchObject({ isMutation: true, isQuery: false });
@@ -441,16 +441,16 @@ describe('openapi codegen data utils', () => {
       },
     });
 
-    it('should treat a query with a cursor parameter as an infinite query', async () => {
-      const data = await buildOpenApiCodeGenData(paginatedSpec({}));
+    it('should treat a query with a cursor parameter as an infinite query', () => {
+      const data = buildOpenApiCodeGenData(paginatedSpec({}));
 
       const op = data.allOperations.find((o) => o.name === 'listPets');
       expect(op.isInfiniteQuery).toBe(true);
       expect(op.infiniteQueryCursorProperty).toMatchObject({ name: 'cursor' });
     });
 
-    it('should page on the property named by a string x-cursor', async () => {
-      const data = await buildOpenApiCodeGenData(
+    it('should page on the property named by a string x-cursor', () => {
+      const data = buildOpenApiCodeGenData(
         paginatedSpec({ 'x-cursor': 'nextToken' }, 'nextToken'),
       );
 
@@ -461,8 +461,8 @@ describe('openapi codegen data utils', () => {
       });
     });
 
-    it('should page on the property named by x-cursor inputToken', async () => {
-      const data = await buildOpenApiCodeGenData(
+    it('should page on the property named by x-cursor inputToken', () => {
+      const data = buildOpenApiCodeGenData(
         paginatedSpec({ 'x-cursor': { inputToken: 'nextToken' } }, 'nextToken'),
       );
 
@@ -473,8 +473,8 @@ describe('openapi codegen data utils', () => {
       });
     });
 
-    it('should disable pagination when x-cursor is false', async () => {
-      const data = await buildOpenApiCodeGenData(
+    it('should disable pagination when x-cursor is false', () => {
+      const data = buildOpenApiCodeGenData(
         paginatedSpec({ 'x-cursor': false }),
       );
 
@@ -483,14 +483,162 @@ describe('openapi codegen data utils', () => {
       expect(op.infiniteQueryCursorProperty).toBeUndefined();
     });
 
-    it('should disable pagination when x-cursor sets enabled to false', async () => {
-      const data = await buildOpenApiCodeGenData(
+    it('should disable pagination when x-cursor sets enabled to false', () => {
+      const data = buildOpenApiCodeGenData(
         paginatedSpec({ 'x-cursor': { enabled: false } }),
       );
 
       const op = data.allOperations.find((o) => o.name === 'listPets');
       expect(op.isInfiniteQuery).toBe(false);
       expect(op.infiniteQueryCursorProperty).toBeUndefined();
+    });
+
+    it('should not be an infinite query when the named cursor param is absent', () => {
+      const data = buildOpenApiCodeGenData(
+        paginatedSpec({ 'x-cursor': 'missing' }, 'cursor'),
+      );
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isInfiniteQuery).toBe(false);
+    });
+
+    it('should not treat a mutation with a cursor parameter as an infinite query', () => {
+      const data = buildOpenApiCodeGenData(
+        paginatedSpec({ 'x-mutation': true }),
+      );
+
+      const op = data.allOperations.find((o) => o.name === 'listPets');
+      expect(op.isMutation).toBe(true);
+      expect(op.isInfiniteQuery).toBeFalsy();
+    });
+
+    it('should treat a 3.1 [T, "null"] type array as a nullable primary type T', () => {
+      const spec: Spec = {
+        openapi: '3.1.0',
+        info: { title: 'Test API', version: '1.0.0' },
+        paths: {},
+        components: {
+          schemas: {
+            Nullable: {
+              type: 'object',
+              properties: { bar: { type: ['string', 'null'] } },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const bar = data.models
+        .find((m) => m.name === 'Nullable')
+        .properties.find((p) => p.name === 'bar');
+      expect(bar).toMatchObject({ type: 'string', isNullable: true });
+    });
+
+    const specWithParameterisedOperation = (): Spec => ({
+      ...sampleSpec,
+      paths: {
+        '/pets': {
+          post: {
+            operationId: 'createPet',
+            parameters: [
+              { name: 'limit', in: 'query', schema: { type: 'integer' } },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Pet' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    it('should use the standard Request suffix when the name is free', () => {
+      const data = buildOpenApiCodeGenData(specWithParameterisedOperation());
+
+      const op = data.allOperations.find((o) => o.name === 'createPet');
+      expect(op.requestTypeName).toBe('CreatePetRequest');
+    });
+
+    it('should use the OperationRequest suffix when Request clashes with a schema', () => {
+      const spec: Spec = {
+        ...specWithParameterisedOperation(),
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            CreatePetRequest: { type: 'object', properties: {} },
+          },
+        },
+      };
+
+      const op = buildOpenApiCodeGenData(spec).allOperations.find(
+        (o) => o.name === 'createPet',
+      );
+      expect(op.requestTypeName).toBe('CreatePetOperationRequest');
+    });
+
+    it('should throw for anyOf composing multiple non-primitive arrays', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            TwoArrays: {
+              anyOf: [
+                { type: 'array', items: { $ref: '#/components/schemas/Pet' } },
+                {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/NewPet' },
+                },
+              ],
+            },
+          },
+        },
+      };
+
+      expect(() => buildOpenApiCodeGenData(spec)).toThrow(
+        /multiple array types/,
+      );
+    });
+
+    it('should throw when a response is a composite of primitives', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/pets': {
+            get: {
+              operationId: 'listPets',
+              responses: {
+                '200': {
+                  description: 'ok',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/StringOrNumber' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            StringOrNumber: {
+              oneOf: [{ type: 'string' }, { type: 'number' }],
+            },
+          },
+        },
+      };
+
+      expect(() => buildOpenApiCodeGenData(spec)).toThrow(
+        /composite schema of primitives/,
+      );
     });
   });
 });
