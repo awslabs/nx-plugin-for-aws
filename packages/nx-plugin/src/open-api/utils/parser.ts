@@ -190,7 +190,7 @@ const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
  * `link` and `imports`.
  *
  * - ref value → `type` is the referenced model name; `link` is left null and
- *   resolved later by `ensureModelLinks`.
+ *   resolved later by `linkModels`.
  * - non-ref value → a `link` model carrying the (innermost) type and imports.
  */
 const collectionValue = (

@@ -210,8 +210,8 @@ describe('openapi codegen data utils', () => {
       const compositeModel = data.models.find((m) => m.name === 'CompositePet');
       expect(compositeModel).toBeDefined();
       expect(compositeModel.export).toBe('all-of');
-      expect(compositeModel).toHaveProperty('composedModels');
-      expect(compositeModel).toHaveProperty('composedPrimitives');
+      expect(compositeModel.composedModels.map((m) => m.name)).toContain('Pet');
+      expect(compositeModel.composedPrimitives).toHaveLength(0);
     });
 
     it('should handle array and dictionary types', () => {
@@ -249,6 +249,87 @@ describe('openapi codegen data utils', () => {
       expect(dictModel).toBeDefined();
       expect(dictModel.export).toBe('dictionary');
       expect(dictModel.link).toBeDefined();
+    });
+
+    it('should build a value model for inline additionalProperties', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Counts: {
+              type: 'object',
+              additionalProperties: { type: 'integer' },
+            },
+          },
+        },
+      };
+
+      const model = buildOpenApiCodeGenData(spec).models.find(
+        (m) => m.name === 'Counts',
+      );
+      expect(model.export).toBe('dictionary');
+      expect(model.link).toMatchObject({ type: 'number' });
+    });
+
+    it('should build value models for patternProperties as an interface', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Patterned: {
+              type: 'object',
+              properties: { id: { type: 'string' } },
+              ...{ patternProperties: { '^x-': { type: 'string' } } },
+            },
+          },
+        },
+      };
+
+      const model = buildOpenApiCodeGenData(spec).models.find(
+        (m) => m.name === 'Patterned',
+      );
+      // Mixing explicit + pattern properties makes it an interface.
+      expect(model.export).toBe('interface');
+      expect(model.hasPatternProperties).toBe(true);
+      expect(model.patternPropertiesModels).toEqual([
+        expect.objectContaining({
+          pattern: '^x-',
+          model: expect.objectContaining({ type: 'string' }),
+        }),
+      ]);
+    });
+
+    it('should build an item model for an inline jsonl streaming itemSchema', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/pets': {
+            get: {
+              operationId: 'streamPets',
+              responses: {
+                '200': {
+                  description: 'stream',
+                  content: {
+                    'application/jsonl': {
+                      schema: { type: 'string' },
+                      ...{ itemSchema: { $ref: '#/components/schemas/Pet' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const op = buildOpenApiCodeGenData(spec).allOperations.find(
+        (o) => o.name === 'streamPets',
+      );
+      const response = op.responses[0];
+      expect(response.isJsonlStreaming).toBe(true);
+      expect(response.itemSchemaModel).toMatchObject({ name: 'Pet' });
     });
 
     it('should handle operations without operationId', () => {
