@@ -347,7 +347,6 @@ resource "aws_iam_role_policy" "migration_handler_access" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-<%_ if (engine === 'mysql') { _%>
       {
         Effect = "Allow"
         Action = [
@@ -362,17 +361,6 @@ resource "aws_iam_role_policy" "migration_handler_access" {
         ]
         Resource = [module.aurora.kms_key_arn]
       }
-<%_ } else { _%>
-      {
-        Effect = "Allow"
-        Action = [
-          "rds-db:connect"
-        ]
-        Resource = [
-          "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/${local.database_runtime_user}"
-        ]
-      }
-<%_ } _%>
     ]
   })
 }
@@ -459,13 +447,8 @@ resource "aws_security_group" "migration_handler" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
-<%_ if (engine === 'mysql') { _%>
   security_group_id            = aws_security_group.migration_handler.id
   referenced_security_group_id = module.aurora.database_security_group_id
-<%_ } else { _%>
-  security_group_id            = aws_security_group.migration_handler.id
-  referenced_security_group_id = module.aurora.security_group_id
-<%_ } _%>
   from_port   = module.aurora.cluster_port
   to_port     = module.aurora.cluster_port
   ip_protocol = "tcp"
@@ -507,11 +490,7 @@ resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
-<%_ if (engine === 'mysql') { _%>
   security_group_id            = module.aurora.database_security_group_id
-<%_ } else { _%>
-  security_group_id            = module.aurora.security_group_id
-<%_ } _%>
   referenced_security_group_id = aws_security_group.migration_handler.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
@@ -632,14 +611,7 @@ resource "aws_lambda_function" "migration_handler" {
 
   environment {
     variables = {
-<%_ if (engine === 'mysql') { _%>
       DATABASE_SECRET_ARN = module.aurora.secret_arn
-<%_ } else { _%>
-      HOSTNAME = module.aurora.cluster_endpoint
-      DATABASE = module.aurora.database_name
-      PORT     = tostring(module.aurora.cluster_port)
-      DBUSER   = local.database_runtime_user
-<%_ } _%>
     }
   }
 
