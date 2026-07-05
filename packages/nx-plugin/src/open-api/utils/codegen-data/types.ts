@@ -222,6 +222,9 @@ export type ModelsByName = { [name: string]: Model };
 export const indexModelsByName = (models: Model[]): ModelsByName =>
   Object.fromEntries(models.map((m) => [m.name, m]));
 
+/** The single service the parser emits; operations are re-grouped by tag. */
+export const DEFAULT_SERVICE_NAME = 'Default';
+
 /**
  * The full data structure handed to the code generation templates.
  */

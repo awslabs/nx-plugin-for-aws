@@ -7,6 +7,7 @@ import type { OpenAPIV3 } from 'openapi-types';
 import {
   type ClientData,
   createModel,
+  DEFAULT_SERVICE_NAME,
   type EnumMember,
   type Model,
   type ModelExport,
@@ -451,7 +452,7 @@ const buildOperations = (spec: Spec): Operation[] =>
 const buildDefaultService = (spec: Spec): Service => {
   const operations = buildOperations(spec);
   return {
-    name: 'Default',
+    name: DEFAULT_SERVICE_NAME,
     operations,
     imports: [...new Set(operations.flatMap((op) => op.imports))],
   };

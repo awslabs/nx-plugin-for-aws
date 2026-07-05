@@ -19,22 +19,19 @@ const toTypescriptPrimitive = (property: Model): string => {
   return property.type;
 };
 
-/**
- * Return the typescript type for the given model
- */
 export const toTypeScriptType = (property: Model): string => {
   const link = property.link;
   // Enum links serialise as their primitive; use the model's own type instead.
-  const valueType =
+  const valueType = () =>
     link && link.export !== 'enum' ? toTypeScriptType(link) : property.type;
   switch (property.export) {
     case 'enum':
     case 'generic':
       return toTypescriptPrimitive(property);
     case 'array':
-      return `Array<${valueType}>`;
+      return `Array<${valueType()}>`;
     case 'dictionary':
-      return `{ [key: string]: ${valueType}; }`;
+      return `{ [key: string]: ${valueType()}; }`;
     case 'one-of':
     case 'any-of':
     case 'all-of':
@@ -119,21 +116,18 @@ const toPythonPrimitive = (property: Model): string => {
   return property.type;
 };
 
-/**
- * Return the python type for a given property
- */
 export const toPythonType = (property: Model): string => {
   const link = property.link;
-  const valueType =
+  const valueType = () =>
     link && link.export !== 'enum' ? toPythonType(link) : property.type;
   switch (property.export) {
     case 'generic':
     case 'reference':
       return toPythonPrimitive(property);
     case 'array':
-      return `List[${valueType}]`;
+      return `List[${valueType()}]`;
     case 'dictionary':
-      return `Dict[str, ${valueType}]`;
+      return `Dict[str, ${valueType()}]`;
     case 'one-of':
     case 'any-of':
     case 'all-of':
