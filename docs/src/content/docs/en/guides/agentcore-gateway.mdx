@@ -78,15 +78,9 @@ The generated construct creates the following AWS resources:
 
 The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> so agents can discover it at runtime.
 
-## AWS WAF
-
-By default, the generated construct associates an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL with the Gateway. AWS WAF inspects every inbound request inline _before_ it reaches a target, protecting your Gateway from web exploits, bot traffic, and volumetric attacks. The Web ACL uses the AWS managed default ruleset ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) and [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), providing protection against common web exploits including the OWASP Top 10. WAF request logs are written to a CloudWatch Logs group.
-
-The Web ACL is `REGIONAL` and created in the Gateway's region, as required for AgentCore Gateway associations — CloudFront (global) Web ACLs are not supported.
-
 #### Architecture
 
-Requests reach the Gateway through AWS WAF, which routes allowed requests on to the Gateway and its downstream MCP server targets:
+The deployed Gateway has the following architecture. Inbound requests pass through an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL and IAM authentication, are authorized against the Cedar [policy engine](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), then routed on to the downstream MCP server targets:
 
 ```d2 inline=true
 direction: right
@@ -106,6 +100,11 @@ gateway: AgentCore Gateway\n(MCP, IAM auth) {
   icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
 }
 
+policy: Policy Engine\n(Cedar, ENFORCE) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
 targets: Downstream MCP Servers\n(Gateway targets) {
   shape: rectangle
 }
@@ -118,9 +117,16 @@ cw: CloudWatch\n(WAF Logs) {
 
 client -> waf
 waf -> gateway
+gateway -> policy: Authorize
 gateway -> targets
 waf -> cw
 ```
+
+## AWS WAF
+
+By default, the generated construct associates an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL with the Gateway. AWS WAF inspects every inbound request inline _before_ it reaches a target, protecting your Gateway from web exploits, bot traffic, and volumetric attacks. The Web ACL uses the AWS managed default ruleset ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) and [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), providing protection against common web exploits including the OWASP Top 10. WAF request logs are written to a CloudWatch Logs group.
+
+The Web ACL is `REGIONAL` and created in the Gateway's region, as required for AgentCore Gateway associations — CloudFront (global) Web ACLs are not supported.
 
 :::caution[SizeRestrictions_BODY deviation from defaults]
 The `SizeRestrictions_BODY` rule from `AWSManagedRulesCommonRuleSet` is overridden to `Count` rather than `Block`, since the rule's 8 KB limit is too restrictive for typical MCP tool payloads. Oversized requests will still be recorded as metrics so you can monitor them. See the [AWS WAF body size limits](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) guide for more details.
