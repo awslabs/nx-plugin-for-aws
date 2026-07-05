@@ -215,6 +215,13 @@ export interface ClientData {
   services: Service[];
 }
 
+/** Models indexed by name, for reference resolution during augmentation. */
+export type ModelsByName = { [name: string]: Model };
+
+/** Index a list of models by name. */
+export const indexModelsByName = (models: Model[]): ModelsByName =>
+  Object.fromEntries(models.map((m) => [m.name, m]));
+
 /**
  * The full data structure handed to the code generation templates.
  */

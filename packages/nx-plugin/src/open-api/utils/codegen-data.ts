@@ -28,8 +28,10 @@ import {
   type CodeGenData,
   type CollectionFormat,
   createModel,
+  indexModelsByName,
   type Model,
   type ModelExport,
+  type ModelsByName,
   type Operation,
   type PatternPropertyModel,
   PRIMITIVE_TYPES,
@@ -69,7 +71,7 @@ export const buildOpenApiCodeGenData = (
   ensureModelLinks(spec, data);
   resolveComposedModels(data);
 
-  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
+  const modelsByName = indexModelsByName(data.models);
 
   for (const service of data.services) {
     augmentService(spec, service, modelsByName);
@@ -111,7 +113,7 @@ export const buildOpenApiCodeGenData = (
     untaggedOperations,
     info: spec.info,
     allOperations,
-    vendorExtensions: vendorExtensionsOf(spec ?? {}),
+    vendorExtensions: vendorExtensionsOf(spec),
     className: toClassName(spec.info.title),
   };
 };
@@ -124,7 +126,7 @@ export const buildOpenApiCodeGenData = (
 const augmentService = (
   spec: Spec,
   service: Service,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): void => {
   const modelImports = service.operations.flatMap((op) =>
     augmentOperation(spec, op, modelsByName),
@@ -145,13 +147,13 @@ const augmentService = (
 const augmentOperation = (
   spec: Spec,
   op: Operation,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): string[] => {
   const specOp = getSpecOperation(spec, op);
 
   assignOperationNames(op, specOp);
 
-  op.vendorExtensions = vendorExtensionsOf(specOp ?? {});
+  op.vendorExtensions = vendorExtensionsOf(specOp);
 
   const modelImports = [
     ...(specOp ? augmentResponses(spec, op, specOp, modelsByName) : []),
@@ -215,7 +217,7 @@ const augmentResponses = (
   spec: Spec,
   op: Operation,
   specOp: OpenAPIV3.OperationObject,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): string[] => {
   const modelImports = op.responses
     .filter((r) => r.export === 'reference')
@@ -258,12 +260,7 @@ const augmentResponses = (
         Object.values(specResponse.content)[0];
       const responseSchema = resolveIfRef(spec, responseContent.schema);
       if (responseSchema) {
-        augmentModelFromSchema(
-          spec,
-          response,
-          responseSchema,
-          modelsByName,
-        );
+        augmentModelFromSchema(spec, response, responseSchema, modelsByName);
       }
       if (
         STREAMING_CONTENT_TYPES.has(mediaType) &&
@@ -291,14 +288,9 @@ const augmentParameters = (
   spec: Spec,
   op: Operation,
   specOp: OpenAPIV3.OperationObject | undefined,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): string[] => {
-  const specParametersByName = Object.fromEntries(
-    (specOp?.parameters ?? []).map((p) => {
-      const param = resolveIfRef(spec, p);
-      return [param.name, param];
-    }),
-  );
+  const specParametersByName = getSpecParametersByName(spec, specOp);
 
   const modelImports: string[] = [];
 
@@ -310,12 +302,7 @@ const augmentParameters = (
     const specParameter = specParametersByName[parameter.prop];
     const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
     if (specParameterSchema) {
-      augmentModelFromSchema(
-        spec,
-        parameter,
-        specParameterSchema,
-        modelsByName,
-      );
+      augmentModelFromSchema(spec, parameter, specParameterSchema, modelsByName);
     }
 
     if (parameter.in === 'body') {
@@ -345,7 +332,7 @@ const augmentBodyParameter = (
   spec: Spec,
   parameter: Model,
   specOp: OpenAPIV3.OperationObject | undefined,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): void => {
   // The request body parameter is named 'body' downstream.
   parameter.name = 'body';
@@ -404,7 +391,7 @@ const getCollectionFormat = (
  */
 const buildRequestParameterModels = (
   op: Operation,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): Model[] => {
   if (!op.parameters || op.parameters.length === 0) {
     return [];
@@ -467,7 +454,7 @@ const buildRequestParameterModels = (
 const augmentModel = (
   spec: Spec,
   model: Model,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
 ): void => {
   model.nameSnakeCase = toPythonName('model', model.name);
 
@@ -476,7 +463,6 @@ const augmentModel = (
     const specModel = resolveIfRef(spec, matchingSpecModel);
 
     augmentModelFromSchema(spec, model, specModel, modelsByName);
-    model.deprecated = specModel.deprecated || false;
 
     for (const property of model.properties) {
       const matchingSpecProperty = specModel.properties?.[property.name];
@@ -548,19 +534,14 @@ const buildModelForPrimitive = (
   }
 
   ensureModelLinks(spec, data);
-  augmentModelFromSchema(
-    spec,
-    model,
-    schema,
-    Object.fromEntries(data.models.map((m) => [m.name, m])),
-  );
+  augmentModelFromSchema(spec, model, schema, indexModelsByName(data.models));
 
   return model;
 };
 
 const buildOrReferenceModel = (
   spec: Spec,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
   schema: OpenApiSchemaOrRef,
 ): Model => {
   if (isRef(schema)) {
@@ -584,9 +565,23 @@ const getSpecOperation = (
   ];
 
 /**
+ * An operation's resolved parameters indexed by name.
+ */
+const getSpecParametersByName = (
+  spec: Spec,
+  specOp: OpenAPIV3.OperationObject | undefined,
+): { [name: string]: OpenAPIV3.ParameterObject } =>
+  Object.fromEntries(
+    (specOp?.parameters ?? []).map((p) => {
+      const param = resolveIfRef(spec, p);
+      return [param.name, param];
+    }),
+  );
+
+/**
  * The `x-*` vendor extensions declared on an object.
  */
-const vendorExtensionsOf = (object: object): VendorExtensions =>
+const vendorExtensionsOf = (object: object | undefined): VendorExtensions =>
   Object.fromEntries(
     Object.entries(object ?? {}).filter(([key]) => key.startsWith('x-')),
   );
@@ -595,7 +590,7 @@ const augmentModelFromSchema = (
   spec: Spec,
   model: Model,
   schema: OpenApiSchema,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
   visited: Set<Model> = new Set(),
 ) => {
   model.format = schema.format;
@@ -707,15 +702,15 @@ const augmentModelFromSchema = (
  * Ensure that the "link" property of all dictionary/array models and properties are set recursively
  */
 const ensureModelLinks = (spec: Spec, data: ClientData) => {
-  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
+  const modelsByName = indexModelsByName(data.models);
   const visited = new Set<Model>();
 
   // Ensure set for all models
   data.models.forEach((model) => {
-    const schema = resolveIfRef(
+    const schema = resolveIfRef<OpenApiSchema | undefined>(
       spec,
       spec?.components?.schemas?.[model.name],
-    ) as OpenApiSchema | undefined;
+    );
     if (schema) {
       // Object schemas should be typed as the model we will create
       if (
@@ -732,13 +727,7 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
   data.services.forEach((service) => {
     service.operations.forEach((op) => {
       const specOp = getSpecOperation(spec, op);
-
-      const specParametersByName = Object.fromEntries(
-        (specOp?.parameters ?? []).map((p) => {
-          const param = resolveIfRef(spec, p);
-          return [param.name, param];
-        }),
-      );
+      const specParametersByName = getSpecParametersByName(spec, specOp);
 
       op.parameters.forEach((parameter) => {
         const specParameter = specParametersByName[parameter.prop];
@@ -800,7 +789,7 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
 
 const ensureModelLink = (
   spec: Spec,
-  modelsByName: { [name: string]: Model },
+  modelsByName: ModelsByName,
   model: Model,
   schema: OpenApiSchema,
   visited: Set<Model>,
@@ -867,12 +856,15 @@ const ensureModelLink = (
  * (allOf/anyOf/oneOf) with the models and primitive types it is composed of.
  */
 const resolveComposedModels = (data: ClientData) => {
+  const modelsByName = indexModelsByName(data.models);
   const visited = new Set<Model>();
-  data.models.forEach((model) => resolveComposedModel(data, model, visited));
+  data.models.forEach((model) =>
+    resolveComposedModel(modelsByName, model, visited),
+  );
 };
 
 const resolveComposedModel = (
-  data: ClientData,
+  modelsByName: ModelsByName,
   model: Model,
   visited: Set<Model>,
 ) => {
@@ -882,13 +874,12 @@ const resolveComposedModel = (
   visited.add(model);
 
   const members = model.properties.filter((p) => !p.name);
-  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
   const referenced = members
     .filter((p) => p.export === 'reference')
     .flatMap((r) => (modelsByName[r.type] ? [modelsByName[r.type]] : []));
 
   // Resolve recursively so all-of mixins include nested all-of properties
-  referenced.forEach((m) => resolveComposedModel(data, m, visited));
+  referenced.forEach((m) => resolveComposedModel(modelsByName, m, visited));
 
   // Enums serialise as primitives, so group them with the primitives
   const composedModels = referenced.filter((m) => m.export !== 'enum');

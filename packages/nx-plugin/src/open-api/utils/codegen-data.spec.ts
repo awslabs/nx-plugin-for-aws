@@ -317,7 +317,7 @@ describe('openapi codegen data utils', () => {
       );
 
       // Check operation level extensions
-      const operation = data.allOperations[0] as any;
+      const operation = data.allOperations[0];
       expect(operation.vendorExtensions).toHaveProperty(
         'x-custom-operation',
         'operation-value',
