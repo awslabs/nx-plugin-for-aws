@@ -3,8 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import camelCase from 'lodash.camelcase';
-import { snakeCase, toClassName } from '../../../utils/names';
+import { camelCase, snakeCase, toClassName } from '../../../utils/names';
 import { type Model, PRIMITIVE_TYPES } from './types';
 
 const toTypescriptPrimitive = (property: Model): string => {
@@ -49,7 +48,15 @@ export const toTypeScriptType = (property: Model): string => {
 };
 
 export const toTypeScriptName = (name: string): string => {
-  return camelCase(name);
+  const camel = camelCase(name);
+  if (camel) {
+    return camel;
+  }
+  // Names made up entirely of non-identifier characters (e.g. "_") camelCase to
+  // an empty string; fall back to an underscore-escaped form so the emitted
+  // property is still a valid identifier.
+  const escaped = (name ?? '').replace(/[^a-zA-Z0-9]/g, '_');
+  return /^[0-9]/.test(escaped) ? `_${escaped}` : escaped || '_';
 };
 
 const TYPESCRIPT_RESERVED_MODEL_NAMES = new Set([

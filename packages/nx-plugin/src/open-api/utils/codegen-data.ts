@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import camelCase from 'lodash.camelcase';
 import orderBy from 'lodash.orderby';
 import trim from 'lodash.trim';
 import uniqBy from 'lodash.uniqby';
 import type { OpenAPIV3 } from 'openapi-types';
 import {
+  camelCase,
   pascalCase,
   snakeCase,
   toClassName,

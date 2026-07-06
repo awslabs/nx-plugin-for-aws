@@ -340,4 +340,158 @@ describe('openApiTsClientGenerator - regressions', () => {
     const types = await generate(spec);
     expect(types).toContain('The thing to update');
   });
+
+  // ---- F. operations whose only responses are errors (no result) ---------
+
+  it('compiles an operation whose only response is an error code', async () => {
+    // `op.result` is undefined when no 2XX/default response exists; the client
+    // template used to read `op.result.typescriptType` unconditionally and crash.
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/thing': {
+          post: {
+            operationId: 'createThing',
+            responses: {
+              '403': {
+                description: 'forbidden',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: { message: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    // Generation must not throw and must compile (result type is `void`).
+    const types = await generate(spec);
+    expect(types).toContain('CreateThingError');
+  });
+
+  // ---- G. identifiers from non-identifier characters ---------------------
+
+  it('sanitizes non-ASCII operationIds into valid identifiers', async () => {
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/thing': {
+          get: {
+            // The `≠` (and accented chars) must not leak into TS identifiers.
+            operationId: 'getThing≠Café',
+            parameters: [
+              { name: 'q', in: 'query', schema: { type: 'string' } },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': { schema: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const types = await generate(spec);
+    expect(types).not.toMatch(/[^\x00-\x7F]/); // no non-ASCII in output
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(client).not.toMatch(/[^\x00-\x7F]/);
+  });
+
+  it('handles a property named entirely of non-identifier characters', async () => {
+    // A property named "_" camelCases to an empty string; it must still emit a
+    // valid identifier rather than `model.` / an empty key.
+    const types = await generate(
+      responseSchema({
+        _: { type: 'object', additionalProperties: { type: 'string' } },
+      }),
+    );
+    expect(types).toBeDefined();
+  });
+
+  // ---- H. dictionary (map) response body ---------------------------------
+
+  it('compiles an operation returning a bare dictionary', async () => {
+    // A map response emits `$IO.$mapValues(...)` inside the client class, which
+    // requires `$mapValues` to be accessible (not `protected`).
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'getThings',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      additionalProperties: {
+                        type: 'object',
+                        properties: { name: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    // Must compile — cross-class `$IO.$mapValues` access.
+    await generate(spec);
+  });
+
+  // ---- I. hoisted inline schema names with `_`-separated property names ---
+
+  it('resolves hoisted inline schema names for snake_case properties', async () => {
+    // `store_photos` hoists to a schema whose name must match its references
+    // (both normalised, so `StorePhotos` not `Store_photos`).
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        store_photos: {
+                          type: 'object',
+                          additionalProperties: {
+                            type: 'object',
+                            properties: { url: { type: 'string' } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    // Must compile — the hoisted schema name and its reference must agree.
+    await generate(spec);
+  });
 });
