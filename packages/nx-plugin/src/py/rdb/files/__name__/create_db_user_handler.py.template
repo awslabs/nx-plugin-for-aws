@@ -2,8 +2,6 @@ import secrets
 from typing import Any
 
 <%_ if (engine === 'mysql') { _%>
-import ssl
-
 import pymysql
 <%_ } else { _%>
 import psycopg
@@ -21,7 +19,7 @@ def _ensure_database_user(db_user: str) -> None:
         database=secret['dbname'],
         user=secret['username'],
         password=secret['password'],
-        ssl=ssl.create_default_context(),
+        ssl={'ca': './global-bundle.pem'},
         connect_timeout=10,
     )
     try:
@@ -35,7 +33,7 @@ def _ensure_database_user(db_user: str) -> None:
                 (db_user,),
             )
             cursor.execute(
-                f"GRANT ALL PRIVILEGES ON `{secret['dbname']}`.* TO %s@'%%'",
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON `{secret['dbname']}`.* TO %s@'%%'",
                 (db_user,),
             )
         connection.commit()
@@ -51,7 +49,7 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret['username'],
         password=secret['password'],
         sslmode='verify-full',
-        sslrootcert='system',
+        sslrootcert='./global-bundle.pem',
         connect_timeout=10,
     )
     try:
@@ -67,14 +65,14 @@ def _ensure_database_user(db_user: str) -> None:
                 cursor.execute(pgsql.SQL('CREATE ROLE {} WITH LOGIN').format(db_user_ident))
             cursor.execute(pgsql.SQL(
                 'ALTER ROLE {role} WITH LOGIN;'
-                'GRANT ALL PRIVILEGES ON DATABASE {db} TO {role};'
-                'GRANT USAGE, CREATE ON SCHEMA public TO {role};'
-                'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {role};'
-                'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {role};'
-                'GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO {role};'
-                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO {role};'
-                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO {role};'
-                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO {role};'
+                'GRANT CONNECT ON DATABASE {db} TO {role};'
+                'GRANT USAGE ON SCHEMA public TO {role};'
+                'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role};'
+                'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};'
+                'ALTER DEFAULT PRIVILEGES IN SCHEMA public '
+                'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role};'
+                'ALTER DEFAULT PRIVILEGES IN SCHEMA public '
+                'GRANT USAGE, SELECT ON SEQUENCES TO {role};'
                 'GRANT rds_iam TO {role};'
             ).format(role=db_user_ident, db=db_name_ident))
         connection.commit()

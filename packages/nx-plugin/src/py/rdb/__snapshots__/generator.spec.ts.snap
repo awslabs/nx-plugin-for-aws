@@ -21,8 +21,17 @@ _runtime_config_key = "Db"
 _engine = None
 
 
-def _create_engine():
-    ssl_args: dict = {} if is_local_dev() else {"ssl": ssl.create_default_context()}
+def get_engine(rds_ca: str | None = None):
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    global _engine
+    if _engine is not None:
+        return _engine
+    ssl_args: dict = (
+        {}
+        if is_local_dev()
+        else ({"ssl_ca": rds_ca} if rds_ca else {"ssl": ssl.create_default_context()})
+    )
     if is_local_dev():
         cfg = get_local_dev_config()
         url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
@@ -34,9 +43,9 @@ def _create_engine():
             config["port"],
             config["database"],
         )
-    engine = create_engine(url, connect_args=ssl_args)
+    _engine = create_engine(url, connect_args=ssl_args)
 
-    @event.listens_for(engine, "do_connect")
+    @event.listens_for(_engine, "do_connect")
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
         if is_local_dev():
             connection_params["password"] = get_local_dev_config()["dbPassword"]
@@ -51,53 +60,37 @@ def _create_engine():
                 DBUsername=config["dbUser"],
             )
 
-    return engine
-
-
-def get_engine():
-    global _engine
-    if _engine is None:
-        _engine = _create_engine()
     return _engine
 
 
-def get_session() -> Generator[Session]:
-    with Session(get_engine()) as session:
+def get_session(rds_ca: str | None = None) -> Generator[Session]:
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    with Session(get_engine(rds_ca)) as session:
         yield session
 "
 `;
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 2`] = `
-"import os
-import ssl
-
-import boto3
-from alembic import command
+"from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
-from .utils import build_database_url, with_connection_retry
+from .utils import build_database_url, get_database_secret, with_connection_retry
 
 
 def _run_migrations() -> None:
-    hostname = os.environ["HOSTNAME"]
-    port = int(os.environ["PORT"])
-    database = os.environ["DATABASE"]
-    db_user = os.environ["DBUSER"]
-    token = boto3.client(
-        "rds", region_name=os.environ["AWS_REGION"]
-    ).generate_db_auth_token(
-        DBHostname=hostname,
-        Port=port,
-        DBUsername=db_user,
+    secret = get_database_secret()
+    database_url = build_database_url(
+        secret["username"],
+        secret["host"],
+        secret["port"],
+        secret["dbname"],
+        password=secret["password"],
     )
-    database_url = build_database_url(db_user, hostname, port, database, password=token)
     alembic_cfg = Config("alembic.ini")
-    connect_args = {
-        "auth_plugin_map": {"mysql_clear_password": None},
-        "ssl": ssl.create_default_context(),
-    }
+    connect_args = {"ssl": {"ca": "./global-bundle.pem"}}
     engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
@@ -114,7 +107,6 @@ def handler(_event, _context):
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 3`] = `
 "import secrets
-import ssl
 from typing import Any
 
 import pymysql
@@ -130,7 +122,7 @@ def _ensure_database_user(db_user: str) -> None:
         database=secret["dbname"],
         user=secret["username"],
         password=secret["password"],
-        ssl=ssl.create_default_context(),
+        ssl={"ca": "./global-bundle.pem"},
         connect_timeout=10,
     )
     try:
@@ -144,7 +136,7 @@ def _ensure_database_user(db_user: str) -> None:
                 (db_user,),
             )
             cursor.execute(
-                f"GRANT ALL PRIVILEGES ON \`{secret['dbname']}\`.* TO %s@'%%'",
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON \`{secret['dbname']}\`.* TO %s@'%%'",
                 (db_user,),
             )
         connection.commit()
@@ -184,8 +176,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 COPY . .
 
 RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
-    update-ca-trust
+    -o ./global-bundle.pem
 
 CMD ["proj_db.migration_handler.handler"]
 "
@@ -199,8 +190,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 COPY . .
 
 RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
-    update-ca-trust
+    -o ./global-bundle.pem
 
 CMD ["proj_db.create_db_user_handler.handler"]
 "
@@ -561,11 +551,16 @@ resource "aws_iam_role_policy" "migration_handler_access" {
       {
         Effect = "Allow"
         Action = [
-          "rds-db:connect"
+          "secretsmanager:GetSecretValue"
         ]
-        Resource = [
-          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
         ]
+        Resource = [module.aurora.kms_key_arn]
       }
     ]
   })
@@ -654,7 +649,7 @@ resource "aws_security_group" "migration_handler" {
 
 resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
   security_group_id            = aws_security_group.migration_handler.id
-  referenced_security_group_id = module.aurora.security_group_id
+  referenced_security_group_id = module.aurora.database_security_group_id
   from_port   = module.aurora.cluster_port
   to_port     = module.aurora.cluster_port
   ip_protocol = "tcp"
@@ -696,7 +691,7 @@ resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
-  security_group_id            = module.aurora.security_group_id
+  security_group_id            = module.aurora.database_security_group_id
   referenced_security_group_id = aws_security_group.migration_handler.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
@@ -816,10 +811,7 @@ resource "aws_lambda_function" "migration_handler" {
 
   environment {
     variables = {
-      HOSTNAME = module.aurora.cluster_endpoint
-      DATABASE = module.aurora.database_name
-      PORT     = tostring(module.aurora.cluster_port)
-      DBUSER   = local.database_runtime_user
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
     }
   }
 
@@ -842,7 +834,6 @@ resource "null_resource" "migration_trigger" {
     cluster_arn    = module.aurora.cluster_arn
     database_ready = module.aurora.database_ready
     function_name  = aws_lambda_function.migration_handler.function_name
-    db_user        = local.database_runtime_user
   }
 
   provisioner "local-exec" {
@@ -1079,9 +1070,19 @@ _runtime_config_key = "Db"
 _engine = None
 
 
-def _create_engine():
+def get_engine(rds_ca: str | None = None):
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    global _engine
+    if _engine is not None:
+        return _engine
     ssl_args: dict = (
-        {} if is_local_dev() else {"sslmode": "verify-full", "sslrootcert": "system"}
+        {}
+        if is_local_dev()
+        else {
+            "sslmode": "verify-full",
+            **({"sslrootcert": rds_ca} if rds_ca else {}),
+        }
     )
     if is_local_dev():
         cfg = get_local_dev_config()
@@ -1094,9 +1095,9 @@ def _create_engine():
             config["port"],
             config["database"],
         )
-    engine = create_engine(url, connect_args=ssl_args)
+    _engine = create_engine(url, connect_args=ssl_args)
 
-    @event.listens_for(engine, "do_connect")
+    @event.listens_for(_engine, "do_connect")
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
         if is_local_dev():
             connection_params["password"] = get_local_dev_config()["dbPassword"]
@@ -1111,18 +1112,13 @@ def _create_engine():
                 DBUsername=config["dbUser"],
             )
 
-    return engine
-
-
-def get_engine():
-    global _engine
-    if _engine is None:
-        _engine = _create_engine()
     return _engine
 
 
-def get_session() -> Generator[Session]:
-    with Session(get_engine()) as session:
+def get_session(rds_ca: str | None = None) -> Generator[Session]:
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    with Session(get_engine(rds_ca)) as session:
         yield session
 "
 `;
@@ -1146,7 +1142,7 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret["username"],
         password=secret["password"],
         sslmode="verify-full",
-        sslrootcert="system",
+        sslrootcert="./global-bundle.pem",
         connect_timeout=10,
     )
     try:
@@ -1165,14 +1161,14 @@ def _ensure_database_user(db_user: str) -> None:
             cursor.execute(
                 pgsql.SQL(
                     "ALTER ROLE {role} WITH LOGIN;"
-                    "GRANT ALL PRIVILEGES ON DATABASE {db} TO {role};"
-                    "GRANT USAGE, CREATE ON SCHEMA public TO {role};"
-                    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {role};"
-                    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {role};"
-                    "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO {role};"
+                    "GRANT CONNECT ON DATABASE {db} TO {role};"
+                    "GRANT USAGE ON SCHEMA public TO {role};"
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role};"
+                    "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT USAGE, SELECT ON SEQUENCES TO {role};"
                     "GRANT rds_iam TO {role};"
                 ).format(role=db_user_ident, db=db_name_ident)
             )
@@ -1209,32 +1205,25 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/migration_handler.py 1`] = `
-"import os
-
-import boto3
-from alembic import command
+"from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
-from .utils import build_database_url, with_connection_retry
+from .utils import build_database_url, get_database_secret, with_connection_retry
 
 
 def _run_migrations() -> None:
-    hostname = os.environ["HOSTNAME"]
-    port = int(os.environ["PORT"])
-    database = os.environ["DATABASE"]
-    db_user = os.environ["DBUSER"]
-    token = boto3.client(
-        "rds", region_name=os.environ["AWS_REGION"]
-    ).generate_db_auth_token(
-        DBHostname=hostname,
-        Port=port,
-        DBUsername=db_user,
+    secret = get_database_secret()
+    database_url = build_database_url(
+        secret["username"],
+        secret["host"],
+        secret["port"],
+        secret["dbname"],
+        password=secret["password"],
     )
-    database_url = build_database_url(db_user, hostname, port, database, password=token)
     alembic_cfg = Config("alembic.ini")
-    connect_args = {"sslmode": "verify-full", "sslrootcert": "system"}
+    connect_args = {"sslmode": "verify-full", "sslrootcert": "./global-bundle.pem"}
     engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
@@ -1284,8 +1273,6 @@ from sqlalchemy import URL
 DatabaseConfig = dict[str, Any]
 DatabaseSecret = dict[str, Any]
 
-_DB_DRIVER = "postgresql+psycopg"
-
 
 def build_database_url(
     username: str,
@@ -1295,7 +1282,7 @@ def build_database_url(
     password: str | None = None,
 ) -> URL:
     return URL.create(
-        _DB_DRIVER,
+        drivername="postgresql+psycopg",
         username=username,
         password=password,
         host=host,
@@ -1433,8 +1420,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 COPY . .
 
 RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
-    update-ca-trust
+    -o ./global-bundle.pem
 
 CMD ["proj_db.migration_handler.handler"]
 "
@@ -1448,8 +1434,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 COPY . .
 
 RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
-    update-ca-trust
+    -o ./global-bundle.pem
 
 CMD ["proj_db.create_db_user_handler.handler"]
 "
@@ -1606,7 +1591,7 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret["username"],
         password=secret["password"],
         sslmode="verify-full",
-        sslrootcert="system",
+        sslrootcert="./global-bundle.pem",
         connect_timeout=10,
     )
     try:
@@ -1625,14 +1610,14 @@ def _ensure_database_user(db_user: str) -> None:
             cursor.execute(
                 pgsql.SQL(
                     "ALTER ROLE {role} WITH LOGIN;"
-                    "GRANT ALL PRIVILEGES ON DATABASE {db} TO {role};"
-                    "GRANT USAGE, CREATE ON SCHEMA public TO {role};"
-                    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {role};"
-                    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {role};"
-                    "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO {role};"
+                    "GRANT CONNECT ON DATABASE {db} TO {role};"
+                    "GRANT USAGE ON SCHEMA public TO {role};"
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role};"
+                    "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role};"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT USAGE, SELECT ON SEQUENCES TO {role};"
                     "GRANT rds_iam TO {role};"
                 ).format(role=db_user_ident, db=db_name_ident)
             )
@@ -2006,26 +1991,16 @@ export abstract class AuroraDatabase extends Construct {
 
     const migrationHandler =
       framework === 'sqlmodel'
-        ? this.createPythonMigrationHandler(
-            vpc,
-            migrationBundleDir,
-            databaseHostname,
-            databasePort,
-            databaseName,
-          )
-        : this.createNodeMigrationHandler(
-            vpc,
-            migrationBundleDir,
-            engine,
-            databaseHostname,
-            databasePort,
-            databaseName,
-          );
+        ? this.createPythonMigrationHandler(vpc, migrationBundleDir)
+        : this.createNodeMigrationHandler(vpc, migrationBundleDir);
 
-    const trigger = new Trigger(this, 'MigrationTrigger', {
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+    this.grantSecretRead(migrationHandler);
+
+    const migrationTrigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
     });
-    trigger.node.addDependency(createDbUserResource);
+    migrationTrigger.node.addDependency(createDbUserResource);
 
     new CfnOutput(this, 'ClusterEndpoint', {
       value: this.cluster.clusterEndpoint.hostname,
@@ -2084,11 +2059,8 @@ export abstract class AuroraDatabase extends Construct {
   private createPythonMigrationHandler(
     vpc: IVpc,
     migrationBundleDir: string,
-    databaseHostname: string,
-    databasePort: number,
-    databaseName: string,
   ): DockerImageFunction {
-    const handler = new DockerImageFunction(this, 'MigrationHandler', {
+    return new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
       }),
@@ -2097,28 +2069,17 @@ export abstract class AuroraDatabase extends Construct {
       tracing: Tracing.ACTIVE,
       vpc,
       environment: {
-        HOSTNAME: databaseHostname,
-        DATABASE: databaseName,
-        PORT: databasePort.toString(),
-        DBUSER: this.dbUser,
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
       },
       architecture: Architecture.ARM_64,
     });
-
-    this.allowDefaultPortFrom(handler);
-    this.grantConnect(handler);
-    return handler;
   }
 
   private createNodeMigrationHandler(
     vpc: IVpc,
     migrationBundleDir: string,
-    engine: AuroraDatabaseEngine,
-    databaseHostname: string,
-    databasePort: number,
-    databaseName: string,
   ): DockerImageFunction {
-    const handler = new DockerImageFunction(this, 'MigrationHandler', {
+    return new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
       }),
@@ -2126,34 +2087,11 @@ export abstract class AuroraDatabase extends Construct {
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
       vpc,
-      environment:
-        engine.type === 'mysql'
-          ? {
-              DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-            }
-          : {
-              HOSTNAME: databaseHostname,
-              DATABASE: databaseName,
-              PORT: databasePort.toString(),
-              DBUSER: this.dbUser,
-            },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      },
       architecture: Architecture.ARM_64,
     });
-
-    // The Prisma CLI uses a Rust-based MySQL driver that does not support the
-    // mysql_clear_password authentication exchange required by RDS IAM auth.
-    // MySQL migrations therefore use the admin secret, while PostgreSQL
-    // migrations generate an IAM auth token from the supplied connection details.
-    // Secret-authenticated MySQL migrations must connect directly to the Aurora
-    // cluster because the configured RDS Proxy accepts IAM authentication only.
-    if (engine.type === 'mysql') {
-      this.cluster.connections.allowDefaultPortFrom(handler);
-      this.grantSecretRead(handler);
-    } else {
-      this.allowDefaultPortFrom(handler);
-      this.grantConnect(handler);
-    }
-    return handler;
   }
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {

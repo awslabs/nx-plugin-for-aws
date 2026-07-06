@@ -1,36 +1,23 @@
-import os
-<%_ if (engine === 'mysql') { _%>
-import ssl
-<%_ } _%>
 
-import boto3
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
-from .utils import build_database_url, with_connection_retry
+from .utils import build_database_url, get_database_secret, with_connection_retry
 
 
 def _run_migrations() -> None:
-    hostname = os.environ['HOSTNAME']
-    port = int(os.environ['PORT'])
-    database = os.environ['DATABASE']
-    db_user = os.environ['DBUSER']
-    token = boto3.client('rds', region_name=os.environ['AWS_REGION']).generate_db_auth_token(
-        DBHostname=hostname,
-        Port=port,
-        DBUsername=db_user,
+    secret = get_database_secret()
+    database_url = build_database_url(
+        secret['username'], secret['host'], secret['port'], secret['dbname'],
+        password=secret['password'],
     )
-    database_url = build_database_url(db_user, hostname, port, database, password=token)
     alembic_cfg = Config('alembic.ini')
 <%_ if (engine === 'mysql') { _%>
-    connect_args = {
-        'auth_plugin_map': {'mysql_clear_password': None},
-        'ssl': ssl.create_default_context(),
-    }
+    connect_args = {'ssl': {'ca': './global-bundle.pem'}}
 <%_ } else { _%>
-    connect_args = {'sslmode': 'verify-full', 'sslrootcert': 'system'}
+    connect_args = {'sslmode': 'verify-full', 'sslrootcert': './global-bundle.pem'}
 <%_ } _%>
     engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
