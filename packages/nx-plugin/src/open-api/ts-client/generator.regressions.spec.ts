@@ -494,4 +494,70 @@ describe('openApiTsClientGenerator - regressions', () => {
     // Must compile — the hoisted schema name and its reference must agree.
     await generate(spec);
   });
+
+  // ---- J. path-level param shared across several methods -----------------
+
+  it('inherits a path-level parameter into every method on the path', async () => {
+    // The `common-parameters` shape: one path-level `petId` shared by GET, PUT
+    // and DELETE on the same path.
+    const pathParam = {
+      name: 'petId',
+      in: 'path',
+      required: true,
+      schema: { type: 'integer' },
+    };
+    const okResponse = {
+      '200': {
+        description: 'ok',
+        content: { 'application/json': { schema: { type: 'string' } } },
+      },
+    };
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets/{petId}': {
+          parameters: [pathParam as never],
+          get: { operationId: 'getPet', responses: okResponse as never },
+          delete: {
+            operationId: 'deletePet',
+            responses: { '204': { description: 'gone' } } as never,
+          },
+          put: {
+            operationId: 'updatePet',
+            requestBody: {
+              content: {
+                'application/json': { schema: { type: 'string' } },
+              },
+            },
+            responses: okResponse as never,
+          },
+        },
+      },
+    };
+    const types = await generate(spec);
+    expect(types).toMatch(/GetPetRequest[\s\S]*petId: number/);
+    expect(types).toMatch(/DeletePetRequest[\s\S]*petId: number/);
+    expect(types).toMatch(/UpdatePetRequest[\s\S]*petId: number/);
+  });
+
+  // ---- K. 3.1 `type: [array, null]` with object items --------------------
+
+  it('renders a nullable array of objects (`type: [array, null]`)', async () => {
+    // The `null-types-with-type-array` shape: a nullable array whose items are
+    // an inline object; the item type must be hoisted, not `unknown`.
+    const types = await generate(
+      responseSchema({
+        nullableSkills: {
+          type: ['array', 'null'],
+          items: {
+            type: 'object',
+            properties: { name: { type: 'string' } },
+          },
+        },
+      }),
+    );
+    expect(types).toMatch(/nullableSkills\?: Array<\w+> \| null/);
+    expect(types).not.toMatch(/nullableSkills\?: Array<unknown>/);
+  });
 });
