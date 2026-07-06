@@ -5,6 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import PackageJson from '../../package.json' with { type: 'json' };
 import { listGenerators } from '../utils/nx';
+import { addToExistingProjectTool } from './tools/add-to-existing-project';
 import { addCreateWorkspaceCommandTool } from './tools/create-workspace-command';
 import {
   addGeneralGuidanceTool,
@@ -41,6 +42,7 @@ ${TOOL_SELECTION_GUIDE}
   addCreateWorkspaceCommandTool(server);
   addListGeneratorsTool(server, generators);
   addGeneratorGuideTool(server, generators);
+  addToExistingProjectTool(server, generators);
 
   return server;
 };

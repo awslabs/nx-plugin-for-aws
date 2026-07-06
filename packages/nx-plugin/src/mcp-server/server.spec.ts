@@ -54,6 +54,7 @@ describe('MCP Server', () => {
     expect(toolNames).toContain('create-workspace-command');
     expect(toolNames).toContain('list-generators');
     expect(toolNames).toContain('generator-guide');
+    expect(toolNames).toContain('add-to-existing-project');
   });
 
   it('should have a description for every tool', async () => {

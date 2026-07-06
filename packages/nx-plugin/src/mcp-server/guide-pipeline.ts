@@ -107,6 +107,18 @@ const stringifyMdx = (tree: Root, deps: RemarkDeps): string =>
       .stringify(tree),
   );
 
+/**
+ * Remove nodes that are meaningless once the MDX is rendered to plain markdown
+ * for an agent: the YAML frontmatter block and the `import`/`export` (ESM)
+ * statements at the top of every docs page. They add noise and tokens without
+ * conveying guidance.
+ */
+const stripFrontmatterAndEsm = (tree: Root): void => {
+  tree.children = tree.children.filter(
+    (node) => node.type !== 'yaml' && node.type !== 'mdxjsEsm',
+  );
+};
+
 export const postProcessGuideWithRemark = async (
   guide: string,
   opts: PipelineOptions,
@@ -117,6 +129,7 @@ export const postProcessGuideWithRemark = async (
   await inlineSnippets(tree, opts, deps);
   applyFilterTransforms(tree, opts.options);
   applyComponentTransforms(tree, opts, deps);
+  stripFrontmatterAndEsm(tree);
 
   return stringifyMdx(tree, deps);
 };
