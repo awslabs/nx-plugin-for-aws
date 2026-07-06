@@ -46,6 +46,7 @@ import {
   compositeMemberSchemas,
   getSpecOperation,
   getSpecParametersByName,
+  getSpecPathParameters,
   linkModel,
 } from './parser';
 import { isRef, resolveIfRef, splitRef } from './refs';
@@ -277,7 +278,11 @@ const augmentParameters = (
   specOp: OpenAPIV3.OperationObject | undefined,
   modelsByName: ModelsByName,
 ): string[] => {
-  const specParametersByName = getSpecParametersByName(spec, specOp);
+  const specParametersByName = getSpecParametersByName(
+    spec,
+    specOp,
+    getSpecPathParameters(spec, op),
+  );
 
   const modelImports: string[] = [];
 

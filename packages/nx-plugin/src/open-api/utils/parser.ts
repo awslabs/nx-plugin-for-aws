@@ -130,9 +130,12 @@ const collectImports = (models: Model[]): string[] => [
  */
 const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
   if (isEnumSchema(schema)) {
+    // A string (or untyped) enum renders as a literal union; a boolean/number
+    // enum renders as its bare primitive, so it must carry the declared type.
+    const declared = primaryType(schema);
     return {
       export: 'enum',
-      type: 'string',
+      type: (declared && PRIMITIVE_TYPE_MAP[declared]) ?? 'string',
       enum: schema.enum!.map(
         (value): EnumMember => ({ value: value as EnumMember['value'] }),
       ),
@@ -355,16 +358,18 @@ const buildRequestBody = (
   if (!requestBody?.content) return null;
 
   const mediaType = preferredMediaType(requestBody.content);
+  const base = buildInlineModel(
+    spec,
+    (requestBody.content[mediaType]?.schema ?? {}) as Schema,
+  );
   return {
-    ...buildInlineModel(
-      spec,
-      (requestBody.content[mediaType]?.schema ?? {}) as Schema,
-    ),
+    ...base,
     name: 'requestBody',
     prop: 'requestBody',
     in: 'body',
     mediaType,
     isRequired: !!requestBody.required,
+    description: requestBody.description ?? base.description,
   };
 };
 
@@ -376,8 +381,11 @@ const buildRequestBody = (
 const buildParameters = (
   spec: Spec,
   specOp: OpenAPIV3.OperationObject,
+  pathParameters: (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] = [],
 ): Model[] => {
-  const declared: Model[] = (specOp.parameters ?? []).flatMap((p) => {
+  const declared: Model[] = mergeParameters(spec, pathParameters, [
+    ...(specOp.parameters ?? []),
+  ]).flatMap((p) => {
     const param = resolveIfRef<OpenAPIV3.ParameterObject | undefined>(spec, p);
     if (!param) return [];
     const base = buildInlineModel(spec, (param.schema ?? {}) as Schema);
@@ -400,6 +408,28 @@ const buildParameters = (
   return [...params].sort((a, b) =>
     a.isRequired === b.isRequired ? 0 : a.isRequired ? -1 : 1,
   );
+};
+
+/**
+ * Merge path-level parameters with operation-level parameters. Per the OpenAPI
+ * spec, path-level parameters apply to every operation in the path unless an
+ * operation-level parameter overrides one with the same `name` + `in`.
+ */
+const mergeParameters = (
+  spec: Spec,
+  pathParameters: (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[],
+  operationParameters: (
+    | OpenAPIV3.ParameterObject
+    | OpenAPIV3.ReferenceObject
+  )[],
+): (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] => {
+  const key = (p: OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject) => {
+    const param = resolveIfRef<OpenAPIV3.ParameterObject | undefined>(spec, p);
+    return param ? `${param.in}:${param.name}` : null;
+  };
+  const overridden = new Set(operationParameters.map(key));
+  const inherited = pathParameters.filter((p) => !overridden.has(key(p)));
+  return [...inherited, ...operationParameters];
 };
 
 /**
@@ -442,8 +472,9 @@ const buildOperation = (
   path: string,
   method: string,
   specOp: OpenAPIV3.OperationObject,
+  pathParameters: (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] = [],
 ): Operation => {
-  const parameters = buildParameters(spec, specOp);
+  const parameters = buildParameters(spec, specOp, pathParameters);
   const responses = buildResponses(spec, specOp);
   const id = (specOp as { operationId: string }).operationId;
 
@@ -469,9 +500,12 @@ const buildOperations = (spec: Spec): Operation[] =>
       pathItemOrRef,
     );
     if (!pathItem) return [];
+    const pathParameters = pathItem.parameters ?? [];
     return HTTP_METHODS.flatMap((method: HttpMethod) => {
       const specOp = pathItem[method as OpenAPIV3.HttpMethods];
-      return specOp ? [buildOperation(spec, path, method, specOp)] : [];
+      return specOp
+        ? [buildOperation(spec, path, method, specOp, pathParameters)]
+        : [];
     });
   });
 
@@ -496,18 +530,38 @@ export const getSpecOperation = (
   ];
 
 /**
- * An operation's resolved parameters indexed by name.
+ * An operation's resolved parameters indexed by name, including any path-level
+ * parameters inherited from the containing path item (operation-level
+ * parameters take precedence when both declare the same name).
  */
 export const getSpecParametersByName = (
   spec: Spec,
   specOp: OpenAPIV3.OperationObject | undefined,
+  pathParameters: (
+    | OpenAPIV3.ParameterObject
+    | OpenAPIV3.ReferenceObject
+  )[] = [],
 ): { [name: string]: OpenAPIV3.ParameterObject } =>
   Object.fromEntries(
-    (specOp?.parameters ?? []).map((p) => {
+    [...pathParameters, ...(specOp?.parameters ?? [])].map((p) => {
       const param = resolveIfRef(spec, p);
       return [param.name, param];
     }),
   );
+
+/**
+ * The path-level parameters declared on the path item containing an operation.
+ */
+export const getSpecPathParameters = (
+  spec: Spec,
+  op: Operation,
+): (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] => {
+  const pathItem = resolveIfRef<OpenAPIV3.PathItemObject | undefined>(
+    spec,
+    spec.paths?.[op.path],
+  );
+  return pathItem?.parameters ?? [];
+};
 
 /**
  * The member sub-schemas of a composite (allOf/anyOf/oneOf) schema, in order.

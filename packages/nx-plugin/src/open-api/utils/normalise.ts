@@ -281,6 +281,43 @@ const rewriteConstToEnum = (spec: Spec): Spec =>
   });
 
 /**
+ * Rewrites an OpenAPI 3.1 multi-type schema (`type: ['integer', 'string']`)
+ * into the equivalent `anyOf` of single-type schemas, dropping `null` from the
+ * list and marking the schema nullable instead. This lets the parser render a
+ * proper union rather than collapsing to the first declared type.
+ */
+const rewriteMultiTypeToAnyOf = (spec: Spec): Spec =>
+  cloneDeepWith(spec, (v) => {
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Array.isArray(v.type) &&
+      !('anyOf' in v) &&
+      !('oneOf' in v) &&
+      !('allOf' in v) &&
+      !('enum' in v)
+    ) {
+      const { type, nullable, ...rest } = v;
+      const nonNull = (type as string[]).filter((t) => t !== 'null');
+      const isNullable = nullable === true || nonNull.length !== type.length;
+      // A single non-null type is not a union; keep it as a plain typed schema.
+      if (nonNull.length <= 1) {
+        return cloneDeepWith({
+          ...rest,
+          ...(nonNull.length === 1 ? { type: nonNull[0] } : {}),
+          ...(isNullable ? { nullable: true } : {}),
+        });
+      }
+      return cloneDeepWith({
+        ...rest,
+        anyOf: nonNull.map((t) => ({ type: t })),
+        ...(isNullable ? { nullable: true } : {}),
+      });
+    }
+  });
+
+/**
  * In order to ensure we generate models consistently whether or not users used refs or inline schemas,
  * we hoist any inline refs to non-primitives
  */
@@ -289,6 +326,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   let spec = cloneDeepWith(inSpec);
 
   spec = rewriteConstToEnum(spec);
+  spec = rewriteMultiTypeToAnyOf(spec);
 
   // Ensure spec has schemas set
   if (!spec?.components?.schemas) {
