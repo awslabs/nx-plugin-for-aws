@@ -214,6 +214,78 @@ describe('openApiTsClientGenerator - regressions', () => {
     expect(types).not.toMatch(/limit\??: string;/);
   });
 
+  // ---- E. nested-array marshalling (noImplicitAny) -----------------------
+
+  it('compiles nested arrays of dates/models (annotates inner map params)', async () => {
+    // The nested `.map()` marshalling helpers used to leave the inner lambda
+    // parameter untyped, tripping noImplicitAny for arrays-of-arrays whose leaf
+    // needs conversion (dates, models, primitive unions).
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/r': {
+          post: {
+            operationId: 'postNested',
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Nested' },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Nested' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Leaf: {
+            type: 'object',
+            properties: { id: { type: 'string' } },
+          },
+          Nested: {
+            type: 'object',
+            properties: {
+              dates2d: {
+                type: 'array',
+                items: {
+                  type: 'array',
+                  items: { type: 'string', format: 'date-time' },
+                },
+              },
+              models2d: {
+                type: 'array',
+                items: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/Leaf' },
+                },
+              },
+              unions2d: {
+                type: 'array',
+                items: {
+                  type: 'array',
+                  items: { type: ['integer', 'string'] },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    // Must compile under strict/noImplicitAny (the assertion is in generate()).
+    await generate(spec);
+  });
+
   // ---- D. requestBody description ----------------------------------------
 
   it('renders requestBody.description as the body parameter doc comment', async () => {
