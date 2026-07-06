@@ -1,0 +1,50 @@
+import { DockerImage } from "aws-cdk-lib";
+import { Code, LayerVersion } from "aws-cdk-lib/aws-lambda";
+import { execSync } from "child_process";
+import { Construct } from "constructs";
+
+const RDS_CA_BUNDLE_URL =
+  "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem";
+
+/**
+ * Lambda Layer containing the Amazon RDS CA bundle (global-bundle.pem).
+ *
+ * Mount this layer on any Lambda that connects directly to an RDS cluster
+ * (i.e. without an RDS Proxy) and pass `/opt/global-bundle.pem` as the
+ * CA certificate path.
+ */
+export class RdsCaLayer extends Construct {
+  public readonly layer: LayerVersion;
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    this.layer = new LayerVersion(this, "Layer", {
+      code: Code.fromAsset(__dirname, {
+        bundling: {
+          local: {
+            tryBundle(outputDir: string): boolean {
+              try {
+                execSync(
+                  `curl -fsSL "${RDS_CA_BUNDLE_URL}" -o "${outputDir}/global-bundle.pem"`,
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          },
+          image: DockerImage.fromRegistry(
+            "public.ecr.aws/lambda/python:3.14",
+          ),
+          command: [
+            "bash",
+            "-c",
+            `curl -fsSL "${RDS_CA_BUNDLE_URL}" -o /asset-output/global-bundle.pem`,
+          ],
+        },
+      }),
+      description: "Amazon RDS CA bundle for SSL certificate verification",
+    });
+  }
+}

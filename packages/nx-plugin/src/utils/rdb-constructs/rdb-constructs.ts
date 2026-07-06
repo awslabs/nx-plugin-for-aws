@@ -124,6 +124,17 @@ export const addRdbCdkConstructs = async (
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
       'src',
+      'core',
+      'index.ts',
+    ),
+    './rdb/rds-ca-layer.js',
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
       'app',
       'dbs',
       'index.ts',
