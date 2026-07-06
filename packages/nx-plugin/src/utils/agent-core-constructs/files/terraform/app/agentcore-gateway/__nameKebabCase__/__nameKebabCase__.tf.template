@@ -36,7 +36,7 @@ variable "tool_dependencies" {
 }
 
 variable "enable_waf" {
-  description = "Whether to create an AWS WAFv2 web ACL with the default managed rule groups (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet) and associate it with the gateway. AWS WAF inspects every inbound request before it reaches a target. The web ACL is REGIONAL and created in the gateway's region, as required for AgentCore Gateway associations."
+  description = "Associate a regional WAFv2 web ACL (default AWS managed rule groups) with the gateway to inspect inbound requests."
   type        = bool
   default     = true
 }
@@ -147,10 +147,8 @@ resource "aws_bedrockagentcore_policy_engine" "this" {
 <%_ } _%>
 
 resource "aws_bedrockagentcore_gateway" "this" {
-  # AgentCore appends an 11-character suffix to the gateway name to form the
-  # gateway id, which must not exceed 50 characters. With the "-<8 hex>"
-  # suffix below, cap the name at 39 characters (39 + 11 = 50) by truncating
-  # the class-name prefix to 30 characters.
+  # Cap the name so the 11-char service suffix keeps the gateway id within its
+  # 50-char limit (30 prefix + "-<8 hex>" + 11 = 50).
   name        = "${substr("<%- nameClassName %>", 0, 30)}-${random_id.unique_suffix.hex}"
   description = "AgentCore Gateway for <%- nameClassName %>"
   role_arn    = aws_iam_role.gateway_role.arn
@@ -175,11 +173,8 @@ resource "aws_bedrockagentcore_gateway" "this" {
 <%_ } _%>
 }
 
-# AWS WAFv2 protection for the gateway. AWS WAF inspects every inbound request
-# inline before it reaches a target. AgentCore Gateway requires a REGIONAL web
-# ACL in the gateway's region; CloudFront (global) web ACLs are not supported.
-# The failure mode (behaviour when AWS WAF cannot be evaluated) defaults to the
-# service's security-first FAIL_CLOSE and is a control-plane-only setting.
+# WAFv2 protection for the gateway. AgentCore Gateway requires a REGIONAL web
+# ACL; CloudFront (global) is not supported.
 resource "aws_wafv2_web_acl" "gateway_waf" {
   #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.gateway_waf_logging; Checkov does not resolve the separate resource
   count = var.enable_waf ? 1 : 0
@@ -262,8 +257,7 @@ resource "aws_wafv2_web_acl_association" "gateway_waf" {
   web_acl_arn  = aws_wafv2_web_acl.gateway_waf[0].arn
 }
 
-# CloudWatch Log Group for WAF request logs. Name must start with
-# `aws-waf-logs-`.
+# WAF request logs. WAFv2 requires the `aws-waf-logs-` name prefix.
 resource "aws_cloudwatch_log_group" "gateway_waf_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to one year which is sufficient for WAF logs

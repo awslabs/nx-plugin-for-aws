@@ -28,15 +28,8 @@ export interface AgentCoreGatewayProps {
    */
   readonly cedarPolicyVariables?: Record<string, string>;
   /**
-   * Whether to create an AWS WAFv2 web ACL with the default managed rule
-   * groups (`AWSManagedRulesCommonRuleSet` and
-   * `AWSManagedRulesKnownBadInputsRuleSet`) and associate it with the
-   * gateway. AWS WAF inspects every inbound request before it reaches a
-   * target, protecting the gateway from web exploits, bot traffic, and
-   * volumetric attacks.
-   *
-   * The web ACL is `REGIONAL` and created in the gateway's region, as
-   * required for AgentCore Gateway associations.
+   * Associate a regional WAFv2 web ACL (default AWS managed rule groups) with
+   * the gateway to inspect inbound requests.
    *
    * @default true
    */
@@ -60,10 +53,8 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
     super(scope, id);
 
     this.gateway = new agentcore.Gateway(this, 'Gateway', {
-      // AgentCore appends an 11-character suffix to the gateway name to form
-      // the gateway id, which must not exceed 50 characters. The Gateway L2
-      // otherwise defaults the name to a 48-character generated string, so the
-      // id overflows. Cap the name at 39 characters (39 + 11 = 50) instead.
+      // Cap at 39 chars so the 11-char service suffix keeps the gateway id
+      // within its 50-char limit.
       gatewayName: cdk.Names.uniqueResourceName(this, { maxLength: 39 }),
       protocolConfiguration: new agentcore.McpProtocolConfiguration({
         searchType: agentcore.McpGatewaySearchType.SEMANTIC,
@@ -160,21 +151,15 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
 
   /**
    * Create a regional WAFv2 web ACL with the default AWS managed rule groups,
-   * associate it with the gateway, and log blocked/counted requests to
-   * CloudWatch. AWS WAF evaluates every inbound request inline before it
-   * reaches a target; when no web ACL is associated there is zero overhead.
-   *
-   * The failure mode (how the gateway behaves when AWS WAF cannot be
-   * evaluated) defaults to the service's security-first `FAIL_CLOSE`. It is a
-   * control-plane-only setting, not exposed through CloudFormation.
+   * associate it with the gateway, and log requests to CloudWatch.
    */
   private createWebAcl(): wafv2.CfnWebACL {
     const metricPrefix = cdk.Names.uniqueResourceName(this, { maxLength: 40 });
 
     const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
       defaultAction: { allow: {} },
-      // AgentCore Gateway requires a REGIONAL web ACL in the gateway's region;
-      // CloudFront (global) web ACLs are not supported.
+      // AgentCore Gateway requires a REGIONAL web ACL; CloudFront (global) is
+      // not supported.
       scope: 'REGIONAL',
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
@@ -234,8 +219,7 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
       webAclArn: webAcl.attrArn,
     });
 
-    // Send WAF request logs to CloudWatch. The log group name must start with
-    // `aws-waf-logs-` to satisfy the WAFv2 logging destination requirement.
+    // WAFv2 logging destination requires the `aws-waf-logs-` name prefix.
     const logsKey = new kms.Key(this, 'WebAclLogsKey', {
       enableKeyRotation: true,
     });
