@@ -176,11 +176,7 @@ export const presetGenerator = async (
     !process.env.VITEST &&
     !process.env.CI &&
     process.env.NX_DRY_RUN !== 'true' &&
-    process.env.NX_INTERACTIVE !== 'false' &&
-    // `create-nx-workspace` runs the preset via `exec`, giving it a piped
-    // stdin with no data — prompting there would hang. Only prompt with a real
-    // terminal (e.g. running the preset directly via `nx generate`).
-    process.stdin.isTTY
+    process.env.NX_INTERACTIVE !== 'false'
   ) {
     const { engagementId } = await enquirer.prompt<{ engagementId?: string }>([
       {
