@@ -87,6 +87,15 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
 const isCompositeSchema = (schema: OpenAPIV3.SchemaObject) =>
   !!schema.allOf || !!schema.anyOf || !!schema.oneOf;
 
+/**
+ * The media type whose schema is hoisted for a request/response: prefer
+ * `application/json`, falling back to any `+json` vendored type (e.g.
+ * `application/problem+json`).
+ */
+const preferredJsonMediaType = (mediaTypes: string[]): string | undefined =>
+  mediaTypes.find((mediaType) => mediaType === 'application/json') ??
+  mediaTypes.find((mediaType) => mediaType.split(';')[0].endsWith('+json'));
+
 const hasSubSchemasToVisit = (
   schema?: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
 ): schema is OpenAPIV3.SchemaObject =>
@@ -275,8 +284,8 @@ const hoistInlineObjectSubSchemas = (
  * parser understands the enum shape, whereas the const shape would synthesise
  * phantom named references.
  */
-const rewriteConstToEnum = (spec: Spec): Spec =>
-  cloneDeepWith(spec, (v) => {
+const rewriteConstToEnum = (spec: Spec): Spec => {
+  const rewrite = (v: any): any => {
     if (
       v &&
       typeof v === 'object' &&
@@ -285,9 +294,13 @@ const rewriteConstToEnum = (spec: Spec): Spec =>
       !('enum' in v)
     ) {
       const { const: constValue, ...rest } = v;
-      return cloneDeepWith({ ...rest, enum: [constValue] });
+      // Recurse with the same rewrite so consts nested within a rewritten
+      // schema are also rewritten.
+      return cloneDeepWith({ ...rest, enum: [constValue] }, rewrite);
     }
-  });
+  };
+  return cloneDeepWith(spec, rewrite);
+};
 
 /**
  * Rewrites a composite schema with sibling `properties`/`required` (a valid
@@ -331,8 +344,8 @@ const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
  * list and marking the schema nullable instead. This lets the parser render a
  * proper union rather than collapsing to the first declared type.
  */
-const rewriteMultiTypeToAnyOf = (spec: Spec): Spec =>
-  cloneDeepWith(spec, (v) => {
+const rewriteMultiTypeToAnyOf = (spec: Spec): Spec => {
+  const rewrite = (v: any): any => {
     if (
       v &&
       typeof v === 'object' &&
@@ -346,21 +359,50 @@ const rewriteMultiTypeToAnyOf = (spec: Spec): Spec =>
       const { type, nullable, ...rest } = v;
       const nonNull = (type as string[]).filter((t) => t !== 'null');
       const isNullable = nullable === true || nonNull.length !== type.length;
+      // Recurse with the same rewrite so multi-type schemas nested within a
+      // rewritten schema (e.g. the items of a nullable array) are also
+      // rewritten.
       // A single non-null type is not a union; keep it as a plain typed schema.
       if (nonNull.length <= 1) {
-        return cloneDeepWith({
-          ...rest,
-          ...(nonNull.length === 1 ? { type: nonNull[0] } : {}),
-          ...(isNullable ? { nullable: true } : {}),
-        });
+        return cloneDeepWith(
+          {
+            ...rest,
+            ...(nonNull.length === 1 ? { type: nonNull[0] } : {}),
+            ...(isNullable ? { nullable: true } : {}),
+          },
+          rewrite,
+        );
       }
-      return cloneDeepWith({
+      return cloneDeepWith(
+        {
+          ...rest,
+          anyOf: nonNull.map((t) => ({ type: t })),
+          ...(isNullable ? { nullable: true } : {}),
+        },
+        rewrite,
+      );
+    }
+  };
+  return cloneDeepWith(spec, rewrite);
+};
+
+/**
+ * Inlines `$ref` path items so that every operation is visited by the
+ * normalisation below (operationId assignment, schema hoisting). Each path
+ * gets its own copy, so paths sharing a path item are normalised
+ * independently.
+ */
+const inlinePathItemRefs = (spec: Spec): void => {
+  Object.entries(spec.paths ?? {}).forEach(([path, pathItem]) => {
+    if (isRef(pathItem)) {
+      const { $ref, ...rest } = pathItem;
+      spec.paths![path] = {
+        ...structuredClone(resolveRef(spec, $ref)),
         ...rest,
-        anyOf: nonNull.map((t) => ({ type: t })),
-        ...(isNullable ? { nullable: true } : {}),
-      });
+      };
     }
   });
+};
 
 /**
  * In order to ensure we generate models consistently whether or not users used refs or inline schemas,
@@ -370,6 +412,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   // Clone the spec so we're free to mutate it
   let spec = cloneDeepWith(inSpec);
 
+  inlinePathItemRefs(spec);
   spec = rewriteConstToEnum(spec);
   spec = rewriteMultiTypeToAnyOf(spec);
   spec = rewriteCompositeSiblingProperties(spec);
@@ -460,8 +503,12 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
         if ('responses' in operation) {
           Object.entries(operation.responses ?? {}).forEach(([code, res]) => {
             const response = resolveIfRef(spec, res);
-            const jsonResponseSchema =
-              response?.content?.['application/json']?.schema;
+            const jsonMediaType = preferredJsonMediaType(
+              Object.keys(response?.content ?? {}),
+            );
+            const jsonResponseSchema = jsonMediaType
+              ? response!.content![jsonMediaType].schema
+              : undefined;
             if (
               jsonResponseSchema &&
               !isRef(jsonResponseSchema) &&
@@ -472,7 +519,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             ) {
               const schemaName = `${upperFirst(deduplicatedOpId)}${code}Response`;
               spec.components!.schemas![schemaName] = jsonResponseSchema;
-              response!.content!['application/json'].schema = {
+              response!.content![jsonMediaType!].schema = {
                 $ref: `#/components/schemas/${schemaName}`,
               };
             }
@@ -502,8 +549,12 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
         }
         if ('requestBody' in operation) {
           const requestBody = resolveIfRef(spec, operation.requestBody);
-          const jsonRequestSchema =
-            requestBody?.content?.['application/json']?.schema;
+          const jsonMediaType = preferredJsonMediaType(
+            Object.keys(requestBody?.content ?? {}),
+          );
+          const jsonRequestSchema = jsonMediaType
+            ? requestBody!.content![jsonMediaType].schema
+            : undefined;
           if (
             jsonRequestSchema &&
             !isRef(jsonRequestSchema) &&
@@ -513,7 +564,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
           ) {
             const schemaName = `${upperFirst(deduplicatedOpId)}RequestContent`;
             spec.components!.schemas![schemaName] = jsonRequestSchema;
-            requestBody!.content!['application/json'].schema = {
+            requestBody!.content![jsonMediaType!].schema = {
               $ref: `#/components/schemas/${schemaName}`,
             };
           }

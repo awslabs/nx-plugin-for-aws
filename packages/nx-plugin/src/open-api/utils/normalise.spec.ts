@@ -331,6 +331,133 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     });
   });
 
+  it('should inline $ref path items', () => {
+    const spec: Spec = {
+      paths: {
+        '/a': { $ref: '#/components/pathItems/Shared' },
+        '/b': { $ref: '#/components/pathItems/Shared' },
+      },
+      components: {
+        pathItems: {
+          Shared: {
+            get: {
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+        schemas: {},
+      },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    expect((result.paths?.['/a'] as any).get).toBeDefined();
+    expect((result.paths?.['/b'] as any).get).toBeDefined();
+    expect((result.paths?.['/a'] as any).$ref).toBeUndefined();
+    // Each path gets its own copy, so each operation gets its own
+    // (path-derived) operationId
+    expect((result.paths?.['/a'] as any).get.operationId).toBe('getA');
+    expect((result.paths?.['/b'] as any).get.operationId).toBe('getB');
+  });
+
+  it('should hoist inline schemas for vendored +json media types', () => {
+    const spec: Spec = {
+      paths: {
+        '/test': {
+          post: {
+            operationId: 'testPost',
+            requestBody: {
+              content: {
+                'application/vnd.api+json': {
+                  schema: {
+                    type: 'object',
+                    properties: { name: { type: 'string' } },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/problem+json': {
+                    schema: {
+                      type: 'object',
+                      properties: { detail: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    expect(
+      (result.paths?.['/test'].post.requestBody as any).content[
+        'application/vnd.api+json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/TestPostRequestContent' });
+    expect(
+      (result.paths?.['/test'].post.responses['200'] as any).content[
+        'application/problem+json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/TestPost200Response' });
+  });
+
+  it('should rewrite multi-type schemas nested inside rewritten schemas', () => {
+    const spec: Spec = {
+      components: {
+        schemas: {
+          Thing: {
+            type: ['array', 'null'],
+            items: { type: ['integer', 'string'] },
+          },
+        },
+      },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    const thing = result.components?.schemas?.Thing as any;
+    expect(thing.type).toEqual('array');
+    expect(thing.nullable).toBe(true);
+    // The rewritten multi-type items are a composite, so they are hoisted
+    expect(thing.items).toEqual({ $ref: '#/components/schemas/ThingItem' });
+    expect(result.components?.schemas?.ThingItem).toMatchObject({
+      anyOf: [{ type: 'integer' }, { type: 'string' }],
+    });
+  });
+
+  it('should rewrite const schemas nested inside rewritten schemas', () => {
+    const spec: Spec = {
+      components: {
+        schemas: {
+          Thing: {
+            type: ['object', 'null'],
+            properties: {
+              kind: { type: 'string', const: 'fixed' },
+            },
+          },
+        },
+      },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    const thing = result.components?.schemas?.Thing as any;
+    expect(thing.nullable).toBe(true);
+    // The const property is rewritten to an enum (and hoisted as one)
+    expect(result.components?.schemas?.ThingKind).toMatchObject({
+      type: 'string',
+      enum: ['fixed'],
+    });
+  });
+
   it('should preserve schema titles when hoisting', () => {
     const spec: Spec = {
       components: {

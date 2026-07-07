@@ -363,6 +363,29 @@ describe('openapi codegen data utils', () => {
       expect(operation.name).toBe('getPets');
     });
 
+    it('should treat a requestBody with an empty content map as no body', () => {
+      const specWithEmptyContent: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/noop': {
+            post: {
+              operationId: 'doNoop',
+              requestBody: { content: {} },
+              responses: {
+                '200': { description: 'ok' },
+              },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(specWithEmptyContent);
+
+      const operation = data.allOperations[0];
+      expect(operation.parametersBody).toBeNull();
+      expect(operation.parameters).toHaveLength(0);
+    });
+
     it('should handle vendor extensions', () => {
       const specWithExtensions: Spec = {
         ...sampleSpec,

@@ -362,7 +362,9 @@ const buildRequestBody = (
     spec,
     specOp.requestBody,
   );
-  if (!requestBody?.content) return null;
+  // An empty content map declares no acceptable media types, ie no body.
+  if (!requestBody?.content || Object.keys(requestBody.content).length === 0)
+    return null;
 
   const mediaType = preferredMediaType(requestBody.content);
   const base = buildInlineModel(

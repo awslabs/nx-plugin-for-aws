@@ -26,6 +26,11 @@ import {
  *     the type and the runtime marshalling
  *  E. inline (non-$ref) streaming `itemSchema` must produce a valid item type
  *  F. enum literal values containing quotes/newlines/backslashes must escape
+ *  G. `$ref` path items must be resolved (including when shared by paths)
+ *  H. a requestBody with an empty `content` map declares no body
+ *  I. vendored `+json` media types must hoist/marshal like application/json
+ *  J. schemas nested inside a rewritten schema (multi-type array items,
+ *     `const` in a nullable object, allOf siblings) must also be rewritten
  */
 describe('openApiTsClientGenerator - edge cases', () => {
   let tree: Tree;
@@ -397,5 +402,244 @@ describe('openApiTsClientGenerator - edge cases', () => {
     });
     const response = await callGeneratedClient(client, mockFetch, 'getTricky');
     expect(response).toEqual("don't");
+  });
+
+  // ---- G. $ref path items ---------------------------------------------------
+
+  it('resolves $ref path items, sharing one path item across paths', async () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/things': { $ref: '#/components/pathItems/ThingPath' },
+        '/other-things': { $ref: '#/components/pathItems/ThingPath' },
+      },
+      components: {
+        pathItems: {
+          ThingPath: {
+            get: {
+              responses: {
+                '200': {
+                  description: 'ok',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'object',
+                        properties: {
+                          at: { type: 'string', format: 'date-time' },
+                        },
+                        required: ['at'],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        schemas: {},
+      },
+    } as unknown as Spec;
+    const { types, client } = await generate(spec);
+
+    // Both paths get an operation, distinctly named, with the date revived.
+    expect(client).toContain("this.$url('/things'");
+    expect(client).toContain("this.$url('/other-things'");
+    expect(types).toContain('GetThings200Response');
+    expect(types).toContain('GetOtherThings200Response');
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({ at: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'getThings');
+    expect(response).toEqual({ at: new Date('2024-01-02T03:04:05.000Z') });
+  });
+
+  // ---- H. empty request body content ---------------------------------------
+
+  it('treats a requestBody with an empty content map as no body', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/noop': {
+          post: {
+            operationId: 'doNoop',
+            requestBody: { content: {} },
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    // No body parameter means no Content-Type header and an undefined body.
+    expect(client).not.toContain("headerParameters['Content-Type']");
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, mockFetch, 'doNoop');
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/noop`,
+      expect.objectContaining({ method: 'POST', body: undefined }),
+    );
+  });
+
+  // ---- I. vendored +json media types ----------------------------------------
+
+  it('hoists and marshals vendored +json request/response schemas', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/v': {
+          post: {
+            operationId: 'postV',
+            requestBody: {
+              required: true,
+              content: {
+                'application/vnd.api+json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      at: { type: 'string', format: 'date-time' },
+                    },
+                    required: ['at'],
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/vnd.api+json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        at: { type: 'string', format: 'date-time' },
+                      },
+                      required: ['at'],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { types, client } = await generate(spec);
+
+    // The inline schemas are hoisted to named models with Date properties.
+    expect(types).toContain('PostVRequestContent');
+    expect(types).toContain('PostV200Response');
+    expect(types).toMatch(/at: Date;/);
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({ at: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'postV', {
+      at: new Date('2024-01-02T03:04:05.000Z'),
+    });
+    expect(response).toEqual({ at: new Date('2024-01-02T03:04:05.000Z') });
+    const [, request] = mockFetch.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual({
+      at: '2024-01-02T03:04:05.000Z',
+    });
+    expect(request.headers).toContainEqual([
+      'Content-Type',
+      'application/vnd.api+json',
+    ]);
+  });
+
+  // ---- J. rewrites nested inside rewritten schemas ---------------------------
+
+  it('renders a multi-type union for items of a nullable (multi-type) array', async () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/r': {
+          get: {
+            operationId: 'getThing',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Thing' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Thing: {
+            type: 'object',
+            properties: {
+              data: {
+                type: ['array', 'null'],
+                items: { type: ['integer', 'string'] },
+              },
+            },
+          },
+        },
+      },
+    } as unknown as Spec;
+    const { types } = await generate(spec);
+
+    expect(types).toMatch(/number \| string/);
+  });
+
+  it('rewrites a const declared inside a nullable (multi-type) object', async () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/r': {
+          get: {
+            operationId: 'getThing',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Thing' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Thing: {
+            type: 'object',
+            properties: {
+              wrapper: {
+                type: ['object', 'null'],
+                properties: {
+                  kind: { type: 'string', const: 'fixed' },
+                },
+              },
+            },
+          },
+        },
+      },
+    } as unknown as Spec;
+    const { types } = await generate(spec);
+
+    expect(types).toContain("'fixed'");
   });
 });
