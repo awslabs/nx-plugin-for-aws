@@ -55,6 +55,8 @@ type HttpMethod = (typeof HTTP_METHODS)[number];
 
 type SchemaOrRef = Schema | OpenAPIV3.ReferenceObject;
 
+type ParameterOrRef = OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject;
+
 const schemaType = (schema: Schema): string | string[] | undefined =>
   (schema as { type?: string | string[] }).type;
 
@@ -381,7 +383,7 @@ const buildRequestBody = (
 const buildParameters = (
   spec: Spec,
   specOp: OpenAPIV3.OperationObject,
-  pathParameters: (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] = [],
+  pathParameters: ParameterOrRef[] = [],
 ): Model[] => {
   const declared: Model[] = mergeParameters(spec, pathParameters, [
     ...(specOp.parameters ?? []),
@@ -417,13 +419,10 @@ const buildParameters = (
  */
 const mergeParameters = (
   spec: Spec,
-  pathParameters: (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[],
-  operationParameters: (
-    | OpenAPIV3.ParameterObject
-    | OpenAPIV3.ReferenceObject
-  )[],
-): (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] => {
-  const key = (p: OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject) => {
+  pathParameters: ParameterOrRef[],
+  operationParameters: ParameterOrRef[],
+): ParameterOrRef[] => {
+  const key = (p: ParameterOrRef) => {
     const param = resolveIfRef<OpenAPIV3.ParameterObject | undefined>(spec, p);
     return param ? `${param.in}:${param.name}` : null;
   };
@@ -472,7 +471,7 @@ const buildOperation = (
   path: string,
   method: string,
   specOp: OpenAPIV3.OperationObject,
-  pathParameters: (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] = [],
+  pathParameters: ParameterOrRef[] = [],
 ): Operation => {
   const parameters = buildParameters(spec, specOp, pathParameters);
   const responses = buildResponses(spec, specOp);
@@ -537,10 +536,7 @@ export const getSpecOperation = (
 export const getSpecParametersByName = (
   spec: Spec,
   specOp: OpenAPIV3.OperationObject | undefined,
-  pathParameters: (
-    | OpenAPIV3.ParameterObject
-    | OpenAPIV3.ReferenceObject
-  )[] = [],
+  pathParameters: ParameterOrRef[] = [],
 ): { [name: string]: OpenAPIV3.ParameterObject } =>
   Object.fromEntries(
     [...pathParameters, ...(specOp?.parameters ?? [])].map((p) => {
@@ -555,7 +551,7 @@ export const getSpecParametersByName = (
 export const getSpecPathParameters = (
   spec: Spec,
   op: Operation,
-): (OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject)[] => {
+): ParameterOrRef[] => {
   const pathItem = resolveIfRef<OpenAPIV3.PathItemObject | undefined>(
     spec,
     spec.paths?.[op.path],

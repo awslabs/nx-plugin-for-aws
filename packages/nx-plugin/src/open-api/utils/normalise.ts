@@ -5,7 +5,12 @@
 
 import cloneDeepWith from 'lodash.clonedeepwith';
 import type { OpenAPIV3 } from 'openapi-types';
-import { camelCase, pascalCase, toClassName, upperFirst } from '../../utils/names';
+import {
+  camelCase,
+  pascalCase,
+  toClassName,
+  upperFirst,
+} from '../../utils/names';
 import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
 import type { Spec } from './types';
 
@@ -128,7 +133,7 @@ const createUniqueModelName = (
   // the hoisted schema name matches what `toTypeScriptModelName`/`toClassName`
   // later derive — otherwise a part like `store_photos` yields a `Store_photos`
   // schema whose reference (`StorePhotos`) no longer resolves.
-  const candidateName = nameParts.map((part) => toClassName(part)).join('');
+  const candidateName = nameParts.map(toClassName).join('');
 
   const seenModelNameCount = seenModelNameCounts[candidateName];
 

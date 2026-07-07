@@ -48,15 +48,9 @@ export const toTypeScriptType = (property: Model): string => {
 };
 
 export const toTypeScriptName = (name: string): string => {
-  const camel = camelCase(name);
-  if (camel) {
-    return camel;
-  }
-  // Names made up entirely of non-identifier characters (e.g. "_") camelCase to
-  // an empty string; fall back to an underscore-escaped form so the emitted
-  // property is still a valid identifier.
-  const escaped = (name ?? '').replace(/[^a-zA-Z0-9]/g, '_');
-  return /^[0-9]/.test(escaped) ? `_${escaped}` : escaped || '_';
+  // A name of only non-identifier characters (e.g. "_") camelCases to an empty
+  // string; fall back to an underscore so the emitted property stays valid.
+  return camelCase(name) || (name ?? '').replace(/[^a-zA-Z0-9]/g, '_') || '_';
 };
 
 const TYPESCRIPT_RESERVED_MODEL_NAMES = new Set([
