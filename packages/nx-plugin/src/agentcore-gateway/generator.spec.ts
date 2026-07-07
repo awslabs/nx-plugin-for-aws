@@ -186,6 +186,25 @@ describe('agentcore-gateway generator', () => {
       ).toBe(true);
     });
 
+    it('lets callers pass props (e.g. enableWaf) through to the base construct', () => {
+      const app = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      // The construct accepts optional props and forwards them to `super`, so
+      // callers can `new MyGateway(this, 'MyGateway', { enableWaf: false })`
+      // without editing the generated construct.
+      expect(app).toContain('AgentCoreGatewayProps');
+      expect(app).toContain(
+        "export type MyGatewayProps = Omit<AgentCoreGatewayProps, 'cedarPolicyPath'>",
+      );
+      expect(app).toContain(
+        'constructor(scope: Construct, id: string, props?: MyGatewayProps)',
+      );
+      expect(app).toContain('...props,');
+    });
+
     it('wires the MCP-protocol Gateway with IAM inbound auth + ENFORCE policy engine', () => {
       const construct = tree
         .read(
@@ -308,7 +327,7 @@ describe('agentcore-gateway generator', () => {
       // id (max 50). The Gateway L2 otherwise defaults to a 48-char name, so
       // an explicit 39-char-capped name is required (39 + 11 = 50).
       expect(construct).toContain(
-        "gatewayName: cdk.Names.uniqueResourceName(this, { maxLength: 39 })",
+        'gatewayName: cdk.Names.uniqueResourceName(this, { maxLength: 39 })',
       );
     });
 
@@ -504,6 +523,23 @@ describe('agentcore-gateway generator', () => {
         .toString();
       expect(construct).not.toContain('cedarPolicyPath');
       expect(construct).toContain('extends AgentCoreGateway');
+    });
+
+    it('exposes the full base props (no cedarPolicyPath to omit)', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      // Without Cedar there is no internally-managed cedarPolicyPath, so props
+      // pass straight through as the base construct's props.
+      expect(construct).toContain(
+        'export type MyGatewayProps = AgentCoreGatewayProps',
+      );
+      expect(construct).toContain(
+        'constructor(scope: Construct, id: string, props?: MyGatewayProps)',
+      );
+      expect(construct).toContain('...props,');
     });
   });
 
