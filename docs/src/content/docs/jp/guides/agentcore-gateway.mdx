@@ -109,52 +109,6 @@ waf -> gateway
 gateway -> targets
 ```
 
-#### AWS WAF
-
-デフォルトでは、生成されたコンストラクトは[AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACLをGatewayに関連付けます。AWS WAFは、ターゲットに到達する_前_にすべてのインバウンドリクエストをインラインで検査し、Webエクスプロイト、ボットトラフィック、ボリューメトリック攻撃からGatewayを保護します。Web ACLは、AWSマネージドデフォルトルールセット（[`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs)および[`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)）を使用し、OWASP Top 10を含む一般的なWebエクスプロイトに対する保護を提供します。WAFリクエストログはCloudWatch Logsグループに書き込まれます。
-
-Web ACLは`REGIONAL`であり、AgentCore Gatewayの関連付けに必要なGatewayのリージョンに作成されます — CloudFront（グローバル）Web ACLはサポートされていません。
-
-:::caution[デフォルトからのSizeRestrictions_BODYの逸脱]
-`AWSManagedRulesCommonRuleSet`の`SizeRestrictions_BODY`ルールは、`Block`ではなく`Count`にオーバーライドされます。これは、ルールの8 KB制限が典型的なMCPツールペイロードには制限が厳しすぎるためです。オーバーサイズのリクエストは引き続きメトリクスとして記録されるため、監視できます。詳細については、[AWS WAFボディサイズ制限](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html)ガイドを参照してください。
-:::
-
-AWS WAFが到達不能またはタイムアウトした場合、Gatewayは**障害モード**を使用してリクエストをブロックするか許可するかを決定します。これはデフォルトでサービスのセキュリティ優先の`FAIL_CLOSE`（ブロック）になります。障害モードはコントロールプレーンのみの設定（[`UpdateGateway`](https://docs.aws.amazon.com/bedrock-agentcore-control/latest/APIReference/API_UpdateGateway.html) APIを介して構成）であり、CloudFormationまたはTerraformを通じて公開されていません。新しいAWS WAFルールを`Block`に切り替える前に`Count`モードでテストし、`AWS/Bedrock-AgentCore`名前空間の`WafBlocks`、`WafFailOpens`、および`WafFailCloses` CloudWatchメトリクスを監視してルールを調整することをお勧めします。
-
-生成されたGatewayコンストラクトを編集して、ルールを追加、削除、または調整できます（例えば、[レートベースルール](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html)や追加のマネージドルールグループを追加するなど）。
-
-<Infrastructure>
-<Fragment slot="cdk">
-オプトアウトするには（例えば、独自のWeb ACLをアタッチする場合）、生成されたGatewayコンストラクトの`super`呼び出しで`enableWaf`を`false`に設定します：
-
-```ts {6}
-export class MyGateway extends AgentCoreGateway {
-  public readonly gatewayName = 'my-gateway';
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      enableWaf: false,
-    });
-    // ...
-  }
-}
-```
-
-コンストラクトは、さらなる設定のために作成されたWeb ACLを`webAcl`として公開します。
-</Fragment>
-<Fragment slot="terraform">
-オプトアウトするには（例えば、独自のWeb ACLをアタッチする場合）、Gatewayモジュールで`enable_waf`を`false`に設定します：
-
-```hcl {2}
-module "my_gateway" {
-  enable_waf = false
-}
-```
-
-モジュールは、さらなる設定のために作成されたWeb ACL ARNを`waf_web_acl_arn`として出力します。
-</Fragment>
-</Infrastructure>
-
 ## ポリシーの記述
 
 <OptionFilter when={{ cedarPolicy: true }} description="Cedarポリシー — cedarPolicy: trueのみ">
@@ -311,6 +265,78 @@ forbid (
 <NxCommands commands={["dev <name>"]} />
 
 完全なローカル開発ストーリーについては、接続ガイドを参照してください。
+
+## AgentCore Gatewayのデプロイ
+
+AgentCore Gatewayジェネレーターは、選択した`iacProvider`に基づいてCDKまたはTerraformのインフラストラクチャコードを作成します。これを使用してGatewayをデプロイできます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+GatewayをデプロイするためのCDKコンストラクトは、`common/constructs`フォルダーにあります。これをCDKアプリケーションで使用できます。例えば：
+
+```ts {7} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyGateway(this, 'MyGateway');
+  }
+}
+```
+
+これにより、`AgentCore::Gateway`、そのCedar `PolicyEngine`、およびAWS WAF Web ACL（以下の[AWS WAF](#aws-waf)を参照）を含むGatewayインフラストラクチャがセットアップされます。MCPサーバーターゲットを`gateway.addMcpServer(...)`で登録します — <Link path="guides/connection/agentcore-gateway-mcp">MCPサーバー接続ガイド</Link>を参照してください。
+</Fragment>
+<Fragment slot="terraform">
+GatewayをデプロイするためのTerraformモジュールは、`common/terraform`フォルダーにあります。これをTerraform設定で使用できます。例えば：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+```
+
+これにより、`aws_bedrockagentcore_gateway`、そのCedarポリシーエンジン、およびAWS WAF Web ACL（以下の[AWS WAF](#aws-waf)を参照）を含むGatewayインフラストラクチャがセットアップされます。MCPサーバーターゲットを`aws_bedrockagentcore_gateway_target`リソースで登録します — <Link path="guides/connection/agentcore-gateway-mcp">MCPサーバー接続ガイド</Link>を参照してください。
+</Fragment>
+</Infrastructure>
+
+### AWS WAF
+
+デフォルトでは、生成されたコンストラクトは[AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACLをGatewayに関連付けます。AWS WAFは、ターゲットに到達する_前_にすべてのインバウンドリクエストをインラインで検査し、Webエクスプロイト、ボットトラフィック、ボリューメトリック攻撃からGatewayを保護します。Web ACLは、AWSマネージドデフォルトルールセット（[`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs)および[`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)）を使用し、OWASP Top 10を含む一般的なWebエクスプロイトに対する保護を提供します。WAFリクエストログはCloudWatch Logsグループに書き込まれます。
+
+Web ACLは`REGIONAL`であり、AgentCore Gatewayの関連付けに必要なGatewayのリージョンに作成されます。
+
+:::caution[デフォルトからのSizeRestrictions_BODYの逸脱]
+`AWSManagedRulesCommonRuleSet`の`SizeRestrictions_BODY`ルールは、`Block`ではなく`Count`にオーバーライドされます。これは、ルールの8 KB制限が典型的なMCPツールペイロードには制限が厳しすぎるためです。オーバーサイズのリクエストは引き続きメトリクスとして記録されるため、監視できます。詳細については、[AWS WAFボディサイズ制限](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html)ガイドを参照してください。
+:::
+
+生成されたGatewayコンストラクトを編集して、ルールを追加、削除、または調整できます（例えば、[レートベースルール](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html)や追加のマネージドルールグループを追加するなど）。
+
+<Infrastructure>
+<Fragment slot="cdk">
+オプトアウトするには（例えば、独自のWeb ACLをアタッチする場合）、Gatewayコンストラクトをインスタンス化する際に`enableWaf`を`false`に設定します：
+
+```ts {2}
+new MyGateway(this, 'MyGateway', {
+  enableWaf: false,
+});
+```
+
+コンストラクトは、さらなる設定のために作成されたWeb ACLを`webAcl`として公開します。
+</Fragment>
+<Fragment slot="terraform">
+オプトアウトするには（例えば、独自のWeb ACLをアタッチする場合）、Gatewayモジュールで`enable_waf`を`false`に設定します：
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+モジュールは、さらなる設定のために作成されたWeb ACL ARNを`waf_web_acl_arn`として出力します。
+</Fragment>
+</Infrastructure>
 
 ## 接続
 

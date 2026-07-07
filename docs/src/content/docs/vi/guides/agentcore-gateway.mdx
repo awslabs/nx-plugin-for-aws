@@ -109,52 +109,6 @@ waf -> gateway
 gateway -> targets
 ```
 
-#### AWS WAF
-
-Theo mặc định, construct được tạo ra liên kết một [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL với Gateway. AWS WAF kiểm tra mọi yêu cầu đầu vào inline _trước khi_ nó đến đích, bảo vệ Gateway của bạn khỏi các khai thác web, lưu lượng bot và các cuộc tấn công theo khối lượng. Web ACL sử dụng bộ quy tắc mặc định được quản lý bởi AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) và [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), cung cấp bảo vệ chống lại các khai thác web phổ biến bao gồm OWASP Top 10. Log yêu cầu WAF được ghi vào nhóm CloudWatch Logs.
-
-Web ACL là `REGIONAL` và được tạo trong vùng của Gateway, theo yêu cầu cho các liên kết AgentCore Gateway — Web ACL CloudFront (toàn cầu) không được hỗ trợ.
-
-:::caution[Sai lệch SizeRestrictions_BODY so với mặc định]
-Quy tắc `SizeRestrictions_BODY` từ `AWSManagedRulesCommonRuleSet` được ghi đè thành `Count` thay vì `Block`, vì giới hạn 8 KB của quy tắc quá hạn chế đối với các payload công cụ MCP điển hình. Các yêu cầu quá khổ vẫn sẽ được ghi lại dưới dạng số liệu để bạn có thể theo dõi chúng. Xem hướng dẫn [giới hạn kích thước body của AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) để biết thêm chi tiết.
-:::
-
-Nếu AWS WAF không thể truy cập hoặc hết thời gian chờ trong quá trình đánh giá, Gateway sử dụng **chế độ lỗi** của nó để quyết định chặn hay cho phép yêu cầu. Mặc định là `FAIL_CLOSE` (chặn) ưu tiên bảo mật của dịch vụ. Chế độ lỗi là cài đặt chỉ dành cho control-plane (được cấu hình thông qua API [`UpdateGateway`](https://docs.aws.amazon.com/bedrock-agentcore-control/latest/APIReference/API_UpdateGateway.html)) và không được hiển thị thông qua CloudFormation hoặc Terraform. Chúng tôi khuyên bạn nên thử nghiệm các quy tắc AWS WAF mới ở chế độ `Count` trước khi chuyển chúng sang `Block`, và theo dõi các số liệu CloudWatch `WafBlocks`, `WafFailOpens` và `WafFailCloses` trong namespace `AWS/Bedrock-AgentCore` để điều chỉnh các quy tắc của bạn.
-
-Bạn có thể chỉnh sửa construct Gateway được tạo để thêm, xóa hoặc điều chỉnh các quy tắc (ví dụ: để thêm [quy tắc dựa trên tốc độ](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) hoặc các nhóm quy tắc được quản lý bổ sung).
-
-<Infrastructure>
-<Fragment slot="cdk">
-Để từ chối (ví dụ: để đính kèm Web ACL của riêng bạn), đặt `enableWaf` thành `false` trên lời gọi `super` trong construct Gateway được tạo của bạn:
-
-```ts {6}
-export class MyGateway extends AgentCoreGateway {
-  public readonly gatewayName = 'my-gateway';
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      enableWaf: false,
-    });
-    // ...
-  }
-}
-```
-
-Construct hiển thị Web ACL đã tạo dưới dạng `webAcl` để cấu hình thêm.
-</Fragment>
-<Fragment slot="terraform">
-Để từ chối (ví dụ: để đính kèm Web ACL của riêng bạn), đặt `enable_waf` thành `false` trên module Gateway:
-
-```hcl {2}
-module "my_gateway" {
-  enable_waf = false
-}
-```
-
-Module xuất ARN của Web ACL đã tạo dưới dạng `waf_web_acl_arn` để cấu hình thêm.
-</Fragment>
-</Infrastructure>
-
 ## Viết chính sách
 
 <OptionFilter when={{ cedarPolicy: true }} description="Chính sách Cedar — chỉ khi cedarPolicy: true">
@@ -311,6 +265,78 @@ Generator thêm target `dev` vào dự án Gateway, chạy `local-dev.ts`: một
 <NxCommands commands={["dev <name>"]} />
 
 Xem hướng dẫn kết nối để biết toàn bộ câu chuyện phát triển cục bộ.
+
+## Triển khai AgentCore Gateway của bạn
+
+Generator AgentCore Gateway tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai Gateway của mình.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct để triển khai Gateway của bạn nằm trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong một ứng dụng CDK, ví dụ:
+
+```ts {7} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyGateway(this, 'MyGateway');
+  }
+}
+```
+
+Điều này thiết lập cơ sở hạ tầng Gateway của bạn, bao gồm `AgentCore::Gateway`, `PolicyEngine` Cedar của nó, và AWS WAF Web ACL (xem [AWS WAF](#aws-waf) bên dưới). Đăng ký các target MCP server với `gateway.addMcpServer(...)` — xem <Link path="guides/connection/agentcore-gateway-mcp">hướng dẫn kết nối MCP server</Link>.
+</Fragment>
+<Fragment slot="terraform">
+Terraform module để triển khai Gateway của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng nó trong cấu hình Terraform, ví dụ:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+```
+
+Điều này thiết lập cơ sở hạ tầng Gateway của bạn, bao gồm `aws_bedrockagentcore_gateway`, policy engine Cedar của nó, và AWS WAF Web ACL (xem [AWS WAF](#aws-waf) bên dưới). Đăng ký các target MCP server với tài nguyên `aws_bedrockagentcore_gateway_target` — xem <Link path="guides/connection/agentcore-gateway-mcp">hướng dẫn kết nối MCP server</Link>.
+</Fragment>
+</Infrastructure>
+
+### AWS WAF
+
+Theo mặc định, construct được tạo ra liên kết một [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL với Gateway. AWS WAF kiểm tra mọi yêu cầu đầu vào inline _trước khi_ nó đến đích, bảo vệ Gateway của bạn khỏi các khai thác web, lưu lượng bot và các cuộc tấn công theo khối lượng. Web ACL sử dụng bộ quy tắc mặc định được quản lý bởi AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) và [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), cung cấp bảo vệ chống lại các khai thác web phổ biến bao gồm OWASP Top 10. Log yêu cầu WAF được ghi vào nhóm CloudWatch Logs.
+
+Web ACL là `REGIONAL` và được tạo trong vùng của Gateway, theo yêu cầu cho các liên kết AgentCore Gateway.
+
+:::caution[Sai lệch SizeRestrictions_BODY so với mặc định]
+Quy tắc `SizeRestrictions_BODY` từ `AWSManagedRulesCommonRuleSet` được ghi đè thành `Count` thay vì `Block`, vì giới hạn 8 KB của quy tắc quá hạn chế đối với các payload công cụ MCP điển hình. Các yêu cầu quá khổ vẫn sẽ được ghi lại dưới dạng số liệu để bạn có thể theo dõi chúng. Xem hướng dẫn [giới hạn kích thước body của AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) để biết thêm chi tiết.
+:::
+
+Bạn có thể chỉnh sửa construct Gateway được tạo để thêm, xóa hoặc điều chỉnh các quy tắc (ví dụ: để thêm [quy tắc dựa trên tốc độ](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) hoặc các nhóm quy tắc được quản lý bổ sung).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Để từ chối (ví dụ: để đính kèm Web ACL của riêng bạn), đặt `enableWaf` thành `false` khi bạn khởi tạo construct Gateway:
+
+```ts {2}
+new MyGateway(this, 'MyGateway', {
+  enableWaf: false,
+});
+```
+
+Construct hiển thị Web ACL đã tạo dưới dạng `webAcl` để cấu hình thêm.
+</Fragment>
+<Fragment slot="terraform">
+Để từ chối (ví dụ: để đính kèm Web ACL của riêng bạn), đặt `enable_waf` thành `false` trên module Gateway:
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+Module xuất ARN của Web ACL đã tạo dưới dạng `waf_web_acl_arn` để cấu hình thêm.
+</Fragment>
+</Infrastructure>
 
 ## Kết nối
 
