@@ -184,26 +184,29 @@ describe('smoke test - create-workspace', () => {
     let projectRoot: string;
     let gitConfigDir: string;
 
-    beforeEach(async () => {
-      if (existsSync(targetDir)) {
-        rmSync(targetDir, { force: true, recursive: true });
-      }
-      ensureDirSync(targetDir);
+    beforeEach(
+      async () => {
+        if (existsSync(targetDir)) {
+          rmSync(targetDir, { force: true, recursive: true });
+        }
+        ensureDirSync(targetDir);
 
-      // Isolate git config so the preset detects an "Amazonian" email without
-      // touching the user's real git config.
-      gitConfigDir = mkdtempSync(join(tmpdir(), 'nx-e2e-gitconfig-'));
-      writeFileSync(
-        join(gitConfigDir, 'global'),
-        '[user]\n\temail = e2e-test@amazon.com\n\tname = E2E Test\n',
-      );
-      // Empty file so no system git config (e.g. an @example.com email) leaks
-      // in and masks the amazon.com email above.
-      writeFileSync(join(gitConfigDir, 'system'), '');
+        // Isolate git config so the preset detects an "Amazonian" email without
+        // touching the user's real git config.
+        gitConfigDir = mkdtempSync(join(tmpdir(), 'nx-e2e-gitconfig-'));
+        writeFileSync(
+          join(gitConfigDir, 'global'),
+          '[user]\n\temail = e2e-test@amazon.com\n\tname = E2E Test\n',
+        );
+        // Empty file so no system git config (e.g. an @example.com email) leaks
+        // in and masks the amazon.com email above.
+        writeFileSync(join(gitConfigDir, 'system'), '');
 
-      // Non-interactive workspace to re-run the preset generator inside.
-      projectRoot = await createTestWorkspace(pkgMgr, targetDir, 'e2e-test');
-    });
+        // Non-interactive workspace to re-run the preset generator inside.
+        projectRoot = await createTestWorkspace(pkgMgr, targetDir, 'e2e-test');
+      },
+      10 * 60 * 1000,
+    );
     afterEach(() => {
       if (gitConfigDir && existsSync(gitConfigDir)) {
         rmSync(gitConfigDir, { force: true, recursive: true });
