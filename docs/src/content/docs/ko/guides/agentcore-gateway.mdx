@@ -74,8 +74,51 @@ import OptionFilter from '@components/option-filter.astro';
 - `GatewayAuthorizer.usingAwsIam()`(인바운드 IAM 인증)을 사용하여 MCP 프로토콜용으로 구성된 `AgentCore::Gateway`
 - Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine` (`cedarPolicy: false`일 때 생략됨)
 - `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy`
+- Gateway와 연결된 AWS WAFv2 Web ACL, CloudWatch로의 요청 로깅 포함 (기본적으로 활성화됨 — <a href="#aws-waf">AWS WAF</a> 참조)
 
 Gateway URL은 <Link path="guides/runtime-config">런타임 구성</Link>의 `agentcore.gateways.<ClassName>` 네임스페이스에 자동으로 등록되어 에이전트가 런타임에 이를 발견할 수 있습니다.
+
+#### 아키텍처
+
+배포된 Gateway는 다음 아키텍처를 가지며, Gateway 앞에 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL이 있고, 다운스트림 MCP 서버 대상으로 라우팅됩니다:
+
+```d2 inline=true
+direction: right
+
+client: Client {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/client.svg
+}
+
+waf: WAF {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/waf.svg
+}
+
+gateway: AgentCore Gateway\n(MCP, IAM auth) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
+policy: Policy Engine\n(Cedar, ENFORCE) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
+targets: Downstream MCP Servers\n(Gateway targets) {
+  shape: rectangle
+}
+
+cw: CloudWatch\n(WAF Logs) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
+  near: bottom-right
+}
+
+client -> waf
+waf -> gateway
+gateway -> targets
+```
 
 ## 정책 작성
 
@@ -233,6 +276,78 @@ forbid (
 <NxCommands commands={["dev <name>"]} />
 
 전체 로컬 개발 스토리는 연결 가이드를 참조하세요.
+
+## AgentCore Gateway 배포
+
+AgentCore Gateway 생성기는 선택한 `iacProvider`를 기반으로 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용하여 Gateway를 배포할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Gateway 배포를 위한 CDK 구성 요소는 `common/constructs` 폴더에 있습니다. 이를 CDK 애플리케이션에서 사용할 수 있습니다. 예를 들어:
+
+```ts {7} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyGateway(this, 'MyGateway');
+  }
+}
+```
+
+이것은 `AgentCore::Gateway`, Cedar `PolicyEngine`, AWS WAF Web ACL을 포함한 Gateway 인프라를 설정합니다(아래 [AWS WAF](#aws-waf) 참조). `gateway.addMcpServer(...)`로 MCP 서버 대상을 등록하세요 — <Link path="guides/connection/agentcore-gateway-mcp">MCP 서버 연결 가이드</Link>를 참조하세요.
+</Fragment>
+<Fragment slot="terraform">
+Gateway 배포를 위한 Terraform 모듈은 `common/terraform` 폴더에 있습니다. 이를 Terraform 구성에서 사용할 수 있습니다. 예를 들어:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+```
+
+이것은 `aws_bedrockagentcore_gateway`, Cedar 정책 엔진, AWS WAF Web ACL을 포함한 Gateway 인프라를 설정합니다(아래 [AWS WAF](#aws-waf) 참조). `aws_bedrockagentcore_gateway_target` 리소스로 MCP 서버 대상을 등록하세요 — <Link path="guides/connection/agentcore-gateway-mcp">MCP 서버 연결 가이드</Link>를 참조하세요.
+</Fragment>
+</Infrastructure>
+
+### AWS WAF
+
+기본적으로 생성된 구성 요소는 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL을 Gateway와 연결합니다. AWS WAF는 대상에 도달하기 _전에_ 모든 인바운드 요청을 인라인으로 검사하여 웹 익스플로잇, 봇 트래픽 및 대량 공격으로부터 Gateway를 보호합니다. Web ACL은 AWS 관리형 기본 규칙 세트([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) 및 [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs))를 사용하여 OWASP Top 10을 포함한 일반적인 웹 익스플로잇에 대한 보호를 제공합니다. WAF 요청 로그는 CloudWatch Logs 그룹에 기록됩니다.
+
+Web ACL은 `REGIONAL`이며 AgentCore Gateway 연결에 필요한 대로 Gateway의 리전에 생성됩니다.
+
+:::caution[기본값과 다른 SizeRestrictions_BODY]
+`AWSManagedRulesCommonRuleSet`의 `SizeRestrictions_BODY` 규칙은 `Block`이 아닌 `Count`로 재정의됩니다. 규칙의 8 KB 제한이 일반적인 MCP 도구 페이로드에 너무 제한적이기 때문입니다. 초과 크기 요청은 여전히 메트릭으로 기록되므로 모니터링할 수 있습니다. 자세한 내용은 [AWS WAF 본문 크기 제한](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) 가이드를 참조하세요.
+:::
+
+생성된 Gateway 구성 요소를 편집하여 규칙을 추가, 제거 또는 조정할 수 있습니다(예: [속도 기반 규칙](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) 또는 추가 관리형 규칙 그룹 추가).
+
+<Infrastructure>
+<Fragment slot="cdk">
+옵트아웃하려면(예: 자체 Web ACL을 연결하려면) Gateway 구성 요소를 인스턴스화할 때 `enableWaf`를 `false`로 설정하세요:
+
+```ts {2}
+new MyGateway(this, 'MyGateway', {
+  enableWaf: false,
+});
+```
+
+구성 요소는 추가 구성을 위해 생성된 Web ACL을 `webAcl`로 노출합니다.
+</Fragment>
+<Fragment slot="terraform">
+옵트아웃하려면(예: 자체 Web ACL을 연결하려면) Gateway 모듈에서 `enable_waf`를 `false`로 설정하세요:
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+모듈은 추가 구성을 위해 생성된 Web ACL ARN을 `waf_web_acl_arn`으로 출력합니다.
+</Fragment>
+</Infrastructure>
 
 ## 연결
 

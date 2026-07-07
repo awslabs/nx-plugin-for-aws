@@ -74,8 +74,40 @@ import OptionFilter from '@components/option-filter.astro';
 - `GatewayAuthorizer.usingAwsIam()`（インバウンドIAM認証）を使用してMCPプロトコル用に構成された`AgentCore::Gateway`
 - `ENFORCE`モードで実行され、Gatewayにアタッチされた`AgentCore::PolicyEngine`（`cedarPolicy: false`の場合は省略）
 - `policies/`内の`.cedar`ファイルごとに1つの`AgentCore::Policy`
+- Gatewayに関連付けられたAWS WAFv2 Web ACLで、CloudWatchへのリクエストログ記録が有効（デフォルトで有効 — <a href="#aws-waf">AWS WAF</a>を参照）
 
 Gateway URLは、<Link path="guides/runtime-config">ランタイム設定</Link>の`agentcore.gateways.<ClassName>`名前空間に自動的に登録されるため、エージェントは実行時にそれを検出できます。
+
+#### アーキテクチャ
+
+デプロイされたGatewayは以下のアーキテクチャを持ち、Gatewayの前に[AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACLがあり、下流のMCPサーバーターゲットにルーティングします：
+
+```d2 inline=true
+direction: right
+
+client: Client {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/client.svg
+}
+
+waf: WAF {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/waf.svg
+}
+
+gateway: AgentCore Gateway\n(MCP, IAM auth) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
+}
+
+targets: Downstream MCP Servers\n(Gateway targets) {
+  shape: rectangle
+}
+
+client -> waf
+waf -> gateway
+gateway -> targets
+```
 
 ## ポリシーの記述
 
@@ -233,6 +265,78 @@ forbid (
 <NxCommands commands={["dev <name>"]} />
 
 完全なローカル開発ストーリーについては、接続ガイドを参照してください。
+
+## AgentCore Gatewayのデプロイ
+
+AgentCore Gatewayジェネレーターは、選択した`iacProvider`に基づいてCDKまたはTerraformのインフラストラクチャコードを作成します。これを使用してGatewayをデプロイできます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+GatewayをデプロイするためのCDKコンストラクトは、`common/constructs`フォルダーにあります。これをCDKアプリケーションで使用できます。例えば：
+
+```ts {7} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyGateway(this, 'MyGateway');
+  }
+}
+```
+
+これにより、`AgentCore::Gateway`、そのCedar `PolicyEngine`、およびAWS WAF Web ACL（以下の[AWS WAF](#aws-waf)を参照）を含むGatewayインフラストラクチャがセットアップされます。MCPサーバーターゲットを`gateway.addMcpServer(...)`で登録します — <Link path="guides/connection/agentcore-gateway-mcp">MCPサーバー接続ガイド</Link>を参照してください。
+</Fragment>
+<Fragment slot="terraform">
+GatewayをデプロイするためのTerraformモジュールは、`common/terraform`フォルダーにあります。これをTerraform設定で使用できます。例えば：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+```
+
+これにより、`aws_bedrockagentcore_gateway`、そのCedarポリシーエンジン、およびAWS WAF Web ACL（以下の[AWS WAF](#aws-waf)を参照）を含むGatewayインフラストラクチャがセットアップされます。MCPサーバーターゲットを`aws_bedrockagentcore_gateway_target`リソースで登録します — <Link path="guides/connection/agentcore-gateway-mcp">MCPサーバー接続ガイド</Link>を参照してください。
+</Fragment>
+</Infrastructure>
+
+### AWS WAF
+
+デフォルトでは、生成されたコンストラクトは[AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACLをGatewayに関連付けます。AWS WAFは、ターゲットに到達する_前_にすべてのインバウンドリクエストをインラインで検査し、Webエクスプロイト、ボットトラフィック、ボリューメトリック攻撃からGatewayを保護します。Web ACLは、AWSマネージドデフォルトルールセット（[`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs)および[`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)）を使用し、OWASP Top 10を含む一般的なWebエクスプロイトに対する保護を提供します。WAFリクエストログはCloudWatch Logsグループに書き込まれます。
+
+Web ACLは`REGIONAL`であり、AgentCore Gatewayの関連付けに必要なGatewayのリージョンに作成されます。
+
+:::caution[デフォルトからのSizeRestrictions_BODYの逸脱]
+`AWSManagedRulesCommonRuleSet`の`SizeRestrictions_BODY`ルールは、`Block`ではなく`Count`にオーバーライドされます。これは、ルールの8 KB制限が典型的なMCPツールペイロードには制限が厳しすぎるためです。オーバーサイズのリクエストは引き続きメトリクスとして記録されるため、監視できます。詳細については、[AWS WAFボディサイズ制限](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html)ガイドを参照してください。
+:::
+
+生成されたGatewayコンストラクトを編集して、ルールを追加、削除、または調整できます（例えば、[レートベースルール](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html)や追加のマネージドルールグループを追加するなど）。
+
+<Infrastructure>
+<Fragment slot="cdk">
+オプトアウトするには（例えば、独自のWeb ACLをアタッチする場合）、Gatewayコンストラクトをインスタンス化する際に`enableWaf`を`false`に設定します：
+
+```ts {2}
+new MyGateway(this, 'MyGateway', {
+  enableWaf: false,
+});
+```
+
+コンストラクトは、さらなる設定のために作成されたWeb ACLを`webAcl`として公開します。
+</Fragment>
+<Fragment slot="terraform">
+オプトアウトするには（例えば、独自のWeb ACLをアタッチする場合）、Gatewayモジュールで`enable_waf`を`false`に設定します：
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+モジュールは、さらなる設定のために作成されたWeb ACL ARNを`waf_web_acl_arn`として出力します。
+</Fragment>
+</Infrastructure>
 
 ## 接続
 
