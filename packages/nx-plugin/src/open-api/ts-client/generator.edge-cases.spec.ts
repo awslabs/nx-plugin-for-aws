@@ -31,6 +31,10 @@ import {
  *  I. vendored `+json` media types must hoist/marshal like application/json
  *  J. schemas nested inside a rewritten schema (multi-type array items,
  *     `const` in a nullable object, allOf siblings) must also be rewritten
+ *  K. a query and a header array parameter sharing a name must keep separate
+ *     collection-format maps (no duplicate object key)
+ *  L. spaceDelimited / pipeDelimited query arrays must serialise with the
+ *     correct delimiter (and compile)
  */
 describe('openApiTsClientGenerator - edge cases', () => {
   let tree: Tree;
@@ -641,5 +645,100 @@ describe('openApiTsClientGenerator - edge cases', () => {
     const { types } = await generate(spec);
 
     expect(types).toContain("'fixed'");
+  });
+
+  // ---- K. query + header array params sharing a name ------------------------
+
+  it('keeps separate collection-format maps for same-named query and header arrays', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/items': {
+          get: {
+            operationId: 'listItems',
+            parameters: [
+              {
+                name: 'ids',
+                in: 'query',
+                schema: { type: 'array', items: { type: 'string' } },
+                explode: false,
+              },
+              {
+                name: 'ids',
+                in: 'header',
+                schema: { type: 'array', items: { type: 'string' } },
+                explode: true,
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    // The two 'ids' params live in separate collection-format maps.
+    expect(client).toContain('queryCollectionFormats');
+    expect(client).toContain('headerCollectionFormats');
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, mockFetch, 'listItems', {
+      ids: ['a', 'b'],
+    });
+    const [url, request] = mockFetch.mock.calls[0];
+    // Query: csv (explode false); header: multi (explode true, repeated).
+    expect(url).toBe(`${baseUrl}/items?ids=a%2Cb`);
+    expect(request.headers).toEqual([
+      ['ids', 'a'],
+      ['ids', 'b'],
+    ]);
+  });
+
+  // ---- L. spaceDelimited / pipeDelimited query arrays -----------------------
+
+  it('serialises spaceDelimited and pipeDelimited query arrays with the right delimiter', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'spaced',
+                in: 'query',
+                style: 'spaceDelimited',
+                explode: false,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+              {
+                name: 'piped',
+                in: 'query',
+                style: 'pipeDelimited',
+                explode: false,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, mockFetch, 'search', {
+      spaced: ['a', 'b', 'c'],
+      piped: ['x', 'y'],
+    });
+    const [url] = mockFetch.mock.calls[0];
+    // %20 = space, %7C = pipe
+    expect(url).toBe(`${baseUrl}/search?spaced=a%20b%20c&piped=x%7Cy`);
   });
 });

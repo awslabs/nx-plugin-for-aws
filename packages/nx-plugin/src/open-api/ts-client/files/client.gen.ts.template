@@ -359,7 +359,10 @@ export class <%- className %> {
     <%_ }); _%>
   }
 
-  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): string => {
+  // Delimiters for non-'multi' array serialisation formats.
+  private $collectionDelimiters: { [format: string]: string } = { csv: ',', ssv: ' ', pipes: '|' };
+
+  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' }): string => {
     const baseUrl = this.$config.url.endsWith('/') ? this.$config.url.slice(0, -1) : this.$config.url;
     const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) =>
       withParams.replace(`{${key}}`, encodeURIComponent(`${value}`))
@@ -368,17 +371,19 @@ export class <%- className %> {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map(v => `${encodeURIComponent(key)}=${encodeURIComponent(`${v}`)}`).join('&');
       }
-      return `${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}`;
+      const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return `${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}`;
     }).join('&');
     return baseUrl + pathWithParameters + (queryString ? `?${queryString}` : '');
   };
 
-  private $headers = (headerParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): [string, string][] => {
+  private $headers = (headerParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' }): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map(v => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [[key, Array.isArray(value) ? value.map(String).join(delimiter) : String(value)]];
     });
   };
 
@@ -422,9 +427,21 @@ export class <%- className %> {
     }
     <%_ } _%>
     <%_ } _%>
-    <%_ if (op.parameters.filter(p => p.collectionFormat).length > 0) { _%>
-    const collectionFormats = {
-      <%_ op.parameters.filter(p => p.collectionFormat).forEach((parameter) => { _%>
+    <%_ /* Query and header collection formats are kept in separate maps: a
+           query and a header parameter may share a name, which would collide
+           in a single object literal. */ _%>
+    <%_ const queryCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'query'); _%>
+    <%_ const headerCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'header'); _%>
+    <%_ if (queryCollectionParams.length > 0) { _%>
+    const queryCollectionFormats = {
+      <%_ queryCollectionParams.forEach((parameter) => { _%>
+      '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
+      <%_ }); _%>
+    } as const;
+    <%_ } _%>
+    <%_ if (headerCollectionParams.length > 0) { _%>
+    const headerCollectionFormats = {
+      <%_ headerCollectionParams.forEach((parameter) => { _%>
       '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
       <%_ }); _%>
     } as const;
@@ -461,8 +478,8 @@ export class <%- className %> {
     const body = undefined;
     <%_ } _%>
 
-    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (op.parameters.filter(p => p.collectionFormat).length > 0) { %>, collectionFormats<% } %>), {
-      headers: this.$headers(headerParameters<% if (op.parameters.filter(p => p.collectionFormat).length > 0) { %>, collectionFormats<% } %>),
+    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (queryCollectionParams.length > 0) { %>, queryCollectionFormats<% } %>), {
+      headers: this.$headers(headerParameters<% if (headerCollectionParams.length > 0) { %>, headerCollectionFormats<% } %>),
       method: '<%- op.method %>',
       body,
     });

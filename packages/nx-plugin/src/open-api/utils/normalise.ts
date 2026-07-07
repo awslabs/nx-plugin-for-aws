@@ -34,12 +34,16 @@ interface SubSchemaRef {
  */
 const normaliseSchemaNames = (spec: Spec): Spec => {
   const schemaNameMapping: { [oldName: string]: string } = {};
-  const existingSchemaNames = new Set(
-    Object.keys(spec.components?.schemas ?? {}),
-  );
+  const originalNames = Object.keys(spec.components?.schemas ?? {});
+  const existingSchemaNames = new Set(originalNames);
+
+  // The name each schema resolves to (its normalised form, or itself when it
+  // needs no normalisation). Used to detect two distinct schemas that would
+  // collapse onto the same identifier.
+  const resolvedNameOwners: { [resolvedName: string]: string } = {};
 
   // Build mapping of old names to new names
-  Object.keys(spec.components?.schemas ?? {}).forEach((name) => {
+  originalNames.forEach((name) => {
     const normalizedName = toClassName(name);
     if (normalizedName !== name) {
       // Check if the normalized name would clash with an existing schema
@@ -50,6 +54,17 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
       }
       schemaNameMapping[name] = normalizedName;
     }
+
+    // Detect two distinct schemas resolving to the same name (e.g. "Foo-Bar"
+    // and "Foo.Bar" both normalise to "FooBar"), which would otherwise
+    // silently overwrite one another.
+    const owner = resolvedNameOwners[normalizedName];
+    if (owner !== undefined) {
+      throw new Error(
+        `Schema name normalization conflict: "${name}" and "${owner}" both normalize to "${normalizedName}". Please rename one of these schemas in your OpenAPI specification.`,
+      );
+    }
+    resolvedNameOwners[normalizedName] = name;
   });
 
   // If no normalization needed, return spec as-is

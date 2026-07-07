@@ -241,6 +241,36 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     });
   });
 
+  it('should throw when a normalised schema name clashes with an existing schema', () => {
+    const spec: Spec = {
+      components: {
+        schemas: {
+          'Foo-Bar': { type: 'object', properties: { a: { type: 'string' } } },
+          FooBar: { type: 'object', properties: { b: { type: 'number' } } },
+        },
+      },
+    } as any;
+
+    expect(() => normaliseOpenApiSpecForCodeGen(spec)).toThrow(
+      /would be normalized to "FooBar", but a schema with that name already exists/,
+    );
+  });
+
+  it('should throw when two schemas normalise to the same name', () => {
+    const spec: Spec = {
+      components: {
+        schemas: {
+          'Foo-Bar': { type: 'object', properties: { a: { type: 'string' } } },
+          'Foo.Bar': { type: 'object', properties: { b: { type: 'number' } } },
+        },
+      },
+    } as any;
+
+    expect(() => normaliseOpenApiSpecForCodeGen(spec)).toThrow(
+      /both normalize to "FooBar"/,
+    );
+  });
+
   it('should handle composite schemas', () => {
     const spec: Spec = {
       components: {

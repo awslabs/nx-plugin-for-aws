@@ -40,7 +40,7 @@ export type ModelIn =
   | 'response';
 
 /** How array/dictionary query & header parameters are serialised on the wire. */
-export type CollectionFormat = 'multi' | 'csv' | 'ssv' | 'tsv';
+export type CollectionFormat = 'multi' | 'csv' | 'ssv' | 'pipes';
 
 /** A single enum member value. */
 export interface EnumMember {

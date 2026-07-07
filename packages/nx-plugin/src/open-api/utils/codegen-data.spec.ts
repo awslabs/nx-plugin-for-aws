@@ -710,6 +710,74 @@ describe('openapi codegen data utils', () => {
       );
     });
 
+    it('should throw when two properties map to the same TypeScript name', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Clashing: {
+              type: 'object',
+              properties: {
+                'foo-bar': { type: 'string' },
+                foo_bar: { type: 'number' },
+              },
+            },
+          },
+        },
+      };
+
+      expect(() => buildOpenApiCodeGenData(spec)).toThrow(
+        /both map to the TypeScript name "fooBar"/,
+      );
+    });
+
+    it('should throw when two parameters in one position map to the same name', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              parameters: [
+                { name: 'user-id', in: 'query', schema: { type: 'string' } },
+                { name: 'user_id', in: 'query', schema: { type: 'number' } },
+              ],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      expect(() => buildOpenApiCodeGenData(spec)).toThrow(
+        /both map to the TypeScript name "userId"/,
+      );
+    });
+
+    it('should allow a query and header parameter to share a name', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              parameters: [
+                { name: 'token', in: 'query', schema: { type: 'string' } },
+                { name: 'token', in: 'header', schema: { type: 'string' } },
+              ],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const op = data.allOperations.find((o) => o.name === 'getX')!;
+      // The two parameters live in separate request-position models, so they
+      // do not clash.
+      expect(op.parameters.filter((p) => p.name === 'token')).toHaveLength(2);
+    });
+
     it('should throw when a response is a composite of primitives', () => {
       const spec: Spec = {
         ...sampleSpec,

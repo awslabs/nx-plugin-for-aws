@@ -87,6 +87,10 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     model.typescriptType = model.typescriptName;
   }
 
+  for (const model of data.models) {
+    assertNoClashingPropertyNames(model);
+  }
+
   data.models = orderBy(data.models, (d) => d.name);
   // Default service first, then by name.
   data.services = orderBy(data.services, (s) =>
@@ -374,7 +378,7 @@ const getCollectionFormat = (
     : ((
         {
           spaceDelimited: 'ssv',
-          pipeDelimited: 'tsv',
+          pipeDelimited: 'pipes',
           simple: 'csv',
           form: 'csv',
         } as const
@@ -468,6 +472,28 @@ const augmentModel = (
   }
 
   model.properties.forEach(addLanguageTypes);
+};
+
+/**
+ * Ensure no two properties/parameters of an object model collapse onto the same
+ * TypeScript identifier (e.g. `foo-bar` and `foo_bar` both camelCase to
+ * `fooBar`, or a query and header parameter sharing a name within one request
+ * position). Such a clash would emit a type with duplicate members that does
+ * not compile, so fail fast with an actionable error instead.
+ */
+const assertNoClashingPropertyNames = (model: Model): void => {
+  const seen = new Map<string, string>();
+  for (const property of model.properties) {
+    // Composite members are unnamed (their names are empty); skip them.
+    if (!property.name) continue;
+    const existing = seen.get(property.typescriptName!);
+    if (existing !== undefined && existing !== property.name) {
+      throw new Error(
+        `Property name conflict in "${model.name}": "${existing}" and "${property.name}" both map to the TypeScript name "${property.typescriptName}". Please rename one of these in your OpenAPI specification.`,
+      );
+    }
+    seen.set(property.typescriptName!, property.name);
+  }
 };
 
 /**
