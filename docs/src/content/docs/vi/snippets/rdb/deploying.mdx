@@ -1,0 +1,177 @@
+---
+title: Triển khai Cơ sở dữ liệu Quan hệ của bạn
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo cơ sở dữ liệu quan hệ tạo ra cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Construct CDK được tạo trong `common/constructs`. Ví dụ sử dụng:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Điều này cung cấp một cụm Aurora với RDS Proxy, thông tin xác thực quản trị, người dùng cơ sở dữ liệu ứng dụng, đăng ký cấu hình runtime và trình xử lý migration.
+
+Cơ sở hạ tầng được tạo ra tạo hai người dùng cơ sở dữ liệu:
+- **Người dùng quản trị** - Được tạo trong quá trình cung cấp cụm với thông tin xác thực được lưu trữ trong AWS Secrets Manager
+- **Người dùng ứng dụng** - Được tạo thông qua tài nguyên tùy chỉnh Lambda với xác thực IAM được bật và các đặc quyền DML (SELECT, INSERT, UPDATE, DELETE) trên cơ sở dữ liệu ứng dụng
+</Fragment>
+<Fragment slot="terraform">
+Module Terraform được tạo trong `common/terraform`. Ví dụ sử dụng:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Điều này cung cấp một cụm Aurora với RDS Proxy, thông tin xác thực quản trị, Lambda create-db-user, đăng ký cấu hình runtime, Lambda migration và tài nguyên container registry.
+
+Cơ sở hạ tầng được tạo ra tạo hai người dùng cơ sở dữ liệu:
+- **Người dùng quản trị** - Được tạo trong quá trình cung cấp cụm với thông tin xác thực được lưu trữ trong AWS Secrets Manager
+- **Người dùng ứng dụng** - Được tạo thông qua hàm Lambda với xác thực IAM được bật và các đặc quyền DML (SELECT, INSERT, UPDATE, DELETE) trên cơ sở dữ liệu ứng dụng
+</Fragment>
+</Infrastructure>
+
+Người dùng ứng dụng được tự động tạo với tên ngẫu nhiên và xác thực IAM. Client cơ sở dữ liệu được tạo đã được cấu hình sẵn để xác thực với tư cách người dùng này bằng cách sử dụng token RDS có thời hạn ngắn, vì vậy mã ứng dụng của bạn không bao giờ xử lý mật khẩu cơ sở dữ liệu.
+
+VPC của bạn nên bao gồm các subnet công khai, subnet riêng tư có egress và subnet riêng tư bị cô lập. Cơ sở dữ liệu có thể chạy trong các subnet riêng tư bị cô lập, trong khi các hàm Lambda ứng dụng nên chạy trong các subnet riêng tư có egress để chúng có thể truy cập các dịch vụ AWS như AppConfig.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Kết nối API với Cơ sở dữ liệu
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho từng Lambda handler:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Triển khai các hàm Lambda API vào **subnet riêng tư có egress** (được khuyến nghị) hoặc subnet công khai, không phải subnet riêng tư bị cô lập. Tại runtime, client cơ sở dữ liệu truy xuất chi tiết kết nối từ AWS AppConfig, đây là một endpoint dịch vụ AWS công khai. Các hàm Lambda trong subnet riêng tư bị cô lập không có quyền truy cập internet ra ngoài và không thể truy cập AppConfig. Các subnet riêng tư có egress định tuyến lưu lượng ra ngoài thông qua NAT Gateway nằm trong subnet công khai.
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền các output của module cơ sở dữ liệu vào module compute của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # Allow the API to read runtime config from AppConfig
+  appconfig_application_id = module.my_database.appconfig_application_id
+
+  # Grant rds-db:connect for the application database user
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+
+  # Allow network access to the database port
+  database_security_group_id = module.my_database.security_group_id
+  database_port              = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Triển khai các hàm Lambda API vào **các subnet riêng tư có egress** (được khuyến nghị) hoặc các subnet công khai, không phải các subnet riêng tư bị cô lập. Tại runtime, client cơ sở dữ liệu truy xuất chi tiết kết nối từ AWS AppConfig, đây là một endpoint dịch vụ AWS công khai. Các hàm Lambda trong subnet riêng tư bị cô lập không có quyền truy cập internet ra ngoài và không thể truy cập AppConfig. Các subnet riêng tư có egress định tuyến lưu lượng ra ngoài thông qua NAT Gateway yêu cầu một subnet công khai.
+
+Đảm bảo vai trò Lambda API có `rds-db:connect` trên `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` và quyền đọc AppConfig, rằng security group của API có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu, và rằng môi trường Lambda bao gồm `RUNTIME_CONFIG_APP_ID`.
+</Fragment>
+</Infrastructure>
+
+:::note
+Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần quyền truy cập thì tốt hơn là cấu hình riêng lẻ.
+:::

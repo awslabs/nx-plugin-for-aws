@@ -1,0 +1,138 @@
+---
+title: Python Agent 到关系数据库
+description: 将 Python Agent 连接到关系数据库
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器将 <Link path="guides/py-agent">Python Agent</Link> 连接到 <Link path="guides/py-rdb">Python 关系数据库</Link> 项目，使数据库会话在您的 agent 工具中可用。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/py-agent">`py#agent`</Link> 项目
+2. 一个 <Link path="guides/py-rdb">`py#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 Agent 项目作为源，选择您的关系数据库项目作为目标。如果项目包含多个 agent 组件，请指定 `sourceComponent` 以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器将数据库包添加为工作区依赖项，更新 agent 的 `<agent-name>-dev` 目标以依赖数据库的 `dev` 目标，使两者在本地开发期间一起启动，并使用用于直接 Aurora 连接的 RDS CA 证书包更新生成的 agent Dockerfile。
+
+## 工作原理
+
+数据库包导出 `session_context`，这是一个上下文管理器，使用生成的数据库客户端打开 SQLModel `Session`，并在 `with` 块退出时关闭它。
+
+对于本地开发，`session_context()` 连接到本地数据库容器。在已部署的运行时中，它从 AWS AppConfig 读取数据库配置，生成 IAM 身份验证令牌，并验证数据库 TLS 证书。
+
+## 在 Agent 工具中使用数据库
+
+从您的数据库包中导入 `session_context` 并在您的 agent 工具中使用它：
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context() as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+## 基础设施
+
+生成的 agent 构造实现了 `IGrantable` 和 `IConnectable`，因此您可以直接在构造上授予对数据库的网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` 打开安全组规则，使 agent 运行时可以访问数据库端口。`grantConnect` 向 agent 的执行角色授予 IAM `rds-db:connect` 权限。
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的 agent 模块中，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+确保 agent 的执行角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>
+
+### 不使用 RDS Proxy 连接时的 SSL 要求
+
+当 agent 直接连接到 Aurora 集群（不使用 RDS Proxy）时，连接生成器会更新生成的 agent Dockerfile，在 `/opt/global-bundle.pem` 处添加 Amazon RDS CA 证书包：
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+使用可选的 `rds_ca` 参数将该路径传递给 `session_context`：
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+使用 RDS Proxy 时，您无需在 agent 运行时中配置 RDS CA 证书包。
+
+## 本地开发
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+这将启动 agent 和所有连接的数据库。`LOCAL_DEV=true` 环境变量使数据库客户端连接到其本地 Docker 数据库而不是 Aurora。

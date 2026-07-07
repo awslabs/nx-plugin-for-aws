@@ -10,6 +10,7 @@ export interface PyRdbGeneratorSchema {
   engine: 'postgres' | 'mysql';
   databaseUser?: string;
   databaseName?: string;
+  framework: 'sqlmodel';
   iac?: 'inherit' | 'cdk' | 'terraform';
   preferInstallDependencies?: boolean;
 }

@@ -1,0 +1,147 @@
+---
+title: Kết nối Python MCP Server với Cơ sở dữ liệu Quan hệ
+description: Kết nối Python MCP Server với Cơ sở dữ liệu Quan hệ
+when:
+  sourceType: py#mcp-server
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` kết nối một <Link path="guides/py-mcp-server">Python MCP Server</Link> với dự án <Link path="guides/py-rdb">Python Relational Database</Link>, làm cho phiên cơ sở dữ liệu có sẵn cho tất cả các công cụ được đăng ký trong server.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/py-mcp-server">`py#mcp-server`</Link>
+2. Một dự án <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án MCP server của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích. Nếu dự án chứa nhiều thành phần MCP server, hãy chỉ định `sourceComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator thêm gói cơ sở dữ liệu làm dependency workspace, cập nhật target `<mcp-server-name>-dev` của MCP server để phụ thuộc vào target `dev` của cơ sở dữ liệu để cả hai khởi động cùng nhau trong quá trình phát triển cục bộ, và cập nhật Dockerfile MCP server được tạo với gói RDS CA được sử dụng cho các kết nối Aurora trực tiếp.
+
+## Cách hoạt động
+
+Gói cơ sở dữ liệu xuất `session_context`, một context manager mở một `Session` SQLModel bằng cách sử dụng database client được tạo và đóng nó khi khối `with` thoát.
+
+Đối với phát triển cục bộ, `session_context()` kết nối với container cơ sở dữ liệu cục bộ. Trong các runtime đã triển khai, nó đọc cấu hình cơ sở dữ liệu từ AWS AppConfig, tạo token xác thực IAM và xác thực chứng chỉ TLS của cơ sở dữ liệu.
+
+## Sử dụng Cơ sở dữ liệu trong MCP Tools
+
+Import `session_context` từ gói cơ sở dữ liệu của bạn và sử dụng nó bên trong các công cụ MCP server của bạn:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example records."""
+    with session_context() as session:
+        items = session.exec(select(ExampleModel)).all()
+        return str([item.model_dump() for item in items])
+```
+
+## Nhiều Cơ sở dữ liệu
+
+Chạy generator lại với một target khác sẽ thêm cơ sở dữ liệu thứ hai bên cạnh cơ sở dữ liệu đầu tiên. Cả hai session context đều có sẵn cho tất cả các công cụ:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from my_scope.my_db import session_context as my_db_session_context
+from my_scope.other_db import session_context as other_db_session_context
+```
+
+## Hạ tầng
+
+Construct MCP server được tạo triển khai `IGrantable` và `IConnectable`, vì vậy bạn có thể cấp quyền truy cập mạng và IAM cho cơ sở dữ liệu trực tiếp trên construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` mở quy tắc security group để runtime MCP server có thể truy cập cổng cơ sở dữ liệu. `grantConnect` cấp quyền IAM `rds-db:connect` cho execution role của server.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền các output của module cơ sở dữ liệu vào module MCP server của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Đảm bảo execution role của MCP server có quyền `rds-db:connect` và security group của nó có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+
+</Fragment>
+</Infrastructure>
+
+### Yêu cầu SSL khi Kết nối mà không có RDS Proxy
+
+Khi MCP server kết nối trực tiếp với Aurora cluster (không có RDS Proxy), connection generator cập nhật Dockerfile MCP server được tạo để thêm gói Amazon RDS CA tại `/opt/global-bundle.pem`:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+Truyền đường dẫn đó cho `session_context` bằng cách sử dụng tham số tùy chọn `rds_ca`:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        items = session.exec(select(ExampleModel)).all()
+        return str([item.model_dump() for item in items])
+```
+
+Khi sử dụng RDS Proxy, bạn không cần cấu hình gói RDS CA trong runtime MCP server.
+
+## Phát triển Cục bộ
+
+<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
+
+Lệnh này khởi động MCP server và tất cả các cơ sở dữ liệu được kết nối. Biến môi trường `LOCAL_DEV=true` khiến database client kết nối với cơ sở dữ liệu Docker cục bộ của nó thay vì Aurora.

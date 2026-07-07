@@ -1,0 +1,138 @@
+---
+title: Python Agent에서 관계형 데이터베이스로
+description: Python Agent를 관계형 데이터베이스에 연결
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/py-agent">Python Agent</Link>를 <Link path="guides/py-rdb">Python 관계형 데이터베이스</Link> 프로젝트에 연결하여 에이전트 도구 내에서 데이터베이스 세션을 사용할 수 있도록 합니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/py-agent">`py#agent`</Link> 프로젝트
+2. <Link path="guides/py-rdb">`py#rdb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+Agent 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를 타겟으로 선택합니다. 프로젝트에 여러 에이전트 컴포넌트가 포함된 경우 `sourceComponent`를 지정하여 명확히 구분합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 데이터베이스 패키지를 워크스페이스 종속성으로 추가하고, 에이전트의 `<agent-name>-dev` 타겟이 데이터베이스의 `dev` 타겟에 의존하도록 업데이트하여 로컬 개발 중에 둘 다 함께 시작되도록 하며, 직접 Aurora 연결에 사용되는 RDS CA 번들로 생성된 에이전트 Dockerfile을 업데이트합니다.
+
+## 작동 방식
+
+데이터베이스 패키지는 생성된 데이터베이스 클라이언트를 사용하여 SQLModel `Session`을 열고 `with` 블록이 종료될 때 닫는 컨텍스트 관리자인 `session_context`를 내보냅니다.
+
+로컬 개발의 경우 `session_context()`는 로컬 데이터베이스 컨테이너에 연결합니다. 배포된 런타임에서는 AWS AppConfig에서 데이터베이스 구성을 읽고, IAM 인증 토큰을 생성하며, 데이터베이스 TLS 인증서를 검증합니다.
+
+## 에이전트 도구에서 데이터베이스 사용
+
+데이터베이스 패키지에서 `session_context`를 가져와 에이전트 도구 내에서 사용합니다:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context() as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+## 인프라
+
+생성된 에이전트 구성은 `IGrantable` 및 `IConnectable`을 구현하므로 구성에서 직접 데이터베이스에 대한 네트워크 및 IAM 액세스 권한을 부여할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom`은 에이전트 런타임이 데이터베이스 포트에 도달할 수 있도록 보안 그룹 규칙을 엽니다. `grantConnect`는 에이전트의 실행 역할에 IAM `rds-db:connect` 권한을 부여합니다.
+
+</Fragment>
+<Fragment slot="terraform">
+
+데이터베이스 모듈 출력을 에이전트 모듈에 전달하여 데이터베이스에 도달하고 런타임 구성을 읽을 수 있도록 합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+에이전트의 실행 역할에 `rds-db:connect` 권한이 있고 보안 그룹이 데이터베이스 포트에서 데이터베이스 보안 그룹에 도달할 수 있는지 확인합니다.
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy 없이 연결할 때의 SSL 요구 사항
+
+에이전트가 (RDS Proxy 없이) Aurora 클러스터에 직접 연결하는 경우, 연결 생성기는 생성된 에이전트 Dockerfile을 업데이트하여 `/opt/global-bundle.pem`에 Amazon RDS CA 번들을 추가합니다:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+선택적 `rds_ca` 매개변수를 사용하여 해당 경로를 `session_context`에 전달합니다:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+RDS Proxy를 사용하는 경우 에이전트 런타임에서 RDS CA 번들을 구성할 필요가 없습니다.
+
+## 로컬 개발
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+이렇게 하면 에이전트와 연결된 모든 데이터베이스가 시작됩니다. `LOCAL_DEV=true` 환경 변수는 데이터베이스 클라이언트가 Aurora 대신 로컬 Docker 데이터베이스에 연결하도록 합니다.

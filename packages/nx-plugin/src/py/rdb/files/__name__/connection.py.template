@@ -1,6 +1,9 @@
 from collections.abc import Generator
+from contextlib import contextmanager
 <%_ if (engine === 'mysql') { _%>
 import ssl
+<%_ } else { _%>
+import certifi
 <%_ } _%>
 
 import boto3
@@ -23,12 +26,14 @@ def get_engine(rds_ca: str | None = None):
         return _engine
 <%_ if (engine === 'mysql') { _%>
     ssl_args: dict = {} if is_local_dev() else (
-        {'ssl_ca': rds_ca} if rds_ca else {'ssl': ssl.create_default_context()}
+        {'ssl_ca': rds_ca, 'ssl_verify_cert': True, 'ssl_verify_identity': True}
+        if rds_ca
+        else {'ssl': ssl.create_default_context()}
     )
 <%_ } else { _%>
     ssl_args: dict = {} if is_local_dev() else {
         'sslmode': 'verify-full',
-        **({'sslrootcert': rds_ca} if rds_ca else {}),
+        'sslrootcert': rds_ca if rds_ca else certifi.where(),
     }
 <%_ } _%>
     if is_local_dev():
@@ -58,8 +63,16 @@ def get_engine(rds_ca: str | None = None):
     return _engine
 
 
-def get_session(rds_ca: str | None = None) -> Generator[Session]:
+@contextmanager
+def session_context(rds_ca: str | None = None) -> Generator[Session]:
     """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
         Required when connecting directly to the RDS cluster without an RDS Proxy."""
     with Session(get_engine(rds_ca)) as session:
+        yield session
+
+
+def get_session(rds_ca: str | None = None) -> Generator[Session]:
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+        Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    with session_context(rds_ca) as session:
         yield session

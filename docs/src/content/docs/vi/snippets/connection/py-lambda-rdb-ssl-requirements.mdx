@@ -1,0 +1,53 @@
+---
+title: Yêu cầu SSL khi Kết nối không sử dụng RDS Proxy
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Khi kết nối trực tiếp đến cụm Aurora (không sử dụng RDS Proxy), hãy truyền đường dẫn gói CA của Amazon RDS bằng tham số tùy chọn `rds_ca`.
+
+Đối với các hàm Lambda được nén, hãy đính kèm Lambda layer `RdsCaLayer` (CDK) hoặc module Terraform `ca-layer`. Layer CDK sử dụng Docker bundling để thêm gói CA, và layer được triển khai cung cấp nó tại `/opt/global-bundle.pem`:
+
+```python
+from my_scope.my_db import session_context
+
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Để biết thêm chi tiết, hãy xem [tài liệu TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls) của Amazon RDS Proxy. Khi sử dụng RDS Proxy, bạn không cần cấu hình gói RDS CA trong hàm Lambda của mình.

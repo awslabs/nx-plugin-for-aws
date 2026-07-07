@@ -4,12 +4,14 @@
  */
 import {
   type GeneratorCallback,
+  joinPathFragments,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { toSnakeCase } from '../../../utils/names';
 import {
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
@@ -17,6 +19,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
+import { injectRdsCaBundleIntoDockerfile } from '../utils';
 import type { PyRdbAgentConnectionGeneratorSchema } from './schema';
 
 export const PY_RDB_AGENT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -39,6 +42,18 @@ export const pyRdbAgentConnectionGenerator = async (
 
   const agentName = options.sourceComponent?.name ?? 'agent';
   const devTarget = `${agentName}-dev`;
+  const agentSourceDir = options.sourceComponent?.path
+    ? joinPathFragments(sourceProject.root, options.sourceComponent.path)
+    : sourceProject.sourceRoot
+      ? joinPathFragments(sourceProject.sourceRoot, toSnakeCase(agentName))
+      : undefined;
+  const dockerfilePath = agentSourceDir
+    ? joinPathFragments(agentSourceDir, 'Dockerfile')
+    : undefined;
+
+  if (dockerfilePath) {
+    injectRdsCaBundleIntoDockerfile(tree, dockerfilePath);
+  }
 
   if (sourceProject.targets?.[devTarget]) {
     addDependencyToTargetIfNotPresent(sourceProject, devTarget, {

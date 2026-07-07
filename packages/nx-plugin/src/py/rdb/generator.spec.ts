@@ -30,6 +30,7 @@ describe('py#rdb generator', () => {
     directory: 'packages',
     infra: 'aurora' as const,
     engine: 'postgres' as const,
+    framework: 'sqlmodel' as const,
     databaseUser: 'databaseUser',
     databaseName: 'databaseName',
     iac: 'cdk' as const,
@@ -198,7 +199,7 @@ describe('py#rdb generator', () => {
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
     expect(projectConfig.targets['bundle-migration']).toBeUndefined();
     expect(projectConfig.targets['bundle-create-db-user']).toBeUndefined();
-    expect(projectConfig.targets['dev']).toBeDefined();
+    expect(projectConfig.targets.dev).toBeDefined();
     expect(projectConfig.targets.migrate).toBeDefined();
     expect(tree.exists('packages/common/constructs')).toBe(false);
   });

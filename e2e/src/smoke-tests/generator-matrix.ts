@@ -400,15 +400,32 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#rdb --name=py-postgres-db --infra=aurora --engine=postgres --no-interactive`,
+    `generate @aws/nx-plugin:py#rdb --name=py-postgres-db --infra=aurora --engine=postgres --framework=sqlmodel --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:py#rdb --name=py-mysql-db --infra=aurora --engine=mysql --no-interactive`,
+    `generate @aws/nx-plugin:py#rdb --name=py-mysql-db --infra=aurora --engine=mysql --framework=sqlmodel --no-interactive${deferFlag}`,
     opts,
   );
 
-  await runCLI(`generate @aws/nx-plugin:license --no-interactive${deferFlag}`, opts);
+  // Python RDB connections — FastAPI, py agent, py MCP server.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_api --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-mcp-server --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+
+  await runCLI(
+    `generate @aws/nx-plugin:license --no-interactive${deferFlag}`,
+    opts,
+  );
 
   // Nx plugin + a custom generator (pure TS, not tied to IaC provider)
   await runCLI(

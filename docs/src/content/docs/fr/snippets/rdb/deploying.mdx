@@ -1,0 +1,177 @@
+---
+title: Déploiement de votre base de données relationnelle
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur de base de données relationnelle crée une infrastructure CDK ou Terraform en fonction de votre `iacProvider` sélectionné.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Le construct CDK est créé dans `common/constructs`. Exemple d'utilisation :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Cela provisionne un cluster Aurora avec RDS Proxy, des identifiants administrateur, un utilisateur de base de données d'application, l'enregistrement de la configuration d'exécution et un gestionnaire de migration.
+
+L'infrastructure générée crée deux utilisateurs de base de données :
+- **Utilisateur administrateur** - Créé lors du provisionnement du cluster avec des identifiants stockés dans AWS Secrets Manager
+- **Utilisateur d'application** - Créé via une ressource personnalisée Lambda avec l'authentification IAM activée et des privilèges DML (SELECT, INSERT, UPDATE, DELETE) sur la base de données d'application
+</Fragment>
+<Fragment slot="terraform">
+Le module Terraform est créé dans `common/terraform`. Exemple d'utilisation :
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Cela provisionne un cluster Aurora avec RDS Proxy, des identifiants administrateur, une Lambda create-db-user, l'enregistrement de la configuration d'exécution, une Lambda de migration et des ressources de registre de conteneurs.
+
+L'infrastructure générée crée deux utilisateurs de base de données :
+- **Utilisateur administrateur** - Créé lors du provisionnement du cluster avec des identifiants stockés dans AWS Secrets Manager
+- **Utilisateur d'application** - Créé via une fonction Lambda avec l'authentification IAM activée et des privilèges DML (SELECT, INSERT, UPDATE, DELETE) sur la base de données d'application
+</Fragment>
+</Infrastructure>
+
+L'utilisateur d'application est automatiquement créé avec un nom aléatoire et l'authentification IAM. Le client de base de données généré est déjà configuré pour s'authentifier en tant que cet utilisateur en utilisant des jetons RDS de courte durée, de sorte que votre code d'application ne gère jamais les mots de passe de base de données.
+
+Votre VPC doit inclure des sous-réseaux publics, des sous-réseaux privés avec sortie et des sous-réseaux privés isolés. La base de données peut s'exécuter dans des sous-réseaux privés isolés, tandis que les fonctions Lambda d'application doivent s'exécuter dans des sous-réseaux privés avec sortie afin qu'elles puissent atteindre les services AWS tels qu'AppConfig.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Connexion d'une API à la base de données
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Dans votre stack d'application, déployez l'API dans le même VPC que la base de données, puis appelez `allowDefaultPortFrom` et `grantConnect` pour ouvrir le chemin réseau et accorder la permission IAM `rds-db:connect` à chaque gestionnaire Lambda :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Déployez les fonctions Lambda de l'API dans un **sous-réseau privé avec sortie** (recommandé) ou un sous-réseau public, et non dans un sous-réseau privé isolé. Au moment de l'exécution, le client de base de données récupère les détails de connexion depuis AWS AppConfig, qui est un point de terminaison de service AWS public. Les fonctions Lambda dans un sous-réseau privé isolé n'ont pas d'accès Internet sortant et ne peuvent pas atteindre AppConfig. Les sous-réseaux privés avec sortie acheminent le trafic sortant via une passerelle NAT qui se trouve dans un sous-réseau public.
+</Fragment>
+<Fragment slot="terraform">
+
+Transmettez les sorties du module de base de données dans votre module de calcul afin qu'il puisse atteindre la base de données et lire sa configuration d'exécution :
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # Allow the API to read runtime config from AppConfig
+  appconfig_application_id = module.my_database.appconfig_application_id
+
+  # Grant rds-db:connect for the application database user
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+
+  # Allow network access to the database port
+  database_security_group_id = module.my_database.security_group_id
+  database_port              = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Déployez les fonctions Lambda de l'API dans des **sous-réseaux privés avec sortie** (recommandé) ou des sous-réseaux publics, et non dans des sous-réseaux privés isolés. Au moment de l'exécution, le client de base de données récupère les détails de connexion depuis AWS AppConfig, qui est un point de terminaison de service AWS public. Les fonctions Lambda dans un sous-réseau privé isolé n'ont pas d'accès Internet sortant et ne peuvent pas atteindre AppConfig. Les sous-réseaux privés avec sortie acheminent le trafic sortant via une passerelle NAT qui nécessite un sous-réseau public.
+
+Assurez-vous que le rôle Lambda de l'API dispose de `rds-db:connect` sur `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` et des permissions de lecture AppConfig, que le groupe de sécurité de l'API peut atteindre le groupe de sécurité de la base de données sur le port de la base de données, et que l'environnement Lambda inclut `RUNTIME_CONFIG_APP_ID`.
+</Fragment>
+</Infrastructure>
+
+:::note
+Cet exemple accorde à chaque gestionnaire de votre API l'accès, mais si seuls certains gestionnaires ont besoin d'accès, il est préférable de configurer individuellement.
+:::

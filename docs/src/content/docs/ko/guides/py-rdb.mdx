@@ -1,0 +1,296 @@
+---
+title: Python 관계형 데이터베이스
+description: Python 관계형 데이터베이스 프로젝트 생성
+generator: py#rdb
+---
+
+import { FileTree, CardGrid } from '@astrojs/starlight/components';
+import Astro from '@astrojs/react';
+import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+이 생성기는 [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL 또는 MySQL), 데이터 모델링을 위한 [SQLModel](https://sqlmodel.tiangolo.com/), 스키마 마이그레이션을 위한 [Alembic](https://alembic.sqlalchemy.org/)을 기반으로 하는 새로운 Python 관계형 데이터베이스 프로젝트를 생성합니다. AWS CDK 또는 Terraform을 사용하여 데이터베이스를 프로비저닝하고 관리하는 데 필요한 애플리케이션 코드와 인프라를 생성하며, 선언적 스키마 정의, 자동 마이그레이션 배포 및 데이터베이스 클라이언트를 제공합니다.
+
+## 사용법
+
+### 관계형 데이터베이스 생성
+
+<RunGenerator generator="py#rdb" />
+
+### 옵션
+
+<GeneratorParameters generator="py#rdb" />
+
+## 생성기 출력
+
+생성기는 `<directory>/<name>` 디렉토리에 다음과 같은 프로젝트 구조를 생성합니다:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py 패키지 내보내기 (`get_engine`, `session_context`, `get_session`)
+    - connection.py IAM 인증을 사용하는 데이터베이스 엔진 및 세션 팩토리
+    - utils.py 런타임 구성 및 로컬 개발 헬퍼
+    - migration_handler.py 배포 중 Alembic 마이그레이션을 실행하는 Lambda 핸들러
+    - create_db_user_handler.py 배포 중 애플리케이션 데이터베이스 사용자를 생성하는 Lambda 핸들러
+    - models
+      - example.py 예제 SQLModel 테이블 정의
+  - migrations
+    - versions Alembic이 생성한 마이그레이션 스크립트
+    - env.py Alembic 환경 (데이터베이스에 연결)
+    - script.py.mako Alembic 마이그레이션 스크립트 템플릿
+  - alembic.ini Alembic 구성
+  - config.json 로컬 개발 연결 세부 정보 및 런타임 구성 키
+  - Dockerfile.migration 마이그레이션 핸들러용 컨테이너 이미지
+  - Dockerfile.create-db-user create-db-user 핸들러용 컨테이너 이미지
+  - project.json 프로젝트 구성 및 빌드 타겟
+</FileTree>
+
+로컬 개발 스크립트는 모든 데이터베이스 프로젝트에서 공유되며 `packages/common/scripts/`에 생성됩니다:
+
+<FileTree>
+  - packages/common/scripts/src/rdb
+    - pull-image.ts 데이터베이스 컨테이너 이미지를 가져옵니다
+    - start-container.ts 로컬 데이터베이스 컨테이너를 시작합니다
+    - wait-for-postgres-db.ts 로컬 데이터베이스가 준비될 때까지 대기합니다 (PostgreSQL)
+    - wait-for-mysql-db.ts 로컬 데이터베이스가 준비될 때까지 대기합니다 (MySQL)
+</FileTree>
+
+### 인프라
+
+<Snippet name="rdb/infrastructure" />
+
+#### 아키텍처
+
+<Snippet name="rdb/architecture" />
+
+## 로컬 개발
+
+### 데이터 모델링
+
+생성된 프로젝트는 [SQLModel](https://sqlmodel.tiangolo.com/)을 사용하여 데이터베이스 스키마를 정의합니다. 워크플로는 모델 우선입니다: 데이터베이스 프로젝트의 `<name>/models/` 디렉토리 아래에 SQLModel 테이블 클래스를 추가하거나 업데이트한 다음, 해당 모델 변경 사항에서 마이그레이션을 생성합니다.
+
+예제 모델:
+
+```python title="packages/my_db/my_db/models/example.py"
+from sqlalchemy import Column, String
+from sqlmodel import Field, SQLModel
+
+
+class ExampleModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(sa_column=Column(String(255), nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+```
+
+Alembic이 자동 생성 중에 모델을 발견할 수 있도록 `<name>/models/__init__.py`에서 모델을 가져옵니다.
+
+### 마이그레이션 생성
+
+모델을 추가하거나 업데이트한 후 Alembic을 사용하여 마이그레이션 스크립트를 생성하고 적용합니다. 생성된 `alembic` 타겟은 실행 전에 자동으로 로컬 데이터베이스 컨테이너를 시작합니다:
+
+<NxCommands commands={['run <project>:alembic revision --autogenerate -m "describe your change"']} />
+
+이렇게 하면 `migrations/versions/` 아래에 새 마이그레이션 스크립트가 생성됩니다. 적용하기 전에 생성된 스크립트를 검토하세요.
+
+로컬 데이터베이스에 마이그레이션을 적용합니다:
+
+<NxCommands commands={['run <project>:migrate']} />
+
+AWS 스택을 배포하면 생성된 인프라가 배포된 데이터베이스에 생성된 마이그레이션을 자동으로 적용합니다.
+
+### 기존 마이그레이션 적용
+
+다른 개발자가 생성한 마이그레이션 파일을 가져올 때 로컬 데이터베이스에 적용합니다:
+
+<NxCommands commands={['run <project>:migrate']} />
+
+### Alembic 명령 실행
+
+생성된 `alembic` 타겟은 Alembic CLI를 노출하므로 로컬 데이터베이스에 대해 모든 Alembic 명령을 실행할 수 있습니다. 사용 가능한 명령은 [Alembic 명령 참조](https://alembic.sqlalchemy.org/en/latest/ops.html)를 참조하세요.
+
+<NxCommands commands={['run <project>:alembic <alembic-command>']} />
+
+### 로컬 데이터베이스 중지
+
+`dev`를 중지하면 (예: `Ctrl+C`로) 로컬 데이터베이스 컨테이너가 자동으로 제거되지만, 명명된 볼륨은 보존되므로 재시작 시에도 데이터가 유지됩니다.
+
+:::caution[Windows]
+Windows의 신호 처리 제한으로 인해 `dev`가 중지될 때 컨테이너가 자동으로 제거되지 않습니다. 수동으로 제거해야 합니다:
+
+```bash
+<engine> rm -f <scope>-<db-name>
+```
+
+`<engine>`을 컨테이너 엔진(`docker` 또는 `finch`)으로, `<scope>`를 Nx 워크스페이스 스코프(예: `proj`)로, `<db-name>`을 데이터베이스 프로젝트 이름(예: `my-db`)으로 바꾸세요.
+:::
+
+## 데이터베이스 연결
+
+데이터베이스 패키지에서 `session_context`를 가져와서 컨텍스트 매니저로 사용하여 SQLModel `Session`을 얻습니다:
+
+```python
+from sqlmodel import select
+
+from my_scope.my_db import session_context
+
+with session_context() as session:
+    results = session.exec(select(ExampleModel)).all()
+```
+
+데이터베이스 클라이언트는 자동으로:
+- `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 데이터베이스 구성을 검색합니다
+- IAM 인증을 위해 `boto3` RDS Signer를 통해 임시 인증 토큰을 생성합니다
+- 인증서 검증을 사용하여 SSL/TLS 연결을 관리합니다
+
+## 데이터베이스 배포
+
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
+
+### RDS Proxy 구성
+
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
+
+### RDS Proxy 없이 연결할 때 SSL 요구 사항
+
+RDS Proxy 없이 Aurora 클러스터에 직접 연결할 때는 선택적 `rds_ca` 매개변수를 사용하여 Amazon RDS CA 번들 경로를 전달합니다:
+
+```python
+from my_scope.my_db import session_context
+
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+`rds_ca` 값은 런타임 파일 시스템에서 사용 가능한 CA 인증서 번들을 가리켜야 합니다. Amazon RDS의 경우 다음에서 글로벌 CA 번들을 사용하세요:
+
+```text
+https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+해당 파일을 사용 가능하게 만드는 방법은 데이터베이스에 연결하는 런타임에 따라 다릅니다.
+
+#### 런타임 컨테이너 이미지
+
+런타임용 자체 컨테이너 이미지를 준비하는 경우 Dockerfile에 RDS CA 번들을 추가하고 해당 경로를 `session_context`에 전달합니다:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+```python
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+#### 압축된 Lambda 함수
+
+압축된 Lambda 함수를 배포하는 경우 `RdsCaLayer` Lambda 레이어(CDK) 또는 `ca-layer` Terraform 모듈을 연결합니다. CDK 레이어는 Docker 번들링을 사용하여 CA 번들을 추가하며, 배포된 레이어는 `/opt/global-bundle.pem`에서 이를 제공하므로 `session_context`에 전달할 수 있습니다:
+
+```python
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+RDS Proxy를 사용하는 경우 데이터베이스에 연결하는 런타임에서 RDS CA 번들을 구성할 필요가 없습니다.
+
+### 클러스터 인스턴스
+
+<Snippet name="rdb/cluster-instances" />
+
+### 서버리스 용량
+
+<Snippet name="rdb/serverless-capacity" />
+
+### 엔진 버전
+
+<Snippet name="rdb/engine-version" />
+
+### 삭제 보호
+
+<Snippet name="rdb/deletion-protection" />
+
+### 제거 정책
+
+<Snippet name="rdb/removal-policy" />
+
+### 로깅 및 모니터링
+
+<Snippet name="rdb/logging" />
+
+### 암호화 키 로테이션
+
+<Snippet name="rdb/encryption-key-rotation" />
+
+## 연결
+
+<Link path="guides/connection">`connection`</Link> 생성기를 사용하여 이 프로젝트를 워크스페이스의 다른 프로젝트와 통합합니다. 다음 연결은 이 프로젝트와 관련이 있습니다:
+
+<CardGrid>
+  <ConnectionCard
+    title="Python Agent to Relational Database"
+    description="Python Agent를 Aurora 관계형 데이터베이스에 연결"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-agent-rdb`}
+    source="strands"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="FastAPI to Relational Database"
+    description="FastAPI를 Aurora 관계형 데이터베이스에 연결"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-fast-api-rdb`}
+    source="fastapi"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="Python MCP Server to Relational Database"
+    description="Python MCP Server를 Aurora 관계형 데이터베이스에 연결"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-mcp-server-rdb`}
+    source="mcp"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+</CardGrid>

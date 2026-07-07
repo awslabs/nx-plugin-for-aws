@@ -316,7 +316,12 @@ export const pyRdbGenerator = async (
     'alembic',
     ...(engine === 'mysql'
       ? (['pymysql', 'boto3', 'aws-lambda-powertools'] as const)
-      : (['psycopg[binary,pool]', 'boto3', 'aws-lambda-powertools'] as const)),
+      : ([
+          'psycopg[binary,pool]',
+          'certifi',
+          'boto3',
+          'aws-lambda-powertools',
+        ] as const)),
   ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_RDB_GENERATOR_INFO]);

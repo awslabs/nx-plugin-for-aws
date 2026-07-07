@@ -1,0 +1,147 @@
+---
+title: Python MCP Server a Database Relazionale
+description: Connetti un Python MCP Server a un Database Relazionale
+when:
+  sourceType: py#mcp-server
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Il generatore `connection` collega un <Link path="guides/py-mcp-server">Python MCP Server</Link> a un progetto <Link path="guides/py-rdb">Python Relational Database</Link>, rendendo la sessione del database disponibile a tutti gli strumenti registrati nel server.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati di avere:
+
+1. Un progetto <Link path="guides/py-mcp-server">`py#mcp-server`</Link>
+2. Un progetto <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Utilizzo
+
+### Esegui il Generatore
+
+<RunGenerator generator="connection" />
+
+Seleziona il tuo progetto MCP server come sorgente e il tuo progetto database relazionale come destinazione. Se il progetto contiene più componenti MCP server, specifica `sourceComponent` per disambiguare.
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del Generatore
+
+Il generatore aggiunge il pacchetto del database come dipendenza del workspace, aggiorna il target `<mcp-server-name>-dev` dell'MCP server per dipendere dal target `dev` del database in modo che entrambi si avviino insieme durante lo sviluppo locale, e aggiorna il Dockerfile generato dell'MCP server con il bundle CA RDS utilizzato per le connessioni dirette ad Aurora.
+
+## Come Funziona
+
+Il pacchetto del database esporta `session_context`, un context manager che apre una `Session` SQLModel utilizzando il client del database generato e la chiude quando il blocco `with` termina.
+
+Per lo sviluppo locale, `session_context()` si connette al container del database locale. Nei runtime distribuiti, legge la configurazione del database da AWS AppConfig, genera un token di autenticazione IAM e valida il certificato TLS del database.
+
+## Utilizzo del Database negli Strumenti MCP
+
+Importa `session_context` dal tuo pacchetto del database e utilizzalo all'interno dei tuoi strumenti MCP server:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example records."""
+    with session_context() as session:
+        items = session.exec(select(ExampleModel)).all()
+        return str([item.model_dump() for item in items])
+```
+
+## Database Multipli
+
+Eseguire nuovamente il generatore con una destinazione diversa aggiunge il secondo database accanto al primo. Entrambi i contesti di sessione sono disponibili per tutti gli strumenti:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from my_scope.my_db import session_context as my_db_session_context
+from my_scope.other_db import session_context as other_db_session_context
+```
+
+## Infrastruttura
+
+Il costrutto MCP server generato implementa `IGrantable` e `IConnectable`, quindi puoi concedere l'accesso di rete e IAM al database direttamente sul costrutto.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` apre la regola del security group in modo che il runtime dell'MCP server possa raggiungere la porta del database. `grantConnect` concede il permesso IAM `rds-db:connect` al ruolo di esecuzione del server.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Passa gli output del modulo del database nel tuo modulo MCP server in modo che possa raggiungere il database e leggere la sua configurazione di runtime:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Assicurati che il ruolo di esecuzione dell'MCP server abbia il permesso `rds-db:connect` e che il suo security group possa raggiungere il security group del database sulla porta del database.
+
+</Fragment>
+</Infrastructure>
+
+### Requisiti SSL per la Connessione Senza RDS Proxy
+
+Quando l'MCP server si connette direttamente al cluster Aurora (senza RDS Proxy), il generatore di connessione aggiorna il Dockerfile generato dell'MCP server per aggiungere il bundle CA Amazon RDS in `/opt/global-bundle.pem`:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+Passa quel percorso a `session_context` utilizzando il parametro opzionale `rds_ca`:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        items = session.exec(select(ExampleModel)).all()
+        return str([item.model_dump() for item in items])
+```
+
+Quando si utilizza RDS Proxy, non è necessario configurare il bundle CA RDS nel runtime dell'MCP server.
+
+## Sviluppo Locale
+
+<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
+
+Questo avvia l'MCP server e tutti i database connessi. La variabile d'ambiente `LOCAL_DEV=true` fa sì che il client del database si connetta al suo database Docker locale invece che ad Aurora.

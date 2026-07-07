@@ -1,5 +1,5 @@
 ---
-title: py#rdb
+title: Python Relational Database
 description: Create a Python relational database project
 generator: py#rdb
 ---
@@ -7,14 +7,14 @@ generator: py#rdb
 import { FileTree, CardGrid } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
-import OptionFilter from '@components/option-filter.astro';
 
-This generator creates a new Python relational database project backed by [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL or MySQL), [SQLModel](https://sqlmodel.tiangolo.com/) for data modelling, and [Alembic](https://alembic.sqlalchemy.org/) for schema migrations. It generates the application code and infrastructure needed to provision and manage a database using AWS CDK or Terraform, with declarative schema definition, automatic migration deployment, and a session-based database client.
+This generator creates a new Python relational database project backed by [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL or MySQL), [SQLModel](https://sqlmodel.tiangolo.com/) for data modelling, and [Alembic](https://alembic.sqlalchemy.org/) for schema migrations. It generates the application code and infrastructure needed to provision and manage a database using AWS CDK or Terraform, with declarative schema definition, automatic migration deployment, and a database client.
 
 ## Usage
 
@@ -32,7 +32,7 @@ The generator creates the following project structure in the `<directory>/<name>
 
 <FileTree>
   - \<name>
-    - \_\_init\_\_.py Package exports (`get_engine`, `get_session`)
+    - \_\_init\_\_.py Package exports (`get_engine`, `session_context`, `get_session`)
     - connection.py Database engine and session factory with IAM authentication
     - utils.py Runtime config and local development helpers
     - migration_handler.py Lambda handler that runs Alembic migrations during deployment
@@ -101,6 +101,8 @@ Apply the migration to your local database:
 
 <NxCommands commands={['run <project>:migrate']} />
 
+When you deploy the AWS stack, the generated infrastructure automatically applies the generated migrations to the deployed database.
+
 ### Applying Existing Migrations
 
 When you pull migration files created by other developers, apply them to your local database:
@@ -129,56 +131,108 @@ Replace `<engine>` with your container engine (`docker` or `finch`), `<scope>` w
 
 ## Connecting to the Database
 
-Import `get_session` from your database package and use it as a generator to obtain a SQLModel `Session`:
+Import `session_context` from your database package and use it as a context manager to obtain a SQLModel `Session`:
 
 ```python
-from my_scope.my_db import get_session
+from sqlmodel import select
 
-for session in get_session():
+from my_scope.my_db import session_context
+
+with session_context() as session:
     results = session.exec(select(ExampleModel)).all()
-```
-
-Or use `get_engine` for direct engine access:
-
-```python
-from sqlmodel import Session, select
-from my_scope.my_db import get_engine
-
-with Session(get_engine()) as session:
-    results = session.exec(select(ExampleModel)).all()
-```
-
-`get_engine()` returns a lazily-initialised, cached engine. Subsequent calls within the same Lambda execution context reuse the existing engine rather than creating a new one.
-
-In FastAPI, use `get_session` as a dependency via `Annotated`:
-
-```python
-from typing import Annotated
-from fastapi import Depends
-from sqlmodel import Session, select
-from my_scope.my_db import get_session
-
-SessionDep = Annotated[Session, Depends(get_session)]
-
-@app.get("/examples")
-def list_examples(session: SessionDep):
-    return session.exec(select(ExampleModel)).all()
 ```
 
 The database client automatically:
 - Retrieves database configuration from AWS AppConfig using `RUNTIME_CONFIG_APP_ID` environment variable
-- Generates temporary authentication tokens via `boto3` RDS Signer for IAM authentication (PostgreSQL)
+- Generates temporary authentication tokens via `boto3` RDS Signer for IAM authentication
 - Manages SSL/TLS connections with certificate validation
 
 ## Deploying your Database
 
-<Snippet name="rdb/deploying" />
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
 
 ### RDS Proxy Configuration
 
-<Snippet name="rdb/rds-proxy" />
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
 
-The generated infrastructure can be customised to match your workload requirements. The following examples demonstrate a few common customisation options available.
+### SSL Requirements When Connecting Without RDS Proxy
+
+When connecting directly to the Aurora cluster (without RDS Proxy), pass the Amazon RDS CA bundle path using the optional `rds_ca` parameter:
+
+```python
+from my_scope.my_db import session_context
+
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+The `rds_ca` value must point to a CA certificate bundle available in your runtime filesystem. For Amazon RDS, use the global CA bundle from:
+
+```text
+https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+How you make that file available depends on the runtime that connects to the database.
+
+#### Runtime Container Images
+
+If you prepare your own container image for the runtime, add the RDS CA bundle in your Dockerfile and pass that path to `session_context`:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+```python
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+#### Zipped Lambda Functions
+
+If you deploy a zipped Lambda function, attach the `RdsCaLayer` Lambda layer (CDK) or `ca-layer` Terraform module. The CDK layer uses Docker bundling to add the CA bundle, and the deployed layer provides it at `/opt/global-bundle.pem`, which you can pass to `session_context`:
+
+```python
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+When using RDS Proxy, you do not need to configure the RDS CA bundle in the runtime that connects to the database.
 
 ### Cluster Instances
 
@@ -207,20 +261,6 @@ The generated infrastructure can be customised to match your workload requiremen
 ### Encryption Key Rotation
 
 <Snippet name="rdb/encryption-key-rotation" />
-
-## Limitations
-
-<OptionFilter when={{ engine: 'mysql' }}>
-
-### MySQL: Authentication
-
-The Python MySQL driver (PyMySQL) does not support the `mysql_clear_password` plugin required for RDS IAM authentication. As a result, the migration handler and create-db-user handler use the admin credentials from AWS Secrets Manager to authenticate, rather than IAM tokens.
-
-:::note
-This limitation does not affect the application-level connection (`get_session` / `get_engine`) for IAM-authenticated database users — that path uses the generated application user created during deployment. The Secrets Manager credentials are only used during the Lambda-based setup phase (migrations and user creation).
-:::
-
-</OptionFilter>
 
 ## Connections
 

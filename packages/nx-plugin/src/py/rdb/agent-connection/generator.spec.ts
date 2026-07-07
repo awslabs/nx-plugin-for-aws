@@ -29,6 +29,7 @@ describe('py#rdb agent-connection generator', () => {
       JSON.stringify({
         name,
         root: `packages/${name}`,
+        sourceRoot: `packages/${name}/src/proj_${name.replaceAll('-', '_')}`,
         targets: {
           [`${agentName}-dev`]: {
             executor: 'nx:run-commands',
@@ -36,6 +37,24 @@ describe('py#rdb agent-connection generator', () => {
           },
         },
       }),
+    );
+
+    const agentNameSnakeCase = agentName.replaceAll('-', '_');
+    tree.write(
+      `packages/${name}/src/proj_${name.replaceAll('-', '_')}/${agentNameSnakeCase}/Dockerfile`,
+      `FROM public.ecr.aws/docker/library/python:3.14-slim
+
+WORKDIR /app
+
+COPY . /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:\${PATH}"
+
+CMD ["python", "-m", "proj_${name.replaceAll('-', '_')}.${agentNameSnakeCase}.main"]
+`,
     );
   };
 
@@ -62,7 +81,11 @@ describe('py#rdb agent-connection generator', () => {
     await pyRdbAgentConnectionGenerator(tree, {
       sourceProject: 'my-agent',
       targetProject: 'db',
-      sourceComponent: { generator: 'py#agent', name: 'custom-agent' },
+      sourceComponent: {
+        generator: 'py#agent',
+        name: 'custom-agent',
+        path: 'src/proj_my_agent/custom_agent',
+      },
     });
 
     expect(readProjectConfiguration(tree, 'my-agent')).toMatchSnapshot();
@@ -128,5 +151,61 @@ describe('py#rdb agent-connection generator', () => {
         d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
+  });
+
+  it('should add RDS CA bundle to Dockerfile', async () => {
+    setupAgentProject();
+    setupRdbProject();
+
+    await pyRdbAgentConnectionGenerator(tree, {
+      sourceProject: 'my-agent',
+      targetProject: 'db',
+    });
+
+    expect(
+      tree.read(
+        'packages/my-agent/src/proj_my_agent/agent/Dockerfile',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+  });
+
+  it('should add RDS CA bundle to sourceComponent Dockerfile', async () => {
+    setupAgentProject('my-agent', 'custom-agent');
+    setupRdbProject();
+
+    await pyRdbAgentConnectionGenerator(tree, {
+      sourceProject: 'my-agent',
+      targetProject: 'db',
+      sourceComponent: { generator: 'py#agent', name: 'custom-agent' },
+    });
+
+    expect(
+      tree.read(
+        'packages/my-agent/src/proj_my_agent/custom_agent/Dockerfile',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+  });
+
+  it('should be idempotent for Dockerfile', async () => {
+    setupAgentProject();
+    setupRdbProject();
+
+    await pyRdbAgentConnectionGenerator(tree, {
+      sourceProject: 'my-agent',
+      targetProject: 'db',
+    });
+    await pyRdbAgentConnectionGenerator(tree, {
+      sourceProject: 'my-agent',
+      targetProject: 'db',
+    });
+
+    expect(
+      tree.read(
+        'packages/my-agent/src/proj_my_agent/agent/Dockerfile',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
   });
 });

@@ -1,7 +1,7 @@
 import { DockerImage } from "aws-cdk-lib";
 import { Code, LayerVersion } from "aws-cdk-lib/aws-lambda";
-import { execSync } from "child_process";
 import { Construct } from "constructs";
+import * as url from "url";
 
 const RDS_CA_BUNDLE_URL =
   "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem";
@@ -20,27 +20,15 @@ export class RdsCaLayer extends Construct {
     super(scope, id);
 
     this.layer = new LayerVersion(this, "Layer", {
-      code: Code.fromAsset(__dirname, {
+      code: Code.fromAsset(url.fileURLToPath(new URL(".", import.meta.url)), {
         bundling: {
-          local: {
-            tryBundle(outputDir: string): boolean {
-              try {
-                execSync(
-                  `curl -fsSL "${RDS_CA_BUNDLE_URL}" -o "${outputDir}/global-bundle.pem"`,
-                );
-                return true;
-              } catch {
-                return false;
-              }
-            },
-          },
           image: DockerImage.fromRegistry(
-            "public.ecr.aws/lambda/python:3.14",
+            "public.ecr.aws/docker/library/python:3.14-alpine",
           ),
           command: [
-            "bash",
+            "python",
             "-c",
-            `curl -fsSL "${RDS_CA_BUNDLE_URL}" -o /asset-output/global-bundle.pem`,
+            `import os, urllib.request; urllib.request.urlretrieve("${RDS_CA_BUNDLE_URL}", "/asset-output/global-bundle.pem"); os.chmod("/asset-output/global-bundle.pem", 0o644)`,
           ],
         },
       }),

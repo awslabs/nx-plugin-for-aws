@@ -1,0 +1,230 @@
+---
+title: FastAPI para Banco de Dados Relacional
+description: Conectar um FastAPI a um Banco de Dados Relacional Python
+when:
+  sourceType: py#fast-api
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+O gerador `connection` conecta um <Link path="guides/fastapi">FastAPI</Link> a um projeto de <Link path="guides/py-rdb">Banco de Dados Relacional Python</Link>, injetando uma sessão SQLModel tipada em seus manipuladores de rota via uma dependência FastAPI.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um projeto <Link path="guides/fastapi">`py#fast-api`</Link>
+2. Um projeto <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione seu projeto FastAPI como origem e seu projeto de banco de dados relacional como destino.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador modifica seu projeto FastAPI:
+
+<FileTree>
+
+- packages/my_api/my_api
+  - dependencies
+    - my-db.py Dependência FastAPI `SessionDep` para a sessão do banco de dados
+
+</FileTree>
+
+Além disso, o target `dev` do FastAPI é atualizado para depender do target `dev` do banco de dados, para que ambos iniciem juntos durante o desenvolvimento local.
+
+## Como Funciona
+
+O arquivo de dependência gerado exporta um alias de tipo `SessionDep` que injeta uma `Session` SQLModel via `Depends` do FastAPI:
+
+```python title="packages/my_api/my_api/dependencies/my-db.py"
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlmodel import Session
+
+from my_scope.my_db.connection import get_session
+
+def get_session_dep() -> Generator[Session]:
+    yield from get_session()
+
+
+SessionDep = Annotated[Session, Depends(get_session_dep)]
+```
+
+## Usando o Banco de Dados em Manipuladores de Rota
+
+Importe `SessionDep` e declare-o como um parâmetro em seus manipuladores de rota:
+
+```python title="packages/my_api/my_api/api.py"
+from sqlmodel import select
+from my_api.dependencies.my_db import SessionDep
+from my_scope.my_db.models.example import ExampleModel
+
+@app.get("/examples")
+def list_examples(session: SessionDep):
+    return session.exec(select(ExampleModel)).all()
+
+@app.post("/examples")
+def create_example(name: str, session: SessionDep):
+    item = ExampleModel(name=name)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+```
+
+O FastAPI abre automaticamente uma nova sessão por requisição e a fecha quando o manipulador retorna.
+
+## Infraestrutura
+
+Para permitir que a função Lambda FastAPI se conecte ao banco de dados em tempo de execução, ela deve ser implantada na mesma VPC que o banco de dados e receber acesso de rede e IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Em sua pilha de aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` ao manipulador Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede isolada privada. Em tempo de execução, `get_session()` recupera a configuração do banco de dados do AWS AppConfig, que é um endpoint de serviço AWS público que requer acesso à internet de saída.
+
+:::note
+Este exemplo concede acesso a todos os manipuladores em sua API, mas se apenas alguns manipuladores precisarem de acesso, é melhor configurar individualmente.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Passe as saídas do módulo do banco de dados para o módulo da sua API para que ela possa alcançar o banco de dados e ler sua configuração de tempo de execução:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes isoladas privadas. Certifique-se de que a função Lambda tenha permissão `rds-db:connect` e que seu grupo de segurança possa alcançar o grupo de segurança do banco de dados na porta do banco de dados.
+
+</Fragment>
+</Infrastructure>
+
+### Requisitos SSL ao Conectar Sem RDS Proxy
+
+Quando as funções Lambda FastAPI se conectam diretamente ao cluster Aurora (sem RDS Proxy), anexe a camada Lambda `RdsCaLayer` (CDK) ou o módulo Terraform `ca-layer`. A camada CDK usa empacotamento Docker para adicionar o pacote CA do Amazon RDS, e a camada implantada o fornece em `/opt/global-bundle.pem`.
+
+Anexe a camada do pacote CA às integrações Lambda FastAPI geradas:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Em seguida, passe o caminho da camada para `get_session` na dependência gerada:
+
+```python title="packages/my_api/my_api/dependencies/my-db.py"
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlmodel import Session
+
+from my_scope.my_db.connection import get_session
+
+def get_session_dep() -> Generator[Session]:
+    yield from get_session(rds_ca='/opt/global-bundle.pem')
+
+
+SessionDep = Annotated[Session, Depends(get_session_dep)]
+```
+
+Ao usar RDS Proxy, você não precisa configurar o pacote CA do RDS no tempo de execução Lambda do FastAPI.
+
+## Desenvolvimento Local
+
+<NxCommands commands={["dev <project-name>"]} />
+
+Isso inicia o FastAPI e todos os bancos de dados conectados. A variável de ambiente `LOCAL_DEV=true` faz com que o cliente do banco de dados se conecte ao seu banco de dados Docker local em vez do Aurora.

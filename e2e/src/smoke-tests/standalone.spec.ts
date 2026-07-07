@@ -94,6 +94,7 @@ const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([
   'ts#mcp-server',
   'py#mcp-server',
   'ts#rdb',
+  'py#rdb',
   'ts#infra',
   'terraform#project',
 ]);
@@ -107,6 +108,7 @@ const CONNECTION_UNSUPPORTED_ENDPOINTS = new Set([
   'py#mcp-server',
   'ts#smithy-api',
   'ts#rdb',
+  'py#rdb',
 ]);
 
 const connectionUnsupported = (key: string): boolean =>
@@ -260,6 +262,13 @@ const rdb = async (opts: Opts, s: string): Promise<Side> => {
   );
   return { project: `rdb-${s}` };
 };
+const pyRdb = async (opts: Opts, s: string): Promise<Side> => {
+  await runCLI(
+    `generate @aws/nx-plugin:py#rdb --name=py-rdb-${s} --framework=sqlmodel --no-interactive`,
+    opts,
+  );
+  return { project: `py_rdb_${s}` };
+};
 const tsDynamodb = async (opts: Opts, s: string): Promise<Side> => {
   await runCLI(
     `generate @aws/nx-plugin:ts#dynamodb --name=ts-table-${s} --no-interactive`,
@@ -385,6 +394,9 @@ const CONNECTION_CASES = {
   'py#fast-api -> py#dynamodb': [pair(fastApi, pyDynamodb)],
   'py#agent -> py#dynamodb': [pair(pyAgent, pyDynamodb)],
   'py#mcp-server -> py#dynamodb': [pair(pyMcp, pyDynamodb)],
+  'py#fast-api -> py#rdb': [pair(fastApi, pyRdb)],
+  'py#agent -> py#rdb': [pair(pyAgent, pyRdb)],
+  'py#mcp-server -> py#rdb': [pair(pyMcp, pyRdb)],
 } satisfies Record<ConnectionKey, CaseFactory[]>;
 
 // Flatten to one case per factory, labelling variants when a connection has

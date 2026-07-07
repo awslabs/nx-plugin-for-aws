@@ -1,0 +1,138 @@
+---
+title: Python Agent からリレーショナルデータベースへの接続
+description: Python Agent をリレーショナルデータベースに接続する
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/py-agent">Python Agent</Link> を <Link path="guides/py-rdb">Python Relational Database</Link> プロジェクトに接続し、エージェントツール内でデータベースセッションを利用可能にします。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. <Link path="guides/py-agent">`py#agent`</Link> プロジェクト
+2. <Link path="guides/py-rdb">`py#rdb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+Agent プロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択します。プロジェクトに複数のエージェントコンポーネントが含まれている場合は、`sourceComponent` を指定して明確にします。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、データベースパッケージをワークスペースの依存関係として追加し、エージェントの `<agent-name>-dev` ターゲットをデータベースの `dev` ターゲットに依存するように更新して、ローカル開発時に両方が一緒に起動するようにします。また、生成されたエージェント Dockerfile を、直接 Aurora 接続に使用される RDS CA バンドルで更新します。
+
+## 動作の仕組み
+
+データベースパッケージは `session_context` をエクスポートします。これは、生成されたデータベースクライアントを使用して SQLModel `Session` を開き、`with` ブロックが終了すると閉じるコンテキストマネージャーです。
+
+ローカル開発では、`session_context()` はローカルのデータベースコンテナに接続します。デプロイされたランタイムでは、AWS AppConfig からデータベース設定を読み取り、IAM 認証トークンを生成し、データベース TLS 証明書を検証します。
+
+## エージェントツールでのデータベースの使用
+
+データベースパッケージから `session_context` をインポートし、エージェントツール内で使用します：
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context() as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+## インフラストラクチャ
+
+生成されたエージェント構成は `IGrantable` と `IConnectable` を実装しているため、構成上で直接データベースへのネットワークおよび IAM アクセスを許可できます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` は、エージェントランタイムがデータベースポートに到達できるようにセキュリティグループルールを開きます。`grantConnect` は、エージェントの実行ロールに IAM `rds-db:connect` 権限を付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+データベースモジュールの出力をエージェントモジュールに渡して、データベースに到達し、そのランタイム設定を読み取れるようにします：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+エージェントの実行ロールに `rds-db:connect` 権限があり、そのセキュリティグループがデータベースポートでデータベースセキュリティグループに到達できることを確認してください。
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy を使用せずに接続する場合の SSL 要件
+
+エージェントが（RDS Proxy を使用せずに）Aurora クラスターに直接接続する場合、接続ジェネレーターは生成されたエージェント Dockerfile を更新して、`/opt/global-bundle.pem` に Amazon RDS CA バンドルを追加します：
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+オプションの `rds_ca` パラメーターを使用して、そのパスを `session_context` に渡します：
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+RDS Proxy を使用する場合、エージェントランタイムで RDS CA バンドルを設定する必要はありません。
+
+## ローカル開発
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+これにより、エージェントと接続されているすべてのデータベースが起動します。`LOCAL_DEV=true` 環境変数により、データベースクライアントは Aurora の代わりにローカルの Docker データベースに接続します。

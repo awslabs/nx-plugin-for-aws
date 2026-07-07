@@ -1,0 +1,177 @@
+---
+title: 관계형 데이터베이스 배포하기
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+관계형 데이터베이스 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라를 생성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 구성은 `common/constructs`에 생성됩니다. 사용 예시:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+이것은 RDS Proxy가 있는 Aurora 클러스터, 관리자 자격 증명, 애플리케이션 데이터베이스 사용자, 런타임 구성 등록 및 마이그레이션 핸들러를 프로비저닝합니다.
+
+생성된 인프라는 두 개의 데이터베이스 사용자를 생성합니다:
+- **관리자 사용자** - 클러스터 프로비저닝 중에 생성되며 자격 증명은 AWS Secrets Manager에 저장됩니다
+- **애플리케이션 사용자** - Lambda 사용자 지정 리소스를 통해 생성되며 IAM 인증이 활성화되고 애플리케이션 데이터베이스에 대한 DML 권한(SELECT, INSERT, UPDATE, DELETE)을 가집니다
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 `common/terraform`에 생성됩니다. 사용 예시:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+이것은 RDS Proxy가 있는 Aurora 클러스터, 관리자 자격 증명, create-db-user Lambda, 런타임 구성 등록, 마이그레이션 Lambda 및 컨테이너 레지스트리 리소스를 프로비저닝합니다.
+
+생성된 인프라는 두 개의 데이터베이스 사용자를 생성합니다:
+- **관리자 사용자** - 클러스터 프로비저닝 중에 생성되며 자격 증명은 AWS Secrets Manager에 저장됩니다
+- **애플리케이션 사용자** - Lambda 함수를 통해 생성되며 IAM 인증이 활성화되고 애플리케이션 데이터베이스에 대한 DML 권한(SELECT, INSERT, UPDATE, DELETE)을 가집니다
+</Fragment>
+</Infrastructure>
+
+애플리케이션 사용자는 임의의 이름과 IAM 인증으로 자동 생성됩니다. 생성된 데이터베이스 클라이언트는 이미 단기 RDS 토큰을 사용하여 이 사용자로 인증하도록 구성되어 있으므로 애플리케이션 코드는 데이터베이스 비밀번호를 처리할 필요가 없습니다.
+
+VPC에는 퍼블릭 서브넷, 이그레스가 있는 프라이빗 서브넷, 프라이빗 격리 서브넷이 포함되어야 합니다. 데이터베이스는 프라이빗 격리 서브넷에서 실행될 수 있으며, 애플리케이션 Lambda 함수는 AppConfig와 같은 AWS 서비스에 도달할 수 있도록 이그레스가 있는 프라이빗 서브넷에서 실행되어야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### API를 데이터베이스에 연결하기
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+애플리케이션 스택에서 API를 데이터베이스와 동일한 VPC에 배포한 다음 `allowDefaultPortFrom` 및 `grantConnect`를 호출하여 네트워크 경로를 열고 각 Lambda 핸들러에 IAM `rds-db:connect` 권한을 부여합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+API Lambda 함수를 **이그레스가 있는 프라이빗 서브넷**(권장) 또는 퍼블릭 서브넷에 배포하고, 프라이빗 격리 서브넷에는 배포하지 마세요. 런타임에 데이터베이스 클라이언트는 AWS AppConfig에서 연결 세부 정보를 검색하는데, 이는 퍼블릭 AWS 서비스 엔드포인트입니다. 프라이빗 격리 서브넷의 Lambda 함수는 아웃바운드 인터넷 액세스가 없으므로 AppConfig에 도달할 수 없습니다. 이그레스가 있는 프라이빗 서브넷은 퍼블릭 서브넷에 있는 NAT Gateway를 통해 아웃바운드 트래픽을 라우팅합니다.
+</Fragment>
+<Fragment slot="terraform">
+
+데이터베이스 모듈 출력을 컴퓨팅 모듈에 전달하여 데이터베이스에 도달하고 런타임 구성을 읽을 수 있도록 합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # Allow the API to read runtime config from AppConfig
+  appconfig_application_id = module.my_database.appconfig_application_id
+
+  # Grant rds-db:connect for the application database user
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+
+  # Allow network access to the database port
+  database_security_group_id = module.my_database.security_group_id
+  database_port              = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+API Lambda 함수를 **이그레스가 있는 프라이빗 서브넷**(권장) 또는 퍼블릭 서브넷에 배포하고, 프라이빗 격리 서브넷에는 배포하지 마세요. 런타임에 데이터베이스 클라이언트는 AWS AppConfig에서 연결 세부 정보를 검색하는데, 이는 퍼블릭 AWS 서비스 엔드포인트입니다. 프라이빗 격리 서브넷의 Lambda 함수는 아웃바운드 인터넷 액세스가 없으므로 AppConfig에 도달할 수 없습니다. 이그레스가 있는 프라이빗 서브넷은 퍼블릭 서브넷이 필요한 NAT Gateway를 통해 아웃바운드 트래픽을 라우팅합니다.
+
+API Lambda 역할이 `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>`에 대한 `rds-db:connect` 권한과 AppConfig 읽기 권한을 가지고 있는지, API의 보안 그룹이 데이터베이스 포트에서 데이터베이스 보안 그룹에 도달할 수 있는지, Lambda 환경에 `RUNTIME_CONFIG_APP_ID`가 포함되어 있는지 확인하세요.
+</Fragment>
+</Infrastructure>
+
+:::note
+이 예제는 API의 모든 핸들러에 액세스 권한을 부여하지만, 일부 핸들러만 액세스가 필요한 경우 개별적으로 구성하는 것이 좋습니다.
+:::

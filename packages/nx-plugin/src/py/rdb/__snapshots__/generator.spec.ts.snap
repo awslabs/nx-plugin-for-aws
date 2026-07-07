@@ -3,6 +3,7 @@
 exports[`py#rdb generator > should generate MySQL dependencies and templates 1`] = `
 "import ssl
 from collections.abc import Generator
+from contextlib import contextmanager
 
 import boto3
 from sqlalchemy import event
@@ -30,7 +31,11 @@ def get_engine(rds_ca: str | None = None):
     ssl_args: dict = (
         {}
         if is_local_dev()
-        else ({"ssl_ca": rds_ca} if rds_ca else {"ssl": ssl.create_default_context()})
+        else (
+            {"ssl_ca": rds_ca, "ssl_verify_cert": True, "ssl_verify_identity": True}
+            if rds_ca
+            else {"ssl": ssl.create_default_context()}
+        )
     )
     if is_local_dev():
         cfg = get_local_dev_config()
@@ -63,10 +68,18 @@ def get_engine(rds_ca: str | None = None):
     return _engine
 
 
-def get_session(rds_ca: str | None = None) -> Generator[Session]:
+@contextmanager
+def session_context(rds_ca: str | None = None) -> Generator[Session]:
     """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
     Required when connecting directly to the RDS cluster without an RDS Proxy."""
     with Session(get_engine(rds_ca)) as session:
+        yield session
+
+
+def get_session(rds_ca: str | None = None) -> Generator[Session]:
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    with session_context(rds_ca) as session:
         yield session
 "
 `;
@@ -90,7 +103,11 @@ def _run_migrations() -> None:
         password=secret["password"],
     )
     alembic_cfg = Config("alembic.ini")
-    connect_args = {"ssl": {"ca": "./global-bundle.pem"}}
+    connect_args = {
+        "ssl_ca": "/opt/global-bundle.pem",
+        "ssl_verify_cert": True,
+        "ssl_verify_identity": True,
+    }
     engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
@@ -122,7 +139,9 @@ def _ensure_database_user(db_user: str) -> None:
         database=secret["dbname"],
         user=secret["username"],
         password=secret["password"],
-        ssl={"ca": "./global-bundle.pem"},
+        ssl_ca="/opt/global-bundle.pem",
+        ssl_verify_cert=True,
+        ssl_verify_identity=True,
         connect_timeout=10,
     )
     try:
@@ -175,8 +194,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o ./global-bundle.pem
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
 
 CMD ["proj_db.migration_handler.handler"]
 "
@@ -189,8 +207,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o ./global-bundle.pem
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
 
 CMD ["proj_db.create_db_user_handler.handler"]
 "
@@ -1044,16 +1061,18 @@ def downgrade() -> None:
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/versions/.gitkeep 1`] = `""`;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/__init__.py 1`] = `
-"from .connection import get_engine, get_session, is_local_dev
+"from .connection import get_engine, get_session, is_local_dev, session_context
 
-__all__ = ["get_engine", "get_session", "is_local_dev"]
+__all__ = ["get_engine", "get_session", "is_local_dev", "session_context"]
 "
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/connection.py 1`] = `
 "from collections.abc import Generator
+from contextlib import contextmanager
 
 import boto3
+import certifi
 from sqlalchemy import event
 from sqlmodel import Session, create_engine
 
@@ -1081,7 +1100,7 @@ def get_engine(rds_ca: str | None = None):
         if is_local_dev()
         else {
             "sslmode": "verify-full",
-            **({"sslrootcert": rds_ca} if rds_ca else {}),
+            "sslrootcert": rds_ca if rds_ca else certifi.where(),
         }
     )
     if is_local_dev():
@@ -1115,10 +1134,18 @@ def get_engine(rds_ca: str | None = None):
     return _engine
 
 
-def get_session(rds_ca: str | None = None) -> Generator[Session]:
+@contextmanager
+def session_context(rds_ca: str | None = None) -> Generator[Session]:
     """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
     Required when connecting directly to the RDS cluster without an RDS Proxy."""
     with Session(get_engine(rds_ca)) as session:
+        yield session
+
+
+def get_session(rds_ca: str | None = None) -> Generator[Session]:
+    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
+    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+    with session_context(rds_ca) as session:
         yield session
 "
 `;
@@ -1142,7 +1169,7 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret["username"],
         password=secret["password"],
         sslmode="verify-full",
-        sslrootcert="./global-bundle.pem",
+        sslrootcert="/opt/global-bundle.pem",
         connect_timeout=10,
     )
     try:
@@ -1223,7 +1250,7 @@ def _run_migrations() -> None:
         password=secret["password"],
     )
     alembic_cfg = Config("alembic.ini")
-    connect_args = {"sslmode": "verify-full", "sslrootcert": "./global-bundle.pem"}
+    connect_args = {"sslmode": "verify-full", "sslrootcert": "/opt/global-bundle.pem"}
     engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
     try:
         with engine.connect() as connection:
@@ -1419,8 +1446,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o ./global-bundle.pem
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
 
 CMD ["proj_db.migration_handler.handler"]
 "
@@ -1433,8 +1459,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
-    -o ./global-bundle.pem
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
 
 CMD ["proj_db.create_db_user_handler.handler"]
 "
@@ -1503,6 +1528,7 @@ dependencies = [
   "sqlmodel==0.0.38",
   "alembic==1.18.4",
   "psycopg[binary,pool]==3.3.4",
+  "certifi==2026.6.17",
   "boto3==1.43.37",
   "aws-lambda-powertools==3.31.0"
 ]
@@ -1591,7 +1617,7 @@ def _ensure_database_user(db_user: str) -> None:
         user=secret["username"],
         password=secret["password"],
         sslmode="verify-full",
-        sslrootcert="./global-bundle.pem",
+        sslrootcert="/opt/global-bundle.pem",
         connect_timeout=10,
     )
     try:

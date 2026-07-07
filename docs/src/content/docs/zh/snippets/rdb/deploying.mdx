@@ -1,0 +1,177 @@
+---
+title: 部署关系型数据库
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+关系型数据库生成器会根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 构造在 `common/constructs` 中创建。示例用法：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+这将配置一个 Aurora 集群，包含 RDS Proxy、管理员凭证、应用程序数据库用户、运行时配置注册和迁移处理程序。
+
+生成的基础设施会创建两个数据库用户：
+- **管理员用户** - 在集群配置期间创建，凭证存储在 AWS Secrets Manager 中
+- **应用程序用户** - 通过 Lambda 自定义资源创建，启用 IAM 身份验证，并对应用程序数据库具有 DML 权限（SELECT、INSERT、UPDATE、DELETE）
+</Fragment>
+<Fragment slot="terraform">
+Terraform 模块在 `common/terraform` 中创建。示例用法：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+这将配置一个 Aurora 集群，包含 RDS Proxy、管理员凭证、create-db-user Lambda、运行时配置注册、迁移 Lambda 和容器注册表资源。
+
+生成的基础设施会创建两个数据库用户：
+- **管理员用户** - 在集群配置期间创建，凭证存储在 AWS Secrets Manager 中
+- **应用程序用户** - 通过 Lambda 函数创建，启用 IAM 身份验证，并对应用程序数据库具有 DML 权限（SELECT、INSERT、UPDATE、DELETE）
+</Fragment>
+</Infrastructure>
+
+应用程序用户会自动创建，使用随机名称和 IAM 身份验证。生成的数据库客户端已配置为使用短期 RDS 令牌以该用户身份进行身份验证，因此您的应用程序代码永远不会处理数据库密码。
+
+您的 VPC 应包括公有子网、具有出口的私有子网和私有隔离子网。数据库可以在私有隔离子网中运行，而应用程序 Lambda 函数应在具有出口的私有子网中运行，以便它们可以访问 AWS 服务（如 AppConfig）。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### 将 API 连接到数据库
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在您的应用程序堆栈中，将 API 部署到与数据库相同的 VPC 中，然后调用 `allowDefaultPortFrom` 和 `grantConnect` 来打开网络路径并向每个 Lambda 处理程序授予 IAM `rds-db:connect` 权限：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**（推荐）或公有子网，而不是私有隔离子网。在运行时，数据库客户端从 AWS AppConfig 检索连接详细信息，AppConfig 是一个公共 AWS 服务端点。私有隔离子网中的 Lambda 函数没有出站互联网访问权限，无法访问 AppConfig。具有出口的私有子网通过位于公有子网中的 NAT 网关路由出站流量。
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的计算模块，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # Allow the API to read runtime config from AppConfig
+  appconfig_application_id = module.my_database.appconfig_application_id
+
+  # Grant rds-db:connect for the application database user
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+
+  # Allow network access to the database port
+  database_security_group_id = module.my_database.security_group_id
+  database_port              = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**（推荐）或公有子网，而不是私有隔离子网。在运行时，数据库客户端从 AWS AppConfig 检索连接详细信息，AppConfig 是一个公共 AWS 服务端点。私有隔离子网中的 Lambda 函数没有出站互联网访问权限，无法访问 AppConfig。具有出口的私有子网通过 NAT 网关路由出站流量，这需要公有子网。
+
+确保 API Lambda 角色对 `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` 具有 `rds-db:connect` 权限和 AppConfig 读取权限，API 的安全组可以在数据库端口上访问数据库安全组，并且 Lambda 环境包含 `RUNTIME_CONFIG_APP_ID`。
+</Fragment>
+</Infrastructure>
+
+:::note
+此示例向 API 中的每个处理程序授予访问权限，但如果只有某些处理程序需要访问权限，最好单独配置。
+:::

@@ -1,0 +1,138 @@
+---
+title: Agente Python a Base de Datos Relacional
+description: Conectar un Agente Python a una Base de Datos Relacional
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` conecta un <Link path="guides/py-agent">Agente Python</Link> a un proyecto de <Link path="guides/py-rdb">Base de Datos Relacional Python</Link>, haciendo que la sesión de base de datos esté disponible dentro de las herramientas de tu agente.
+
+## Requisitos Previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/py-agent">`py#agent`</Link>
+2. Un proyecto <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto de Agente como origen y tu proyecto de base de datos relacional como destino. Si el proyecto contiene múltiples componentes de agente, especifica `sourceComponent` para desambiguar.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+El generador agrega el paquete de base de datos como una dependencia del espacio de trabajo, actualiza el objetivo `<agent-name>-dev` del agente para que dependa del objetivo `dev` de la base de datos de modo que ambos se inicien juntos durante el desarrollo local, y actualiza el Dockerfile del agente generado con el paquete CA de RDS utilizado para conexiones directas a Aurora.
+
+## Cómo Funciona
+
+El paquete de base de datos exporta `session_context`, un administrador de contexto que abre una `Session` de SQLModel usando el cliente de base de datos generado y la cierra cuando el bloque `with` termina.
+
+Para el desarrollo local, `session_context()` se conecta al contenedor de base de datos local. En entornos de ejecución desplegados, lee la configuración de la base de datos desde AWS AppConfig, genera un token de autenticación IAM y valida el certificado TLS de la base de datos.
+
+## Usar la Base de Datos en Herramientas del Agente
+
+Importa `session_context` desde tu paquete de base de datos y úsalo dentro de las herramientas de tu agente:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context() as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+## Infraestructura
+
+El constructo de agente generado implementa `IGrantable` e `IConnectable`, por lo que puedes otorgar acceso de red e IAM a la base de datos directamente en el constructo.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` abre la regla del grupo de seguridad para que el entorno de ejecución del agente pueda alcanzar el puerto de la base de datos. `grantConnect` otorga el permiso IAM `rds-db:connect` al rol de ejecución del agente.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Pasa las salidas del módulo de base de datos a tu módulo de agente para que pueda alcanzar la base de datos y leer su configuración de tiempo de ejecución:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Asegúrate de que el rol de ejecución del agente tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+
+</Fragment>
+</Infrastructure>
+
+### Requisitos SSL al Conectar sin RDS Proxy
+
+Cuando el agente se conecta directamente al clúster Aurora (sin RDS Proxy), el generador de conexión actualiza el Dockerfile del agente generado para agregar el paquete CA de Amazon RDS en `/opt/global-bundle.pem`:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+Pasa esa ruta a `session_context` usando el parámetro opcional `rds_ca`:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+Cuando uses RDS Proxy, no necesitas configurar el paquete CA de RDS en el entorno de ejecución del agente.
+
+## Desarrollo Local
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+Esto inicia el agente y todas las bases de datos conectadas. La variable de entorno `LOCAL_DEV=true` hace que el cliente de base de datos se conecte a su base de datos Docker local en lugar de Aurora.

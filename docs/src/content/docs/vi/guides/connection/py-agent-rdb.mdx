@@ -1,0 +1,138 @@
+---
+title: Python Agent đến Cơ sở dữ liệu quan hệ
+description: Kết nối Python Agent với Cơ sở dữ liệu quan hệ
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` kết nối một <Link path="guides/py-agent">Python Agent</Link> với dự án <Link path="guides/py-rdb">Python Relational Database</Link>, làm cho phiên cơ sở dữ liệu có sẵn bên trong các công cụ agent của bạn.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/py-agent">`py#agent`</Link>
+2. Một dự án <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án Agent của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích. Nếu dự án chứa nhiều thành phần agent, hãy chỉ định `sourceComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Đầu ra của trình tạo
+
+Trình tạo thêm gói cơ sở dữ liệu làm phụ thuộc workspace, cập nhật target `<agent-name>-dev` của agent để phụ thuộc vào target `dev` của cơ sở dữ liệu để cả hai khởi động cùng nhau trong quá trình phát triển cục bộ, và cập nhật Dockerfile agent được tạo với gói CA RDS được sử dụng cho các kết nối Aurora trực tiếp.
+
+## Cách hoạt động
+
+Gói cơ sở dữ liệu xuất `session_context`, một trình quản lý ngữ cảnh mở một `Session` SQLModel bằng cách sử dụng client cơ sở dữ liệu được tạo và đóng nó khi khối `with` thoát.
+
+Đối với phát triển cục bộ, `session_context()` kết nối với container cơ sở dữ liệu cục bộ. Trong các runtime đã triển khai, nó đọc cấu hình cơ sở dữ liệu từ AWS AppConfig, tạo token xác thực IAM và xác thực chứng chỉ TLS của cơ sở dữ liệu.
+
+## Sử dụng cơ sở dữ liệu trong các công cụ Agent
+
+Import `session_context` từ gói cơ sở dữ liệu của bạn và sử dụng nó bên trong các công cụ agent của bạn:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context() as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+## Cơ sở hạ tầng
+
+Construct agent được tạo triển khai `IGrantable` và `IConnectable`, vì vậy bạn có thể cấp quyền truy cập mạng và IAM cho cơ sở dữ liệu trực tiếp trên construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` mở quy tắc nhóm bảo mật để runtime agent có thể truy cập cổng cơ sở dữ liệu. `grantConnect` cấp quyền IAM `rds-db:connect` cho vai trò thực thi của agent.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền đầu ra của module cơ sở dữ liệu vào module agent của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Đảm bảo vai trò thực thi của agent có quyền `rds-db:connect` và nhóm bảo mật của nó có thể truy cập nhóm bảo mật cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+
+</Fragment>
+</Infrastructure>
+
+### Yêu cầu SSL khi kết nối không có RDS Proxy
+
+Khi agent kết nối trực tiếp với cụm Aurora (không có RDS Proxy), trình tạo kết nối cập nhật Dockerfile agent được tạo để thêm gói CA Amazon RDS tại `/opt/global-bundle.pem`:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+Truyền đường dẫn đó cho `session_context` bằng cách sử dụng tham số tùy chọn `rds_ca`:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+def list_examples() -> list:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+```
+
+Khi sử dụng RDS Proxy, bạn không cần cấu hình gói CA RDS trong runtime agent.
+
+## Phát triển cục bộ
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+Điều này khởi động agent và tất cả các cơ sở dữ liệu được kết nối. Biến môi trường `LOCAL_DEV=true` khiến client cơ sở dữ liệu kết nối với cơ sở dữ liệu Docker cục bộ của nó thay vì Aurora.

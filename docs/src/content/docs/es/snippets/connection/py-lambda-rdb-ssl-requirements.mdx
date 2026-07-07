@@ -1,0 +1,53 @@
+---
+title: Requisitos SSL al Conectar sin RDS Proxy
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Al conectar directamente al clúster Aurora (sin RDS Proxy), pase la ruta del paquete CA de Amazon RDS usando el parámetro opcional `rds_ca`.
+
+Para funciones Lambda comprimidas, adjunte la capa Lambda `RdsCaLayer` (CDK) o el módulo Terraform `ca-layer`. La capa CDK utiliza empaquetado Docker para agregar el paquete CA, y la capa desplegada lo proporciona en `/opt/global-bundle.pem`:
+
+```python
+from my_scope.my_db import session_context
+
+with session_context(rds_ca='/opt/global-bundle.pem') as session:
+    ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Para más detalles, consulte la [documentación TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls) de Amazon RDS Proxy. Al usar RDS Proxy, no necesita configurar el paquete CA de RDS en su función Lambda.

@@ -1,0 +1,230 @@
+---
+title: FastAPI 连接关系型数据库
+description: 将 FastAPI 连接到 Python 关系型数据库
+when:
+  sourceType: py#fast-api
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器将 <Link path="guides/fastapi">FastAPI</Link> 连接到 <Link path="guides/py-rdb">Python 关系型数据库</Link>项目，通过 FastAPI 依赖项将类型化的 SQLModel 会话注入到您的路由处理程序中。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/fastapi">`py#fast-api`</Link> 项目
+2. 一个 <Link path="guides/py-rdb">`py#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 FastAPI 项目作为源，选择您的关系型数据库项目作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会修改您的 FastAPI 项目：
+
+<FileTree>
+
+- packages/my_api/my_api
+  - dependencies
+    - my-db.py 用于数据库会话的 FastAPI `SessionDep` 依赖项
+
+</FileTree>
+
+此外，FastAPI 的 `dev` 目标会更新为依赖于数据库的 `dev` 目标，以便在本地开发期间两者一起启动。
+
+## 工作原理
+
+生成的依赖文件导出一个 `SessionDep` 类型别名，通过 FastAPI 的 `Depends` 注入 SQLModel `Session`：
+
+```python title="packages/my_api/my_api/dependencies/my-db.py"
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlmodel import Session
+
+from my_scope.my_db.connection import get_session
+
+def get_session_dep() -> Generator[Session]:
+    yield from get_session()
+
+
+SessionDep = Annotated[Session, Depends(get_session_dep)]
+```
+
+## 在路由处理程序中使用数据库
+
+导入 `SessionDep` 并将其声明为路由处理程序中的参数：
+
+```python title="packages/my_api/my_api/api.py"
+from sqlmodel import select
+from my_api.dependencies.my_db import SessionDep
+from my_scope.my_db.models.example import ExampleModel
+
+@app.get("/examples")
+def list_examples(session: SessionDep):
+    return session.exec(select(ExampleModel)).all()
+
+@app.post("/examples")
+def create_example(name: str, session: SessionDep):
+    item = ExampleModel(name=name)
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+```
+
+FastAPI 会自动为每个请求打开一个新会话，并在处理程序返回时关闭它。
+
+## 基础设施
+
+为了允许 FastAPI Lambda 函数在运行时连接到数据库，必须将其部署到与数据库相同的 VPC 中，并授予网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在您的应用程序堆栈中，将 API 部署到与数据库相同的 VPC 中，然后调用 `allowDefaultPortFrom` 和 `grantConnect` 来打开网络路径并授予 Lambda 处理程序 IAM `rds-db:connect` 权限：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**中，而不是私有隔离子网。在运行时，`get_session()` 从 AWS AppConfig 检索数据库配置，这是一个需要出站互联网访问的公共 AWS 服务端点。
+
+:::note
+此示例授予 API 中的每个处理程序访问权限，但如果只有某些处理程序需要访问，最好单独配置。
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的 API 模块中，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**中，而不是私有隔离子网。确保 Lambda 角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>
+
+### 不使用 RDS Proxy 连接时的 SSL 要求
+
+当 FastAPI Lambda 函数直接连接到 Aurora 集群（不使用 RDS Proxy）时，需要附加 `RdsCaLayer` Lambda 层（CDK）或 `ca-layer` Terraform 模块。CDK 层使用 Docker 打包来添加 Amazon RDS CA 捆绑包，部署的层在 `/opt/global-bundle.pem` 提供它。
+
+将 CA 捆绑包层附加到生成的 FastAPI Lambda 集成：
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+然后在生成的依赖项中将层路径传递给 `get_session`：
+
+```python title="packages/my_api/my_api/dependencies/my-db.py"
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlmodel import Session
+
+from my_scope.my_db.connection import get_session
+
+def get_session_dep() -> Generator[Session]:
+    yield from get_session(rds_ca='/opt/global-bundle.pem')
+
+
+SessionDep = Annotated[Session, Depends(get_session_dep)]
+```
+
+使用 RDS Proxy 时，您不需要在 FastAPI Lambda 运行时中配置 RDS CA 捆绑包。
+
+## 本地开发
+
+<NxCommands commands={["dev <project-name>"]} />
+
+这将启动 FastAPI 和所有连接的数据库。`LOCAL_DEV=true` 环境变量会导致数据库客户端连接到其本地 Docker 数据库而不是 Aurora。

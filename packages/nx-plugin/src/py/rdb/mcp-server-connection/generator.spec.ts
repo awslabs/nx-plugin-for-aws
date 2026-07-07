@@ -32,6 +32,7 @@ describe('py#rdb mcp-server-connection generator', () => {
       JSON.stringify({
         name,
         root: `packages/${name}`,
+        sourceRoot: `packages/${name}/src/proj_${name.replaceAll('-', '_')}`,
         targets: {
           [`${mcpServerName}-dev`]: {
             executor: 'nx:run-commands',
@@ -39,6 +40,23 @@ describe('py#rdb mcp-server-connection generator', () => {
           },
         },
       }),
+    );
+
+    const mcpServerNameSnakeCase = mcpServerName.replaceAll('-', '_');
+    tree.write(
+      `packages/${name}/src/proj_${name.replaceAll('-', '_')}/${mcpServerNameSnakeCase}/Dockerfile`,
+      `FROM public.ecr.aws/docker/library/python:3.14-slim
+
+WORKDIR /app
+
+COPY . /app
+
+EXPOSE 8000
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "-m", "uvicorn", "proj_${name.replaceAll('-', '_')}.${mcpServerNameSnakeCase}.http:app", "--host", "0.0.0.0", "--port", "8000"]
+`,
     );
   };
 
@@ -134,5 +152,65 @@ describe('py#rdb mcp-server-connection generator', () => {
         d.target === 'dev',
     );
     expect(deps).toHaveLength(1);
+  });
+
+  it('should add RDS CA bundle to Dockerfile', async () => {
+    setupMcpServerProject();
+    setupRdbProject();
+
+    await pyRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-mcp-server',
+      targetProject: 'db',
+    });
+
+    expect(
+      tree.read(
+        'packages/my-mcp-server/src/proj_my_mcp_server/mcp_server/Dockerfile',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+  });
+
+  it('should add RDS CA bundle to sourceComponent Dockerfile', async () => {
+    setupMcpServerProject('my-mcp-server', 'custom-mcp-server');
+    setupRdbProject();
+
+    await pyRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-mcp-server',
+      targetProject: 'db',
+      sourceComponent: {
+        generator: 'py#mcp-server',
+        name: 'custom-mcp-server',
+        path: 'src/proj_my_mcp_server/custom_mcp_server',
+      },
+    });
+
+    expect(
+      tree.read(
+        'packages/my-mcp-server/src/proj_my_mcp_server/custom_mcp_server/Dockerfile',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+  });
+
+  it('should be idempotent for Dockerfile', async () => {
+    setupMcpServerProject();
+    setupRdbProject();
+
+    await pyRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-mcp-server',
+      targetProject: 'db',
+    });
+    await pyRdbMcpServerConnectionGenerator(tree, {
+      sourceProject: 'my-mcp-server',
+      targetProject: 'db',
+    });
+
+    expect(
+      tree.read(
+        'packages/my-mcp-server/src/proj_my_mcp_server/mcp_server/Dockerfile',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
   });
 });

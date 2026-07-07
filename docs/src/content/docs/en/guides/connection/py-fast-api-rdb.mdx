@@ -52,12 +52,19 @@ Additionally, the FastAPI's `dev` target is updated to depend on the database's 
 The generated dependency file exports a `SessionDep` type alias that injects a SQLModel `Session` via FastAPI's `Depends`:
 
 ```python title="packages/my_api/my_api/dependencies/my-db.py"
+from collections.abc import Generator
 from typing import Annotated
+
 from fastapi import Depends
 from sqlmodel import Session
+
 from my_scope.my_db.connection import get_session
 
-SessionDep = Annotated[Session, Depends(get_session)]
+def get_session_dep() -> Generator[Session]:
+    yield from get_session()
+
+
+SessionDep = Annotated[Session, Depends(get_session_dep)]
 ```
 
 ## Using the Database in Route Handlers
@@ -153,6 +160,68 @@ Deploy the API Lambda functions into **private subnets with egress**, not privat
 
 </Fragment>
 </Infrastructure>
+
+### SSL Requirements When Connecting Without RDS Proxy
+
+When the FastAPI Lambda functions connect directly to the Aurora cluster (without RDS Proxy), attach the `RdsCaLayer` Lambda layer (CDK) or `ca-layer` Terraform module. The CDK layer uses Docker bundling to add the Amazon RDS CA bundle, and the deployed layer provides it at `/opt/global-bundle.pem`.
+
+Attach the CA bundle layer to the generated FastAPI Lambda integrations:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RdsCaLayer } from ':my-scope/common-constructs';
+
+const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      layers: [rdsCaLayer.layer],
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "rds_ca_layer" {
+  source = "../../common/terraform/src/core/rdb/ca-layer"
+}
+
+module "api" {
+  source = "..."
+  ...
+
+  layers = [module.rds_ca_layer.layer_arn]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Then pass the layer path to `get_session` in the generated dependency:
+
+```python title="packages/my_api/my_api/dependencies/my-db.py"
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlmodel import Session
+
+from my_scope.my_db.connection import get_session
+
+def get_session_dep() -> Generator[Session]:
+    yield from get_session(rds_ca='/opt/global-bundle.pem')
+
+
+SessionDep = Annotated[Session, Depends(get_session_dep)]
+```
+
+When using RDS Proxy, you do not need to configure the RDS CA bundle in the FastAPI Lambda runtime.
 
 ## Local Development
 

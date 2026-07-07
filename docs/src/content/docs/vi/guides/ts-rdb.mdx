@@ -10,9 +10,7 @@ import ConnectionCard from '@components/connection-card.astro';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import Infrastructure from '@components/infrastructure.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
 
@@ -64,73 +62,11 @@ Local development scripts được chia sẻ giữa tất cả các dự án dat
 
 ### Cơ sở hạ tầng
 
-<Snippet name="shared-constructs" />
-
-<Infrastructure>
-  <Fragment slot="cdk">
-    <FileTree>
-      - packages/common/constructs/src
-        - app
-          - dbs
-            - \<name>.ts Cơ sở hạ tầng dành riêng cho cơ sở dữ liệu của bạn
-        - core
-          - rdb
-            - aurora.ts Construct cơ sở dữ liệu Aurora chung
-    </FileTree>
-  </Fragment>
-  <Fragment slot="terraform">
-    <FileTree>
-      - packages/common/terraform/src
-        - app
-          - dbs
-            - \<name>
-              - \<name>.tf Module dành riêng cho cơ sở dữ liệu của bạn
-        - core
-          - rdb
-            - aurora
-              - aurora.tf Module Aurora chung
-    </FileTree>
-  </Fragment>
-</Infrastructure>
+<Snippet name="rdb/infrastructure" />
 
 #### Kiến trúc
 
-Cơ sở dữ liệu được triển khai có kiến trúc như sau. Theo mặc định, một [Amazon RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.html) nằm phía trước Aurora cluster để gộp các kết nối và kích hoạt [xác thực IAM](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) — xem [Tắt RDS Proxy](#disable-rds-proxy) để biết phương án thay thế. Kiến trúc giống nhau cho dù bạn chọn engine PostgreSQL hay MySQL; chỉ có Aurora engine flavor khác nhau.
-
-```d2 inline=true
-direction: right
-
-app: Application\n(Lambda, Agent, ...) {
-  shape: hexagon
-}
-
-migrations: Migrations Lambda {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/lambda.svg
-  near: top-right
-}
-
-proxy: RDS Proxy {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/rds.svg
-}
-
-aurora: Aurora\n(PostgreSQL or MySQL) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/aurora.svg
-}
-
-secrets: Secrets Manager\n(DB credentials) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/secrets-manager.svg
-  near: bottom-right
-}
-
-app -> proxy: SQL (IAM auth)
-proxy -> aurora
-migrations -> aurora: Schema migrations
-proxy -> secrets: Master credential rotation
-```
+<Snippet name="rdb/architecture" />
 
 ## Phát triển Cục bộ
 
@@ -246,497 +182,111 @@ const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 
 Prisma client expose các model được type đầy đủ được lấy từ schema `prisma/models/` của bạn, cung cấp cho bạn type safety từ đầu đến cuối từ cơ sở dữ liệu cho đến API response.
 
-### Connection Generators
-
-Đối với các loại dự án cụ thể, sử dụng generator `connection` để tự động kết nối cơ sở dữ liệu — nó xử lý import, context injection và các dependency phát triển cục bộ:
-
-- <Link path="guides/connection/trpc-rdb">tRPC API → Relational Database</Link>
-- <Link path="guides/connection/smithy-rdb">Smithy API → Relational Database</Link>
-- <Link path="guides/connection/ts-agent-rdb">TypeScript Agent → Relational Database</Link>
-- <Link path="guides/connection/ts-mcp-server-rdb">MCP Server → Relational Database</Link>
-
 ## Triển khai Cơ sở dữ liệu của bạn
 
-Generator cơ sở dữ liệu quan hệ tạo cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn.
-
-<Infrastructure>
-<Fragment slot="cdk">
-Construct CDK được tạo trong `common/constructs`. Ví dụ sử dụng:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
-    super(scope, id, props);
-    ...
-    const db = new MyDatabase(this, 'Db', {
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_ISOLATED,
-      }
-    });
-  }
-}
-```
-
-Điều này cung cấp một Aurora cluster với RDS Proxy, admin credentials, application database user, đăng ký runtime config và migration handler.
-
-Cơ sở hạ tầng được tạo ra tạo hai database user:
-- **Admin user** - Được tạo trong quá trình cung cấp cluster với credentials được lưu trong AWS Secrets Manager
-- **Application user** - Được tạo thông qua Lambda custom resource với xác thực IAM được bật và có đầy đủ quyền trên application database
-</Fragment>
-<Fragment slot="terraform">
-Module Terraform được tạo trong `common/terraform`. Ví dụ sử dụng:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-
-  tags = local.common_tags
-}
-```
-
-Điều này cung cấp một Aurora cluster với RDS Proxy, admin credentials, create-db-user Lambda, đăng ký runtime config, migration Lambda và các tài nguyên container registry.
-
-Cơ sở hạ tầng được tạo ra tạo hai database user:
-- **Admin user** - Được tạo trong quá trình cung cấp cluster với credentials được lưu trong AWS Secrets Manager
-- **Application user** - Được tạo thông qua Lambda function với xác thực IAM được bật và có đầy đủ quyền trên application database
-</Fragment>
-</Infrastructure>
-
-Application user được tự động tạo với tên ngẫu nhiên và xác thực IAM. `getPrisma()` đã được cấu hình để xác thực với user này bằng RDS token có thời hạn ngắn, vì vậy mã ứng dụng của bạn không bao giờ xử lý mật khẩu cơ sở dữ liệu.
-
-VPC của bạn nên bao gồm public subnet, private subnet với egress và private isolated subnet. Cơ sở dữ liệu có thể chạy trong private isolated subnet, trong khi API Lambda function nên chạy trong private subnet với egress để chúng có thể kết nối với các dịch vụ AWS như AppConfig.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-const vpc = new Vpc(this, 'Vpc', {
-  subnetConfiguration: [
-    {
-      name: 'public',
-      subnetType: SubnetType.PUBLIC,
-    },
-    {
-      name: 'private_with_egress',
-      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    },
-    {
-      name: 'private_isolated',
-      subnetType: SubnetType.PRIVATE_ISOLATED,
-    },
-  ],
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 6.0"
-
-  name = "app"
-  ...
-  public_subnet_names  = ["public"]
-  private_subnet_names = ["private_with_egress"]
-  intra_subnet_names   = ["private_isolated"]
-
-  enable_nat_gateway = true
-  single_nat_gateway = true
-}
-```
-
-</Fragment>
-</Infrastructure>
-
-### Kết nối API với Cơ sở dữ liệu
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho mỗi Lambda handler:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-Triển khai API Lambda function vào **private subnet với egress** (khuyến nghị) hoặc public subnet, không phải private isolated subnet. Tại runtime, `getPrisma()` lấy chi tiết kết nối cơ sở dữ liệu từ AWS AppConfig, đây là public AWS service endpoint. Lambda function trong private isolated subnet không có quyền truy cập internet outbound và không thể kết nối với AppConfig. Private subnet với egress định tuyến outbound traffic thông qua NAT Gateway nằm trong public subnet.
-</Fragment>
-<Fragment slot="terraform">
-
-Truyền các output của database module vào compute module của bạn để nó có thể kết nối với cơ sở dữ liệu và đọc runtime configuration của nó:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  # Allow the API to read runtime config from AppConfig
-  appconfig_application_id = module.my_database.appconfig_application_id
-
-  # Grant rds-db:connect for the application database user
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-
-  # Allow network access to the database port
-  database_security_group_id = module.my_database.security_group_id
-  database_port              = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-Triển khai API Lambda function vào **private subnet với egress** (khuyến nghị) hoặc public subnet, không phải private isolated subnet. Tại runtime, `getPrisma()` lấy chi tiết kết nối cơ sở dữ liệu từ AWS AppConfig, đây là public AWS service endpoint. Lambda function trong private isolated subnet không có quyền truy cập internet outbound và không thể kết nối với AppConfig. Private subnet với egress định tuyến outbound traffic thông qua NAT Gateway yêu cầu public subnet.
-
-Đảm bảo API Lambda role có quyền `rds-db:connect` trên `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` và quyền đọc AppConfig, security group của API có thể kết nối với security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu, và môi trường Lambda bao gồm `RUNTIME_CONFIG_APP_ID`.
-</Fragment>
-</Infrastructure>
-
-:::note
-Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần truy cập thì tốt hơn là cấu hình riêng lẻ.
-:::
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
 
 ### Cấu hình RDS Proxy
 
-Cơ sở hạ tầng được tạo ra bao gồm RDS Proxy theo mặc định, nằm giữa ứng dụng của bạn và Aurora cluster. RDS Proxy cung cấp nhiều lợi ích:
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
 
-- **Connection pooling** - Duy trì một pool các kết nối cơ sở dữ liệu có thể được chia sẻ giữa các instance ứng dụng, giảm overhead của việc thiết lập kết nối mới
-- **Connection resilience** - Tự động xử lý failover và kết nối lại trong quá trình thay thế Aurora instance hoặc bảo trì
-- **IAM authentication** - Hỗ trợ xác thực cơ sở dữ liệu dựa trên IAM, loại bỏ nhu cầu quản lý credentials cơ sở dữ liệu trong mã ứng dụng của bạn
-- **Improved security** - Thực thi mã hóa TLS cho tất cả các kết nối
+### Yêu cầu SSL Khi Kết nối Không qua RDS Proxy
 
-:::note[Chi phí Bổ sung]
-RDS Proxy được bật theo mặc định nhưng phát sinh thêm chi phí ngoài chi phí Aurora cluster. Xem [AWS RDS Proxy pricing](https://aws.amazon.com/rds/proxy/pricing/) để biết chi tiết. Nếu bạn muốn tắt proxy, xem phần bên dưới.
-:::
+Khi kết nối trực tiếp với Aurora cluster (không qua RDS Proxy), runtime gọi `getPrisma()` phải tin tưởng Amazon RDS CA bundle. Prisma client được tạo ra bật xác minh certificate; cách bạn cung cấp CA bundle phụ thuộc vào runtime kết nối với cơ sở dữ liệu.
 
-#### Tắt RDS Proxy  
+Đối với Amazon RDS, sử dụng global CA bundle từ:
 
-Bạn có thể tắt RDS proxy như sau:  
+```text
+https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+#### Runtime Container Images
+
+Nếu bạn chuẩn bị container image riêng cho runtime, tải xuống RDS CA bundle trong Dockerfile của bạn và thêm nó vào trust store của hệ điều hành.
+
+Đối với Debian-based images:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+Đối với Amazon Linux-based images:
+
+```dockerfile
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \
+    update-ca-trust
+```
+
+#### Zipped Lambda Functions
+
+Đối với zipped Lambda function sử dụng Node.js 20 hoặc runtime mới hơn, tải Amazon RDS CA bundle bằng cách đặt `NODE_EXTRA_CA_CERTS`:
 
 <Infrastructure>
 <Fragment slot="cdk">
 
-
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  enableRdsProxy: false,
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
 });
 ```
 
-Khi RDS Proxy bị tắt, ứng dụng của bạn kết nối trực tiếp với Aurora cluster endpoint.
 </Fragment>
 <Fragment slot="terraform">
 
-Theo mặc định, RDS Proxy được bật. Runtime client được tạo ra (`getPrisma()`) tự động kết nối thông qua proxy endpoint. Bạn có thể tắt nó nếu cần:
-
 ```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
+module "api" {
+  source = "..."
   ...
-  enable_rds_proxy = false
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
 }
 ```
 
-Khi RDS Proxy bị tắt, ứng dụng của bạn kết nối trực tiếp với Aurora cluster endpoint.
 </Fragment>
 </Infrastructure>
 
-<Snippet name="connection/lambda-rdb-ssl-requirements" parentHeading="Disable RDS Proxy" />
-
-Cơ sở hạ tầng được tạo ra có thể được tùy chỉnh để phù hợp với yêu cầu workload của bạn. Các ví dụ sau đây minh họa một số tùy chọn tùy chỉnh phổ biến có sẵn.
+Để biết thêm chi tiết, xem AWS Lambda [SSL/TLS requirements for Amazon RDS connections](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls). Khi sử dụng RDS Proxy, bạn không cần cấu hình RDS CA bundle trong runtime kết nối với cơ sở dữ liệu.
 
 ### Cluster Instances
 
-Cấu hình writer và reader instance cho Aurora cluster của bạn.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  writer: ClusterInstance.serverlessV2('writer'),
-  readers: [ClusterInstance.serverlessV2('reader')],
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  instance_count = 2  # 1 writer + 1 reader
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/cluster-instances" />
 
 ### Serverless Capacity
 
-Kiểm soát giới hạn scaling Aurora Serverless v2 để phù hợp với workload của bạn.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  serverlessV2MinCapacity: 0.5,
-  serverlessV2MaxCapacity: 8,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  serverless_min_capacity = 0.5
-  serverless_max_capacity = 8
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/serverless-capacity" />
 
 ### Engine Version
 
-Cố định một Aurora engine version cụ thể.
-
-Theo mặc định, local database container image được tạo ra khớp với Aurora engine version mặc định. Nếu bạn thay đổi Aurora engine version, khuyến nghị cũng sử dụng local container image version tương ứng để có khả năng tương thích tối đa. Xem AWS release notes cho [Aurora PostgreSQL versions](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html) và [Aurora MySQL versions](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html) để xác định community database version tương ứng.
-
-Local database image được cấu hình trong trường `localDev.image` của file `config.json` được tạo ra trong thư mục gốc dự án database của bạn. Cập nhật giá trị đó khi bạn thay đổi engine version.
-
-<OptionFilter when={{ engine: 'postgres' }}>
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  engine_version = "17.7"
-}
-```
-</Fragment>
-</Infrastructure>
-</OptionFilter>
-
-<OptionFilter when={{ engine: 'mysql' }}>
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  engineVersion: AuroraMysqlEngineVersion.VER_3_12_0,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  engine_version = "8.0.mysql_aurora.3.12.0"
-}
-```
-</Fragment>
-</Infrastructure>
-</OptionFilter>
+<Snippet name="rdb/engine-version" />
 
 ### Deletion Protection
 
-Deletion protection được bật theo mặc định (`deletionProtection: true` trong CDK, `deletion_protection = true` trong Terraform) để bảo vệ Aurora cluster khỏi bị xóa vô tình.
-
-#### Tắt Deletion Protection
-
-Bạn có thể tắt deletion protection cho các môi trường mà việc xóa cơ sở dữ liệu được mong đợi, chẳng hạn như các stack phát triển hoặc preview có thời hạn ngắn.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  deletionProtection: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  deletion_protection = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/deletion-protection" />
 
 ### Removal Policy
 
-Construct CDK giữ lại Aurora cluster theo mặc định (`removalPolicy: RemovalPolicy.RETAIN`). Thay đổi điều này khi bạn muốn việc xóa CDK stack tạo snapshot hoặc hủy cluster thay thế.
-
-Khi sử dụng `RemovalPolicy.DESTROY`, deletion protection cũng phải được tắt trước khi cluster có thể bị xóa.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RemovalPolicy } from 'aws-cdk-lib';
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  removalPolicy: RemovalPolicy.SNAPSHOT,
-});
-```
-
-Đối với môi trường tạm thời mà cơ sở dữ liệu nên bị xóa cùng với stack:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RemovalPolicy } from 'aws-cdk-lib';
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  deletionProtection: false,
-  removalPolicy: RemovalPolicy.DESTROY,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-Terraform không sử dụng CDK removal policy. Theo mặc định, module tạo final snapshot khi xóa (`skip_final_snapshot = false`). Để bỏ qua final snapshot cho môi trường tạm thời:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  deletion_protection = false
-  skip_final_snapshot = true
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/removal-policy" />
 
 ### Logging and Monitoring
 
-Performance Insights được bật trên Aurora writer instance theo mặc định (được mã hóa bằng KMS key của cluster). Bạn cũng có thể xuất Aurora engine logs đến [CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html) (`postgresql` cho [Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.CloudWatch.html); `audit`, `error`, `general` và `slowquery` cho [Aurora MySQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Integrating.CloudWatch.html)). Bật xuất log cho từng database:
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  enableCloudwatchLogs: true,
-  enablePerformanceInsights: false, // disable if not required
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  enable_cloudwatch_logs      = true
-  enable_performance_insights = false # disable if not required
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/logging" />
 
 ### Encryption Key Rotation
 
-KMS key được sử dụng để mã hóa Aurora cluster và credentials secret của nó có tính năng tự động xoay key được bật theo mặc định. Tắt nó nếu chính sách bảo mật của bạn quản lý việc xoay key từ bên ngoài.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/encryption-key-rotation" />
 
 ## Hạn chế
 

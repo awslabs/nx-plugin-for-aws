@@ -1,5 +1,5 @@
 ---
-title: Relational Database
+title: TypeScript Relational Database
 description: Create a relational database project
 generator: ts#rdb
 ---
@@ -7,6 +7,7 @@ generator: ts#rdb
 import { FileTree, CardGrid } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -184,13 +185,81 @@ The Prisma client exposes fully typed models derived from your `prisma/models/` 
 
 ## Deploying your Database
 
-<Snippet name="rdb/deploying" />
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
 
 ### RDS Proxy Configuration
 
-<Snippet name="rdb/rds-proxy" />
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
 
-The generated infrastructure can be customised to match your workload requirements. The following examples demonstrate a few common customisation options available.
+### SSL Requirements When Connecting Without RDS Proxy
+
+When connecting directly to the Aurora cluster (without RDS Proxy), the runtime that calls `getPrisma()` must trust the Amazon RDS CA bundle. The generated Prisma client enables certificate verification; how you make the CA bundle available depends on the runtime that connects to the database.
+
+For Amazon RDS, use the global CA bundle from:
+
+```text
+https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+#### Runtime Container Images
+
+If you prepare your own container image for the runtime, download the RDS CA bundle in your Dockerfile and add it to the operating system trust store.
+
+For Debian-based images:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+For Amazon Linux-based images:
+
+```dockerfile
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \
+    update-ca-trust
+```
+
+#### Zipped Lambda Functions
+
+For zipped Lambda functions using Node.js 20 or later runtimes, load the Amazon RDS CA bundle by setting `NODE_EXTRA_CA_CERTS`:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "..."
+  ...
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+For more details, see the AWS Lambda [SSL/TLS requirements for Amazon RDS connections](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls). When using RDS Proxy, you do not need to configure the RDS CA bundle in the runtime that connects to the database.
 
 ### Cluster Instances
 

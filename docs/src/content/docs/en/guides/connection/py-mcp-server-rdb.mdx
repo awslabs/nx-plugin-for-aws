@@ -5,7 +5,6 @@ when:
   sourceType: py#mcp-server
   targetType: py#rdb
 ---
-import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -35,32 +34,38 @@ Select your MCP server project as the source and your relational database projec
 
 ## Generator Output
 
-The generator adds the database package as a workspace dependency and updates the MCP server's `<mcp-server-name>-dev` target to depend on the database's `dev` target so both start together during local development. No source files are modified.
+The generator adds the database package as a workspace dependency, updates the MCP server's `<mcp-server-name>-dev` target to depend on the database's `dev` target so both start together during local development, and updates the generated MCP server Dockerfile with the RDS CA bundle used for direct Aurora connections.
+
+## How It Works
+
+The database package exports `session_context`, a context manager that opens a SQLModel `Session` using the generated database client and closes it when the `with` block exits.
+
+For local development, `session_context()` connects to the local database container. In deployed runtimes, it reads the database configuration from AWS AppConfig, generates an IAM authentication token, and validates the database TLS certificate.
 
 ## Using the Database in MCP Tools
 
-Import `get_session` or `get_engine` from your database package and use them inside your MCP server tools:
+Import `session_context` from your database package and use it inside your MCP server tools:
 
 ```python title="packages/my_service/my_service/my_mcp_server/server.py"
-from sqlmodel import Session, select
-from my_scope.my_db import get_engine
+from sqlmodel import select
+from my_scope.my_db import session_context
 from my_scope.my_db.models.example import ExampleModel
 
 @mcp.tool()
 def list_examples() -> str:
     """List all example records."""
-    with Session(get_engine()) as session:
+    with session_context() as session:
         items = session.exec(select(ExampleModel)).all()
         return str([item.model_dump() for item in items])
 ```
 
 ## Multiple Databases
 
-Running the generator again with a different target adds the second database alongside the first. Both engines are available to all tools:
+Running the generator again with a different target adds the second database alongside the first. Both session contexts are available to all tools:
 
 ```python title="packages/my_service/my_service/my_mcp_server/server.py"
-from my_scope.my_db import get_engine as get_my_db
-from my_scope.other_db import get_engine as get_other_db
+from my_scope.my_db import session_context as my_db_session_context
+from my_scope.other_db import session_context as other_db_session_context
 ```
 
 ## Infrastructure
@@ -109,6 +114,31 @@ Ensure the MCP server's execution role has `rds-db:connect` permission and that 
 
 </Fragment>
 </Infrastructure>
+
+### SSL Requirements When Connecting Without RDS Proxy
+
+When the MCP server connects directly to the Aurora cluster (without RDS Proxy), the connection generator updates the generated MCP server Dockerfile to add the Amazon RDS CA bundle at `/opt/global-bundle.pem`:
+
+```dockerfile
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+```
+
+Pass that path to `session_context` using the optional `rds_ca` parameter:
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+def list_examples() -> str:
+    """List all example records."""
+    with session_context(rds_ca='/opt/global-bundle.pem') as session:
+        items = session.exec(select(ExampleModel)).all()
+        return str([item.model_dump() for item in items])
+```
+
+When using RDS Proxy, you do not need to configure the RDS CA bundle in the MCP server runtime.
 
 ## Local Development
 
