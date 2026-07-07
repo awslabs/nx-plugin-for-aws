@@ -11,10 +11,39 @@ import * as path from 'path';
 import { getGitIncludedFiles, isWithinGitRepo, updateGitIgnore } from './git';
 import { createTreeUsingTsSolutionSetup } from './test';
 
+/**
+ * Remove inherited GIT_* environment variables (eg GIT_DIR, GIT_INDEX_FILE)
+ * before each test and restore them afterwards. When these tests run inside a
+ * git hook (eg pre-commit), git exports these variables pointing at the
+ * surrounding repository. Since they take precedence over `cwd`, the git
+ * commands run here would otherwise operate on that repository - committing
+ * test fixtures and deleting real files - instead of the isolated temp repo.
+ */
+const useIsolatedGitEnv = () => {
+  const savedGitEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('GIT_')) {
+        savedGitEnv[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedGitEnv)) {
+      process.env[key] = value;
+    }
+  });
+};
+
 describe('git utils', () => {
   describe('getGitIncludedFiles', () => {
     let tmpDir: string;
     let tree: FsTree;
+
+    useIsolatedGitEnv();
 
     beforeEach(() => {
       tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-dir'));
@@ -107,6 +136,8 @@ describe('git utils', () => {
   describe('isWithinGitRepo', () => {
     let tmpDir: string;
     let tree: FsTree;
+
+    useIsolatedGitEnv();
 
     beforeEach(() => {
       tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-git-repo'));
