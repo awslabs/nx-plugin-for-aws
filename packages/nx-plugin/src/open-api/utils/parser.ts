@@ -12,6 +12,8 @@ import {
   COMPOSED_SCHEMA_TYPES,
   createModel,
   DEFAULT_SERVICE_NAME,
+  type Discriminator,
+  type DiscriminatorMapping,
   type EnumMember,
   indexModelsByName,
   type Model,
@@ -787,6 +789,60 @@ const resolveComposedModels = (data: ClientData): void => {
 };
 
 /**
+ * Build the {@link Discriminator} for a composite schema, if it declares one.
+ *
+ * An explicit `mapping` maps each discriminator value to a schema ref; without
+ * a mapping, OpenAPI implies each composed member's schema name is its own
+ * discriminator value. Only mappings that resolve to a model composed by this
+ * schema are kept, so unknown values fall through to the default marshalling.
+ */
+const buildDiscriminator = (
+  model: Model,
+  schema: Schema,
+): Discriminator | undefined => {
+  const { discriminator } = schema;
+  if (!discriminator?.propertyName) return undefined;
+
+  const composedNames = new Set((model.composedModels ?? []).map((m) => m.name));
+
+  const mapping: DiscriminatorMapping[] = [];
+  if (discriminator.mapping) {
+    for (const [value, ref] of Object.entries(discriminator.mapping)) {
+      if (typeof ref !== 'string' || !ref.startsWith('#/')) continue;
+      const modelName = splitRef(ref)[2];
+      if (composedNames.has(modelName)) mapping.push({ value, modelName });
+    }
+  } else {
+    // Implicit mapping: each composed member's name is its discriminator value.
+    for (const composed of model.composedModels ?? []) {
+      mapping.push({ value: composed.name, modelName: composed.name });
+    }
+  }
+
+  return mapping.length > 0
+    ? { propertyName: discriminator.propertyName, mapping }
+    : undefined;
+};
+
+/**
+ * Attach discriminator metadata to discriminated one-of/any-of composites so
+ * the generator can marshal directly to the matching branch. all-of is a
+ * conjunction (not a choice) so it is never discriminated.
+ */
+const resolveDiscriminators = (spec: Spec, data: ClientData): void => {
+  data.models.forEach((model) => {
+    if (model.export !== 'one-of' && model.export !== 'any-of') return;
+    const schema = resolveIfRef<Schema | undefined>(
+      spec,
+      spec.components?.schemas?.[model.name],
+    );
+    if (!schema) return;
+    const discriminator = buildDiscriminator(model, schema);
+    if (discriminator) model.discriminator = discriminator;
+  });
+};
+
+/**
  * Build the client data structure from a (normalised) OpenAPI spec: a fully
  * linked model graph with composite members resolved, ready for augmentation.
  */
@@ -797,5 +853,6 @@ export const buildClientData = (spec: Spec): ClientData => {
   };
   linkModels(spec, data);
   resolveComposedModels(data);
+  resolveDiscriminators(spec, data);
   return data;
 };

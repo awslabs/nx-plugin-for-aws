@@ -778,6 +778,115 @@ describe('openapi codegen data utils', () => {
       expect(op.parameters.filter((p) => p.name === 'token')).toHaveLength(2);
     });
 
+    it('should build discriminator metadata for a discriminated oneOf', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Cat: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' }, meow: { type: 'boolean' } },
+            },
+            Dog: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' }, bark: { type: 'boolean' } },
+            },
+            Animal: {
+              oneOf: [
+                { $ref: '#/components/schemas/Cat' },
+                { $ref: '#/components/schemas/Dog' },
+              ],
+              discriminator: {
+                propertyName: 'kind',
+                mapping: {
+                  cat: '#/components/schemas/Cat',
+                  dog: '#/components/schemas/Dog',
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const animal = data.models.find((m) => m.name === 'Animal')!;
+      expect(animal.discriminator).toEqual({
+        propertyName: 'kind',
+        typescriptPropertyName: 'kind',
+        mapping: [
+          { value: 'cat', modelName: 'Cat' },
+          { value: 'dog', modelName: 'Dog' },
+        ],
+      });
+    });
+
+    it('should build implicit discriminator mapping from member names', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Cat: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' } },
+            },
+            Dog: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' } },
+            },
+            Animal: {
+              oneOf: [
+                { $ref: '#/components/schemas/Cat' },
+                { $ref: '#/components/schemas/Dog' },
+              ],
+              discriminator: { propertyName: 'kind' },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const animal = data.models.find((m) => m.name === 'Animal')!;
+      expect(animal.discriminator?.mapping).toEqual([
+        { value: 'Cat', modelName: 'Cat' },
+        { value: 'Dog', modelName: 'Dog' },
+      ]);
+    });
+
+    it('should not build discriminator metadata for a non-discriminated oneOf', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Cat: {
+              type: 'object',
+              properties: { meow: { type: 'boolean' } },
+            },
+            Dog: {
+              type: 'object',
+              properties: { bark: { type: 'boolean' } },
+            },
+            Animal: {
+              oneOf: [
+                { $ref: '#/components/schemas/Cat' },
+                { $ref: '#/components/schemas/Dog' },
+              ],
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const animal = data.models.find((m) => m.name === 'Animal')!;
+      expect(animal.discriminator).toBeUndefined();
+    });
+
     it('should throw when a response is a composite of primitives', () => {
       const spec: Spec = {
         ...sampleSpec,

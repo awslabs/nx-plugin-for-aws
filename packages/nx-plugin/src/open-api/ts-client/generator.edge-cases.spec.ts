@@ -35,6 +35,8 @@ import {
  *     collection-format maps (no duplicate object key)
  *  L. spaceDelimited / pipeDelimited query arrays must serialise with the
  *     correct delimiter (and compile)
+ *  M. discriminated oneOf must marshal to the matching branch, not merge every
+ *     branch (which leaks fields from the non-matching branches)
  */
 describe('openApiTsClientGenerator - edge cases', () => {
   let tree: Tree;
@@ -740,5 +742,125 @@ describe('openApiTsClientGenerator - edge cases', () => {
     const [url] = mockFetch.mock.calls[0];
     // %20 = space, %7C = pipe
     expect(url).toBe(`${baseUrl}/search?spaced=a%20b%20c&piped=x%7Cy`);
+  });
+
+  // ---- M. discriminated oneOf marshalling -----------------------------------
+
+  const discriminatedShapeSpec = (withMapping: boolean): Spec =>
+    ({
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/shapes': {
+          post: {
+            operationId: 'postShape',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Shape' },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Shape' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Cat: {
+            type: 'object',
+            required: ['kind', 'napAt'],
+            properties: {
+              kind: { type: 'string' },
+              napAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Dog: {
+            type: 'object',
+            required: ['kind', 'walkAt'],
+            properties: {
+              kind: { type: 'string' },
+              walkAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Shape: {
+            oneOf: [
+              { $ref: '#/components/schemas/Cat' },
+              { $ref: '#/components/schemas/Dog' },
+            ],
+            discriminator: {
+              propertyName: 'kind',
+              ...(withMapping
+                ? {
+                    mapping: {
+                      cat: '#/components/schemas/Cat',
+                      dog: '#/components/schemas/Dog',
+                    },
+                  }
+                : {}),
+            },
+          },
+        },
+      },
+    }) as unknown as Spec;
+
+  it('marshals a discriminated oneOf to the matching branch (explicit mapping)', async () => {
+    const { client } = await generate(discriminatedShapeSpec(true));
+
+    // fromJson dispatches on the wire discriminator and picks a single branch.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ kind: 'dog', walkAt: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'postShape', {
+      kind: 'dog',
+      walkAt: new Date('2024-01-02T03:04:05.000Z'),
+    });
+    // The Cat branch's napAt must not leak onto the Dog result.
+    expect(response).toEqual({
+      kind: 'dog',
+      walkAt: new Date('2024-01-02T03:04:05.000Z'),
+    });
+    expect('napAt' in response).toBe(false);
+    // The request body is marshalled via the Dog branch only.
+    const [, request] = mockFetch.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual({
+      kind: 'dog',
+      walkAt: '2024-01-02T03:04:05.000Z',
+    });
+  });
+
+  it('marshals a discriminated oneOf using implicit (schema-name) mapping', async () => {
+    const { client } = await generate(discriminatedShapeSpec(false));
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ kind: 'Dog', walkAt: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'postShape', {
+      kind: 'Dog',
+      walkAt: new Date('2024-01-02T03:04:05.000Z'),
+    });
+    expect(response).toEqual({
+      kind: 'Dog',
+      walkAt: new Date('2024-01-02T03:04:05.000Z'),
+    });
+    expect('napAt' in response).toBe(false);
   });
 });

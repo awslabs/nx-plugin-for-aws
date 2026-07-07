@@ -1279,6 +1279,19 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     expect(types).toMatch(/kind:\s*string\b/);
     expect(types).not.toMatch(/kind:\s*'circle'/);
 
+    // The discriminator must marshal directly to the matching branch, so a
+    // Square must not gain a spurious `radius` from the Circle branch.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ canonical: { kind: 'square', side: 3 } }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'getShapes');
+    expect(response.canonical).toEqual({ kind: 'square', side: 3 });
+    expect('radius' in response.canonical).toBe(false);
+
     expect(types).toMatchSnapshot();
     expect(client).toMatchSnapshot();
   });

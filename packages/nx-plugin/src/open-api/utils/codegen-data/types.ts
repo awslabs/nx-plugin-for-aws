@@ -47,6 +47,30 @@ export interface EnumMember {
   value: string | number | boolean;
 }
 
+/**
+ * A discriminated-composite mapping entry: a discriminator value and the name
+ * of the composed model it selects.
+ */
+export interface DiscriminatorMapping {
+  /** The discriminator property value (e.g. `"cat"`). */
+  value: string;
+  /** The name of the composed model this value selects (e.g. `"Cat"`). */
+  modelName: string;
+}
+
+/**
+ * The discriminator of a `oneOf`/`anyOf` composite, used to marshal directly to
+ * the matching branch rather than merging every branch.
+ */
+export interface Discriminator {
+  /** The wire property name carrying the discriminator value. */
+  propertyName: string;
+  /** The TypeScript property name (resolved during augmentation). */
+  typescriptPropertyName?: string;
+  /** The value → composed-model mapping. */
+  mapping: DiscriminatorMapping[];
+}
+
 /** A pattern-property entry: a regex pattern and the model for its values. */
 export interface PatternPropertyModel {
   pattern: string;
@@ -122,6 +146,8 @@ export interface Model {
   composedModels?: Model[];
   /** For composites: the primitive/enum/array members composed together. */
   composedPrimitives?: Model[];
+  /** For discriminated one-of/any-of composites: the discriminator metadata. */
+  discriminator?: Discriminator;
 
   /** The TypeScript identifier for this model/property. */
   typescriptName?: string;

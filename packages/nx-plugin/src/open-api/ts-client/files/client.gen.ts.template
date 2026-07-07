@@ -206,6 +206,17 @@ export class $IO {
           return <%- renderToJsonValue(arrayOfNonPrimitives, 'model') %>;
       }
       <%_ } _%>
+      <%_ /* A discriminated composite marshals directly to the matching branch,
+            rather than merging every branch (which would leak fields from the
+            non-matching branches). Unknown values fall through to the merge. */ _%>
+      <%_ if (model.discriminator) { _%>
+      <%_ const discToJsonByName = Object.fromEntries(model.composedModels.map(m => [m.name, m.typescriptName])); _%>
+      switch ((model as any).<%- model.discriminator.typescriptPropertyName %>) {
+        <%_ model.discriminator.mapping.filter(m => discToJsonByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- discToJsonByName[modelName] %>.toJson(model as <%- discToJsonByName[modelName] %>);
+        <%_ }); _%>
+      }
+      <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((property, i) => { _%>
@@ -272,6 +283,17 @@ export class $IO {
       <%_ if (arrayOfNonPrimitives) { _%>
       if (Array.isArray(json) && (json.length === 0 || typeof json[0] === 'object')) {
           return <%- renderFromJsonValue(arrayOfNonPrimitives, 'json') %>;
+      }
+      <%_ } _%>
+      <%_ /* A discriminated composite marshals directly to the matching branch;
+            the discriminator value comes off the raw json by its wire name.
+            Unknown values fall through to the merge. */ _%>
+      <%_ if (model.discriminator) { _%>
+      <%_ const discFromJsonByName = Object.fromEntries(model.composedModels.map(m => [m.name, m.typescriptName])); _%>
+      switch (json?.[<%- JSON.stringify(model.discriminator.propertyName) %>]) {
+        <%_ model.discriminator.mapping.filter(m => discFromJsonByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- discFromJsonByName[modelName] %>.fromJson(json);
+        <%_ }); _%>
       }
       <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
