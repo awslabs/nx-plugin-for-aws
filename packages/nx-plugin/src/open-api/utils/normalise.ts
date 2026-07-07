@@ -11,6 +11,7 @@ import {
   toClassName,
   upperFirst,
 } from '../../utils/names';
+import { STREAMING_CONTENT_TYPES } from './codegen-data/types';
 import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
 import type { Spec } from './types';
 
@@ -289,6 +290,42 @@ const rewriteConstToEnum = (spec: Spec): Spec =>
   });
 
 /**
+ * Rewrites a composite schema with sibling `properties`/`required` (a valid
+ * JSON Schema conjunction, common in FastAPI/Pydantic output) into an
+ * equivalent extra `allOf` member, so the parser sees a pure composite and the
+ * sibling fields are neither dropped from the type nor stripped when
+ * marshalling.
+ */
+const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
+  const rewrite = (v: any): any => {
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Array.isArray(v.allOf) &&
+      v.properties
+    ) {
+      const { properties, required, type: _type, ...rest } = v;
+      return cloneDeepWith(
+        {
+          ...rest,
+          allOf: [
+            ...v.allOf,
+            {
+              type: 'object',
+              properties,
+              ...(required ? { required } : {}),
+            },
+          ],
+        },
+        rewrite,
+      );
+    }
+  };
+  return cloneDeepWith(spec, rewrite);
+};
+
+/**
  * Rewrites an OpenAPI 3.1 multi-type schema (`type: ['integer', 'string']`)
  * into the equivalent `anyOf` of single-type schemas, dropping `null` from the
  * list and marking the schema nullable instead. This lets the parser render a
@@ -335,6 +372,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
 
   spec = rewriteConstToEnum(spec);
   spec = rewriteMultiTypeToAnyOf(spec);
+  spec = rewriteCompositeSiblingProperties(spec);
 
   // Ensure spec has schemas set
   if (!spec?.components?.schemas) {
@@ -438,6 +476,28 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
                 $ref: `#/components/schemas/${schemaName}`,
               };
             }
+
+            // Hoist inline streaming item schemas (OpenAPI 3.2 itemSchema) so
+            // each streamed item gets a named model.
+            STREAMING_CONTENT_TYPES.forEach((mediaType) => {
+              const streamingContent = response?.content?.[mediaType] as
+                | { itemSchema?: OpenAPIV3.SchemaObject }
+                | undefined;
+              const itemSchema = streamingContent?.itemSchema;
+              if (
+                itemSchema &&
+                !isRef(itemSchema) &&
+                (['object', 'array'].includes(itemSchema.type!) ||
+                  isCompositeSchema(itemSchema) ||
+                  (itemSchema.type === 'string' && itemSchema.enum))
+              ) {
+                const schemaName = `${upperFirst(deduplicatedOpId)}${code}ResponseItem`;
+                spec.components!.schemas![schemaName] = itemSchema;
+                streamingContent.itemSchema = {
+                  $ref: `#/components/schemas/${schemaName}`,
+                } as OpenAPIV3.SchemaObject;
+              }
+            });
           });
         }
         if ('requestBody' in operation) {

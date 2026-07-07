@@ -45,9 +45,10 @@ import {
   buildInlineModel,
   compositeMemberSchemas,
   getSpecOperation,
-  getSpecParametersByName,
+  getSpecParametersByKey,
   getSpecPathParameters,
   linkModel,
+  specParameterKey,
 } from './parser';
 import { isRef, resolveIfRef, splitRef } from './refs';
 import type { OpenApiSchema, OpenApiSchemaOrRef, Spec } from './types';
@@ -243,9 +244,7 @@ const augmentResponses = (
     response.mediaTypes = mediaTypes;
 
     for (const mediaType of mediaTypes) {
-      const responseContent =
-        specResponse.content?.[mediaType] ??
-        Object.values(specResponse.content)[0];
+      const responseContent = specResponse.content[mediaType];
       const responseSchema = resolveIfRef(spec, responseContent.schema);
       if (responseSchema) {
         augmentModelFromSchema(spec, response, responseSchema, modelsByName);
@@ -278,7 +277,7 @@ const augmentParameters = (
   specOp: OpenAPIV3.OperationObject | undefined,
   modelsByName: ModelsByName,
 ): string[] => {
-  const specParametersByName = getSpecParametersByName(
+  const specParametersByKey = getSpecParametersByKey(
     spec,
     specOp,
     getSpecPathParameters(spec, op),
@@ -291,7 +290,10 @@ const augmentParameters = (
       modelImports.push(parameter.type);
     }
 
-    const specParameter = specParametersByName[parameter.prop];
+    const specParameter =
+      specParametersByKey[
+        specParameterKey({ in: parameter.in, name: parameter.prop })
+      ];
     const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
     if (specParameterSchema) {
       augmentModelFromSchema(
@@ -423,13 +425,8 @@ const buildRequestParameterModels = (
       {},
     );
 
-  // An explicit (non-inlined) body parameter is named "body".
-  const requestBodyParameter = parametersByPosition['body']?.[0];
-  if (requestBodyParameter) {
-    requestBodyParameter.name = 'body';
-    requestBodyParameter.prop = 'body';
-  }
-  op.explicitRequestBodyParameter = requestBodyParameter;
+  // The body parameter was already renamed to "body" by augmentBodyParameter.
+  op.explicitRequestBodyParameter = parametersByPosition['body']?.[0];
 
   return Object.entries(parametersByPosition).map(([position, parameters]) => {
     const name = `${op.operationIdPascalCase}Request${upperFirst(position)}Parameters`;
@@ -716,15 +713,25 @@ const augmentOperationBehaviour = (op: Operation) => {
     op.responses.some((res) => res.isJsonlStreaming);
 
   // For JSON-lines streaming, the result is each streamed item, so the client
-  // method returns AsyncIterableIterator<itemSchemaModel>
+  // method returns AsyncIterableIterator<itemSchemaModel>. Named (hoisted)
+  // item schemas become references; inline primitives keep their own type.
   const jsonlResponse = op.responses.find((res) => res.isJsonlStreaming);
   if (jsonlResponse) {
     const itemSchemaModel = jsonlResponse.itemSchemaModel;
     const result = op.result;
     if (result && itemSchemaModel) {
-      result.type = itemSchemaModel.name;
-      result.typescriptType = itemSchemaModel.name;
-      result.export = 'reference';
+      if (itemSchemaModel.name) {
+        result.type = itemSchemaModel.name;
+        result.typescriptType = itemSchemaModel.name;
+        result.export = 'reference';
+      } else {
+        result.type = itemSchemaModel.type;
+        result.typescriptType = itemSchemaModel.typescriptType;
+        result.export = itemSchemaModel.export;
+        result.format = itemSchemaModel.format;
+        result.link = itemSchemaModel.link;
+        result.isPrimitive = itemSchemaModel.isPrimitive;
+      }
     }
   }
 

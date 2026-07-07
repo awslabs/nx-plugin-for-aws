@@ -24,8 +24,8 @@ import {
 } from './codegen-data/types';
 import { isRef, resolveIfRef, splitRef } from './refs';
 import type {
-  OpenApiSchema as Schema,
   OpenApiSchemaOrRef,
+  OpenApiSchema as Schema,
   Spec,
 } from './types';
 
@@ -131,16 +131,21 @@ const collectImports = (models: Model[]): string[] => [
  * schema contributes to a model.
  */
 const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
-  if (isEnumSchema(schema)) {
+  // A null member (3.0 nullable enums list null as a value) marks the model
+  // nullable rather than becoming a literal. An enum of only null degrades to
+  // a plain (nullable) schema.
+  const enumMembers = (schema.enum ?? []).filter((value) => value !== null);
+  if (isEnumSchema(schema) && enumMembers.length > 0) {
     // A string (or untyped) enum renders as a literal union; a boolean/number
     // enum renders as its bare primitive, so it must carry the declared type.
     const declared = primaryType(schema);
     return {
       export: 'enum',
       type: (declared && PRIMITIVE_TYPE_MAP[declared]) ?? 'string',
-      enum: schema.enum!.map(
+      enum: enumMembers.map(
         (value): EnumMember => ({ value: value as EnumMember['value'] }),
       ),
+      ...(enumMembers.length < schema.enum!.length ? { isNullable: true } : {}),
     };
   }
 
@@ -424,7 +429,7 @@ const mergeParameters = (
 ): ParameterOrRef[] => {
   const key = (p: ParameterOrRef) => {
     const param = resolveIfRef<OpenAPIV3.ParameterObject | undefined>(spec, p);
-    return param ? `${param.in}:${param.name}` : null;
+    return param ? specParameterKey(param) : null;
   };
   const overridden = new Set(operationParameters.map(key));
   const inherited = pathParameters.filter((p) => !overridden.has(key(p)));
@@ -529,19 +534,29 @@ export const getSpecOperation = (
   ];
 
 /**
- * An operation's resolved parameters indexed by name, including any path-level
- * parameters inherited from the containing path item (operation-level
- * parameters take precedence when both declare the same name).
+ * The `in`-qualified key for a parameter, distinguishing parameters that share
+ * a name across positions (e.g. `id` in both path and query).
  */
-export const getSpecParametersByName = (
+export const specParameterKey = (parameter: {
+  in: string;
+  name: string;
+}): string => `${parameter.in}:${parameter.name}`;
+
+/**
+ * An operation's resolved parameters indexed by `in:name`, including any
+ * path-level parameters inherited from the containing path item
+ * (operation-level parameters take precedence when both declare the same
+ * `name` + `in`).
+ */
+export const getSpecParametersByKey = (
   spec: Spec,
   specOp: OpenAPIV3.OperationObject | undefined,
   pathParameters: ParameterOrRef[] = [],
-): { [name: string]: OpenAPIV3.ParameterObject } =>
+): { [key: string]: OpenAPIV3.ParameterObject } =>
   Object.fromEntries(
     [...pathParameters, ...(specOp?.parameters ?? [])].map((p) => {
       const param = resolveIfRef(spec, p);
-      return [param.name, param];
+      return [specParameterKey(param), param];
     }),
   );
 
@@ -656,10 +671,17 @@ const linkModels = (spec: Spec, data: ClientData): void => {
   data.services.forEach((service) => {
     service.operations.forEach((op) => {
       const specOp = getSpecOperation(spec, op);
-      const specParametersByName = getSpecParametersByName(spec, specOp);
+      const specParametersByKey = getSpecParametersByKey(
+        spec,
+        specOp,
+        getSpecPathParameters(spec, op),
+      );
 
       op.parameters.forEach((parameter) => {
-        const specParameter = specParametersByName[parameter.prop];
+        const specParameter =
+          specParametersByKey[
+            specParameterKey({ in: parameter.in, name: parameter.prop })
+          ];
         const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
         if (specParameterSchema) {
           linkModel(
