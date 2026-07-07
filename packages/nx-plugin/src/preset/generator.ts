@@ -16,7 +16,7 @@ import {
 } from '@nx/devkit';
 import { initGenerator } from '@nx/js';
 import { execSync } from 'child_process';
-import * as enquirer from 'enquirer';
+import enquirer from 'enquirer';
 import { readFileSync } from 'fs';
 import yaml from 'js-yaml';
 import { readModulePackageJson } from 'nx/src/utils/package-json';
@@ -176,7 +176,11 @@ export const presetGenerator = async (
     !process.env.VITEST &&
     !process.env.CI &&
     process.env.NX_DRY_RUN !== 'true' &&
-    process.env.NX_INTERACTIVE !== 'false'
+    process.env.NX_INTERACTIVE !== 'false' &&
+    // `create-nx-workspace` runs the preset via `exec`, giving it a piped
+    // stdin with no data — prompting there would hang. Only prompt with a real
+    // terminal (e.g. running the preset directly via `nx generate`).
+    process.stdin.isTTY
   ) {
     const { engagementId } = await enquirer.prompt<{ engagementId?: string }>([
       {
