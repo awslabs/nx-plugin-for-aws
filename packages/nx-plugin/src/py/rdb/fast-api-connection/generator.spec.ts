@@ -104,6 +104,23 @@ describe('py#rdb fast-api-connection generator', () => {
     ).toMatchSnapshot();
   });
 
+  it('should use snake_case filename for multi-word db name', async () => {
+    setupFastApiProject();
+    setupRdbProject('my-db');
+
+    await pyRdbFastApiConnectionGenerator(tree, {
+      sourceProject: 'api',
+      targetProject: 'my-db',
+    });
+
+    expect(tree.exists('packages/api/proj_api/dependencies/my_db.py')).toBe(
+      true,
+    );
+    expect(tree.exists('packages/api/proj_api/dependencies/my-db.py')).toBe(
+      false,
+    );
+  });
+
   it('should be idempotent', async () => {
     setupFastApiProject();
     setupRdbProject();
