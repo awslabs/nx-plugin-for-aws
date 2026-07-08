@@ -373,6 +373,11 @@ const getCollectionFormat = (
   if (position === 'header') {
     return explode ? 'multi' : 'csv';
   }
+  // `deepObject` serialises an object as `key[prop]=value` pairs regardless of
+  // explode; the object shape (not array collection) drives its serialisation.
+  if (style === 'deepObject') {
+    return 'deepObject';
+  }
   return explode
     ? 'multi'
     : ((

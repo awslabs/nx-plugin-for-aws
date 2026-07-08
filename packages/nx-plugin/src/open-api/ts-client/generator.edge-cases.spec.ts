@@ -39,6 +39,7 @@ import {
  *     branch (which leaks fields from the non-matching branches)
  *  N. a discriminator whose wire name differs from its TS name (e.g. `pet-type`)
  *     must dispatch on the TS name in toJson and the wire name in fromJson
+ *  O. a `deepObject` query parameter must serialise as `key[prop]=value` pairs
  */
 describe('openApiTsClientGenerator - edge cases', () => {
   let tree: Tree;
@@ -1021,5 +1022,89 @@ describe('openApiTsClientGenerator - edge cases', () => {
       'pet-type': 'dog',
       walkAt: '2024-01-02T03:04:05.000Z',
     });
+  });
+
+  // ---- O. deepObject query parameters ---------------------------------------
+
+  it('serialises a deepObject query parameter as key[prop]=value pairs', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    min: { type: 'integer' },
+                  },
+                },
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, mockFetch, 'search', {
+      filter: { name: 'bob', min: 3 },
+    });
+    const [url] = mockFetch.mock.calls[0];
+    // Each property becomes its own bracketed query pair. Brackets are not
+    // percent-encoded (matches the deepObject convention servers expect).
+    expect(url).toBe(`${baseUrl}/search?filter[name]=bob&filter[min]=3`);
+  });
+
+  it('omits undefined and null members of a deepObject query parameter', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    tag: { type: 'string', nullable: true },
+                  },
+                },
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, mockFetch, 'search', {
+      filter: { name: 'bob', tag: null },
+    });
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/search?filter[name]=bob`);
   });
 });

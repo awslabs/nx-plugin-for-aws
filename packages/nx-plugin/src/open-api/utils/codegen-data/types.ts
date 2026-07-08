@@ -39,8 +39,11 @@ export type ModelIn =
   | 'body'
   | 'response';
 
-/** How array/dictionary query & header parameters are serialised on the wire. */
-export type CollectionFormat = 'multi' | 'csv' | 'ssv' | 'pipes';
+/**
+ * How array/object query & header parameters are serialised on the wire.
+ * `deepObject` explodes an object into `key[prop]=value` query pairs.
+ */
+export type CollectionFormat = 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
 
 /** A single enum member value. */
 export interface EnumMember {
