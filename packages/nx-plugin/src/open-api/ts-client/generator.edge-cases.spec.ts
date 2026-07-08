@@ -1045,6 +1045,7 @@ describe('openApiTsClientGenerator - edge cases', () => {
                   properties: {
                     name: { type: 'string' },
                     min: { type: 'integer' },
+                    since: { type: 'string', format: 'date-time' },
                   },
                 },
               },
@@ -1055,17 +1056,28 @@ describe('openApiTsClientGenerator - edge cases', () => {
       },
       components: { schemas: {} },
     } as unknown as Spec;
-    const { client } = await generate(spec);
+    const { types, client } = await generate(spec);
+
+    // The inline object param is hoisted to a named model, so its members
+    // (including the Date) are fully typed and marshalled.
+    expect(types).toContain('SearchRequestQueryFilter');
 
     const mockFetch = vi.fn();
     mockFetch.mockResolvedValue({ status: 200 });
     await callGeneratedClient(client, mockFetch, 'search', {
-      filter: { name: 'bob', min: 3 },
+      filter: {
+        name: 'bob',
+        min: 3,
+        since: new Date('2024-01-02T03:04:05.000Z'),
+      },
     });
     const [url] = mockFetch.mock.calls[0];
-    // Each property becomes its own bracketed query pair. Brackets are not
-    // percent-encoded (matches the deepObject convention servers expect).
-    expect(url).toBe(`${baseUrl}/search?filter[name]=bob&filter[min]=3`);
+    // Each property becomes its own bracketed query pair; the nested Date is
+    // marshalled to an ISO string. Brackets are not percent-encoded (matches
+    // the deepObject convention servers expect).
+    expect(url).toBe(
+      `${baseUrl}/search?filter[name]=bob&filter[min]=3&filter[since]=2024-01-02T03%3A04%3A05.000Z`,
+    );
   });
 
   it('omits undefined and null members of a deepObject query parameter', async () => {
@@ -1106,5 +1118,53 @@ describe('openApiTsClientGenerator - edge cases', () => {
     });
     const [url] = mockFetch.mock.calls[0];
     expect(url).toBe(`${baseUrl}/search?filter[name]=bob`);
+  });
+
+  it('recurses into a nested deepObject query parameter', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    page: {
+                      type: 'object',
+                      properties: {
+                        size: { type: 'integer' },
+                        sort: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, mockFetch, 'search', {
+      filter: { page: { size: 10, sort: 'asc' } },
+    });
+    const [url] = mockFetch.mock.calls[0];
+    // Nested objects recurse to `filter[page][size]=…`, not `[object Object]`.
+    expect(url).toBe(
+      `${baseUrl}/search?filter[page][size]=10&filter[page][sort]=asc`,
+    );
   });
 });

@@ -435,6 +435,21 @@ export class <%- className %> {
   // Delimiters for non-'multi' array serialisation formats.
   private $collectionDelimiters: { [format: string]: string } = { csv: ',', ssv: ' ', pipes: '|' };
 
+  // Serialise a `deepObject` value into bracketed query pairs, recursing into
+  // nested objects/arrays (e.g. `filter[page][size]=10`). undefined/null members
+  // are omitted.
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [`${key}=${encodeURIComponent(String(value))}`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(`${key}[${encodeURIComponent(prop)}]`, v),
+    );
+  };
+
   private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject' }): string => {
     const baseUrl = this.$config.url.endsWith('/') ? this.$config.url.slice(0, -1) : this.$config.url;
     const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) =>
@@ -444,11 +459,10 @@ export class <%- className %> {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map(v => `${encodeURIComponent(key)}=${encodeURIComponent(`${v}`)}`);
       }
-      // deepObject: serialise an object as `key[prop]=value` pairs.
-      if (collectionFormats?.[key] === 'deepObject' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        return Object.entries(value)
-          .filter(([, v]) => v !== undefined && v !== null)
-          .map(([prop, v]) => `${encodeURIComponent(key)}[${encodeURIComponent(prop)}]=${encodeURIComponent(String(v))}`);
+      // deepObject: serialise an object as `key[prop]=value` pairs (recursing
+      // into nested objects/arrays).
+      if (collectionFormats?.[key] === 'deepObject' && value !== null && typeof value === 'object') {
+        return this.$deepObject(encodeURIComponent(key), value);
       }
       const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
       return [`${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}`];

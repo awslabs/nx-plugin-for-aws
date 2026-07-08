@@ -361,6 +361,67 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     });
   });
 
+  it('should hoist an inline object parameter schema to a named model', () => {
+    const spec: Spec = {
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                style: 'deepObject',
+                schema: {
+                  type: 'object',
+                  properties: { name: { type: 'string' } },
+                },
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    expect(
+      (result.paths?.['/search'] as any).get.parameters[0].schema,
+    ).toEqual({ $ref: '#/components/schemas/SearchRequestQueryFilter' });
+    expect(
+      result.components?.schemas?.SearchRequestQueryFilter,
+    ).toMatchObject({
+      type: 'object',
+      properties: { name: { type: 'string' } },
+    });
+  });
+
+  it('should not hoist a primitive parameter schema', () => {
+    const spec: Spec = {
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              { name: 'q', in: 'query', schema: { type: 'string' } },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    expect((result.paths?.['/search'] as any).get.parameters[0].schema).toEqual(
+      { type: 'string' },
+    );
+    expect(result.components?.schemas?.SearchRequestQueryQ).toBeUndefined();
+  });
+
   it('should inline $ref path items', () => {
     const spec: Spec = {
       paths: {

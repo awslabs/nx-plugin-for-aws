@@ -585,15 +585,20 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
           }
         }
 
-        // Hoist parameter schemas
+        // Hoist parameter schemas. Composite and inline-object schemas are
+        // hoisted to named models so the parameter is fully typed (e.g. a
+        // `deepObject` query param's members are marshalled, not left `unknown`).
         if ('parameters' in operation) {
           (operation.parameters ?? []).forEach((p) => {
             const param = resolveIfRef(spec, p);
-            const paramSchema = param?.schema;
+            const paramSchema = param?.schema as
+              | OpenAPIV3.SchemaObject
+              | undefined;
             if (
               paramSchema &&
               !isRef(paramSchema) &&
-              isCompositeSchema(paramSchema as OpenAPIV3.SchemaObject)
+              (isCompositeSchema(paramSchema) ||
+                (paramSchema.type === 'object' && !!paramSchema.properties))
             ) {
               const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
               spec.components!.schemas![schemaName] = paramSchema;
