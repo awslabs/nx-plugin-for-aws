@@ -166,7 +166,7 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk deploy --require-approval=never --express',
+              command: 'cdk deploy --require-approval=never',
             }),
       };
       config.targets['deploy-ci'] = {
