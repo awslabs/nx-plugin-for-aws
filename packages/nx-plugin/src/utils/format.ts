@@ -4,11 +4,12 @@
  */
 
 import { Biome } from '@biomejs/js-api/nodejs';
-import type { Tree } from '@nx/devkit';
+import { getProjects, type Tree } from '@nx/devkit';
 import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
+import { readToml } from './toml';
 
 const require = createRequire(import.meta.url);
 
@@ -97,6 +98,12 @@ export async function formatFilesInSubtree(
     BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)),
   );
 
+  // Map each project root to its Python module names, used to resolve the
+  // first-party packages for each file below.
+  const pythonProjectModules = pyFiles.length
+    ? getPythonProjectModules(tree)
+    : [];
+
   // Format Python files with ruff (lint fixes + formatting)
   for (const file of pyFiles) {
     try {
@@ -104,6 +111,7 @@ export async function formatFilesInSubtree(
         file.content.toString('utf-8'),
         file.path,
         hasRuffConfigOnDisk(tree, file.path),
+        getFirstPartyModulesForFile(file.path, pythonProjectModules),
       );
       tree.write(file.path, content);
     } catch {
@@ -299,6 +307,72 @@ function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
   }
 }
 
+interface PythonProjectModules {
+  /** Project root, normalised to use forward slashes. */
+  readonly root: string;
+  /** Top-level importable module names declared by the project. */
+  readonly modules: string[];
+}
+
+/**
+ * Map each Nx project to its top-level Python module names, read from the
+ * project's `pyproject.toml` `[tool.hatch.build.targets.wheel].packages`.
+ */
+function getPythonProjectModules(tree: Tree): PythonProjectModules[] {
+  const projectModules: PythonProjectModules[] = [];
+
+  for (const project of getProjects(tree).values()) {
+    const pyprojectPath = path.join(project.root, 'pyproject.toml');
+    if (tree.exists(pyprojectPath)) {
+      try {
+        const pyproject = readToml(tree, pyprojectPath) as any;
+        const wheelPackages: unknown =
+          pyproject?.tool?.hatch?.build?.targets?.wheel?.packages;
+        if (Array.isArray(wheelPackages)) {
+          // Record the top-level module segment (`pkg/sub` -> `pkg`), which is
+          // all `known-first-party` keys off.
+          const modules = wheelPackages
+            .filter((pkg): pkg is string => typeof pkg === 'string' && !!pkg)
+            .map((pkg) => pkg.split('/')[0]);
+          if (modules.length) {
+            projectModules.push({
+              root: project.root.split(path.sep).join('/'),
+              modules,
+            });
+          }
+        }
+      } catch {
+        // Skip projects whose pyproject.toml cannot be parsed
+      }
+    }
+  }
+
+  return projectModules;
+}
+
+/**
+ * Resolve the first-party Python modules for a file: those of the project that
+ * owns it (the project with the longest root that is a prefix of the file
+ * path). Ruff runs per-project on disk, so only a file's own project module is
+ * first-party — sibling workspace packages are third-party — and scoping this
+ * way keeps in-tree formatting consistent with the on-disk build.
+ */
+function getFirstPartyModulesForFile(
+  filePath: string,
+  projectModules: PythonProjectModules[],
+): string[] {
+  let owner: PythonProjectModules | undefined;
+  for (const project of projectModules) {
+    if (
+      (filePath === project.root || filePath.startsWith(`${project.root}/`)) &&
+      (!owner || project.root.length > owner.root.length)
+    ) {
+      owner = project;
+    }
+  }
+  return owner ? [...owner.modules].sort() : [];
+}
+
 /**
  * Run ruff check --fix and ruff format on Python file content via stdin.
  * Applies all configured lint fixes (including import sorting) and formatting.
@@ -308,21 +382,33 @@ function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
  * build fails on unsorted imports (I001). In that case we add `--extend-select
  * I` so import sorting matches what the build enforces. When a config does
  * exist we defer to it entirely, honouring the user's rule selection.
+ *
+ * `firstPartyModules` are the owning project's own Python modules. Ruff detects
+ * first-party imports from the filesystem, but during generation the project
+ * lives only in the tree, so we pass these via `--config known-first-party` to
+ * keep the project's own imports in their own group. This is additive to any
+ * on-disk config, so it is safe to pass regardless of `hasConfig`.
  */
 function ruffFixAndFormat(
   content: string,
   filePath: string,
   hasConfig: boolean,
+  firstPartyModules: string[] = [],
 ): string {
   const ruff = getRuffCommand();
   if (!ruff) return content;
 
   const extendSelect = hasConfig ? '' : ' --extend-select I';
+  const knownFirstParty = firstPartyModules.length
+    ? ` --config ${JSON.stringify(
+        `lint.isort.known-first-party = ${JSON.stringify(firstPartyModules)}`,
+      )}`
+    : '';
 
   // First apply lint fixes (import sorting, unused imports, etc.)
   try {
     const result = execSync(
-      `${ruff} check --fix${extendSelect} --stdin-filename ${filePath} -`,
+      `${ruff} check --fix${extendSelect}${knownFirstParty} --stdin-filename ${filePath} -`,
       { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
     content = result;

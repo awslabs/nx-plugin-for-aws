@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Tree } from '@nx/devkit';
+import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -16,6 +16,28 @@ describe('format utils', () => {
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
+
+  /**
+   * Register a Python project with the given module name, mirroring what the
+   * py#project generator writes: an Nx project plus a pyproject.toml declaring
+   * the importable module in [tool.hatch.build.targets.wheel].packages.
+   */
+  const addFirstPartyPythonProject = (name: string, moduleName: string) => {
+    const root = `packages/${name}`;
+    addProjectConfiguration(tree, `proj.${name}`, { root });
+    tree.write(
+      `${root}/pyproject.toml`,
+      [
+        '[tool.hatch.build.targets.wheel]',
+        `packages = [ "${moduleName}" ]`,
+        '',
+        '[project]',
+        `name = "proj-${name}"`,
+        '',
+      ].join('\n'),
+    );
+    tree.write(`${root}/${moduleName}/__init__.py`, '');
+  };
   describe('formatFilesInSubtree', () => {
     it('should format files in the given directory', async () => {
       // Setup
@@ -117,6 +139,106 @@ describe('format utils', () => {
           'from .b import beta',
           '',
           '__all__ = ["beta", "alpha"]',
+          '',
+        ].join('\n'),
+      );
+    });
+    it('should group a workspace package as first-party even when its module is not on disk', async () => {
+      // During generation the project's module lives only in the tree, so ruff
+      // cannot detect it as first-party from the filesystem. The formatter reads
+      // the project's module name from its pyproject.toml and passes
+      // known-first-party so the project's own imports sort into their own
+      // group, matching what the on-disk build enforces (I001).
+      addFirstPartyPythonProject('my_lib', 'my_lib');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'import os',
+          'import boto3',
+          'from my_lib.core import helper',
+          '',
+          'x = os, boto3, helper',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - stdlib, third-party and first-party each in their own group
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [
+          'import os',
+          '',
+          'import boto3',
+          '',
+          'from my_lib.core import helper',
+          '',
+          'x = os, boto3, helper',
+          '',
+        ].join('\n'),
+      );
+    });
+    it('should treat a sibling workspace project as third-party, matching the on-disk build', async () => {
+      // On disk ruff runs per-project, so a sibling workspace package is
+      // third-party to the importing project (only the owning project's module
+      // is first-party). Scoping known-first-party to the owning project keeps
+      // in-tree formatting consistent with the build (which would otherwise
+      // fail with I001 on a spurious blank line).
+      addFirstPartyPythonProject('other_lib', 'other_lib');
+      addFirstPartyPythonProject('my_lib', 'my_lib');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'import boto3',
+          'from my_lib.core import helper',
+          'from other_lib import thing',
+          '',
+          'x = boto3, helper, thing',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - boto3 and the sibling other_lib share the third-party group;
+      // only my_lib (the owning project) is its own first-party group.
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [
+          'import boto3',
+          'from other_lib import thing',
+          '',
+          'from my_lib.core import helper',
+          '',
+          'x = boto3, helper, thing',
+          '',
+        ].join('\n'),
+      );
+    });
+    it('should not treat installed packages under .venv or node_modules as first-party', async () => {
+      // Installed third-party packages are not Nx projects, so enumerating
+      // first-party modules via the project graph never picks them up — no
+      // ignore list required.
+      tree.write('.venv/lib/boto3/__init__.py', '');
+      tree.write('node_modules/some_pkg/__init__.py', '');
+      addFirstPartyPythonProject('my_lib', 'my_lib');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'import boto3',
+          'from my_lib.core import helper',
+          '',
+          'x = boto3, helper',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - boto3 stays third-party (own group), my_lib first-party
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [
+          'import boto3',
+          '',
+          'from my_lib.core import helper',
+          '',
+          'x = boto3, helper',
           '',
         ].join('\n'),
       );
