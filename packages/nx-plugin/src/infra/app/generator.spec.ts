@@ -84,7 +84,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never --express',
+        command: 'cdk deploy --require-approval=never',
       },
       dependsOn: ['^build', 'compile'],
     });
@@ -288,7 +288,7 @@ describe('infra generator', () => {
     await tsInfraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
     expect(config.targets.deploy.options.command).toBe(
-      'cdk deploy --require-approval=never --express',
+      'cdk deploy --require-approval=never',
     );
     expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
     expect(config.targets.destroy.options.command).toBe(
