@@ -20,9 +20,14 @@ describe('format utils', () => {
   /**
    * Register a Python project with the given module name, mirroring what the
    * py#project generator writes: an Nx project plus a pyproject.toml declaring
-   * the importable module in [tool.hatch.build.targets.wheel].packages.
+   * the importable module in [tool.hatch.build.targets.wheel].packages and an
+   * optional [tool.ruff] line-length.
    */
-  const addFirstPartyPythonProject = (name: string, moduleName: string) => {
+  const addFirstPartyPythonProject = (
+    name: string,
+    moduleName: string,
+    lineLength?: number,
+  ) => {
     const root = `packages/${name}`;
     addProjectConfiguration(tree, `proj.${name}`, { root });
     tree.write(
@@ -31,6 +36,9 @@ describe('format utils', () => {
         '[tool.hatch.build.targets.wheel]',
         `packages = [ "${moduleName}" ]`,
         '',
+        ...(lineLength !== undefined
+          ? ['[tool.ruff]', `line-length = ${lineLength}`, '']
+          : []),
         '[project]',
         `name = "proj-${name}"`,
         '',
@@ -241,6 +249,24 @@ describe('format utils', () => {
           'x = boto3, helper',
           '',
         ].join('\n'),
+      );
+    });
+    it("should apply the owning project's line-length when its config is not on disk", async () => {
+      // The project's [tool.ruff] line-length lives only in the tree during
+      // generation, so ruff would otherwise wrap at its default of 88 and
+      // produce output the on-disk build (line-length 120) reformats.
+      addFirstPartyPythonProject('my_lib', 'my_lib', 120);
+      const line =
+        'def compute(first_value, second_value, third_value, fourth_value, fifth_value, sixth_val):';
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [line, '    return first_value', ''].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - the 90-char signature stays on one line at line-length 120
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [line, '    return first_value', ''].join('\n'),
       );
     });
     it('should format json and css files', async () => {
