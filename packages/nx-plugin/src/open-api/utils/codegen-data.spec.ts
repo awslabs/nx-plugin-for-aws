@@ -858,6 +858,110 @@ describe('openapi codegen data utils', () => {
       ]);
     });
 
+    it('should exclude hoisted inline members from implicit discriminator mapping', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Dog: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' } },
+            },
+            Animal: {
+              oneOf: [
+                { $ref: '#/components/schemas/Dog' },
+                {
+                  type: 'object',
+                  required: ['kind'],
+                  properties: { kind: { type: 'string' } },
+                } as never,
+              ],
+              discriminator: { propertyName: 'kind' },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const animal = data.models.find((m) => m.name === 'Animal')!;
+      // The hoisted inline member's synthetic name (AnimalOneOf1) can never
+      // appear on the wire, so only the named member is mapped.
+      expect(animal.discriminator?.mapping).toEqual([
+        { value: 'Dog', modelName: 'Dog' },
+      ]);
+    });
+
+    it('should build base discriminator metadata for inheritance-style schemas', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Base: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' } },
+              discriminator: {
+                propertyName: 'kind',
+                mapping: {
+                  cat: '#/components/schemas/Cat',
+                  dog: '#/components/schemas/Dog',
+                },
+              },
+            },
+            Cat: {
+              allOf: [
+                { $ref: '#/components/schemas/Base' },
+                { type: 'object', properties: { meow: { type: 'boolean' } } },
+              ],
+            },
+            Dog: {
+              allOf: [
+                { $ref: '#/components/schemas/Base' },
+                { type: 'object', properties: { bark: { type: 'boolean' } } },
+              ],
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const base = data.models.find((m) => m.name === 'Base')!;
+      expect(base.export).toBe('interface');
+      expect(base.discriminator).toEqual({
+        propertyName: 'kind',
+        typescriptPropertyName: 'kind',
+        isBase: true,
+        mapping: [
+          { value: 'cat', modelName: 'Cat' },
+          { value: 'dog', modelName: 'Dog' },
+        ],
+      });
+    });
+
+    it('should not build a base discriminator when no subtypes compose it', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Lonely: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' } },
+              discriminator: { propertyName: 'kind' },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const lonely = data.models.find((m) => m.name === 'Lonely')!;
+      expect(lonely.discriminator).toBeUndefined();
+    });
+
     it('should not build discriminator metadata for a non-discriminated oneOf', () => {
       const spec: Spec = {
         ...sampleSpec,

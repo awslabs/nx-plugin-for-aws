@@ -59,8 +59,10 @@ export interface DiscriminatorMapping {
 }
 
 /**
- * The discriminator of a `oneOf`/`anyOf` composite, used to marshal directly to
- * the matching branch rather than merging every branch.
+ * The discriminator of a composite (`oneOf`/`anyOf`) or an inheritance base
+ * (an `object` schema whose subtypes `allOf`-compose it), used to marshal
+ * directly to the matching branch/subtype rather than merging every branch or
+ * dropping subtype-only fields.
  */
 export interface Discriminator {
   /** The wire property name carrying the discriminator value. */
@@ -69,6 +71,14 @@ export interface Discriminator {
   typescriptPropertyName?: string;
   /** The value → composed-model mapping. */
   mapping: DiscriminatorMapping[];
+  /**
+   * True when this discriminator sits on an inheritance base (an `object`
+   * schema selected by `allOf`-composing subtypes) rather than a `oneOf`/
+   * `anyOf` composite. The base marshals via dispatch to its subtypes, but its
+   * subtypes compose the base's own (non-dispatching) body — so the base emits
+   * a separate non-dispatching marshaller to break the recursion.
+   */
+  isBase?: boolean;
 }
 
 /** A pattern-property entry: a regex pattern and the model for its values. */

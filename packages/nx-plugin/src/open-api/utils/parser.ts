@@ -788,36 +788,57 @@ const resolveComposedModels = (data: ClientData): void => {
   );
 };
 
+const isHoisted = (spec: Spec, name: string): boolean =>
+  !!(
+    resolveIfRef<Schema | undefined>(
+      spec,
+      spec.components?.schemas?.[name],
+    ) as { 'x-aws-nx-hoisted'?: boolean } | undefined
+  )?.['x-aws-nx-hoisted'];
+
 /**
- * Build the {@link Discriminator} for a composite schema, if it declares one.
- *
- * An explicit `mapping` maps each discriminator value to a schema ref; without
- * a mapping, OpenAPI implies each composed member's schema name is its own
- * discriminator value. Only mappings that resolve to a model composed by this
- * schema are kept, so unknown values fall through to the default marshalling.
+ * The value → model-name mapping for a discriminator, resolved either from an
+ * explicit `mapping` (value → schema ref) or implicitly (each candidate model's
+ * schema name is its own discriminator value). Only candidates in
+ * `candidateNames` are kept, so unknown values fall through to the default
+ * marshalling; hoisted synthetic names (which never appear on the wire) are
+ * excluded from the implicit form.
  */
-const buildDiscriminator = (
+const buildDiscriminatorMapping = (
+  spec: Spec,
+  discriminator: OpenAPIV3.DiscriminatorObject,
+  candidateNames: Set<string>,
+): DiscriminatorMapping[] => {
+  if (discriminator.mapping) {
+    const mapping: DiscriminatorMapping[] = [];
+    for (const [value, ref] of Object.entries(discriminator.mapping)) {
+      if (typeof ref !== 'string' || !ref.startsWith('#/')) continue;
+      const modelName = splitRef(ref)[2];
+      if (candidateNames.has(modelName)) mapping.push({ value, modelName });
+    }
+    return mapping;
+  }
+  return [...candidateNames]
+    .filter((name) => !isHoisted(spec, name))
+    .map((name) => ({ value: name, modelName: name }));
+};
+
+/**
+ * Build the {@link Discriminator} for a `oneOf`/`anyOf` composite, if declared.
+ * The candidates are the models composed by the union.
+ */
+const buildCompositeDiscriminator = (
+  spec: Spec,
   model: Model,
   schema: Schema,
 ): Discriminator | undefined => {
   const { discriminator } = schema;
   if (!discriminator?.propertyName) return undefined;
 
-  const composedNames = new Set((model.composedModels ?? []).map((m) => m.name));
-
-  const mapping: DiscriminatorMapping[] = [];
-  if (discriminator.mapping) {
-    for (const [value, ref] of Object.entries(discriminator.mapping)) {
-      if (typeof ref !== 'string' || !ref.startsWith('#/')) continue;
-      const modelName = splitRef(ref)[2];
-      if (composedNames.has(modelName)) mapping.push({ value, modelName });
-    }
-  } else {
-    // Implicit mapping: each composed member's name is its discriminator value.
-    for (const composed of model.composedModels ?? []) {
-      mapping.push({ value: composed.name, modelName: composed.name });
-    }
-  }
+  const candidateNames = new Set(
+    (model.composedModels ?? []).map((m) => m.name),
+  );
+  const mapping = buildDiscriminatorMapping(spec, discriminator, candidateNames);
 
   return mapping.length > 0
     ? { propertyName: discriminator.propertyName, mapping }
@@ -825,20 +846,67 @@ const buildDiscriminator = (
 };
 
 /**
- * Attach discriminator metadata to discriminated one-of/any-of composites so
- * the generator can marshal directly to the matching branch. all-of is a
- * conjunction (not a choice) so it is never discriminated.
+ * Build the {@link Discriminator} for an inheritance base — an `object` schema
+ * carrying a `discriminator` whose subtypes `allOf`-compose it. The candidates
+ * are those subtypes (found by scanning every model for one that composes this
+ * base). Marked `isBase` so the generator emits a non-dispatching body the
+ * subtypes can compose without recursing.
+ */
+const buildBaseDiscriminator = (
+  spec: Spec,
+  base: Model,
+  schema: Schema,
+  models: Model[],
+): Discriminator | undefined => {
+  const { discriminator } = schema;
+  if (!discriminator?.propertyName) return undefined;
+
+  const subtypeNames = new Set(
+    models
+      .filter(
+        (m) =>
+          m.export === 'all-of' &&
+          (m.composedModels ?? []).some((c) => c.name === base.name),
+      )
+      .map((m) => m.name),
+  );
+  if (subtypeNames.size === 0) return undefined;
+
+  const mapping = buildDiscriminatorMapping(spec, discriminator, subtypeNames);
+
+  return mapping.length > 0
+    ? { propertyName: discriminator.propertyName, mapping, isBase: true }
+    : undefined;
+};
+
+/**
+ * Attach discriminator metadata so the generator can marshal directly to the
+ * matching branch/subtype. Two shapes carry a discriminator:
+ *  - a `oneOf`/`anyOf` composite (dispatch to the matching member), and
+ *  - an inheritance base `object` whose subtypes `allOf`-compose it (dispatch
+ *    to the matching subtype so subtype-only fields survive marshalling).
+ * `allOf` itself is a conjunction (not a choice) so it is never discriminated.
  */
 const resolveDiscriminators = (spec: Spec, data: ClientData): void => {
   data.models.forEach((model) => {
-    if (model.export !== 'one-of' && model.export !== 'any-of') return;
     const schema = resolveIfRef<Schema | undefined>(
       spec,
       spec.components?.schemas?.[model.name],
     );
     if (!schema) return;
-    const discriminator = buildDiscriminator(model, schema);
-    if (discriminator) model.discriminator = discriminator;
+
+    if (model.export === 'one-of' || model.export === 'any-of') {
+      const discriminator = buildCompositeDiscriminator(spec, model, schema);
+      if (discriminator) model.discriminator = discriminator;
+    } else if (model.export === 'interface') {
+      const discriminator = buildBaseDiscriminator(
+        spec,
+        model,
+        schema,
+        data.models,
+      );
+      if (discriminator) model.discriminator = discriminator;
+    }
   });
 };
 

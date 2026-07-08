@@ -37,6 +37,8 @@ import {
  *     correct delimiter (and compile)
  *  M. discriminated oneOf must marshal to the matching branch, not merge every
  *     branch (which leaks fields from the non-matching branches)
+ *  N. a discriminator whose wire name differs from its TS name (e.g. `pet-type`)
+ *     must dispatch on the TS name in toJson and the wire name in fromJson
  */
 describe('openApiTsClientGenerator - edge cases', () => {
   let tree: Tree;
@@ -862,5 +864,162 @@ describe('openApiTsClientGenerator - edge cases', () => {
       walkAt: new Date('2024-01-02T03:04:05.000Z'),
     });
     expect('napAt' in response).toBe(false);
+  });
+
+  it('does not build a discriminator switch for inline (hoisted) union members', async () => {
+    // Inline oneOf members are hoisted to synthetic names (ShapeOneOf, …) that
+    // can never appear on the wire, so an implicit discriminator must not emit
+    // dispatch cases on them; marshalling falls through to the merge.
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/shapes': {
+          get: {
+            operationId: 'getShape',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Shape' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Shape: {
+            oneOf: [
+              {
+                type: 'object',
+                required: ['kind', 'napAt'],
+                properties: {
+                  kind: { type: 'string' },
+                  napAt: { type: 'string', format: 'date-time' },
+                },
+              },
+              {
+                type: 'object',
+                required: ['kind', 'walkAt'],
+                properties: {
+                  kind: { type: 'string' },
+                  walkAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
+            discriminator: { propertyName: 'kind' },
+          },
+        },
+      },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    // No dispatch on synthetic hoisted names.
+    expect(client).not.toContain("case 'ShapeOneOf'");
+    expect(client).not.toMatch(/switch \(json\?\.\['kind'\]\)/);
+
+    // Still deserialises without crashing (merge fallthrough).
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ kind: 'dog', walkAt: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'getShape');
+    expect(response.walkAt).toEqual(new Date('2024-01-02T03:04:05.000Z'));
+  });
+
+  it('dispatches a discriminator whose wire name differs from its TS name', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/shapes': {
+          post: {
+            operationId: 'postShape',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Shape' },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Shape' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Cat: {
+            type: 'object',
+            required: ['pet-type', 'napAt'],
+            properties: {
+              'pet-type': { type: 'string' },
+              napAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Dog: {
+            type: 'object',
+            required: ['pet-type', 'walkAt'],
+            properties: {
+              'pet-type': { type: 'string' },
+              walkAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Shape: {
+            oneOf: [
+              { $ref: '#/components/schemas/Cat' },
+              { $ref: '#/components/schemas/Dog' },
+            ],
+            discriminator: {
+              propertyName: 'pet-type',
+              mapping: {
+                cat: '#/components/schemas/Cat',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          },
+        },
+      },
+    } as unknown as Spec;
+    const { client } = await generate(spec);
+
+    // toJson dispatches on the TS name, fromJson on the wire name.
+    expect(client).toContain('switch ((model as any).petType)');
+    expect(client).toContain("switch (json?.['pet-type'])");
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ 'pet-type': 'dog', walkAt: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'postShape', {
+      petType: 'dog',
+      walkAt: new Date('2024-01-02T03:04:05.000Z'),
+    } as never);
+    expect('napAt' in response).toBe(false);
+    // The request body carries the wire discriminator name.
+    const [, request] = mockFetch.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual({
+      'pet-type': 'dog',
+      walkAt: '2024-01-02T03:04:05.000Z',
+    });
   });
 });

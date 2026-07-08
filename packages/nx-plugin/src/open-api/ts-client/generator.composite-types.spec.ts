@@ -1295,4 +1295,152 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     expect(types).toMatchSnapshot();
     expect(client).toMatchSnapshot();
   });
+
+  it('should marshal an inheritance-style discriminator base to its subtype', async () => {
+    // A base object schema carries the discriminator; subtypes allOf-compose
+    // it. A response typed as the base must still round-trip subtype-only
+    // fields (here a date) rather than dropping them.
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets/{id}': {
+          get: {
+            operationId: 'getPet',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Pet' },
+                  },
+                },
+              },
+            },
+          },
+          put: {
+            operationId: 'putPet',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Pet' },
+                },
+              },
+            },
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Pet: {
+            type: 'object',
+            required: ['petType', 'name'],
+            properties: {
+              petType: { type: 'string' },
+              name: { type: 'string' },
+              bornAt: { type: 'string', format: 'date-time' },
+            },
+            discriminator: {
+              propertyName: 'petType',
+              mapping: {
+                cat: '#/components/schemas/Cat',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          } as never,
+          Cat: {
+            allOf: [
+              { $ref: '#/components/schemas/Pet' },
+              {
+                type: 'object',
+                required: ['lastNapAt'],
+                properties: {
+                  lastNapAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
+          },
+          Dog: {
+            allOf: [
+              { $ref: '#/components/schemas/Pet' },
+              {
+                type: 'object',
+                properties: { packSize: { type: 'integer' } },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+
+    // The base dispatches to subtypes; subtypes compose the base's
+    // non-dispatching body (no infinite recursion).
+    expect(client).toContain('$toJsonBase');
+    expect(client).toContain('$IO.Pet.$toJsonBase(model)');
+    expect(client).toMatch(/case 'cat':\s*return \$IO\.Cat\.toJson/);
+
+    // GET: a Cat payload through the Pet-typed response revives lastNapAt.
+    const getFetch = vi.fn();
+    getFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        petType: 'cat',
+        name: 'felix',
+        bornAt: '2020-01-02T03:04:05.000Z',
+        lastNapAt: '2024-01-02T03:04:05.000Z',
+      }),
+    });
+    const getRes = await callGeneratedClient(client, getFetch, 'getPet', {
+      id: 'felix',
+    });
+    expect(getRes.lastNapAt).toEqual(new Date('2024-01-02T03:04:05.000Z'));
+    expect(getRes.bornAt).toEqual(new Date('2020-01-02T03:04:05.000Z'));
+
+    // PUT: a Cat through the Pet-typed body serialises lastNapAt.
+    const putFetch = vi.fn();
+    putFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, putFetch, 'putPet', {
+      id: 'felix',
+      petType: 'cat',
+      name: 'felix',
+      bornAt: new Date('2020-01-02T03:04:05.000Z'),
+      lastNapAt: new Date('2024-01-02T03:04:05.000Z'),
+    } as never);
+    const [, putRequest] = putFetch.mock.calls[0];
+    expect(JSON.parse(putRequest.body)).toEqual({
+      petType: 'cat',
+      name: 'felix',
+      bornAt: '2020-01-02T03:04:05.000Z',
+      lastNapAt: '2024-01-02T03:04:05.000Z',
+    });
+  });
 });
