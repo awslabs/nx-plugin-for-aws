@@ -1,9 +1,34 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import * as fs from 'fs';
 
 import starlight from '@astrojs/starlight';
 <% if (includeBlog) { %>import starlightBlog from 'starlight-blog';
 <% } %>
+/**
+ * Vite 8's rolldown bundler has a module-loading concurrency race
+ * (rolldown#10102) that can throw spurious "No such file" errors on real
+ * content files when bundling large content collections. Reading content
+ * modules synchronously in JS bypasses rolldown's native async loader.
+ */
+const contentSyncLoad = () => ({
+  name: 'content-sync-load',
+  enforce: 'pre',
+  load(id) {
+    const file = id.split('?')[0];
+    if (
+      /\.mdx?$/.test(file) &&
+      file.replace(/\\/g, '/').includes('/src/content/')
+    ) {
+      try {
+        return { code: fs.readFileSync(file, 'utf-8'), map: null };
+      } catch {
+        return null;
+      }
+    }
+  },
+});
+
 // https://astro.build/config
 export default defineConfig({
   outDir: './dist',
@@ -44,4 +69,7 @@ export default defineConfig({
       <% } %>],
     }),
   ],
+  vite: {
+    plugins: [contentSyncLoad()],
+  },
 });
