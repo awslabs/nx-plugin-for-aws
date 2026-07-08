@@ -75,9 +75,7 @@ describe('MCP Server', () => {
     // Verify result
     expect(result.content).toHaveLength(1);
     expect(result.content[0].type).toBe('text');
-    expect(result.content[0].text).toContain(
-      'pnpm create @aws/nx-workspace@next',
-    );
+    expect(result.content[0].text).toContain('pnpm create @aws/nx-workspace');
   });
 
   it('should execute list-generators tool', async () => {

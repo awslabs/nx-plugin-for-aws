@@ -133,7 +133,7 @@ Create a workspace and start adding components — zero configuration required:
 
 ```bash
 # Create a new workspace
-pnpm create @aws/nx-workspace@next my-project
+pnpm create @aws/nx-workspace my-project
 cd my-project
 
 # Add a tRPC API
