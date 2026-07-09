@@ -26,7 +26,7 @@ describe('mcp utils', () => {
         const config = readJson(tree, filePath);
         expect(config.mcpServers[NX_PLUGIN_MCP_SERVER_NAME]).toEqual({
           command: 'npx',
-          args: ['-y', '@aws/nx-plugin-mcp@next'],
+          args: ['-y', '@aws/nx-plugin-mcp'],
         });
       }
 
@@ -35,14 +35,14 @@ describe('mcp utils', () => {
       expect(vscode.servers[NX_PLUGIN_MCP_SERVER_NAME]).toEqual({
         type: 'stdio',
         command: 'npx',
-        args: ['-y', '@aws/nx-plugin-mcp@next'],
+        args: ['-y', '@aws/nx-plugin-mcp'],
       });
 
       // OpenAI Codex CLI uses TOML
       const codex = TOML.parse(tree.read('.codex/config.toml', 'utf-8'));
       expect((codex.mcp_servers as any)[NX_PLUGIN_MCP_SERVER_NAME]).toEqual({
         command: 'npx',
-        args: ['-y', '@aws/nx-plugin-mcp@next'],
+        args: ['-y', '@aws/nx-plugin-mcp'],
       });
     });
 
