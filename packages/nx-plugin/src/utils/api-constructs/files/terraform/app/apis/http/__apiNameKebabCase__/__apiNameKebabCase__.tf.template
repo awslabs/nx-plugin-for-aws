@@ -44,14 +44,25 @@ variable "asset_bucket_name" {
 }
 
 # VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Deploy the Lambda function into a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
 variable "vpc_id" {
-  description = "VPC ID to deploy the Lambda function into. Leave unset to keep the Lambda outside a VPC."
+  description = "VPC ID to deploy the Lambda function into. Required when enable_vpc is true."
   type        = string
   default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
 }
 
 variable "subnet_ids" {
-  description = "Subnet IDs to deploy the Lambda function into. Required when vpc_id is set."
+  description = "Subnet IDs to deploy the Lambda function into. Required when enable_vpc is true."
   type        = list(string)
   default     = null
 }
@@ -144,7 +155,7 @@ module "http_api" {
 
 # Security group for the API Lambda function, used when deployed into a VPC
 resource "aws_security_group" "api_lambda" {
-  count = var.vpc_id != null ? 1 : 0
+  count = var.enable_vpc ? 1 : 0
 
   #checkov:skip=CKV2_AWS_5:Attached to api_lambda via vpc_config block; Checkov cannot resolve this reference
   name_prefix = "<%- apiNameKebabCase %>-lambda-"
@@ -154,7 +165,7 @@ resource "aws_security_group" "api_lambda" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
-  count = var.vpc_id != null ? 1 : 0
+  count = var.enable_vpc ? 1 : 0
 
   security_group_id = aws_security_group.api_lambda[0].id
   cidr_ipv4         = "0.0.0.0/0"
@@ -199,7 +210,7 @@ resource "aws_lambda_function" "api_lambda" {
   }
 
   dynamic "vpc_config" {
-    for_each = var.vpc_id != null ? [1] : []
+    for_each = var.enable_vpc ? [1] : []
     content {
       subnet_ids         = var.subnet_ids
       security_group_ids = [aws_security_group.api_lambda[0].id]
@@ -262,7 +273,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.vpc_id != null ? 1 : 0
+  count      = var.enable_vpc ? 1 : 0
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
   role       = aws_iam_role.lambda_execution_role.name
 }
@@ -580,8 +591,8 @@ output "lambda_execution_role_name" {
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless vpc_id is set."
-  value       = var.vpc_id != null ? aws_security_group.api_lambda[0].id : null
+  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
 # Integration Outputs
