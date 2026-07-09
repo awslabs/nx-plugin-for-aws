@@ -17,7 +17,10 @@ import { libraryGenerator } from '@nx/js';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { resolveModuleFormat } from '../../utils/module-format';
+import {
+  assertModuleFormatCompatible,
+  resolveModuleFormat,
+} from '../../utils/module-format';
 import { toKebabCase } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
@@ -72,6 +75,10 @@ export const tsProjectGenerator = async (
   schema: TsProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
+  // Fail fast if an explicit --module contradicts the workspace's established
+  // format, rather than silently flipping the whole workspace and breaking
+  // existing projects.
+  assertModuleFormatCompatible(tree, schema.module);
   const esm = resolveModuleFormat(tree, schema.module) === 'esm';
 
   // Only scaffold the project on first run; on re-run skip creation so user

@@ -285,8 +285,10 @@ describe('ts lib generator', () => {
     });
     // CommonJS workspaces are marked with an explicit `type: commonjs`.
     expect(readJson(tree, 'package.json').type).toBe('commonjs');
-    const compilerOptions = readJson(tree, 'test-lib/tsconfig.lib.json')
-      .compilerOptions;
+    const compilerOptions = readJson(
+      tree,
+      'test-lib/tsconfig.lib.json',
+    ).compilerOptions;
     expect(compilerOptions?.module).toBe('node16');
     expect(compilerOptions?.moduleResolution).toBe('node16');
   });
@@ -307,5 +309,57 @@ describe('ts lib generator', () => {
     expect(
       readJson(tree, 'second-lib/tsconfig.lib.json').compilerOptions?.module,
     ).toBe('node16');
+  });
+
+  it('should error when module=cjs conflicts with an established ESM workspace', async () => {
+    // First project establishes the workspace as ESM.
+    await tsProjectGenerator(tree, {
+      name: 'first-lib',
+      preferInstallDependencies: false,
+    });
+    // A CommonJS project would flip the whole workspace, so it must error.
+    await expect(
+      tsProjectGenerator(tree, {
+        name: 'second-lib',
+        module: 'cjs',
+        preferInstallDependencies: false,
+      }),
+    ).rejects.toThrow(/already configured for ES modules/);
+    // The workspace format and the existing project are left untouched.
+    expect(readJson(tree, 'package.json').type).toBe('module');
+    expect(tree.exists('second-lib')).toBe(false);
+  });
+
+  it('should error when module=esm conflicts with an established CommonJS workspace', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'first-lib',
+      module: 'cjs',
+      preferInstallDependencies: false,
+    });
+    await expect(
+      tsProjectGenerator(tree, {
+        name: 'second-lib',
+        module: 'esm',
+        preferInstallDependencies: false,
+      }),
+    ).rejects.toThrow(/already configured for CommonJS/);
+    expect(readJson(tree, 'package.json').type).toBe('commonjs');
+    expect(tree.exists('second-lib')).toBe(false);
+  });
+
+  it('should allow module=cjs when it matches the established workspace', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'first-lib',
+      module: 'cjs',
+      preferInstallDependencies: false,
+    });
+    await expect(
+      tsProjectGenerator(tree, {
+        name: 'second-lib',
+        module: 'cjs',
+        preferInstallDependencies: false,
+      }),
+    ).resolves.toBeDefined();
+    expect(tree.exists('second-lib')).toBe(true);
   });
 });

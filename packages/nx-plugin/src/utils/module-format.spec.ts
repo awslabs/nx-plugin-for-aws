@@ -6,7 +6,9 @@ import { type Tree, writeJson } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  assertModuleFormatCompatible,
   esmVars,
+  getEstablishedModuleFormat,
   isEsmWorkspace,
   resolveModuleFormat,
 } from './module-format';
@@ -56,5 +58,74 @@ describe('resolveModuleFormat', () => {
     expect(esmVars(tree)).toEqual({ esm: true });
     writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
     expect(esmVars(tree)).toEqual({ esm: false });
+  });
+});
+
+describe('getEstablishedModuleFormat', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+  });
+
+  it('returns undefined when there is no root package.json', () => {
+    tree.delete('package.json');
+    expect(getEstablishedModuleFormat(tree)).toBeUndefined();
+  });
+
+  it('returns undefined when the root package.json has no type', () => {
+    writeJson(tree, 'package.json', { name: 'x' });
+    expect(getEstablishedModuleFormat(tree)).toBeUndefined();
+  });
+
+  it('returns esm for type module and cjs for type commonjs', () => {
+    writeJson(tree, 'package.json', { name: 'x', type: 'module' });
+    expect(getEstablishedModuleFormat(tree)).toBe('esm');
+    writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
+    expect(getEstablishedModuleFormat(tree)).toBe('cjs');
+  });
+});
+
+describe('assertModuleFormatCompatible', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+  });
+
+  it('throws when cjs is requested in an established esm workspace', () => {
+    writeJson(tree, 'package.json', { name: 'x', type: 'module' });
+    expect(() => assertModuleFormatCompatible(tree, 'cjs')).toThrow(
+      /already configured for ES modules/,
+    );
+  });
+
+  it('throws when esm is requested in an established cjs workspace', () => {
+    writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
+    expect(() => assertModuleFormatCompatible(tree, 'esm')).toThrow(
+      /already configured for CommonJS/,
+    );
+  });
+
+  it('does not throw when the explicit format matches the workspace', () => {
+    writeJson(tree, 'package.json', { name: 'x', type: 'module' });
+    expect(() => assertModuleFormatCompatible(tree, 'esm')).not.toThrow();
+    writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
+    expect(() => assertModuleFormatCompatible(tree, 'cjs')).not.toThrow();
+  });
+
+  it('never throws for infer or an undefined option', () => {
+    writeJson(tree, 'package.json', { name: 'x', type: 'module' });
+    expect(() => assertModuleFormatCompatible(tree, 'infer')).not.toThrow();
+    expect(() => assertModuleFormatCompatible(tree, undefined)).not.toThrow();
+    writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
+    expect(() => assertModuleFormatCompatible(tree, 'infer')).not.toThrow();
+  });
+
+  it('does not throw when the workspace has no established format', () => {
+    // Fresh workspace with no type: a generator is free to set the format.
+    writeJson(tree, 'package.json', { name: 'x' });
+    expect(() => assertModuleFormatCompatible(tree, 'cjs')).not.toThrow();
+    expect(() => assertModuleFormatCompatible(tree, 'esm')).not.toThrow();
   });
 });
