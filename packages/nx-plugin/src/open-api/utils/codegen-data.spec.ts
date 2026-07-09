@@ -821,6 +821,53 @@ describe('openapi codegen data utils', () => {
           { value: 'dog', modelName: 'Dog' },
         ],
       });
+
+      // Each subtype's discriminator property is typed as its literal tag.
+      const catKind = data.models
+        .find((m) => m.name === 'Cat')!
+        .properties.find((p) => p.name === 'kind')!;
+      const dogKind = data.models
+        .find((m) => m.name === 'Dog')!
+        .properties.find((p) => p.name === 'kind')!;
+      expect(catKind.typescriptType).toBe('"cat"');
+      expect(dogKind.typescriptType).toBe('"dog"');
+    });
+
+    it('should fall back to the primitive tag when a subtype is tagged differently across unions', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Cat: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' } },
+            },
+            Pet: {
+              oneOf: [{ $ref: '#/components/schemas/Cat' }],
+              discriminator: {
+                propertyName: 'kind',
+                mapping: { cat: '#/components/schemas/Cat' },
+              },
+            },
+            Animal: {
+              oneOf: [{ $ref: '#/components/schemas/Cat' }],
+              discriminator: {
+                propertyName: 'kind',
+                mapping: { feline: '#/components/schemas/Cat' },
+              },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const catKind = data.models
+        .find((m) => m.name === 'Cat')!
+        .properties.find((p) => p.name === 'kind')!;
+      // 'cat' vs 'feline' conflict → no single literal, stays a string.
+      expect(catKind.typescriptType).toBe('string');
     });
 
     it('should build implicit discriminator mapping from member names', () => {

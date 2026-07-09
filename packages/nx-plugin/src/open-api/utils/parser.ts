@@ -911,6 +911,67 @@ const resolveDiscriminators = (spec: Spec, data: ClientData): void => {
 };
 
 /**
+ * Type each discriminated subtype's discriminator property as its literal
+ * value(s), turning `Cat | Dog` into a true TypeScript tagged union that
+ * narrows on the discriminator (e.g. `Cat.petType: 'cat'`).
+ *
+ * The literal is taken from every discriminator's `mapping` (value → subtype).
+ * A subtype selected by several values within one discriminator becomes a union
+ * of those literals. A subtype that appears in multiple discriminators with
+ * conflicting values can't be pinned to a single literal, so it is left as the
+ * plain primitive (`string`) — the marshalling dispatch is unaffected either
+ * way, this only affects the emitted type.
+ */
+const resolveDiscriminatorLiterals = (data: ClientData): void => {
+  const modelsByName = indexModelsByName(data.models);
+
+  // Collect, per (subtype, discriminator property), the set of literal values
+  // that select it — across every discriminator in the spec.
+  const valuesBySubtypeProp = new Map<string, Set<string>>();
+  const conflicting = new Set<string>();
+
+  for (const model of data.models) {
+    const discriminator = model.discriminator;
+    if (!discriminator) continue;
+    const byName = new Map<string, string[]>();
+    for (const { value, modelName } of discriminator.mapping) {
+      byName.set(modelName, [...(byName.get(modelName) ?? []), value]);
+    }
+    for (const [modelName, values] of byName) {
+      const key = `${modelName} ${discriminator.propertyName}`;
+      const existing = valuesBySubtypeProp.get(key);
+      const incoming = new Set(values);
+      if (existing && !setsEqual(existing, incoming)) {
+        // Same subtype+property tagged differently by another union.
+        conflicting.add(key);
+      }
+      valuesBySubtypeProp.set(key, existing ? union(existing, incoming) : incoming);
+    }
+  }
+
+  for (const [key, values] of valuesBySubtypeProp) {
+    if (conflicting.has(key)) continue;
+    const [modelName, propertyName] = key.split(' ');
+    const property = modelsByName[modelName]?.properties.find(
+      (p) => p.name === propertyName,
+    );
+    // Only pin a literal when the property is a plain (string/enum) scalar —
+    // never an object/array reference.
+    if (property && (property.type === 'string' || property.isEnum)) {
+      property.discriminatorValue = [...values]
+        .map((v) => JSON.stringify(v))
+        .join(' | ');
+    }
+  }
+};
+
+const setsEqual = (a: Set<string>, b: Set<string>): boolean =>
+  a.size === b.size && [...a].every((v) => b.has(v));
+
+const union = (a: Set<string>, b: Set<string>): Set<string> =>
+  new Set([...a, ...b]);
+
+/**
  * Build the client data structure from a (normalised) OpenAPI spec: a fully
  * linked model graph with composite members resolved, ready for augmentation.
  */
@@ -922,5 +983,6 @@ export const buildClientData = (spec: Spec): ClientData => {
   linkModels(spec, data);
   resolveComposedModels(data);
   resolveDiscriminators(spec, data);
+  resolveDiscriminatorLiterals(data);
   return data;
 };

@@ -142,6 +142,15 @@ export interface Model {
   /** The response status code, for response models. */
   code?: number | string;
 
+  /**
+   * For a discriminated subtype's discriminator property: the rendered literal
+   * TypeScript type (e.g. `'cat'`, or `'cat' | 'kitten'` when several values
+   * map to one subtype) that makes the union a true tagged union. Absent when
+   * the subtype's tag can't be pinned to a literal (e.g. it appears in
+   * multiple unions with different values).
+   */
+  discriminatorValue?: string;
+
   /** The raw OpenAPI `type` (used to distinguish integer from number). */
   openapiType?: string | string[];
   /** Vendor extensions (`x-*`) copied from the schema. */

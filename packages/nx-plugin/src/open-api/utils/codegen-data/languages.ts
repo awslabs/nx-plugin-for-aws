@@ -19,6 +19,11 @@ const toTypescriptPrimitive = (property: Model): string => {
 };
 
 export const toTypeScriptType = (property: Model): string => {
+  // A discriminated subtype's discriminator property renders as its literal
+  // tag, making the union a true (narrowable) tagged union.
+  if (property.discriminatorValue) {
+    return property.discriminatorValue;
+  }
   const link = property.link;
   // Enum links serialise as their primitive; use the model's own type instead.
   const valueType = () =>

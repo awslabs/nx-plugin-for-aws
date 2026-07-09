@@ -1271,13 +1271,10 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     expect(client).not.toMatch(/\b_String\b/);
     expect(types).not.toMatch(/:\s*undefined\b/);
 
-    // After rewriteConstToEnum + languages.ts defence-in-depth the property
-    // resolves to bare `string` (the generator does not currently propagate
-    // the literal back to the reference site — it's compiled cleanly by tsc
-    // but loses the Literal narrowing). Assert the concrete current shape so
-    // any future tightening of this path is a deliberate, visible change.
-    expect(types).toMatch(/kind:\s*string\b/);
-    expect(types).not.toMatch(/kind:\s*'circle'/);
+    // The discriminator property is typed as its literal per subtype, making
+    // the union a true tagged union that narrows on `kind`.
+    expect(types).toMatch(/kind:\s*'circle'/);
+    expect(types).toMatch(/kind:\s*'square'/);
 
     // The discriminator must marshal directly to the matching branch, so a
     // Square must not gain a spurious `radius` from the Circle branch.

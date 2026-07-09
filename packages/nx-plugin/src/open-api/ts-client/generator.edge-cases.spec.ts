@@ -40,6 +40,8 @@ import {
  *  N. a discriminator whose wire name differs from its TS name (e.g. `pet-type`)
  *     must dispatch on the TS name in toJson and the wire name in fromJson
  *  O. a `deepObject` query parameter must serialise as `key[prop]=value` pairs
+ *  P. a discriminated union must be a true tagged union that narrows on the
+ *     discriminator (each branch's discriminator typed as its literal)
  */
 describe('openApiTsClientGenerator - edge cases', () => {
   let tree: Tree;
@@ -818,7 +820,12 @@ describe('openApiTsClientGenerator - edge cases', () => {
     }) as unknown as Spec;
 
   it('marshals a discriminated oneOf to the matching branch (explicit mapping)', async () => {
-    const { client } = await generate(discriminatedShapeSpec(true));
+    const { types, client } = await generate(discriminatedShapeSpec(true));
+
+    // The union is tagged: each branch's discriminator is its literal, so it
+    // narrows on `kind`.
+    expect(types).toMatch(/kind:\s*'cat'/);
+    expect(types).toMatch(/kind:\s*'dog'/);
 
     // fromJson dispatches on the wire discriminator and picks a single branch.
     const mockFetch = vi.fn();
@@ -1166,5 +1173,34 @@ describe('openApiTsClientGenerator - edge cases', () => {
     expect(url).toBe(
       `${baseUrl}/search?filter[page][size]=10&filter[page][sort]=asc`,
     );
+  });
+
+  // ---- P. tagged discriminated union narrows -------------------------------
+
+  it('emits a tagged union that narrows on the discriminator', async () => {
+    const { types } = await generate(discriminatedShapeSpec(true));
+
+    // Each branch's discriminator is typed as its literal.
+    expect(types).toMatch(/kind:\s*'cat'/);
+    expect(types).toMatch(/kind:\s*'dog'/);
+
+    // A consumer that narrows on the discriminator must type-check: accessing a
+    // branch-only field after checking `kind` is only valid for a tagged union.
+    tree.write(
+      'src/generated/consumer.ts',
+      `import type { Shape } from './types.gen';
+       export const napAt = (shape: Shape): Date | undefined => {
+         switch (shape.kind) {
+           case 'cat':
+             return shape.napAt;
+           case 'dog':
+             return shape.walkAt;
+         }
+       };`,
+    );
+    expectTypeScriptToCompile(tree, [
+      'src/generated/types.gen.ts',
+      'src/generated/consumer.ts',
+    ]);
   });
 });
