@@ -16,7 +16,19 @@ const uniqStrings = (strings) => {
     return true;
   });
 };
-const returnTypeSet = new Set(allOperations.map(op => op.result.typescriptType));
+const returnTypeSet = new Set(allOperations.flatMap(op => op.result ? [op.result.typescriptType] : []));
+// Names of discriminator "base" models (an object schema whose subtypes allOf-
+// compose it). A subtype composes its base's non-dispatching `$toJsonBase`/
+// `$fromJsonBase` body, so composing the dispatching `toJson`/`fromJson` would
+// recurse infinitely (base -> subtype -> base).
+const discriminatorBaseNames = new Set(models.filter(m => m.discriminator && m.discriminator.isBase).map(m => m.name));
+const modelByName = Object.fromEntries(models.map(m => [m.name, m]));
+// The $IO marshaller call for a composed member: a subtype composes its base's
+// non-dispatching body to avoid recursing back through the base's dispatch.
+const composedMarshaller = (property, method) =>
+  property.export === 'reference' && discriminatorBaseNames.has(property.type)
+    ? `$IO.${property.typescriptType}.$${method}Base`
+    : `$IO.${property.typescriptType}.${method}`;
 _%>
 <%_ if ((models.length + allOperations.filter(p => p.parameters.length > 0).length) > 0) { _%>
 import type {
@@ -44,7 +56,9 @@ const renderToJsonDateValue = (identifier, format) => {
 // Renders the appropriate nested function for .map() or $mapValues() for arrays and dictionaries for the given type
 const renderNestedToJsonValue = (type, argumentType = undefined, depth = 0) => {
   const itemIdentifier = `item${depth}`;
-  const argType = `${argumentType ? `: ${argumentType}` : ''}`;
+  // Nested items (depth > 0) come from mapping over an `any`, so annotate them
+  // to satisfy noImplicitAny.
+  const argType = `${argumentType ? `: ${argumentType}` : (depth > 0 ? ': any' : '')}`;
   if (type.isPrimitive || type.typescriptType === 'unknown' || type.export === 'enum' || type.isEnum) {
     return `(${itemIdentifier}${argType}) => ${["date", "date-time"].includes(type.format) ? renderToJsonDateValue(itemIdentifier, type.format) : itemIdentifier}`;
   } else if (type.export === "array") {
@@ -83,7 +97,9 @@ const renderToJsonValue = (property, value, argumentType = undefined) => {
 // Renders the appropriate nested function for .map() or $mapValues() for arrays and dictionaries for the given type
 const renderNestedFromJsonValue = (type, argumentType = undefined, depth = 0) => {
     const itemIdentifier = `item${depth}`;
-    const argType = `${argumentType ? `: ${argumentType}` : ''}`;
+    // Nested items (depth > 0) come from mapping over an `any`, so annotate them
+    // to satisfy noImplicitAny.
+    const argType = `${argumentType ? `: ${argumentType}` : (depth > 0 ? ': any' : '')}`;
     if (type.isPrimitive || type.typescriptType === 'unknown' || type.export === 'enum' || type.isEnum) {
         return `(${itemIdentifier}${argType}) => ${["date", "date-time"].includes(type.format) ? `new Date(${itemIdentifier})` : itemIdentifier}`;
     } else if (type.export === "array") {
@@ -163,13 +179,44 @@ _%>
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 <%_ models.filter(m => m.export !== 'enum').forEach((model) => { _%>
 <%_ const isComposite = model.export === "one-of" || model.export === "any-of" || model.export === "all-of"; _%>
+<%_ /* A discriminator base emits its plain (own-fields) body under a $-prefixed
+      name that its subtypes compose, while its public toJson/fromJson dispatch
+      to the matching subtype — so composing a subtype never recurses back into
+      the dispatch. */ _%>
+<%_ const isBase = model.discriminator && model.discriminator.isBase; _%>
+<%_ const toJsonName = isBase ? '$toJsonBase' : 'toJson'; _%>
+<%_ const fromJsonName = isBase ? '$fromJsonBase' : 'fromJson'; _%>
 
   public static <%- model.typescriptName %> = {
+    <%_ if (isBase) { _%>
     toJson: (model: <%- model.typescriptName %>): any => {
+      if (model === undefined || model === null) {
+        return model;
+      }
+      switch ((model as any).<%- model.discriminator.typescriptPropertyName %>) {
+        <%_ model.discriminator.mapping.filter(m => modelByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- modelByName[modelName].typescriptName %>.toJson(model as <%- modelByName[modelName].typescriptName %>);
+        <%_ }); _%>
+      }
+      return $IO.<%- model.typescriptName %>.$toJsonBase(model);
+    },
+    fromJson: (json: any): <%- model.typescriptName %> => {
+      if (json === undefined || json === null) {
+        return json;
+      }
+      switch (json?.[<%- JSON.stringify(model.discriminator.propertyName) %>]) {
+        <%_ model.discriminator.mapping.filter(m => modelByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- modelByName[modelName].typescriptName %>.fromJson(json);
+        <%_ }); _%>
+      }
+      return $IO.<%- model.typescriptName %>.$fromJsonBase(json);
+    },
+    <%_ } _%>
+    <%- toJsonName %>: (model: <%- model.typescriptName %>): any => {
       if (model === undefined || model === null) {
         return model;
       }
@@ -202,10 +249,25 @@ export class $IO {
           return <%- renderToJsonValue(arrayOfNonPrimitives, 'model') %>;
       }
       <%_ } _%>
+      <%_ /* A discriminated composite marshals directly to the matching branch,
+            rather than merging every branch (which would leak fields from the
+            non-matching branches). Unknown values fall through to the merge. */ _%>
+      <%_ if (model.discriminator) { _%>
+      <%_ const discToJsonByName = Object.fromEntries(model.composedModels.map(m => [m.name, m.typescriptName])); _%>
+      switch ((model as any).<%- model.discriminator.typescriptPropertyName %>) {
+        <%_ model.discriminator.mapping.filter(m => discToJsonByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- discToJsonByName[modelName] %>.toJson(model as <%- discToJsonByName[modelName] %>);
+        <%_ }); _%>
+      }
+      <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((property, i) => { _%>
+        <%_ if (property.export === 'reference' && discriminatorBaseNames.has(property.type)) { _%>
+        ...<%- composedMarshaller(property, 'toJson') %>(model),
+        <%_ } else { _%>
         ...<%- renderToJsonValue(property, `model${(model.export !== 'all-of' && property.export !== 'dictionary') ? ` as ${property.typescriptType}` : ''}`) %>,
+        <%_ } _%>
         <%_ }); _%>
       };
       <%_ } else { _%>
@@ -238,7 +300,7 @@ export class $IO {
       };
       <%_ } _%>
     },
-    fromJson: (json: any): <%- model.typescriptName %> => {
+    <%- fromJsonName %>: (json: any): <%- model.typescriptName %> => {
       if (json === undefined || json === null) {
         return json;
       }
@@ -270,10 +332,25 @@ export class $IO {
           return <%- renderFromJsonValue(arrayOfNonPrimitives, 'json') %>;
       }
       <%_ } _%>
+      <%_ /* A discriminated composite marshals directly to the matching branch;
+            the discriminator value comes off the raw json by its wire name.
+            Unknown values fall through to the merge. */ _%>
+      <%_ if (model.discriminator) { _%>
+      <%_ const discFromJsonByName = Object.fromEntries(model.composedModels.map(m => [m.name, m.typescriptName])); _%>
+      switch (json?.[<%- JSON.stringify(model.discriminator.propertyName) %>]) {
+        <%_ model.discriminator.mapping.filter(m => discFromJsonByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- discFromJsonByName[modelName] %>.fromJson(json);
+        <%_ }); _%>
+      }
+      <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((composedType) => { _%>
+        <%_ if (composedType.export === 'reference' && discriminatorBaseNames.has(composedType.type)) { _%>
+        ...<%- composedMarshaller(composedType, 'fromJson') %>(json),
+        <%_ } else { _%>
         ...<%- renderFromJsonValue(composedType, 'json') %>,
+        <%_ } _%>
         <%_ }); _%>
       };
       <%_ } else { _%>
@@ -355,26 +432,45 @@ export class <%- className %> {
     <%_ }); _%>
   }
 
-  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): string => {
+  private $collectionDelimiters: { [format: string]: string } = { csv: ',', ssv: ' ', pipes: '|' };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [`${key}=${encodeURIComponent(String(value))}`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(`${key}[${encodeURIComponent(prop)}]`, v),
+    );
+  };
+
+  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject' }): string => {
     const baseUrl = this.$config.url.endsWith('/') ? this.$config.url.slice(0, -1) : this.$config.url;
     const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) =>
       withParams.replace(`{${key}}`, encodeURIComponent(`${value}`))
     , path);
-    const queryString = Object.entries(queryParameters).map(([key, value]) => {
+    const queryString = Object.entries(queryParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-        return value.map(v => `${encodeURIComponent(key)}=${encodeURIComponent(`${v}`)}`).join('&');
+        return value.map(v => `${encodeURIComponent(key)}=${encodeURIComponent(`${v}`)}`);
       }
-      return `${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}`;
+      if (collectionFormats?.[key] === 'deepObject' && value !== null && typeof value === 'object') {
+        return this.$deepObject(encodeURIComponent(key), value);
+      }
+      const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [`${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}`];
     }).join('&');
     return baseUrl + pathWithParameters + (queryString ? `?${queryString}` : '');
   };
 
-  private $headers = (headerParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): [string, string][] => {
+  private $headers = (headerParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' }): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map(v => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [[key, Array.isArray(value) ? value.map(String).join(delimiter) : String(value)]];
     });
   };
 
@@ -418,9 +514,21 @@ export class <%- className %> {
     }
     <%_ } _%>
     <%_ } _%>
-    <%_ if (op.parameters.filter(p => p.collectionFormat).length > 0) { _%>
-    const collectionFormats = {
-      <%_ op.parameters.filter(p => p.collectionFormat).forEach((parameter) => { _%>
+    <%_ /* Query and header collection formats are kept in separate maps: a
+           query and a header parameter may share a name, which would collide
+           in a single object literal. */ _%>
+    <%_ const queryCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'query'); _%>
+    <%_ const headerCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'header'); _%>
+    <%_ if (queryCollectionParams.length > 0) { _%>
+    const queryCollectionFormats = {
+      <%_ queryCollectionParams.forEach((parameter) => { _%>
+      '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
+      <%_ }); _%>
+    } as const;
+    <%_ } _%>
+    <%_ if (headerCollectionParams.length > 0) { _%>
+    const headerCollectionFormats = {
+      <%_ headerCollectionParams.forEach((parameter) => { _%>
       '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
       <%_ }); _%>
     } as const;
@@ -457,8 +565,8 @@ export class <%- className %> {
     const body = undefined;
     <%_ } _%>
 
-    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (op.parameters.filter(p => p.collectionFormat).length > 0) { %>, collectionFormats<% } %>), {
-      headers: this.$headers(headerParameters<% if (op.parameters.filter(p => p.collectionFormat).length > 0) { %>, collectionFormats<% } %>),
+    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (queryCollectionParams.length > 0) { %>, queryCollectionFormats<% } %>), {
+      headers: this.$headers(headerParameters<% if (headerCollectionParams.length > 0) { %>, headerCollectionFormats<% } %>),
       method: '<%- op.method %>',
       body,
     });

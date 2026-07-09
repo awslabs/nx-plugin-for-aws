@@ -3,15 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Plugin } from '@hey-api/openapi-ts';
-import * as gen from '@hey-api/openapi-ts';
-import camelCase from 'lodash.camelcase';
 import orderBy from 'lodash.orderby';
 import trim from 'lodash.trim';
 import uniqBy from 'lodash.uniqby';
-import type { OpenAPIV3, OpenAPIV3_1 } from 'openapi-types';
+import type { OpenAPIV3 } from 'openapi-types';
 import {
-  kebabCase,
+  camelCase,
   pascalCase,
   snakeCase,
   toClassName,
@@ -25,468 +22,83 @@ import {
   toTypeScriptType,
 } from './codegen-data/languages';
 import {
-  type ClientData,
   COLLECTION_TYPES,
   COMPOSED_SCHEMA_TYPES,
   type CodeGenData,
-  flattenModelLink,
+  type CollectionFormat,
+  createModel,
+  DEFAULT_SERVICE_NAME,
+  indexModelsByName,
   type Model,
+  type ModelsByName,
   type Operation,
+  type PatternPropertyModel,
   PRIMITIVE_TYPES,
+  type Service,
   STREAMING_CONTENT_TYPES,
   VENDOR_EXTENSIONS,
+  type VendorExtensions,
 } from './codegen-data/types';
 import { normaliseOpenApiSpecForCodeGen } from './normalise';
+import {
+  buildClientData,
+  buildInlineModel,
+  compositeMemberSchemas,
+  getSpecOperation,
+  getSpecParametersByKey,
+  getSpecPathParameters,
+  linkModel,
+  specParameterKey,
+} from './parser';
 import { isRef, resolveIfRef, splitRef } from './refs';
-import type { Spec } from './types';
+import type { OpenApiSchema, OpenApiSchemaOrRef, Spec } from './types';
 
 /**
- * Builds a data structure from an OpenAPI spec which can be used to generate code
+ * Build the data structure used to generate code from an OpenAPI spec.
  */
-export const buildOpenApiCodeGenData = async (
-  inSpec: Spec,
-): Promise<CodeGenData> => {
-  // Ensure spec is ready for codegen
+export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
   const spec = normaliseOpenApiSpecForCodeGen(inSpec);
+  const data = buildClientData(spec);
 
-  // Build the initial data, which we will augment with additional information
-  const data = await buildInitialCodeGenData(spec);
+  const modelsByName = indexModelsByName(data.models);
 
-  // Ensure the models have their links set when they are arrays/dictionaries
-  ensureModelLinks(spec, data);
-
-  // Mutate the models with enough data to render composite models in the templates
-  ensureCompositeModels(data);
-
-  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
-
-  // Augment operations with additional data
   for (const service of data.services) {
-    // Keep track of the request and response models we need the service (ie api client) to import
-    const requestModelImports: string[] = [];
-    const responseModelImports: string[] = [];
-
-    for (const op of service.operations) {
-      // Extract the operation back from the openapi spec
-      const specOp = (spec as any)?.paths?.[op.path]?.[
-        op.method.toLowerCase()
-      ] as OpenAPIV3.OperationObject | undefined;
-
-      op.name = op.id ?? op.name;
-      (op as any).uniqueName = op.name;
-      if (specOp['x-aws-nx-deduplicated-op-id']) {
-        (op as any).uniqueName = specOp['x-aws-nx-deduplicated-op-id'];
-      }
-      if (specOp['x-aws-nx-deduplicated-dot-op-id']) {
-        (op as any).dotNotationName = specOp['x-aws-nx-deduplicated-dot-op-id'];
-      }
-
-      // Add vendor extensions
-      (op as any).vendorExtensions = (op as any).vendorExtensions ?? {};
-      copyVendorExtensions(specOp ?? {}, (op as any).vendorExtensions);
-
-      if (specOp) {
-        // Add all response models to the response model imports
-        responseModelImports.push(
-          ...op.responses
-            .filter((r) => r.export === 'reference')
-            .map((r) => r.type),
-        );
-
-        for (const response of op.responses) {
-          // Validate that the response is not a composite schema of primitives since we cannot determine what
-          // the type of the response is (it all comes back as text!)
-          if (
-            response.export === 'reference' &&
-            COMPOSED_SCHEMA_TYPES.has(modelsByName[response.type]?.export)
-          ) {
-            const composedPrimitives = (
-              modelsByName[response.type] as any
-            ).composedPrimitives.filter(
-              (p) => !['array', 'dictionary'].includes(p.export),
-            );
-            if (composedPrimitives.length > 0) {
-              throw new Error(
-                `Operation "${op.method} ${op.path}" returns a composite schema of primitives with ${camelCase(modelsByName[response.type].export)}, which cannot be distinguished at runtime`,
-              );
-            }
-          }
-
-          const matchingSpecResponse = specOp.responses[`${response.code}`];
-
-          // @hey-api/openapi-ts does not distinguish between returning an "any" or returning "void"
-          // We distinguish this by looking back at each response in the spec, and checking whether it
-          // has content
-          if (matchingSpecResponse) {
-            // Resolve the ref if necessary
-            const specResponse = resolveIfRef(spec, matchingSpecResponse);
-
-            // When there's no content, we set the type to 'void'
-            if (!specResponse.content) {
-              response.type = 'void';
-            } else {
-              // Add the response media types
-              const mediaTypes = Object.keys(specResponse.content);
-              (response as any).mediaTypes = mediaTypes;
-
-              for (const mediaType of mediaTypes) {
-                const responseContent =
-                  specResponse.content?.[mediaType] ??
-                  Object.values(specResponse.content)[0];
-                const responseSchema = resolveIfRef(
-                  spec,
-                  responseContent.schema,
-                );
-                if (responseSchema) {
-                  await mutateWithOpenapiSchemaProperties(
-                    spec,
-                    response,
-                    responseSchema,
-                    modelsByName,
-                  );
-                }
-                if (
-                  STREAMING_CONTENT_TYPES.has(mediaType) &&
-                  'itemSchema' in responseContent
-                ) {
-                  (response as any).isJsonlStreaming = true;
-                  (response as any).itemSchemaModel =
-                    await buildOrReferenceModel(
-                      spec,
-                      modelsByName,
-                      responseContent.itemSchema,
-                    );
-                }
-              }
-            }
-          }
-        }
-      }
-
-      const specParametersByName = Object.fromEntries(
-        (specOp?.parameters ?? []).map((p) => {
-          const param = resolveIfRef(spec, p);
-          return [param.name, param];
-        }),
-      );
-
-      // Loop through the parameters
-      for (const parameter of op.parameters) {
-        // Add the request model import
-        if (parameter.export === 'reference') {
-          requestModelImports.push(parameter.type);
-        }
-
-        const specParameter = specParametersByName[parameter.prop];
-        const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
-
-        if (specParameterSchema) {
-          await mutateWithOpenapiSchemaProperties(
-            spec,
-            parameter,
-            specParameterSchema,
-            modelsByName,
-          );
-        }
-
-        if (parameter.in === 'body' || parameter.in === 'formData') {
-          // Parameter name for the body is 'body'.  `formData` bodies arrive
-          // under a synthetic `formData` param (hey-api convention) that's
-          // logically the body — normalise both shapes to `in === 'body'`
-          // so every downstream consumer (including ts-client's request-
-          // type composition) sees a single body kind.
-          parameter.name = 'body';
-          parameter.prop = 'body';
-          parameter.in = 'body';
-
-          // The request body is not in the "parameters" section of the openapi spec so we won't have added the schema
-          // properties above. Find it here.
-          const specBody = resolveIfRef(spec, specOp?.requestBody);
-          if (specBody) {
-            if (parameter.mediaType) {
-              const bodySchema = resolveIfRef(
-                spec,
-                specBody.content?.[parameter.mediaType]?.schema,
-              );
-              if (bodySchema) {
-                await mutateWithOpenapiSchemaProperties(
-                  spec,
-                  parameter,
-                  bodySchema,
-                  modelsByName,
-                );
-              }
-            }
-            // Track all the media types that can be accepted in the request body
-            (parameter as any).mediaTypes = Object.keys(specBody.content);
-          }
-        } else if (
-          ['query', 'header'].includes(parameter.in) &&
-          specParameter
-        ) {
-          // Translate style/explode to OpenAPI v2 style collectionFormat
-          // https://spec.openapis.org/oas/v3.0.3.html#style-values
-          const style =
-            specParameter.style ??
-            (parameter.in === 'query' ? 'form' : 'simple');
-          const explode = specParameter.explode ?? style === 'form';
-
-          if (parameter.in === 'query') {
-            (parameter as any).collectionFormat = explode
-              ? 'multi'
-              : ({
-                  spaceDelimited: 'ssv',
-                  pipeDelimited: 'tsv',
-                  simple: 'csv',
-                  form: 'csv',
-                }[style] ?? 'multi');
-          } else {
-            // parameter.in === "header"
-            (parameter as any).collectionFormat = explode ? 'multi' : 'csv';
-          }
-        }
-
-        mutateModelWithAdditionalTypes(parameter);
-      }
-
-      // Add language types to response models
-      (op.responses ?? []).forEach(mutateModelWithAdditionalTypes);
-
-      // Sort responses by code
-      op.responses = orderBy(op.responses, (r) => r.code);
-      // Result is the lowest successful response, otherwise is the 2XX or default response
-      const result = op.responses.find(
-        (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
-      );
-      (op as any).result =
-        result ??
-        op.responses.find((r) => r.code === '2XX' || r.code === 'default');
-
-      // Add variants of operation name
-      (op as any).operationIdPascalCase = pascalCase((op as any).uniqueName);
-      (op as any).operationIdKebabCase = kebabCase((op as any).uniqueName);
-      (op as any).operationIdSnakeCase = toPythonName(
-        'operation',
-        (op as any).uniqueName,
-      );
-
-      // Add request type name (after operationIdPascalCase is set)
-      if (op.parameters && op.parameters.length > 0) {
-        const baseRequestTypeName = `${(op as any).operationIdPascalCase}Request`;
-        const hasConflict = !!spec.components?.schemas?.[baseRequestTypeName];
-        if (hasConflict) {
-          // Use OperationRequest suffix when there's a conflict
-          (op as any).requestTypeName =
-            `${(op as any).operationIdPascalCase}OperationRequest`;
-        } else {
-          // Use standard Request suffix when no conflict
-          (op as any).requestTypeName = baseRequestTypeName;
-        }
-      }
-
-      mutateOperationWithAdditionalData(op);
-    }
-
-    // Lexicographical ordering of operations
-    service.operations = orderBy(
-      service.operations,
-      (op) => (op as any).uniqueName,
-    );
-
-    // Add the models to import
-    (service as any).modelImports = orderBy(
-      uniqBy(
-        [...service.imports, ...requestModelImports, ...responseModelImports],
-        (x) => x,
-      ),
-    );
-
-    // Add the service class name
-    (service as any).className = `${service.name}Api`;
-    (service as any).classNameSnakeCase = snakeCase((service as any).className);
-    (service as any).nameSnakeCase = snakeCase(service.name);
+    augmentService(spec, service, modelsByName);
   }
 
-  // All operations across all services
   const allOperations = uniqBy(
     data.services.flatMap((s) => s.operations),
-    (o) => (o as any).uniqueName,
+    (o) => o.uniqueName,
   );
 
-  // Add additional models for operation parameters
+  // A model per operation request parameter position (query/path/body/...).
   data.models = [
     ...data.models,
-    ...allOperations.flatMap((op: Operation): Model[] => {
-      if (op.parameters && op.parameters.length > 0) {
-        // Build a collection of request parameter models to create based on their position (ie 'in' in the openapi spec, eg body, query, path, header, etc)
-        const parametersByPosition: { [position: string]: Model[] } = {};
-
-        op.parameters
-          .filter(
-            // We filter out (return false for) request bodies which we "inline" - ie we don't create a property which points to the body, the request will only be the body itself
-            (p) => {
-              // Always create models for non-body parameters
-              if (p.in !== 'body') {
-                return true;
-              }
-
-              // If the body is the only parameter, we can inline it no matter the type
-              if (op.parameters.length === 1) {
-                return false;
-              }
-
-              // We inline object bodies, so long as they aren't dictionaries (as dictionary keys could clash with other parameters),
-              // and so long as they don't have a property name that clashes with another parameter
-              const hasClashingPropertyName = (
-                modelsByName?.[p.type]?.properties ?? []
-              ).some((prop) =>
-                op.parameters.some((param) => param.name === prop.name),
-              );
-              if (
-                p.export === 'reference' &&
-                modelsByName?.[p.type]?.export !== 'dictionary' &&
-                !hasClashingPropertyName
-              ) {
-                return false;
-              }
-
-              // Don't inline anything else
-              return true;
-            },
-          )
-          .forEach((parameter) => {
-            parametersByPosition[parameter.in] = [
-              ...(parametersByPosition[parameter.in] ?? []),
-              parameter,
-            ];
-          });
-
-        // Ensure that if we have an explicit body parameter, it's called "body"
-        const requestBodyParameter = parametersByPosition['body']?.[0];
-        if (requestBodyParameter) {
-          requestBodyParameter.name = 'body';
-          (requestBodyParameter as any).prop = 'body';
-        }
-
-        (op as any).explicitRequestBodyParameter = requestBodyParameter;
-
-        return Object.entries(parametersByPosition).map(
-          ([position, parameters]) => {
-            const name = `${(op as any).operationIdPascalCase}Request${upperFirst(position)}Parameters`;
-            return {
-              $refs: [],
-              base: name,
-              description: op.description,
-              enum: null,
-              enums: null,
-              export: 'interface',
-              imports: [],
-              in: '',
-              link: undefined,
-              name,
-              properties: parameters,
-              template: '',
-              type: name,
-              isDefinition: false,
-              isNullable: false,
-              isReadOnly: false,
-              isRequired: true,
-            };
-          },
-        );
-      }
-      return [] as Model[];
-    }),
+    ...allOperations.flatMap((op) =>
+      buildRequestParameterModels(op, modelsByName),
+    ),
   ];
 
-  // Augment models with additional data
   for (const model of data.models) {
-    // Add a snake_case name
-    (model as any).nameSnakeCase = toPythonName('model', model.name);
-
-    const matchingSpecModel = spec?.components?.schemas?.[model.name];
-
-    if (matchingSpecModel) {
-      const specModel = resolveIfRef(spec, matchingSpecModel);
-
-      await mutateWithOpenapiSchemaProperties(
-        spec,
-        model,
-        specModel,
-        modelsByName,
-      );
-
-      // Add unique imports
-      (model as any).uniqueImports = orderBy(
-        uniqBy(
-          [
-            ...model.imports,
-            // Include property imports, if any
-            ...model.properties
-              .filter((p) => p.export === 'reference')
-              .map((p) => p.type),
-          ],
-          (x) => x,
-        ),
-      ).filter((modelImport) => modelImport !== model.name); // Filter out self for recursive model references
-
-      // Add deprecated flag if present
-      (model as any).deprecated = specModel.deprecated || false;
-
-      // Augment properties with additional data
-      for (const property of model.properties) {
-        const matchingSpecProperty = specModel.properties?.[property.name];
-
-        if (matchingSpecProperty) {
-          const specProperty = resolveIfRef(spec, matchingSpecProperty);
-          await mutateWithOpenapiSchemaProperties(
-            spec,
-            property,
-            specProperty,
-            modelsByName,
-          );
-        }
-      }
-    }
-
-    // Augment properties with additional data
-    model.properties.forEach((property) => {
-      // Add language-specific names/types
-      mutateModelWithAdditionalTypes(property);
-    });
+    augmentModel(spec, model, modelsByName);
+  }
+  for (const model of data.models) {
+    model.typescriptName = toTypeScriptModelName(model.name);
+    model.typescriptType = model.typescriptName;
   }
 
   for (const model of data.models) {
-    // Set the model's typescript name and type
-    (model as any).typescriptName = toTypeScriptModelName(model.name);
-    (model as any).typescriptType = (model as any).typescriptName;
+    assertNoClashingPropertyNames(model);
   }
 
-  // Order models lexicographically by name
   data.models = orderBy(data.models, (d) => d.name);
-
-  // Order services so default appears first, then otherwise by name
+  // Default service first, then by name.
   data.services = orderBy(data.services, (s) =>
-    s.name === 'Default' ? '' : s.name,
+    s.name === DEFAULT_SERVICE_NAME ? '' : s.name,
   );
 
-  // All operations by tags
-  const operationsByTag: { [tag: string]: Operation[] } = {};
-  const untaggedOperations: Operation[] = [];
-  allOperations.forEach((op) => {
-    const tags = (op as any).tags;
-    if (tags && tags.length > 0) {
-      tags.map(camelCase).forEach((tag: string) => {
-        operationsByTag[tag] = [...(operationsByTag[tag] ?? []), op];
-      });
-    } else {
-      untaggedOperations.push(op);
-    }
-  });
-
-  // Add top level vendor extensions
-  const vendorExtensions: { [key: string]: any } = {};
-  copyVendorExtensions(spec ?? {}, vendorExtensions);
+  const { operationsByTag, untaggedOperations } =
+    groupOperationsByTag(allOperations);
 
   return {
     ...data,
@@ -494,675 +106,675 @@ export const buildOpenApiCodeGenData = async (
     untaggedOperations,
     info: spec.info,
     allOperations,
-    vendorExtensions,
+    vendorExtensions: vendorExtensionsOf(spec),
     className: toClassName(spec.info.title),
   };
 };
 
-const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
-  let data: ClientData;
+/**
+ * Augment a service and each of its operations with the data needed for code
+ * generation (names, imports, result/request types, behavioural flags), and
+ * compute the set of models the service (ie API client) needs to import.
+ */
+const augmentService = (
+  spec: Spec,
+  service: Service,
+  modelsByName: ModelsByName,
+): void => {
+  const modelImports = service.operations.flatMap((op) =>
+    augmentOperation(spec, op, modelsByName),
+  );
 
-  // We create a plugin which will capture the client data
-  const plugin: Plugin.DefineConfig<{ name: string }> = () => ({
-    name: 'plugin',
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
-    _handler: () => {},
-    _handlerLegacy: ({ client }) => {
-      data = client;
-    },
-  });
-
-  // Use @hey-api/openapi-ts to build the initial data structure that we'll generate clients from
-  await gen.createClient({
-    experimentalParser: false,
-    input: {
-      path: spec,
-    },
-    output: 'unused',
-    plugins: [plugin()],
-    dryRun: true,
-    logs: { level: 'silent' },
-  });
-
-  if (!data) {
-    // If this happens it indicates an update to @hey-api/openapi-ts which has removed the legacy parser
-    throw new Error('Failed to build code generation data');
-  }
-
-  return data;
+  service.operations = orderBy(service.operations, (op) => op.uniqueName);
+  service.modelImports = orderBy(
+    uniqBy([...service.imports, ...modelImports], (x) => x),
+  );
+  service.className = `${service.name}Api`;
+  service.nameSnakeCase = snakeCase(service.name);
 };
 
 /**
- * Build a model for a particular primitive schema.
- * Only primitives are supported since we only return one model.
- * For non-primitives, it assumes all referenced subschemas are already models
+ * Augment a single operation with all the data the templates need, returning
+ * the names of the models it references (for the service's import list).
  */
-const buildModelForPrimitive = async (
-  originalSpec: Spec,
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3_1.SchemaObject,
-): Promise<Model> => {
-  const targetSchemaName = '___aws_nx_plugin_openapi_tmp_schema___';
+const augmentOperation = (
+  spec: Spec,
+  op: Operation,
+  modelsByName: ModelsByName,
+): string[] => {
+  const specOp = getSpecOperation(spec, op);
 
-  const spec: Spec = {
-    openapi: '3.1.0',
-    info: { title: 'tmp', version: '1.0.0' },
-    paths: {},
-    components: {
-      schemas: {
-        ...originalSpec.components?.schemas,
-        [targetSchemaName]: schema,
-      },
-    },
-  };
-  const data = await buildInitialCodeGenData(spec);
+  assignOperationNames(op, specOp);
 
-  const model = data.models.find((m) => m.name === targetSchemaName);
-  if (!model) {
-    throw new Error(
-      `Failed to construct model for schema ${JSON.stringify(schema)}`,
-    );
+  op.vendorExtensions = vendorExtensionsOf(specOp);
+
+  const modelImports = [
+    ...(specOp ? augmentResponses(spec, op, specOp, modelsByName) : []),
+    ...augmentParameters(spec, op, specOp, modelsByName),
+  ];
+
+  op.responses.forEach(addLanguageTypes);
+  op.responses = orderBy(op.responses, (r) => r.code);
+
+  // Result is the lowest successful response, otherwise the 2XX or default.
+  op.result =
+    op.responses.find(
+      (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
+    ) ?? op.responses.find((r) => r.code === '2XX' || r.code === 'default');
+
+  op.operationIdPascalCase = pascalCase(op.uniqueName);
+  op.operationIdSnakeCase = toPythonName('operation', op.uniqueName);
+
+  if (op.parameters.length > 0) {
+    const baseRequestTypeName = `${op.operationIdPascalCase}Request`;
+    // Use the OperationRequest suffix when the standard Request name clashes
+    // with an existing schema.
+    op.requestTypeName = spec.components?.schemas?.[baseRequestTypeName]
+      ? `${op.operationIdPascalCase}OperationRequest`
+      : baseRequestTypeName;
   }
 
-  ensureModelLinks(spec, data);
-  await mutateWithOpenapiSchemaProperties(
-    spec,
-    model,
-    schema,
-    Object.fromEntries(data.models.map((m) => [m.name, m])),
-  );
+  augmentOperationBehaviour(op);
 
-  return model;
+  return modelImports;
 };
 
-const buildOrReferenceModel = async (
+/**
+ * Set an operation's name and its deduplicated variants from the vendor
+ * extensions the normaliser added.
+ */
+const assignOperationNames = (
+  op: Operation,
+  specOp: OpenAPIV3.OperationObject | undefined,
+): void => {
+  const deduplicatedOpId = specOp?.['x-aws-nx-deduplicated-op-id'] as
+    | string
+    | undefined;
+  const dotNotationOpId = specOp?.['x-aws-nx-deduplicated-dot-op-id'] as
+    | string
+    | undefined;
+
+  op.name = op.id ?? op.name;
+  op.uniqueName = deduplicatedOpId ?? op.name;
+  if (dotNotationOpId) {
+    op.dotNotationName = dotNotationOpId;
+  }
+};
+
+/**
+ * Augment an operation's response models with schema-derived data, resolving
+ * void responses and streaming item schemas. Returns the response model names
+ * to import.
+ */
+const augmentResponses = (
   spec: Spec,
-  modelsByName: { [name: string]: Model },
-  schema:
-    | OpenAPIV3.SchemaObject
-    | OpenAPIV3_1.SchemaObject
-    | OpenAPIV3.ReferenceObject,
-): Promise<Model> => {
+  op: Operation,
+  specOp: OpenAPIV3.OperationObject,
+  modelsByName: ModelsByName,
+): string[] => {
+  const modelImports = op.responses
+    .filter((r) => r.export === 'reference')
+    .map((r) => r.type);
+
+  for (const response of op.responses) {
+    // We cannot distinguish a composite of primitives at runtime (it all comes
+    // back as text), so validate this away.
+    if (
+      response.export === 'reference' &&
+      COMPOSED_SCHEMA_TYPES.has(modelsByName[response.type]?.export)
+    ) {
+      const composedPrimitives = (
+        modelsByName[response.type].composedPrimitives ?? []
+      ).filter((p) => !COLLECTION_TYPES.has(p.export));
+      if (composedPrimitives.length > 0) {
+        throw new Error(
+          `Operation "${op.method} ${op.path}" returns a composite schema of primitives with ${camelCase(modelsByName[response.type].export)}, which cannot be distinguished at runtime`,
+        );
+      }
+    }
+
+    const matchingSpecResponse = specOp.responses[`${response.code}`];
+    if (!matchingSpecResponse) continue;
+
+    const specResponse = resolveIfRef(spec, matchingSpecResponse);
+
+    // When there's no content, the response type is 'void'
+    if (!specResponse.content) {
+      response.type = 'void';
+      continue;
+    }
+
+    const mediaTypes = Object.keys(specResponse.content);
+    response.mediaTypes = mediaTypes;
+
+    for (const mediaType of mediaTypes) {
+      const responseContent = specResponse.content[mediaType];
+      const responseSchema = resolveIfRef(spec, responseContent.schema);
+      if (responseSchema) {
+        augmentModelFromSchema(spec, response, responseSchema, modelsByName);
+      }
+      if (
+        STREAMING_CONTENT_TYPES.has(mediaType) &&
+        'itemSchema' in responseContent
+      ) {
+        response.isJsonlStreaming = true;
+        response.itemSchemaModel = buildOrReferenceModel(
+          spec,
+          modelsByName,
+          responseContent.itemSchema as OpenApiSchemaOrRef,
+        );
+      }
+    }
+  }
+
+  return modelImports;
+};
+
+/**
+ * Augment an operation's parameter models with schema-derived data, resolving
+ * request bodies and query/header collection formats. Returns the parameter
+ * model names to import.
+ */
+const augmentParameters = (
+  spec: Spec,
+  op: Operation,
+  specOp: OpenAPIV3.OperationObject | undefined,
+  modelsByName: ModelsByName,
+): string[] => {
+  const specParametersByKey = getSpecParametersByKey(
+    spec,
+    specOp,
+    getSpecPathParameters(spec, op),
+  );
+
+  const modelImports: string[] = [];
+
+  for (const parameter of op.parameters) {
+    if (parameter.export === 'reference') {
+      modelImports.push(parameter.type);
+    }
+
+    const specParameter =
+      specParametersByKey[
+        specParameterKey({ in: parameter.in, name: parameter.prop })
+      ];
+    const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
+    if (specParameterSchema) {
+      augmentModelFromSchema(
+        spec,
+        parameter,
+        specParameterSchema,
+        modelsByName,
+      );
+    }
+
+    if (parameter.in === 'body') {
+      augmentBodyParameter(spec, parameter, specOp, modelsByName);
+    } else if (
+      (parameter.in === 'query' || parameter.in === 'header') &&
+      specParameter
+    ) {
+      parameter.collectionFormat = getCollectionFormat(
+        parameter.in,
+        specParameter,
+      );
+    }
+
+    addLanguageTypes(parameter);
+  }
+
+  return modelImports;
+};
+
+/**
+ * Augment a request body parameter with its schema (the body is not in the
+ * spec's `parameters`, so it is resolved from `requestBody` here) and record
+ * its acceptable media types.
+ */
+const augmentBodyParameter = (
+  spec: Spec,
+  parameter: Model,
+  specOp: OpenAPIV3.OperationObject | undefined,
+  modelsByName: ModelsByName,
+): void => {
+  // The request body parameter is named 'body' downstream.
+  parameter.name = 'body';
+  parameter.prop = 'body';
+
+  const specBody = resolveIfRef(spec, specOp?.requestBody);
+  if (!specBody) return;
+
+  if (parameter.mediaType) {
+    const bodySchema = resolveIfRef(
+      spec,
+      specBody.content?.[parameter.mediaType]?.schema,
+    );
+    if (bodySchema) {
+      augmentModelFromSchema(spec, parameter, bodySchema, modelsByName);
+    }
+  }
+  // Track all the media types that can be accepted in the request body
+  parameter.mediaTypes = Object.keys(specBody.content);
+};
+
+/**
+ * Translate an OpenAPI v3 parameter's style/explode into a v2-style
+ * collectionFormat used when serialising array parameters.
+ * @see https://spec.openapis.org/oas/v3.0.3.html#style-values
+ */
+const getCollectionFormat = (
+  position: 'query' | 'header',
+  specParameter: OpenAPIV3.ParameterObject,
+): CollectionFormat => {
+  const style =
+    specParameter.style ?? (position === 'query' ? 'form' : 'simple');
+  const explode = specParameter.explode ?? style === 'form';
+
+  if (position === 'header') {
+    return explode ? 'multi' : 'csv';
+  }
+  // `deepObject` serialises an object as `key[prop]=value` pairs regardless of
+  // explode; the object shape (not array collection) drives its serialisation.
+  if (style === 'deepObject') {
+    return 'deepObject';
+  }
+  return explode
+    ? 'multi'
+    : ((
+        {
+          spaceDelimited: 'ssv',
+          pipeDelimited: 'pipes',
+          simple: 'csv',
+          form: 'csv',
+        } as const
+      )[style] ?? 'multi');
+};
+
+/**
+ * Build the request parameter models for an operation — one model per parameter
+ * position (query/path/header/cookie/body), named e.g.
+ * `FooRequestQueryParameters`. Request bodies that can be represented directly
+ * (the sole parameter, or a non-clashing object reference) are inlined rather
+ * than given a wrapper model, and recorded on `op.explicitRequestBodyParameter`.
+ */
+const buildRequestParameterModels = (
+  op: Operation,
+  modelsByName: ModelsByName,
+): Model[] => {
+  if (!op.parameters || op.parameters.length === 0) {
+    return [];
+  }
+
+  // Whether the request body can be represented directly, without a wrapper
+  // model (ie the request will be the body itself).
+  const canInlineBody = (body: Model): boolean => {
+    // If the body is the only parameter, we can inline it no matter the type
+    if (op.parameters.length === 1) {
+      return true;
+    }
+    // We inline object bodies, so long as they aren't dictionaries (as
+    // dictionary keys could clash with other parameters), and so long as they
+    // don't have a property name that clashes with another parameter
+    const hasClashingPropertyName = (
+      modelsByName?.[body.type]?.properties ?? []
+    ).some((prop) => op.parameters.some((param) => param.name === prop.name));
+    return (
+      body.export === 'reference' &&
+      modelsByName?.[body.type]?.export !== 'dictionary' &&
+      !hasClashingPropertyName
+    );
+  };
+
+  // Group parameters by their position (`in`: query/path/header/cookie/body),
+  // dropping any body that can be inlined.
+  const parametersByPosition = op.parameters
+    .filter((p) => !(p.in === 'body' && canInlineBody(p)))
+    .reduce<{ [position: string]: Model[] }>(
+      (acc, p) => ({ ...acc, [p.in]: [...(acc[p.in] ?? []), p] }),
+      {},
+    );
+
+  // The body parameter was already renamed to "body" by augmentBodyParameter.
+  op.explicitRequestBodyParameter = parametersByPosition['body']?.[0];
+
+  return Object.entries(parametersByPosition).map(([position, parameters]) => {
+    const name = `${op.operationIdPascalCase}Request${upperFirst(position)}Parameters`;
+    return createModel({
+      description: op.description,
+      export: 'interface',
+      name,
+      properties: parameters,
+      type: name,
+      isRequired: true,
+    });
+  });
+};
+
+/**
+ * Augment a single model with schema-derived data (from its matching spec
+ * schema, if any) and language-specific names and types.
+ */
+const augmentModel = (
+  spec: Spec,
+  model: Model,
+  modelsByName: ModelsByName,
+): void => {
+  model.nameSnakeCase = toPythonName('model', model.name);
+
+  const matchingSpecModel = spec?.components?.schemas?.[model.name];
+  if (matchingSpecModel) {
+    const specModel = resolveIfRef(spec, matchingSpecModel);
+
+    augmentModelFromSchema(spec, model, specModel, modelsByName);
+
+    for (const property of model.properties) {
+      const matchingSpecProperty = specModel.properties?.[property.name];
+      if (matchingSpecProperty) {
+        const specProperty = resolveIfRef(spec, matchingSpecProperty);
+        augmentModelFromSchema(spec, property, specProperty, modelsByName);
+      }
+    }
+  }
+
+  model.properties.forEach(addLanguageTypes);
+
+  // Resolve the discriminator's TypeScript property name for marshalling.
+  if (model.discriminator) {
+    model.discriminator.typescriptPropertyName = toTypeScriptName(
+      model.discriminator.propertyName,
+    );
+  }
+};
+
+/**
+ * Ensure no two properties/parameters of an object model collapse onto the same
+ * TypeScript identifier (e.g. `foo-bar` and `foo_bar` both camelCase to
+ * `fooBar`, or a query and header parameter sharing a name within one request
+ * position). Such a clash would emit a type with duplicate members that does
+ * not compile, so fail fast with an actionable error instead.
+ */
+const assertNoClashingPropertyNames = (model: Model): void => {
+  const seen = new Map<string, string>();
+  for (const property of model.properties) {
+    // Composite members are unnamed (their names are empty); skip them.
+    if (!property.name) continue;
+    const existing = seen.get(property.typescriptName!);
+    if (existing !== undefined && existing !== property.name) {
+      throw new Error(
+        `Property name conflict in "${model.name}": "${existing}" and "${property.name}" both map to the TypeScript name "${property.typescriptName}". Please rename one of these in your OpenAPI specification.`,
+      );
+    }
+    seen.set(property.typescriptName!, property.name);
+  }
+};
+
+/**
+ * Group operations by their (camelCased) tags, collecting any untagged
+ * operations separately.
+ */
+const groupOperationsByTag = (
+  allOperations: Operation[],
+): {
+  operationsByTag: { [tag: string]: Operation[] };
+  untaggedOperations: Operation[];
+} => {
+  const isTagged = (op: Operation): boolean => !!op.tags && op.tags.length > 0;
+
+  const operationsByTag = allOperations
+    .filter(isTagged)
+    .flatMap((op) => op.tags!.map((tag) => [camelCase(tag), op] as const))
+    .reduce<{ [tag: string]: Operation[] }>(
+      (acc, [tag, op]) => ({ ...acc, [tag]: [...(acc[tag] ?? []), op] }),
+      {},
+    );
+
+  return {
+    operationsByTag,
+    untaggedOperations: allOperations.filter((op) => !isTagged(op)),
+  };
+};
+
+/**
+ * Resolve a schema to its model: an existing named model for a `$ref`, or a
+ * freshly built-and-augmented model for an inline (nested value) schema.
+ */
+const buildOrReferenceModel = (
+  spec: Spec,
+  modelsByName: ModelsByName,
+  schema: OpenApiSchemaOrRef,
+): Model => {
   if (isRef(schema)) {
     const name = splitRef(schema.$ref)[2];
     return modelsByName[name];
   }
-  // Non referenced schemas won't have a model created as they are primitives and aren't covered by @heyapi
-  // So we build the model here
-  return await buildModelForPrimitive(spec, schema);
+  const model = buildInlineModel(spec, schema);
+  linkModel(spec, modelsByName, model, schema);
+  augmentModelFromSchema(spec, model, schema, modelsByName);
+  return model;
 };
 
 /**
- * Copy vendor extensions from the first parameter to the second
+ * The `x-*` vendor extensions declared on an object.
  */
-const copyVendorExtensions = (
-  object: object,
-  vendorExtensions: { [key: string]: any },
-) => {
-  Object.entries(object ?? {}).forEach(([key, value]) => {
-    if (key.startsWith('x-')) {
-      vendorExtensions[key] = value;
-    }
-  });
-};
+const vendorExtensionsOf = (object: object | undefined): VendorExtensions =>
+  Object.fromEntries(
+    Object.entries(object ?? {}).filter(([key]) => key.startsWith('x-')),
+  );
 
-const mutateWithOpenapiSchemaProperties = async (
+const augmentModelFromSchema = (
   spec: Spec,
   model: Model,
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3_1.SchemaObject,
-  modelsByName: { [name: string]: Model },
+  schema: OpenApiSchema,
+  modelsByName: ModelsByName,
   visited: Set<Model> = new Set(),
 ) => {
-  (model as any).format = schema.format;
-  (model as any).isInteger = schema.type === 'integer';
-  (model as any).isShort = schema.format === 'int32';
-  (model as any).isLong = schema.format === 'int64';
-  (model as any).deprecated = !!schema.deprecated;
-  (model as any).openapiType = schema.type;
-  (model as any).isNotSchema = !!schema.not;
-  (model as any).isEnum = !!schema.enum && schema.enum.length > 0;
+  model.format = schema.format;
+  model.deprecated = !!schema.deprecated;
+  model.openapiType = schema.type;
+  model.isEnum = !!schema.enum && schema.enum.length > 0;
+  model.vendorExtensions = vendorExtensionsOf(schema);
 
-  // Copy any schema vendor extensions
-  (model as any).vendorExtensions = {};
-  copyVendorExtensions(schema, (model as any).vendorExtensions);
-
-  // Use our added vendor extension
-  (model as any).isHoisted = !!(model as any).vendorExtensions?.[
-    'x-aws-nx-hoisted'
-  ];
-
-  // Ensure models with additional properties are handled correctly
+  // A "dictionary" has only additional properties; an "interface" may mix
+  // explicit and additional properties.
   if (schema.additionalProperties) {
-    const additionalPropertiesModel = await buildOrReferenceModel(
+    const additionalPropertiesModel = buildOrReferenceModel(
       spec,
       modelsByName,
       schema.additionalProperties === true ? {} : schema.additionalProperties,
     );
 
-    // The original models treat _some_ objects with additional properties as a "dictionary", and others as an "interface"
-    // For the purposes of our code generation, we define a "dictionary" to be a model with no explicit properties, only
-    // additional properties. Interfaces can have a mixture of explicit properties and additional properties.
     if (model.export === 'dictionary') {
-      // Dictionaries contain a special property which is the model itself. Other properties are explicit properties.
+      // A dictionary carries a self-referential property; the rest are explicit
       const explicitProperties = model.properties.filter(
         (p) => !(p.export === 'dictionary' && p.name === model.name),
       );
 
-      if (explicitProperties.length > 0 || (schema as any).patternProperties) {
-        // Treat this model as an interface instead of a dictionary, since this has
-        // explicit properties
+      // Explicit properties make this an interface rather than a dictionary
+      if (explicitProperties.length > 0 || schema.patternProperties) {
         model.export = 'interface';
-        (model as any).hasAdditionalProperties = true;
-        (model as any).additionalPropertiesModel = additionalPropertiesModel;
+        model.hasAdditionalProperties = true;
+        model.additionalPropertiesModel = additionalPropertiesModel;
         model.properties = explicitProperties;
       }
     } else {
-      (model as any).hasAdditionalProperties = true;
-      (model as any).additionalPropertiesModel = additionalPropertiesModel;
-      // There's a special property named [key: string] which is the definition of the additional properties
-      // We remove this so we don't render it as a regular property.
-      model.properties = (model.properties ?? []).filter(
-        (p) => p.name !== '[key: string]',
-      );
+      model.hasAdditionalProperties = true;
+      model.additionalPropertiesModel = additionalPropertiesModel;
     }
   }
 
-  // Ensure models with pattern properties are handled correctly
-  if ((schema as any).patternProperties) {
-    const patternProperties = resolveIfRef(
-      spec,
-      (schema as any).patternProperties as
-        | OpenAPIV3.ReferenceObject
-        | {
-            [pattern: string]:
-              | OpenAPIV3.ReferenceObject
-              | OpenAPIV3.SchemaObject
-              | OpenAPIV3_1.SchemaObject;
-          },
-    );
+  // Pattern properties can have different value types per pattern, so the model
+  // is an interface rather than a dictionary.
+  if (schema.patternProperties) {
+    const patternProperties = resolveIfRef(spec, schema.patternProperties);
 
-    const patternPropertiesModels: { pattern: string; model: Model }[] = [];
-
-    // When there are pattern properties, we don't want to treat models as dictionaries since there can be more than one type of "value"
-    // depending on what pattern the key matches
     if (model.export === 'dictionary') {
       model.export = 'interface';
     }
 
-    for (const [pattern, patternProperty] of Object.entries(
-      patternProperties,
-    )) {
-      const patternPropertyModel = await buildOrReferenceModel(
-        spec,
-        modelsByName,
-        patternProperty,
-      );
-      if (patternPropertyModel) {
-        patternPropertiesModels.push({
-          pattern,
-          model: patternPropertyModel,
-        });
-      }
-    }
-
-    (model as any).hasPatternProperties = true;
-    (model as any).patternPropertiesModels = patternPropertiesModels;
+    model.hasPatternProperties = true;
+    model.patternPropertiesModels = Object.entries(patternProperties)
+      .map(([pattern, patternProperty]) => ({
+        pattern,
+        model: buildOrReferenceModel(spec, modelsByName, patternProperty),
+      }))
+      .filter((entry): entry is PatternPropertyModel => !!entry.model);
   }
 
-  mutateModelWithAdditionalTypes(model);
+  addLanguageTypes(model);
 
   visited.add(model);
 
-  const modelLink = flattenModelLink(model.link);
+  const recurse = (target: Model, subSchema: OpenApiSchema): void =>
+    augmentModelFromSchema(spec, target, subSchema, modelsByName, visited);
 
-  // Also apply to array items recursively
+  // Array element type.
   if (
     model.export === 'array' &&
-    modelLink &&
+    model.link &&
     'items' in schema &&
     schema.items &&
-    !visited.has(modelLink)
+    !visited.has(model.link)
   ) {
-    const subSchema = resolveIfRef(spec, schema.items);
-    await mutateWithOpenapiSchemaProperties(
-      spec,
-      modelLink,
-      subSchema,
-      modelsByName,
-      visited,
-    );
+    recurse(model.link, resolveIfRef(spec, schema.items));
   }
 
-  // Also apply to object properties recursively
+  // Dictionary value type (additionalProperties may be `true` rather than a
+  // schema).
   if (
     model.export === 'dictionary' &&
     model.link &&
     'additionalProperties' in schema &&
     schema.additionalProperties &&
-    !visited.has(modelLink)
+    !visited.has(model.link)
   ) {
     const subSchema = resolveIfRef(spec, schema.additionalProperties);
-    // Additional properties can be "true" rather than a type
     if (subSchema !== true) {
-      await mutateWithOpenapiSchemaProperties(
-        spec,
-        modelLink,
-        subSchema,
-        modelsByName,
-        visited,
-      );
-    }
-  }
-
-  for (const property of model.properties.filter(
-    (p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)],
-  )) {
-    const subSchema = resolveIfRef(
-      spec,
-      schema.properties![trim(property.name, `"'`)],
-    );
-    await mutateWithOpenapiSchemaProperties(
-      spec,
-      property,
-      subSchema,
-      modelsByName,
-      visited,
-    );
-  }
-
-  if (COMPOSED_SCHEMA_TYPES.has(model.export)) {
-    for (let i = 0; i < model.properties.length; i++) {
-      const subSchema = resolveIfRef(
-        spec,
-        (schema as any)[camelCase(model.export)]?.[i],
-      );
-      if (subSchema) {
-        await mutateWithOpenapiSchemaProperties(
-          spec,
-          model.properties[i],
-          subSchema,
-          modelsByName,
-          visited,
-        );
-      }
-    }
-  }
-};
-
-/**
- * Ensure that the "link" property of all dictionary/array models and properties are set recursively
- */
-const ensureModelLinks = (spec: Spec, data: ClientData) => {
-  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
-  const visited = new Set<Model>();
-
-  // Ensure set for all models
-  data.models.forEach((model) => {
-    const schema = resolveIfRef(spec, spec?.components?.schemas?.[model.name]);
-    if (schema) {
-      // Object schemas should be typed as the model we will create
-      if (
-        schema.type === 'object' &&
-        (schema.properties || (schema as any).patternProperties)
-      ) {
-        model.type = model.name;
-      }
-      _ensureModelLinks(spec, modelsByName, model, schema, visited);
-    }
-  });
-
-  // Ensure set for all parameters and responses
-  data.services.forEach((service) => {
-    service.operations.forEach((op) => {
-      const specOp = (spec as any)?.paths?.[op.path]?.[
-        op.method.toLowerCase()
-      ] as OpenAPIV3.OperationObject | undefined;
-
-      const specParametersByName = Object.fromEntries(
-        (specOp?.parameters ?? []).map((p) => {
-          const param = resolveIfRef(spec, p);
-          return [param.name, param];
-        }),
-      );
-
-      op.parameters.forEach((parameter) => {
-        const specParameter = specParametersByName[parameter.prop];
-        const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
-
-        if (specParameterSchema) {
-          _ensureModelLinks(
-            spec,
-            modelsByName,
-            parameter,
-            specParameterSchema,
-            visited,
-          );
-        } else if (parameter.in === 'body') {
-          // Body is not in the "parameters" section of the OpenAPI spec so we handle it in an explicit case here
-          const specBody = resolveIfRef(spec, specOp?.requestBody);
-          const specBodySchema = resolveIfRef(
-            spec,
-            specBody?.content?.[parameter.mediaType]?.schema,
-          );
-
-          if (specBodySchema) {
-            _ensureModelLinks(
-              spec,
-              modelsByName,
-              parameter,
-              specBodySchema,
-              visited,
-            );
-          }
-        }
-      });
-
-      op.responses.forEach((response) => {
-        const specResponse = resolveIfRef(
-          spec,
-          specOp?.responses?.[response.code],
-        );
-        const mediaTypes = Object.keys(specResponse?.content ?? {});
-        mediaTypes.forEach((mediaType) => {
-          const responseSchema = resolveIfRef(
-            spec,
-            specResponse?.content?.[mediaType]?.schema,
-          );
-          if (responseSchema) {
-            _ensureModelLinks(
-              spec,
-              modelsByName,
-              response,
-              responseSchema,
-              visited,
-            );
-          }
-        });
-      });
-    });
-  });
-};
-
-const _ensureModelLinks = (
-  spec: Spec,
-  modelsByName: { [name: string]: Model },
-  model: Model,
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3_1.SchemaObject,
-  visited: Set<Model>,
-) => {
-  if (visited.has(model)) {
-    return;
-  }
-
-  visited.add(model);
-
-  if (
-    model.export === 'dictionary' &&
-    'additionalProperties' in schema &&
-    schema.additionalProperties
-  ) {
-    if (isRef(schema.additionalProperties)) {
-      const name = splitRef(schema.additionalProperties.$ref)[2];
-      if (modelsByName[name] && !model.link) {
-        model.link = modelsByName[name];
-      }
-    } else if (model.link && typeof schema.additionalProperties !== 'boolean') {
-      _ensureModelLinks(
-        spec,
-        modelsByName,
-        flattenModelLink(model.link),
-        schema.additionalProperties,
-        visited,
-      );
-    }
-  } else if (model.export === 'array' && 'items' in schema && schema.items) {
-    if (isRef(schema.items)) {
-      const name = splitRef(schema.items.$ref)[2];
-      if (modelsByName[name] && !model.link) {
-        model.link = modelsByName[name];
-      }
-    } else if (model.link) {
-      _ensureModelLinks(
-        spec,
-        modelsByName,
-        flattenModelLink(model.link),
-        schema.items,
-        visited,
-      );
+      recurse(model.link, subSchema);
     }
   }
 
   model.properties
     .filter((p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)])
-    .forEach((property) => {
-      const subSchema = resolveIfRef(
-        spec,
-        schema.properties![trim(property.name, `"'`)],
-      );
-      _ensureModelLinks(spec, modelsByName, property, subSchema, visited);
-    });
+    .forEach((property) =>
+      recurse(
+        property,
+        resolveIfRef(spec, schema.properties![trim(property.name, `"'`)]),
+      ),
+    );
 
   if (COMPOSED_SCHEMA_TYPES.has(model.export)) {
+    const memberSchemas = compositeMemberSchemas(schema, model.export);
     model.properties.forEach((property, i) => {
-      const subSchema = resolveIfRef(
-        spec,
-        (schema as any)[camelCase(model.export)]?.[i],
-      );
+      const subSchema = resolveIfRef(spec, memberSchemas[i]);
       if (subSchema) {
-        _ensureModelLinks(spec, modelsByName, property, subSchema, visited);
+        recurse(property, subSchema);
       }
     });
   }
 };
 
-/**
- * Mutates the given data to ensure composite models (ie allOf, oneOf, anyOf) have the necessary
- * properties for representing them in generated code. Adds `composedModels` and `composedPrimitives`
- * which contain the models and primitive types that each model is composed of.
- */
-const ensureCompositeModels = (data: ClientData) => {
-  const visited = new Set<Model>();
-  data.models.forEach((model) =>
-    mutateModelWithCompositeProperties(data, model, visited),
-  );
-};
-
-const mutateModelWithCompositeProperties = (
-  data: ClientData,
-  model: Model,
-  visited: Set<Model>,
-) => {
-  if (COMPOSED_SCHEMA_TYPES.has(model.export) && !visited.has(model)) {
-    visited.add(model);
-
-    // Find the models/primitives which this is composed from
-    const composedModelReferences = model.properties.filter(
-      (p) => !p.name && p.export === 'reference',
-    );
-    const composedPrimitives = model.properties.filter(
-      (p) => !p.name && p.export !== 'reference',
-    );
-
-    const modelsByName = Object.fromEntries(
-      data.models.map((m) => [m.name, m]),
-    );
-    let composedModels = composedModelReferences.flatMap((r) =>
-      modelsByName[r.type] ? [modelsByName[r.type]] : [],
-    );
-    // Recursively resolve composed properties of properties, to ensure mixins for all-of include all recursive all-of properties
-    composedModels.forEach((m) =>
-      mutateModelWithCompositeProperties(data, m, visited),
-    );
-
-    // Enums are models, however they are serialised as primitives and so should be moved to the primitives list
-    composedPrimitives.push(
-      ...composedModels.filter((m) => m.export === 'enum'),
-    );
-    composedModels = composedModels.filter((m) => m.export !== 'enum');
-
-    // When multiple arrays of non-primitives are composed using allOf/oneOf/anyOf, it's not possible to distinguish at runtime which
-    // type it is, and so we validate this away.
-    // TODO: consider honouring more advanced OpenAPI spec features like "discriminators" which can help for this case, but in practice
-    // users are unlikely to model their API this way
-    const isPrimitiveArray = (m: Model) => {
-      if (m.link && ['array', 'dictionary'].includes(m.export)) {
-        return isPrimitiveArray(flattenModelLink(m.link));
-      }
-      return (
-        PRIMITIVE_TYPES.has(m.type) && !['date', 'date-time'].includes(m.format)
-      );
-    };
-    const arrayComposedModels = composedPrimitives.filter(
-      (m) => m.export === 'array' && !isPrimitiveArray(m),
-    );
-    if (arrayComposedModels.length > 1) {
-      throw new Error(
-        `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
-      );
-    }
-
-    // For all-of models, we include all composed model properties.
-    if (model.export === 'all-of') {
-      if (composedPrimitives.length > 0) {
-        throw new Error(
-          `Schema "${model.name}" defines allOf with non-object types. allOf may only compose object types in the OpenAPI specification.`,
-        );
-      }
-    }
-
-    (model as any).composedModels = composedModels;
-    (model as any).composedPrimitives = composedPrimitives;
-  }
-};
-
-/**
- * Mutates the given model to add language specific types and names
- */
-const mutateModelWithAdditionalTypes = (model: Model) => {
-  // Trim any surrounding quotes from name
+const addLanguageTypes = (model: Model) => {
   model.name = trim(model.name, `"'`);
-
-  (model as any).typescriptName = toTypeScriptName(model.name);
-  (model as any).typescriptType = toTypeScriptType(model);
-  (model as any).pythonName = toPythonName('property', model.name);
-  (model as any).pythonType = toPythonType(model);
-  (model as any).isPrimitive =
+  model.typescriptName = toTypeScriptName(model.name);
+  model.typescriptType = toTypeScriptType(model);
+  model.pythonName = toPythonName('property', model.name);
+  model.pythonType = toPythonType(model);
+  model.isPrimitive =
     PRIMITIVE_TYPES.has(model.type) &&
     !COMPOSED_SCHEMA_TYPES.has(model.export) &&
     !COLLECTION_TYPES.has(model.export);
 };
 
-/**
- * Determine whether or not an operation is a mutation
- */
 const isOperationMutation = (op: Operation): boolean => {
-  // Let the user override whether an operation is a query or mutation using x-mutation/x-query
-  const { vendorExtensions } = op as any;
+  // x-mutation/x-query override the HTTP-method default.
+  const { vendorExtensions } = op;
   if (vendorExtensions?.[VENDOR_EXTENSIONS.MUTATION]) {
     return true;
   } else if (vendorExtensions?.[VENDOR_EXTENSIONS.QUERY]) {
     return false;
   }
-  // Assume a restful API and treat mutative HTTP methods as mutations
   return ['PATCH', 'POST', 'PUT', 'DELETE'].includes(op.method);
 };
 
-/**
- * Add infinite query details to the operation
- */
-const mutateOperationWithInfiniteQueryDetails = (op: Operation) => {
+const augmentInfiniteQuery = (op: Operation) => {
   const { paginationDisabled, cursorPropertyName } = getCursorOptions(op);
 
-  // Allow users to customise the "cursor" property used for paginated requests
   const cursorProperty = op.parameters.find(
     (p) => p.name === cursorPropertyName,
   );
 
-  // The operation is an infinite query if:
-  // - x-cursor is not set to 'false' (this allows users to disable infinite queries for operations that accept a 'cursor')
-  // - the operation accepts a parameter named 'cursor', or a parameter named as the user specified with x-cursor
-  (op as any).isInfiniteQuery = !paginationDisabled && !!cursorProperty;
-  if ((op as any).isInfiniteQuery) {
-    (op as any).infiniteQueryCursorProperty = cursorProperty;
+  // An infinite query is a paginated operation that accepts the cursor parameter
+  op.isInfiniteQuery = !paginationDisabled && !!cursorProperty;
+  if (op.isInfiniteQuery) {
+    op.infiniteQueryCursorProperty = cursorProperty;
   }
 };
 
 /**
- * Extracts the cursor options for this operation based on the vendor extensions
+ * Resolve the pagination cursor options from an operation's `x-cursor` vendor
+ * extension. Accepted forms (object variants exist because Smithy vendor
+ * extensions must be objects):
  *
- * Valid usage of x-cursor:
- *
- * x-cursor: 'property' - customises the input property used for pagination
- * x-cursor: false - disables pagination for the operation (ie the operation would have pagination by default as an input 'cursor' property exists)
- *
- * We also support object equivalents of the above, since Smithy vendor extensions can only be objects
- *
- * x-cursor: { inputToken: 'property' }
- * x-cursor: { enabled: false }
+ * - `'property'` / `{ inputToken: 'property' }` — the input property to page on
+ * - `false` / `{ enabled: false }` — disable pagination
  */
-const getCursorOptions = (op: Operation) => {
-  const { vendorExtensions } = op as any;
+const getCursorOptions = (
+  op: Operation,
+): { paginationDisabled: boolean; cursorPropertyName: string } => {
+  const cursor = op.vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR];
 
-  const cursorExtension = vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR];
-
-  // By default pagination isn't explicitly disabled and the cursor property to look for is 'cursor'
-  let paginationDisabled = false;
-  let cursorPropertyName = 'cursor';
-
-  if (typeof cursorExtension === 'boolean' && cursorExtension === false) {
-    paginationDisabled = true;
-  } else if (typeof cursorExtension === 'string') {
-    cursorPropertyName = cursorExtension;
-  } else if (typeof cursorExtension === 'object') {
-    if (cursorExtension?.enabled === false) {
-      paginationDisabled = true;
-    }
-    if (
-      cursorExtension?.inputToken &&
-      typeof cursorExtension.inputToken === 'string'
-    ) {
-      cursorPropertyName = cursorExtension.inputToken;
-    }
+  // Defaults: pagination enabled, paging on a property named 'cursor'.
+  if (cursor === false) {
+    return { paginationDisabled: true, cursorPropertyName: 'cursor' };
   }
-
-  // x-cursor can be: a string (indicating pagination is enabled and the property name to use)
-
+  if (typeof cursor === 'string') {
+    return { paginationDisabled: false, cursorPropertyName: cursor };
+  }
+  const options = (cursor ?? {}) as { enabled?: boolean; inputToken?: unknown };
   return {
-    paginationDisabled,
-    cursorPropertyName,
+    paginationDisabled: options.enabled === false,
+    cursorPropertyName:
+      typeof options.inputToken === 'string' ? options.inputToken : 'cursor',
   };
 };
 
 /**
- * Add additional data to an operation for code generation decisions
+ * Add query/mutation, streaming and infinite-query flags to an operation.
  */
-const mutateOperationWithAdditionalData = (op: Operation) => {
-  // Add mutation/query details
+const augmentOperationBehaviour = (op: Operation) => {
   const isMutation = isOperationMutation(op);
-  (op as any).isMutation = isMutation;
-  (op as any).isQuery = !isMutation;
+  op.isMutation = isMutation;
+  op.isQuery = !isMutation;
 
-  // Streaming responses
-  (op as any).isStreaming =
-    !!(op as any).vendorExtensions?.[VENDOR_EXTENSIONS.STREAMING] ||
-    op.responses.some((res) => (res as any).isJsonlStreaming);
+  op.isStreaming =
+    !!op.vendorExtensions?.[VENDOR_EXTENSIONS.STREAMING] ||
+    op.responses.some((res) => res.isJsonlStreaming);
 
-  // Set the result type for the client method to the item schema so that
-  // it will resolve to AsyncIterableIterator<{itemSchemaModel.name}>
-  const jsonlResponse = op.responses.find(
-    (res) => (res as any).isJsonlStreaming,
-  );
+  // For JSON-lines streaming, the result is each streamed item, so the client
+  // method returns AsyncIterableIterator<itemSchemaModel>. Named (hoisted)
+  // item schemas become references; inline primitives keep their own type.
+  const jsonlResponse = op.responses.find((res) => res.isJsonlStreaming);
   if (jsonlResponse) {
-    const itemSchemaModel = (jsonlResponse as any).itemSchemaModel;
-    const result = (op as any).result;
+    const itemSchemaModel = jsonlResponse.itemSchemaModel;
+    const result = op.result;
     if (result && itemSchemaModel) {
-      result.type = itemSchemaModel.name;
-      result.typescriptType = itemSchemaModel.name;
-      result.export = 'reference';
+      if (itemSchemaModel.name) {
+        result.type = itemSchemaModel.name;
+        result.typescriptType = itemSchemaModel.name;
+        result.export = 'reference';
+      } else {
+        result.type = itemSchemaModel.type;
+        result.typescriptType = itemSchemaModel.typescriptType;
+        result.export = itemSchemaModel.export;
+        result.format = itemSchemaModel.format;
+        result.link = itemSchemaModel.link;
+        result.isPrimitive = itemSchemaModel.isPrimitive;
+      }
     }
   }
 
   // Add infinite query details if applicable
   if (!isMutation) {
-    mutateOperationWithInfiniteQueryDetails(op);
+    augmentInfiniteQuery(op);
   }
 };

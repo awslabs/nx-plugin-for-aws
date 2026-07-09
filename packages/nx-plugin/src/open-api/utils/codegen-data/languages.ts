@@ -3,9 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import camelCase from 'lodash.camelcase';
-import { snakeCase, toClassName } from '../../../utils/names';
-import { flattenModelLink, type Model, PRIMITIVE_TYPES } from './types';
+import { camelCase, snakeCase, toClassName } from '../../../utils/names';
+import { type Model, PRIMITIVE_TYPES } from './types';
 
 const toTypescriptPrimitive = (property: Model): string => {
   if (
@@ -19,19 +18,19 @@ const toTypescriptPrimitive = (property: Model): string => {
   return property.type;
 };
 
-/**
- * Return the typescript type for the given model
- */
 export const toTypeScriptType = (property: Model): string => {
-  const propertyLink = flattenModelLink(property.link);
+  const link = property.link;
+  // Enum links serialise as their primitive; use the model's own type instead.
+  const valueType = () =>
+    link && link.export !== 'enum' ? toTypeScriptType(link) : property.type;
   switch (property.export) {
     case 'enum':
     case 'generic':
       return toTypescriptPrimitive(property);
     case 'array':
-      return `Array<${propertyLink && propertyLink.export !== 'enum' ? toTypeScriptType(propertyLink) : property.type}>`;
+      return `Array<${valueType()}>`;
     case 'dictionary':
-      return `{ [key: string]: ${propertyLink && propertyLink.export !== 'enum' ? toTypeScriptType(propertyLink) : property.type}; }`;
+      return `{ [key: string]: ${valueType()}; }`;
     case 'one-of':
     case 'any-of':
     case 'all-of':
@@ -49,7 +48,9 @@ export const toTypeScriptType = (property: Model): string => {
 };
 
 export const toTypeScriptName = (name: string): string => {
-  return camelCase(name);
+  // A name of only non-identifier characters (e.g. "_") camelCases to an empty
+  // string; fall back to an underscore so the emitted property stays valid.
+  return camelCase(name) || (name ?? '').replace(/[^a-zA-Z0-9]/g, '_') || '_';
 };
 
 const TYPESCRIPT_RESERVED_MODEL_NAMES = new Set([
@@ -95,7 +96,7 @@ const toPythonPrimitive = (property: Model): string => {
   } else if (property.type === 'binary') {
     return 'bytearray';
   } else if (property.type === 'number') {
-    if ((property as any).openapiType === 'integer') {
+    if (property.openapiType === 'integer') {
       return 'int';
     }
 
@@ -116,19 +117,18 @@ const toPythonPrimitive = (property: Model): string => {
   return property.type;
 };
 
-/**
- * Return the python type for a given property
- */
 export const toPythonType = (property: Model): string => {
-  const propertyLink = flattenModelLink(property.link);
+  const link = property.link;
+  const valueType = () =>
+    link && link.export !== 'enum' ? toPythonType(link) : property.type;
   switch (property.export) {
     case 'generic':
     case 'reference':
       return toPythonPrimitive(property);
     case 'array':
-      return `List[${propertyLink && propertyLink.export !== 'enum' ? toPythonType(propertyLink) : property.type}]`;
+      return `List[${valueType()}]`;
     case 'dictionary':
-      return `Dict[str, ${propertyLink && propertyLink.export !== 'enum' ? toPythonType(propertyLink) : property.type}]`;
+      return `Dict[str, ${valueType()}]`;
     case 'one-of':
     case 'any-of':
     case 'all-of':
@@ -199,8 +199,8 @@ export const toPythonName = (
 ) => {
   const nameSnakeCase = snakeCase(name);
 
-  // Check if the name is a reserved word. Reserved words that overlap with TypeScript will already be escaped
-  // with a leading _ by @hey-api/openapi-ts, so we remove this to test
+  // Names overlapping a TypeScript reserved word carry a leading `_`; strip it
+  // before testing against the Python keyword set.
   if (PYTHON_KEYWORDS.has(name.startsWith('_') ? name.slice(1) : name)) {
     const nameSuffix = `_${nameSnakeCase}`;
     switch (namedEntity) {

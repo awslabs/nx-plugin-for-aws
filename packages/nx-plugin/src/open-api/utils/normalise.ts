@@ -3,10 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import camelCase from 'lodash.camelcase';
 import cloneDeepWith from 'lodash.clonedeepwith';
 import type { OpenAPIV3 } from 'openapi-types';
-import { pascalCase, toClassName, upperFirst } from '../../utils/names';
+import {
+  camelCase,
+  pascalCase,
+  toClassName,
+  upperFirst,
+} from '../../utils/names';
+import { STREAMING_CONTENT_TYPES } from './codegen-data/types';
 import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
 import type { Spec } from './types';
 
@@ -29,12 +34,16 @@ interface SubSchemaRef {
  */
 const normaliseSchemaNames = (spec: Spec): Spec => {
   const schemaNameMapping: { [oldName: string]: string } = {};
-  const existingSchemaNames = new Set(
-    Object.keys(spec.components?.schemas ?? {}),
-  );
+  const originalNames = Object.keys(spec.components?.schemas ?? {});
+  const existingSchemaNames = new Set(originalNames);
+
+  // The name each schema resolves to (its normalised form, or itself when it
+  // needs no normalisation). Used to detect two distinct schemas that would
+  // collapse onto the same identifier.
+  const resolvedNameOwners: { [resolvedName: string]: string } = {};
 
   // Build mapping of old names to new names
-  Object.keys(spec.components?.schemas ?? {}).forEach((name) => {
+  originalNames.forEach((name) => {
     const normalizedName = toClassName(name);
     if (normalizedName !== name) {
       // Check if the normalized name would clash with an existing schema
@@ -45,6 +54,17 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
       }
       schemaNameMapping[name] = normalizedName;
     }
+
+    // Detect two distinct schemas resolving to the same name (e.g. "Foo-Bar"
+    // and "Foo.Bar" both normalise to "FooBar"), which would otherwise
+    // silently overwrite one another.
+    const owner = resolvedNameOwners[normalizedName];
+    if (owner !== undefined) {
+      throw new Error(
+        `Schema name normalization conflict: "${name}" and "${owner}" both normalize to "${normalizedName}". Please rename one of these schemas in your OpenAPI specification.`,
+      );
+    }
+    resolvedNameOwners[normalizedName] = name;
   });
 
   // If no normalization needed, return spec as-is
@@ -81,6 +101,15 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
 
 const isCompositeSchema = (schema: OpenAPIV3.SchemaObject) =>
   !!schema.allOf || !!schema.anyOf || !!schema.oneOf;
+
+/**
+ * The media type whose schema is hoisted for a request/response: prefer
+ * `application/json`, falling back to any `+json` vendored type (e.g.
+ * `application/problem+json`).
+ */
+const preferredJsonMediaType = (mediaTypes: string[]): string | undefined =>
+  mediaTypes.find((mediaType) => mediaType === 'application/json') ??
+  mediaTypes.find((mediaType) => mediaType.split(';')[0].endsWith('+json'));
 
 const hasSubSchemasToVisit = (
   schema?: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
@@ -125,7 +154,11 @@ const createUniqueModelName = (
   nameParts: string[],
   seenModelNameCounts: { [name: string]: number },
 ): string => {
-  const candidateName = nameParts.map(upperFirst).join('');
+  // Normalise each part to a class-name form (stripping `_`, hyphens, etc) so
+  // the hoisted schema name matches what `toTypeScriptModelName`/`toClassName`
+  // later derive — otherwise a part like `store_photos` yields a `Store_photos`
+  // schema whose reference (`StorePhotos`) no longer resolves.
+  const candidateName = nameParts.map(toClassName).join('');
 
   const seenModelNameCount = seenModelNameCounts[candidateName];
 
@@ -262,12 +295,12 @@ const hoistInlineObjectSubSchemas = (
 
 /**
  * Rewrites OpenAPI 3.1 `const` schemas to the semantically equivalent `enum`
- * form. FastAPI emits `{type: 'string', const: 'X'}` for `Literal['X']`;
- * downstream hey-api/openapi-ts handles the enum shape but synthesises
- * phantom named references for the const shape.
+ * form. FastAPI emits `{type: 'string', const: 'X'}` for `Literal['X']`; the
+ * parser understands the enum shape, whereas the const shape would synthesise
+ * phantom named references.
  */
-const rewriteConstToEnum = (spec: Spec): Spec =>
-  cloneDeepWith(spec, (v) => {
+const rewriteConstToEnum = (spec: Spec): Spec => {
+  const rewrite = (v: any): any => {
     if (
       v &&
       typeof v === 'object' &&
@@ -276,9 +309,115 @@ const rewriteConstToEnum = (spec: Spec): Spec =>
       !('enum' in v)
     ) {
       const { const: constValue, ...rest } = v;
-      return cloneDeepWith({ ...rest, enum: [constValue] });
+      // Recurse with the same rewrite so consts nested within a rewritten
+      // schema are also rewritten.
+      return cloneDeepWith({ ...rest, enum: [constValue] }, rewrite);
+    }
+  };
+  return cloneDeepWith(spec, rewrite);
+};
+
+/**
+ * Rewrites a composite schema with sibling `properties`/`required` (a valid
+ * JSON Schema conjunction, common in FastAPI/Pydantic output) into an
+ * equivalent extra `allOf` member, so the parser sees a pure composite and the
+ * sibling fields are neither dropped from the type nor stripped when
+ * marshalling.
+ */
+const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
+  const rewrite = (v: any): any => {
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Array.isArray(v.allOf) &&
+      v.properties
+    ) {
+      const { properties, required, type: _type, ...rest } = v;
+      return cloneDeepWith(
+        {
+          ...rest,
+          allOf: [
+            ...v.allOf,
+            {
+              type: 'object',
+              properties,
+              ...(required ? { required } : {}),
+            },
+          ],
+        },
+        rewrite,
+      );
+    }
+  };
+  return cloneDeepWith(spec, rewrite);
+};
+
+/**
+ * Rewrites an OpenAPI 3.1 multi-type schema (`type: ['integer', 'string']`)
+ * into the equivalent `anyOf` of single-type schemas, dropping `null` from the
+ * list and marking the schema nullable instead. This lets the parser render a
+ * proper union rather than collapsing to the first declared type.
+ */
+const rewriteMultiTypeToAnyOf = (spec: Spec): Spec => {
+  const rewrite = (v: any): any => {
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Array.isArray(v.type) &&
+      !('anyOf' in v) &&
+      !('oneOf' in v) &&
+      !('allOf' in v) &&
+      !('enum' in v)
+    ) {
+      const { type, nullable, ...rest } = v;
+      const nonNull = (type as string[]).filter((t) => t !== 'null');
+      const isNullable = nullable === true || nonNull.length !== type.length;
+      // Recurse with the same rewrite so multi-type schemas nested within a
+      // rewritten schema (e.g. the items of a nullable array) are also
+      // rewritten.
+      // A single non-null type is not a union; keep it as a plain typed schema.
+      if (nonNull.length <= 1) {
+        return cloneDeepWith(
+          {
+            ...rest,
+            ...(nonNull.length === 1 ? { type: nonNull[0] } : {}),
+            ...(isNullable ? { nullable: true } : {}),
+          },
+          rewrite,
+        );
+      }
+      return cloneDeepWith(
+        {
+          ...rest,
+          anyOf: nonNull.map((t) => ({ type: t })),
+          ...(isNullable ? { nullable: true } : {}),
+        },
+        rewrite,
+      );
+    }
+  };
+  return cloneDeepWith(spec, rewrite);
+};
+
+/**
+ * Inlines `$ref` path items so that every operation is visited by the
+ * normalisation below (operationId assignment, schema hoisting). Each path
+ * gets its own copy, so paths sharing a path item are normalised
+ * independently.
+ */
+const inlinePathItemRefs = (spec: Spec): void => {
+  Object.entries(spec.paths ?? {}).forEach(([path, pathItem]) => {
+    if (isRef(pathItem)) {
+      const { $ref, ...rest } = pathItem;
+      spec.paths![path] = {
+        ...structuredClone(resolveRef(spec, $ref)),
+        ...rest,
+      };
     }
   });
+};
 
 /**
  * In order to ensure we generate models consistently whether or not users used refs or inline schemas,
@@ -288,7 +427,10 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   // Clone the spec so we're free to mutate it
   let spec = cloneDeepWith(inSpec);
 
+  inlinePathItemRefs(spec);
   spec = rewriteConstToEnum(spec);
+  spec = rewriteMultiTypeToAnyOf(spec);
+  spec = rewriteCompositeSiblingProperties(spec);
 
   // Ensure spec has schemas set
   if (!spec?.components?.schemas) {
@@ -376,8 +518,12 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
         if ('responses' in operation) {
           Object.entries(operation.responses ?? {}).forEach(([code, res]) => {
             const response = resolveIfRef(spec, res);
-            const jsonResponseSchema =
-              response?.content?.['application/json']?.schema;
+            const jsonMediaType = preferredJsonMediaType(
+              Object.keys(response?.content ?? {}),
+            );
+            const jsonResponseSchema = jsonMediaType
+              ? response!.content![jsonMediaType].schema
+              : undefined;
             if (
               jsonResponseSchema &&
               !isRef(jsonResponseSchema) &&
@@ -388,16 +534,42 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             ) {
               const schemaName = `${upperFirst(deduplicatedOpId)}${code}Response`;
               spec.components!.schemas![schemaName] = jsonResponseSchema;
-              response!.content!['application/json'].schema = {
+              response!.content![jsonMediaType!].schema = {
                 $ref: `#/components/schemas/${schemaName}`,
               };
             }
+
+            // Hoist inline streaming item schemas (OpenAPI 3.2 itemSchema) so
+            // each streamed item gets a named model.
+            STREAMING_CONTENT_TYPES.forEach((mediaType) => {
+              const streamingContent = response?.content?.[mediaType] as
+                | { itemSchema?: OpenAPIV3.SchemaObject }
+                | undefined;
+              const itemSchema = streamingContent?.itemSchema;
+              if (
+                itemSchema &&
+                !isRef(itemSchema) &&
+                (['object', 'array'].includes(itemSchema.type!) ||
+                  isCompositeSchema(itemSchema) ||
+                  (itemSchema.type === 'string' && itemSchema.enum))
+              ) {
+                const schemaName = `${upperFirst(deduplicatedOpId)}${code}ResponseItem`;
+                spec.components!.schemas![schemaName] = itemSchema;
+                streamingContent.itemSchema = {
+                  $ref: `#/components/schemas/${schemaName}`,
+                } as OpenAPIV3.SchemaObject;
+              }
+            });
           });
         }
         if ('requestBody' in operation) {
           const requestBody = resolveIfRef(spec, operation.requestBody);
-          const jsonRequestSchema =
-            requestBody?.content?.['application/json']?.schema;
+          const jsonMediaType = preferredJsonMediaType(
+            Object.keys(requestBody?.content ?? {}),
+          );
+          const jsonRequestSchema = jsonMediaType
+            ? requestBody!.content![jsonMediaType].schema
+            : undefined;
           if (
             jsonRequestSchema &&
             !isRef(jsonRequestSchema) &&
@@ -407,21 +579,26 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
           ) {
             const schemaName = `${upperFirst(deduplicatedOpId)}RequestContent`;
             spec.components!.schemas![schemaName] = jsonRequestSchema;
-            requestBody!.content!['application/json'].schema = {
+            requestBody!.content![jsonMediaType!].schema = {
               $ref: `#/components/schemas/${schemaName}`,
             };
           }
         }
 
-        // Hoist parameter schemas
+        // Hoist parameter schemas. Composite and inline-object schemas are
+        // hoisted to named models so the parameter is fully typed (e.g. a
+        // `deepObject` query param's members are marshalled, not left `unknown`).
         if ('parameters' in operation) {
           (operation.parameters ?? []).forEach((p) => {
             const param = resolveIfRef(spec, p);
-            const paramSchema = param?.schema;
+            const paramSchema = param?.schema as
+              | OpenAPIV3.SchemaObject
+              | undefined;
             if (
               paramSchema &&
               !isRef(paramSchema) &&
-              isCompositeSchema(paramSchema as OpenAPIV3.SchemaObject)
+              (isCompositeSchema(paramSchema) ||
+                (paramSchema.type === 'object' && !!paramSchema.properties))
             ) {
               const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
               spec.components!.schemas![schemaName] = paramSchema;

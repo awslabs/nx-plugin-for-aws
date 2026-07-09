@@ -47,7 +47,7 @@ exports[`openApiTsClientGenerator - composite schemas > should generate valid Ty
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static PutTest200Response = {
@@ -274,11 +274,31 @@ export class TestApi {
     this.putTest = this.putTest.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -289,15 +309,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -307,13 +336,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -385,7 +423,7 @@ exports[`openApiTsClientGenerator - composite schemas > should handle FastAPI-st
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static Circle = {
@@ -445,6 +483,12 @@ export class $IO {
       if (model === undefined || model === null) {
         return model;
       }
+      switch ((model as any).kind) {
+        case 'circle':
+          return $IO.Circle.toJson(model as Circle);
+        case 'square':
+          return $IO.Square.toJson(model as Square);
+      }
       return {
         ...$IO.Circle.toJson(model as Circle),
         ...$IO.Square.toJson(model as Square),
@@ -453,6 +497,12 @@ export class $IO {
     fromJson: (json: any): ShapesOutCanonical => {
       if (json === undefined || json === null) {
         return json;
+      }
+      switch (json?.['kind']) {
+        case 'circle':
+          return $IO.Circle.fromJson(json);
+        case 'square':
+          return $IO.Square.fromJson(json);
       }
       return {
         ...$IO.Circle.fromJson(json),
@@ -529,11 +579,31 @@ export class TestApi {
     this.getShapes = this.getShapes.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -544,15 +614,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -562,13 +641,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -628,7 +716,7 @@ exports[`openApiTsClientGenerator - composite schemas > should handle anyOf with
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static TestAnyOfAny200Response = {
@@ -743,11 +831,31 @@ export class TestApi {
     this.testAnyOfAny = this.testAnyOfAny.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -758,15 +866,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -776,13 +893,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -853,7 +979,7 @@ exports[`openApiTsClientGenerator - composite schemas > should handle anyOf with
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static TestAnyOfEnum200Response = {
@@ -968,11 +1094,31 @@ export class TestApi {
     this.testAnyOfEnum = this.testAnyOfEnum.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -983,15 +1129,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -1001,13 +1156,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -1088,7 +1252,7 @@ exports[`openApiTsClientGenerator - composite schemas > should handle composite 
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static CompositeRequestContent = {
@@ -1294,11 +1458,31 @@ export class TestApi {
     this.composite = this.composite.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -1309,15 +1493,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -1327,13 +1520,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -1444,7 +1646,7 @@ exports[`openApiTsClientGenerator - composite schemas > should handle inline pri
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static TestArrays200Response = {
@@ -1692,11 +1894,31 @@ export class TestApi {
     this.testPrimitiveText = this.testPrimitiveText.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -1707,15 +1929,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -1725,13 +1956,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -1776,7 +2016,7 @@ export class TestApi {
     if (!this.$config.options?.omitContentTypeHeader) {
       headerParameters['Content-Type'] = 'application/json';
     }
-    const collectionFormats = {
+    const queryCollectionFormats = {
       someParameter: 'multi',
     } as const;
     const body =
@@ -1792,10 +2032,10 @@ export class TestApi {
         '/arrays-with-other-parameters',
         pathParameters,
         queryParameters,
-        collectionFormats,
+        queryCollectionFormats,
       ),
       {
-        headers: this.$headers(headerParameters, collectionFormats),
+        headers: this.$headers(headerParameters),
         method: 'POST',
         body,
       },
@@ -1956,7 +2196,7 @@ exports[`openApiTsClientGenerator - composite schemas > should handle not schema
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static TestNot200Response = {
@@ -2089,11 +2329,31 @@ export class TestApi {
     this.testNot = this.testNot.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -2104,15 +2364,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -2122,13 +2391,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
@@ -2191,7 +2469,7 @@ exports[`openApiTsClientGenerator - composite schemas > should round-trip Date t
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 
   public static MaybeDate = {
@@ -2281,11 +2559,31 @@ export class TestApi {
     this.postMaybeDate = this.postMaybeDate.bind(this);
   }
 
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
   private $url = (
     path: string,
     pathParameters: { [key: string]: any },
     queryParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
   ): string => {
     const baseUrl = this.$config.url.endsWith('/')
       ? this.$config.url.slice(0, -1)
@@ -2296,15 +2594,24 @@ export class TestApi {
       path,
     );
     const queryString = Object.entries(queryParameters)
-      .map(([key, value]) => {
+      .flatMap(([key, value]) => {
         if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-          return value
-            .map(
-              (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
-            )
-            .join('&');
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
         }
-        return \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}\`;
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
       })
       .join('&');
     return (
@@ -2314,13 +2621,22 @@ export class TestApi {
 
   private $headers = (
     headerParameters: { [key: string]: any },
-    collectionFormats?: { [key: string]: 'multi' | 'csv' },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
   ): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map((v) => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
     });
   };
 
