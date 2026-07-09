@@ -753,9 +753,11 @@ const resolveComposedModel = (
     ...referenced.filter((m) => m.export === 'enum'),
   ];
 
-  // Composing multiple arrays of non-primitives is not distinguishable at
-  // runtime, so it's validated away.
-  // TODO: honour `discriminator` to support this case.
+  // A composite of multiple non-primitive array members can't be told apart at
+  // runtime: each arrives as a plain JSON array with no property to switch on.
+  // A `discriminator` can't disambiguate here either — it names a property on
+  // an object member, not on an array. Model a polymorphic list as an array of
+  // a discriminated union instead (`type: array` whose `items` is the oneOf).
   const isPrimitiveArray = (m: Model): boolean =>
     m.link && COLLECTION_TYPES.has(m.export)
       ? isPrimitiveArray(m.link)
@@ -766,7 +768,7 @@ const resolveComposedModel = (
   );
   if (arrayComposedModels.length > 1) {
     throw new Error(
-      `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
+      `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime. Model a polymorphic list as an array whose items are a discriminated union instead (a "type: array" schema with a "oneOf" in "items").`,
     );
   }
 

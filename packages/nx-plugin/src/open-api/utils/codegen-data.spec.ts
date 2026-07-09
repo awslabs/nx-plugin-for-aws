@@ -710,6 +710,105 @@ describe('openapi codegen data utils', () => {
       );
     });
 
+    it('should not honour a discriminator on a oneOf of arrays (still throws with guidance)', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            CatList: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/Pet' },
+            },
+            DogList: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/NewPet' },
+            },
+            // A discriminator on the composite can't disambiguate arrays — the
+            // discriminator names a property on an object, not on an array.
+            AnyList: {
+              oneOf: [
+                { $ref: '#/components/schemas/CatList' },
+                { $ref: '#/components/schemas/DogList' },
+              ],
+              discriminator: {
+                propertyName: 'type',
+                mapping: {
+                  cat: '#/components/schemas/CatList',
+                  dog: '#/components/schemas/DogList',
+                },
+              },
+            },
+          },
+        },
+      };
+
+      expect(() => buildOpenApiCodeGenData(spec)).toThrow(
+        /array whose items are a discriminated union/,
+      );
+    });
+
+    it('should support a polymorphic list as an array of a discriminated union', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        paths: {
+          '/pets': {
+            get: {
+              operationId: 'listPets',
+              responses: {
+                '200': {
+                  description: 'ok',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'array',
+                        items: { $ref: '#/components/schemas/Animal' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Cat: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' }, meow: { type: 'boolean' } },
+            },
+            Dog: {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' }, bark: { type: 'boolean' } },
+            },
+            Animal: {
+              oneOf: [
+                { $ref: '#/components/schemas/Cat' },
+                { $ref: '#/components/schemas/Dog' },
+              ],
+              discriminator: {
+                propertyName: 'kind',
+                mapping: {
+                  cat: '#/components/schemas/Cat',
+                  dog: '#/components/schemas/Dog',
+                },
+              },
+            },
+          },
+        },
+      };
+
+      // The recommended shape builds cleanly and tags the union.
+      const data = buildOpenApiCodeGenData(spec);
+      const animal = data.models.find((m) => m.name === 'Animal')!;
+      expect(animal.discriminator?.mapping).toEqual([
+        { value: 'cat', modelName: 'Cat' },
+        { value: 'dog', modelName: 'Dog' },
+      ]);
+    });
+
     it('should throw when two properties map to the same TypeScript name', () => {
       const spec: Spec = {
         ...sampleSpec,

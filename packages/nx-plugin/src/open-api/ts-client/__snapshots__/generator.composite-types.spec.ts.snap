@@ -1,5 +1,270 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`openApiTsClientGenerator - composite schemas > marshals a polymorphic list as an array of a discriminated union > client.gen.ts 1`] = `
+"import type { Animal, Cat, Dog } from './types.gen.js';
+
+/**
+ * Utility for serialisation and deserialisation of API types.
+ */
+export class $IO {
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
+    Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
+
+  public static Animal = {
+    toJson: (model: Animal): any => {
+      if (model === undefined || model === null) {
+        return model;
+      }
+      switch ((model as any).kind) {
+        case 'cat':
+          return $IO.Cat.toJson(model as Cat);
+        case 'dog':
+          return $IO.Dog.toJson(model as Dog);
+      }
+      return {
+        ...$IO.Cat.toJson(model as Cat),
+        ...$IO.Dog.toJson(model as Dog),
+      };
+    },
+    fromJson: (json: any): Animal => {
+      if (json === undefined || json === null) {
+        return json;
+      }
+      switch (json?.['kind']) {
+        case 'cat':
+          return $IO.Cat.fromJson(json);
+        case 'dog':
+          return $IO.Dog.fromJson(json);
+      }
+      return {
+        ...$IO.Cat.fromJson(json),
+        ...$IO.Dog.fromJson(json),
+      };
+    },
+  };
+
+  public static Cat = {
+    toJson: (model: Cat): any => {
+      if (model === undefined || model === null) {
+        return model;
+      }
+      return {
+        ...(model.kind === undefined
+          ? {}
+          : {
+              kind: model.kind,
+            }),
+        ...(model.napAt === undefined
+          ? {}
+          : {
+              napAt: model.napAt.toISOString(),
+            }),
+      };
+    },
+    fromJson: (json: any): Cat => {
+      if (json === undefined || json === null) {
+        return json;
+      }
+      return {
+        kind: json['kind'],
+        napAt: new Date(json['napAt']),
+      };
+    },
+  };
+
+  public static Dog = {
+    toJson: (model: Dog): any => {
+      if (model === undefined || model === null) {
+        return model;
+      }
+      return {
+        ...(model.kind === undefined
+          ? {}
+          : {
+              kind: model.kind,
+            }),
+        ...(model.walkAt === undefined
+          ? {}
+          : {
+              walkAt: model.walkAt.toISOString(),
+            }),
+      };
+    },
+    fromJson: (json: any): Dog => {
+      if (json === undefined || json === null) {
+        return json;
+      }
+      return {
+        kind: json['kind'],
+        walkAt: new Date(json['walkAt']),
+      };
+    },
+  };
+}
+
+/**
+ * Client configuration for TestApi
+ */
+export interface TestApiConfig {
+  /**
+   * Base URL for the API
+   */
+  url: string;
+  /**
+   * Custom instance of fetch. By default the global 'fetch' is used.
+   * You can override this to add custom middleware for use cases such as adding authentication headers.
+   */
+  fetch?: typeof fetch;
+  /**
+   * Additional configuration
+   */
+  options?: {
+    /**
+     * By default, the client will add a Content-Type header, set to the media type defined for
+     * the request in the OpenAPI specification.
+     * Set this to false to omit this header.
+     */
+    omitContentTypeHeader?: boolean;
+  };
+}
+
+/**
+ * API Client for TestApi
+ */
+export class TestApi {
+  private $config: TestApiConfig;
+
+  constructor(config: TestApiConfig) {
+    this.$config = config;
+
+    this.listPets = this.listPets.bind(this);
+  }
+
+  private $collectionDelimiters: { [format: string]: string } = {
+    csv: ',',
+    ssv: ' ',
+    pipes: '|',
+  };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [\`\${key}=\${encodeURIComponent(String(value))}\`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(\`\${key}[\${encodeURIComponent(prop)}]\`, v),
+    );
+  };
+
+  private $url = (
+    path: string,
+    pathParameters: { [key: string]: any },
+    queryParameters: { [key: string]: any },
+    collectionFormats?: {
+      [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject';
+    },
+  ): string => {
+    const baseUrl = this.$config.url.endsWith('/')
+      ? this.$config.url.slice(0, -1)
+      : this.$config.url;
+    const pathWithParameters = Object.entries(pathParameters).reduce(
+      (withParams, [key, value]) =>
+        withParams.replace(\`{\${key}}\`, encodeURIComponent(\`\${value}\`)),
+      path,
+    );
+    const queryString = Object.entries(queryParameters)
+      .flatMap(([key, value]) => {
+        if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
+          return value.map(
+            (v) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(\`\${v}\`)}\`,
+          );
+        }
+        if (
+          collectionFormats?.[key] === 'deepObject' &&
+          value !== null &&
+          typeof value === 'object'
+        ) {
+          return this.$deepObject(encodeURIComponent(key), value);
+        }
+        const delimiter =
+          this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+        return [
+          \`\${encodeURIComponent(key)}=\${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}\`,
+        ];
+      })
+      .join('&');
+    return (
+      baseUrl + pathWithParameters + (queryString ? \`?\${queryString}\` : '')
+    );
+  };
+
+  private $headers = (
+    headerParameters: { [key: string]: any },
+    collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' },
+  ): [string, string][] => {
+    return Object.entries(headerParameters).flatMap(([key, value]) => {
+      if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
+        return value.map((v) => [key, String(v)]) as [string, string][];
+      }
+      const delimiter =
+        this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [
+        [
+          key,
+          Array.isArray(value)
+            ? value.map(String).join(delimiter)
+            : String(value),
+        ],
+      ];
+    });
+  };
+
+  private $fetch: typeof fetch = (...args) =>
+    (this.$config.fetch ?? fetch)(...args);
+
+  public async listPets(): Promise<Array<Animal>> {
+    const pathParameters: { [key: string]: any } = {};
+    const queryParameters: { [key: string]: any } = {};
+    const headerParameters: { [key: string]: any } = {};
+
+    const body = undefined;
+
+    const response = await this.$fetch(
+      this.$url('/pets', pathParameters, queryParameters),
+      {
+        headers: this.$headers(headerParameters),
+        method: 'GET',
+        body,
+      },
+    );
+
+    if (response.status === 200) {
+      return ((await response.json()) as Array<any>).map($IO.Animal.fromJson);
+    }
+    throw new Error(
+      \`Unknown response status \${response.status} returned by API\`,
+    );
+  }
+}
+"
+`;
+
+exports[`openApiTsClientGenerator - composite schemas > marshals a polymorphic list as an array of a discriminated union > types.gen.ts 1`] = `
+"export type Animal = Cat | Dog;
+export type Cat = {
+  kind: 'cat';
+  napAt: Date;
+};
+export type Dog = {
+  kind: 'dog';
+  walkAt: Date;
+};
+export type ListPetsError = never;
+"
+`;
+
 exports[`openApiTsClientGenerator - composite schemas > should generate valid TypeScript for composite types 1`] = `
 "export type PutTest200Response = PutTest200ResponseAllOf &
   PutTest200ResponseAllOf1;
