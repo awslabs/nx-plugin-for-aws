@@ -1004,6 +1004,47 @@ describe('openapi codegen data utils', () => {
       ]);
     });
 
+    it('should use the original (pre-normalisation) schema name as the implicit discriminator value', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            'pet-cat': {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' }, meow: { type: 'boolean' } },
+            },
+            'pet-dog': {
+              type: 'object',
+              required: ['kind'],
+              properties: { kind: { type: 'string' }, bark: { type: 'boolean' } },
+            },
+            Animal: {
+              oneOf: [
+                { $ref: '#/components/schemas/pet-cat' },
+                { $ref: '#/components/schemas/pet-dog' },
+              ],
+              discriminator: { propertyName: 'kind' },
+            },
+          },
+        },
+      };
+
+      const data = buildOpenApiCodeGenData(spec);
+      const animal = data.models.find((m) => m.name === 'Animal')!;
+      // The wire value is the original name; it selects the normalised model.
+      expect(animal.discriminator?.mapping).toEqual([
+        { value: 'pet-cat', modelName: 'PetCat' },
+        { value: 'pet-dog', modelName: 'PetDog' },
+      ]);
+      // The subtype's discriminator literal is the wire value, not the model name.
+      const catKind = data.models
+        .find((m) => m.name === 'PetCat')!
+        .properties.find((p) => p.name === 'kind')!;
+      expect(catKind.typescriptType).toBe('"pet-cat"');
+    });
+
     it('should exclude hoisted inline members from implicit discriminator mapping', () => {
       const spec: Spec = {
         ...sampleSpec,

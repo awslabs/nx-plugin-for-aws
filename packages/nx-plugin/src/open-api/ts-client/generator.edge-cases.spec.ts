@@ -1203,4 +1203,80 @@ describe('openApiTsClientGenerator - edge cases', () => {
       'src/generated/consumer.ts',
     ]);
   });
+
+  it('uses the original schema name as the discriminator value for normalised names', async () => {
+    // Implicit discriminator over subtypes whose names need normalisation
+    // (`pet-cat` -> `PetCat`). The discriminator value on the wire is the
+    // ORIGINAL name, so both the type literal and the runtime dispatch must use
+    // `pet-cat`, not the normalised `PetCat`.
+    const spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'getPet',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Pet' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          'pet-cat': {
+            type: 'object',
+            required: ['kind', 'napAt'],
+            properties: {
+              kind: { type: 'string' },
+              napAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          'pet-dog': {
+            type: 'object',
+            required: ['kind', 'walkAt'],
+            properties: {
+              kind: { type: 'string' },
+              walkAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Pet: {
+            oneOf: [
+              { $ref: '#/components/schemas/pet-cat' },
+              { $ref: '#/components/schemas/pet-dog' },
+            ],
+            discriminator: { propertyName: 'kind' },
+          },
+        },
+      },
+    } as unknown as Spec;
+    const { types, client } = await generate(spec);
+
+    // Literal tag and dispatch both use the original wire name.
+    expect(types).toMatch(/kind:\s*'pet-cat'/);
+    expect(client).toContain("case 'pet-cat'");
+    expect(types).not.toMatch(/kind:\s*'PetCat'/);
+
+    // A `pet-cat` payload dispatches to the PetCat branch and revives its date.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ kind: 'pet-cat', napAt: '2024-01-02T03:04:05.000Z' }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'getPet');
+    expect(response).toEqual({
+      kind: 'pet-cat',
+      napAt: new Date('2024-01-02T03:04:05.000Z'),
+    });
+    expect('walkAt' in response).toBe(false);
+  });
 });

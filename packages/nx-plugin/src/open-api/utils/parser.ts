@@ -799,6 +799,19 @@ const isHoisted = (spec: Spec, name: string): boolean =>
   )?.['x-aws-nx-hoisted'];
 
 /**
+ * The on-the-wire name of a schema: its original name before normalisation to
+ * a valid identifier (recorded by the normaliser), or its current name. An
+ * implicit discriminator matches on this, not the normalised model name.
+ */
+const wireName = (spec: Spec, name: string): string =>
+  (
+    resolveIfRef<Schema | undefined>(
+      spec,
+      spec.components?.schemas?.[name],
+    ) as { 'x-aws-nx-original-name'?: string } | undefined
+  )?.['x-aws-nx-original-name'] ?? name;
+
+/**
  * The value → model-name mapping for a discriminator, resolved either from an
  * explicit `mapping` (value → schema ref) or implicitly (each candidate model's
  * schema name is its own discriminator value). Only candidates in
@@ -822,7 +835,9 @@ const buildDiscriminatorMapping = (
   }
   return [...candidateNames]
     .filter((name) => !isHoisted(spec, name))
-    .map((name) => ({ value: name, modelName: name }));
+    // The wire value is the schema's original name; the model it selects is the
+    // normalised name.
+    .map((name) => ({ value: wireName(spec, name), modelName: name }));
 };
 
 /**
