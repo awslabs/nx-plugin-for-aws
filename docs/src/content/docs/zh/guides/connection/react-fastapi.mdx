@@ -312,6 +312,42 @@ function CreateItemForm() {
 ```
 </Drawer>
 
+### 文件上传
+
+对于接受文件上传的端点，生成的客户端将请求作为 `FormData` 发送。在 FastAPI 中定义一个带有 `multipart/form-data` 主体的操作，例如使用 `UploadFile`：
+
+```python
+from fastapi import UploadFile
+
+@app.post("/files")
+async def upload_file(file: UploadFile, description: str = "") -> FileMetadata:
+    contents = await file.read()
+    ...
+```
+
+二进制字段在生成的客户端上类型为 `Blob`，其他字段（如上面的 `description`）保持其建模类型。传递 `Blob` 或 `File` —— 例如从 `<input type="file">` 获取的文件：
+
+```tsx {9-12}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function UploadForm() {
+  const api = useMyApi();
+  const uploadFile = useMutation(api.uploadFile.mutationOptions());
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadFile.mutate({ file, description: file.name });
+    }
+  };
+
+  return <input type="file" onChange={handleChange} />;
+}
+```
+
+客户端构建 `FormData` 主体并让 `fetch` 自动设置 `Content-Type`（包括 multipart 边界）。
+
 ### 无限滚动分页
 
 对于接受 `cursor` 参数的端点，生成的钩子支持使用 TanStack Query 的 `useInfiniteQuery` 实现无限查询，便于实现"加载更多"或无限滚动功能。
@@ -1468,6 +1504,7 @@ function ItemForm() {
 </Drawer>
 
 类型根据 FastAPI 的 OpenAPI 模式自动生成，确保 API 的更改在构建后反映到前端代码中。
-## Custom Auth
 
-If your FastAPI uses `Custom` authentication (Lambda Authorizer), you will need to edit the generated client provider to add the authorization headers your authorizer expects. Look for the `fetch` configuration in the generated `<ApiName>Provider.tsx` and add your token or API key to the request headers.
+## 自定义身份验证
+
+如果 FastAPI 使用 `Custom` 身份验证（Lambda 授权器），需要编辑生成的客户端提供者以添加授权器所需的授权标头。在生成的 `<ApiName>Provider.tsx` 中查找 `fetch` 配置，并将令牌或 API 密钥添加到请求标头中。
