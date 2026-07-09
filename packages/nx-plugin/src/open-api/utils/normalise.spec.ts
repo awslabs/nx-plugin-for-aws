@@ -271,6 +271,24 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     );
   });
 
+  it('should record the original name when normalising a schema name', () => {
+    const spec: Spec = {
+      components: {
+        schemas: {
+          'pet-cat': { type: 'object', properties: { a: { type: 'string' } } },
+        },
+      },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    expect(result.components?.schemas?.['pet-cat']).toBeUndefined();
+    expect(result.components?.schemas?.PetCat).toMatchObject({
+      type: 'object',
+      'x-aws-nx-original-name': 'pet-cat',
+    });
+  });
+
   it('should handle composite schemas', () => {
     const spec: Spec = {
       components: {

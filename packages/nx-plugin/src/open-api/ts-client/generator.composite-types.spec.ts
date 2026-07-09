@@ -1271,13 +1271,10 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     expect(client).not.toMatch(/\b_String\b/);
     expect(types).not.toMatch(/:\s*undefined\b/);
 
-    // After rewriteConstToEnum + languages.ts defence-in-depth the property
-    // resolves to bare `string` (the generator does not currently propagate
-    // the literal back to the reference site — it's compiled cleanly by tsc
-    // but loses the Literal narrowing). Assert the concrete current shape so
-    // any future tightening of this path is a deliberate, visible change.
-    expect(types).toMatch(/kind:\s*string\b/);
-    expect(types).not.toMatch(/kind:\s*'circle'/);
+    // The discriminator property is typed as its literal per subtype, making
+    // the union a true tagged union that narrows on `kind`.
+    expect(types).toMatch(/kind:\s*'circle'/);
+    expect(types).toMatch(/kind:\s*'square'/);
 
     // The discriminator must marshal directly to the matching branch, so a
     // Square must not gain a spurious `radius` from the Circle branch.
@@ -1442,5 +1439,100 @@ describe('openApiTsClientGenerator - composite schemas', () => {
       bornAt: '2020-01-02T03:04:05.000Z',
       lastNapAt: '2024-01-02T03:04:05.000Z',
     });
+  });
+
+  it('marshals a polymorphic list as an array of a discriminated union', async () => {
+    // The supported shape for a polymorphic list: an array whose items are a
+    // discriminated union (not a oneOf of arrays). Each element marshals to its
+    // matching branch, so branch-only dates round-trip without leaking.
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/Animal' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Cat: {
+            type: 'object',
+            required: ['kind', 'napAt'],
+            properties: {
+              kind: { type: 'string' },
+              napAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Dog: {
+            type: 'object',
+            required: ['kind', 'walkAt'],
+            properties: {
+              kind: { type: 'string' },
+              walkAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Animal: {
+            oneOf: [
+              { $ref: '#/components/schemas/Cat' },
+              { $ref: '#/components/schemas/Dog' },
+            ],
+            discriminator: {
+              propertyName: 'kind',
+              mapping: {
+                cat: '#/components/schemas/Cat',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          } as never,
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
+
+    // A mixed list: each element deserialises via its own branch, so the Cat
+    // keeps napAt and the Dog keeps walkAt with no cross-branch leakage.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue([
+        { kind: 'cat', napAt: '2024-01-02T03:04:05.000Z' },
+        { kind: 'dog', walkAt: '2024-06-07T08:09:10.000Z' },
+      ]),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'listPets');
+    expect(response).toEqual([
+      { kind: 'cat', napAt: new Date('2024-01-02T03:04:05.000Z') },
+      { kind: 'dog', walkAt: new Date('2024-06-07T08:09:10.000Z') },
+    ]);
+    expect('walkAt' in response[0]).toBe(false);
+    expect('napAt' in response[1]).toBe(false);
   });
 });

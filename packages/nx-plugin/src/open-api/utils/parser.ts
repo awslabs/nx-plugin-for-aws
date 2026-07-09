@@ -753,9 +753,11 @@ const resolveComposedModel = (
     ...referenced.filter((m) => m.export === 'enum'),
   ];
 
-  // Composing multiple arrays of non-primitives is not distinguishable at
-  // runtime, so it's validated away.
-  // TODO: honour `discriminator` to support this case.
+  // A composite of multiple non-primitive array members can't be told apart at
+  // runtime: each arrives as a plain JSON array with no property to switch on.
+  // A `discriminator` can't disambiguate here either — it names a property on
+  // an object member, not on an array. Model a polymorphic list as an array of
+  // a discriminated union instead (`type: array` whose `items` is the oneOf).
   const isPrimitiveArray = (m: Model): boolean =>
     m.link && COLLECTION_TYPES.has(m.export)
       ? isPrimitiveArray(m.link)
@@ -766,7 +768,7 @@ const resolveComposedModel = (
   );
   if (arrayComposedModels.length > 1) {
     throw new Error(
-      `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
+      `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime. Model a polymorphic list as an array whose items are a discriminated union instead (a "type: array" schema with a "oneOf" in "items").`,
     );
   }
 
@@ -797,6 +799,19 @@ const isHoisted = (spec: Spec, name: string): boolean =>
   )?.['x-aws-nx-hoisted'];
 
 /**
+ * The on-the-wire name of a schema: its original name before normalisation to
+ * a valid identifier (recorded by the normaliser), or its current name. An
+ * implicit discriminator matches on this, not the normalised model name.
+ */
+const wireName = (spec: Spec, name: string): string =>
+  (
+    resolveIfRef<Schema | undefined>(
+      spec,
+      spec.components?.schemas?.[name],
+    ) as { 'x-aws-nx-original-name'?: string } | undefined
+  )?.['x-aws-nx-original-name'] ?? name;
+
+/**
  * The value → model-name mapping for a discriminator, resolved either from an
  * explicit `mapping` (value → schema ref) or implicitly (each candidate model's
  * schema name is its own discriminator value). Only candidates in
@@ -820,7 +835,9 @@ const buildDiscriminatorMapping = (
   }
   return [...candidateNames]
     .filter((name) => !isHoisted(spec, name))
-    .map((name) => ({ value: name, modelName: name }));
+    // The wire value is the schema's original name; the model it selects is the
+    // normalised name.
+    .map((name) => ({ value: wireName(spec, name), modelName: name }));
 };
 
 /**
@@ -911,6 +928,67 @@ const resolveDiscriminators = (spec: Spec, data: ClientData): void => {
 };
 
 /**
+ * Type each discriminated subtype's discriminator property as its literal
+ * value(s), turning `Cat | Dog` into a true TypeScript tagged union that
+ * narrows on the discriminator (e.g. `Cat.petType: 'cat'`).
+ *
+ * The literal is taken from every discriminator's `mapping` (value → subtype).
+ * A subtype selected by several values within one discriminator becomes a union
+ * of those literals. A subtype that appears in multiple discriminators with
+ * conflicting values can't be pinned to a single literal, so it is left as the
+ * plain primitive (`string`) — the marshalling dispatch is unaffected either
+ * way, this only affects the emitted type.
+ */
+const resolveDiscriminatorLiterals = (data: ClientData): void => {
+  const modelsByName = indexModelsByName(data.models);
+
+  // Collect, per (subtype, discriminator property), the set of literal values
+  // that select it — across every discriminator in the spec.
+  const valuesBySubtypeProp = new Map<string, Set<string>>();
+  const conflicting = new Set<string>();
+
+  for (const model of data.models) {
+    const discriminator = model.discriminator;
+    if (!discriminator) continue;
+    const byName = new Map<string, string[]>();
+    for (const { value, modelName } of discriminator.mapping) {
+      byName.set(modelName, [...(byName.get(modelName) ?? []), value]);
+    }
+    for (const [modelName, values] of byName) {
+      const key = `${modelName} ${discriminator.propertyName}`;
+      const existing = valuesBySubtypeProp.get(key);
+      const incoming = new Set(values);
+      if (existing && !setsEqual(existing, incoming)) {
+        // Same subtype+property tagged differently by another union.
+        conflicting.add(key);
+      }
+      valuesBySubtypeProp.set(key, existing ? union(existing, incoming) : incoming);
+    }
+  }
+
+  for (const [key, values] of valuesBySubtypeProp) {
+    if (conflicting.has(key)) continue;
+    const [modelName, propertyName] = key.split(' ');
+    const property = modelsByName[modelName]?.properties.find(
+      (p) => p.name === propertyName,
+    );
+    // Only pin a literal when the property is a plain (string/enum) scalar —
+    // never an object/array reference.
+    if (property && (property.type === 'string' || property.isEnum)) {
+      property.discriminatorValue = [...values]
+        .map((v) => JSON.stringify(v))
+        .join(' | ');
+    }
+  }
+};
+
+const setsEqual = (a: Set<string>, b: Set<string>): boolean =>
+  a.size === b.size && [...a].every((v) => b.has(v));
+
+const union = (a: Set<string>, b: Set<string>): Set<string> =>
+  new Set([...a, ...b]);
+
+/**
  * Build the client data structure from a (normalised) OpenAPI spec: a fully
  * linked model graph with composite members resolved, ready for augmentation.
  */
@@ -922,5 +1000,6 @@ export const buildClientData = (spec: Spec): ClientData => {
   linkModels(spec, data);
   resolveComposedModels(data);
   resolveDiscriminators(spec, data);
+  resolveDiscriminatorLiterals(data);
   return data;
 };

@@ -90,9 +90,17 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
     }
   });
 
-  // Rename schema keys
+  // Rename schema keys, recording the original name so downstream code can
+  // recover the on-the-wire value (e.g. an implicit discriminator matches on
+  // the original schema name, not its normalised identifier).
   Object.entries(schemaNameMapping).forEach(([oldName, newName]) => {
-    spec.components!.schemas![newName] = spec.components!.schemas![oldName];
+    const schema = spec.components!.schemas![oldName];
+    if (schema && !isRef(schema)) {
+      (schema as { 'x-aws-nx-original-name'?: string })[
+        'x-aws-nx-original-name'
+      ] = oldName;
+    }
+    spec.components!.schemas![newName] = schema;
     delete spec.components!.schemas![oldName];
   });
 
