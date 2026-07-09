@@ -167,7 +167,7 @@ export const PY_VERSIONS = {
   uvicorn: '==0.51.0',
   sqlmodel: '==0.0.38',
   alembic: '==1.18.4',
-  asyncmy: '==0.2.11',
+  aiomysql: '==0.3.2',
   asyncpg: '==0.31.0',
 } as const;
 export type IPyDepVersion = keyof typeof PY_VERSIONS;

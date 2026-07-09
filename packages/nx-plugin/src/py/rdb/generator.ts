@@ -103,7 +103,7 @@ export const pyRdbGenerator = async (
     dockerImage,
     sqlmodelVersion: PY_VERSIONS.sqlmodel,
     alembicVersion: PY_VERSIONS.alembic,
-    asyncmyVersion: PY_VERSIONS.asyncmy,
+    aiomysqlVersion: PY_VERSIONS.aiomysql,
     asyncpgVersion: PY_VERSIONS.asyncpg,
     boto3Version: PY_VERSIONS.boto3,
     awsLambdaPowertoolsVersion: PY_VERSIONS['aws-lambda-powertools'],
@@ -315,7 +315,7 @@ export const pyRdbGenerator = async (
     'sqlmodel',
     'alembic',
     ...(engine === 'mysql'
-      ? (['asyncmy', 'boto3', 'aws-lambda-powertools'] as const)
+      ? (['aiomysql', 'boto3', 'aws-lambda-powertools'] as const)
       : (['asyncpg', 'boto3', 'aws-lambda-powertools'] as const)),
   ]);
 

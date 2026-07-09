@@ -152,7 +152,7 @@ describe('py#rdb generator', () => {
     await pyRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
 
     const pyproject = tree.read('packages/db/pyproject.toml', 'utf-8');
-    expect(pyproject).toContain('asyncmy==0.2.11');
+    expect(pyproject).toContain('aiomysql==0.3.2');
     expect(pyproject).not.toContain('asyncpg');
     expect(
       tree.read('packages/db/proj_db/connection.py', 'utf-8'),
