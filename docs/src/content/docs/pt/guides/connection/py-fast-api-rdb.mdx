@@ -41,7 +41,7 @@ O gerador modifica seu projeto FastAPI:
 
 - packages/my_api/my_api
   - dependencies
-    - my-db.py Dependência FastAPI `SessionDep` para a sessão do banco de dados
+    - my_db.py Dependência FastAPI `SessionDep` para a sessão do banco de dados
 
 </FileTree>
 
@@ -49,22 +49,23 @@ Além disso, o target `dev` do FastAPI é atualizado para depender do target `de
 
 ## Como Funciona
 
-O arquivo de dependência gerado exporta um alias de tipo `SessionDep` que injeta uma `Session` SQLModel via `Depends` do FastAPI:
+O arquivo de dependência gerado exporta um alias de tipo `SessionDep` que injeta uma `AsyncSession` via `Depends` do FastAPI:
 
-```python title="packages/my_api/my_api/dependencies/my-db.py"
-from collections.abc import Generator
+```python title="packages/my_api/my_api/dependencies/my_db.py"
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends
-from sqlmodel import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from my_scope.my_db.connection import get_session
+from my_scope.my_db.connection import session_context
 
-def get_session_dep() -> Generator[Session]:
-    yield from get_session()
+async def get_session_dep() -> AsyncGenerator[AsyncSession]:
+    async with session_context() as session:
+        yield session
 
 
-SessionDep = Annotated[Session, Depends(get_session_dep)]
+SessionDep = Annotated[AsyncSession, Depends(get_session_dep)]
 ```
 
 ## Usando o Banco de Dados em Manipuladores de Rota
@@ -77,15 +78,15 @@ from my_api.dependencies.my_db import SessionDep
 from my_scope.my_db.models.example import ExampleModel
 
 @app.get("/examples")
-def list_examples(session: SessionDep):
-    return session.exec(select(ExampleModel)).all()
+async def list_examples(session: SessionDep):
+    return (await session.exec(select(ExampleModel))).all()
 
 @app.post("/examples")
-def create_example(name: str, session: SessionDep):
+async def create_example(name: str, session: SessionDep):
     item = ExampleModel(name=name)
     session.add(item)
-    session.commit()
-    session.refresh(item)
+    await session.commit()
+    await session.refresh(item)
     return item
 ```
 
@@ -120,7 +121,7 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede isolada privada. Em tempo de execução, `get_session()` recupera a configuração do banco de dados do AWS AppConfig, que é um endpoint de serviço AWS público que requer acesso à internet de saída.
+Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede isolada privada. Em tempo de execução, `session_context()` recupera a configuração do banco de dados do AWS AppConfig, que é um endpoint de serviço AWS público que requer acesso à internet de saída.
 
 :::note
 Este exemplo concede acesso a todos os manipuladores em sua API, mas se apenas alguns manipuladores precisarem de acesso, é melhor configurar individualmente.
@@ -163,63 +164,7 @@ Implante as funções Lambda da API em **sub-redes privadas com saída**, não e
 
 ### Requisitos SSL ao Conectar Sem RDS Proxy
 
-Quando as funções Lambda FastAPI se conectam diretamente ao cluster Aurora (sem RDS Proxy), anexe a camada Lambda `RdsCaLayer` (CDK) ou o módulo Terraform `ca-layer`. A camada CDK usa empacotamento Docker para adicionar o pacote CA do Amazon RDS, e a camada implantada o fornece em `/opt/global-bundle.pem`.
-
-Anexe a camada do pacote CA às integrações Lambda FastAPI geradas:
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new MyApi(this, 'Api', {
-  integrations: MyApi.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
-
-Em seguida, passe o caminho da camada para `get_session` na dependência gerada:
-
-```python title="packages/my_api/my_api/dependencies/my-db.py"
-from collections.abc import Generator
-from typing import Annotated
-
-from fastapi import Depends
-from sqlmodel import Session
-
-from my_scope.my_db.connection import get_session
-
-def get_session_dep() -> Generator[Session]:
-    yield from get_session(rds_ca='/opt/global-bundle.pem')
-
-
-SessionDep = Annotated[Session, Depends(get_session_dep)]
-```
+O armazenamento de confiança CA integrado do ambiente de execução Lambda Amazon Linux 2023 inclui as CAs raiz da Amazon usadas pelo RDS, portanto nenhuma configuração adicional é necessária.
 
 Ao usar RDS Proxy, você não precisa configurar o pacote CA do RDS no tempo de execução Lambda do FastAPI.
 

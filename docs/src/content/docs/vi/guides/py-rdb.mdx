@@ -32,7 +32,7 @@ Generator tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
 
 <FileTree>
   - \<name>
-    - \_\_init\_\_.py Package exports (`get_engine`, `session_context`, `get_session`)
+    - \_\_init\_\_.py Package exports (`get_engine`, `session_context`)
     - connection.py Database engine và session factory với xác thực IAM
     - utils.py Runtime config và các helper phát triển cục bộ
     - migration_handler.py Lambda handler chạy Alembic migrations trong quá trình triển khai
@@ -131,21 +131,23 @@ Thay thế `<engine>` bằng container engine của bạn (`docker` hoặc `finc
 
 ## Kết nối đến Cơ sở dữ liệu
 
-Import `session_context` từ database package của bạn và sử dụng nó như một context manager để có được một SQLModel `Session`:
+Import `session_context` từ database package của bạn và sử dụng nó như một async context manager để có được một `AsyncSession`:
 
 ```python
 from sqlmodel import select
 
 from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
 
-with session_context() as session:
-    results = session.exec(select(ExampleModel)).all()
+async def example():
+    async with session_context() as session:
+        results = (await session.exec(select(ExampleModel))).all()
 ```
 
 Database client tự động:
 - Lấy cấu hình cơ sở dữ liệu từ AWS AppConfig bằng biến môi trường `RUNTIME_CONFIG_APP_ID`
 - Tạo token xác thực tạm thời qua `boto3` RDS Signer cho xác thực IAM
-- Quản lý kết nối SSL/TLS với xác thực chứng chỉ
+- Thiết lập kết nối TLS bằng `ssl.create_default_context()`
 
 ## Triển khai Cơ sở dữ liệu của bạn
 
@@ -157,80 +159,27 @@ Database client tự động:
 
 ### Yêu cầu SSL khi kết nối không có RDS Proxy
 
-Khi kết nối trực tiếp đến Aurora cluster (không có RDS Proxy), truyền đường dẫn Amazon RDS CA bundle bằng tham số tùy chọn `rds_ca`:
+Amazon RDS CA bundle phải có trong system trust store của runtime.
 
-```python
-from my_scope.my_db import session_context
+#### Container Runtimes
 
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-Giá trị `rds_ca` phải trỏ đến một CA certificate bundle có sẵn trong hệ thống tệp runtime của bạn. Đối với Amazon RDS, sử dụng global CA bundle từ:
-
-```text
-https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-```
-
-Cách bạn làm cho tệp đó có sẵn phụ thuộc vào runtime kết nối đến cơ sở dữ liệu.
-
-#### Runtime Container Images
-
-Nếu bạn chuẩn bị container image của riêng mình cho runtime, thêm RDS CA bundle trong Dockerfile của bạn và truyền đường dẫn đó cho `session_context`:
+Đối với các container image dựa trên Debian, thêm Amazon RDS CA bundle vào system trust store:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
+Đối với các container image dựa trên Amazon Linux, sử dụng lệnh `update-ca-trust` thay thế:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 ```
 
-#### Zipped Lambda Functions
+#### Zip Lambda Functions
 
-Nếu bạn triển khai một zipped Lambda function, đính kèm `RdsCaLayer` Lambda layer (CDK) hoặc `ca-layer` Terraform module. CDK layer sử dụng Docker bundling để thêm CA bundle, và layer đã triển khai cung cấp nó tại `/opt/global-bundle.pem`, mà bạn có thể truyền cho `session_context`:
-
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
+Đối với các Lambda function được triển khai dưới dạng zip (chẳng hạn như <Link path="guides/fastapi">`py#api` FastAPI</Link>), system trust store tích hợp sẵn của môi trường thực thi Lambda Amazon Linux 2023 bao gồm các Amazon Root CA được sử dụng bởi RDS.
 
 Khi sử dụng RDS Proxy, bạn không cần cấu hình RDS CA bundle trong runtime kết nối đến cơ sở dữ liệu.
 

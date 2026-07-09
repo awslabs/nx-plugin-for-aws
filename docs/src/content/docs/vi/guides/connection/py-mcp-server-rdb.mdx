@@ -38,7 +38,7 @@ Generator thêm gói cơ sở dữ liệu làm dependency workspace, cập nhậ
 
 ## Cách hoạt động
 
-Gói cơ sở dữ liệu xuất `session_context`, một context manager mở một `Session` SQLModel bằng cách sử dụng database client được tạo và đóng nó khi khối `with` thoát.
+Gói cơ sở dữ liệu xuất `session_context`, một async context manager mở một `AsyncSession` bằng cách sử dụng database client được tạo và đóng nó khi khối `async with` thoát.
 
 Đối với phát triển cục bộ, `session_context()` kết nối với container cơ sở dữ liệu cục bộ. Trong các runtime đã triển khai, nó đọc cấu hình cơ sở dữ liệu từ AWS AppConfig, tạo token xác thực IAM và xác thực chứng chỉ TLS của cơ sở dữ liệu.
 
@@ -52,10 +52,10 @@ from my_scope.my_db import session_context
 from my_scope.my_db.models.example import ExampleModel
 
 @mcp.tool()
-def list_examples() -> str:
+async def list_examples() -> str:
     """List all example records."""
-    with session_context() as session:
-        items = session.exec(select(ExampleModel)).all()
+    async with session_context() as session:
+        items = (await session.exec(select(ExampleModel))).all()
         return str([item.model_dump() for item in items])
 ```
 
@@ -117,25 +117,11 @@ module "my_mcp_server" {
 
 ### Yêu cầu SSL khi Kết nối mà không có RDS Proxy
 
-Khi MCP server kết nối trực tiếp với Aurora cluster (không có RDS Proxy), connection generator cập nhật Dockerfile MCP server được tạo để thêm gói Amazon RDS CA tại `/opt/global-bundle.pem`:
+Khi MCP server kết nối trực tiếp với Aurora cluster (không có RDS Proxy), connection generator cập nhật Dockerfile MCP server được tạo để cài đặt gói Amazon RDS CA vào system trust store:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
-```
-
-Truyền đường dẫn đó cho `session_context` bằng cách sử dụng tham số tùy chọn `rds_ca`:
-
-```python title="packages/my_service/my_service/my_mcp_server/server.py"
-from sqlmodel import select
-from my_scope.my_db import session_context
-from my_scope.my_db.models.example import ExampleModel
-
-@mcp.tool()
-def list_examples() -> str:
-    """List all example records."""
-    with session_context(rds_ca='/opt/global-bundle.pem') as session:
-        items = session.exec(select(ExampleModel)).all()
-        return str([item.model_dump() for item in items])
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
 Khi sử dụng RDS Proxy, bạn không cần cấu hình gói RDS CA trong runtime MCP server.

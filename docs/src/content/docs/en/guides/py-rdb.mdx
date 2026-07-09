@@ -32,7 +32,7 @@ The generator creates the following project structure in the `<directory>/<name>
 
 <FileTree>
   - \<name>
-    - \_\_init\_\_.py Package exports (`get_engine`, `session_context`, `get_session`)
+    - \_\_init\_\_.py Package exports (`get_engine`, `session_context`)
     - connection.py Database engine and session factory with IAM authentication
     - utils.py Runtime config and local development helpers
     - migration_handler.py Lambda handler that runs Alembic migrations during deployment
@@ -131,21 +131,23 @@ Replace `<engine>` with your container engine (`docker` or `finch`), `<scope>` w
 
 ## Connecting to the Database
 
-Import `session_context` from your database package and use it as a context manager to obtain a SQLModel `Session`:
+Import `session_context` from your database package and use it as an async context manager to obtain an `AsyncSession`:
 
 ```python
 from sqlmodel import select
 
 from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
 
-with session_context() as session:
-    results = session.exec(select(ExampleModel)).all()
+async def example():
+    async with session_context() as session:
+        results = (await session.exec(select(ExampleModel))).all()
 ```
 
 The database client automatically:
 - Retrieves database configuration from AWS AppConfig using `RUNTIME_CONFIG_APP_ID` environment variable
 - Generates temporary authentication tokens via `boto3` RDS Signer for IAM authentication
-- Manages SSL/TLS connections with certificate validation
+- Establishes TLS connections using `ssl.create_default_context()`
 
 ## Deploying your Database
 
@@ -157,80 +159,27 @@ The database client automatically:
 
 ### SSL Requirements When Connecting Without RDS Proxy
 
-When connecting directly to the Aurora cluster (without RDS Proxy), pass the Amazon RDS CA bundle path using the optional `rds_ca` parameter:
+The Amazon RDS CA bundle must be in the runtime's system trust store.
 
-```python
-from my_scope.my_db import session_context
+#### Container Runtimes
 
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-The `rds_ca` value must point to a CA certificate bundle available in your runtime filesystem. For Amazon RDS, use the global CA bundle from:
-
-```text
-https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-```
-
-How you make that file available depends on the runtime that connects to the database.
-
-#### Runtime Container Images
-
-If you prepare your own container image for the runtime, add the RDS CA bundle in your Dockerfile and pass that path to `session_context`:
+For Debian-based container images, add the Amazon RDS CA bundle to the system trust store:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
+For Amazon Linux-based container images, use the `update-ca-trust` command instead:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 ```
 
-#### Zipped Lambda Functions
+#### Zip Lambda Functions
 
-If you deploy a zipped Lambda function, attach the `RdsCaLayer` Lambda layer (CDK) or `ca-layer` Terraform module. The CDK layer uses Docker bundling to add the CA bundle, and the deployed layer provides it at `/opt/global-bundle.pem`, which you can pass to `session_context`:
-
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
+For zip-deployed Lambda functions (such as a <Link path="guides/fastapi">`py#api` FastAPI</Link>), the Amazon Linux 2023 Lambda execution environment's built-in CA trust store includes the Amazon Root CAs used by RDS.
 
 When using RDS Proxy, you do not need to configure the RDS CA bundle in the runtime that connects to the database.
 

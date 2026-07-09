@@ -1,53 +1,7 @@
 ---
 title: 不使用 RDS Proxy 连接时的 SSL 要求
 ---
-import Infrastructure from '@components/infrastructure.astro';
 
-当直接连接到 Aurora 集群（不使用 RDS Proxy）时，使用可选的 `rds_ca` 参数传递 Amazon RDS CA 证书包路径。
+Amazon Linux 2023 Lambda 执行环境的内置 CA 信任存储包含 RDS 使用的 Amazon 根 CA，因此无需额外配置。
 
-对于压缩的 Lambda 函数，附加 `RdsCaLayer` Lambda 层（CDK）或 `ca-layer` Terraform 模块。CDK 层使用 Docker 打包来添加 CA 证书包，部署的层在 `/opt/global-bundle.pem` 提供它：
-
-```python
-from my_scope.my_db import session_context
-
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
-
-有关更多详细信息，请参阅 Amazon RDS Proxy [TLS 文档](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls)。使用 RDS Proxy 时，您无需在 Lambda 函数中配置 RDS CA 证书包。
+使用 RDS Proxy 时，您无需在 Lambda 函数中配置 RDS CA 证书包。

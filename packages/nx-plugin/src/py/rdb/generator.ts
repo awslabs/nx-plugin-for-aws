@@ -103,8 +103,8 @@ export const pyRdbGenerator = async (
     dockerImage,
     sqlmodelVersion: PY_VERSIONS.sqlmodel,
     alembicVersion: PY_VERSIONS.alembic,
-    pymysqlVersion: PY_VERSIONS.pymysql,
-    psycopgVersion: PY_VERSIONS['psycopg[binary,pool]'],
+    asyncmyVersion: PY_VERSIONS.asyncmy,
+    asyncpgVersion: PY_VERSIONS.asyncpg,
     boto3Version: PY_VERSIONS.boto3,
     awsLambdaPowertoolsVersion: PY_VERSIONS['aws-lambda-powertools'],
   };
@@ -315,13 +315,8 @@ export const pyRdbGenerator = async (
     'sqlmodel',
     'alembic',
     ...(engine === 'mysql'
-      ? (['pymysql', 'boto3', 'aws-lambda-powertools'] as const)
-      : ([
-          'psycopg[binary,pool]',
-          'certifi',
-          'boto3',
-          'aws-lambda-powertools',
-        ] as const)),
+      ? (['asyncmy', 'boto3', 'aws-lambda-powertools'] as const)
+      : (['asyncpg', 'boto3', 'aws-lambda-powertools'] as const)),
   ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_RDB_GENERATOR_INFO]);

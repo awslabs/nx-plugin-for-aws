@@ -56,8 +56,8 @@ describe('py#rdb generator', () => {
 
     expect(pyproject).toContain('sqlmodel==0.0.38');
     expect(pyproject).toContain('alembic==1.18.4');
-    expect(pyproject).toContain('psycopg[binary,pool]==3.3.4');
-    expect(pyproject).not.toContain('psycopg2-binary');
+    expect(pyproject).toContain('asyncpg==0.31.0');
+    expect(pyproject).not.toContain('psycopg');
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
       inputs: ['default', '^production'],
@@ -152,8 +152,8 @@ describe('py#rdb generator', () => {
     await pyRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
 
     const pyproject = tree.read('packages/db/pyproject.toml', 'utf-8');
-    expect(pyproject).toContain('pymysql==1.2.0');
-    expect(pyproject).not.toContain('psycopg[binary,pool]');
+    expect(pyproject).toContain('asyncmy==0.2.11');
+    expect(pyproject).not.toContain('asyncpg');
     expect(
       tree.read('packages/db/proj_db/connection.py', 'utf-8'),
     ).toMatchSnapshot();

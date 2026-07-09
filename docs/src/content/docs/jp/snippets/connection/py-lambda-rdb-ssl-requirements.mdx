@@ -1,53 +1,7 @@
 ---
 title: RDS Proxy を使用しない接続時の SSL 要件
 ---
-import Infrastructure from '@components/infrastructure.astro';
 
-Aurora クラスターに直接接続する場合（RDS Proxy を使用しない場合）、オプションの `rds_ca` パラメータを使用して Amazon RDS CA バンドルパスを渡します。
+Amazon Linux 2023 Lambda 実行環境の組み込み CA トラストストアには、RDS で使用される Amazon ルート CA が含まれているため、追加の設定は必要ありません。
 
-ZIP 形式の Lambda 関数の場合、`RdsCaLayer` Lambda レイヤー（CDK）または `ca-layer` Terraform モジュールをアタッチします。CDK レイヤーは Docker バンドリングを使用して CA バンドルを追加し、デプロイされたレイヤーは `/opt/global-bundle.pem` で提供します：
-
-```python
-from my_scope.my_db import session_context
-
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
-
-詳細については、Amazon RDS Proxy の [TLS ドキュメント](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls)を参照してください。RDS Proxy を使用する場合、Lambda 関数で RDS CA バンドルを設定する必要はありません。
+RDS Proxy を使用する場合、Lambda 関数で RDS CA バンドルを設定する必要はありません。

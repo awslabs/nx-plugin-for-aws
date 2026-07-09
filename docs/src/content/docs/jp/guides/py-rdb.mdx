@@ -32,7 +32,7 @@ import Snippet from '@components/snippet.astro';
 
 <FileTree>
   - \<name>
-    - \_\_init\_\_.py パッケージエクスポート（`get_engine`、`session_context`、`get_session`）
+    - \_\_init\_\_.py パッケージエクスポート（`get_engine`、`session_context`）
     - connection.py IAM 認証を使用したデータベースエンジンとセッションファクトリ
     - utils.py ランタイム設定とローカル開発ヘルパー
     - migration_handler.py デプロイ時に Alembic マイグレーションを実行する Lambda ハンドラー
@@ -131,21 +131,23 @@ Windows でのシグナル処理の制限により、`dev` を停止してもコ
 
 ## データベースへの接続
 
-データベースパッケージから `session_context` をインポートし、コンテキストマネージャーとして使用して SQLModel `Session` を取得します：
+データベースパッケージから `session_context` をインポートし、非同期コンテキストマネージャーとして使用して `AsyncSession` を取得します：
 
 ```python
 from sqlmodel import select
 
 from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
 
-with session_context() as session:
-    results = session.exec(select(ExampleModel)).all()
+async def example():
+    async with session_context() as session:
+        results = (await session.exec(select(ExampleModel))).all()
 ```
 
 データベースクライアントは自動的に以下を行います：
 - `RUNTIME_CONFIG_APP_ID` 環境変数を使用して AWS AppConfig からデータベース設定を取得
 - IAM 認証用に `boto3` RDS Signer を介して一時的な認証トークンを生成
-- 証明書検証を使用した SSL/TLS 接続を管理
+- `ssl.create_default_context()` を使用して TLS 接続を確立
 
 ## データベースのデプロイ
 
@@ -157,80 +159,27 @@ with session_context() as session:
 
 ### RDS Proxy を使用せずに接続する場合の SSL 要件
 
-Aurora クラスターに直接接続する場合（RDS Proxy を使用しない場合）、オプションの `rds_ca` パラメーターを使用して Amazon RDS CA バンドルパスを渡します：
+Amazon RDS CA バンドルは、ランタイムのシステムトラストストアに含まれている必要があります。
 
-```python
-from my_scope.my_db import session_context
+#### コンテナランタイム
 
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-`rds_ca` 値は、ランタイムファイルシステムで利用可能な CA 証明書バンドルを指す必要があります。Amazon RDS の場合、以下からグローバル CA バンドルを使用します：
-
-```text
-https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-```
-
-そのファイルを利用可能にする方法は、データベースに接続するランタイムによって異なります。
-
-#### ランタイムコンテナイメージ
-
-ランタイム用に独自のコンテナイメージを準備する場合、Dockerfile に RDS CA バンドルを追加し、そのパスを `session_context` に渡します：
+Debian ベースのコンテナイメージの場合、Amazon RDS CA バンドルをシステムトラストストアに追加します：
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
+Amazon Linux ベースのコンテナイメージの場合、代わりに `update-ca-trust` コマンドを使用します：
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 ```
 
 #### Zip 形式の Lambda 関数
 
-Zip 形式の Lambda 関数をデプロイする場合、`RdsCaLayer` Lambda レイヤー（CDK）または `ca-layer` Terraform モジュールをアタッチします。CDK レイヤーは Docker バンドリングを使用して CA バンドルを追加し、デプロイされたレイヤーは `/opt/global-bundle.pem` で提供します。これを `session_context` に渡すことができます：
-
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
+Zip 形式でデプロイされる Lambda 関数（<Link path="guides/fastapi">`py#api` FastAPI</Link> など）の場合、Amazon Linux 2023 Lambda 実行環境の組み込み CA トラストストアには、RDS で使用される Amazon ルート CA が含まれています。
 
 RDS Proxy を使用する場合、データベースに接続するランタイムで RDS CA バンドルを設定する必要はありません。
 

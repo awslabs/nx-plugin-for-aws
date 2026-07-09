@@ -38,7 +38,7 @@ El generador agrega el paquete de base de datos como una dependencia del espacio
 
 ## Cómo Funciona
 
-El paquete de base de datos exporta `session_context`, un administrador de contexto que abre una `Session` de SQLModel usando el cliente de base de datos generado y la cierra cuando el bloque `with` termina.
+El paquete de base de datos exporta `session_context`, un administrador de contexto asíncrono que abre una `AsyncSession` usando el cliente de base de datos generado y la cierra cuando el bloque `async with` termina.
 
 Para el desarrollo local, `session_context()` se conecta al contenedor de base de datos local. En entornos de ejecución desplegados, lee la configuración de la base de datos desde AWS AppConfig, genera un token de autenticación IAM y valida el certificado TLS de la base de datos.
 
@@ -52,10 +52,10 @@ from my_scope.my_db import session_context
 from my_scope.my_db.models.example import ExampleModel
 
 @mcp.tool()
-def list_examples() -> str:
+async def list_examples() -> str:
     """List all example records."""
-    with session_context() as session:
-        items = session.exec(select(ExampleModel)).all()
+    async with session_context() as session:
+        items = (await session.exec(select(ExampleModel))).all()
         return str([item.model_dump() for item in items])
 ```
 
@@ -117,25 +117,11 @@ Asegúrate de que el rol de ejecución del servidor MCP tenga el permiso `rds-db
 
 ### Requisitos de SSL al Conectarse sin RDS Proxy
 
-Cuando el servidor MCP se conecta directamente al clúster de Aurora (sin RDS Proxy), el generador de conexión actualiza el Dockerfile generado del servidor MCP para agregar el paquete de CA de Amazon RDS en `/opt/global-bundle.pem`:
+Cuando el servidor MCP se conecta directamente al clúster de Aurora (sin RDS Proxy), el generador de conexión actualiza el Dockerfile generado del servidor MCP para instalar el paquete de CA de Amazon RDS en el almacén de confianza del sistema:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
-```
-
-Pasa esa ruta a `session_context` usando el parámetro opcional `rds_ca`:
-
-```python title="packages/my_service/my_service/my_mcp_server/server.py"
-from sqlmodel import select
-from my_scope.my_db import session_context
-from my_scope.my_db.models.example import ExampleModel
-
-@mcp.tool()
-def list_examples() -> str:
-    """List all example records."""
-    with session_context(rds_ca='/opt/global-bundle.pem') as session:
-        items = session.exec(select(ExampleModel)).all()
-        return str([item.model_dump() for item in items])
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
 Cuando uses RDS Proxy, no necesitas configurar el paquete de CA de RDS en el entorno de ejecución del servidor MCP.

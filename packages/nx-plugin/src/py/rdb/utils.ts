@@ -4,8 +4,10 @@
  */
 import type { Tree } from '@nx/devkit';
 
-const RDS_CA_RUN =
-  'ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem';
+const RDS_CA_RUN = [
+  'ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt',
+  'RUN update-ca-certificates',
+].join('\n');
 
 export const injectRdsCaBundleIntoDockerfile = (
   tree: Tree,

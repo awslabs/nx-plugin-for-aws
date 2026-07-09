@@ -38,7 +38,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ## 工作原理
 
-数据库包导出 `session_context`，这是一个上下文管理器，它使用生成的数据库客户端打开一个 SQLModel `Session`，并在 `with` 块退出时关闭它。
+数据库包导出 `session_context`，这是一个异步上下文管理器，它使用生成的数据库客户端打开一个 `AsyncSession`，并在 `async with` 块退出时关闭它。
 
 对于本地开发，`session_context()` 连接到本地数据库容器。在部署的运行时中，它从 AWS AppConfig 读取数据库配置，生成 IAM 身份验证令牌，并验证数据库 TLS 证书。
 
@@ -52,10 +52,10 @@ from my_scope.my_db import session_context
 from my_scope.my_db.models.example import ExampleModel
 
 @mcp.tool()
-def list_examples() -> str:
+async def list_examples() -> str:
     """List all example records."""
-    with session_context() as session:
-        items = session.exec(select(ExampleModel)).all()
+    async with session_context() as session:
+        items = (await session.exec(select(ExampleModel))).all()
         return str([item.model_dump() for item in items])
 ```
 
@@ -117,25 +117,11 @@ module "my_mcp_server" {
 
 ### 在不使用 RDS Proxy 连接时的 SSL 要求
 
-当 MCP 服务器直接连接到 Aurora 集群（不使用 RDS Proxy）时，连接生成器会更新生成的 MCP 服务器 Dockerfile，以在 `/opt/global-bundle.pem` 处添加 Amazon RDS CA 证书包：
+当 MCP 服务器直接连接到 Aurora 集群（不使用 RDS Proxy）时，连接生成器会更新生成的 MCP 服务器 Dockerfile，将 Amazon RDS CA 证书包安装到系统信任存储中：
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
-```
-
-使用可选的 `rds_ca` 参数将该路径传递给 `session_context`：
-
-```python title="packages/my_service/my_service/my_mcp_server/server.py"
-from sqlmodel import select
-from my_scope.my_db import session_context
-from my_scope.my_db.models.example import ExampleModel
-
-@mcp.tool()
-def list_examples() -> str:
-    """List all example records."""
-    with session_context(rds_ca='/opt/global-bundle.pem') as session:
-        items = session.exec(select(ExampleModel)).all()
-        return str([item.model_dump() for item in items])
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
 使用 RDS Proxy 时，您无需在 MCP 服务器运行时中配置 RDS CA 证书包。

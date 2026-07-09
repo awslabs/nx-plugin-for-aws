@@ -38,7 +38,7 @@ Trình tạo thêm gói cơ sở dữ liệu làm phụ thuộc workspace, cập
 
 ## Cách hoạt động
 
-Gói cơ sở dữ liệu xuất `session_context`, một trình quản lý ngữ cảnh mở một `Session` SQLModel bằng cách sử dụng client cơ sở dữ liệu được tạo và đóng nó khi khối `with` thoát.
+Gói cơ sở dữ liệu xuất `session_context`, một trình quản lý ngữ cảnh async mở một `AsyncSession` bằng cách sử dụng client cơ sở dữ liệu được tạo và đóng nó khi khối `async with` thoát.
 
 Đối với phát triển cục bộ, `session_context()` kết nối với container cơ sở dữ liệu cục bộ. Trong các runtime đã triển khai, nó đọc cấu hình cơ sở dữ liệu từ AWS AppConfig, tạo token xác thực IAM và xác thực chứng chỉ TLS của cơ sở dữ liệu.
 
@@ -53,10 +53,10 @@ from my_scope.my_db.models.example import ExampleModel
 from strands import tool
 
 @tool
-def list_examples() -> list:
+async def list_examples() -> list:
     """List all example records."""
-    with session_context() as session:
-        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+    async with session_context() as session:
+        return [item.model_dump() for item in (await session.exec(select(ExampleModel))).all()]
 ```
 
 ## Cơ sở hạ tầng
@@ -108,25 +108,11 @@ module "my_agent" {
 
 ### Yêu cầu SSL khi kết nối không có RDS Proxy
 
-Khi agent kết nối trực tiếp với cụm Aurora (không có RDS Proxy), trình tạo kết nối cập nhật Dockerfile agent được tạo để thêm gói CA Amazon RDS tại `/opt/global-bundle.pem`:
+Khi agent kết nối trực tiếp với cụm Aurora (không có RDS Proxy), trình tạo kết nối cập nhật Dockerfile agent được tạo để cài đặt gói CA Amazon RDS vào kho lưu trữ tin cậy hệ thống:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
-```
-
-Truyền đường dẫn đó cho `session_context` bằng cách sử dụng tham số tùy chọn `rds_ca`:
-
-```python title="packages/my_service/my_service/my_agent/agent.py"
-from sqlmodel import select
-from my_scope.my_db import session_context
-from my_scope.my_db.models.example import ExampleModel
-from strands import tool
-
-@tool
-def list_examples() -> list:
-    """List all example records."""
-    with session_context(rds_ca='/opt/global-bundle.pem') as session:
-        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
 Khi sử dụng RDS Proxy, bạn không cần cấu hình gói CA RDS trong runtime agent.

@@ -38,7 +38,7 @@ Il generatore aggiunge il pacchetto del database come dipendenza del workspace, 
 
 ## Come Funziona
 
-Il pacchetto del database esporta `session_context`, un context manager che apre una `Session` SQLModel utilizzando il client del database generato e la chiude quando il blocco `with` termina.
+Il pacchetto del database esporta `session_context`, un context manager asincrono che apre una `AsyncSession` utilizzando il client del database generato e la chiude quando il blocco `async with` termina.
 
 Per lo sviluppo locale, `session_context()` si connette al container del database locale. Nei runtime distribuiti, legge la configurazione del database da AWS AppConfig, genera un token di autenticazione IAM e valida il certificato TLS del database.
 
@@ -53,10 +53,10 @@ from my_scope.my_db.models.example import ExampleModel
 from strands import tool
 
 @tool
-def list_examples() -> list:
+async def list_examples() -> list:
     """List all example records."""
-    with session_context() as session:
-        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+    async with session_context() as session:
+        return [item.model_dump() for item in (await session.exec(select(ExampleModel))).all()]
 ```
 
 ## Infrastruttura
@@ -108,25 +108,11 @@ Assicurati che il ruolo di esecuzione dell'agent abbia il permesso `rds-db:conne
 
 ### Requisiti SSL per la Connessione Senza RDS Proxy
 
-Quando l'agent si connette direttamente al cluster Aurora (senza RDS Proxy), il generatore di connessione aggiorna il Dockerfile dell'agent generato per aggiungere il bundle CA Amazon RDS in `/opt/global-bundle.pem`:
+Quando l'agent si connette direttamente al cluster Aurora (senza RDS Proxy), il generatore di connessione aggiorna il Dockerfile dell'agent generato per installare il bundle CA Amazon RDS nel trust store di sistema:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
-```
-
-Passa quel percorso a `session_context` utilizzando il parametro opzionale `rds_ca`:
-
-```python title="packages/my_service/my_service/my_agent/agent.py"
-from sqlmodel import select
-from my_scope.my_db import session_context
-from my_scope.my_db.models.example import ExampleModel
-from strands import tool
-
-@tool
-def list_examples() -> list:
-    """List all example records."""
-    with session_context(rds_ca='/opt/global-bundle.pem') as session:
-        return [item.model_dump() for item in session.exec(select(ExampleModel)).all()]
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
 Quando si utilizza RDS Proxy, non è necessario configurare il bundle CA RDS nel runtime dell'agent.

@@ -2,12 +2,12 @@
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 1`] = `
 "import ssl
-from collections.abc import Generator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import boto3
 from sqlalchemy import event
-from sqlmodel import Session, create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from .utils import build_database_url, get_database_config, get_local_dev_config, is_local_dev
 
@@ -17,24 +17,14 @@ _runtime_config_key = "Db"
 _engine = None
 
 
-def get_engine(rds_ca: str | None = None):
-    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
-    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+def get_engine():
     global _engine
     if _engine is not None:
         return _engine
-    ssl_args: dict = (
-        {}
-        if is_local_dev()
-        else (
-            {"ssl_ca": rds_ca, "ssl_verify_cert": True, "ssl_verify_identity": True}
-            if rds_ca
-            else {"ssl": ssl.create_default_context()}
-        )
-    )
     if is_local_dev():
         cfg = get_local_dev_config()
         url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
+        ssl_args: dict = {}
     else:
         config = get_database_config(_runtime_config_key)
         url = build_database_url(
@@ -43,9 +33,10 @@ def get_engine(rds_ca: str | None = None):
             config["port"],
             config["database"],
         )
-    _engine = create_engine(url, connect_args=ssl_args)
+        ssl_args = {"ssl": ssl.create_default_context()}
+    _engine = create_async_engine(url, connect_args=ssl_args)
 
-    @event.listens_for(_engine, "do_connect")
+    @event.listens_for(_engine.sync_engine, "do_connect")
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
         if is_local_dev():
             connection_params["password"] = get_local_dev_config()["dbPassword"]
@@ -63,32 +54,31 @@ def get_engine(rds_ca: str | None = None):
     return _engine
 
 
-@contextmanager
-def session_context(rds_ca: str | None = None) -> Generator[Session]:
-    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
-    Required when connecting directly to the RDS cluster without an RDS Proxy."""
-    with Session(get_engine(rds_ca)) as session:
-        yield session
-
-
-def get_session(rds_ca: str | None = None) -> Generator[Session]:
-    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
-    Required when connecting directly to the RDS cluster without an RDS Proxy."""
-    with session_context(rds_ca) as session:
+@asynccontextmanager
+async def session_context() -> AsyncGenerator[AsyncSession]:
+    async with AsyncSession(get_engine()) as session:
         yield session
 "
 `;
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 2`] = `
-"from alembic import command
+"import asyncio
+import ssl
+
+from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 from .utils import build_database_url, get_database_secret, with_connection_retry
 
 
-def _run_migrations() -> None:
+def _apply_migrations(sync_conn, alembic_cfg: Config) -> None:
+    alembic_cfg.attributes["connection"] = sync_conn
+    command.upgrade(alembic_cfg, "head")
+
+
+async def _run_migrations() -> None:
     secret = get_database_secret()
     database_url = build_database_url(
         secret["username"],
@@ -98,64 +88,61 @@ def _run_migrations() -> None:
         password=secret["password"],
     )
     alembic_cfg = Config("alembic.ini")
-    connect_args = {
-        "ssl_ca": "/opt/global-bundle.pem",
-        "ssl_verify_cert": True,
-        "ssl_verify_identity": True,
-    }
-    engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
+    engine = create_async_engine(
+        database_url,
+        poolclass=NullPool,
+        connect_args={"ssl": ssl.create_default_context()},
+    )
     try:
-        with engine.connect() as connection:
-            alembic_cfg.attributes["connection"] = connection
-            command.upgrade(alembic_cfg, "head")
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda c: _apply_migrations(c, alembic_cfg))
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
 def handler(_event, _context):
-    with_connection_retry(_run_migrations)
+    with_connection_retry(lambda: asyncio.run(_run_migrations()))
 "
 `;
 
 exports[`py#rdb generator > should generate MySQL dependencies and templates 3`] = `
-"import secrets
+"import asyncio
+import secrets
+import ssl
 from typing import Any
 
-import pymysql
+import asyncmy
 
 from .utils import get_database_secret, with_connection_retry
 
 
-def _ensure_database_user(db_user: str) -> None:
+async def _ensure_database_user(db_user: str) -> None:
     secret = get_database_secret()
-    connection = pymysql.connect(
+    conn = await asyncmy.connect(
         host=secret["host"],
-        port=secret["port"],
-        database=secret["dbname"],
+        port=int(secret["port"]),
+        db=secret["dbname"],
         user=secret["username"],
         password=secret["password"],
-        ssl_ca="/opt/global-bundle.pem",
-        ssl_verify_cert=True,
-        ssl_verify_identity=True,
-        connect_timeout=10,
+        ssl=ssl.create_default_context(),
     )
     try:
-        with connection.cursor() as cursor:
-            cursor.execute(
+        async with conn.cursor() as cursor:
+            await cursor.execute(
                 "CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'",
                 (db_user,),
             )
-            cursor.execute(
+            await cursor.execute(
                 "ALTER USER %s@'%%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS' REQUIRE SSL",
                 (db_user,),
             )
-            cursor.execute(
+            await cursor.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON \`{secret['dbname']}\`.* TO %s@'%%'",
                 (db_user,),
             )
-        connection.commit()
+        await conn.commit()
     finally:
-        connection.close()
+        conn.close()
 
 
 _PHYSICAL_RESOURCE_ID_PREFIX = "db-user:"
@@ -171,7 +158,7 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     db_user = _resolve_db_user(event.get("PhysicalResourceId"))
 
     if event.get("RequestType") != "Delete":
-        with_connection_retry(lambda: _ensure_database_user(db_user))
+        with_connection_retry(lambda: asyncio.run(_ensure_database_user(db_user)))
 
     return {
         "PhysicalResourceId": f"{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}",
@@ -187,7 +174,8 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 
 CMD ["proj_db.migration_handler.handler"]
 "
@@ -200,7 +188,8 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 
 CMD ["proj_db.create_db_user_handler.handler"]
 "
@@ -934,12 +923,14 @@ output "database_runtime_user" {
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/env.py 1`] = `
-"import json
+"import asyncio
+import json
 import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import URL, engine_from_config, pool
+from sqlalchemy import URL
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 
 # Import all models to register them in SQLModel.metadata
@@ -959,7 +950,7 @@ def _get_local_url():
         with open(config_path) as f:
             cfg = json.load(f)["localDev"]
         engine = cfg["dbEngine"]
-        driver = "mysql+pymysql" if engine == "mysql" else "postgresql+psycopg"
+        driver = "mysql+asyncmy" if engine == "mysql" else "postgresql+asyncpg"
         return URL.create(
             driver,
             username=cfg["dbUser"],
@@ -984,32 +975,28 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _run_migrations_sync(sync_conn) -> None:
+    context.configure(connection=sync_conn, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
 # Runs migrations against a live DB connection
 def run_migrations_online() -> None:
     supplied_connection = config.attributes.get("connection")
     # Connection injected by migration_handler.py (Lambda)
     if supplied_connection is not None:
-        context.configure(
-            connection=supplied_connection,
-            target_metadata=target_metadata,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+        _run_migrations_sync(supplied_connection)
         return
 
     # Local alembic commands run via nx run <project>:alembic
-    connectable = engine_from_config(
-        {"sqlalchemy.url": _get_local_url()},
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    async def _run_async() -> None:
+        engine = create_async_engine(_get_local_url())
+        async with engine.begin() as conn:
+            await conn.run_sync(_run_migrations_sync)
+        await engine.dispose()
+
+    asyncio.run(_run_async())
 
 
 if context.is_offline_mode():
@@ -1054,20 +1041,20 @@ def downgrade() -> None:
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/migrations/versions/.gitkeep 1`] = `""`;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/__init__.py 1`] = `
-"from .connection import get_engine, get_session, is_local_dev, session_context
+"from .connection import get_engine, is_local_dev, session_context
 
-__all__ = ["get_engine", "get_session", "is_local_dev", "session_context"]
+__all__ = ["get_engine", "is_local_dev", "session_context"]
 "
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/connection.py 1`] = `
-"from collections.abc import Generator
-from contextlib import contextmanager
+"import ssl
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import boto3
-import certifi
 from sqlalchemy import event
-from sqlmodel import Session, create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from .utils import build_database_url, get_database_config, get_local_dev_config, is_local_dev
 
@@ -1077,23 +1064,14 @@ _runtime_config_key = "Db"
 _engine = None
 
 
-def get_engine(rds_ca: str | None = None):
-    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
-    Required when connecting directly to the RDS cluster without an RDS Proxy."""
+def get_engine():
     global _engine
     if _engine is not None:
         return _engine
-    ssl_args: dict = (
-        {}
-        if is_local_dev()
-        else {
-            "sslmode": "verify-full",
-            "sslrootcert": rds_ca if rds_ca else certifi.where(),
-        }
-    )
     if is_local_dev():
         cfg = get_local_dev_config()
         url = build_database_url(cfg["dbUser"], cfg["host"], cfg["port"], cfg["dbName"])
+        ssl_args: dict = {}
     else:
         config = get_database_config(_runtime_config_key)
         url = build_database_url(
@@ -1102,9 +1080,10 @@ def get_engine(rds_ca: str | None = None):
             config["port"],
             config["database"],
         )
-    _engine = create_engine(url, connect_args=ssl_args)
+        ssl_args = {"ssl": ssl.create_default_context()}
+    _engine = create_async_engine(url, connect_args=ssl_args)
 
-    @event.listens_for(_engine, "do_connect")
+    @event.listens_for(_engine.sync_engine, "do_connect")
     def provide_password(_dialect, _connection_record, _cargs, connection_params):
         if is_local_dev():
             connection_params["password"] = get_local_dev_config()["dbPassword"]
@@ -1122,75 +1101,58 @@ def get_engine(rds_ca: str | None = None):
     return _engine
 
 
-@contextmanager
-def session_context(rds_ca: str | None = None) -> Generator[Session]:
-    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
-    Required when connecting directly to the RDS cluster without an RDS Proxy."""
-    with Session(get_engine(rds_ca)) as session:
-        yield session
-
-
-def get_session(rds_ca: str | None = None) -> Generator[Session]:
-    """:param rds_ca: Path to a CA certificate bundle for SSL server verification.
-    Required when connecting directly to the RDS cluster without an RDS Proxy."""
-    with session_context(rds_ca) as session:
+@asynccontextmanager
+async def session_context() -> AsyncGenerator[AsyncSession]:
+    async with AsyncSession(get_engine()) as session:
         yield session
 "
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/create_db_user_handler.py 1`] = `
-"import secrets
+"import asyncio
+import secrets
+import ssl
 from typing import Any
 
-import psycopg
-from psycopg import sql as pgsql
+import asyncpg
 
 from .utils import get_database_secret, with_connection_retry
 
 
-def _ensure_database_user(db_user: str) -> None:
+async def _ensure_database_user(db_user: str) -> None:
     secret = get_database_secret()
-    connection = psycopg.connect(
+    conn = await asyncpg.connect(
         host=secret["host"],
-        port=secret["port"],
-        dbname=secret["dbname"],
+        port=int(secret["port"]),
+        database=secret["dbname"],
         user=secret["username"],
         password=secret["password"],
-        sslmode="verify-full",
-        sslrootcert="/opt/global-bundle.pem",
-        connect_timeout=10,
+        ssl=ssl.create_default_context(),
     )
     try:
-        connection.autocommit = False
-        with connection.cursor() as cursor:
-            db_user_ident = pgsql.Identifier(db_user)
-            db_name_ident = pgsql.Identifier(secret["dbname"])
-            cursor.execute(
-                pgsql.SQL("SELECT 1 FROM pg_roles WHERE rolname = %s"),
-                (db_user,),
-            )
-            if cursor.fetchone() is None:
-                cursor.execute(pgsql.SQL("CREATE ROLE {} WITH LOGIN").format(db_user_ident))
-            cursor.execute(
-                pgsql.SQL(
-                    "ALTER ROLE {role} WITH LOGIN;"
-                    "GRANT CONNECT ON DATABASE {db} TO {role};"
-                    "GRANT USAGE ON SCHEMA public TO {role};"
-                    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role};"
-                    "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-                    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-                    "GRANT USAGE, SELECT ON SEQUENCES TO {role};"
-                    "GRANT rds_iam TO {role};"
-                ).format(role=db_user_ident, db=db_name_ident)
-            )
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
+        quoted = await conn.fetchrow(
+            "SELECT quote_ident($1) AS role_q, quote_ident($2) AS db_q",
+            db_user,
+            secret["dbname"],
+        )
+        role_q, db_q = quoted["role_q"], quoted["db_q"]
+        row = await conn.fetchrow("SELECT 1 FROM pg_roles WHERE rolname = $1", db_user)
+        if row is None:
+            await conn.execute(f"CREATE ROLE {role_q} WITH LOGIN")
+        await conn.execute(f"""
+            ALTER ROLE {role_q} WITH LOGIN;
+            GRANT CONNECT ON DATABASE {db_q} TO {role_q};
+            GRANT USAGE ON SCHEMA public TO {role_q};
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role_q};
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role_q};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role_q};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT USAGE, SELECT ON SEQUENCES TO {role_q};
+            GRANT rds_iam TO {role_q};
+        """)
     finally:
-        connection.close()
+        await conn.close()
 
 
 _PHYSICAL_RESOURCE_ID_PREFIX = "db-user:"
@@ -1206,7 +1168,7 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     db_user = _resolve_db_user(event.get("PhysicalResourceId"))
 
     if event.get("RequestType") != "Delete":
-        with_connection_retry(lambda: _ensure_database_user(db_user))
+        with_connection_retry(lambda: asyncio.run(_ensure_database_user(db_user)))
 
     return {
         "PhysicalResourceId": f"{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}",
@@ -1216,15 +1178,23 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic > packages/db/proj_db/migration_handler.py 1`] = `
-"from alembic import command
+"import asyncio
+import ssl
+
+from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 from .utils import build_database_url, get_database_secret, with_connection_retry
 
 
-def _run_migrations() -> None:
+def _apply_migrations(sync_conn, alembic_cfg: Config) -> None:
+    alembic_cfg.attributes["connection"] = sync_conn
+    command.upgrade(alembic_cfg, "head")
+
+
+async def _run_migrations() -> None:
     secret = get_database_secret()
     database_url = build_database_url(
         secret["username"],
@@ -1234,18 +1204,20 @@ def _run_migrations() -> None:
         password=secret["password"],
     )
     alembic_cfg = Config("alembic.ini")
-    connect_args = {"sslmode": "verify-full", "sslrootcert": "/opt/global-bundle.pem"}
-    engine = create_engine(database_url, poolclass=NullPool, connect_args=connect_args)
+    engine = create_async_engine(
+        database_url,
+        poolclass=NullPool,
+        connect_args={"ssl": ssl.create_default_context()},
+    )
     try:
-        with engine.connect() as connection:
-            alembic_cfg.attributes["connection"] = connection
-            command.upgrade(alembic_cfg, "head")
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda c: _apply_migrations(c, alembic_cfg))
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
 def handler(_event, _context):
-    with_connection_retry(_run_migrations)
+    with_connection_retry(lambda: asyncio.run(_run_migrations()))
 "
 `;
 
@@ -1291,7 +1263,7 @@ def build_database_url(
     password: str | None = None,
 ) -> URL:
     return URL.create(
-        drivername="postgresql+psycopg",
+        drivername="postgresql+asyncpg",
         username=username,
         password=password,
         host=host,
@@ -1423,7 +1395,8 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 
 CMD ["proj_db.migration_handler.handler"]
 "
@@ -1436,7 +1409,8 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 COPY . .
 
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 
 CMD ["proj_db.create_db_user_handler.handler"]
 "
@@ -1504,8 +1478,7 @@ readme = "README.md"
 dependencies = [
   "sqlmodel==0.0.38",
   "alembic==1.18.4",
-  "psycopg[binary,pool]==3.3.4",
-  "certifi==2026.6.17",
+  "asyncpg==0.31.0",
   "boto3==1.43.37",
   "aws-lambda-powertools==3.31.0"
 ]
@@ -1576,58 +1549,50 @@ export class Db extends AuroraDatabase {
 `;
 
 exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with Alembic 7`] = `
-"import secrets
+"import asyncio
+import secrets
+import ssl
 from typing import Any
 
-import psycopg
-from psycopg import sql as pgsql
+import asyncpg
 
 from .utils import get_database_secret, with_connection_retry
 
 
-def _ensure_database_user(db_user: str) -> None:
+async def _ensure_database_user(db_user: str) -> None:
     secret = get_database_secret()
-    connection = psycopg.connect(
+    conn = await asyncpg.connect(
         host=secret["host"],
-        port=secret["port"],
-        dbname=secret["dbname"],
+        port=int(secret["port"]),
+        database=secret["dbname"],
         user=secret["username"],
         password=secret["password"],
-        sslmode="verify-full",
-        sslrootcert="/opt/global-bundle.pem",
-        connect_timeout=10,
+        ssl=ssl.create_default_context(),
     )
     try:
-        connection.autocommit = False
-        with connection.cursor() as cursor:
-            db_user_ident = pgsql.Identifier(db_user)
-            db_name_ident = pgsql.Identifier(secret["dbname"])
-            cursor.execute(
-                pgsql.SQL("SELECT 1 FROM pg_roles WHERE rolname = %s"),
-                (db_user,),
-            )
-            if cursor.fetchone() is None:
-                cursor.execute(pgsql.SQL("CREATE ROLE {} WITH LOGIN").format(db_user_ident))
-            cursor.execute(
-                pgsql.SQL(
-                    "ALTER ROLE {role} WITH LOGIN;"
-                    "GRANT CONNECT ON DATABASE {db} TO {role};"
-                    "GRANT USAGE ON SCHEMA public TO {role};"
-                    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role};"
-                    "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-                    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role};"
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-                    "GRANT USAGE, SELECT ON SEQUENCES TO {role};"
-                    "GRANT rds_iam TO {role};"
-                ).format(role=db_user_ident, db=db_name_ident)
-            )
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
+        quoted = await conn.fetchrow(
+            "SELECT quote_ident($1) AS role_q, quote_ident($2) AS db_q",
+            db_user,
+            secret["dbname"],
+        )
+        role_q, db_q = quoted["role_q"], quoted["db_q"]
+        row = await conn.fetchrow("SELECT 1 FROM pg_roles WHERE rolname = $1", db_user)
+        if row is None:
+            await conn.execute(f"CREATE ROLE {role_q} WITH LOGIN")
+        await conn.execute(f"""
+            ALTER ROLE {role_q} WITH LOGIN;
+            GRANT CONNECT ON DATABASE {db_q} TO {role_q};
+            GRANT USAGE ON SCHEMA public TO {role_q};
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role_q};
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role_q};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role_q};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT USAGE, SELECT ON SEQUENCES TO {role_q};
+            GRANT rds_iam TO {role_q};
+        """)
     finally:
-        connection.close()
+        await conn.close()
 
 
 _PHYSICAL_RESOURCE_ID_PREFIX = "db-user:"
@@ -1643,7 +1608,7 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     db_user = _resolve_db_user(event.get("PhysicalResourceId"))
 
     if event.get("RequestType") != "Delete":
-        with_connection_retry(lambda: _ensure_database_user(db_user))
+        with_connection_retry(lambda: asyncio.run(_ensure_database_user(db_user)))
 
     return {
         "PhysicalResourceId": f"{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}",

@@ -131,21 +131,23 @@ Windows의 신호 처리 제한으로 인해 `dev`가 중지될 때 컨테이너
 
 ## 데이터베이스 연결
 
-데이터베이스 패키지에서 `session_context`를 가져와서 컨텍스트 매니저로 사용하여 SQLModel `Session`을 얻습니다:
+데이터베이스 패키지에서 `session_context`를 가져와서 비동기 컨텍스트 매니저로 사용하여 `AsyncSession`을 얻습니다:
 
 ```python
 from sqlmodel import select
 
 from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
 
-with session_context() as session:
-    results = session.exec(select(ExampleModel)).all()
+async def example():
+    async with session_context() as session:
+        results = (await session.exec(select(ExampleModel))).all()
 ```
 
 데이터베이스 클라이언트는 자동으로:
 - `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 데이터베이스 구성을 검색합니다
 - IAM 인증을 위해 `boto3` RDS Signer를 통해 임시 인증 토큰을 생성합니다
-- 인증서 검증을 사용하여 SSL/TLS 연결을 관리합니다
+- `ssl.create_default_context()`를 사용하여 TLS 연결을 설정합니다
 
 ## 데이터베이스 배포
 
@@ -157,80 +159,27 @@ with session_context() as session:
 
 ### RDS Proxy 없이 연결할 때 SSL 요구 사항
 
-RDS Proxy 없이 Aurora 클러스터에 직접 연결할 때는 선택적 `rds_ca` 매개변수를 사용하여 Amazon RDS CA 번들 경로를 전달합니다:
+Amazon RDS CA 번들은 런타임의 시스템 신뢰 저장소에 있어야 합니다.
 
-```python
-from my_scope.my_db import session_context
+#### 컨테이너 런타임
 
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-`rds_ca` 값은 런타임 파일 시스템에서 사용 가능한 CA 인증서 번들을 가리켜야 합니다. Amazon RDS의 경우 다음에서 글로벌 CA 번들을 사용하세요:
-
-```text
-https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-```
-
-해당 파일을 사용 가능하게 만드는 방법은 데이터베이스에 연결하는 런타임에 따라 다릅니다.
-
-#### 런타임 컨테이너 이미지
-
-런타임용 자체 컨테이너 이미지를 준비하는 경우 Dockerfile에 RDS CA 번들을 추가하고 해당 경로를 `session_context`에 전달합니다:
+Debian 기반 컨테이너 이미지의 경우 Amazon RDS CA 번들을 시스템 신뢰 저장소에 추가합니다:
 
 ```dockerfile
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
 ```
 
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
+Amazon Linux 기반 컨테이너 이미지의 경우 대신 `update-ca-trust` 명령을 사용합니다:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
 ```
 
-#### 압축된 Lambda 함수
+#### Zip Lambda 함수
 
-압축된 Lambda 함수를 배포하는 경우 `RdsCaLayer` Lambda 레이어(CDK) 또는 `ca-layer` Terraform 모듈을 연결합니다. CDK 레이어는 Docker 번들링을 사용하여 CA 번들을 추가하며, 배포된 레이어는 `/opt/global-bundle.pem`에서 이를 제공하므로 `session_context`에 전달할 수 있습니다:
-
-```python
-with session_context(rds_ca='/opt/global-bundle.pem') as session:
-    ...
-```
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RdsCaLayer } from ':my-scope/common-constructs';
-
-const rdsCaLayer = new RdsCaLayer(this, 'RdsCaLayer');
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      layers: [rdsCaLayer.layer],
-    })
-    .build(),
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "rds_ca_layer" {
-  source = "../../common/terraform/src/core/rdb/ca-layer"
-}
-
-module "api" {
-  source = "..."
-  ...
-
-  layers = [module.rds_ca_layer.layer_arn]
-}
-```
-
-</Fragment>
-</Infrastructure>
+zip으로 배포된 Lambda 함수(예: <Link path="guides/fastapi">`py#api` FastAPI</Link>)의 경우, Amazon Linux 2023 Lambda 실행 환경의 내장 CA 신뢰 저장소에는 RDS에서 사용하는 Amazon Root CA가 포함되어 있습니다.
 
 RDS Proxy를 사용하는 경우 데이터베이스에 연결하는 런타임에서 RDS CA 번들을 구성할 필요가 없습니다.
 
@@ -270,7 +219,7 @@ RDS Proxy를 사용하는 경우 데이터베이스에 연결하는 런타임에
   <ConnectionCard
     title="Python Agent to Relational Database"
     description="Python Agent를 Aurora 관계형 데이터베이스에 연결"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-agent-rdb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-rdb`}
     source="strands"
     sourceBadge="python"
     target="aurora"
@@ -279,7 +228,7 @@ RDS Proxy를 사용하는 경우 데이터베이스에 연결하는 런타임에
   <ConnectionCard
     title="FastAPI to Relational Database"
     description="FastAPI를 Aurora 관계형 데이터베이스에 연결"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-fast-api-rdb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-rdb`}
     source="fastapi"
     target="aurora"
     targetBadge="python"
@@ -287,7 +236,7 @@ RDS Proxy를 사용하는 경우 데이터베이스에 연결하는 런타임에
   <ConnectionCard
     title="Python MCP Server to Relational Database"
     description="Python MCP Server를 Aurora 관계형 데이터베이스에 연결"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-mcp-server-rdb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-mcp-server-rdb`}
     source="mcp"
     sourceBadge="python"
     target="aurora"
