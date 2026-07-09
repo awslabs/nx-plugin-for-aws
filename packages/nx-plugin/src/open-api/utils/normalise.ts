@@ -564,22 +564,31 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
         }
         if ('requestBody' in operation) {
           const requestBody = resolveIfRef(spec, operation.requestBody);
-          const jsonMediaType = preferredJsonMediaType(
-            Object.keys(requestBody?.content ?? {}),
-          );
-          const jsonRequestSchema = jsonMediaType
-            ? requestBody!.content![jsonMediaType].schema
+          const contentMediaTypes = Object.keys(requestBody?.content ?? {});
+          // Hoist the JSON body, falling back to a form-data body (multipart or
+          // urlencoded) so an inline form object is fully typed and marshalled
+          // rather than left `unknown`.
+          const bodyMediaType =
+            preferredJsonMediaType(contentMediaTypes) ??
+            contentMediaTypes.find((mt) =>
+              [
+                'multipart/form-data',
+                'application/x-www-form-urlencoded',
+              ].includes(mt.split(';')[0]),
+            );
+          const bodyRequestSchema = bodyMediaType
+            ? requestBody!.content![bodyMediaType].schema
             : undefined;
           if (
-            jsonRequestSchema &&
-            !isRef(jsonRequestSchema) &&
-            (['object', 'array'].includes(jsonRequestSchema.type!) ||
-              isCompositeSchema(jsonRequestSchema) ||
-              (jsonRequestSchema?.type === 'string' && jsonRequestSchema.enum))
+            bodyRequestSchema &&
+            !isRef(bodyRequestSchema) &&
+            (['object', 'array'].includes(bodyRequestSchema.type!) ||
+              isCompositeSchema(bodyRequestSchema) ||
+              (bodyRequestSchema?.type === 'string' && bodyRequestSchema.enum))
           ) {
             const schemaName = `${upperFirst(deduplicatedOpId)}RequestContent`;
-            spec.components!.schemas![schemaName] = jsonRequestSchema;
-            requestBody!.content![jsonMediaType!].schema = {
+            spec.components!.schemas![schemaName] = bodyRequestSchema;
+            requestBody!.content![bodyMediaType!].schema = {
               $ref: `#/components/schemas/${schemaName}`,
             };
           }

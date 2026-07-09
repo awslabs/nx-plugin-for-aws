@@ -108,8 +108,26 @@ const isDictionarySchema = (schema: Schema): boolean => {
  */
 const primitiveType = (schema: Schema): string => {
   const type = primaryType(schema);
-  if (type === 'string' && schema.format === 'binary') return 'binary';
+  if (type === 'string' && isBinaryStringSchema(schema)) return 'binary';
   return (type && PRIMITIVE_TYPE_MAP[type]) ?? 'unknown';
+};
+
+/**
+ * Whether a `string` schema denotes raw binary content (rendered as a `Blob`).
+ * Covers the 3.0 `format: binary` idiom and the 3.1 `contentMediaType` idiom
+ * (as emitted by FastAPI for `UploadFile`). A base64 `contentEncoding`, or a
+ * textual/JSON media type, keeps the value a string on the wire.
+ */
+const isBinaryStringSchema = (schema: Schema): boolean => {
+  if (schema.format === 'binary') return true;
+  const contentMediaType = schema.contentMediaType;
+  if (!contentMediaType || schema.contentEncoding) return false;
+  return !(
+    contentMediaType.startsWith('text/') ||
+    contentMediaType === 'application/json' ||
+    contentMediaType.endsWith('+json') ||
+    contentMediaType === 'application/xml'
+  );
 };
 
 /**
@@ -790,10 +808,9 @@ const resolveComposedModels = (data: ClientData): void => {
 
 const isHoisted = (spec: Spec, name: string): boolean =>
   !!(
-    resolveIfRef<Schema | undefined>(
-      spec,
-      spec.components?.schemas?.[name],
-    ) as { 'x-aws-nx-hoisted'?: boolean } | undefined
+    resolveIfRef<Schema | undefined>(spec, spec.components?.schemas?.[name]) as
+      | { 'x-aws-nx-hoisted'?: boolean }
+      | undefined
   )?.['x-aws-nx-hoisted'];
 
 /**
@@ -838,7 +855,11 @@ const buildCompositeDiscriminator = (
   const candidateNames = new Set(
     (model.composedModels ?? []).map((m) => m.name),
   );
-  const mapping = buildDiscriminatorMapping(spec, discriminator, candidateNames);
+  const mapping = buildDiscriminatorMapping(
+    spec,
+    discriminator,
+    candidateNames,
+  );
 
   return mapping.length > 0
     ? { propertyName: discriminator.propertyName, mapping }
