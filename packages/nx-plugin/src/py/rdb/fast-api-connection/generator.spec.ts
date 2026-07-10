@@ -90,7 +90,7 @@ describe('py#rdb fast-api-connection generator', () => {
     expect(config.targets?.['dev']).toBeUndefined();
   });
 
-  it('should generate SessionDep dependency file', async () => {
+  it('should generate the database session dependency file', async () => {
     setupFastApiProject();
     setupRdbProject();
 

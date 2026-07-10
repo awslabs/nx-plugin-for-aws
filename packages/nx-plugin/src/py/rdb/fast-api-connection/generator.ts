@@ -13,7 +13,7 @@ import {
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { toSnakeCase } from '../../../utils/names';
+import { toClassName, toSnakeCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
@@ -54,6 +54,7 @@ export const pyRdbFastApiConnectionGenerator = async (
   const rdbLocalName = targetProject.name.split('.').pop()!;
   const databasePackageAlias = `${scope}_${rdbLocalName}`;
   const rdbNameSnake = toSnakeCase(rdbLocalName);
+  const rdbNameClassName = toClassName(rdbLocalName);
   const apiName = (sourceProject.metadata as any)?.apiName as string;
   const apiModuleName = toSnakeCase(`${scope}_${toSnakeCase(apiName)}`);
 
@@ -61,7 +62,7 @@ export const pyRdbFastApiConnectionGenerator = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     sourceProject.root,
-    { databasePackageAlias, rdbNameSnake, apiModuleName },
+    { databasePackageAlias, rdbNameSnake, rdbNameClassName, apiModuleName },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
