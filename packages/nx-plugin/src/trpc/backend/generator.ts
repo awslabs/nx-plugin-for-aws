@@ -75,7 +75,6 @@ export async function tsTrpcApiGenerator(
       name: backendName,
       directory: options.directory,
       subDirectory: options.subDirectory,
-      module: options.module,
       preferInstallDependencies: false,
     });
   }

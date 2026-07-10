@@ -13,7 +13,6 @@ export interface TsTrpcApiGeneratorSchema {
   auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
-  module?: TsProjectGeneratorSchema['module'];
   iac: IacOption;
   preferInstallDependencies?: boolean;
 }

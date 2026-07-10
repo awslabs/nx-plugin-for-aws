@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, type Tree } from '@nx/devkit';
+import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -277,13 +277,17 @@ describe('ts lib generator', () => {
     ).not.toBe('node16');
   });
 
-  it('should configure the project for CommonJS when module=cjs', async () => {
+  it('should configure the project for CommonJS in a commonjs workspace', async () => {
+    // The preset establishes the workspace format; generators infer it.
+    writeJson(tree, 'package.json', {
+      ...readJson(tree, 'package.json'),
+      type: 'commonjs',
+    });
     await tsProjectGenerator(tree, {
       name: 'test-lib',
-      module: 'cjs',
       preferInstallDependencies: false,
     });
-    // CommonJS workspaces are marked with an explicit `type: commonjs`.
+    // CommonJS workspaces keep their explicit `type: commonjs`.
     expect(readJson(tree, 'package.json').type).toBe('commonjs');
     const compilerOptions = readJson(
       tree,
@@ -294,13 +298,14 @@ describe('ts lib generator', () => {
   });
 
   it('should infer CommonJS from an existing commonjs workspace', async () => {
-    // First project sets the workspace to CommonJS.
+    writeJson(tree, 'package.json', {
+      ...readJson(tree, 'package.json'),
+      type: 'commonjs',
+    });
     await tsProjectGenerator(tree, {
       name: 'first-lib',
-      module: 'cjs',
       preferInstallDependencies: false,
     });
-    // A subsequent project with the default (infer) follows suit.
     await tsProjectGenerator(tree, {
       name: 'second-lib',
       preferInstallDependencies: false,
@@ -309,57 +314,5 @@ describe('ts lib generator', () => {
     expect(
       readJson(tree, 'second-lib/tsconfig.lib.json').compilerOptions?.module,
     ).toBe('node16');
-  });
-
-  it('should error when module=cjs conflicts with an established ESM workspace', async () => {
-    // First project establishes the workspace as ESM.
-    await tsProjectGenerator(tree, {
-      name: 'first-lib',
-      preferInstallDependencies: false,
-    });
-    // A CommonJS project would flip the whole workspace, so it must error.
-    await expect(
-      tsProjectGenerator(tree, {
-        name: 'second-lib',
-        module: 'cjs',
-        preferInstallDependencies: false,
-      }),
-    ).rejects.toThrow(/already configured for ES modules/);
-    // The workspace format and the existing project are left untouched.
-    expect(readJson(tree, 'package.json').type).toBe('module');
-    expect(tree.exists('second-lib')).toBe(false);
-  });
-
-  it('should error when module=esm conflicts with an established CommonJS workspace', async () => {
-    await tsProjectGenerator(tree, {
-      name: 'first-lib',
-      module: 'cjs',
-      preferInstallDependencies: false,
-    });
-    await expect(
-      tsProjectGenerator(tree, {
-        name: 'second-lib',
-        module: 'esm',
-        preferInstallDependencies: false,
-      }),
-    ).rejects.toThrow(/already configured for CommonJS/);
-    expect(readJson(tree, 'package.json').type).toBe('commonjs');
-    expect(tree.exists('second-lib')).toBe(false);
-  });
-
-  it('should allow module=cjs when it matches the established workspace', async () => {
-    await tsProjectGenerator(tree, {
-      name: 'first-lib',
-      module: 'cjs',
-      preferInstallDependencies: false,
-    });
-    await expect(
-      tsProjectGenerator(tree, {
-        name: 'second-lib',
-        module: 'cjs',
-        preferInstallDependencies: false,
-      }),
-    ).resolves.toBeDefined();
-    expect(tree.exists('second-lib')).toBe(true);
   });
 });

@@ -86,7 +86,6 @@ export const tsSmithyApiGenerator = async (
       name: options.name,
       directory: dir,
       subDirectory: 'backend',
-      module: options.module,
       preferInstallDependencies: false,
     });
   }

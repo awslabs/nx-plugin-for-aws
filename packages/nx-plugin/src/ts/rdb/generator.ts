@@ -75,7 +75,6 @@ export const tsRdbGenerator = async (
     await tsProjectGenerator(tree, {
       name: options.name,
       directory: options.directory,
-      module: options.module,
       preferInstallDependencies: false,
     });
   }

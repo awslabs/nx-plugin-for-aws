@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { LibraryGeneratorSchema } from '@nx/js/src/utils/schema';
-import type { ModuleFormatOption } from '../../utils/module-format';
 export interface TsProjectGeneratorSchema {
   name: LibraryGeneratorSchema['name'];
   directory?: string;
@@ -11,6 +10,5 @@ export interface TsProjectGeneratorSchema {
   // TODO: test and consider exposing alternate bundlers
   // bundler?: LibraryGeneratorSchema['bundler'];
   subDirectory?: string;
-  module?: ModuleFormatOption;
   preferInstallDependencies?: boolean;
 }
