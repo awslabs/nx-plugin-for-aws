@@ -10,6 +10,8 @@ import type { OpenAPIV3, OpenAPIV3_1 } from 'openapi-types';
  * - `interface` — an object type with named properties
  * - `enum` — a set of string/number literal values
  * - `array` — a list whose element type is described by `link`
+ * - `tuple` — a fixed-length array (`prefixItems`) whose element types are the
+ *   `properties`, in order
  * - `dictionary` — a map whose value type is described by `link`
  * - `reference` — a reference to another named model (`type` is its name)
  * - `generic` — a primitive (string/number/boolean/null/void/binary/any)
@@ -19,6 +21,7 @@ export type ModelExport =
   | 'interface'
   | 'enum'
   | 'array'
+  | 'tuple'
   | 'dictionary'
   | 'reference'
   | 'generic'

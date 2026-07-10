@@ -104,30 +104,17 @@ const isDictionarySchema = (schema: Schema): boolean => {
 };
 
 /**
- * The internal primitive type name for a primitive schema.
+ * The internal primitive type name for a primitive schema. A `string` field
+ * denotes raw binary content (rendered as a `Blob`) only via `format: binary`.
+ * The 3.1 `contentMediaType` idiom is ambiguous in isolation — FastAPI emits it
+ * both for multipart file fields (binary) and for `bytes` in a JSON body
+ * (base64 string) — so `normalise` rewrites it to `format: binary` for form
+ * bodies only, and this stays context-free.
  */
 const primitiveType = (schema: Schema): string => {
   const type = primaryType(schema);
-  if (type === 'string' && isBinaryStringSchema(schema)) return 'binary';
+  if (type === 'string' && schema.format === 'binary') return 'binary';
   return (type && PRIMITIVE_TYPE_MAP[type]) ?? 'unknown';
-};
-
-/**
- * Whether a `string` schema denotes raw binary content (rendered as a `Blob`).
- * Covers the 3.0 `format: binary` idiom and the 3.1 `contentMediaType` idiom
- * (as emitted by FastAPI for `UploadFile`). A base64 `contentEncoding`, or a
- * textual/JSON media type, keeps the value a string on the wire.
- */
-const isBinaryStringSchema = (schema: Schema): boolean => {
-  if (schema.format === 'binary') return true;
-  const contentMediaType = schema.contentMediaType;
-  if (!contentMediaType || schema.contentEncoding) return false;
-  return !(
-    contentMediaType.startsWith('text/') ||
-    contentMediaType === 'application/json' ||
-    contentMediaType.endsWith('+json') ||
-    contentMediaType === 'application/xml'
-  );
 };
 
 /**
@@ -185,7 +172,22 @@ const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
   const type = primaryType(schema);
 
   if (type === 'array') {
+    // A fixed-length tuple (3.1 `prefixItems`, as emitted by Pydantic for
+    // `tuple[A, B]`) models each element positionally in `properties`. An open
+    // tuple (additional `items` beyond the prefix) degrades to a plain array.
+    const prefixItems = (schema as { prefixItems?: SchemaOrRef[] }).prefixItems;
     const items = (schema as { items?: SchemaOrRef }).items;
+    if (prefixItems && prefixItems.length > 0 && !items) {
+      const properties = prefixItems.map((member) =>
+        buildInlineModel(spec, member),
+      );
+      return {
+        export: 'tuple',
+        type: 'unknown',
+        properties,
+        imports: collectImports(properties),
+      };
+    }
     return { export: 'array', ...collectionValue(spec, items) };
   }
 
@@ -652,6 +654,17 @@ export const linkModel = (
     }
   }
 
+  if (model.export === 'tuple' && 'prefixItems' in schema) {
+    const memberSchemas =
+      (schema as { prefixItems?: OpenApiSchemaOrRef[] }).prefixItems ?? [];
+    model.properties.forEach((member, i) => {
+      const subSchema = resolveIfRef(spec, memberSchemas[i]);
+      if (subSchema && !visited.has(member)) {
+        linkModel(spec, modelsByName, member, subSchema, visited);
+      }
+    });
+  }
+
   model.properties
     .filter((p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)])
     .forEach((property) => {
@@ -822,10 +835,9 @@ const isHoisted = (spec: Spec, name: string): boolean =>
  */
 const wireName = (spec: Spec, name: string): string =>
   (
-    resolveIfRef<Schema | undefined>(
-      spec,
-      spec.components?.schemas?.[name],
-    ) as { 'x-aws-nx-original-name'?: string } | undefined
+    resolveIfRef<Schema | undefined>(spec, spec.components?.schemas?.[name]) as
+      | { 'x-aws-nx-original-name'?: string }
+      | undefined
   )?.['x-aws-nx-original-name'] ?? name;
 
 /**
@@ -850,11 +862,13 @@ const buildDiscriminatorMapping = (
     }
     return mapping;
   }
-  return [...candidateNames]
-    .filter((name) => !isHoisted(spec, name))
-    // The wire value is the schema's original name; the model it selects is the
-    // normalised name.
-    .map((name) => ({ value: wireName(spec, name), modelName: name }));
+  return (
+    [...candidateNames]
+      .filter((name) => !isHoisted(spec, name))
+      // The wire value is the schema's original name; the model it selects is the
+      // normalised name.
+      .map((name) => ({ value: wireName(spec, name), modelName: name }))
+  );
 };
 
 /**
@@ -983,7 +997,10 @@ const resolveDiscriminatorLiterals = (data: ClientData): void => {
         // Same subtype+property tagged differently by another union.
         conflicting.add(key);
       }
-      valuesBySubtypeProp.set(key, existing ? union(existing, incoming) : incoming);
+      valuesBySubtypeProp.set(
+        key,
+        existing ? union(existing, incoming) : incoming,
+      );
     }
   }
 

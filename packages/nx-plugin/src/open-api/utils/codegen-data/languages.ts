@@ -18,6 +18,10 @@ const toTypescriptPrimitive = (property: Model): string => {
   return property.type;
 };
 
+// A nullable tuple member renders as a union with null.
+const memberType = (rendered: string, member: Model): string =>
+  member.isNullable && member.type !== 'null' ? `${rendered} | null` : rendered;
+
 export const toTypeScriptType = (property: Model): string => {
   // A discriminated subtype's discriminator property renders as its literal
   // tag, making the union a true (narrowable) tagged union.
@@ -34,6 +38,10 @@ export const toTypeScriptType = (property: Model): string => {
       return toTypescriptPrimitive(property);
     case 'array':
       return `Array<${valueType()}>`;
+    case 'tuple':
+      return `[${property.properties
+        .map((member) => memberType(toTypeScriptType(member), member))
+        .join(', ')}]`;
     case 'dictionary':
       return `{ [key: string]: ${valueType()}; }`;
     case 'one-of':
@@ -132,6 +140,10 @@ export const toPythonType = (property: Model): string => {
       return toPythonPrimitive(property);
     case 'array':
       return `List[${valueType()}]`;
+    case 'tuple':
+      return `Tuple[${property.properties
+        .map((member) => toPythonType(member))
+        .join(', ')}]`;
     case 'dictionary':
       return `Dict[str, ${valueType()}]`;
     case 'one-of':

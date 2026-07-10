@@ -119,6 +119,54 @@ const preferredJsonMediaType = (mediaTypes: string[]): string | undefined =>
   mediaTypes.find((mediaType) => mediaType === 'application/json') ??
   mediaTypes.find((mediaType) => mediaType.split(';')[0].endsWith('+json'));
 
+const FORM_MEDIA_TYPES = [
+  'multipart/form-data',
+  'application/x-www-form-urlencoded',
+];
+
+const isFormMediaType = (mediaType: string): boolean =>
+  FORM_MEDIA_TYPES.includes(mediaType.split(';')[0]);
+
+/**
+ * Whether a `contentMediaType` denotes binary (rather than textual/JSON)
+ * content — an octet-stream, image, audio, etc.
+ */
+const isBinaryContentMediaType = (contentMediaType: string): boolean =>
+  !(
+    contentMediaType.startsWith('text/') ||
+    contentMediaType === 'application/json' ||
+    contentMediaType.endsWith('+json') ||
+    contentMediaType === 'application/xml'
+  );
+
+/**
+ * Rewrite file string fields of a form body to `format: binary` so the
+ * generator types them as `Blob`. FastAPI emits an identical schema
+ * (`{type: string, contentMediaType: ...}`) for a multipart file field and for
+ * `bytes` in a JSON body; only the enclosing media type distinguishes them, so
+ * this promotion is scoped to form bodies. A base64 `contentEncoding` or a
+ * textual/JSON `contentMediaType` keeps the field a string. `format: binary` is
+ * left untouched (already binary anywhere).
+ */
+const markFormBinaryFields = (schema: OpenAPIV3.SchemaObject): void => {
+  Object.values(schema.properties ?? {}).forEach((prop) => {
+    if (isRef(prop)) return;
+    const s = prop as OpenAPIV3.SchemaObject & {
+      contentMediaType?: string;
+      contentEncoding?: string;
+    };
+    if (
+      s.type === 'string' &&
+      s.format !== 'binary' &&
+      s.contentMediaType &&
+      !s.contentEncoding &&
+      isBinaryContentMediaType(s.contentMediaType)
+    ) {
+      s.format = 'binary';
+    }
+  });
+};
+
 const hasSubSchemasToVisit = (
   schema?: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
 ): schema is OpenAPIV3.SchemaObject =>
@@ -225,6 +273,21 @@ const hoistInlineObjectSubSchemas = (
           },
         ]
       : []),
+    ...(
+      (schema as { prefixItems?: OpenAPIV3.SchemaObject[] }).prefixItems ?? []
+    ).flatMap((s, i) =>
+      hasSubSchemasToVisit(s)
+        ? [
+            {
+              nameParts: s.title
+                ? [pascalCase(s.title)]
+                : [...nameParts, 'Item', `${i}`],
+              schema: s,
+              propPath: ['prefixItems', i],
+            },
+          ]
+        : [],
+    ),
     ...Object.entries(schema.properties ?? {})
       .filter(([, s]) => hasSubSchemasToVisit(s))
       .map(([name, s]) => ({
@@ -578,24 +641,27 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
           // rather than left `unknown`.
           const bodyMediaType =
             preferredJsonMediaType(contentMediaTypes) ??
-            contentMediaTypes.find((mt) =>
-              [
-                'multipart/form-data',
-                'application/x-www-form-urlencoded',
-              ].includes(mt.split(';')[0]),
-            );
-          const bodyRequestSchema = bodyMediaType
+            contentMediaTypes.find(isFormMediaType);
+          const bodyContentSchema = bodyMediaType
             ? requestBody!.content![bodyMediaType].schema
             : undefined;
+          // A form body's binary string fields are file uploads (Blob). Mark
+          // the resolved schema (inline or $ref target) before hoisting.
+          if (bodyMediaType && isFormMediaType(bodyMediaType)) {
+            const resolved = resolveIfRef(spec, bodyContentSchema) as
+              | OpenAPIV3.SchemaObject
+              | undefined;
+            if (resolved) markFormBinaryFields(resolved);
+          }
           if (
-            bodyRequestSchema &&
-            !isRef(bodyRequestSchema) &&
-            (['object', 'array'].includes(bodyRequestSchema.type!) ||
-              isCompositeSchema(bodyRequestSchema) ||
-              (bodyRequestSchema?.type === 'string' && bodyRequestSchema.enum))
+            bodyContentSchema &&
+            !isRef(bodyContentSchema) &&
+            (['object', 'array'].includes(bodyContentSchema.type!) ||
+              isCompositeSchema(bodyContentSchema) ||
+              (bodyContentSchema?.type === 'string' && bodyContentSchema.enum))
           ) {
             const schemaName = `${upperFirst(deduplicatedOpId)}RequestContent`;
-            spec.components!.schemas![schemaName] = bodyRequestSchema;
+            spec.components!.schemas![schemaName] = bodyContentSchema;
             requestBody!.content![bodyMediaType!].schema = {
               $ref: `#/components/schemas/${schemaName}`,
             };

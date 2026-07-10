@@ -524,6 +524,7 @@ describe('openApiTsClientGenerator - complex types', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
 
     await callGeneratedClient(client, mockFetch, 'postMapOfNumbers', {
@@ -997,6 +998,7 @@ describe('openApiTsClientGenerator - complex types', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
 
     await callGeneratedClient(

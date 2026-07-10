@@ -410,6 +410,7 @@ describe('openApiTsClientGenerator - edge cases', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue("don't"),
+      json: vi.fn().mockResolvedValue("don't"),
     });
     const response = await callGeneratedClient(client, mockFetch, 'getTricky');
     expect(response).toEqual("don't");
@@ -1014,9 +1015,10 @@ describe('openApiTsClientGenerator - edge cases', () => {
     const mockFetch = vi.fn();
     mockFetch.mockResolvedValue({
       status: 200,
-      json: vi
-        .fn()
-        .mockResolvedValue({ 'pet-type': 'dog', walkAt: '2024-01-02T03:04:05.000Z' }),
+      json: vi.fn().mockResolvedValue({
+        'pet-type': 'dog',
+        walkAt: '2024-01-02T03:04:05.000Z',
+      }),
     });
     const response = await callGeneratedClient(client, mockFetch, 'postShape', {
       petType: 'dog',
@@ -1268,9 +1270,10 @@ describe('openApiTsClientGenerator - edge cases', () => {
     const mockFetch = vi.fn();
     mockFetch.mockResolvedValue({
       status: 200,
-      json: vi
-        .fn()
-        .mockResolvedValue({ kind: 'pet-cat', napAt: '2024-01-02T03:04:05.000Z' }),
+      json: vi.fn().mockResolvedValue({
+        kind: 'pet-cat',
+        napAt: '2024-01-02T03:04:05.000Z',
+      }),
     });
     const response = await callGeneratedClient(client, mockFetch, 'getPet');
     expect(response).toEqual({

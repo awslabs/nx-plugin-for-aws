@@ -382,6 +382,7 @@ describe('openApiTsClientGenerator - content type header', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('sekret'),
+      json: vi.fn().mockResolvedValue('sekret'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'getSecret', {
