@@ -174,6 +174,17 @@ export interface Model {
 
   /** For composites: the referenced (object) models composed together. */
   composedModels?: Model[];
+  /**
+   * For `all-of` composites: the flattened property list across all composed
+   * models (first occurrence of each property name wins).
+   */
+  effectiveProperties?: Model[];
+  /**
+   * Set on a hoisted (normaliser-synthesised) model that an `all-of` parent
+   * flattens into itself, to the parent's name. Language templates that
+   * flatten composition can skip emitting the hoisted component separately.
+   */
+  isInlinedByAllOf?: string;
   /** For composites: the primitive/enum/array members composed together. */
   composedPrimitives?: Model[];
   /** For discriminated one-of/any-of composites: the discriminator metadata. */
@@ -187,8 +198,29 @@ export interface Model {
   pythonName?: string;
   /** The rendered Python type. */
   pythonType?: string;
+  /**
+   * The rendered Python type with user-defined names forward-ref quoted, for
+   * use inside class bodies before the referenced class is defined.
+   */
+  pythonAnnotation?: string;
+  /**
+   * The Python class name: the TypeScript escape plus escaping of names that
+   * would shadow imports in the generated Python modules (e.g. `Field`).
+   */
+  pythonClassName?: string;
+  /**
+   * The Python type qualified with the `types_gen.` namespace, for reference
+   * from the generated client modules.
+   */
+  pythonClientType?: string;
   /** snake_case model name (Python). */
   nameSnakeCase?: string;
+  /**
+   * When `type` references a named model that renders as a module-level alias
+   * (collection, union or literal) rather than a class: the kind of alias.
+   * Python templates use this to pick `TypeAdapter(X)` over `X.model_validate`.
+   */
+  referencedCollectionKind?: 'array' | 'dictionary' | 'alias';
   /** True when the model is a renderable primitive (not composite/collection). */
   isPrimitive?: boolean;
   /** True when the schema declares an enum. */
@@ -211,6 +243,82 @@ export interface Model {
 
 /** Vendor extension bag (`x-*` keys copied from a schema/operation/spec). */
 export type VendorExtensions = { [key: string]: unknown };
+
+/**
+ * Where a single operation input is placed in the HTTP request. `body-field`
+ * is a field of an object request body flattened into the call signature.
+ */
+export interface RequestInputSource {
+  kind: 'path' | 'query' | 'header' | 'cookie' | 'body' | 'body-field';
+  /** The wire (spec) name for parameters; absent for `body-field`. */
+  wireName?: string;
+  /** The body property name, for `body-field` inputs. */
+  fieldName?: string;
+  /** Collection serialisation format for array query/header parameters. */
+  collectionFormat?: CollectionFormat;
+}
+
+/** A single input to an operation, tagged with where it goes on the wire. */
+export interface RequestInput {
+  source: RequestInputSource;
+  /** The model describing the input's type. */
+  model: Model;
+  /** True when this input is a flattened request-body field. */
+  fromFlattenedBody: boolean;
+  isRequired: boolean;
+  isNullable: boolean;
+  description: string | null;
+  /** The original spec name (parameter name or body property name). */
+  specName: string;
+  /** The Python keyword-argument name (deduplicated snake_case). */
+  pythonName?: string;
+  /** The Python annotation for the kwarg, qualified with `types_gen.`. */
+  pythonAnnotation?: string;
+}
+
+/**
+ * A language-agnostic description of an operation's inputs. Each input carries
+ * its request placement plus the underlying model; language templates decide
+ * how to render the call signature (kwargs, a wrapper interface, etc).
+ */
+export interface RequestShape {
+  inputs: RequestInput[];
+  /** True when the body is the operation's only input (positional-arg style). */
+  isSingleBodyInput: boolean;
+  /** Set when the body's fields are flattened into the inputs. */
+  bodyFromFields?: { model: Model; mediaType?: string };
+  /** Set when the body is passed as a single input. */
+  bodyAsSingleInput?: { model: Model; mediaType?: string };
+}
+
+/** One non-success response bucket in an operation's error taxonomy. */
+export interface ErrorShapeEntry {
+  code: number | string;
+  /**
+   * The concrete status codes the bucket covers: `[code]` for a literal code,
+   * the full range for `NXX`, or undefined for `default`.
+   */
+  statusCodes?: number[];
+  responseModel: Model;
+  /** The generated per-code error class name (e.g. `GetPet404Error`). */
+  className?: string;
+  /** True for a literal numeric code (vs a range or `default`). */
+  isExactCode?: boolean;
+  /** The Python annotation for the error's `status` field. */
+  statusAnnotation?: string;
+}
+
+/**
+ * A language-agnostic error taxonomy for an operation: one entry per
+ * non-success response bucket.
+ */
+export interface ErrorShape {
+  entries: ErrorShapeEntry[];
+  /** The generated exception class name (e.g. `GetPetApiError`). */
+  exceptionClassName?: string;
+  /** The generated error union type name (e.g. `GetPetError`). */
+  unionTypeName?: string;
+}
 
 /**
  * An operation represents a single OpenAPI path + method. Produced by the
@@ -244,6 +352,11 @@ export interface Operation {
 
   /** The explicit body parameter when the body is not inlined. */
   explicitRequestBodyParameter?: Model;
+
+  /** Language-agnostic description of the operation's inputs. */
+  requestShape?: RequestShape;
+  /** Language-agnostic error taxonomy for the operation. */
+  errorShape?: ErrorShape;
 
   vendorExtensions?: VendorExtensions;
   isMutation?: boolean;
