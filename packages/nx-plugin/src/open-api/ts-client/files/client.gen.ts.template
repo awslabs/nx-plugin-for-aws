@@ -29,6 +29,13 @@ const composedMarshaller = (property, method) =>
   property.export === 'reference' && discriminatorBaseNames.has(property.type)
     ? `$IO.${property.typescriptType}.$${method}Base`
     : `$IO.${property.typescriptType}.${method}`;
+// The single wire media type chosen for an operation's request body, if any.
+const bodyMediaTypeOf = (op) => {
+  if (!op.parametersBody || !op.parametersBody.mediaTypes) return undefined;
+  const mediaTypes = Array.isArray(op.parametersBody.mediaTypes) ? op.parametersBody.mediaTypes : [op.parametersBody.mediaTypes];
+  return mediaTypes.find(mt => mt === 'application/json' || mt.endsWith('+json')) || mediaTypes[0];
+};
+const hasMultipartBody = allOperations.some(op => bodyMediaTypeOf(op) === 'multipart/form-data');
 _%>
 <%_ if ((models.length + allOperations.filter(p => p.parameters.length > 0).length) > 0) { _%>
 import type {
@@ -478,6 +485,28 @@ export class <%- className %> {
     });
   };
 
+  <%_ if (hasMultipartBody) { _%>
+  private $formData = (model: { [key: string]: any }): FormData => {
+    const formData = new FormData();
+    const append = (key: string, value: any): void => {
+      if (value === undefined || value === null) {
+        return;
+      }
+      if (value instanceof Blob || typeof value === 'string') {
+        formData.append(key, value);
+      } else if (Array.isArray(value)) {
+        value.forEach((v) => append(key, v));
+      } else if (typeof value === 'object') {
+        formData.append(key, JSON.stringify(value));
+      } else {
+        formData.append(key, String(value));
+      }
+    };
+    Object.entries(model).forEach(([key, value]) => append(key, value));
+    return formData;
+  };
+
+  <%_ } _%>
   private $fetch: typeof fetch = (...args) => (this.$config.fetch ?? fetch)(...args);
   <%_ allOperations.forEach((op) => { _%>
   <%_ const hasTag = op.tags && op.tags.length > 0; _%>
@@ -538,7 +567,13 @@ export class <%- className %> {
     } as const;
     <%_ } _%>
     <%_ if (op.parametersBody) { _%>
-    <%_ if (op.parametersBody.isPrimitive && ['number', 'boolean', 'string'].includes(op.parametersBody.type) && !['array', 'dictionary'].includes(op.parametersBody.export) && !["date", "date-time"].includes(op.parametersBody.format)) { _%>
+    <%_ if (bodyMediaTypeOf(op) === 'multipart/form-data') { _%>
+    <%_ /* A multipart body is sent as FormData: Blob fields stream as file
+           parts, primitives serialise to strings, and fetch computes the
+           boundary itself (so the Content-Type header is intentionally unset
+           above). */ _%>
+    const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$formData(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %>);
+    <%_ } else if (op.parametersBody.isPrimitive && ['number', 'boolean', 'string'].includes(op.parametersBody.type) && !['array', 'dictionary'].includes(op.parametersBody.export) && !["date", "date-time"].includes(op.parametersBody.format)) { _%>
     const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>String(input<%- op.explicitRequestBodyParameter ? `.${op.explicitRequestBodyParameter.typescriptName}` : '' %>);
     <%_ } else if (op.parametersBody.isPrimitive && ["date", "date-time"].includes(op.parametersBody.format)) { _%>
     const body = <%- renderToJsonDateValue('input', op.parametersBody.format) %>;
