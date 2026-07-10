@@ -23,6 +23,25 @@ variable "tags" {
   default     = {}
 }
 
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
 variable "appconfig_application_id" {
   description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). The agent reads its runtime configuration from this application."
   type        = string
@@ -38,6 +57,9 @@ module "agent_core_runtime" {
   agent_runtime_name = "TerraformSnapshotAgent"
   docker_image_tag = "proj-terraform-snapshot-agent:latest"
   server_protocol = "HTTP"
+  enable_vpc = var.enable_vpc
+  vpc_id = var.vpc_id
+  subnet_ids = var.subnet_ids
 
   env = merge({
     RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
@@ -91,6 +113,11 @@ output "agent_core_runtime_arn" {
 output "appconfig_application_id" {
   description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
   value       = var.appconfig_application_id
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = module.agent_core_runtime.security_group_id
 }
 "
 `;
@@ -166,6 +193,30 @@ variable "additional_iam_policy_statements" {
     Resource = list(string)
   }))
   default = []
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
 }
 
 variable "tags" {
@@ -403,6 +454,28 @@ resource "null_resource" "docker_publish" {
   depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
 }
 
+# Security group for the agent core runtime, used when running inside a VPC
+resource "aws_security_group" "agent_core_runtime" {
+  count = var.enable_vpc ? 1 : 0
+
+  #checkov:skip=CKV2_AWS_5:Attached to the runtime via network_configuration; Checkov cannot resolve this reference
+  name_prefix = "\${var.agent_runtime_name}-runtime-"
+  description = "Security group for the \${var.agent_runtime_name} agent core runtime"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_core_runtime_https" {
+  count = var.enable_vpc ? 1 : 0
+
+  security_group_id = aws_security_group.agent_core_runtime[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
 # Bedrock AgentCore Agent Runtime
 resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
   agent_runtime_name = "\${var.agent_runtime_name}_\${random_id.unique_suffix.hex}"
@@ -429,7 +502,15 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
   }
 
   network_configuration {
-    network_mode = "PUBLIC"
+    network_mode = var.enable_vpc ? "VPC" : "PUBLIC"
+
+    dynamic "network_mode_config" {
+      for_each = var.enable_vpc ? [1] : []
+      content {
+        security_groups = [aws_security_group.agent_core_runtime[0].id]
+        subnets         = var.subnet_ids
+      }
+    }
   }
 
   protocol_configuration {
@@ -530,6 +611,11 @@ output "agent_runtime_id" {
 output "agent_runtime_version" {
   description = "Version of the Bedrock Agent Core runtime"
   value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_version
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.agent_core_runtime[0].id : null
 }
 "
 `;
