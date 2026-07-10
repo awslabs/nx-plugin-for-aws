@@ -11,9 +11,7 @@ module.exports = {
     }
     return 'minor'; // Upgrade stable to latest minor
   },
-  reject: [
-    '@modelcontextprotocol/inspector', // TODO: consider allowing updates when transitive dep on @types/react 18.x is removed
-  ],
+  reject: [],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
