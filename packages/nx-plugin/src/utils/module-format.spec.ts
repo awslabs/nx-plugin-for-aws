@@ -5,45 +5,32 @@
 import { type Tree, writeJson } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { esmVars, isEsmWorkspace, resolveModuleFormat } from './module-format';
+import { esmVars, isEsmWorkspace } from './module-format';
 
-describe('resolveModuleFormat', () => {
+describe('isEsmWorkspace', () => {
   let tree: Tree;
 
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
   });
 
-  it('returns the explicit format when esm or cjs is passed', () => {
-    expect(resolveModuleFormat(tree, 'esm')).toBe('esm');
-    expect(resolveModuleFormat(tree, 'cjs')).toBe('cjs');
-  });
-
-  it('infers esm from a root package.json with type module', () => {
+  it('treats a root package.json with type module as esm', () => {
     writeJson(tree, 'package.json', { name: 'x', type: 'module' });
-    expect(resolveModuleFormat(tree, 'infer')).toBe('esm');
+    expect(isEsmWorkspace(tree)).toBe(true);
   });
 
-  it('infers cjs from a root package.json with explicit type commonjs', () => {
+  it('treats a root package.json with explicit type commonjs as cjs', () => {
     writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
-    expect(resolveModuleFormat(tree, 'infer')).toBe('cjs');
+    expect(isEsmWorkspace(tree)).toBe(false);
   });
 
   it('defaults to esm when the root package.json has no type', () => {
     writeJson(tree, 'package.json', { name: 'x' });
-    expect(resolveModuleFormat(tree, 'infer')).toBe('esm');
+    expect(isEsmWorkspace(tree)).toBe(true);
   });
 
-  it('defaults to esm when no option is provided', () => {
-    writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
-    // undefined option is treated as infer
-    expect(resolveModuleFormat(tree, undefined)).toBe('cjs');
-  });
-
-  it('isEsmWorkspace reflects the inferred format', () => {
-    writeJson(tree, 'package.json', { name: 'x', type: 'commonjs' });
-    expect(isEsmWorkspace(tree)).toBe(false);
-    writeJson(tree, 'package.json', { name: 'x', type: 'module' });
+  it('defaults to esm when there is no root package.json', () => {
+    tree.delete('package.json');
     expect(isEsmWorkspace(tree)).toBe(true);
   });
 

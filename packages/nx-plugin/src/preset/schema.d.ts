@@ -5,7 +5,7 @@
 
 import { Containers } from '../utils/containers';
 import { Iac } from '../utils/iac';
-import type { ModuleFormatOption } from '../utils/module-format';
+import type { ModuleFormat } from '../utils/module-format';
 
 export type PresetContainersOption = Containers | 'infer';
 
@@ -14,6 +14,6 @@ export interface PresetGeneratorSchema {
   readonly gitSecrets?: boolean;
   readonly mcp?: boolean;
   readonly containers?: PresetContainersOption;
-  readonly module?: ModuleFormatOption;
+  readonly module?: ModuleFormat;
   readonly preferInstallDependencies?: boolean;
 }

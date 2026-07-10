@@ -16,7 +16,7 @@ export const runSmokeTest = async (
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
   beforeBuild?: (projectRoot: string) => void | Promise<void>,
-  module?: 'infer' | 'esm' | 'cjs',
+  module?: 'esm' | 'cjs',
 ) => {
   const projectRoot = await createTestWorkspace(
     pkgMgr,
@@ -108,11 +108,10 @@ export interface SmokeTestOptions {
   setup?: () => undefined | (() => void);
   onProjectCreate?: (projectRoot: string) => void;
   /**
-   * Module format to create the workspace with. Defaults to `infer` (ESM for a
-   * fresh workspace). Set to `cjs` to exercise the full CommonJS generator
-   * matrix.
+   * Module format to create the workspace with. Defaults to `esm`. Set to `cjs`
+   * to exercise the full CommonJS generator matrix.
    */
-  module?: 'infer' | 'esm' | 'cjs';
+  module?: 'esm' | 'cjs';
 }
 
 export const smokeTest = (

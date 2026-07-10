@@ -84,7 +84,7 @@ export const buildCreateNxWorkspaceCommand = (
   workspace: string,
   iac?: 'cdk' | 'terraform',
   tag?: string,
-  module?: 'infer' | 'esm' | 'cjs',
+  module?: 'esm' | 'cjs',
 ) => {
   const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;
   const pkgName = tag ? `@aws/nx-workspace@${tag}` : '@aws/nx-workspace';

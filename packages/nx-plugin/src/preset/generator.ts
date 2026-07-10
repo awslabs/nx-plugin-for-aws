@@ -31,7 +31,6 @@ import { DEFAULT_BIOME_CONFIG, formatFilesInSubtree } from '../utils/format';
 import { installDependencies } from '../utils/install';
 import { configureMcpServers } from '../utils/mcp';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { resolveModuleFormat } from '../utils/module-format';
 import { getNpmScope } from '../utils/npm-scope';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
 import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
@@ -173,8 +172,7 @@ export const presetGenerator = async (
 ): Promise<GeneratorCallback> => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
-  // For a fresh workspace with no root `type`, `infer` resolves to ESM.
-  const esm = resolveModuleFormat(tree, module) === 'esm';
+  const esm = (module ?? 'esm') === 'esm';
   if (
     isAmazonian() &&
     !process.env.VITEST &&

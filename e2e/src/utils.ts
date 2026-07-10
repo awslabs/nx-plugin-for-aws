@@ -245,7 +245,7 @@ export const createTestWorkspace = async (
   targetDir: string,
   name: string,
   iac?: 'cdk' | 'terraform',
-  module?: 'infer' | 'esm' | 'cjs',
+  module?: 'esm' | 'cjs',
 ): Promise<string> => {
   const workspaceDir = join(targetDir, name);
   const npmCacheDir = join(targetDir, '.npm-cache');
