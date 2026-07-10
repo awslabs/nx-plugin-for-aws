@@ -454,27 +454,6 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
-resource "aws_iam_role_policy" "proxy_secret_access" {
-  count = var.enable_rds_proxy ? 1 : 0
-  role  = aws_iam_role.proxy[0].name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = [aws_secretsmanager_secret.credentials.arn]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt"]
-        Resource = [aws_kms_key.database.arn]
-      }
-    ]
-  })
-}
-
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -498,17 +477,6 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
-
-  auth {
-    auth_scheme = "SECRETS"
-    iam_auth    = "REQUIRED"
-    secret_arn  = aws_secretsmanager_secret.credentials.arn
-  }
-
-  depends_on = [
-    aws_iam_role_policy.proxy_secret_access,
-    aws_secretsmanager_secret_version.credentials,
-  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
