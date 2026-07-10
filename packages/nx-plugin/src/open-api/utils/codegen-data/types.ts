@@ -75,6 +75,8 @@ export interface Discriminator {
   propertyName: string;
   /** The TypeScript property name (resolved during augmentation). */
   typescriptPropertyName?: string;
+  /** The Python field name (resolved during augmentation). */
+  pythonPropertyName?: string;
   /** The value → composed-model mapping. */
   mapping: DiscriminatorMapping[];
   /**

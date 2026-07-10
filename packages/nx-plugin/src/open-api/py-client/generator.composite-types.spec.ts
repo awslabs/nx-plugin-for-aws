@@ -386,4 +386,83 @@ describe('openApiPyClientGenerator - composite types', () => {
     expect(res.ok).toBe(true);
     expect(res.value).toBe('v1');
   });
+
+  it('renders a discriminated oneOf as a pydantic tagged union', async () => {
+    // A oneOf with a discriminator should parse via pydantic's discriminated
+    // union machinery (Annotated[..., Field(discriminator=...)]) so unknown
+    // fields from non-matching branches never leak, and each member's
+    // discriminator property is a required Literal tag.
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'Test', version: '1.0.0' },
+      paths: {
+        '/pet': {
+          get: {
+            operationId: 'getPet',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Pet' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Pet: {
+            oneOf: [
+              { $ref: '#/components/schemas/Dog' },
+              { $ref: '#/components/schemas/Cat' },
+            ],
+            discriminator: {
+              propertyName: 'petType',
+              mapping: {
+                dog: '#/components/schemas/Dog',
+                cat: '#/components/schemas/Cat',
+              },
+            },
+          },
+          Dog: {
+            type: 'object',
+            required: ['petType', 'bark'],
+            properties: {
+              petType: { type: 'string' },
+              bark: { type: 'string' },
+            },
+          },
+          Cat: {
+            type: 'object',
+            required: ['petType', 'whiskers'],
+            properties: {
+              petType: { type: 'string' },
+              whiskers: { type: 'integer' },
+            },
+          },
+        },
+      },
+    };
+    const { types } = await generateAndRead(verifier, tree, spec);
+
+    // The alias is a pydantic tagged union on the discriminator field.
+    expect(types).toMatch(
+      /^Pet\s*=\s*Annotated\[Union\[Dog,\s*Cat\],\s*Field\(discriminator="pet_type"\)\]/m,
+    );
+    // Each member's discriminator property is a Literal tag.
+    expect(types).toMatch(/pet_type:\s*Literal\["dog"\]/);
+    expect(types).toMatch(/pet_type:\s*Literal\["cat"\]/);
+
+    const res = await callGeneratedClient(
+      verifier,
+      'get_pet',
+      {},
+      { json: { petType: 'cat', whiskers: 7 } },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.value).toEqual({ petType: 'cat', whiskers: 7 });
+  });
 });
