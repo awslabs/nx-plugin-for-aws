@@ -114,8 +114,7 @@ export const configureTsProject = async (
   }
   // Update the root package.json. ESM projects require `type: module`; for
   // CommonJS we write an explicit `type: commonjs` marker (which Node treats
-  // identically to an absent `type`) so `--module=infer` can distinguish an
-  // established CommonJS workspace from a fresh one that defaults to ESM.
+  // identically to an absent `type`).
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
     type: esm ? 'module' : 'commonjs',

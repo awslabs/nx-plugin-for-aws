@@ -24,9 +24,9 @@ describe('isEsmWorkspace', () => {
     expect(isEsmWorkspace(tree)).toBe(false);
   });
 
-  it('defaults to esm when the root package.json has no type', () => {
+  it('treats a root package.json with no type as cjs', () => {
     writeJson(tree, 'package.json', { name: 'x' });
-    expect(isEsmWorkspace(tree)).toBe(true);
+    expect(isEsmWorkspace(tree)).toBe(false);
   });
 
   it('defaults to esm when there is no root package.json', () => {

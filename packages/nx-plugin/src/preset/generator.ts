@@ -237,9 +237,8 @@ export const presetGenerator = async (
 
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
-    // CommonJS workspaces are marked with an explicit `type: commonjs` (treated
-    // by Node like an absent `type`) so `--module=infer` can detect the
-    // workspace's module format on subsequent generator runs.
+    // Written explicitly so later generators can infer the workspace's module
+    // format from the root `type`.
     type: esm ? 'module' : 'commonjs',
     scripts: {
       ...packageJson.scripts,

@@ -15,14 +15,13 @@ export type ModuleFormat = 'esm' | 'cjs';
  * the workspace is created, so shared infrastructure/construct helpers can read
  * it from the tree rather than having it threaded through every call site.
  *
- * CommonJS workspaces are marked with an explicit `type: "commonjs"` (which Node
- * treats identically to an absent `type`), so a `type` of anything other than
- * `commonjs` — including `module`, an absent `type`, or no root package.json —
- * is treated as ESM.
+ * ESM requires an explicit `type: "module"`, matching Node: an absent `type` (or
+ * `type: "commonjs"`) means CommonJS. A workspace with no root package.json
+ * defaults to ESM.
  */
 export const isEsmWorkspace = (tree: Tree): boolean => {
   if (tree.exists('package.json')) {
-    return readJson(tree, 'package.json').type !== 'commonjs';
+    return readJson(tree, 'package.json').type === 'module';
   }
   return true;
 };

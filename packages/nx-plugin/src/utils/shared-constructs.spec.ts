@@ -26,6 +26,7 @@ describe('shared-constructs utils', () => {
         name: '@test-scope/source',
         version: '0.0.0',
         license: 'MIT',
+        type: 'module',
         dependencies: {},
         devDependencies: {},
       }),
