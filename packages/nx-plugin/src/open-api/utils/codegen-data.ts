@@ -824,9 +824,13 @@ const augmentModel = (
 
   model.properties.forEach(addLanguageTypes);
 
-  // Resolve the discriminator's TypeScript property name for marshalling.
+  // Resolve the discriminator's language property names for marshalling.
   if (model.discriminator) {
     model.discriminator.typescriptPropertyName = toTypeScriptName(
+      model.discriminator.propertyName,
+    );
+    model.discriminator.pythonPropertyName = toPythonName(
+      'property',
       model.discriminator.propertyName,
     );
   }

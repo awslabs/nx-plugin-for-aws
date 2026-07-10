@@ -227,4 +227,50 @@ describe('openApiPyClientGenerator - requests', () => {
     expect(res.ok).toBe(true);
     expect(res.value).toBe('pong');
   });
+
+  it('serialises a deepObject query parameter as key[prop]=value pairs', async () => {
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    colour: { type: 'string' },
+                    size: { type: 'integer' },
+                  },
+                },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    await generateAndRead(verifier, tree, spec);
+    const res = await callGeneratedClient(
+      verifier,
+      'search',
+      { filter: { colour: 'red', size: 5 } },
+      { json: 'ok' },
+    );
+    expect(res.ok).toBe(true);
+    const url = decodeURIComponent(res.calls?.[0]?.url ?? '');
+    expect(url).toMatch(/filter\[colour\]=red/);
+    expect(url).toMatch(/filter\[size\]=5/);
+  });
 });

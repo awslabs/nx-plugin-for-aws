@@ -126,6 +126,7 @@ const PYTHON_BUILTIN_TYPES = new Set([
  */
 const PYTHON_RESERVED_MODEL_NAMES = new Set([
   // typing module
+  'Annotated',
   'Any',
   'Literal',
   'Never',
