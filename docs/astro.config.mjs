@@ -29,30 +29,6 @@ const smithySyntax = () => ({
   name: 'smithy',
 });
 
-/**
- * Vite 8's rolldown bundler has a module-loading concurrency race
- * (rolldown#10102) that surfaces as spurious "No such file" errors on real
- * content files when bundling large content collections. Reading content
- * modules synchronously in JS bypasses rolldown's native async loader.
- */
-const contentSyncLoad = () => ({
-  name: 'content-sync-load',
-  enforce: 'pre',
-  load(id) {
-    const file = id.split('?')[0];
-    if (
-      /\.mdx?$/.test(file) &&
-      file.replace(/\\/g, '/').includes('/src/content/')
-    ) {
-      try {
-        return { code: fs.readFileSync(file, 'utf-8'), map: null };
-      } catch {
-        return null;
-      }
-    }
-  },
-});
-
 const basePath = process.env.DOCS_BASE_PATH || '/nx-plugin-for-aws';
 
 // https://astro.build/config
@@ -748,6 +724,6 @@ export default defineConfig({
     react(),
   ],
   vite: {
-    plugins: [tailwindcss(), contentSyncLoad()],
+    plugins: [tailwindcss()],
   },
 });
