@@ -281,25 +281,65 @@ exports[`openApiTsClientGenerator - edge cases > does not build a discriminator 
 export class $IO {
   public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
+  // Select the best-matching branch of a non-discriminated oneOf/anyOf: the
+  // candidate whose required properties are all present, preferring the one
+  // matching the most properties. Falls back to the first candidate so a value
+  // still round-trips when none matches cleanly.
+  public static $selectBranch = (
+    value: any,
+    candidates: {
+      required: string[];
+      all: string[];
+      convert: (v: any) => any;
+    }[],
+  ): any => {
+    if (value === null || typeof value !== 'object') {
+      return candidates[0].convert(value);
+    }
+    const scored = candidates
+      .filter((c) => c.required.every((k) => value[k] !== undefined))
+      .map((c) => ({
+        c,
+        score: c.all.filter((k) => value[k] !== undefined).length,
+      }));
+    const best = scored.sort((a, b) => b.score - a.score)[0];
+    return (best ? best.c : candidates[0]).convert(value);
+  };
 
   public static Shape = {
     toJson: (model: Shape): any => {
       if (model === undefined || model === null) {
         return model;
       }
-      return {
-        ...$IO.ShapeOneOf.toJson(model as ShapeOneOf),
-        ...$IO.ShapeOneOf1.toJson(model as ShapeOneOf1),
-      };
+      return $IO.$selectBranch(model, [
+        {
+          required: ['kind', 'napAt'],
+          all: ['kind', 'napAt'],
+          convert: (v) => $IO.ShapeOneOf.toJson(v as ShapeOneOf),
+        },
+        {
+          required: ['kind', 'walkAt'],
+          all: ['kind', 'walkAt'],
+          convert: (v) => $IO.ShapeOneOf1.toJson(v as ShapeOneOf1),
+        },
+      ]);
     },
     fromJson: (json: any): Shape => {
       if (json === undefined || json === null) {
         return json;
       }
-      return {
-        ...$IO.ShapeOneOf.fromJson(json),
-        ...$IO.ShapeOneOf1.fromJson(json),
-      };
+      return $IO.$selectBranch(json, [
+        {
+          required: ['kind', 'napAt'],
+          all: ['kind', 'napAt'],
+          convert: (v) => $IO.ShapeOneOf.fromJson(v),
+        },
+        {
+          required: ['kind', 'walkAt'],
+          all: ['kind', 'walkAt'],
+          convert: (v) => $IO.ShapeOneOf1.fromJson(v),
+        },
+      ]);
     },
   };
 

@@ -36,6 +36,16 @@ const bodyMediaTypeOf = (op) => {
   return mediaTypes.find(mt => mt === 'application/json' || mt.endsWith('+json')) || mediaTypes[0];
 };
 const hasMultipartBody = allOperations.some(op => bodyMediaTypeOf(op) === 'multipart/form-data');
+// A oneOf/anyOf of two or more object branches with no discriminator: the
+// branch can't be chosen by a discriminator property, so marshalling merges
+// every branch (leaking fields, e.g. an Invalid Date from a non-matching
+// branch). Such composites instead select the best-matching branch at runtime.
+const isNonDiscriminatedObjectUnion = (model) =>
+  (model.export === 'one-of' || model.export === 'any-of') &&
+  !model.discriminator &&
+  (model.composedPrimitives || []).length === 0 &&
+  (model.composedModels || []).length > 1;
+const hasNonDiscriminatedObjectUnion = models.some(isNonDiscriminatedObjectUnion);
 _%>
 <%_ if ((models.length + allOperations.filter(p => p.parameters.length > 0).length) > 0) { _%>
 import type {
@@ -192,6 +202,28 @@ _%>
 export class $IO {
   public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
+  <%_ if (hasNonDiscriminatedObjectUnion) { _%>
+  // Select the best-matching branch of a non-discriminated oneOf/anyOf: the
+  // candidate whose required properties are all present, preferring the one
+  // matching the most properties. Falls back to the first candidate so a value
+  // still round-trips when none matches cleanly.
+  public static $selectBranch = (
+    value: any,
+    candidates: { required: string[]; all: string[]; convert: (v: any) => any }[],
+  ): any => {
+    if (value === null || typeof value !== 'object') {
+      return candidates[0].convert(value);
+    }
+    const scored = candidates
+      .filter((c) => c.required.every((k) => value[k] !== undefined))
+      .map((c) => ({
+        c,
+        score: c.all.filter((k) => value[k] !== undefined).length,
+      }));
+    const best = scored.sort((a, b) => b.score - a.score)[0];
+    return (best ? best.c : candidates[0]).convert(value);
+  };
+  <%_ } _%>
 <%_ models.filter(m => m.export !== 'enum').forEach((model) => { _%>
 <%_ const isComposite = model.export === "one-of" || model.export === "any-of" || model.export === "all-of"; _%>
 <%_ /* A discriminator base emits its plain (own-fields) body under a $-prefixed
@@ -271,7 +303,16 @@ export class $IO {
         <%_ }); _%>
       }
       <%_ } _%>
-      <%_ if (model.composedModels.length > 0) { _%>
+      <%_ /* A non-discriminated oneOf/anyOf of object branches selects the
+            best-matching branch rather than merging every branch (which would
+            leak fields from the non-matching branches). */ _%>
+      <%_ if (isNonDiscriminatedObjectUnion(model)) { _%>
+      return $IO.$selectBranch(model, [
+        <%_ model.composedModels.forEach((branch) => { _%>
+        { required: [<%- (branch.properties || []).filter(p => p.isRequired).map(p => JSON.stringify(p.typescriptName)).join(', ') %>], all: [<%- (branch.properties || []).map(p => JSON.stringify(p.typescriptName)).join(', ') %>], convert: (v) => $IO.<%- branch.typescriptName %>.toJson(v as <%- branch.typescriptName %>) },
+        <%_ }); _%>
+      ]);
+      <%_ } else if (model.composedModels.length > 0) { _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((property, i) => { _%>
         <%_ if (property.export === 'reference' && discriminatorBaseNames.has(property.type)) { _%>
@@ -354,7 +395,16 @@ export class $IO {
         <%_ }); _%>
       }
       <%_ } _%>
-      <%_ if (model.composedModels.length > 0) { _%>
+      <%_ /* A non-discriminated oneOf/anyOf of object branches selects the
+            best-matching branch (matched on wire property names) rather than
+            merging every branch. */ _%>
+      <%_ if (isNonDiscriminatedObjectUnion(model)) { _%>
+      return $IO.$selectBranch(json, [
+        <%_ model.composedModels.forEach((branch) => { _%>
+        { required: [<%- (branch.properties || []).filter(p => p.isRequired).map(p => JSON.stringify(p.name)).join(', ') %>], all: [<%- (branch.properties || []).map(p => JSON.stringify(p.name)).join(', ') %>], convert: (v) => $IO.<%- branch.typescriptName %>.fromJson(v) },
+        <%_ }); _%>
+      ]);
+      <%_ } else if (model.composedModels.length > 0) { _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((composedType) => { _%>
         <%_ if (composedType.export === 'reference' && discriminatorBaseNames.has(composedType.type)) { _%>

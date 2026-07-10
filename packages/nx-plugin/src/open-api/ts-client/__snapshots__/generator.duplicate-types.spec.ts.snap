@@ -292,25 +292,65 @@ exports[`openApiTsClientGenerator - duplicate types > should handle many duplica
 export class $IO {
   public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
+  // Select the best-matching branch of a non-discriminated oneOf/anyOf: the
+  // candidate whose required properties are all present, preferring the one
+  // matching the most properties. Falls back to the first candidate so a value
+  // still round-trips when none matches cleanly.
+  public static $selectBranch = (
+    value: any,
+    candidates: {
+      required: string[];
+      all: string[];
+      convert: (v: any) => any;
+    }[],
+  ): any => {
+    if (value === null || typeof value !== 'object') {
+      return candidates[0].convert(value);
+    }
+    const scored = candidates
+      .filter((c) => c.required.every((k) => value[k] !== undefined))
+      .map((c) => ({
+        c,
+        score: c.all.filter((k) => value[k] !== undefined).length,
+      }));
+    const best = scored.sort((a, b) => b.score - a.score)[0];
+    return (best ? best.c : candidates[0]).convert(value);
+  };
 
   public static AnotherModel = {
     toJson: (model: AnotherModel): any => {
       if (model === undefined || model === null) {
         return model;
       }
-      return {
-        ...$IO.Clash3.toJson(model as Clash3),
-        ...$IO.Clash4.toJson(model as Clash4),
-      };
+      return $IO.$selectBranch(model, [
+        {
+          required: ['prop4'],
+          all: ['prop4'],
+          convert: (v) => $IO.Clash3.toJson(v as Clash3),
+        },
+        {
+          required: ['prop5'],
+          all: ['prop5'],
+          convert: (v) => $IO.Clash4.toJson(v as Clash4),
+        },
+      ]);
     },
     fromJson: (json: any): AnotherModel => {
       if (json === undefined || json === null) {
         return json;
       }
-      return {
-        ...$IO.Clash3.fromJson(json),
-        ...$IO.Clash4.fromJson(json),
-      };
+      return $IO.$selectBranch(json, [
+        {
+          required: ['prop4'],
+          all: ['prop4'],
+          convert: (v) => $IO.Clash3.fromJson(v),
+        },
+        {
+          required: ['prop5'],
+          all: ['prop5'],
+          convert: (v) => $IO.Clash4.fromJson(v),
+        },
+      ]);
     },
   };
 
@@ -434,19 +474,35 @@ export class $IO {
       if (model === undefined || model === null) {
         return model;
       }
-      return {
-        ...$IO.Clash1.toJson(model as Clash1),
-        ...$IO.Clash2.toJson(model as Clash2),
-      };
+      return $IO.$selectBranch(model, [
+        {
+          required: ['prop1'],
+          all: ['prop1'],
+          convert: (v) => $IO.Clash1.toJson(v as Clash1),
+        },
+        {
+          required: ['prop2'],
+          all: ['prop2'],
+          convert: (v) => $IO.Clash2.toJson(v as Clash2),
+        },
+      ]);
     },
     fromJson: (json: any): MyModel => {
       if (json === undefined || json === null) {
         return json;
       }
-      return {
-        ...$IO.Clash1.fromJson(json),
-        ...$IO.Clash2.fromJson(json),
-      };
+      return $IO.$selectBranch(json, [
+        {
+          required: ['prop1'],
+          all: ['prop1'],
+          convert: (v) => $IO.Clash1.fromJson(v),
+        },
+        {
+          required: ['prop2'],
+          all: ['prop2'],
+          convert: (v) => $IO.Clash2.fromJson(v),
+        },
+      ]);
     },
   };
 }

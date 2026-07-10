@@ -1186,6 +1186,120 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     );
   });
 
+  it('should select the matching branch of a non-discriminated union rather than merging', async () => {
+    // FastAPI emits a plain `Union[A, B]` return as an anyOf/oneOf with no
+    // discriminator. Merging every branch leaks fields from the non-matching
+    // branch (e.g. an SmsEvent gaining a spurious `sentAt: Invalid Date` from
+    // the EmailEvent branch), so marshalling must select the matching branch.
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          EmailEvent: {
+            type: 'object',
+            properties: {
+              sentAt: { type: 'string', format: 'date-time' },
+              to: { type: 'string' },
+            },
+            required: ['sentAt', 'to'],
+          },
+          SmsEvent: {
+            type: 'object',
+            properties: {
+              deliveredOn: { type: 'string', format: 'date' },
+              number: { type: 'string' },
+            },
+            required: ['deliveredOn', 'number'],
+          },
+        } as any,
+      },
+      paths: {
+        '/last-event': {
+          get: {
+            operationId: 'lastEvent',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      anyOf: [
+                        { $ref: '#/components/schemas/EmailEvent' },
+                        { $ref: '#/components/schemas/SmsEvent' },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          post: {
+            operationId: 'putEvent',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    anyOf: [
+                      { $ref: '#/components/schemas/EmailEvent' },
+                      { $ref: '#/components/schemas/SmsEvent' },
+                    ],
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'ok' } },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+
+    // fromJson: an SMS payload must revive only SMS fields — no leaked
+    // sentAt/to, and deliveredOn is a valid Date.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ deliveredOn: '2026-05-01', number: '+1555' }),
+    });
+    const sms = await callGeneratedClient(client, mockFetch, 'lastEvent');
+    expect(sms.deliveredOn instanceof Date).toBe(true);
+    expect(isNaN((sms.deliveredOn as Date).getTime())).toBe(false);
+    expect('sentAt' in sms).toBe(false);
+    expect('to' in sms).toBe(false);
+    expect(Object.keys(sms).sort()).toEqual(['deliveredOn', 'number']);
+
+    // toJson: sending an email event must serialise only email fields.
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValue({ status: 204 });
+    await callGeneratedClient(client, mockFetch, 'putEvent', {
+      sentAt: new Date('2026-05-01T09:00:00Z'),
+      to: 'a@b.com',
+    });
+    const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(sentBody).toEqual({
+      sentAt: '2026-05-01T09:00:00.000Z',
+      to: 'a@b.com',
+    });
+    expect('deliveredOn' in sentBody).toBe(false);
+  });
+
   it('should handle FastAPI-style discriminated unions with string const (Literal)', async () => {
     const spec: Spec = {
       openapi: '3.1.0',
