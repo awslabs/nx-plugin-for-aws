@@ -16,3 +16,6 @@ export { pyMcpServerGenerator } from '../py/mcp-server/generator';
 export type { PyMcpServerGeneratorSchema } from '../py/mcp-server/schema';
 export { pyProjectGenerator } from '../py/project/generator';
 export type { PyProjectGeneratorSchema } from '../py/project/schema';
+
+export { pyRdbGenerator } from '../py/rdb/generator';
+export type { PyRdbGeneratorSchema } from '../py/rdb/schema';
