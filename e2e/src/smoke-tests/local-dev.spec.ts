@@ -636,8 +636,9 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         writeFileSync(file, content);
       }
 
-      // Install openai dep for agents
-      await runCLI(`pnpm add openai --filter=@local-dev-test/ts-project`, {
+      // Install openai dep for agents. TS projects declare their dependencies
+      // at the workspace root, so install it there.
+      await runCLI(`pnpm add openai -w`, {
         cwd: projectRoot,
         prefixWithPackageManagerCmd: false,
       });
