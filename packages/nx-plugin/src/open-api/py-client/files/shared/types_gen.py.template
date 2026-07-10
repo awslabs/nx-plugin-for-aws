@@ -61,7 +61,7 @@ _%>
 from __future__ import annotations
 
 import datetime
-from typing import Any, Literal, Never, Optional, TypedDict, Union
+from typing import Annotated, Any, Literal, Never, Optional, TypedDict, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -169,7 +169,23 @@ _%>
        `pythonType` (no quotes) vs `pythonAnnotation` (forward-ref-quoted)
        matters here: pydantic's `TypeAdapter(X)` can't resolve string
        forward-refs at runtime, only typing does that statically. */ _%>
+<%_ /* A discriminated union renders as a pydantic tagged union so parsing
+       dispatches directly to the matching branch (never merging branches).
+       Requires every member to carry the discriminator as a Literal-typed
+       field; otherwise fall back to a plain Union. */ _%>
+<%_ /* pydantic requires the tag to be a required Literal field on every
+       member, else TypeAdapter construction fails at import time. */
+    const memberModels = (model.composedModels || []);
+    const isTagged = model.discriminator && memberModels.length > 0
+      && memberModels.length === model.properties.filter(p => !p.isPrimitive).length
+      && (model.composedPrimitives || []).length === 0
+      && memberModels.every(m => (m.properties || []).some(p =>
+           p.name === model.discriminator.propertyName && p.discriminatorValue && p.isRequired)); _%>
+<%_ if (isTagged) { _%>
+<%- model.pythonClassName %> = Annotated[Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>], Field(discriminator="<%- model.discriminator.pythonPropertyName %>")]
+<%_ } else { _%>
 <%- model.pythonClassName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>]
+<%_ } _%>
 <%_ if (model.description || model.deprecated) { _%>
 """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
 <%_ } _%>

@@ -194,12 +194,23 @@ class Async<%- className %>:
             path = path.replace("{" + key + "}", quote(str(value), safe=""))
         return self._base_url + path
 
+    def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, dict):
+            for prop, v in value.items():
+                self._deep_object(f"{key}[{prop}]", v, out)
+        elif value is not None:
+            out[key] = value
+
     def _query(self, query_params: dict[str, Any], collection_formats: Optional[dict[str, str]] = None) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for key, value in query_params.items():
             if value is None:
                 continue
-            if isinstance(value, list):
+            if (collection_formats or {}).get(key) == "deepObject":
+                self._deep_object(key, value, out)
+            elif isinstance(value, list):
                 fmt = (collection_formats or {}).get(key, "multi")
                 if fmt == "csv":
                     out[key] = ",".join(str(v) for v in value)
