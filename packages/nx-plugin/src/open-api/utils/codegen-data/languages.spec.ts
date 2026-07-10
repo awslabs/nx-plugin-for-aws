@@ -3,7 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { toPythonName, toPythonType, toTypeScriptType } from './languages';
+import {
+  qualifyPythonType,
+  toPythonAnnotation,
+  toPythonName,
+  toPythonType,
+  toTypeScriptType,
+} from './languages';
 import type { Model } from './types';
 
 const createModel = (partial: Partial<Model>): Model => ({
@@ -93,7 +99,7 @@ describe('languages', () => {
 
       expect(toPythonType(stringModel)).toBe('str');
       expect(toPythonType(boolModel)).toBe('bool');
-      expect(toPythonType(anyModel)).toBe('object');
+      expect(toPythonType(anyModel)).toBe('Any');
     });
 
     it('should handle date formats', () => {
@@ -108,8 +114,8 @@ describe('languages', () => {
         export: 'generic',
       });
 
-      expect(toPythonType(dateModel)).toBe('date');
-      expect(toPythonType(dateTimeModel)).toBe('datetime');
+      expect(toPythonType(dateModel)).toBe('datetime.date');
+      expect(toPythonType(dateTimeModel)).toBe('datetime.datetime');
     });
 
     it('should handle number types', () => {
@@ -140,7 +146,7 @@ describe('languages', () => {
         export: 'array',
         link: createModel({ type: 'string', export: 'generic' }),
       });
-      expect(toPythonType(model)).toBe('List[str]');
+      expect(toPythonType(model)).toBe('list[str]');
     });
 
     it('should handle dictionary types', () => {
@@ -149,7 +155,80 @@ describe('languages', () => {
         export: 'dictionary',
         link: createModel({ type: 'string', export: 'generic' }),
       });
-      expect(toPythonType(model)).toBe('Dict[str, str]');
+      expect(toPythonType(model)).toBe('dict[str, str]');
+    });
+
+    it('should render enums as Literal', () => {
+      const model = createModel({
+        type: 'string',
+        export: 'enum',
+        enum: [{ value: 'a' }, { value: 'b' }],
+      });
+      expect(toPythonType(model)).toBe('Literal["a", "b"]');
+    });
+
+    it('should escape model names that shadow generated imports', () => {
+      expect(
+        toPythonType(createModel({ type: 'Field', export: 'reference' })),
+      ).toBe('_Field');
+      expect(
+        toPythonType(createModel({ type: 'Error', export: 'reference' })),
+      ).toBe('_Error');
+    });
+  });
+
+  describe('toPythonAnnotation', () => {
+    it('returns bare types for built-ins', () => {
+      expect(
+        toPythonAnnotation(createModel({ type: 'string', export: 'generic' })),
+      ).toBe('str');
+      expect(
+        toPythonAnnotation(
+          createModel({ type: 'integer', export: 'generic' }),
+        ),
+      ).toBe('int');
+    });
+
+    it('forward-refs user-defined model names', () => {
+      expect(
+        toPythonAnnotation(createModel({ type: 'Pet', export: 'reference' })),
+      ).toBe('"Pet"');
+    });
+
+    it('forward-refs nested model references in collections', () => {
+      const listOfPets = createModel({
+        type: 'Pet',
+        export: 'array',
+        link: createModel({ type: 'Pet', export: 'reference' }),
+      });
+      expect(toPythonAnnotation(listOfPets)).toBe('list["Pet"]');
+
+      const dictOfPets = createModel({
+        type: 'Pet',
+        export: 'dictionary',
+        link: createModel({ type: 'Pet', export: 'reference' }),
+      });
+      expect(toPythonAnnotation(dictOfPets)).toBe('dict[str, "Pet"]');
+    });
+  });
+
+  describe('qualifyPythonType', () => {
+    it('prefixes user-defined names', () => {
+      expect(qualifyPythonType('Pet', 'types_gen.')).toBe('types_gen.Pet');
+      expect(qualifyPythonType('list[Pet]', 'types_gen.')).toBe(
+        'list[types_gen.Pet]',
+      );
+      expect(qualifyPythonType('dict[str, Pet]', 'types_gen.')).toBe(
+        'dict[str, types_gen.Pet]',
+      );
+    });
+
+    it('leaves built-ins and Literals untouched', () => {
+      expect(qualifyPythonType('str', 'types_gen.')).toBe('str');
+      expect(qualifyPythonType('list[int]', 'types_gen.')).toBe('list[int]');
+      expect(qualifyPythonType('Literal["a"]', 'types_gen.')).toBe(
+        'Literal["a"]',
+      );
     });
   });
 

@@ -9,6 +9,9 @@ export {
 } from '../open-api/ts-client/generator';
 export type { OpenApiTsClientGeneratorSchema } from '../open-api/ts-client/schema';
 
+export { openApiPyClientGenerator } from '../open-api/py-client/generator';
+export type { OpenApiPyClientGeneratorSchema } from '../open-api/py-client/schema';
+
 export { openApiTsHooksGenerator } from '../open-api/ts-hooks/generator';
 export type { OpenApiTsHooksGeneratorSchema } from '../open-api/ts-hooks/schema';
 

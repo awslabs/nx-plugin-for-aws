@@ -159,6 +159,7 @@ export const PY_VERSIONS = {
   mcp: '==1.28.1',
   'pip-check-updates': '==0.29.0',
   'pip-licenses': '==5.5.5',
+  pydantic: '==2.13.2',
   'strands-agents': '==1.47.0',
   'strands-agents[a2a]': '==1.47.0',
   'strands-agents-tools': '==0.8.3',
