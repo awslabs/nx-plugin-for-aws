@@ -16,6 +16,7 @@ import tsProjectGenerator from '../ts/lib/generator';
 import { readAwsNxPluginConfig } from './config/utils';
 import { formatFilesInSubtree } from './format';
 import type { Iac } from './iac';
+import { esmVars } from './module-format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
@@ -66,6 +67,7 @@ export async function sharedConstructsGenerator(
           npmScopePrefix,
           scopeAlias: toScopeAlias(npmScopePrefix),
           tags: (await readAwsNxPluginConfig(tree))?.tags ?? [],
+          ...esmVars(tree),
         },
         {
           overwriteStrategy: OverwriteStrategy.KeepExisting,

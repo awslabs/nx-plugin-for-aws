@@ -197,7 +197,9 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should handle CommonJS projects correctly', async () => {
-    // package.json without type: 'module' defaults to CommonJS
+    // A CommonJS workspace is marked with an explicit type: 'commonjs'
+    updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'commonjs' }));
+
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'cjs-server',

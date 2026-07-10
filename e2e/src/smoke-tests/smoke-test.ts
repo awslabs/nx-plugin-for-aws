@@ -16,8 +16,15 @@ export const runSmokeTest = async (
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
   beforeBuild?: (projectRoot: string) => void | Promise<void>,
+  module?: 'esm' | 'cjs',
 ) => {
-  const projectRoot = await createTestWorkspace(pkgMgr, dir, 'e2e-test', 'cdk');
+  const projectRoot = await createTestWorkspace(
+    pkgMgr,
+    dir,
+    'e2e-test',
+    'cdk',
+    module,
+  );
   const opts = {
     cwd: projectRoot,
     env: {
@@ -100,6 +107,11 @@ export interface SmokeTestOptions {
    */
   setup?: () => undefined | (() => void);
   onProjectCreate?: (projectRoot: string) => void;
+  /**
+   * Module format to create the workspace with. Defaults to `esm`. Set to `cjs`
+   * to exercise the full CommonJS generator matrix.
+   */
+  module?: 'esm' | 'cjs';
 }
 
 export const smokeTest = (
@@ -144,6 +156,8 @@ export const smokeTest = (
         `${tmpProjPath()}/${variant}`,
         pkgMgr,
         options.onProjectCreate,
+        undefined,
+        options.module,
       );
     });
   });

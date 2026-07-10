@@ -11,4 +11,10 @@ export interface ConfigureProjectOptions {
    * Directory of the project relative to the root
    */
   readonly dir: string;
+  /**
+   * Whether the project uses ES modules. When false, the project is configured
+   * for CommonJS (tsconfig `module`/`moduleResolution`, no root `type: module`).
+   * Defaults to true (ESM) when not specified.
+   */
+  readonly esm?: boolean;
 }

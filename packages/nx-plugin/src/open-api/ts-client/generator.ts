@@ -5,6 +5,7 @@
 import { generateFiles, type Tree } from '@nx/devkit';
 import * as path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
+import { esmVars } from '../../utils/module-format';
 import { buildOpenApiCodeGenData } from '../utils/codegen-data';
 import type { CodeGenData } from '../utils/codegen-data/types';
 import { parseOpenApiSpec } from '../utils/parse';
@@ -50,7 +51,7 @@ export const generateOpenApiTsClient = (
     tree,
     path.join(import.meta.dirname, 'files'),
     outputPath,
-    data,
+    { ...data, ...esmVars(tree) },
   );
 };
 

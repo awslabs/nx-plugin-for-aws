@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Iac } from '../iac';
+import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
@@ -69,7 +70,7 @@ const addWebsiteCdkConstructs = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -79,7 +80,7 @@ const addWebsiteCdkConstructs = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

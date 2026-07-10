@@ -10,6 +10,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { formatFilesInSubtree } from './format';
+import { esmVars } from './module-format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
@@ -43,7 +44,7 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
       'infra',
     ),
     joinPathFragments(scriptsDir, 'src', 'infra'),
-    { scopeAlias },
+    { scopeAlias, ...esmVars(tree) },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 

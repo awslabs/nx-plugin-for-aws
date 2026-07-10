@@ -13,6 +13,7 @@ import {
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
 import type { Iac } from '../iac';
+import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
@@ -80,7 +81,7 @@ export const addRdbCdkConstructs = async (
       'core',
       'rdb',
     ),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -90,7 +91,7 @@ export const addRdbCdkConstructs = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app', 'dbs'),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

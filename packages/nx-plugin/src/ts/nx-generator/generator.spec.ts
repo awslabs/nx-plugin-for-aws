@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  type Tree,
+  updateJson,
+  writeJson,
+} from '@nx/devkit';
 import * as fs from 'fs';
 import * as path from 'path';
 import NxPluginForAwsPackageJson from '../../../package.json' with {
@@ -38,6 +43,13 @@ describe('nx-generator generator', () => {
       ].forEach((file) => {
         tree.write(file, fs.readFileSync(path.join(pathToRoot, file)));
       });
+
+      // The @aws/nx-plugin workspace is ESM; mark the root type explicitly so
+      // the generator infers the module format the same way the preset sets it.
+      updateJson(tree, 'package.json', (json) => ({
+        ...json,
+        type: 'module',
+      }));
 
       writeJson(tree, 'packages/nx-plugin/generators.json', {
         generators: {

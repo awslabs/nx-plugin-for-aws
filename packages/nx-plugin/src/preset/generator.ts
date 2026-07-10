@@ -166,11 +166,13 @@ export const presetGenerator = async (
     gitSecrets,
     mcp,
     containers,
+    module,
     preferInstallDependencies,
   }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
+  const esm = (module ?? 'esm') === 'esm';
   if (
     isAmazonian() &&
     !process.env.VITEST &&
@@ -235,7 +237,9 @@ export const presetGenerator = async (
 
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
-    type: 'module',
+    // Written explicitly so later generators can infer the workspace's module
+    // format from the root `type`.
+    type: esm ? 'module' : 'commonjs',
     scripts: {
       ...packageJson.scripts,
       dev: 'nx run-many --target dev',

@@ -17,6 +17,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import {
@@ -96,6 +97,7 @@ export async function tsTrpcApiGenerator(
     apiGatewayEventType: getApiGatewayEventType(options),
     port,
     ...options,
+    ...esmVars(tree),
   };
 
   if (options.infra !== 'none') {

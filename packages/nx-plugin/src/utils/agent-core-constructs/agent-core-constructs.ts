@@ -13,6 +13,7 @@ import {
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
 import type { Iac } from '../iac';
+import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
@@ -84,7 +85,7 @@ const addAgentCoreCDKInfra = async (
       'app',
       options.appDirectory,
     ),
-    options,
+    { ...options, ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -295,7 +296,7 @@ const addAgentCoreGatewayCDKInfra = async (
       'core',
       'agentcore-gateway',
     ),
-    {},
+    { ...esmVars(tree) },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -322,6 +323,7 @@ const addAgentCoreGatewayCDKInfra = async (
       nameKebabCase: options.gatewayNameKebabCase,
       projectDirectory: options.projectDirectory,
       cedarPolicy: options.cedarPolicy,
+      ...esmVars(tree),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

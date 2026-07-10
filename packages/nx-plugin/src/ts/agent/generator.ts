@@ -24,6 +24,7 @@ import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
@@ -96,6 +97,7 @@ export const tsAgentGenerator = async (
     agentNameClassName,
     distDir,
     agentConnectionImport: `:${getNpmScope(tree)}/agent-connection`,
+    ...esmVars(tree),
   };
 
   // Generate common files shared by both protocols
@@ -137,6 +139,7 @@ export const tsAgentGenerator = async (
         protocol,
         adotVersion:
           TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+        ...esmVars(tree),
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );

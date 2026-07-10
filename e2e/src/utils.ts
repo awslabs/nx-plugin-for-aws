@@ -245,6 +245,7 @@ export const createTestWorkspace = async (
   targetDir: string,
   name: string,
   iac?: 'cdk' | 'terraform',
+  module?: 'esm' | 'cjs',
 ): Promise<string> => {
   const workspaceDir = join(targetDir, name);
   const npmCacheDir = join(targetDir, '.npm-cache');
@@ -258,7 +259,7 @@ export const createTestWorkspace = async (
   for (let attempt = 1; ; attempt++) {
     try {
       await runCLI(
-        `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac)} --interactive=false`,
+        `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac, undefined, module)} --interactive=false`,
         {
           cwd: targetDir,
           prefixWithPackageManagerCmd: false,

@@ -24,6 +24,7 @@ import {
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { esmVars } from '../../../utils/module-format';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
@@ -95,6 +96,7 @@ export const tsAgentA2aConnectionGenerator = async (
       targetAgentKebabCase,
       targetAgentClassName,
       targetAgentPort,
+      ...esmVars(tree),
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
