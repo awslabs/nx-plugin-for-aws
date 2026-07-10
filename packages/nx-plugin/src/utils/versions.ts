@@ -225,6 +225,7 @@ export const PY_VERSIONS = {
   mcp: '==1.28.1',
   'pip-check-updates': '==0.29.0',
   'pip-licenses': '==5.5.5',
+  pydantic: '==2.13.4',
   ruff: '==0.16.5',
   'strands-agents': '==1.54.0',
   'strands-agents[a2a]': '==1.54.0',
