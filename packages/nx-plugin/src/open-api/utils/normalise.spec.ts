@@ -40,7 +40,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
     expect(
-      (result.paths?.['/test'].post.requestBody as any).content[
+      (result.paths!['/test'].post.requestBody as any).content[
         'application/json'
       ].schema,
     ).toEqual({
@@ -84,7 +84,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
     expect(
-      (result.paths?.['/test'].get.responses['200'] as any).content[
+      (result.paths!['/test'].get.responses['200'] as any).content[
         'application/json'
       ].schema,
     ).toEqual({
@@ -118,7 +118,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
     expect(result.components?.schemas?.TestArrayItem).toBeDefined();
-    expect((result.components?.schemas?.TestArray as any).items).toEqual({
+    expect((result.components!.schemas!.TestArray as any).items).toEqual({
       $ref: '#/components/schemas/TestArrayItem',
     });
   });
@@ -144,7 +144,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     expect(result.components?.schemas?.TestMapValue).toBeDefined();
     expect(
-      (result.components?.schemas?.TestMap as any).additionalProperties,
+      (result.components!.schemas!.TestMap as any).additionalProperties,
     ).toEqual({
       $ref: '#/components/schemas/TestMapValue',
     });
@@ -173,7 +173,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     expect(result.components?.schemas?.StringType).toBeUndefined();
     expect(
-      (result.components?.schemas?.TestObject as any).properties.field,
+      (result.components!.schemas!.TestObject as any).properties.field,
     ).toEqual({
       type: 'string',
     });
@@ -205,7 +205,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     expect(result.components?.schemas?.ReferencedObject).toBeDefined();
     expect(
-      (result.components?.schemas?.TestObject as any).properties.ref,
+      (result.components!.schemas!.TestObject as any).properties.ref,
     ).toEqual({
       $ref: '#/components/schemas/ReferencedObject',
     });
@@ -235,7 +235,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     expect(result.components?.schemas?.Status).toBeDefined();
     expect(
-      (result.components?.schemas?.TestObject as any).properties.status,
+      (result.components!.schemas!.TestObject as any).properties.status,
     ).toEqual({
       $ref: '#/components/schemas/Status',
     });
@@ -317,7 +317,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     expect(result.components?.schemas?.TestCompositeAllOf).toBeDefined();
     expect(result.components?.schemas?.TestCompositeAllOf1).toBeDefined();
-    expect((result.components?.schemas?.TestComposite as any).allOf).toEqual([
+    expect((result.components!.schemas!.TestComposite as any).allOf).toEqual([
       { $ref: '#/components/schemas/TestCompositeAllOf' },
       { $ref: '#/components/schemas/TestCompositeAllOf1' },
     ]);
@@ -342,7 +342,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
     expect(result.components?.schemas?.TestNotNot).toBeDefined();
-    expect((result.components?.schemas?.TestNot as any).not).toEqual({
+    expect((result.components!.schemas!.TestNot as any).not).toEqual({
       $ref: '#/components/schemas/TestNotNot',
     });
   });
@@ -373,7 +373,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
       'x-aws-nx-hoisted': true,
     });
     expect(
-      (result.components?.schemas?.TestObject as any).properties.status,
+      (result.components!.schemas!.TestObject as any).properties.status,
     ).toEqual({
       $ref: '#/components/schemas/TestObjectStatus',
     });
@@ -405,12 +405,10 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
-    expect(
-      (result.paths?.['/search'] as any).get.parameters[0].schema,
-    ).toEqual({ $ref: '#/components/schemas/SearchRequestQueryFilter' });
-    expect(
-      result.components?.schemas?.SearchRequestQueryFilter,
-    ).toMatchObject({
+    expect((result.paths!['/search'] as any).get.parameters[0].schema).toEqual({
+      $ref: '#/components/schemas/SearchRequestQueryFilter',
+    });
+    expect(result.components?.schemas?.SearchRequestQueryFilter).toMatchObject({
       type: 'object',
       properties: { name: { type: 'string' } },
     });
@@ -434,9 +432,9 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
-    expect((result.paths?.['/search'] as any).get.parameters[0].schema).toEqual(
-      { type: 'string' },
-    );
+    expect((result.paths!['/search'] as any).get.parameters[0].schema).toEqual({
+      type: 'string',
+    });
     expect(result.components?.schemas?.SearchRequestQueryQ).toBeUndefined();
   });
 
@@ -460,13 +458,13 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
 
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
-    expect((result.paths?.['/a'] as any).get).toBeDefined();
-    expect((result.paths?.['/b'] as any).get).toBeDefined();
-    expect((result.paths?.['/a'] as any).$ref).toBeUndefined();
+    expect((result.paths!['/a'] as any).get).toBeDefined();
+    expect((result.paths!['/b'] as any).get).toBeDefined();
+    expect((result.paths!['/a'] as any).$ref).toBeUndefined();
     // Each path gets its own copy, so each operation gets its own
     // (path-derived) operationId
-    expect((result.paths?.['/a'] as any).get.operationId).toBe('getA');
-    expect((result.paths?.['/b'] as any).get.operationId).toBe('getB');
+    expect((result.paths!['/a'] as any).get.operationId).toBe('getA');
+    expect((result.paths!['/b'] as any).get.operationId).toBe('getB');
   });
 
   it('should hoist inline schemas for vendored +json media types', () => {
@@ -507,12 +505,12 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
     expect(
-      (result.paths?.['/test'].post.requestBody as any).content[
+      (result.paths!['/test'].post.requestBody as any).content[
         'application/vnd.api+json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/TestPostRequestContent' });
     expect(
-      (result.paths?.['/test'].post.responses['200'] as any).content[
+      (result.paths!['/test'].post.responses['200'] as any).content[
         'application/problem+json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/TestPost200Response' });
@@ -588,7 +586,7 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
     const result = normaliseOpenApiSpecForCodeGen(spec);
 
     expect(result.components?.schemas?.CustomTitle).toBeDefined();
-    expect((result.components?.schemas?.TestArray as any).items).toEqual({
+    expect((result.components!.schemas!.TestArray as any).items).toEqual({
       $ref: '#/components/schemas/CustomTitle',
     });
   });
