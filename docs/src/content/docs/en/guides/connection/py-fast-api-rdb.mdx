@@ -41,48 +41,27 @@ The generator modifies your FastAPI project:
 
 - packages/my_api/my_api
   - dependencies
-    - my_db.py FastAPI `SessionDep` dependency for the database session
+    - my_db.py FastAPI `MyDbSession` dependency for the database session
 
 </FileTree>
 
 Additionally, the FastAPI's `dev` target is updated to depend on the database's `dev` target so both start together during local development.
 
-## How It Works
-
-The generated dependency file exports a `SessionDep` type alias that injects an `AsyncSession` via FastAPI's `Depends`:
-
-```python title="packages/my_api/my_api/dependencies/my_db.py"
-from collections.abc import AsyncGenerator
-from typing import Annotated
-
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from my_scope.my_db.connection import session_context
-
-async def get_session_dep() -> AsyncGenerator[AsyncSession]:
-    async with session_context() as session:
-        yield session
-
-
-SessionDep = Annotated[AsyncSession, Depends(get_session_dep)]
-```
-
 ## Using the Database in Route Handlers
 
-Import `SessionDep` and declare it as a parameter in your route handlers:
+This generator configures an injectable [FastAPI Dependency](https://fastapi.tiangolo.com/tutorial/dependencies/) which you can use in your route handlers:
 
-```python title="packages/my_api/my_api/api.py"
+```python title="packages/my_api/my_api/api.py" {2,6,10}
 from sqlmodel import select
-from my_api.dependencies.my_db import SessionDep
+from my_api.dependencies.my_db import MyDbSession
 from my_scope.my_db.models.example import ExampleModel
 
 @app.get("/examples")
-async def list_examples(my_db: SessionDep):
+async def list_examples(my_db: MyDbSession):
     return (await my_db.execute(select(ExampleModel))).all()
 
 @app.post("/examples")
-async def create_example(name: str, my_db: SessionDep):
+async def create_example(name: str, my_db: MyDbSession):
     item = ExampleModel(name=name)
     my_db.add(item)
     await my_db.commit()
