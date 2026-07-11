@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { getProjects, readJson, type Tree } from '@nx/devkit';
+import { getProjects, readJson, type Tree, updateJson } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -99,6 +99,30 @@ describe('ts#astro-docs generator', () => {
     expect(deps).toHaveProperty('@strands-agents/sdk');
     expect(deps).toHaveProperty('commander');
     expect(deps).toHaveProperty('tsx');
+  });
+
+  it('should use import.meta.dirname in translate.ts in an ESM workspace', async () => {
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
+
+    const translateScript = tree.read('docs/scripts/translate.ts', 'utf-8');
+    expect(translateScript).toContain('import.meta.dirname');
+    expect(translateScript).not.toContain('__dirname');
+  });
+
+  it('should use __dirname in translate.ts in a CommonJS workspace', async () => {
+    updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'commonjs' }));
+
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
+
+    const translateScript = tree.read('docs/scripts/translate.ts', 'utf-8');
+    expect(translateScript).toContain('__dirname');
+    expect(translateScript).not.toContain('import.meta.dirname');
   });
 
   it('should use the project name as the site title', async () => {
