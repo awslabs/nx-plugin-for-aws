@@ -41,52 +41,31 @@ import Infrastructure from '@components/infrastructure.astro';
 
 - packages/my_api/my_api
   - dependencies
-    - my_db.py 用于数据库会话的 FastAPI `SessionDep` 依赖项
+    - my_db.py 用于数据库会话的 FastAPI `MyDbSession` 依赖项
 
 </FileTree>
 
 此外，FastAPI 的 `dev` 目标会更新为依赖于数据库的 `dev` 目标，以便在本地开发期间两者一起启动。
 
-## 工作原理
-
-生成的依赖文件导出一个 `SessionDep` 类型别名，通过 FastAPI 的 `Depends` 注入 `AsyncSession`：
-
-```python title="packages/my_api/my_api/dependencies/my_db.py"
-from collections.abc import AsyncGenerator
-from typing import Annotated
-
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from my_scope.my_db.connection import session_context
-
-async def get_session_dep() -> AsyncGenerator[AsyncSession]:
-    async with session_context() as session:
-        yield session
-
-
-SessionDep = Annotated[AsyncSession, Depends(get_session_dep)]
-```
-
 ## 在路由处理程序中使用数据库
 
-导入 `SessionDep` 并将其声明为路由处理程序中的参数：
+此生成器配置了一个可注入的 [FastAPI 依赖项](https://fastapi.tiangolo.com/tutorial/dependencies/)，您可以在路由处理程序中使用它：
 
-```python title="packages/my_api/my_api/api.py"
+```python title="packages/my_api/my_api/api.py" {2,6,10}
 from sqlmodel import select
-from my_api.dependencies.my_db import SessionDep
+from my_api.dependencies.my_db import MyDbSession
 from my_scope.my_db.models.example import ExampleModel
 
 @app.get("/examples")
-async def list_examples(session: SessionDep):
-    return (await session.execute(select(ExampleModel))).all()
+async def list_examples(my_db: MyDbSession):
+    return (await my_db.execute(select(ExampleModel))).all()
 
 @app.post("/examples")
-async def create_example(name: str, session: SessionDep):
+async def create_example(name: str, my_db: MyDbSession):
     item = ExampleModel(name=name)
-    session.add(item)
-    await session.commit()
-    await session.refresh(item)
+    my_db.add(item)
+    await my_db.commit()
+    await my_db.refresh(item)
     return item
 ```
 
@@ -130,7 +109,7 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 </Fragment>
 <Fragment slot="terraform">
 
-将数据库模块输出传递到您的 API 模块中，以便它可以访问数据库并读取其运行时配置：
+将 API 部署到与数据库相同的 VPC 中，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -141,32 +120,47 @@ module "my_database" {
 }
 
 module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-将 API Lambda 函数部署到**具有出口的私有子网**中，而不是私有隔离子网。确保 Lambda 角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+将 API Lambda 函数部署到**具有出口的私有子网**中，而不是私有隔离子网。`RUNTIME_CONFIG_APP_ID` 应指向共享的 <Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，而不是数据库模块的输出。
 
 </Fragment>
 </Infrastructure>
-
-### 不使用 RDS Proxy 连接时的 SSL 要求
-
-Amazon Linux 2023 Lambda 执行环境的内置 CA 信任存储包含 RDS 使用的 Amazon 根 CA，因此不需要额外的配置。
-
-使用 RDS Proxy 时，您不需要在 FastAPI Lambda 运行时中配置 RDS CA 捆绑包。
 
 ## 本地开发
 

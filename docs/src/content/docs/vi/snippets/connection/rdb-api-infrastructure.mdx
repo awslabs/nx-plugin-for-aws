@@ -39,7 +39,7 @@ Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, 
 </Fragment>
 <Fragment slot="terraform">
 
-Truyền các output của database module vào API module của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+Triển khai API vào cùng VPC với cơ sở dữ liệu, cấp quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp security group rules:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -50,24 +50,44 @@ module "my_database" {
 }
 
 module "api" {
-  source             = "..."
-  enable_vpc         = true
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Triển khai các hàm Lambda API vào **private subnets with egress**, không phải private isolated subnets. Đảm bảo API Lambda role có quyền `rds-db:connect` và security group của nó có thể truy cập database security group trên database port.
+Triển khai các hàm Lambda API vào **private subnets with egress**, không phải private isolated subnets. `RUNTIME_CONFIG_APP_ID` nên trỏ đến ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ, không phải output của database module.
 
 </Fragment>
 </Infrastructure>

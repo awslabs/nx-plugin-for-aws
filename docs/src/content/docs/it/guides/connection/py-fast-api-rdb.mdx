@@ -41,52 +41,31 @@ Il generatore modifica il tuo progetto FastAPI:
 
 - packages/my_api/my_api
   - dependencies
-    - my_db.py Dipendenza FastAPI `SessionDep` per la sessione del database
+    - my_db.py Dipendenza FastAPI `MyDbSession` per la sessione del database
 
 </FileTree>
 
 Inoltre, il target `dev` della FastAPI viene aggiornato per dipendere dal target `dev` del database in modo che entrambi si avviino insieme durante lo sviluppo locale.
 
-## Come Funziona
-
-Il file di dipendenza generato esporta un alias di tipo `SessionDep` che inietta una `AsyncSession` tramite il `Depends` di FastAPI:
-
-```python title="packages/my_api/my_api/dependencies/my_db.py"
-from collections.abc import AsyncGenerator
-from typing import Annotated
-
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from my_scope.my_db.connection import session_context
-
-async def get_session_dep() -> AsyncGenerator[AsyncSession]:
-    async with session_context() as session:
-        yield session
-
-
-SessionDep = Annotated[AsyncSession, Depends(get_session_dep)]
-```
-
 ## Utilizzo del Database nei Gestori di Route
 
-Importa `SessionDep` e dichiaralo come parametro nei tuoi gestori di route:
+Questo generatore configura una [Dipendenza FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) iniettabile che puoi utilizzare nei tuoi gestori di route:
 
-```python title="packages/my_api/my_api/api.py"
+```python title="packages/my_api/my_api/api.py" {2,6,10}
 from sqlmodel import select
-from my_api.dependencies.my_db import SessionDep
+from my_api.dependencies.my_db import MyDbSession
 from my_scope.my_db.models.example import ExampleModel
 
 @app.get("/examples")
-async def list_examples(session: SessionDep):
-    return (await session.execute(select(ExampleModel))).all()
+async def list_examples(my_db: MyDbSession):
+    return (await my_db.execute(select(ExampleModel))).all()
 
 @app.post("/examples")
-async def create_example(name: str, session: SessionDep):
+async def create_example(name: str, my_db: MyDbSession):
     item = ExampleModel(name=name)
-    session.add(item)
-    await session.commit()
-    await session.refresh(item)
+    my_db.add(item)
+    await my_db.commit()
+    await my_db.refresh(item)
     return item
 ```
 
@@ -130,7 +109,7 @@ Questo esempio concede l'accesso a ogni gestore nella tua API, ma se solo alcuni
 </Fragment>
 <Fragment slot="terraform">
 
-Passa gli output del modulo database nel tuo modulo API in modo che possa raggiungere il database e leggere la sua configurazione runtime:
+Distribuisci l'API nello stesso VPC del database, concedi il permesso `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -141,32 +120,47 @@ module "my_database" {
 }
 
 module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. Assicurati che il ruolo Lambda abbia il permesso `rds-db:connect` e che il suo security group possa raggiungere il security group del database sulla porta del database.
+Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `RUNTIME_CONFIG_APP_ID` dovrebbe puntare all'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa, non a un output del modulo database.
 
 </Fragment>
 </Infrastructure>
-
-### Requisiti SSL per la Connessione Senza RDS Proxy
-
-L'archivio di trust CA integrato nell'ambiente di esecuzione Lambda Amazon Linux 2023 include le Amazon Root CA utilizzate da RDS, quindi non è necessaria alcuna configurazione aggiuntiva.
-
-Quando si utilizza RDS Proxy, non è necessario configurare il bundle CA RDS nel runtime Lambda FastAPI.
 
 ## Sviluppo Locale
 

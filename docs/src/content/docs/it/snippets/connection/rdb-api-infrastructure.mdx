@@ -39,7 +39,7 @@ Questo esempio concede l'accesso a tutti gli handler nella tua API, ma se solo a
 </Fragment>
 <Fragment slot="terraform">
 
-Passa gli output del modulo database nel tuo modulo API in modo che possa raggiungere il database e leggere la sua configurazione runtime:
+Distribuisci l'API nello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements`, e apri il percorso di rete con una coppia di regole di security group:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -50,24 +50,44 @@ module "my_database" {
 }
 
 module "api" {
-  source             = "..."
-  enable_vpc         = true
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. Assicurati che il ruolo Lambda dell'API abbia il permesso `rds-db:connect` e che il suo security group possa raggiungere il security group del database sulla porta del database.
+Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `RUNTIME_CONFIG_APP_ID` dovrebbe puntare alla <Link path="guides/runtime-config">configurazione runtime</Link> condivisa dell'applicazione AppConfig, non a un output del modulo database.
 
 </Fragment>
 </Infrastructure>

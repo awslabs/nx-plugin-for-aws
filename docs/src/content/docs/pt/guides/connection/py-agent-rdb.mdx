@@ -5,6 +5,7 @@ when:
   sourceType: py#agent
   targetType: py#rdb
 ---
+import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -34,13 +35,16 @@ Selecione seu projeto Agent como origem e seu projeto de banco de dados relacion
 
 ## Saída do Gerador
 
-O gerador adiciona o pacote do banco de dados como uma dependência do workspace, atualiza o target `<agent-name>-dev` do agente para depender do target `dev` do banco de dados para que ambos iniciem juntos durante o desenvolvimento local, e atualiza o Dockerfile do agente gerado com o pacote CA do RDS usado para conexões diretas ao Aurora.
+<FileTree>
 
-## Como Funciona
+- packages/my\_service
+  - project.json Adiciona uma dependência de `my_agent-dev` no target `dev` do banco de dados
+  - pyproject.toml Adiciona o pacote do banco de dados como uma dependência do workspace
+  - my\_service
+    - my\_agent
+      - Dockerfile Adiciona o pacote CA do RDS usado para conexões diretas ao Aurora
 
-O pacote do banco de dados exporta `session_context`, um gerenciador de contexto assíncrono que abre uma `AsyncSession` usando o cliente de banco de dados gerado e a fecha quando o bloco `async with` termina.
-
-Para desenvolvimento local, `session_context()` conecta-se ao contêiner de banco de dados local. Em ambientes de execução implantados, ele lê a configuração do banco de dados do AWS AppConfig, gera um token de autenticação IAM e valida o certificado TLS do banco de dados.
+</FileTree>
 
 ## Usando o Banco de Dados nas Ferramentas do Agente
 
@@ -67,10 +71,17 @@ O construto de agente gerado implementa `IGrantable` e `IConnectable`, então vo
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myAgent);
 db.grantConnect(myAgent);
@@ -81,27 +92,54 @@ db.grantConnect(myAgent);
 </Fragment>
 <Fragment slot="terraform">
 
-Passe as saídas do módulo do banco de dados para o módulo do seu agente para que ele possa alcançar o banco de dados e ler sua configuração de runtime:
+Execute o agente dentro da mesma VPC que o banco de dados, conceda a ele `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_agent" {
-  source = "../../common/terraform/src/app/agents/my-agent"
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  security_group_id            = module.my_agent.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Certifique-se de que a função de execução do agente tenha permissão `rds-db:connect` e que seu grupo de segurança possa alcançar o grupo de segurança do banco de dados na porta do banco de dados.
+`appconfig_application_id`/`appconfig_application_arn` vêm da aplicação AppConfig de <Link path="guides/runtime-config">configuração de runtime</Link> compartilhada declarada uma vez no seu módulo raiz, não do módulo do banco de dados.
 
 </Fragment>
 </Infrastructure>

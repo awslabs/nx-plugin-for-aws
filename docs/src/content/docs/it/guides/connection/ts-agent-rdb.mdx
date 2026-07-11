@@ -48,13 +48,9 @@ Il generatore modifica due file nella directory sorgente del tuo agent:
 
 Inoltre, il target `<agent-name>-dev` dell'agent viene aggiornato per dipendere dal target `dev` del database.
 
-## Come Funziona
+## Utilizzo del Database negli Strumenti dell'Agent
 
-Il client Prisma viene istanziato all'interno di `getAgent()`. Poiché il generatore `ts#agent` configura un singolo Agent per sessione, il client viene anche riutilizzato per la durata della sessione.
-
-### Definizione dell'Agent
-
-`getAgent` viene aggiornato per importare e chiamare il getter Prisma all'inizio del suo corpo:
+Il client Prisma viene istanziato all'interno di `getAgent()`. Poiché il generatore `ts#agent` configura un singolo Agent per sessione, il client viene anche riutilizzato per la durata della sessione:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
@@ -65,7 +61,6 @@ export const getAgent = async () => {
   return new Agent({ /* use myDb in tools */ });
 };
 ```
-
 
 ## Database Multipli
 
@@ -91,10 +86,17 @@ Il costrutto agent generato implementa `IGrantable` e `IConnectable`, quindi puo
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myAgent);
 db.grantConnect(myAgent);
@@ -105,38 +107,64 @@ db.grantConnect(myAgent);
 </Fragment>
 <Fragment slot="terraform">
 
-Passa gli output del modulo database nel tuo modulo agent in modo che possa raggiungere il database e leggere la sua configurazione di runtime:
+Esegui l'agent all'interno dello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_agent" {
-  source = "../../common/terraform/src/app/agents/my-agent"
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  security_group_id            = module.my_agent.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Assicurati che il ruolo di esecuzione dell'agent abbia il permesso `rds-db:connect` e che il suo security group possa raggiungere il security group del database sulla porta del database.
+`appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione <Link path="guides/runtime-config">runtime configuration</Link> AppConfig condivisa dichiarata una volta nel tuo modulo root, non dal modulo database.
 
 </Fragment>
 </Infrastructure>
 
 ### Requisiti SSL per la Connessione Senza RDS Proxy
 
-<Snippet name="connection/agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
 
 ## Sviluppo Locale
 
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
-Questo avvia l'agent e tutti i database connessi. La variabile d'ambiente `SERVE_LOCAL=true` fa sì che ogni client Prisma si connetta al suo database Docker locale invece che ad Aurora.
-he ad Aurora.
+Questo avvia l'agent e tutti i database connessi. La variabile d'ambiente `LOCAL_DEV=true` fa sì che ogni client Prisma si connetta al suo database Docker locale invece che ad Aurora.

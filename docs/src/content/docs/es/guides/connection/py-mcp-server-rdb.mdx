@@ -5,6 +5,7 @@ when:
   sourceType: py#mcp-server
   targetType: py#rdb
 ---
+import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -34,13 +35,16 @@ Selecciona tu proyecto de servidor MCP como origen y tu proyecto de base de dato
 
 ## Salida del Generador
 
-El generador agrega el paquete de base de datos como una dependencia del espacio de trabajo, actualiza el objetivo `<mcp-server-name>-dev` del servidor MCP para que dependa del objetivo `dev` de la base de datos de modo que ambos se inicien juntos durante el desarrollo local, y actualiza el Dockerfile generado del servidor MCP con el paquete de CA de RDS utilizado para conexiones directas a Aurora.
+<FileTree>
 
-## Cómo Funciona
+- packages/my\_service
+  - project.json Agrega una dependencia de `my_mcp_server-dev` en el objetivo `dev` de la base de datos
+  - pyproject.toml Agrega el paquete de base de datos como una dependencia del espacio de trabajo
+  - my\_service
+    - my\_mcp\_server
+      - Dockerfile Agrega el paquete de CA de RDS utilizado para conexiones directas a Aurora
 
-El paquete de base de datos exporta `session_context`, un administrador de contexto asíncrono que abre una `AsyncSession` usando el cliente de base de datos generado y la cierra cuando el bloque `async with` termina.
-
-Para el desarrollo local, `session_context()` se conecta al contenedor de base de datos local. En entornos de ejecución desplegados, lee la configuración de la base de datos desde AWS AppConfig, genera un token de autenticación IAM y valida el certificado TLS de la base de datos.
+</FileTree>
 
 ## Usar la Base de Datos en Herramientas MCP
 
@@ -76,10 +80,17 @@ El constructo del servidor MCP generado implementa `IGrantable` e `IConnectable`
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myMcpServer);
 db.grantConnect(myMcpServer);
@@ -90,27 +101,54 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Pasa las salidas del módulo de base de datos a tu módulo de servidor MCP para que pueda alcanzar la base de datos y leer su configuración de tiempo de ejecución:
+Ejecuta el servidor MCP dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Asegúrate de que el rol de ejecución del servidor MCP tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos.
 
 </Fragment>
 </Infrastructure>

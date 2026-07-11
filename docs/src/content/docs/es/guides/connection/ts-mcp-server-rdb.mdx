@@ -48,7 +48,7 @@ El generador modifica dos archivos en el directorio de origen de tu servidor MCP
 
 Además, el objetivo `<mcp-server-name>-dev` se actualiza para depender del objetivo `dev` de la base de datos.
 
-## Cómo Funciona
+## Usando la Base de Datos en Herramientas MCP
 
 El cliente Prisma se obtiene dentro de `createServer` y está disponible para todas las herramientas y recursos registrados allí:
 
@@ -85,10 +85,17 @@ El constructo del servidor MCP generado implementa `IGrantable` e `IConnectable`
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myMcpServer);
 db.grantConnect(myMcpServer);
@@ -99,27 +106,54 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Pasa las salidas del módulo de base de datos a tu módulo de servidor MCP para que pueda alcanzar la base de datos y leer su configuración de tiempo de ejecución:
+Ejecuta el servidor MCP dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Asegúrate de que el rol de ejecución del servidor MCP tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos.
 
 </Fragment>
 </Infrastructure>

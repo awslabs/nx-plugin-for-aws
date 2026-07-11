@@ -2,6 +2,7 @@
 title: Implantando seu Banco de Dados Relacional
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
 
 O gerador de banco de dados relacional cria infraestrutura CDK ou Terraform com base no seu `iacProvider` selecionado.
 
@@ -103,75 +104,4 @@ module "vpc" {
 </Fragment>
 </Infrastructure>
 
-### Conectando uma API ao Banco de Dados
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-No seu stack de aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` a cada manipulador Lambda:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-Implante as funções Lambda da API em uma **sub-rede privada com saída** (recomendado) ou uma sub-rede pública, não em uma sub-rede privada isolada. Em tempo de execução, o cliente de banco de dados recupera detalhes de conexão do AWS AppConfig, que é um endpoint de serviço AWS público. Funções Lambda em uma sub-rede privada isolada não têm acesso de saída à internet e não podem alcançar o AppConfig. Sub-redes privadas com saída roteiam o tráfego de saída através de um NAT Gateway que fica em uma sub-rede pública.
-</Fragment>
-<Fragment slot="terraform">
-
-Passe as saídas do módulo de banco de dados para o seu módulo de computação para que ele possa alcançar o banco de dados e ler sua configuração de runtime:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  # Allow the API to read runtime config from AppConfig
-  appconfig_application_id = module.my_database.appconfig_application_id
-
-  # Grant rds-db:connect for the application database user
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-
-  # Allow network access to the database port
-  database_security_group_id = module.my_database.security_group_id
-  database_port              = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-Implante as funções Lambda da API em **sub-redes privadas com saída** (recomendado) ou sub-redes públicas, não em sub-redes privadas isoladas. Em tempo de execução, o cliente de banco de dados recupera detalhes de conexão do AWS AppConfig, que é um endpoint de serviço AWS público. Funções Lambda em uma sub-rede privada isolada não têm acesso de saída à internet e não podem alcançar o AppConfig. Sub-redes privadas com saída roteiam o tráfego de saída através de um NAT Gateway que requer uma sub-rede pública.
-
-Certifique-se de que a função Lambda da API tenha `rds-db:connect` em `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` e permissões de leitura do AppConfig, que o grupo de segurança da API possa alcançar o grupo de segurança do banco de dados na porta do banco de dados, e que o ambiente Lambda inclua `RUNTIME_CONFIG_APP_ID`.
-</Fragment>
-</Infrastructure>
-
-:::note
-Este exemplo concede acesso a todos os manipuladores na sua API, mas se apenas alguns manipuladores precisarem de acesso, é melhor configurar individualmente.
-:::
+Use o gerador <Link path="guides/connection">`connection`</Link> para conectar um projeto a este banco de dados — consulte o guia de conexão para o tipo de computação relevante (por exemplo, FastAPI, servidor MCP, agente) para a configuração de infraestrutura necessária para alcançá-lo.

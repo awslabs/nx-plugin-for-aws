@@ -2,6 +2,7 @@
 title: Distribuzione del Database Relazionale
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
 
 Il generatore di database relazionali crea un'infrastruttura CDK o Terraform in base al `iacProvider` selezionato.
 
@@ -103,75 +104,4 @@ module "vpc" {
 </Fragment>
 </Infrastructure>
 
-### Connessione di un'API al Database
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-Nel tuo stack dell'applicazione, distribuisci l'API nello stesso VPC del database, quindi chiama `allowDefaultPortFrom` e `grantConnect` per aprire il percorso di rete e concedere il permesso IAM `rds-db:connect` a ciascun gestore Lambda:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-Distribuisci le funzioni Lambda dell'API in una **subnet privata con egress** (consigliato) o in una subnet pubblica, non in una subnet privata isolata. Durante l'esecuzione, il client del database recupera i dettagli di connessione da AWS AppConfig, che è un endpoint di servizio AWS pubblico. Le funzioni Lambda in una subnet privata isolata non hanno accesso a Internet in uscita e non possono raggiungere AppConfig. Le subnet private con egress instradano il traffico in uscita attraverso un NAT Gateway che si trova in una subnet pubblica.
-</Fragment>
-<Fragment slot="terraform">
-
-Passa gli output del modulo del database nel tuo modulo di calcolo in modo che possa raggiungere il database e leggere la sua configurazione runtime:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  # Allow the API to read runtime config from AppConfig
-  appconfig_application_id = module.my_database.appconfig_application_id
-
-  # Grant rds-db:connect for the application database user
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-
-  # Allow network access to the database port
-  database_security_group_id = module.my_database.security_group_id
-  database_port              = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress** (consigliato) o in subnet pubbliche, non in subnet private isolate. Durante l'esecuzione, il client del database recupera i dettagli di connessione da AWS AppConfig, che è un endpoint di servizio AWS pubblico. Le funzioni Lambda in una subnet privata isolata non hanno accesso a Internet in uscita e non possono raggiungere AppConfig. Le subnet private con egress instradano il traffico in uscita attraverso un NAT Gateway che richiede una subnet pubblica.
-
-Assicurati che il ruolo Lambda dell'API abbia `rds-db:connect` su `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` e permessi di lettura AppConfig, che il gruppo di sicurezza dell'API possa raggiungere il gruppo di sicurezza del database sulla porta del database e che l'ambiente Lambda includa `RUNTIME_CONFIG_APP_ID`.
-</Fragment>
-</Infrastructure>
-
-:::note
-Questo esempio concede l'accesso a ogni gestore nella tua API, ma se solo alcuni gestori necessitano dell'accesso è meglio configurarli individualmente.
-:::
+Utilizza il generatore <Link path="guides/connection">`connection`</Link> per connettere un progetto a questo database — consulta la guida alla connessione per il tipo di calcolo pertinente (ad esempio FastAPI, server MCP, agente) per il cablaggio dell'infrastruttura necessario per raggiungerlo.

@@ -5,6 +5,7 @@ when:
   sourceType: py#agent
   targetType: py#rdb
 ---
+import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -34,13 +35,16 @@ Chọn dự án Agent của bạn làm nguồn và dự án cơ sở dữ liệu
 
 ## Đầu ra của trình tạo
 
-Trình tạo thêm gói cơ sở dữ liệu làm phụ thuộc workspace, cập nhật target `<agent-name>-dev` của agent để phụ thuộc vào target `dev` của cơ sở dữ liệu để cả hai khởi động cùng nhau trong quá trình phát triển cục bộ, và cập nhật Dockerfile agent được tạo với gói CA RDS được sử dụng cho các kết nối Aurora trực tiếp.
+<FileTree>
 
-## Cách hoạt động
+- packages/my\_service
+  - project.json Thêm phụ thuộc từ `my_agent-dev` vào target `dev` của cơ sở dữ liệu
+  - pyproject.toml Thêm gói cơ sở dữ liệu làm phụ thuộc workspace
+  - my\_service
+    - my\_agent
+      - Dockerfile Thêm gói CA RDS được sử dụng cho các kết nối Aurora trực tiếp
 
-Gói cơ sở dữ liệu xuất `session_context`, một trình quản lý ngữ cảnh async mở một `AsyncSession` bằng cách sử dụng client cơ sở dữ liệu được tạo và đóng nó khi khối `async with` thoát.
-
-Đối với phát triển cục bộ, `session_context()` kết nối với container cơ sở dữ liệu cục bộ. Trong các runtime đã triển khai, nó đọc cấu hình cơ sở dữ liệu từ AWS AppConfig, tạo token xác thực IAM và xác thực chứng chỉ TLS của cơ sở dữ liệu.
+</FileTree>
 
 ## Sử dụng cơ sở dữ liệu trong các công cụ Agent
 
@@ -67,10 +71,17 @@ Construct agent được tạo triển khai `IGrantable` và `IConnectable`, vì
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myAgent);
 db.grantConnect(myAgent);
@@ -81,27 +92,54 @@ db.grantConnect(myAgent);
 </Fragment>
 <Fragment slot="terraform">
 
-Truyền đầu ra của module cơ sở dữ liệu vào module agent của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+Chạy agent bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp quy tắc nhóm bảo mật:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_agent" {
-  source = "../../common/terraform/src/app/agents/my-agent"
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  security_group_id            = module.my_agent.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Đảm bảo vai trò thực thi của agent có quyền `rds-db:connect` và nhóm bảo mật của nó có thể truy cập nhóm bảo mật cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng AppConfig <Link path="guides/runtime-config">cấu hình runtime</Link> được chia sẻ được khai báo một lần trong module gốc của bạn, không phải từ module cơ sở dữ liệu.
 
 </Fragment>
 </Infrastructure>
