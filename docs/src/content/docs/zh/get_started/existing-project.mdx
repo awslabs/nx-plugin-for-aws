@@ -1,0 +1,151 @@
+---
+title: 添加到现有项目
+description: 如何在现有的 Nx 工作区或非 Nx monorepo 中采用 @aws/nx-plugin。
+---
+import { Steps, Aside } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+并非每个项目都从 `create-nx-workspace --preset=@aws/nx-plugin` 开始。如果您已经有一个 [Nx workspace](https://nx.dev) — 或者一个可以添加 Nx 的 monorepo — 您可以逐步采用 `@aws/nx-plugin`，而无需重新创建项目。
+
+## 前置条件
+
+- **Node.js** — 一个[活跃的 LTS 版本](https://nodejs.org/en/about/previous-releases)。
+- **包管理器** — 推荐使用 `pnpm` 并且支持最好；`npm`、`yarn` 和 `bun` 也可以使用。
+- **TypeScript 5 或 6** — 如果您的工作区固定了 `typescript` 7（原生编译器），请暂时降级：Nx 的执行器和插件的生成器依赖于 TypeScript JS API，而 TS 7 移除了该 API。
+- **一个 Nx 工作区。** 如果您的项目还不是 Nx 工作区，请先添加 Nx — 参见[将 Nx 添加到非 Nx 项目](#adding-nx-to-a-non-nx-project)。这是 Nx 本身负责的步骤；插件建立在一个正常工作的 Nx 工作区之上。
+
+## 添加插件
+
+使用 [`nx add`](https://nx.dev/nx-api/nx/documents/add)，它会安装与您的 Nx 安装兼容的插件版本，然后运行其 `init` 生成器来配置您的工作区：
+
+<NxCommands commands={['add @aws/nx-plugin']} />
+
+`nx add` 会自动运行插件的 `init` 生成器。要稍后再次运行它（例如更改 IaC 提供商），请直接调用它：
+
+<RunGenerator generator="init" />
+
+然后通过生成一个项目并构建它来验证设置：
+
+<Steps>
+
+1. <RunGenerator generator="ts#project" requiredParameters={{ name: 'my-lib' }} />
+
+2. <NxCommands commands={['sync']} />
+
+3. <NxCommands commands={['run-many --target build --all']} />
+
+</Steps>
+
+### `init` 生成器配置的内容
+
+`init` 生成器对工作区进行确定性更改，以便运行插件的生成器。它是**幂等的** — 再次运行它是无操作 — 并且它保留您工作区的模块格式：根 `package.json` 中有 `type: "module"` 的工作区保持 ESM，其他任何情况保持 CommonJS，生成的代码也遵循相同规则。它**不会**重写现有的 `tsconfig.base.json`，不会迁移您的包管理器，也不会重组您现有的项目。
+
+它执行以下操作：
+
+- 创建 `aws-nx-plugin.config.mts`，记录您选择的<Link path="guides/typescript-infrastructure">基础设施即代码提供商</Link>（CDK 或 Terraform）和容器引擎。生成器从此文件读取 `iac.provider`。
+- 在 `nx.json` 的 `compile` 目标上注册同步生成器（`@nx/js:typescript-sync` 和 `@aws/nx-plugin:ts#sync`），以便在您添加项目时保持 TypeScript 项目引用同步。
+- 确保存在根 `tsconfig.json` 和 `tsconfig.base.json`（Nx 的 TypeScript 同步和插件的项目需要它们）。缺失的文件会被创建；**现有文件保持不变**，以免干扰您的其他项目。
+- 对于 `pnpm` 工作区，在 `pnpm-workspace.yaml` 中允许列出插件依赖项需要的构建脚本（`@swc/core`、`esbuild`、`nx`、`sharp`）。
+- 向根 `package.json` 添加便利脚本（不会覆盖您的任何脚本），以及 `nx`、`@nx/js`、`@nx/workspace`、`typescript` 和 Biome 开发依赖项 — `nx` 固定为单一版本以避免[重复 nx 死锁](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established) — 如果不存在则写入默认的 `biome.json`。ESM 工作区保留其 `type: "module"`；CommonJS 工作区的 `type` 字段（或缺少该字段）保持原样。
+- 为支持的编码代理配置 <Link path="get_started/building-with-ai">MCP server</Link>（除非禁用）。
+
+### 选项
+
+<GeneratorParameters generator="init" />
+
+## 将 Nx 添加到非 Nx 项目
+
+如果您的项目还没有使用 Nx，请先使用 [`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project) 添加它。它适用于普通包、npm/pnpm/yarn 工作区、Turborepo 或 Lerna monorepo：
+
+```bash
+npx nx@latest init
+```
+
+`nx init` 是 Nx 自己的采用工具 — 它检测您的工具，写入 `nx.json`，并将您现有的脚本连接到 Nx。按照提示操作。在非交互式运行时（CI 或 AI 代理），传递 `--interactive=false`；如果 Nx 检测到您技术栈的工具插件（例如 `@nx/vite`），它还会要求明确选择 — 传递 `--plugins=skip` 以推迟（插件可以稍后使用 `nx add` 添加）或 `--plugins=all` 以接受它们。一旦完成并且您的工作区在 Nx 下构建，请按照上述方式[添加插件](#adding-the-plugin)。
+
+### 非 Node 项目（Python、Go、Java、Rust 等）
+
+Nx 和插件作为 npm 包分发，因此没有 Node.js 工具的项目在 `nx init` 可以执行任何有用操作之前需要一个最小的根 `package.json`：
+
+```json
+{
+  "name": "my-project",
+  "private": true,
+  "type": "module"
+}
+```
+
+创建该文件，然后照常运行 `nx init` 并[添加插件](#adding-the-plugin)。您现有的语言工具不受影响 — 插件生成的 Nx 项目（包括 <Link path="guides/py-project">Python 项目</Link>）与您现有的代码并存，您可以逐步将现有构建连接到 Nx。
+
+### 单包项目
+
+插件是为 monorepo 设计的 — 它将每个项目生成到 `packages/` 下的自己的目录中。如果您从**单包项目**开始（根目录下有一个 `package.json`，源代码直接在其下，没有工作区），请在采用插件之前将现有包移动到 `packages/` 中，以便您的项目与插件生成的项目并存：
+
+<Steps>
+
+1. 创建一个 `packages/<your-package>/` 目录，并将您的源代码、`package.json` 和 `tsconfig.json` 移动到其中。
+2. 声明工作区：对于 `pnpm`，添加一个包含 `packages: ['packages/*']` 的 `pnpm-workspace.yaml`；对于 `npm`/`yarn`/`bun`，向根 `package.json` 添加 `"workspaces": ["packages/*"]`。根 `package.json` 成为工作区清单而不是项目本身。
+3. 运行 `nx init`（如果您还没有运行），然后[添加插件](#adding-the-plugin)。
+
+</Steps>
+
+将根保持为工作区清单（而不是项目）是让 `nx run-many --target build --all` 构建每个项目而不会出现任务引用自身的原因 — 参见下面的[递归注释](#recursive-task-invocation-detected)。
+
+<Aside type="note" title="稍后升级">
+要升级插件（并获取它附带的任何自动代码迁移），请使用 [`nx migrate`](https://nx.dev/features/automate-updating-dependencies) — `nx migrate @aws/nx-plugin` — 而不是手动更改版本。
+</Aside>
+
+<Aside type="note" title="包管理器和布局">
+插件的项目生成在 `packages/` 目录下。`pnpm` 从 `pnpm-workspace.yaml` 读取工作区 glob；其他包管理器从根 `package.json` 的 `workspaces` 字段读取 — `init` 更新您的工作区使用的任何一个。如果您的工作区使用不同的布局（例如 `apps/` 和 `libs/`），插件的项目将与您现有的结构一起位于 `packages/` 下。
+</Aside>
+
+## 逐步采用
+
+您不必一次转换整个工作区。一个好的路径是：
+
+<Steps>
+
+1. 添加插件，然后生成单个项目（例如 <Link path="guides/typescript-project">TypeScript 项目</Link>或 <Link path="guides/ts-api">API</Link>）并构建它。
+2. 根据需要添加更多项目 — 网站、API、基础设施 — 使用<Link path="guides/index">生成器指南</Link>。
+3. 如果需要，随着时间的推移将现有代码迁移到工作区中。插件的项目与您现有的项目并存；它们不要求您移动任何东西。
+
+</Steps>
+
+## 故障排除
+
+大多数采用摩擦来自 Nx 设置本身而不是插件。一旦 `nx add @aws/nx-plugin` 运行完成，以下是您可能仍然看到的不匹配。
+
+#### `The workspace is out of sync`
+
+TypeScript 项目引用需要同步。`init` 注册同步生成器；运行：
+
+<NxCommands commands={['sync']} />
+
+#### 安装期间出现 `ERR_PNPM_IGNORED_BUILDS`
+
+pnpm 跳过未列入允许列表的包的安装脚本。`init` 在 `pnpm-workspace.yaml` 中允许列出插件工具需要的脚本（`@swc/core`、`esbuild`、`nx`、`sharp`），但该阻止可能在 `nx add @aws/nx-plugin` 本身期间触发 — 在 `init` 运行之前。运行 `pnpm approve-builds` 并批准列出的包（或将它们添加到 `allowBuilds:` 下），然后重新运行安装。
+
+#### `nx sync` 挂起，或 `plugin worker ... exited before the connection was established`
+
+同一个 node_modules 树中存在两个不同的 `nx` 版本（运行 `npm ls nx` 确认）— 它们的插件工作器 IPC 死锁。`init` 生成器将根 `nx` devDependency 固定到插件自己的 `@nx/*` 包解析的版本，但稍后在不同补丁版本安装另一个 `@nx/*` 包可能会重新引入不匹配。将根 `package.json` 中的每个 `nx` 和 `@nx/*` 条目对齐到单一版本并重新安装。
+
+#### `Recursive task invocation detected`
+
+您的**根** `package.json` 被注册为 Nx 项目（它有一个 `"nx"` 键，`nx init` 为单包仓库添加）*并且*带有 `nx run-many --target build` 的 `build` 脚本。然后 Nx 在根上推断出一个调用自身的 `build` 目标。将您的源代码移动到 `packages/<your-package>/` 中，以便根成为工作区清单而不是项目 — 参见[单包项目](#single-package-projects)。（Nx 自己的独立预设通过在根包上设置 `"nx": { "includedScripts": [] }` 来避免这种情况；您可以将其作为更快的替代方案。）
+
+#### 添加插件后您的**现有**项目中出现 TypeScript 错误（`TS6059`、`TS7016`、`TS5011`、`NG4006`）
+
+插件自己生成的项目在其每个项目的 `tsconfig.lib.json` 中携带它们需要的 TypeScript 设置，因此无论您的 `tsconfig.base.json` 如何，它们都能构建。这些错误反而出现在**您预先存在的项目**中，该项目继承了 `init` 创建的 `tsconfig.base.json`（带有 `composite`/`emitDeclarationOnly`/`nodenext`）但与这些设置不兼容 — 例如，Angular 编译器拒绝 `emitDeclarationOnly`（`NG4006`），或者在没有 `rootDir` 的情况下设置 `outDir` 的项目现在需要一个（`TS5011`）。为这些项目添加每个项目的 `tsconfig` 覆盖，重新声明冲突的选项（例如 `"rootDir": "src"`），或将插件的项目和您的项目指向单独的基础配置。
+
+`init` 从不重写现有的 `tsconfig.base.json`，正是为了不会默默破坏从它继承的项目 — 解决这些不匹配是只有您才能为您的代码库做出的决定。
+
+<Aside type="note" title="ESM 和 CommonJS">
+模块格式是工作区范围的，从根 `package.json` 的 `type` 字段读取：`type: "module"` 表示 ESM，其他任何情况（包括没有 `type` 字段）表示 CommonJS。`init` 保留您的工作区使用的任何格式，插件的 TypeScript 生成器发出匹配的代码。如果您以后想要切换，请更改根 `type` — 但这是您现有代码的迁移，而不是 `init` 为您做的事情。
+</Aside>
+
+<Aside type="tip">
+在与 AI 助手一起工作时，<Link path="get_started/building-with-ai">Nx Plugin for AWS MCP server</Link> 公开了一个 `add-to-existing-project` 工具，该工具直接向您的助手提供此指导 — 包括将您看到的错误消息映射到其修复。
+</Aside>

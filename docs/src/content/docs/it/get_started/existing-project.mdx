@@ -1,0 +1,151 @@
+---
+title: Aggiungere a un Progetto Esistente
+description: Come adottare @aws/nx-plugin in un workspace Nx esistente o in un monorepo non-Nx.
+---
+import { Steps, Aside } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Non tutti i progetti iniziano con `create-nx-workspace --preset=@aws/nx-plugin`. Se hai già un [workspace Nx](https://nx.dev) — o un monorepo a cui puoi aggiungere Nx — puoi adottare `@aws/nx-plugin` in modo incrementale senza ricreare il tuo progetto.
+
+## Prerequisiti
+
+- **Node.js** — una [versione LTS attiva](https://nodejs.org/en/about/previous-releases).
+- **Un package manager** — `pnpm` è raccomandato e meglio supportato; anche `npm`, `yarn` e `bun` funzionano.
+- **TypeScript 5 o 6** — se il tuo workspace fissa `typescript` 7 (compilatore nativo), effettua il downgrade per ora: gli executor di Nx e i generatori del plugin si basano sull'API JS di TypeScript che TS 7 rimuove.
+- **Un workspace Nx.** Se il tuo progetto non è ancora un workspace Nx, aggiungi prima Nx — vedi [Aggiungere Nx a un progetto non-Nx](#adding-nx-to-a-non-nx-project). Questo è un passaggio di competenza di Nx stesso; il plugin si basa su un workspace Nx funzionante.
+
+## Aggiungere il plugin
+
+Usa [`nx add`](https://nx.dev/nx-api/nx/documents/add), che installa il plugin in una versione compatibile con la tua installazione di Nx e poi esegue il suo generatore `init` per configurare il tuo workspace:
+
+<NxCommands commands={['add @aws/nx-plugin']} />
+
+`nx add` esegue automaticamente il generatore `init` del plugin. Per eseguirlo nuovamente in seguito (ad esempio per cambiare il provider IaC), invocalo direttamente:
+
+<RunGenerator generator="init" />
+
+Quindi verifica la configurazione generando un progetto e compilandolo:
+
+<Steps>
+
+1. <RunGenerator generator="ts#project" requiredParameters={{ name: 'my-lib' }} />
+
+2. <NxCommands commands={['sync']} />
+
+3. <NxCommands commands={['run-many --target build --all']} />
+
+</Steps>
+
+### Cosa configura il generatore `init`
+
+Il generatore `init` apporta le modifiche deterministiche di cui un workspace ha bisogno per eseguire i generatori del plugin. È **idempotente** — eseguirlo nuovamente è un no-op — e preserva il formato del modulo del tuo workspace: un workspace il cui `package.json` radice ha `type: "module"` rimane ESM, qualsiasi altra cosa rimane CommonJS, e il codice generato segue di conseguenza. **Non** riscrive un `tsconfig.base.json` esistente, non migra il tuo package manager e non ristruttura i tuoi progetti esistenti.
+
+Esegue le seguenti operazioni:
+
+- Crea `aws-nx-plugin.config.mts` registrando il tuo <Link path="guides/typescript-infrastructure">provider di infrastructure as code</Link> scelto (CDK o Terraform) e il motore container. I generatori leggono `iac.provider` da questo file.
+- Registra i generatori di sincronizzazione (`@nx/js:typescript-sync` e `@aws/nx-plugin:ts#sync`) sul target `compile` in `nx.json`, in modo che i riferimenti ai progetti TypeScript rimangano sincronizzati mentre aggiungi progetti.
+- Assicura che esistano un `tsconfig.json` radice e un `tsconfig.base.json` (la sincronizzazione TypeScript di Nx e i progetti del plugin ne hanno bisogno). I file mancanti vengono creati; **quelli esistenti vengono lasciati intatti** in modo da non disturbare gli altri tuoi progetti.
+- Per i workspace `pnpm`, inserisce nella allow-list gli script di build di cui le dipendenze del plugin hanno bisogno (`@swc/core`, `esbuild`, `nx`, `sharp`) in `pnpm-workspace.yaml`.
+- Aggiunge script di convenienza (senza sovrascrivere i tuoi) al `package.json` radice, più le dev dependencies `nx`, `@nx/js`, `@nx/workspace`, `typescript` e Biome — `nx` fissato a una singola versione per evitare il [deadlock duplicate-nx](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established) — e scrive un `biome.json` predefinito se non ne esiste uno. Un workspace ESM mantiene il suo `type: "module"`; il campo `type` di un workspace CommonJS (o la sua assenza) viene lasciato così com'è.
+- Configura il <Link path="get_started/building-with-ai">server MCP</Link> per gli agenti di codifica supportati (a meno che non sia disabilitato).
+
+### Opzioni
+
+<GeneratorParameters generator="init" />
+
+## Aggiungere Nx a un progetto non-Nx
+
+Se il tuo progetto non usa ancora Nx, aggiungilo prima con [`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project). Funziona su un pacchetto semplice, un workspace npm/pnpm/yarn, un Turborepo o un monorepo Lerna:
+
+```bash
+npx nx@latest init
+```
+
+`nx init` è lo strumento proprio di Nx per adottare Nx — rileva i tuoi strumenti, scrive `nx.json` e collega i tuoi script esistenti in Nx. Segui i prompt. Quando viene eseguito in modo non interattivo (CI o un agente AI), passa `--interactive=false`; se Nx rileva plugin di strumenti per il tuo stack (ad es. `@nx/vite`) chiederà anche una scelta esplicita — passa `--plugins=skip` per rimandare (i plugin possono essere aggiunti in seguito con `nx add`) o `--plugins=all` per accettarli. Una volta completato e il tuo workspace compila sotto Nx, [aggiungi il plugin](#adding-the-plugin) come sopra.
+
+### Progetti non-Node (Python, Go, Java, Rust, …)
+
+Nx e il plugin sono distribuiti come pacchetti npm, quindi un progetto senza strumenti Node.js ha bisogno di un `package.json` radice minimo prima che `nx init` possa fare qualcosa di utile:
+
+```json
+{
+  "name": "my-project",
+  "private": true,
+  "type": "module"
+}
+```
+
+Crea quel file, quindi esegui `nx init` e [aggiungi il plugin](#adding-the-plugin) come al solito. I tuoi strumenti di linguaggio esistenti rimangono intatti — i progetti Nx generati dal plugin (inclusi i <Link path="guides/py-project">progetti Python</Link>) vivono accanto al tuo codice esistente, e puoi collegare la tua build esistente in Nx in modo incrementale.
+
+### Progetti a pacchetto singolo
+
+Il plugin è progettato per monorepo — genera ogni progetto nella propria directory sotto `packages/`. Se stai partendo da un **progetto a pacchetto singolo** (un `package.json` alla radice con il tuo sorgente direttamente sotto di esso, nessun workspace), sposta il tuo pacchetto esistente in `packages/` prima di adottare il plugin in modo che il tuo progetto si trovi accanto a quelli che il plugin genera:
+
+<Steps>
+
+1. Crea una directory `packages/<your-package>/` e sposta il tuo sorgente, `package.json` e `tsconfig.json` al suo interno.
+2. Dichiara il workspace: per `pnpm`, aggiungi un `pnpm-workspace.yaml` con `packages: ['packages/*']`; per `npm`/`yarn`/`bun`, aggiungi `"workspaces": ["packages/*"]` al `package.json` radice. Il `package.json` radice diventa un manifest del workspace piuttosto che un progetto stesso.
+3. Esegui `nx init` (se non l'hai fatto), quindi [aggiungi il plugin](#adding-the-plugin).
+
+</Steps>
+
+Mantenere la radice come manifest del workspace (piuttosto che un progetto) è ciò che permette a `nx run-many --target build --all` di compilare ogni progetto senza che un task faccia riferimento a se stesso — vedi [la nota sulla ricorsione](#recursive-task-invocation-detected) di seguito.
+
+<Aside type="note" title="Aggiornamento successivo">
+Per aggiornare il plugin (e raccogliere eventuali migrazioni di codice automatizzate che fornisce), usa [`nx migrate`](https://nx.dev/features/automate-updating-dependencies) — `nx migrate @aws/nx-plugin` — piuttosto che aumentare la versione manualmente.
+</Aside>
+
+<Aside type="note" title="Package manager e layout">
+I progetti del plugin sono generati sotto una directory `packages/`. `pnpm` legge i glob del workspace da `pnpm-workspace.yaml`; altri package manager leggono il campo `workspaces` del `package.json` radice — `init` aggiorna quello che usa il tuo workspace. Se il tuo workspace usa un layout diverso (come `apps/` e `libs/`), i progetti del plugin vivono sotto `packages/` accanto alla tua struttura esistente.
+</Aside>
+
+## Adozione incrementale
+
+Non devi convertire tutto il tuo workspace in una volta. Un buon percorso è:
+
+<Steps>
+
+1. Aggiungi il plugin, quindi genera un singolo progetto (ad esempio un <Link path="guides/typescript-project">progetto TypeScript</Link> o un'<Link path="guides/ts-api">API</Link>) e compilalo.
+2. Aggiungi ulteriori progetti man mano che ne hai bisogno — siti web, API, infrastruttura — usando le <Link path="guides/index">guide ai generatori</Link>.
+3. Migra il tuo codice esistente nel workspace nel tempo, se lo desideri. I progetti del plugin si trovano accanto a quelli esistenti; non richiedono di spostare nulla.
+
+</Steps>
+
+## Risoluzione dei problemi
+
+La maggior parte degli attriti nell'adozione deriva dalla configurazione di Nx stesso piuttosto che dal plugin. Una volta che `nx add @aws/nx-plugin` è stato eseguito, questi sono i disallineamenti che potresti ancora vedere.
+
+#### `The workspace is out of sync`
+
+I riferimenti ai progetti TypeScript necessitano di sincronizzazione. `init` registra i generatori di sincronizzazione; esegui:
+
+<NxCommands commands={['sync']} />
+
+#### `ERR_PNPM_IGNORED_BUILDS` durante l'installazione
+
+pnpm salta gli script di installazione per i pacchetti che non sono nella allow-list. `init` inserisce nella allow-list quelli di cui gli strumenti del plugin hanno bisogno (`@swc/core`, `esbuild`, `nx`, `sharp`) in `pnpm-workspace.yaml`, ma il blocco può attivarsi durante `nx add @aws/nx-plugin` stesso — prima che `init` sia stato eseguito. Esegui `pnpm approve-builds` e approva i pacchetti elencati (o aggiungili sotto `allowBuilds:`), quindi riesegui l'installazione.
+
+#### `nx sync` si blocca, o `plugin worker ... exited before the connection was established`
+
+Due diverse versioni di `nx` sono presenti nello stesso albero node_modules (esegui `npm ls nx` per confermare) — il loro IPC plugin-worker va in deadlock. Il generatore `init` fissa la devDependency `nx` radice alla versione che i pacchetti `@nx/*` del plugin stesso risolvono, ma un'installazione successiva di un altro pacchetto `@nx/*` a una versione patch diversa può reintrodurre il disallineamento. Allinea ogni voce `nx` e `@nx/*` nel tuo `package.json` radice a una singola versione e reinstalla.
+
+#### `Recursive task invocation detected`
+
+Il tuo `package.json` **radice** è registrato come progetto Nx (ha una chiave `"nx"`, che `nx init` aggiunge per un repo a pacchetto singolo) *e* porta uno script `build` di `nx run-many --target build`. Nx quindi deduce un target `build` sulla radice che chiama se stesso. Sposta il tuo sorgente in `packages/<your-package>/` in modo che la radice diventi un manifest del workspace piuttosto che un progetto — vedi [Progetti a pacchetto singolo](#single-package-projects). (I preset standalone di Nx stesso evitano questo impostando `"nx": { "includedScripts": [] }` sul pacchetto radice; puoi fare lo stesso come alternativa più rapida.)
+
+#### Errori TypeScript nei tuoi progetti **esistenti** dopo aver aggiunto il plugin (`TS6059`, `TS7016`, `TS5011`, `NG4006`)
+
+I progetti generati dal plugin stesso portano le impostazioni TypeScript di cui hanno bisogno nel loro `tsconfig.lib.json` per progetto, quindi compilano indipendentemente dal tuo `tsconfig.base.json`. Questi errori compaiono invece in un **progetto preesistente tuo** che eredita un `tsconfig.base.json` creato da `init` (con `composite`/`emitDeclarationOnly`/`nodenext`) ma non è compatibile con quelle impostazioni — ad esempio, il compilatore Angular rifiuta `emitDeclarationOnly` (`NG4006`), o un progetto che imposta `outDir` senza un `rootDir` ora ne ha bisogno di uno (`TS5011`). Aggiungi override `tsconfig` per progetto ridichiarando le opzioni in conflitto per quei progetti (ad es. `"rootDir": "src"`), o punta i progetti del plugin e i tuoi progetti a configurazioni base separate.
+
+`init` non riscrive mai un `tsconfig.base.json` esistente, proprio per non poter rompere silenziosamente i progetti che ne ereditano — risolvere questi disallineamenti è una decisione che solo tu puoi prendere per la tua codebase.
+
+<Aside type="note" title="ESM e CommonJS">
+Il formato del modulo è a livello di workspace, letto dal campo `type` del `package.json` radice: `type: "module"` significa ESM, qualsiasi altra cosa (inclusa l'assenza del campo `type`) significa CommonJS. `init` preserva quello che usa il tuo workspace, e i generatori TypeScript del plugin emettono codice corrispondente. Se in seguito vuoi cambiare, modifica il `type` radice — ma quella è una migrazione del tuo codice esistente, non qualcosa che `init` fa per te.
+</Aside>
+
+<Aside type="tip">
+Quando lavori con un assistente AI, il <Link path="get_started/building-with-ai">server MCP Nx Plugin for AWS</Link> espone uno strumento `add-to-existing-project` che fornisce questa guida — inclusa la mappatura di un messaggio di errore che stai vedendo alla sua correzione — direttamente al tuo assistente.
+</Aside>

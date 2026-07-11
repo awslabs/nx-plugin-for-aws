@@ -1,0 +1,151 @@
+---
+title: 기존 프로젝트에 추가하기
+description: 기존 Nx 워크스페이스 또는 비-Nx 모노레포에서 @aws/nx-plugin을 도입하는 방법.
+---
+import { Steps, Aside } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+모든 프로젝트가 `create-nx-workspace --preset=@aws/nx-plugin`으로 시작하는 것은 아닙니다. 이미 [Nx 워크스페이스](https://nx.dev)가 있거나 Nx를 추가할 수 있는 모노레포가 있다면, 프로젝트를 재생성하지 않고도 `@aws/nx-plugin`을 점진적으로 도입할 수 있습니다.
+
+## 사전 요구사항
+
+- **Node.js** — [활성 LTS 버전](https://nodejs.org/en/about/previous-releases).
+- **패키지 매니저** — `pnpm`이 권장되며 가장 잘 지원됩니다. `npm`, `yarn`, `bun`도 작동합니다.
+- **TypeScript 5 또는 6** — 워크스페이스가 `typescript` 7(네이티브 컴파일러)을 고정하는 경우, 지금은 다운그레이드하세요: Nx의 실행자와 플러그인의 생성기는 TS 7에서 제거된 TypeScript JS API에 의존합니다.
+- **Nx 워크스페이스.** 프로젝트가 아직 Nx 워크스페이스가 아니라면, 먼저 Nx를 추가하세요 — [비-Nx 프로젝트에 Nx 추가하기](#adding-nx-to-a-non-nx-project)를 참조하세요. 이것은 Nx 자체가 담당하는 단계이며, 플러그인은 작동하는 Nx 워크스페이스 위에 구축됩니다.
+
+## 플러그인 추가하기
+
+[`nx add`](https://nx.dev/nx-api/nx/documents/add)를 사용하세요. 이는 Nx 설치와 호환되는 버전으로 플러그인을 설치한 다음 `init` 생성기를 실행하여 워크스페이스를 구성합니다:
+
+<NxCommands commands={['add @aws/nx-plugin']} />
+
+`nx add`는 플러그인의 `init` 생성기를 자동으로 실행합니다. 나중에 다시 실행하려면(예: IaC 제공자를 변경하려면) 직접 호출하세요:
+
+<RunGenerator generator="init" />
+
+그런 다음 프로젝트를 생성하고 빌드하여 설정을 확인하세요:
+
+<Steps>
+
+1. <RunGenerator generator="ts#project" requiredParameters={{ name: 'my-lib' }} />
+
+2. <NxCommands commands={['sync']} />
+
+3. <NxCommands commands={['run-many --target build --all']} />
+
+</Steps>
+
+### `init` 생성기가 구성하는 것
+
+`init` 생성기는 워크스페이스가 플러그인의 생성기를 실행하는 데 필요한 결정론적 변경을 수행합니다. 이는 **멱등성**을 가지며 — 다시 실행해도 아무 작업도 수행하지 않습니다 — 워크스페이스의 모듈 형식을 보존합니다: 루트 `package.json`에 `type: "module"`이 있는 워크스페이스는 ESM으로 유지되고, 그 외의 경우는 CommonJS로 유지되며, 생성된 코드도 이에 따릅니다. 기존 `tsconfig.base.json`을 다시 작성하거나, 패키지 매니저를 마이그레이션하거나, 기존 프로젝트를 재구성하지 **않습니다**.
+
+다음을 수행합니다:
+
+- 선택한 <Link path="guides/typescript-infrastructure">코드형 인프라 제공자</Link>(CDK 또는 Terraform)와 컨테이너 엔진을 기록하는 `aws-nx-plugin.config.mts`를 생성합니다. 생성기는 이 파일에서 `iac.provider`를 읽습니다.
+- `nx.json`의 `compile` 타겟에 동기화 생성기(`@nx/js:typescript-sync` 및 `@aws/nx-plugin:ts#sync`)를 등록하여, 프로젝트를 추가할 때 TypeScript 프로젝트 참조가 동기화 상태를 유지하도록 합니다.
+- 루트 `tsconfig.json`과 `tsconfig.base.json`이 존재하는지 확인합니다(Nx의 TypeScript 동기화와 플러그인의 프로젝트에 필요함). 누락된 파일은 생성되며, **기존 파일은 그대로 유지**되어 다른 프로젝트를 방해하지 않습니다.
+- `pnpm` 워크스페이스의 경우, 플러그인의 종속성이 필요로 하는 빌드 스크립트(`@swc/core`, `esbuild`, `nx`, `sharp`)를 `pnpm-workspace.yaml`에서 허용 목록에 추가합니다.
+- 루트 `package.json`에 편의 스크립트를(기존 스크립트를 덮어쓰지 않고) 추가하고, `nx`, `@nx/js`, `@nx/workspace`, `typescript` 및 Biome 개발 종속성을 추가합니다 — `nx`는 [중복-nx 교착 상태](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established)를 피하기 위해 단일 버전으로 고정됩니다 — 그리고 `biome.json`이 없으면 기본값을 작성합니다. ESM 워크스페이스는 `type: "module"`을 유지하고, CommonJS 워크스페이스의 `type` 필드(또는 없음)는 그대로 유지됩니다.
+- 지원되는 코딩 에이전트를 위한 <Link path="get_started/building-with-ai">MCP 서버</Link>를 구성합니다(비활성화되지 않은 경우).
+
+### 옵션
+
+<GeneratorParameters generator="init" />
+
+## 비-Nx 프로젝트에 Nx 추가하기
+
+프로젝트가 아직 Nx를 사용하지 않는 경우, 먼저 [`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project)으로 추가하세요. 일반 패키지, npm/pnpm/yarn 워크스페이스, Turborepo 또는 Lerna 모노레포에서 작동합니다:
+
+```bash
+npx nx@latest init
+```
+
+`nx init`은 Nx를 도입하기 위한 Nx 자체의 도구입니다 — 도구를 감지하고, `nx.json`을 작성하며, 기존 스크립트를 Nx에 연결합니다. 프롬프트를 따르세요. 비대화형으로 실행할 때(CI 또는 AI 에이전트), `--interactive=false`를 전달하세요. Nx가 스택에 대한 도구 플러그인(예: `@nx/vite`)을 감지하면 명시적 선택을 요청합니다 — `--plugins=skip`을 전달하여 연기하거나(플러그인은 나중에 `nx add`로 추가 가능) `--plugins=all`을 전달하여 수락하세요. 완료되고 워크스페이스가 Nx에서 빌드되면, 위와 같이 [플러그인을 추가](#adding-the-plugin)하세요.
+
+### 비-Node 프로젝트 (Python, Go, Java, Rust, …)
+
+Nx와 플러그인은 npm 패키지로 배포되므로, Node.js 도구가 없는 프로젝트는 `nx init`이 유용한 작업을 수행하기 전에 최소한의 루트 `package.json`이 필요합니다:
+
+```json
+{
+  "name": "my-project",
+  "private": true,
+  "type": "module"
+}
+```
+
+해당 파일을 생성한 다음 `nx init`을 실행하고 평소처럼 [플러그인을 추가](#adding-the-plugin)하세요. 기존 언어 도구는 그대로 유지됩니다 — 플러그인이 생성한 Nx 프로젝트(<Link path="guides/py-project">Python 프로젝트</Link> 포함)는 기존 코드와 함께 존재하며, 기존 빌드를 점진적으로 Nx에 연결할 수 있습니다.
+
+### 단일 패키지 프로젝트
+
+플러그인은 모노레포용으로 설계되었습니다 — 각 프로젝트를 `packages/` 아래의 자체 디렉토리에 생성합니다. **단일 패키지 프로젝트**(루트에 하나의 `package.json`이 있고 소스가 바로 아래에 있으며 워크스페이스가 없는 경우)에서 시작하는 경우, 플러그인을 도입하기 전에 기존 패키지를 `packages/`로 이동하여 프로젝트가 플러그인이 생성하는 프로젝트와 나란히 위치하도록 하세요:
+
+<Steps>
+
+1. `packages/<your-package>/` 디렉토리를 생성하고 소스, `package.json` 및 `tsconfig.json`을 그 안으로 이동하세요.
+2. 워크스페이스를 선언하세요: `pnpm`의 경우 `packages: ['packages/*']`가 포함된 `pnpm-workspace.yaml`을 추가하고, `npm`/`yarn`/`bun`의 경우 루트 `package.json`에 `"workspaces": ["packages/*"]`를 추가하세요. 루트 `package.json`은 프로젝트 자체가 아닌 워크스페이스 매니페스트가 됩니다.
+3. `nx init`을 실행한 다음(아직 실행하지 않았다면), [플러그인을 추가](#adding-the-plugin)하세요.
+
+</Steps>
+
+루트를 워크스페이스 매니페스트로 유지하는 것(프로젝트가 아닌)은 `nx run-many --target build --all`이 작업이 자신을 참조하지 않고 모든 프로젝트를 빌드할 수 있게 합니다 — 아래의 [재귀 참고사항](#recursive-task-invocation-detected)을 참조하세요.
+
+<Aside type="note" title="나중에 업그레이드하기">
+플러그인을 업그레이드하고(제공되는 자동화된 코드 마이그레이션을 받으려면) [`nx migrate`](https://nx.dev/features/automate-updating-dependencies)를 사용하세요 — `nx migrate @aws/nx-plugin` — 버전을 수동으로 변경하는 대신.
+</Aside>
+
+<Aside type="note" title="패키지 매니저 및 레이아웃">
+플러그인의 프로젝트는 `packages/` 디렉토리 아래에 생성됩니다. `pnpm`은 `pnpm-workspace.yaml`에서 워크스페이스 글로브를 읽고, 다른 패키지 매니저는 루트 `package.json`의 `workspaces` 필드를 읽습니다 — `init`은 워크스페이스가 사용하는 것을 업데이트합니다. 워크스페이스가 다른 레이아웃(예: `apps/` 및 `libs/`)을 사용하는 경우, 플러그인의 프로젝트는 기존 구조와 함께 `packages/` 아래에 위치합니다.
+</Aside>
+
+## 점진적 도입
+
+전체 워크스페이스를 한 번에 변환할 필요는 없습니다. 좋은 경로는 다음과 같습니다:
+
+<Steps>
+
+1. 플러그인을 추가한 다음 단일 프로젝트(예: <Link path="guides/typescript-project">TypeScript 프로젝트</Link> 또는 <Link path="guides/ts-api">API</Link>)를 생성하고 빌드하세요.
+2. 필요에 따라 추가 프로젝트를 추가하세요 — 웹사이트, API, 인프라 — <Link path="guides/index">생성기 가이드</Link>를 사용하여.
+3. 원하는 경우 시간이 지남에 따라 기존 코드를 워크스페이스로 마이그레이션하세요. 플러그인의 프로젝트는 기존 프로젝트와 함께 위치하며, 아무것도 이동할 필요가 없습니다.
+
+</Steps>
+
+## 문제 해결
+
+대부분의 도입 마찰은 플러그인 자체보다는 Nx 설정에서 발생합니다. `nx add @aws/nx-plugin`이 실행된 후에도 여전히 볼 수 있는 불일치는 다음과 같습니다.
+
+#### `The workspace is out of sync`
+
+TypeScript 프로젝트 참조를 동기화해야 합니다. `init`은 동기화 생성기를 등록합니다. 실행하세요:
+
+<NxCommands commands={['sync']} />
+
+#### 설치 중 `ERR_PNPM_IGNORED_BUILDS`
+
+pnpm은 허용 목록에 없는 패키지의 설치 스크립트를 건너뜁니다. `init`은 플러그인의 도구가 필요로 하는 것(`@swc/core`, `esbuild`, `nx`, `sharp`)을 `pnpm-workspace.yaml`에서 허용 목록에 추가하지만, `nx add @aws/nx-plugin` 자체 중에 — `init`이 실행되기 전에 — 차단이 발생할 수 있습니다. `pnpm approve-builds`를 실행하고 나열된 패키지를 승인하거나(`allowBuilds:` 아래에 추가), 설치를 다시 실행하세요.
+
+#### `nx sync`가 멈추거나 `plugin worker ... exited before the connection was established`
+
+동일한 node_modules 트리에 두 개의 다른 `nx` 버전이 있습니다(`npm ls nx`를 실행하여 확인) — 플러그인-워커 IPC가 교착 상태에 빠집니다. `init` 생성기는 루트 `nx` devDependency를 플러그인 자체의 `@nx/*` 패키지가 해결하는 버전으로 고정하지만, 다른 패치 버전의 다른 `@nx/*` 패키지를 나중에 설치하면 불일치가 다시 발생할 수 있습니다. 루트 `package.json`의 모든 `nx` 및 `@nx/*` 항목을 단일 버전으로 정렬하고 재설치하세요.
+
+#### `Recursive task invocation detected`
+
+**루트** `package.json`이 Nx 프로젝트로 등록되어 있고(`"nx"` 키가 있으며, `nx init`이 단일 패키지 레포에 추가함) `nx run-many --target build`의 `build` 스크립트를 가지고 있습니다. 그러면 Nx는 자신을 호출하는 루트에 `build` 타겟을 추론합니다. 소스를 `packages/<your-package>/`로 이동하여 루트가 프로젝트가 아닌 워크스페이스 매니페스트가 되도록 하세요 — [단일 패키지 프로젝트](#single-package-projects)를 참조하세요. (Nx 자체의 독립형 프리셋은 루트 패키지에 `"nx": { "includedScripts": [] }`를 설정하여 이를 방지합니다. 더 빠른 대안으로 동일하게 수행할 수 있습니다.)
+
+#### 플러그인 추가 후 **기존** 프로젝트의 TypeScript 오류 (`TS6059`, `TS7016`, `TS5011`, `NG4006`)
+
+플러그인 자체가 생성한 프로젝트는 프로젝트별 `tsconfig.lib.json`에 필요한 TypeScript 설정을 가지고 있으므로 `tsconfig.base.json`과 관계없이 빌드됩니다. 이러한 오류는 대신 `init`이 생성한 `tsconfig.base.json`(`composite`/`emitDeclarationOnly`/`nodenext` 포함)을 상속하지만 해당 설정과 호환되지 않는 **기존 프로젝트**에 나타납니다 — 예를 들어, Angular 컴파일러는 `emitDeclarationOnly`를 거부하거나(`NG4006`), `rootDir` 없이 `outDir`을 설정하는 프로젝트는 이제 하나가 필요합니다(`TS5011`). 해당 프로젝트에 대해 충돌하는 옵션을 다시 선언하는 프로젝트별 `tsconfig` 재정의를 추가하거나(예: `"rootDir": "src"`), 플러그인의 프로젝트와 프로젝트를 별도의 기본 구성으로 지정하세요.
+
+`init`은 기존 `tsconfig.base.json`을 다시 작성하지 않습니다. 정확히 이를 상속하는 프로젝트를 조용히 깨뜨릴 수 없도록 하기 위함입니다 — 이러한 불일치를 해결하는 것은 코드베이스에 대해 귀하만이 내릴 수 있는 결정입니다.
+
+<Aside type="note" title="ESM 및 CommonJS">
+모듈 형식은 워크스페이스 전체에 적용되며, 루트 `package.json` `type` 필드에서 읽습니다: `type: "module"`은 ESM을 의미하고, 그 외의 경우(`type` 필드가 없는 경우 포함)는 CommonJS를 의미합니다. `init`은 워크스페이스가 사용하는 것을 보존하며, 플러그인의 TypeScript 생성기는 일치하는 코드를 생성합니다. 나중에 전환하려면 루트 `type`을 변경하세요 — 하지만 그것은 기존 코드의 마이그레이션이며, `init`이 수행하는 것이 아닙니다.
+</Aside>
+
+<Aside type="tip">
+AI 어시스턴트와 작업할 때, <Link path="get_started/building-with-ai">Nx Plugin for AWS MCP 서버</Link>는 이 가이드를 제공하는 `add-to-existing-project` 도구를 노출합니다 — 보고 있는 오류 메시지를 수정 사항에 매핑하는 것을 포함하여 — 어시스턴트에게 직접.
+</Aside>
