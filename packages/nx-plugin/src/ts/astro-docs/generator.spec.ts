@@ -6,6 +6,7 @@ import { getProjects, readJson, type Tree, updateJson } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec';
 import {
   TS_ASTRO_DOCS_GENERATOR_INFO,
   tsAstroDocsGenerator,
@@ -13,6 +14,14 @@ import {
 
 describe('ts#astro-docs generator', () => {
   let tree: Tree;
+  const verifier = new TypeScriptVerifier([
+    'commander',
+    'fs-extra',
+    '@types/fs-extra',
+    'simple-git',
+    'fast-glob',
+    '@strands-agents/sdk',
+  ]);
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
@@ -101,7 +110,7 @@ describe('ts#astro-docs generator', () => {
     expect(deps).toHaveProperty('tsx');
   });
 
-  it('should use import.meta.dirname in translate.ts in an ESM workspace', async () => {
+  it('should generate a compiling translate.ts using import.meta.dirname in an ESM workspace', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
       preferInstallDependencies: false,
@@ -110,9 +119,11 @@ describe('ts#astro-docs generator', () => {
     const translateScript = tree.read('docs/scripts/translate.ts', 'utf-8');
     expect(translateScript).toContain('import.meta.dirname');
     expect(translateScript).not.toContain('__dirname');
+
+    verifier.expectTypeScriptToCompile(tree, ['docs/scripts/translate.ts']);
   });
 
-  it('should use __dirname in translate.ts in a CommonJS workspace', async () => {
+  it('should generate a compiling translate.ts using __dirname in a CommonJS workspace', async () => {
     updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'commonjs' }));
 
     await tsAstroDocsGenerator(tree, {
@@ -123,6 +134,8 @@ describe('ts#astro-docs generator', () => {
     const translateScript = tree.read('docs/scripts/translate.ts', 'utf-8');
     expect(translateScript).toContain('__dirname');
     expect(translateScript).not.toContain('import.meta.dirname');
+
+    verifier.expectTypeScriptToCompile(tree, ['docs/scripts/translate.ts']);
   });
 
   it('should use the project name as the site title', async () => {
