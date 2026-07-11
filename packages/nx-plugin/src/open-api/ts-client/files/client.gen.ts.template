@@ -29,6 +29,19 @@ const composedMarshaller = (property, method) =>
   property.export === 'reference' && discriminatorBaseNames.has(property.type)
     ? `$IO.${property.typescriptType}.$${method}Base`
     : `$IO.${property.typescriptType}.${method}`;
+// Names of object models composed by a non-discriminated one-of/any-of. These
+// additionally emit an internal `$fromJsonPartial` marshaller that converts
+// only the properties present on the wire value, so composing the union's
+// members never fabricates values (e.g. an Invalid Date) from a non-matching
+// member's absent required fields. Discriminated unions dispatch to a single
+// member instead and never compose, so they don't need the partial form.
+const unionMemberNames = new Set(models
+  .filter(m => (m.export === 'one-of' || m.export === 'any-of') && !m.discriminator)
+  .flatMap(m => (m.composedModels || []).map(c => c.name)));
+const hasPartialMarshaller = (name) => {
+  const member = unionMemberNames.has(name) && modelByName[name];
+  return member && !['one-of', 'any-of', 'all-of', 'dictionary', 'enum', 'tuple'].includes(member.export);
+};
 // The single wire media type chosen for an operation's request body, if any.
 const bodyMediaTypeOf = (op) => {
   if (!op.parametersBody || !op.parametersBody.mediaTypes) return undefined;
@@ -405,10 +418,15 @@ export class $IO {
       }
       <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
+      <%_ /* A non-discriminated union's members marshal via their partial form:
+            the value matches one member, so the others must convert only the
+            properties actually present rather than fabricate their own. */ _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((composedType) => { _%>
         <%_ if (composedType.export === 'reference' && discriminatorBaseNames.has(composedType.type)) { _%>
         ...<%- composedMarshaller(composedType, 'fromJson') %>(json),
+        <%_ } else if (model.export !== 'all-of' && composedType.export === 'reference' && hasPartialMarshaller(composedType.type)) { _%>
+        ...$IO.<%- composedType.typescriptType %>.$fromJsonPartial(json),
         <%_ } else { _%>
         ...<%- renderFromJsonValue(composedType, 'json') %>,
         <%_ } _%>
@@ -436,20 +454,48 @@ export class $IO {
         <%_ } _%>
         )), (additionalProperty) => <%- renderFromJsonValue(model.additionalPropertiesModel, 'additionalProperty', 'any') %>),
         <%_ } _%>
-        <%_ /* Absent properties are skipped (mirroring toJson) rather than
-              converted: converting a missing required field would fabricate a
-              value (e.g. `new Date(undefined)` -> Invalid Date). This also
-              makes composing a non-discriminated union sound — each member
-              spread contributes only the fields actually present. The cast
-              restores the declared (required) property types. */ _%>
+        <%_ model.properties.forEach((property) => { _%>
+        <%_ if (!property.isRequired) { _%>
+        ...(json['<%- property.name %>'] === undefined ? {} : {
+          <%= property.typescriptName %>: <%- renderFromJsonValue(property, `json['${property.name}']`) %>,
+        }),
+        <%_ } else { _%>
+        <%= property.typescriptName %>: <%- renderFromJsonValue(property, `json['${property.name}']`) %>,
+        <%_ } _%>
+        <%_ }); _%>
+      };
+      <%_ } _%>
+    },
+    <%_ if (hasPartialMarshaller(model.name)) { _%>
+    <%_ /* Converts only the properties present on the wire value — a required
+          field that is absent is skipped, never fabricated (e.g. no
+          `new Date(undefined)`). Used solely when composing this model as a
+          member of a non-discriminated union, where the value may match a
+          different member; `fromJson` remains the fully-typed marshaller. */ _%>
+    $fromJsonPartial: (json: any): any => {
+      return {
+        <%_ if (model.hasPatternProperties && model.patternPropertiesModels.length > 0) { _%>
+        <%_ model.patternPropertiesModels.forEach(({ pattern, model: patternProperty }) => { _%>
+          ...$IO.$mapValues(Object.fromEntries(Object.entries(json).filter(([key]) => <% if (model.properties.length > 0) { %>![<%- model.properties.map(p => `'${p.name}'`).join(', ') %>].includes(key) && <% } %>
+          <%- matchPattern(pattern, 'key') %>
+          )), (patternProperty) => <%- renderFromJsonValue(patternProperty, 'patternProperty', 'any') %>),
+        <%_ }); _%>
+        <%_ } _%>
+        <%_ if (model.hasAdditionalProperties) { _%>
+        ...$IO.$mapValues(Object.fromEntries(Object.entries(json).filter(([key]) => <% if (model.properties.length > 0) { %>![<%- model.properties.map(p => `'${p.name}'`).join(', ') %>].includes(key)<% } %>
+        <%_ if (model.hasPatternProperties && model.patternPropertiesModels.length > 0) { _%>
+        <% if (model.properties.length > 0) { %>&& <% } %>!(<%- model.patternPropertiesModels.map(({ pattern }) => matchPattern(pattern, 'key')).join(' || ') %>)
+        <%_ } _%>
+        )), (additionalProperty) => <%- renderFromJsonValue(model.additionalPropertiesModel, 'additionalProperty', 'any') %>),
+        <%_ } _%>
         <%_ model.properties.forEach((property) => { _%>
         ...(json['<%- property.name %>'] === undefined ? {} : {
           <%= property.typescriptName %>: <%- renderFromJsonValue(property, `json['${property.name}']`) %>,
         }),
         <%_ }); _%>
-      } as <%- model.typescriptName %>;
-      <%_ } _%>
+      };
     },
+    <%_ } _%>
   };
 <%_ }) _%>
 }
