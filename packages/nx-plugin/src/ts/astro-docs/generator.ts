@@ -15,6 +15,7 @@ import {
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { isEsmWorkspace } from '../../utils/module-format';
 import { toKebabCase } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
@@ -106,6 +107,7 @@ export const tsAstroDocsGenerator = async (
     title: schema.name,
     includeTranslation,
     includeBlog,
+    esm: isEsmWorkspace(tree),
     pkgMgrCmd: getPackageManagerDisplayCommands().exec,
     today: new Date().toISOString().slice(0, 10),
   };
