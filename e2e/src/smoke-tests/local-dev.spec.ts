@@ -392,6 +392,16 @@ describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:ts#rdb --name=postgres-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
         opts,
       );
+      // Python relational databases (PostgreSQL + MySQL), connected to the
+      // FastAPI below so its dev target boots each local Docker database.
+      await runCLI(
+        `generate @aws/nx-plugin:py#rdb --name=py-postgres-db --infra=aurora --engine=postgres --framework=sqlmodel --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:py#rdb --name=py-mysql-db --infra=aurora --engine=mysql --framework=sqlmodel --no-interactive`,
+        opts,
+      );
       // Python DynamoDB table, connected to the FastAPI so its dev target
       // boots DynamoDB Local and the PynamoDB client points at it locally.
       await runCLI(
@@ -466,6 +476,14 @@ describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
       );
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=postgres-db --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_api --targetProject=py_postgres_db --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_api --targetProject=py_mysql_db --no-interactive`,
         opts,
       );
       await runCLI(
@@ -725,6 +743,16 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
           'packages/postgres-db/project.json',
           'dev',
         ),
+        pyPostgresRdb: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_postgres_db/project.json',
+          'dev',
+        ),
+        pyMysqlRdb: getPortFromProjectJson(
+          projectRoot,
+          'packages/py_mysql_db/project.json',
+          'dev',
+        ),
         pyTable: getPortFromProjectJson(
           projectRoot,
           'packages/py_table/project.json',
@@ -840,10 +868,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('Smithy API - echo', async () => {
-    await startAndWait(
-      '@local-dev-test/my-smithy-api:dev',
-      ports.smithy,
-    );
+    await startAndWait('@local-dev-test/my-smithy-api:dev', ports.smithy);
     const res = await fetch(
       `http://127.0.0.1:${ports.smithy}/echo?message=hello`,
     );
@@ -1492,10 +1517,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('TS MCP Server - initialize handshake', async () => {
-    await startAndWait(
-      '@local-dev-test/ts-project:my-mcp-dev',
-      ports.tsMcp,
-    );
+    await startAndWait('@local-dev-test/ts-project:my-mcp-dev', ports.tsMcp);
 
     const res = await fetch(`http://127.0.0.1:${ports.tsMcp}/mcp`, {
       method: 'POST',
@@ -1521,10 +1543,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
   });
 
   it('Python MCP Server - initialize handshake', async () => {
-    await startAndWait(
-      'local_dev_test.py_project:my-py-mcp-dev',
-      ports.pyMcp,
-    );
+    await startAndWait('local_dev_test.py_project:my-py-mcp-dev', ports.pyMcp);
 
     const res = await fetch(`http://127.0.0.1:${ports.pyMcp}/mcp`, {
       method: 'POST',
@@ -1558,6 +1577,33 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       env: { NX_DAEMON: 'true' },
     });
     console.log('Postgres ready for queries');
+    await stopLast();
+  });
+
+  it('Python PostgreSQL RDB - Docker start + ready', async () => {
+    await startAndWait(
+      'local_dev_test.py_postgres_db:dev',
+      ports.pyPostgresRdb,
+    );
+    console.log(`Python Postgres listening on port ${ports.pyPostgresRdb}`);
+
+    await runCLI(`run local_dev_test.py_postgres_db:wait-for-db`, {
+      cwd: projectRoot,
+      env: { NX_DAEMON: 'true' },
+    });
+    console.log('Python Postgres ready for queries');
+    await stopLast();
+  });
+
+  it('Python MySQL RDB - Docker start + ready', async () => {
+    await startAndWait('local_dev_test.py_mysql_db:dev', ports.pyMysqlRdb);
+    console.log(`Python MySQL listening on port ${ports.pyMysqlRdb}`);
+
+    await runCLI(`run local_dev_test.py_mysql_db:wait-for-db`, {
+      cwd: projectRoot,
+      env: { NX_DAEMON: 'true' },
+    });
+    console.log('Python MySQL ready for queries');
     await stopLast();
   });
 
