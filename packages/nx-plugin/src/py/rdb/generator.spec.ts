@@ -137,8 +137,11 @@ describe('py#rdb generator', () => {
       'utf-8',
     );
     expect(databaseConstruct).toMatchSnapshot();
-    expect(databaseConstruct).toContain('createDbUserBundleDir:');
-    expect(databaseConstruct).toContain("framework: 'sqlmodel'");
+    expect(databaseConstruct).toContain('createDbUserBundleDir = path.join(');
+    expect(databaseConstruct).toContain(
+      'DockerImageCode.fromImageAsset(createDbUserBundleDir',
+    );
+    expect(databaseConstruct).not.toContain('NODE_EXTRA_CA_CERTS');
     expect(databaseConstruct).not.toContain('createDbUserImageCommand');
     expect(
       tree.read('packages/db/proj_db/create_db_user_handler.py', 'utf-8'),

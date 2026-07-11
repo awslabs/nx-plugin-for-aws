@@ -1499,6 +1499,13 @@ exports[`py#rdb generator > should generate a PostgreSQL SQLModel project with A
 import * as url from 'url';
 import { readFileSync } from 'fs';
 import { Construct } from 'constructs';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  DockerImageCode,
+  DockerImageFunction,
+  Function,
+  FunctionOptions,
+} from 'aws-cdk-lib/aws-lambda';
 import {
   AuroraDatabase,
   AuroraDatabaseEngines,
@@ -1516,15 +1523,19 @@ const { runtimeConfigKey } = JSON.parse(
   ),
 ) as { runtimeConfigKey: string };
 
+const migrationBundleDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/packages/db/docker/migration',
+);
+
+const createDbUserBundleDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/packages/db/docker/create-db-user',
+);
+
 export type DbProps = Omit<
   AuroraDatabaseProps,
-  | 'databaseName'
-  | 'adminUser'
-  | 'createDbUserBundleDir'
-  | 'framework'
-  | 'engine'
-  | 'runtimeConfigKey'
-  | 'migrationBundleDir'
+  'databaseName' | 'adminUser' | 'runtimeConfigKey' | 'engine'
 >;
 
 /**
@@ -1537,16 +1548,27 @@ export class Db extends AuroraDatabase {
       databaseName: 'database_name',
       adminUser: 'databaseUser',
       runtimeConfigKey,
-      migrationBundleDir: path.join(
-        findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-        'dist/packages/db/docker/migration',
-      ),
-      createDbUserBundleDir: path.join(
-        findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-        'dist/packages/db/docker/create-db-user',
-      ),
-      framework: 'sqlmodel',
       engine: AuroraDatabaseEngines.postgres({}),
+    });
+  }
+
+  protected override createDbUserHandler(baseProps: FunctionOptions): Function {
+    return new DockerImageFunction(this, 'CreateDbUserHandler', {
+      ...baseProps,
+      code: DockerImageCode.fromImageAsset(createDbUserBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+    });
+  }
+
+  protected override createMigrationHandler(
+    baseProps: FunctionOptions,
+  ): Function {
+    return new DockerImageFunction(this, 'MigrationHandler', {
+      ...baseProps,
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
     });
   }
 }
@@ -1628,14 +1650,10 @@ import { CustomResource } from 'aws-cdk-lib';
 import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
 import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import {
   Architecture,
-  Code,
-  DockerImageCode,
-  DockerImageFunction,
   Function,
-  Runtime,
+  FunctionOptions,
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import {
@@ -1752,19 +1770,6 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
   readonly runtimeConfigKey: string;
 
   /**
-   * Migration bundle used to create a migration handler Lambda.
-   */
-  readonly migrationBundleDir: string;
-
-  /**
-   * Bundle used to create or reconcile the application database user.
-   */
-  readonly createDbUserBundleDir: string;
-
-  /** ORM framework used by this database project. */
-  readonly framework: 'prisma' | 'sqlmodel';
-
-  /**
    * Writer instance for the Aurora cluster.
    */
   readonly writer?: DatabaseClusterProps['writer'];
@@ -1838,9 +1843,6 @@ export abstract class AuroraDatabase extends Construct {
       adminUser,
       databaseName,
       runtimeConfigKey,
-      migrationBundleDir,
-      createDbUserBundleDir,
-      framework,
       vpcSubnets,
       writer,
       enableRdsProxy = true,
@@ -1917,11 +1919,24 @@ export abstract class AuroraDatabase extends Construct {
     const databaseHostname =
       this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
     const databasePort = this.cluster.clusterEndpoint.port;
-    const createDbUserHandler =
-      framework === 'sqlmodel'
-        ? this.createPythonDbUserHandler(vpc, createDbUserBundleDir)
-        : this.createNodeDbUserHandler(vpc, createDbUserBundleDir);
 
+    const commonProps: FunctionOptions = {
+      vpc,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      architecture: Architecture.ARM_64,
+    };
+
+    const createDbUserHandler = this.createDbUserHandler({
+      ...commonProps,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+    });
+    createDbUserHandler.addEnvironment(
+      'DATABASE_SECRET_ARN',
+      this.cluster.secret!.secretArn,
+    );
     this.cluster.connections.allowDefaultPortFrom(
       createDbUserHandler,
       'Allow the create-db-user handler to connect to the database',
@@ -1958,11 +1973,14 @@ export abstract class AuroraDatabase extends Construct {
       region: Stack.of(this).region,
     });
 
-    const migrationHandler =
-      framework === 'sqlmodel'
-        ? this.createPythonMigrationHandler(vpc, migrationBundleDir)
-        : this.createNodeMigrationHandler(vpc, migrationBundleDir);
-
+    const migrationHandler = this.createMigrationHandler({
+      ...commonProps,
+      memorySize: 1024,
+    });
+    migrationHandler.addEnvironment(
+      'DATABASE_SECRET_ARN',
+      this.cluster.secret!.secretArn,
+    );
     this.cluster.connections.allowDefaultPortFrom(migrationHandler);
     this.grantSecretRead(migrationHandler);
 
@@ -1982,86 +2000,17 @@ export abstract class AuroraDatabase extends Construct {
     }
   }
 
-  private createPythonDbUserHandler(
-    vpc: IVpc,
-    createDbUserBundleDir: string,
-  ): DockerImageFunction {
-    return new DockerImageFunction(this, 'CreateDbUserHandler', {
-      code: DockerImageCode.fromImageAsset(createDbUserBundleDir, {
-        platform: Platform.LINUX_ARM64,
-      }),
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-      },
-      architecture: Architecture.ARM_64,
-    });
-  }
+  /**
+   * Creates the Lambda handler used to create or reconcile the application database user.
+   */
+  protected abstract createDbUserHandler(baseProps: FunctionOptions): Function;
 
-  private createNodeDbUserHandler(
-    vpc: IVpc,
-    createDbUserBundleDir: string,
-  ): Function {
-    return new Function(this, 'CreateDbUserHandler', {
-      code: Code.fromAsset(createDbUserBundleDir),
-      handler: 'index.handler',
-      runtime: Runtime.NODEJS_LATEST,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
-      architecture: Architecture.ARM_64,
-    });
-  }
-
-  private createPythonMigrationHandler(
-    vpc: IVpc,
-    migrationBundleDir: string,
-  ): DockerImageFunction {
-    return new DockerImageFunction(this, 'MigrationHandler', {
-      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
-        platform: Platform.LINUX_ARM64,
-      }),
-      memorySize: 1024,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-      },
-      architecture: Architecture.ARM_64,
-    });
-  }
-
-  private createNodeMigrationHandler(
-    vpc: IVpc,
-    migrationBundleDir: string,
-  ): DockerImageFunction {
-    return new DockerImageFunction(this, 'MigrationHandler', {
-      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
-        platform: Platform.LINUX_ARM64,
-      }),
-      memorySize: 1024,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-      },
-      architecture: Architecture.ARM_64,
-    });
-  }
+  /**
+   * Creates the Lambda handler used to run database migrations.
+   */
+  protected abstract createMigrationHandler(
+    baseProps: FunctionOptions,
+  ): Function;
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {
     if (this.proxy) {
