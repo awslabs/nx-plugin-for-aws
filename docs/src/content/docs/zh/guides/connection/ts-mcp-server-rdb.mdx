@@ -48,7 +48,7 @@ import Snippet from '@components/snippet.astro';
 
 此外，`<mcp-server-name>-dev` 目标会更新为依赖数据库的 `dev` 目标。
 
-## 工作原理
+## 在 MCP 工具中使用数据库
 
 Prisma 客户端在 `createServer` 内获取，并可供在其中注册的所有工具和资源使用：
 
@@ -85,55 +85,61 @@ export const createServer = async () => {
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myMcpServer);
 db.grantConnect(myMcpServer);
 ```
 
-`allowDefaultPortFrom` 打开安全组规则，以便 MCP 服务器运行时可以访问数据库端口。`grantConnect` 向服务器的执行角色授予 IAM `rds-db:connect` 权限。
+`allowDefaultPortFrom` 打开安全组规则，使 MCP 服务器运行时可以访问数据库端口。`grantConnect` 向服务器的执行角色授予 IAM `rds-db:connect` 权限。
 
 </Fragment>
 <Fragment slot="terraform">
 
-将数据库模块输出传递到您的 MCP 服务器模块中，以便它可以访问数据库并读取其运行时配置：
+在与数据库相同的 VPC 中运行 MCP 服务器，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 }
-```
 
-确保 MCP 服务器的执行角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
-
-</Fragment>
-</Infrastructure>
-
-### 不使用 RDS Proxy 连接时的 SSL 要求
-
-<Snippet name="connection/ts-mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
-
-## 本地开发
-
-<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
-
-这会启动 MCP 服务器和所有连接的数据库。`LOCAL_DEV=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。
-database.cluster_port
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
   to_port                      = module.my_database.cluster_port
   ip_protocol                  = "tcp"
 }

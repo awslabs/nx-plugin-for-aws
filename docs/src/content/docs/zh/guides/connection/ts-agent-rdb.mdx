@@ -48,13 +48,9 @@ import Snippet from '@components/snippet.astro';
 
 此外，agent 的 `<agent-name>-dev` 目标会更新为依赖于数据库的 `dev` 目标。
 
-## 工作原理
+## 在 Agent 工具中使用数据库
 
-Prisma 客户端在 `getAgent()` 内实例化。由于 `ts#agent` 生成器为每个会话配置一个 Agent，因此客户端也会在会话的生命周期内重用。
-
-### Agent 定义
-
-`getAgent` 被更新为在其主体顶部导入并调用 Prisma getter：
+Prisma 客户端在 `getAgent()` 内实例化。由于 `ts#agent` 生成器为每个会话配置一个 Agent，因此客户端也会在会话的生命周期内重用：
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
@@ -65,7 +61,6 @@ export const getAgent = async () => {
   return new Agent({ /* use myDb in tools */ });
 };
 ```
-
 
 ## 多个数据库
 
@@ -91,58 +86,67 @@ export const getAgent = async () => {
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myAgent);
 db.grantConnect(myAgent);
 ```
 
-`allowDefaultPortFrom` 打开安全组规则，以便 agent 运行时可以访问数据库端口。`grantConnect` 向 agent 的执行角色授予 IAM `rds-db:connect` 权限。
+`allowDefaultPortFrom` 打开安全组规则，使 agent 运行时可以访问数据库端口。`grantConnect` 向 agent 的执行角色授予 IAM `rds-db:connect` 权限。
 
 </Fragment>
 <Fragment slot="terraform">
 
-将数据库模块输出传递到您的 agent 模块中，以便它可以访问数据库并读取其运行时配置：
+在与数据库相同的 VPC 中运行 agent，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_agent" {
-  source = "../../common/terraform/src/app/agents/my-agent"
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 }
-```
 
-确保 agent 的执行角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
 
-</Fragment>
-</Infrastructure>
-
-### 不使用 RDS Proxy 连接时的 SSL 要求
-
-<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
-
-## 本地开发
-
-<NxCommands commands={["<agent-name>-dev <project-name>"]} />
-
-这将启动 agent 和所有连接的数据库。`LOCAL_DEV=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。
-s commands={["<agent-name>-dev <project-name>"]} />
-
-这将启动 agent 和所有连接的数据库。`LOCAL_DEV=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。
-ity_group_id            = module.my_agent.security_group_id
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
   to_port                      = module.my_database.cluster_port
@@ -150,14 +154,14 @@ ity_group_id            = module.my_agent.security_group_id
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` 来自在根模块中声明一次的共享 <Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，而不是来自数据库模块。
+`appconfig_application_id`/`appconfig_application_arn` 来自共享的 <Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，该应用程序在您的根模块中声明一次，而不是来自数据库模块。
 
 </Fragment>
 </Infrastructure>
 
 ### 不使用 RDS Proxy 连接时的 SSL 要求
 
-<Snippet name="connection/agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
 
 ## 本地开发
 

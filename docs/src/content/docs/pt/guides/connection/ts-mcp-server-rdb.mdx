@@ -48,7 +48,7 @@ O gerador modifica dois arquivos no diretório de origem do seu servidor MCP:
 
 Além disso, o target `<mcp-server-name>-dev` é atualizado para depender do target `dev` do banco de dados.
 
-## Como Funciona
+## Usando o Banco de Dados em Ferramentas MCP
 
 O cliente Prisma é buscado dentro de `createServer` e disponível para todas as ferramentas e recursos registrados lá:
 
@@ -106,41 +106,48 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Passe as saídas do módulo do banco de dados para o módulo do seu servidor MCP para que ele possa alcançar o banco de dados e ler sua configuração de runtime:
+Execute o servidor MCP dentro da mesma VPC que o banco de dados, conceda a ele `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 }
-```
 
-Certifique-se de que o papel de execução do servidor MCP tenha a permissão `rds-db:connect` e que seu grupo de segurança possa alcançar o grupo de segurança do banco de dados na porta do banco de dados.
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
 
-</Fragment>
-</Infrastructure>
-
-### Requisitos SSL ao Conectar Sem RDS Proxy
-
-<Snippet name="connection/ts-mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
-
-## Desenvolvimento Local
-
-<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
-
-Isso inicia o servidor MCP e todos os bancos de dados conectados. A variável de ambiente `LOCAL_DEV=true` faz com que cada cliente Prisma se conecte ao seu banco de dados Docker local em vez do Aurora.
-om_port                    = module.my_database.cluster_port
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
   to_port                      = module.my_database.cluster_port
   ip_protocol                  = "tcp"
 }
