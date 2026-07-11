@@ -112,18 +112,6 @@ export const configureTsProject = async (
       ]),
     }));
   }
-  // Update the root package.json. ESM projects require `type: module`. For
-  // CommonJS an absent `type` already means CJS — only normalise an existing
-  // `type` field to `commonjs`, since introducing one changes behaviour for
-  // frameworks that parse it (e.g. Next.js treats the app's ESM source as CJS).
-  updateJson(tree, 'package.json', (packageJson) => ({
-    ...packageJson,
-    ...(esm
-      ? { type: 'module' }
-      : packageJson.type !== undefined
-        ? { type: 'commonjs' }
-        : {}),
-  }));
   // Remove package.json if it exists
   if (tree.exists(join(options.dir, 'package.json'))) {
     tree.delete(join(options.dir, 'package.json'));

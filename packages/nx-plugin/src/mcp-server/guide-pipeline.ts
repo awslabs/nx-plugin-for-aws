@@ -21,6 +21,7 @@ import type { MdxJsxFlowElement } from 'mdast-util-mdx-jsx';
 import {
   buildCreateNxWorkspaceCommand,
   buildInstallCommand,
+  buildNxInitCommand,
   buildPackageManagerExecCommand,
   buildPackageManagerShortCommand,
 } from '../utils/commands';
@@ -455,6 +456,9 @@ const renderComponent = (
         | 'terraform'
         | undefined;
       return [codeBlock(buildCreateNxWorkspaceCommand(pm, workspace, iac))];
+    }
+    case 'NxInitCommand': {
+      return [codeBlock(buildNxInitCommand(pm))];
     }
     case 'InstallCommand': {
       const pkg =

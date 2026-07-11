@@ -7,6 +7,7 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { NX_VERSION } from '../../../packages/nx-plugin/src/utils/commands';
 import { runCLI, runInstall, tmpProjPath } from '../utils';
 
 /**
@@ -16,10 +17,9 @@ import { runCLI, runInstall, tmpProjPath } from '../utils';
  * workspace — the scenario the `init` generator targets — then exercises the
  * deterministic path a user follows to adopt the plugin:
  *   1. add Nx
- *   2. install the plugin
- *   3. run `@aws/nx-plugin:init`
- *   4. run a generator
- *   5. build
+ *   2. add the plugin (`nx add` installs it and runs `@aws/nx-plugin:init`)
+ *   3. run a generator
+ *   4. build
  *
  * It asserts only the deterministic outcome (init configures the workspace, a
  * generator runs, the workspace builds) — no AWS deployment.
@@ -84,41 +84,41 @@ describe('smoke test - existing-workspace', () => {
   });
 
   it('should init an existing pnpm workspace, run a generator and build', async () => {
-    // 1. Add Nx to the existing workspace, non-interactively (Nx's own tool
-    // for adopting Nx — a prerequisite the plugin builds on top of).
-    await runCLI('npx --yes nx@latest init --interactive=false --useGitHub', {
-      ...opts,
-      prefixWithPackageManagerCmd: false,
-      redirectStderr: true,
-      silenceError: true,
-    });
+    // 1. Add Nx to the existing workspace, non-interactively, pinned to the
+    // nx version the plugin is built against (Nx's own tool for adopting Nx —
+    // a prerequisite the plugin builds on top of).
+    await runCLI(
+      `npx --yes nx@${NX_VERSION} init --interactive=false --useGitHub`,
+      {
+        ...opts,
+        prefixWithPackageManagerCmd: false,
+        redirectStderr: true,
+        silenceError: true,
+      },
+    );
     // Ensure Nx is installed (nx init may skip its own install in CI).
     await runInstall(opts);
 
-    // 2. Install the plugin (local build via verdaccio).
-    await runCLI(
-      `pnpm add -w -D @aws/nx-plugin@${pluginVersion}`,
-      { ...opts, prefixWithPackageManagerCmd: false, redirectStderr: true },
-    );
-
-    // 3. Run the init generator — the deterministic configuration step that
-    // `nx add @aws/nx-plugin` invokes automatically (run directly here to pin
-    // the IaC provider deterministically in CI).
-    await runCLI(
-      `generate @aws/nx-plugin:init --iac=cdk --no-interactive --prefer-install-dependencies=false`,
-      opts,
-    );
+    // 2. Add the plugin (local build via verdaccio) — `nx add` installs it
+    // and runs its `init` generator. Prompts fall back to schema defaults
+    // (iac=cdk) as there is no TTY.
+    await runCLI(`add @aws/nx-plugin@${pluginVersion}`, {
+      ...opts,
+      redirectStderr: true,
+    });
 
     // The init generator must have created the plugin config.
-    expect(existsSync(join(projectRoot, 'aws-nx-plugin.config.mts'))).toBe(true);
+    expect(existsSync(join(projectRoot, 'aws-nx-plugin.config.mts'))).toBe(
+      true,
+    );
 
-    // 4. Run a generator — proving the workspace is now plugin-ready.
+    // 3. Run a generator — proving the workspace is now plugin-ready.
     await runCLI(
       `generate @aws/nx-plugin:ts#project --name=my-lib --no-interactive --prefer-install-dependencies=false`,
       opts,
     );
 
-    // 5. Install the accumulated dependencies, sync references and build.
+    // 4. Install the accumulated dependencies, sync references and build.
     await runInstall(opts);
     await runCLI('sync', opts);
     const buildOutput = await runCLI(

@@ -43,25 +43,13 @@ describe('add-to-existing-project tool', () => {
     expect(text).toContain('nx add @aws/nx-plugin');
   });
 
-  it('should include the common errors reference', async () => {
+  it('should include the troubleshooting reference', async () => {
     const text = await callText();
-    expect(text).toContain('Common errors and fixes');
+    expect(text).toContain('Troubleshooting');
   });
 
-  it('should surface the matching fix first when an error message is supplied', async () => {
-    const text = await callText({
-      errorMessage:
-        'IaC provider "inherit" requires iac.provider to be set in aws-nx-plugin.config.mts',
-    });
-    expect(text).toContain('Matching the error you reported');
-    expect(text).toContain('iac.provider');
-  });
-
-  it('should map an out-of-sync error to its fix', async () => {
-    const text = await callText({
-      errorMessage: 'The workspace is out of sync',
-    });
-    expect(text).toContain('Matching the error you reported');
-    expect(text).toContain('nx sync');
+  it('should render commands for the requested package manager', async () => {
+    const text = await callText({ packageManager: 'npm' });
+    expect(text).toContain('npx nx add @aws/nx-plugin');
   });
 });

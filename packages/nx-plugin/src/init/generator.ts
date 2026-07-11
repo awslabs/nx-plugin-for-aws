@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type GeneratorCallback, type Tree } from '@nx/devkit';
+import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { formatFilesInSubtree } from '../utils/format';
 import { applyWorkspaceInit } from '../utils/init';
 import { installDependencies } from '../utils/install';

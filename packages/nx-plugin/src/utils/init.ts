@@ -27,7 +27,6 @@ import { type Containers, inferContainers } from './containers';
 import { DEFAULT_BIOME_CONFIG } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
-import { isEsmWorkspace, type ModuleFormat } from './module-format';
 import { getNpmScope } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { withVersions } from './versions';
@@ -57,13 +56,6 @@ export interface ApplyWorkspaceInitOptions {
   readonly containers?: Containers | 'infer';
   /** Whether to configure MCP servers for coding agents. Defaults to true. */
   readonly mcp?: boolean;
-  /**
-   * The workspace-wide module format. When omitted it is inferred from the
-   * root package.json (`type: "module"` means ESM; absent or `"commonjs"`
-   * means CommonJS) so the `init` generator preserves an existing workspace's
-   * format. The preset passes it explicitly from its `--module` option.
-   */
-  readonly module?: ModuleFormat;
   /**
    * How to treat the generated workspace README. The preset owns the README of
    * a greenfield workspace (`Overwrite`); the `init` generator must not clobber
@@ -138,7 +130,9 @@ const setUpWorkspaces = (tree: Tree) => {
   } else {
     updateJson(tree, 'package.json', (json) => ({
       ...json,
-      workspaces: Array.from(new Set([...(json.workspaces ?? []), ...WORKSPACES])),
+      workspaces: Array.from(
+        new Set([...(json.workspaces ?? []), ...WORKSPACES]),
+      ),
     }));
   }
 };
@@ -231,11 +225,12 @@ const ensureRootTsConfig = (tree: Tree) => {
  * keyed nx.json / package.json entries, create-if-missing files), so running
  * it against an already-initialised workspace is a no-op.
  *
- * It preserves the workspace's module format (ESM or CommonJS, inferred from
- * the root package.json `type` unless passed explicitly). It does NOT rewrite
- * an existing `tsconfig.base.json`'s compiler options, migrate a workspace's
- * package manager, or restructure existing projects — those are decisions for
- * the user (see the "add to an existing workspace" guide).
+ * It preserves the workspace's module format: the root package.json `type`
+ * field is owned by the preset (written from its `--module` option) and left
+ * untouched here. It does NOT rewrite an existing `tsconfig.base.json`'s
+ * compiler options, migrate a workspace's package manager, or restructure
+ * existing projects — those are decisions for the user (see the "add to an
+ * existing workspace" guide).
  */
 export const applyWorkspaceInit = async (
   tree: Tree,
@@ -243,14 +238,12 @@ export const applyWorkspaceInit = async (
     iac,
     containers,
     mcp,
-    module,
     readmeOverwriteStrategy = OverwriteStrategy.KeepExisting,
     overwriteScripts = false,
   }: ApplyWorkspaceInitOptions,
 ) => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
-  const esm = module ? module === 'esm' : isEsmWorkspace(tree);
 
   // Write IaC provider and container engine to plugin config
   await ensureAwsNxPluginConfig(tree);
@@ -306,18 +299,12 @@ export const applyWorkspaceInit = async (
   };
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
-    // ESM needs an explicit `type: "module"` for later generators to infer the
-    // workspace's format. For CommonJS an absent `type` already means CJS: the
-    // preset (which passes `module` explicitly) writes the `type: "commonjs"`
-    // marker on its greenfield workspace, but `init` must not introduce a
-    // `type` field into an existing workspace that lacks one — frameworks that
-    // parse it change behaviour when it appears (e.g. Next.js starts treating
-    // the app's ESM source as CJS).
-    ...(esm
-      ? { type: 'module' }
-      : module || packageJson.type !== undefined
-        ? { type: 'commonjs' }
-        : {}),
+    // The root `type` field is owned by the preset (written explicitly from
+    // its `--module` option). `init` preserves an existing workspace's field
+    // as-is: an ESM workspace already carries `type: "module"` (that is how
+    // the format is inferred), and introducing a `type` into a CommonJS
+    // workspace that lacks one changes behaviour for frameworks that parse it
+    // (e.g. Next.js starts treating the app's ESM source as CJS).
     scripts: overwriteScripts
       ? { ...packageJson.scripts, ...CONVENIENCE_SCRIPTS }
       : { ...CONVENIENCE_SCRIPTS, ...packageJson.scripts },

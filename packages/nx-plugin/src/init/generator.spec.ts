@@ -6,8 +6,8 @@ import { readJson, readNxJson, type Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readAwsNxPluginConfig } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
+import { readAwsNxPluginConfig } from '../utils/config/utils';
 import { initGenerator } from './generator';
 
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
@@ -62,8 +62,7 @@ describe('init generator', () => {
     expect(base.compilerOptions.moduleResolution).toBe('nodenext');
   });
 
-
-  it('should set type module and add convenience scripts', async () => {
+  it('should preserve an ESM workspace and add convenience scripts', async () => {
     tree.write(
       'package.json',
       JSON.stringify({ name: 'existing', type: 'module' }),
@@ -83,7 +82,7 @@ describe('init generator', () => {
     expect(readJson(tree, 'package.json').type).toBeUndefined();
   });
 
-  it('should normalise an explicit commonjs type', async () => {
+  it('should preserve an explicit commonjs type', async () => {
     tree.write(
       'package.json',
       JSON.stringify({ name: 'existing', type: 'commonjs' }),

@@ -146,13 +146,21 @@ export const presetGenerator = async (
     }
   }
 
+  // The preset owns the greenfield workspace's module format: write the root
+  // `type` explicitly from the chosen `--module` so later generators can
+  // infer it. The `init` generator never touches an existing workspace's
+  // `type` field.
+  updateJson(tree, 'package.json', (packageJson) => ({
+    ...packageJson,
+    type: (module ?? 'esm') === 'esm' ? 'module' : 'commonjs',
+  }));
+
   // Apply the deterministic workspace configuration shared with the `init`
   // generator. The preset owns the README of a greenfield workspace.
   await applyWorkspaceInit(tree, {
     iac,
     containers,
     mcp,
-    module: module ?? 'esm',
     readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
     overwriteScripts: true,
   });
