@@ -140,6 +140,11 @@ export interface Model {
   prop?: string;
   /** The chosen request/response media type, for body params and responses. */
   mediaType?: string | null;
+  /**
+   * Per-part content types declared by the request body `encoding` object
+   * (multipart bodies), keyed by property name.
+   */
+  partContentTypes?: { [prop: string]: string };
   /** All acceptable media types (request body / response). */
   mediaTypes?: string[];
   /** The response status code, for response models. */
@@ -196,6 +201,12 @@ export interface Model {
 
   /** Collection serialisation format for array query/header parameters. */
   collectionFormat?: CollectionFormat;
+  /** Path parameter serialization style, when not the default `simple`. */
+  pathStyle?: 'matrix' | 'label';
+  /** Path parameter explode flag (used with `pathStyle`). */
+  pathExplode?: boolean;
+  /** Query parameter `allowReserved`: reserved characters are not encoded. */
+  allowReserved?: boolean;
 }
 
 /** Vendor extension bag (`x-*` keys copied from a schema/operation/spec). */

@@ -50,6 +50,10 @@ const bodyMediaTypeOf = (op) => {
 };
 const hasMultipartBody = allOperations.some(op => bodyMediaTypeOf(op) === 'multipart/form-data');
 const hasUrlEncodedBody = allOperations.some(op => bodyMediaTypeOf(op) === 'application/x-www-form-urlencoded');
+// Whether any operation uses matrix/label path styles or allowReserved query
+// params, so the extra $url serialisation logic is only emitted when needed.
+const hasStyledPathParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'path' && p.pathStyle));
+const hasAllowReservedParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'query' && p.allowReserved));
 // Whether a response is JSON on the wire (so primitives arrive JSON-encoded,
 // e.g. a string response body is `"hello"` including the quotes).
 const isJsonResponse = (response) => (response.mediaTypes || []).some(mt => mt === 'application/json' || mt.split(';')[0].endsWith('+json'));
@@ -555,20 +559,44 @@ export class <%- className %> {
     );
   };
 
-  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject' }): string => {
+  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject' }<% if (hasStyledPathParams) { %>, pathStyles?: { [key: string]: { style: 'matrix' | 'label'; explode: boolean } }<% } %><% if (hasAllowReservedParams) { %>, allowReserved?: string[]<% } %>): string => {
     const baseUrl = this.$config.url.endsWith('/') ? this.$config.url.slice(0, -1) : this.$config.url;
+    <%_ if (hasAllowReservedParams) { _%>
+    // Reserved characters stay literal when a query parameter declares allowReserved
+    const encodeQueryValue = (key: string, v: string): string =>
+      allowReserved?.includes(key) ? encodeURIComponent(v).replace(/%(2F|3A|3F|23|5B|5D|40|21|24|26|27|28|29|2A|2B|2C|3B|3D)/gi, (m) => decodeURIComponent(m)) : encodeURIComponent(v);
+    <%_ } _%>
+    <%_ if (hasStyledPathParams) { _%>
+    const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) => {
+      const pathStyle = pathStyles?.[key];
+      let rendered: string;
+      if (pathStyle?.style === 'matrix') {
+        // RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+        rendered = Array.isArray(value) && pathStyle.explode
+          ? value.map(v => `;${key}=${encodeURIComponent(`${v}`)}`).join('')
+          : `;${key}=${(Array.isArray(value) ? value : [value]).map(v => encodeURIComponent(`${v}`)).join(',')}`;
+      } else if (pathStyle?.style === 'label') {
+        // RFC 6570 label expansion: .a,b (explode: .a.b)
+        rendered = `.${(Array.isArray(value) ? value : [value]).map(v => encodeURIComponent(`${v}`)).join(pathStyle.explode ? '.' : ',')}`;
+      } else {
+        rendered = encodeURIComponent(`${value}`);
+      }
+      return withParams.replace(`{${key}}`, rendered);
+    }, path);
+    <%_ } else { _%>
     const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) =>
       withParams.replace(`{${key}}`, encodeURIComponent(`${value}`))
     , path);
+    <%_ } _%>
     const queryString = Object.entries(queryParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-        return value.map(v => `${encodeURIComponent(key)}=${encodeURIComponent(`${v}`)}`);
+        return value.map(v => `${encodeURIComponent(key)}=<% if (hasAllowReservedParams) { %>${encodeQueryValue(key, `${v}`)}<% } else { %>${encodeURIComponent(`${v}`)}<% } %>`);
       }
       if (collectionFormats?.[key] === 'deepObject' && value !== null && typeof value === 'object') {
         return this.$deepObject(encodeURIComponent(key), value);
       }
       const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
-      return [`${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}`];
+      return [`${encodeURIComponent(key)}=<% if (hasAllowReservedParams) { %>${encodeQueryValue(key, Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}<% } else { %>${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}<% } %>`];
     }).join('&');
     return baseUrl + pathWithParameters + (queryString ? `?${queryString}` : '');
   };
@@ -584,18 +612,33 @@ export class <%- className %> {
   };
 
   <%_ if (hasMultipartBody) { _%>
-  private $formData = (model: { [key: string]: any }): FormData => {
+  private $formData = (
+    model: { [key: string]: any },
+    partContentTypes?: { [key: string]: string },
+  ): FormData => {
     const formData = new FormData();
     const append = (key: string, value: any): void => {
       if (value === undefined || value === null) {
         return;
       }
+      const partContentType = partContentTypes?.[key];
       if (value instanceof Blob || typeof value === 'string') {
-        formData.append(key, value);
+        // A declared part content type overrides the default (text/plain for
+        // strings, the Blob's own type otherwise)
+        if (partContentType) {
+          formData.append(key, new Blob([value], { type: partContentType }));
+        } else {
+          formData.append(key, value);
+        }
       } else if (Array.isArray(value)) {
         value.forEach((v) => append(key, v));
       } else if (typeof value === 'object') {
-        formData.append(key, JSON.stringify(value));
+        const serialized = JSON.stringify(value);
+        if (partContentType) {
+          formData.append(key, new Blob([serialized], { type: partContentType }));
+        } else {
+          formData.append(key, serialized);
+        }
       } else {
         formData.append(key, String(value));
       }
@@ -635,6 +678,14 @@ export class <%- className %> {
     <%_ ['path', 'query', 'header'].forEach((position) => { _%>
     <%_ if (op.parameters.map(p => p.in).includes(position)) { _%>
     const <%- position %>Parameters: {[key: string]: any} = $IO.<%- op.operationIdPascalCase %>Request<%- upperFirst(position) %>Parameters.toJson(input);
+    <%_ /* A content-based parameter (declared with `content` rather than
+           `schema`) is serialised to its media type — JSON — as a single
+           value. */ _%>
+    <%_ op.parameters.filter(p => p.in === position && p.mediaType === 'application/json').forEach((parameter) => { _%>
+    if (<%- position %>Parameters['<%- parameter.prop %>'] !== undefined) {
+      <%- position %>Parameters['<%- parameter.prop %>'] = JSON.stringify(<%- position %>Parameters['<%- parameter.prop %>']);
+    }
+    <%_ }); _%>
     <%_ } else { _%>
     const <%- position %>Parameters: {[key: string]: any} = {};
     <%_ } _%>
@@ -670,10 +721,19 @@ export class <%- className %> {
            in a single object literal. */ _%>
     <%_ const queryCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'query'); _%>
     <%_ const headerCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'header'); _%>
+    <%_ const styledPathParams = op.parameters.filter(p => p.pathStyle && p.in === 'path'); _%>
+    <%_ const allowReservedParams = op.parameters.filter(p => p.allowReserved && p.in === 'query'); _%>
     <%_ if (queryCollectionParams.length > 0) { _%>
     const queryCollectionFormats = {
       <%_ queryCollectionParams.forEach((parameter) => { _%>
       '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
+      <%_ }); _%>
+    } as const;
+    <%_ } _%>
+    <%_ if (styledPathParams.length > 0) { _%>
+    const pathParameterStyles = {
+      <%_ styledPathParams.forEach((parameter) => { _%>
+      '<%- parameter.prop %>': { style: '<%- parameter.pathStyle %>', explode: <%- !!parameter.pathExplode %> },
       <%_ }); _%>
     } as const;
     <%_ } _%>
@@ -690,7 +750,7 @@ export class <%- className %> {
            parts, primitives serialise to strings, and fetch computes the
            boundary itself (so the Content-Type header is intentionally unset
            above). */ _%>
-    const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$formData(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %>);
+    const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$formData(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %><% if (op.parametersBody.partContentTypes) { %>, <%- JSON.stringify(op.parametersBody.partContentTypes) %><% } %>);
     <%_ } else if (bodyMediaTypeOf(op) === 'application/x-www-form-urlencoded') { _%>
     <%_ /* A urlencoded body is sent as `key=value&...` pairs — the JSON
            serialisation the wire type declares would be rejected by the
@@ -727,7 +787,7 @@ export class <%- className %> {
     const body = undefined;
     <%_ } _%>
 
-    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (queryCollectionParams.length > 0) { %>, queryCollectionFormats<% } %>), {
+    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (queryCollectionParams.length > 0 || styledPathParams.length > 0 || allowReservedParams.length > 0) { %>, <%- queryCollectionParams.length > 0 ? 'queryCollectionFormats' : 'undefined' %><% } %><% if (styledPathParams.length > 0 || allowReservedParams.length > 0) { %>, <%- styledPathParams.length > 0 ? 'pathParameterStyles' : 'undefined' %><% } %><% if (allowReservedParams.length > 0) { %>, [<%- allowReservedParams.map(p => `'${p.prop}'`).join(', ') %>]<% } %>), {
       headers: this.$headers(headerParameters<% if (headerCollectionParams.length > 0) { %>, headerCollectionFormats<% } %>),
       method: '<%- op.method %>',
       body,
