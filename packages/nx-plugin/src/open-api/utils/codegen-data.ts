@@ -319,6 +319,15 @@ const augmentParameters = (
         parameter.in,
         specParameter,
       );
+      if (parameter.in === 'query' && specParameter.allowReserved) {
+        parameter.allowReserved = true;
+      }
+    } else if (parameter.in === 'path' && specParameter) {
+      const style = specParameter.style;
+      if (style === 'matrix' || style === 'label') {
+        parameter.pathStyle = style;
+        parameter.pathExplode = !!specParameter.explode;
+      }
     }
 
     addLanguageTypes(parameter);

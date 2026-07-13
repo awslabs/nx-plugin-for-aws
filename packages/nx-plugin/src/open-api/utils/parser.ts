@@ -393,12 +393,20 @@ const buildRequestBody = (
     spec,
     (requestBody.content[mediaType]?.schema ?? {}) as Schema,
   );
+  // The encoding object's per-part content types (multipart/urlencoded bodies)
+  const partContentTypes = Object.fromEntries(
+    Object.entries(requestBody.content[mediaType]?.encoding ?? {}).flatMap(
+      ([prop, encoding]) =>
+        encoding.contentType ? [[prop, encoding.contentType]] : [],
+    ),
+  );
   return {
     ...base,
     name: 'requestBody',
     prop: 'requestBody',
     in: 'body',
     mediaType,
+    ...(Object.keys(partContentTypes).length > 0 ? { partContentTypes } : {}),
     isRequired: !!requestBody.required,
     description: requestBody.description ?? base.description,
   };
@@ -419,14 +427,25 @@ const buildParameters = (
   ]).flatMap((p) => {
     const param = resolveIfRef<OpenAPIV3.ParameterObject | undefined>(spec, p);
     if (!param) return [];
-    const base = buildInlineModel(spec, (param.schema ?? {}) as Schema);
+    // A content-based parameter declares `content` (a single media type)
+    // instead of `schema`; its value is serialised to that media type.
+    const contentMediaType = param.content
+      ? Object.keys(param.content)[0]
+      : undefined;
+    if (contentMediaType && contentMediaType !== 'application/json') {
+      throw new Error(
+        `Parameter "${param.name}" declares content media type "${contentMediaType}", which is not supported (only application/json content-based parameters can be serialised)`,
+      );
+    }
+    const schema = param.schema ?? param.content?.[contentMediaType]?.schema;
+    const base = buildInlineModel(spec, (schema ?? {}) as Schema);
     return [
       {
         ...base,
         name: param.name,
         prop: param.name,
         in: param.in as ModelIn,
-        mediaType: null,
+        mediaType: param.schema ? null : (contentMediaType ?? null),
         isRequired: !!param.required,
         description: param.description ? param.description : base.description,
       },

@@ -166,18 +166,36 @@ export class TestApi {
     });
   };
 
-  private $formData = (model: { [key: string]: any }): FormData => {
+  private $formData = (
+    model: { [key: string]: any },
+    partContentTypes?: { [key: string]: string },
+  ): FormData => {
     const formData = new FormData();
     const append = (key: string, value: any): void => {
       if (value === undefined || value === null) {
         return;
       }
+      const partContentType = partContentTypes?.[key];
       if (value instanceof Blob || typeof value === 'string') {
-        formData.append(key, value);
+        // A declared part content type overrides the default (text/plain for
+        // strings, the Blob's own type otherwise)
+        if (partContentType) {
+          formData.append(key, new Blob([value], { type: partContentType }));
+        } else {
+          formData.append(key, value);
+        }
       } else if (Array.isArray(value)) {
         value.forEach((v) => append(key, v));
       } else if (typeof value === 'object') {
-        formData.append(key, JSON.stringify(value));
+        const serialized = JSON.stringify(value);
+        if (partContentType) {
+          formData.append(
+            key,
+            new Blob([serialized], { type: partContentType }),
+          );
+        } else {
+          formData.append(key, serialized);
+        }
       } else {
         formData.append(key, String(value));
       }
