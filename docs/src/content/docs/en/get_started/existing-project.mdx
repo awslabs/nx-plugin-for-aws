@@ -26,7 +26,20 @@ If your project doesn't use Nx yet, add it first with [`nx init`](https://nx.dev
 
 <NxInitCommand />
 
+The command pins `nx` to the version the plugin is built against — running an unpinned `nx init` can install a newer patch version, leaving two `nx` versions in the tree once the plugin is added (see [the plugin worker note](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established) below).
+
 `nx init` is Nx's own tool for adopting Nx — it detects your tooling, writes `nx.json`, and wires your existing scripts into Nx. Follow the prompts. When running non-interactively (CI or an AI agent), pass `--interactive=false`; if Nx detects tool plugins for your stack (e.g. `@nx/vite`) it will also ask for an explicit choice — pass `--plugins=skip` to defer (plugins can be added later with `nx add`) or `--plugins=all` to accept them. Once it completes and your workspace builds under Nx, [add the plugin](#adding-the-plugin) as below.
+
+<Aside type="note" title="pnpm workspaces">
+pnpm only runs install scripts for allow-listed packages, and `nx` needs its install script — without it, the install `nx init` performs can fail, leaving a `set this to true or false` placeholder in `pnpm-workspace.yaml`. Allow-list it before running `nx init`:
+
+```yaml title="pnpm-workspace.yaml"
+allowBuilds:
+  - nx
+```
+
+The `init` generator later extends this allowlist with the rest of the packages the plugin's tooling needs.
+</Aside>
 
 ### Non-Node projects (Python, Go, Java, Rust, …)
 
@@ -152,6 +165,10 @@ pnpm skips install scripts for packages that aren't allow-listed. `init` allow-l
 #### `nx sync` hangs, or `plugin worker ... exited before the connection was established`
 
 If two different `nx` versions are present in the same node_modules tree (run `npm ls nx` to confirm), their plugin-worker IPC deadlocks. The `init` generator pins the root `nx` devDependency to the version the plugin's own `@nx/*` packages resolve, but a later install of another `@nx/*` package at a different patch version can reintroduce the mismatch. Align every `nx` and `@nx/*` entry in your root `package.json` to a single version and reinstall.
+
+#### `ts.readConfigFile is not a function`
+
+Your workspace has TypeScript 7 installed, which [Nx does not yet support](https://nx.dev/docs/technologies/typescript/guides/typescript-7) — Nx's plugins rely on TypeScript's in-process compiler API, which TypeScript 7 no longer provides. Pin `typescript` in your root `package.json` to the version the plugin uses (the `init` generator installs a compatible version) and reinstall.
 
 #### `Recursive task invocation detected`
 
