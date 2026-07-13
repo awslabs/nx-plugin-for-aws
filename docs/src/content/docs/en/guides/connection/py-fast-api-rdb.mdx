@@ -128,6 +128,9 @@ module "api" {
   vpc_id     = aws_vpc.main.id
   subnet_ids = aws_subnet.private[*].id
 
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -135,22 +138,8 @@ module "api" {
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
       ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = [
-        "${module.runtime_config_appconfig.application_arn}/*"
-      ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
@@ -172,7 +161,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Deploy the API Lambda functions into **private subnets with egress**, not private isolated subnets. `RUNTIME_CONFIG_APP_ID` should point at the shared <Link path="guides/runtime-config">runtime configuration</Link> AppConfig application, not an output of the database module.
+Deploy the API Lambda functions into **private subnets with egress**, not private isolated subnets. `appconfig_application_id`/`appconfig_application_arn` come from the shared <Link path="guides/runtime-config">runtime configuration</Link> AppConfig application declared once in your root module, not from the database module — passing them sets `RUNTIME_CONFIG_APP_ID` on the Lambda functions and grants them read access to the application.
 
 The AppConfig application must expose the `database` namespace so the database module's runtime configuration entry is deployed. Include it in the `namespaces` when instantiating the `runtime-config/appconfig` module:
 
