@@ -2,9 +2,10 @@
 title: Aggiungere a un Progetto Esistente
 description: Come adottare @aws/nx-plugin in un workspace Nx esistente o in un monorepo non-Nx.
 ---
-import { Steps, Aside } from '@astrojs/starlight/components';
+import { Steps, Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
+import Drawer from '@components/drawer.astro';
 import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -19,11 +20,9 @@ Salva e committa prima tutto il lavoro in corso, in modo che le modifiche apport
 
 <Snippet name="prerequisites" />
 
-Avrai anche bisogno di **un workspace Nx**. Se il tuo progetto non è ancora un workspace Nx, aggiungi prima Nx — vedi [Aggiungere Nx a un progetto non-Nx](#adding-nx-to-a-non-nx-project) di seguito. Se usi già Nx, passa direttamente ad [Aggiungere il plugin](#adding-the-plugin).
-
 ## Aggiungere Nx a un progetto non-Nx
 
-Se il tuo progetto non usa ancora Nx, aggiungilo prima con [`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project). Questo è un passaggio di competenza di Nx stesso; il plugin si basa su un workspace Nx funzionante. Funziona su un pacchetto semplice, un workspace npm/pnpm/yarn, un Turborepo o un monorepo Lerna:
+Se il tuo progetto non usa ancora Nx, aggiungilo prima con [`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project). Questo è un passaggio di competenza di Nx stesso; il plugin si basa su un workspace Nx funzionante. Funziona su un pacchetto semplice, un workspace npm/pnpm/yarn/bun, un Turborepo o un monorepo Lerna:
 
 <NxInitCommand />
 
@@ -72,13 +71,15 @@ Una volta completato, il tuo workspace è pronto — scegli i generatori di cui 
 
 ### Cosa configura il generatore `init`
 
-Il generatore `init` apporta le modifiche deterministiche di cui un workspace ha bisogno per eseguire i generatori del plugin. È **idempotente** — eseguirlo nuovamente è un no-op — e preserva il formato del modulo del tuo workspace: un workspace il cui `package.json` radice ha `type: "module"` rimane ESM, qualsiasi altra cosa rimane CommonJS, e il codice generato segue di conseguenza. **Non** riscrive un `tsconfig.base.json` esistente, non migra il tuo package manager e non ristruttura i tuoi progetti esistenti.
+Il generatore `init` apporta le modifiche deterministiche di cui un workspace ha bisogno per eseguire i generatori del plugin. Preserva il formato del modulo del tuo workspace: un workspace il cui `package.json` radice ha `type: "module"` rimane ESM, qualsiasi altra cosa rimane CommonJS, e il codice generato segue di conseguenza. **Non** riscrive un `tsconfig.base.json` esistente, non migra il tuo package manager e non ristruttura i tuoi progetti esistenti.
 
-Esegue le seguenti operazioni:
+Crea o aggiorna i seguenti file:
 
-- Crea `aws-nx-plugin.config.mts` registrando il tuo <Link path="guides/typescript-infrastructure">provider di infrastructure as code</Link> scelto (CDK o Terraform) e il motore container. I generatori leggono `iac.provider` da questo file.
-- Registra i generatori di sincronizzazione (`@nx/js:typescript-sync` e `@aws/nx-plugin:ts#sync`) sul target `compile` in `nx.json`, in modo che i riferimenti ai progetti TypeScript rimangano sincronizzati mentre aggiungi progetti.
-- Assicura che esistano un `tsconfig.json` radice e un `tsconfig.base.json` (la sincronizzazione TypeScript di Nx e i progetti del plugin ne hanno bisogno). I file mancanti vengono creati; **quelli esistenti vengono lasciati intatti** in modo da non disturbare gli altri tuoi progetti. Un `tsconfig.base.json` creato contiene le opzioni del compilatore su cui si basano i progetti TypeScript del plugin — se mantieni il tuo, queste sono le opzioni con cui allinearti:
+<FileTree>
+- aws-nx-plugin.config.mts registra il tuo provider IaC scelto (CDK o Terraform) e il motore container; i generatori leggono `iac.provider` da qui
+- nx.json registra i generatori di sincronizzazione (`@nx/js:typescript-sync` e `@aws/nx-plugin:ts#sync`) sul target `compile` in modo che i riferimenti ai progetti TypeScript rimangano sincronizzati
+- tsconfig.json creato solo se mancante — i file esistenti vengono lasciati intatti
+- tsconfig.base.json creato solo se mancante (vedi sotto per le opzioni del compilatore che contiene)
 
   ```json
   {
@@ -112,7 +113,9 @@ Esegue le seguenti operazioni:
 <GeneratorParameters generator="init" />
 
 <Aside type="note" title="Aggiornamento successivo">
-Per aggiornare il plugin (e raccogliere eventuali migrazioni di codice automatizzate che fornisce), usa [`nx migrate`](https://nx.dev/features/automate-updating-dependencies) — `nx migrate @aws/nx-plugin` — piuttosto che aumentare la versione manualmente.
+Per aggiornare il plugin (e raccogliere eventuali migrazioni di codice automatizzate che fornisce), usa [`nx migrate`](https://nx.dev/features/automate-updating-dependencies) piuttosto che aumentare la versione manualmente:
+
+<NxCommands commands={['migrate @aws/nx-plugin']} />
 </Aside>
 
 ## Adozione incrementale
@@ -142,6 +145,10 @@ pnpm salta gli script di installazione per i pacchetti che non sono nella allow-
 #### `nx sync` si blocca, o `plugin worker ... exited before the connection was established`
 
 Se due diverse versioni di `nx` sono presenti nello stesso albero node_modules (esegui `npm ls nx` per confermare), il loro IPC plugin-worker va in deadlock. Il generatore `init` fissa la devDependency `nx` radice alla versione che i pacchetti `@nx/*` del plugin stesso risolvono, ma un'installazione successiva di un altro pacchetto `@nx/*` a una versione patch diversa può reintrodurre il disallineamento. Allinea ogni voce `nx` e `@nx/*` nel tuo `package.json` radice a una singola versione e reinstalla.
+
+#### `ts.readConfigFile is not a function`
+
+Il tuo workspace ha TypeScript 7 installato, che [Nx non supporta ancora](https://nx.dev/docs/technologies/typescript/guides/typescript-7) — i plugin di Nx si basano sull'API del compilatore in-process di TypeScript, che TypeScript 7 non fornisce più. Fissa `typescript` nel tuo `package.json` radice alla versione che usa il plugin (il generatore `init` installa una versione compatibile) e reinstalla.
 
 #### `Recursive task invocation detected`
 

@@ -26,7 +26,20 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 
 <NxInitCommand />
 
+이 명령은 플러그인이 빌드된 버전에 `nx`를 고정합니다 — 고정되지 않은 `nx init`을 실행하면 더 새로운 패치 버전이 설치될 수 있으며, 플러그인이 추가되면 트리에 두 개의 `nx` 버전이 남게 됩니다(아래의 [플러그인 워커 참고사항](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established) 참조).
+
 `nx init`은 Nx를 도입하기 위한 Nx 자체의 도구입니다 — 도구를 감지하고, `nx.json`을 작성하며, 기존 스크립트를 Nx에 연결합니다. 프롬프트를 따르세요. 비대화형으로 실행할 때(CI 또는 AI 에이전트), `--interactive=false`를 전달하세요. Nx가 스택에 대한 도구 플러그인(예: `@nx/vite`)을 감지하면 명시적 선택을 요청합니다 — `--plugins=skip`을 전달하여 연기하거나(플러그인은 나중에 `nx add`로 추가 가능) `--plugins=all`을 전달하여 수락하세요. 완료되고 워크스페이스가 Nx에서 빌드되면, 아래와 같이 [플러그인을 추가](#adding-the-plugin)하세요.
+
+<Aside type="note" title="pnpm workspaces">
+pnpm은 허용 목록에 있는 패키지에 대해서만 설치 스크립트를 실행하며, `nx`는 설치 스크립트가 필요합니다 — 이것이 없으면 `nx init`이 수행하는 설치가 실패하여 `pnpm-workspace.yaml`에 `set this to true or false` 플레이스홀더가 남을 수 있습니다. `nx init`을 실행하기 전에 허용 목록에 추가하세요:
+
+```yaml title="pnpm-workspace.yaml"
+allowBuilds:
+  - nx
+```
+
+`init` 생성기는 나중에 플러그인의 도구가 필요로 하는 나머지 패키지로 이 허용 목록을 확장합니다.
+</Aside>
 
 ### 비-Node 프로젝트 (Python, Go, Java, Rust, …)
 
@@ -73,38 +86,47 @@ Nx와 플러그인은 npm 패키지로 배포되므로, Node.js 도구가 없는
 
 `init` 생성기는 워크스페이스가 플러그인의 생성기를 실행하는 데 필요한 결정론적 변경을 수행합니다. 워크스페이스의 모듈 형식을 보존합니다: 루트 `package.json`에 `type: "module"`이 있는 워크스페이스는 ESM으로 유지되고, 그 외의 경우는 CommonJS로 유지되며, 생성된 코드도 이에 따릅니다. 기존 `tsconfig.base.json`을 다시 작성하거나, 패키지 매니저를 마이그레이션하거나, 기존 프로젝트를 재구성하지 **않습니다**.
 
-다음을 수행합니다:
+다음 파일을 생성하거나 업데이트합니다:
 
-- 선택한 <Link path="guides/typescript-infrastructure">코드형 인프라 제공자</Link>(CDK 또는 Terraform)와 컨테이너 엔진을 기록하는 `aws-nx-plugin.config.mts`를 생성합니다. 생성기는 이 파일에서 `iac.provider`를 읽습니다.
-- `nx.json`의 `compile` 타겟에 동기화 생성기(`@nx/js:typescript-sync` 및 `@aws/nx-plugin:ts#sync`)를 등록하여, 프로젝트를 추가할 때 TypeScript 프로젝트 참조가 동기화 상태를 유지하도록 합니다.
-- 루트 `tsconfig.json`과 `tsconfig.base.json`이 존재하는지 확인합니다(Nx의 TypeScript 동기화와 플러그인의 프로젝트에 필요함). 누락된 파일은 생성되며, **기존 파일은 그대로 유지**되어 다른 프로젝트를 방해하지 않습니다. 생성된 `tsconfig.base.json`은 플러그인의 TypeScript 프로젝트가 의존하는 컴파일러 옵션을 포함합니다 — 자체 파일을 유지하는 경우, 다음은 정렬해야 할 옵션입니다:
+<FileTree>
+- aws-nx-plugin.config.mts 선택한 IaC 제공자(CDK 또는 Terraform)와 컨테이너 엔진을 기록합니다. 생성기는 여기에서 `iac.provider`를 읽습니다
+- nx.json `compile` 타겟에 동기화 생성기(`@nx/js:typescript-sync` 및 `@aws/nx-plugin:ts#sync`)를 등록하여 TypeScript 프로젝트 참조가 동기화 상태를 유지하도록 합니다
+- tsconfig.json 누락된 경우에만 생성됩니다 — 기존 파일은 그대로 유지됩니다
+- tsconfig.base.json 누락된 경우에만 생성됩니다(포함하는 컴파일러 옵션은 아래 참조)
+- pnpm-workspace.yaml (pnpm만 해당) 플러그인의 종속성이 필요로 하는 빌드 스크립트(`@swc/core`, `esbuild`, `nx`, `sharp`)를 허용 목록에 추가합니다
+- package.json 편의 스크립트를(기존 스크립트를 덮어쓰지 않고) 추가하고, `nx`, `@nx/js`, `@nx/workspace`, `typescript` 및 Biome 개발 종속성을 추가합니다
+- biome.json 기본 포매터/린터 구성, 존재하지 않는 경우에만 작성됩니다
+- .mcp.json 비활성화되지 않는 한 지원되는 코딩 에이전트를 위한 MCP 서버를 구성합니다(.cursor/, .kiro/, .gemini/, .vscode/ 및 .codex/ 동등물도 포함)
+</FileTree>
 
-  ```json
-  {
-    "compilerOptions": {
-      "composite": true,
-      "declarationMap": true,
-      "emitDeclarationOnly": true,
-      "importHelpers": true,
-      "isolatedModules": true,
-      "lib": ["es2022"],
-      "module": "nodenext",
-      "moduleResolution": "nodenext",
-      "noEmitOnError": true,
-      "noFallthroughCasesInSwitch": true,
-      "noImplicitOverride": true,
-      "noImplicitReturns": true,
-      "noUnusedLocals": true,
-      "skipLibCheck": true,
-      "strict": true,
-      "target": "es2022"
-    }
+<Link path="get_started/building-with-ai">MCP 서버</Link> 구성은 `--mcp=false`로 비활성화할 수 있습니다.
+
+<Drawer title="tsconfig.base.json" trigger="생성된 tsconfig.base.json이 포함하는 컴파일러 옵션을 보려면 여기를 클릭하세요.">
+플러그인의 TypeScript 프로젝트는 이러한 컴파일러 옵션에 의존합니다. `init`은 기존 `tsconfig.base.json`을 다시 작성하지 않으므로, 자체 파일을 유지하는 경우 다음은 정렬해야 할 옵션입니다:
+
+```json title="tsconfig.base.json"
+{
+  "compilerOptions": {
+    "composite": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "importHelpers": true,
+    "isolatedModules": true,
+    "lib": ["es2022"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2022"
   }
-  ```
-
-- `pnpm` 워크스페이스의 경우, 플러그인의 종속성이 필요로 하는 빌드 스크립트(`@swc/core`, `esbuild`, `nx`, `sharp`)를 `pnpm-workspace.yaml`에서 허용 목록에 추가합니다.
-- 루트 `package.json`에 편의 스크립트를(기존 스크립트를 덮어쓰지 않고) 추가하고, `nx`, `@nx/js`, `@nx/workspace`, `typescript` 및 Biome 개발 종속성을 추가합니다 — 그리고 `biome.json`이 없으면 기본값을 작성합니다.
-- 지원되는 코딩 에이전트를 위한 <Link path="get_started/building-with-ai">MCP 서버</Link>를 구성합니다(비활성화되지 않은 경우).
+}
+```
+</Drawer>
 
 ### 옵션
 
@@ -142,6 +164,10 @@ pnpm은 허용 목록에 없는 패키지의 설치 스크립트를 건너뜁니
 
 두 개의 다른 `nx` 버전이 동일한 node_modules 트리에 있으면(`npm ls nx`를 실행하여 확인), 플러그인-워커 IPC가 교착 상태에 빠집니다. `init` 생성기는 루트 `nx` devDependency를 플러그인 자체의 `@nx/*` 패키지가 해결하는 버전으로 고정하지만, 다른 패치 버전의 다른 `@nx/*` 패키지를 나중에 설치하면 불일치가 다시 발생할 수 있습니다. 루트 `package.json`의 모든 `nx` 및 `@nx/*` 항목을 단일 버전으로 정렬하고 재설치하세요.
 
+#### `ts.readConfigFile is not a function`
+
+워크스페이스에 TypeScript 7이 설치되어 있으며, [Nx는 아직 이를 지원하지 않습니다](https://nx.dev/docs/technologies/typescript/guides/typescript-7) — Nx의 플러그인은 TypeScript의 인프로세스 컴파일러 API에 의존하는데, TypeScript 7은 더 이상 이를 제공하지 않습니다. 루트 `package.json`에서 `typescript`를 플러그인이 사용하는 버전으로 고정하고(`init` 생성기가 호환되는 버전을 설치함) 재설치하세요.
+
 #### `Recursive task invocation detected`
 
 **루트** `package.json`이 Nx 프로젝트로 등록되어 있고(`"nx"` 키가 있으며, `nx init`이 단일 패키지 레포에 추가함) `nx run-many --target build`의 `build` 스크립트를 가지고 있습니다. 그러면 Nx는 자신을 호출하는 루트에 `build` 타겟을 추론합니다. 소스를 `packages/<your-package>/`로 이동하여 루트가 프로젝트가 아닌 워크스페이스 매니페스트가 되도록 하세요 — [단일 패키지 프로젝트](#single-package-projects)를 참조하세요. (Nx 자체의 독립형 프리셋은 루트 패키지에 `"nx": { "includedScripts": [] }`를 설정하여 이를 방지합니다. 더 빠른 대안으로 동일하게 수행할 수 있습니다.)
@@ -154,6 +180,12 @@ pnpm은 허용 목록에 없는 패키지의 설치 스크립트를 건너뜁니
 
 <Aside type="note" title="ESM 및 CommonJS">
 모듈 형식은 워크스페이스 전체에 적용되며, 루트 `package.json` `type` 필드에서 읽습니다: `type: "module"`은 ESM을 의미하고, 그 외의 경우(`type` 필드가 없는 경우 포함)는 CommonJS를 의미합니다. `init`은 워크스페이스가 사용하는 것을 보존하며, 플러그인의 TypeScript 생성기는 일치하는 코드를 생성합니다. 나중에 전환하려면 루트 `type`을 변경하세요 — 하지만 그것은 기존 코드의 마이그레이션이며, `init`이 수행하는 것이 아닙니다.
+</Aside>
+
+<Aside type="tip">
+AI 어시스턴트와 작업할 때, <Link path="get_started/building-with-ai">Nx Plugin for AWS MCP 서버</Link>는 이 가이드를 어시스턴트에게 직접 제공하는 `add-to-existing-project` 도구를 노출합니다.
+</Aside>
+�� 일치하는 코드를 생성합니다. 나중에 전환하려면 루트 `type`을 변경하세요 — 하지만 그것은 기존 코드의 마이그레이션이며, `init`이 수행하는 것이 아닙니다.
 </Aside>
 
 <Aside type="tip">
