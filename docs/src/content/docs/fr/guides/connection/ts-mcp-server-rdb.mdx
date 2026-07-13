@@ -46,9 +46,9 @@ Le générateur modifie deux fichiers dans le répertoire source de votre serveu
 
 </FileTree>
 
-De plus, la cible `<mcp-server-name>-serve-local` est mise à jour pour dépendre de la cible `serve-local` de la base de données.
+De plus, la cible `<mcp-server-name>-dev` est mise à jour pour dépendre de la cible `dev` de la base de données.
 
-## Comment ça fonctionne
+## Utilisation de la base de données dans les outils MCP
 
 Le client Prisma est récupéré à l'intérieur de `createServer` et disponible pour tous les outils et ressources enregistrés là :
 
@@ -85,10 +85,17 @@ Le construct de serveur MCP généré implémente `IGrantable` et `IConnectable`
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myMcpServer);
 db.grantConnect(myMcpServer);
@@ -99,34 +106,61 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Transmettez les sorties du module de base de données dans votre module de serveur MCP afin qu'il puisse atteindre la base de données et lire sa configuration d'exécution :
+Exécutez le serveur MCP dans le même VPC que la base de données, accordez-lui `rds-db:connect` via `additional_iam_policy_statements`, et ouvrez le chemin réseau avec une paire de règles de groupe de sécurité :
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Assurez-vous que le rôle d'exécution du serveur MCP dispose de la permission `rds-db:connect` et que son groupe de sécurité peut atteindre le groupe de sécurité de la base de données sur le port de la base de données.
+`appconfig_application_id`/`appconfig_application_arn` proviennent de l'application AppConfig de <Link path="guides/runtime-config">configuration d'exécution</Link> partagée déclarée une fois dans votre module racine, et non du module de base de données.
 
 </Fragment>
 </Infrastructure>
 
 ### Exigences SSL lors de la connexion sans RDS Proxy
 
-<Snippet name="connection/mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/ts-mcp-server-rdb-ssl-requirements" parentHeading="Exigences SSL lors de la connexion sans RDS Proxy" />
 
 ## Développement local
 

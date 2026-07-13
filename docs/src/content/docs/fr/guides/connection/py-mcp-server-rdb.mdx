@@ -1,0 +1,171 @@
+---
+title: Serveur MCP Python vers Base de Données Relationnelle
+description: Connecter un serveur MCP Python à une base de données relationnelle
+when:
+  sourceType: py#mcp-server
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur `connection` relie un <Link path="guides/py-mcp-server">serveur MCP Python</Link> à un projet de <Link path="guides/py-rdb">base de données relationnelle Python</Link>, rendant la session de base de données disponible pour tous les outils enregistrés dans le serveur.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet <Link path="guides/py-mcp-server">`py#mcp-server`</Link>
+2. Un projet <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez votre projet de serveur MCP comme source et votre projet de base de données relationnelle comme cible. Si le projet contient plusieurs composants de serveur MCP, spécifiez `sourceComponent` pour lever l'ambiguïté.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+<FileTree>
+
+- packages/my\_service
+  - project.json Ajoute une dépendance de `my_mcp_server-dev` sur la cible `dev` de la base de données
+  - pyproject.toml Ajoute le package de base de données comme dépendance de l'espace de travail
+  - my\_service
+    - my\_mcp\_server
+      - Dockerfile Ajoute le bundle CA RDS utilisé pour les connexions directes à Aurora
+
+</FileTree>
+
+## Utiliser la base de données dans les outils MCP
+
+Importez `session_context` depuis votre package de base de données et utilisez-le dans vos outils de serveur MCP :
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+async def list_examples() -> str:
+    """List all example records."""
+    async with session_context() as session:
+        items = (await session.execute(select(ExampleModel))).all()
+        return str([item.model_dump() for item in items])
+```
+
+## Bases de données multiples
+
+Exécuter à nouveau le générateur avec une cible différente ajoute la deuxième base de données à côté de la première. Les deux contextes de session sont disponibles pour tous les outils :
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from my_scope.my_db import session_context as my_db_session_context
+from my_scope.other_db import session_context as other_db_session_context
+```
+
+## Infrastructure
+
+Le construct de serveur MCP généré implémente `IGrantable` et `IConnectable`, vous pouvez donc accorder l'accès réseau et IAM à la base de données directement sur le construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` ouvre la règle du groupe de sécurité afin que le runtime du serveur MCP puisse atteindre le port de la base de données. `grantConnect` accorde la permission IAM `rds-db:connect` au rôle d'exécution du serveur.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Exécutez le serveur MCP dans le même VPC que la base de données, accordez-lui `rds-db:connect` via `additional_iam_policy_statements`, et ouvrez le chemin réseau avec une paire de règles de groupe de sécurité :
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "my_mcp_server" {
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+`appconfig_application_id`/`appconfig_application_arn` proviennent de l'application AppConfig de <Link path="guides/runtime-config">configuration d'exécution</Link> partagée déclarée une fois dans votre module racine, et non du module de base de données.
+
+</Fragment>
+</Infrastructure>
+
+### Exigences SSL lors de la connexion sans RDS Proxy
+
+Lorsque le serveur MCP se connecte directement au cluster Aurora (sans RDS Proxy), le générateur de connexion met à jour le Dockerfile du serveur MCP généré pour installer le bundle CA Amazon RDS dans le magasin de confiance du système :
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+Lors de l'utilisation de RDS Proxy, vous n'avez pas besoin de configurer le bundle CA RDS dans le runtime du serveur MCP.
+
+## Développement local
+
+<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
+
+Cela démarre le serveur MCP et toutes les bases de données connectées. La variable d'environnement `LOCAL_DEV=true` fait en sorte que le client de base de données se connecte à sa base de données Docker locale au lieu d'Aurora.

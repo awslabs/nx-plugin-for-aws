@@ -1,0 +1,53 @@
+---
+title: 删除策略
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+CDK 构造默认保留 Aurora 集群（`removalPolicy: RemovalPolicy.RETAIN`）。当您希望 CDK 堆栈删除时对集群进行快照或销毁时，请更改此设置。
+
+使用 `RemovalPolicy.DESTROY` 时，还必须在删除集群之前禁用删除保护。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+对于应随堆栈一起删除数据库的临时环境：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform 不使用 CDK 删除策略。默认情况下，模块在删除时创建最终快照（`skip_final_snapshot = false`）。要跳过临时环境的最终快照：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
+}
+```
+
+::::caution[数据丢失]
+`skip_final_snapshot = true` 将在删除集群时永久擦除所有数据。仅在临时环境（如自动化测试）中使用。对所有持久性和生产堆栈保持 `skip_final_snapshot = false` 以防止数据丢失。
+::::
+</Fragment>
+</Infrastructure>

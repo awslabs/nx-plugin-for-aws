@@ -1,0 +1,170 @@
+---
+title: FastAPI para Banco de Dados Relacional
+description: Conectar um FastAPI a um Banco de Dados Relacional Python
+when:
+  sourceType: py#fast-api
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+O gerador `connection` conecta um <Link path="guides/fastapi">FastAPI</Link> a um projeto de <Link path="guides/py-rdb">Banco de Dados Relacional Python</Link>, injetando uma sessão SQLModel tipada em seus manipuladores de rota via uma dependência FastAPI.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um projeto <Link path="guides/fastapi">`py#fast-api`</Link>
+2. Um projeto <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione seu projeto FastAPI como origem e seu projeto de banco de dados relacional como destino.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador modifica seu projeto FastAPI:
+
+<FileTree>
+
+- packages/my_api
+  - project.json Adiciona uma dependência de `dev` no target `dev` do banco de dados
+  - pyproject.toml Adiciona o pacote do banco de dados como uma dependência do workspace
+  - my_api
+    - dependencies
+      - my_db.py Dependência FastAPI `MyDbSession` para a sessão do banco de dados
+
+</FileTree>
+
+## Usando o Banco de Dados em Manipuladores de Rota
+
+Este gerador configura uma [Dependência FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) injetável que você pode usar em seus manipuladores de rota:
+
+```python title="packages/my_api/my_api/api.py" {2,6,10}
+from sqlmodel import select
+from my_api.dependencies.my_db import MyDbSession
+from my_scope.my_db.models.example import ExampleModel
+
+@app.get("/examples")
+async def list_examples(my_db: MyDbSession):
+    return (await my_db.execute(select(ExampleModel))).all()
+
+@app.post("/examples")
+async def create_example(name: str, my_db: MyDbSession):
+    item = ExampleModel(name=name)
+    my_db.add(item)
+    await my_db.commit()
+    await my_db.refresh(item)
+    return item
+```
+
+O FastAPI abre automaticamente uma nova sessão por requisição e a fecha quando o manipulador retorna.
+
+## Infraestrutura
+
+Para permitir que a função Lambda FastAPI se conecte ao banco de dados em tempo de execução, ela deve ser implantada na mesma VPC que o banco de dados e receber acesso de rede e IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Em sua pilha de aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` ao manipulador Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede isolada privada. Em tempo de execução, `session_context()` recupera a configuração do banco de dados do AWS AppConfig, que é um endpoint de serviço AWS público que requer acesso à internet de saída.
+
+:::note
+Este exemplo concede acesso a todos os manipuladores em sua API, mas se apenas alguns manipuladores precisarem de acesso, é melhor configurar individualmente.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Implante a API na mesma VPC que o banco de dados, conceda `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes isoladas privadas. `RUNTIME_CONFIG_APP_ID` deve apontar para a aplicação AppConfig de <Link path="guides/runtime-config">configuração de tempo de execução</Link> compartilhada, não para uma saída do módulo do banco de dados.
+
+</Fragment>
+</Infrastructure>
+
+## Desenvolvimento Local
+
+<NxCommands commands={["dev <project-name>"]} />
+
+Isso inicia o FastAPI e todos os bancos de dados conectados. A variável de ambiente `LOCAL_DEV=true` faz com que o cliente do banco de dados se conecte ao seu banco de dados Docker local em vez do Aurora.

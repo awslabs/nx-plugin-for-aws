@@ -2,6 +2,7 @@
 title: Infraestructura de API RDB
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
 
 Para permitir que tu API se conecte a la base de datos en tiempo de ejecución, las funciones Lambda de la API deben desplegarse en la misma VPC que la base de datos y se les debe otorgar acceso de red e IAM.
 
@@ -39,7 +40,7 @@ Este ejemplo otorga acceso a todos los manejadores de tu API, pero si solo algun
 </Fragment>
 <Fragment slot="terraform">
 
-Pasa las salidas del módulo de base de datos a tu módulo de API para que pueda alcanzar la base de datos y leer su configuración en tiempo de ejecución:
+Despliega la API en la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -50,24 +51,44 @@ module "my_database" {
 }
 
 module "api" {
-  source             = "..."
-  enable_vpc         = true
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. Asegúrate de que el rol Lambda de la API tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. `RUNTIME_CONFIG_APP_ID` debe apuntar a la <Link path="guides/runtime-config">configuración en tiempo de ejecución</Link> compartida de la aplicación AppConfig, no a una salida del módulo de base de datos.
 
 </Fragment>
 </Infrastructure>

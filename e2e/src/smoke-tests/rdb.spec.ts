@@ -38,8 +38,14 @@ describe('smoke test - rdb', () => {
           `generate @aws/nx-plugin:ts#rdb --name=${engine}-db --infra=aurora --engine=${engine} --framework=prisma --iac=${iac} --no-interactive`,
           opts,
         );
+        await runCLI(
+          `generate @aws/nx-plugin:py#rdb --name=py-${engine}-db --infra=aurora --engine=${engine} --framework=sqlmodel --iac=${iac} --no-interactive`,
+          opts,
+        );
 
-        // Source projects for connection testing
+        const pyRdbProject = `py_${engine}_db`;
+
+        // TypeScript source projects for connection testing
         await runCLI(
           `generate @aws/nx-plugin:ts#api --name=my-api --infra=rest-lambda --no-interactive`,
           opts,
@@ -65,7 +71,25 @@ describe('smoke test - rdb', () => {
           opts,
         );
 
-        // RDB connections
+        // Python source projects for connection testing
+        await runCLI(
+          `generate @aws/nx-plugin:py#api --name=py-api --infra=rest-lambda --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:py#project --name=py-agents --projectType=application --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:py#agent --project=py_agents --name=py-agent --infra=none --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:py#mcp-server --project=py_agents --name=py-mcp --infra=none --no-interactive`,
+          opts,
+        );
+
+        // TypeScript RDB connections
         await runCLI(
           `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=${rdbProject} --no-interactive`,
           opts,
@@ -84,6 +108,20 @@ describe('smoke test - rdb', () => {
         );
         await runCLI(
           `generate @aws/nx-plugin:connection --sourceProject=agents --sourceComponent=my-mcp --targetProject=${rdbProject} --no-interactive`,
+          opts,
+        );
+
+        // Python RDB connections
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=py_api --targetProject=${pyRdbProject} --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=py_agents --sourceComponent=py-agent --targetProject=${pyRdbProject} --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=py_agents --sourceComponent=py-mcp --targetProject=${pyRdbProject} --no-interactive`,
           opts,
         );
 

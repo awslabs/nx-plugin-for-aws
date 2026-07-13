@@ -32,8 +32,18 @@ export interface AddRdbConstructOptions {
   adminUser: string;
   engine: 'postgres' | 'mysql';
   migrationBundleDir: string;
+  /**
+   * Node.js zip bundle directory for the create-db-user Lambda (ts#rdb).
+   * When absent the migration Docker image is reused with the
+   * `create_db_user_handler.handler` command (py#rdb).
+   */
   createDbUserBundleDir: string;
-  dockerImageTag: string;
+  /** ORM framework used by the create-db-user Lambda. */
+  framework: 'prisma' | 'sqlmodel';
+  /** Local Docker tag for the Python create-db-user Lambda image. */
+  createDbUserDockerImageTag?: string;
+  /** Local Docker tag for the migration Lambda image. */
+  migrationDockerImageTag: string;
   containerEngine: Containers;
 }
 

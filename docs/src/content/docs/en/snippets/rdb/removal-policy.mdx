@@ -1,0 +1,57 @@
+---
+title: Removal Policy
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+The CDK construct retains the Aurora cluster by default (`removalPolicy: RemovalPolicy.RETAIN`). Change this when you want CDK stack deletion to snapshot or destroy the cluster instead.
+
+When using `RemovalPolicy.DESTROY`, deletion protection must also be disabled before the cluster can be deleted.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+For an ephemeral environment where the database should be deleted with the stack:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+
+::::caution[Data Loss]
+`RemovalPolicy.DESTROY` will permanently erase all data when the stack is deleted. Use only in ephemeral environments (such as automated tests). Use `RETAIN` or `SNAPSHOT` for all persistent and production stacks to prevent data loss.
+::::
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform does not use CDK removal policies. By default, the module creates a final snapshot on deletion (`skip_final_snapshot = false`). To skip the final snapshot for an ephemeral environment:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
+}
+```
+
+::::caution[Data Loss]
+`skip_final_snapshot = true` will permanently erase all data when the cluster is deleted. Use only in ephemeral environments (such as automated tests). Keep `skip_final_snapshot = false` for all persistent and production stacks to prevent data loss.
+::::
+</Fragment>
+</Infrastructure>

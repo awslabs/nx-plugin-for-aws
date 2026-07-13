@@ -434,6 +434,7 @@ export default defineConfig({
                 { label: 'ts#dynamodb', link: '/guides/ts-dynamodb' },
                 { label: 'py#dynamodb', link: '/guides/py-dynamodb' },
                 { label: 'ts#rdb', link: '/guides/ts-rdb' },
+                { label: 'py#rdb', link: '/guides/py-rdb' },
               ],
             },
             {

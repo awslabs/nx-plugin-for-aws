@@ -1,0 +1,171 @@
+---
+title: Python MCP Server からリレーショナルデータベースへの接続
+description: Python MCP Server をリレーショナルデータベースに接続する
+when:
+  sourceType: py#mcp-server
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/py-mcp-server">Python MCP Server</Link> を <Link path="guides/py-rdb">Python リレーショナルデータベース</Link>プロジェクトに接続し、サーバーに登録されたすべてのツールでデータベースセッションを利用できるようにします。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を用意してください：
+
+1. <Link path="guides/py-mcp-server">`py#mcp-server`</Link> プロジェクト
+2. <Link path="guides/py-rdb">`py#rdb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+MCP サーバープロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択します。プロジェクトに複数の MCP サーバーコンポーネントが含まれている場合は、`sourceComponent` を指定して明確にします。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+<FileTree>
+
+- packages/my\_service
+  - project.json `my_mcp_server-dev` からデータベースの `dev` ターゲットへの依存関係を追加します
+  - pyproject.toml データベースパッケージをワークスペースの依存関係として追加します
+  - my\_service
+    - my\_mcp\_server
+      - Dockerfile Aurora への直接接続に使用される RDS CA バンドルを追加します
+
+</FileTree>
+
+## MCP ツールでのデータベースの使用
+
+データベースパッケージから `session_context` をインポートし、MCP サーバーツール内で使用します：
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+@mcp.tool()
+async def list_examples() -> str:
+    """List all example records."""
+    async with session_context() as session:
+        items = (await session.execute(select(ExampleModel))).all()
+        return str([item.model_dump() for item in items])
+```
+
+## 複数のデータベース
+
+異なるターゲットでジェネレーターを再度実行すると、最初のデータベースと並行して2番目のデータベースが追加されます。両方のセッションコンテキストがすべてのツールで利用可能になります：
+
+```python title="packages/my_service/my_service/my_mcp_server/server.py"
+from my_scope.my_db import session_context as my_db_session_context
+from my_scope.other_db import session_context as other_db_session_context
+```
+
+## インフラストラクチャ
+
+生成された MCP サーバーコンストラクトは `IGrantable` と `IConnectable` を実装しているため、コンストラクト上で直接データベースへのネットワークおよび IAM アクセスを許可できます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` はセキュリティグループルールを開き、MCP サーバーランタイムがデータベースポートに到達できるようにします。`grantConnect` は、サーバーの実行ロールに IAM `rds-db:connect` 権限を付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+MCP サーバーをデータベースと同じ VPC 内で実行し、`additional_iam_policy_statements` を介して `rds-db:connect` を付与し、セキュリティグループルールのペアでネットワークパスを開きます：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "my_mcp_server" {
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+`appconfig_application_id`/`appconfig_application_arn` は、データベースモジュールからではなく、ルートモジュールで一度宣言された共有<Link path="guides/runtime-config">ランタイム設定</Link> AppConfig アプリケーションから取得されます。
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy を使用せずに接続する場合の SSL 要件
+
+MCP サーバーが（RDS Proxy を使用せずに）Aurora クラスターに直接接続する場合、接続ジェネレーターは生成された MCP サーバーの Dockerfile を更新して、Amazon RDS CA バンドルをシステムトラストストアにインストールします：
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+RDS Proxy を使用する場合、MCP サーバーランタイムで RDS CA バンドルを設定する必要はありません。
+
+## ローカル開発
+
+<NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
+
+これにより、MCP サーバーと接続されたすべてのデータベースが起動します。`LOCAL_DEV=true` 環境変数により、データベースクライアントは Aurora ではなくローカルの Docker データベースに接続します。

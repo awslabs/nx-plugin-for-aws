@@ -2,6 +2,19 @@ import * as path from 'path';
 import * as url from 'url';
 import { readFileSync } from 'fs';
 import { Construct } from 'constructs';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+<%_ if (framework !== 'sqlmodel') { _%>
+  Code,
+<%_ } _%>
+  DockerImageCode,
+  DockerImageFunction,
+  Function,
+  FunctionOptions,
+<%_ if (framework !== 'sqlmodel') { _%>
+  Runtime,
+<%_ } _%>
+} from 'aws-cdk-lib/aws-lambda';
 import {
   AuroraDatabase,
   AuroraDatabaseEngines,
@@ -19,14 +32,19 @@ const { runtimeConfigKey } = JSON.parse(
   ),
 ) as { runtimeConfigKey: string };
 
+const migrationBundleDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  '<%- migrationBundleDir %>',
+);
+
+const createDbUserBundleDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  '<%- createDbUserBundleDir %>',
+);
+
 export type <%= nameClassName %>Props = Omit<
   AuroraDatabaseProps,
-  | 'databaseName'
-  | 'adminUser'
-  | 'createDbUserBundleDir'
-  | 'engine'
-  | 'runtimeConfigKey'
-  | 'migrationBundleDir'
+  'databaseName' | 'adminUser' | 'runtimeConfigKey' | 'engine'
 >;
 
 /**
@@ -39,15 +57,41 @@ export class <%= nameClassName %> extends AuroraDatabase {
       databaseName: '<%= databaseName %>',
       adminUser: '<%= adminUser %>',
       runtimeConfigKey,
-      migrationBundleDir: path.join(
-        findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
-        '<%- migrationBundleDir %>',
-      ),
-      createDbUserBundleDir: path.join(
-        findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
-        '<%- createDbUserBundleDir %>',
-      ),
       engine: AuroraDatabaseEngines.<%= engine %>({}),
+    });
+  }
+
+<%_ if (framework === 'sqlmodel') { _%>
+  protected override createDbUserHandler(baseProps: FunctionOptions): Function {
+    return new DockerImageFunction(this, 'CreateDbUserHandler', {
+      ...baseProps,
+      code: DockerImageCode.fromImageAsset(createDbUserBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
+    });
+  }
+<%_ } else { _%>
+  protected override createDbUserHandler(baseProps: FunctionOptions): Function {
+    return new Function(this, 'CreateDbUserHandler', {
+      ...baseProps,
+      code: Code.fromAsset(createDbUserBundleDir),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    });
+  }
+<%_ } _%>
+
+  protected override createMigrationHandler(
+    baseProps: FunctionOptions,
+  ): Function {
+    return new DockerImageFunction(this, 'MigrationHandler', {
+      ...baseProps,
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
     });
   }
 }

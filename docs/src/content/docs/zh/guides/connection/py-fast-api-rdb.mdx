@@ -1,0 +1,170 @@
+---
+title: FastAPI 连接关系型数据库
+description: 将 FastAPI 连接到 Python 关系型数据库
+when:
+  sourceType: py#fast-api
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器将 <Link path="guides/fastapi">FastAPI</Link> 连接到 <Link path="guides/py-rdb">Python 关系型数据库</Link>项目，通过 FastAPI 依赖项将类型化的 SQLModel 会话注入到您的路由处理程序中。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/fastapi">`py#fast-api`</Link> 项目
+2. 一个 <Link path="guides/py-rdb">`py#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 FastAPI 项目作为源，选择您的关系型数据库项目作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会修改您的 FastAPI 项目：
+
+<FileTree>
+
+- packages/my_api
+  - project.json 添加从 `dev` 到数据库的 `dev` 目标的依赖关系
+  - pyproject.toml 将数据库包添加为工作区依赖项
+  - my_api
+    - dependencies
+      - my_db.py 用于数据库会话的 FastAPI `MyDbSession` 依赖项
+
+</FileTree>
+
+## 在路由处理程序中使用数据库
+
+此生成器配置了一个可注入的 [FastAPI 依赖项](https://fastapi.tiangolo.com/tutorial/dependencies/)，您可以在路由处理程序中使用它：
+
+```python title="packages/my_api/my_api/api.py" {2,6,10}
+from sqlmodel import select
+from my_api.dependencies.my_db import MyDbSession
+from my_scope.my_db.models.example import ExampleModel
+
+@app.get("/examples")
+async def list_examples(my_db: MyDbSession):
+    return (await my_db.execute(select(ExampleModel))).all()
+
+@app.post("/examples")
+async def create_example(name: str, my_db: MyDbSession):
+    item = ExampleModel(name=name)
+    my_db.add(item)
+    await my_db.commit()
+    await my_db.refresh(item)
+    return item
+```
+
+FastAPI 会自动为每个请求打开一个新会话，并在处理程序返回时关闭它。
+
+## 基础设施
+
+为了允许 FastAPI Lambda 函数在运行时连接到数据库，必须将其部署到与数据库相同的 VPC 中，并授予网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在您的应用程序堆栈中，将 API 部署到与数据库相同的 VPC 中，然后调用 `allowDefaultPortFrom` 和 `grantConnect` 来打开网络路径并授予 Lambda 处理程序 IAM `rds-db:connect` 权限：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**中，而不是私有隔离子网。在运行时，`session_context()` 从 AWS AppConfig 检索数据库配置，这是一个需要出站互联网访问的公共 AWS 服务端点。
+
+:::note
+此示例授予 API 中的每个处理程序访问权限，但如果只有某些处理程序需要访问，最好单独配置。
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+将 API 部署到与数据库相同的 VPC 中，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**中，而不是私有隔离子网。`RUNTIME_CONFIG_APP_ID` 应指向共享的 <Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，而不是数据库模块的输出。
+
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+<NxCommands commands={["dev <project-name>"]} />
+
+这将启动 FastAPI 和所有连接的数据库。`LOCAL_DEV=true` 环境变量会导致数据库客户端连接到其本地 Docker 数据库而不是 Aurora。

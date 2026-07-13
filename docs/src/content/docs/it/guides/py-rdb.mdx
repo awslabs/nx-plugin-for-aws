@@ -1,0 +1,250 @@
+---
+title: Database Relazionale Python
+description: Crea un progetto di database relazionale Python
+generator: py#rdb
+---
+
+import { FileTree, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import Astro from '@astrojs/react';
+import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Questo generatore crea un nuovo progetto di database relazionale Python supportato da [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL o MySQL), [SQLModel](https://sqlmodel.tiangolo.com/) per la modellazione dei dati e [Alembic](https://alembic.sqlalchemy.org/) per le migrazioni dello schema. Genera il codice dell'applicazione e l'infrastruttura necessari per il provisioning e la gestione di un database utilizzando AWS CDK o Terraform, con definizione dichiarativa dello schema, distribuzione automatica delle migrazioni e un client di database.
+
+## Utilizzo
+
+### Genera un Database Relazionale
+
+<RunGenerator generator="py#rdb" />
+
+### Opzioni
+
+<GeneratorParameters generator="py#rdb" />
+
+## Output del Generatore
+
+Il generatore crea la seguente struttura di progetto nella directory `<directory>/<name>`:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py Esportazioni del package (`get_engine`, `session_context`)
+    - connection.py Engine del database e factory di sessione con autenticazione IAM
+    - utils.py Configurazione runtime e helper per lo sviluppo locale
+    - migration_handler.py Handler Lambda che esegue le migrazioni Alembic durante la distribuzione
+    - create_db_user_handler.py Handler Lambda che crea l'utente del database dell'applicazione durante la distribuzione
+    - models
+      - example.py Definizione di tabella SQLModel di esempio
+  - migrations
+    - versions Script di migrazione generati da Alembic
+    - env.py Ambiente Alembic (si connette al database)
+    - script.py.mako Template di script di migrazione Alembic
+  - alembic.ini Configurazione Alembic
+  - config.json Dettagli di connessione per lo sviluppo locale e chiave di configurazione runtime
+  - Dockerfile.migration Immagine container per l'handler di migrazione
+  - Dockerfile.create-db-user Immagine container per l'handler create-db-user
+  - project.json Configurazione del progetto e target di build
+</FileTree>
+
+Gli script di sviluppo locale sono condivisi tra tutti i progetti di database e generati in `packages/common/scripts/`:
+
+<FileTree>
+  - packages/common/scripts/src/rdb
+    - pull-image.ts Scarica l'immagine container del database
+    - start-container.ts Avvia un container di database locale
+    - wait-for-postgres-db.ts Attende che il database locale sia pronto (PostgreSQL)
+    - wait-for-mysql-db.ts Attende che il database locale sia pronto (MySQL)
+</FileTree>
+
+### Infrastruttura
+
+<Snippet name="rdb/infrastructure" />
+
+#### Architettura
+
+<Snippet name="rdb/architecture" />
+
+## Sviluppo Locale
+
+### Modellazione dei Dati
+
+Il progetto generato utilizza [SQLModel](https://sqlmodel.tiangolo.com/) per definire lo schema del database. Il flusso di lavoro è model-first: aggiungi o aggiorna le classi di tabella SQLModel nella directory `<name>/models/` del tuo progetto di database, quindi genera una migrazione da tali modifiche del modello.
+
+Modello di esempio:
+
+```python title="packages/my_db/my_db/models/example.py"
+from sqlalchemy import Column, String
+from sqlmodel import Field, SQLModel
+
+
+class ExampleModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(sa_column=Column(String(255), nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+```
+
+Importa i tuoi modelli in `<name>/models/__init__.py` in modo che Alembic possa scoprirli durante l'autogenerazione.
+
+### Creazione di Migrazioni
+
+Dopo aver aggiunto o aggiornato i modelli, utilizza Alembic per generare e applicare gli script di migrazione. Il target `alembic` generato avvia automaticamente un container di database locale prima dell'esecuzione:
+
+<NxCommands commands={['run <project>:alembic revision --autogenerate -m "describe your change"']} />
+
+Questo genera un nuovo script di migrazione in `migrations/versions/`. Rivedi lo script generato prima di applicarlo.
+
+Applica la migrazione al tuo database locale:
+
+<NxCommands commands={['run <project>:migrate']} />
+
+Quando distribuisci lo stack AWS, l'infrastruttura generata applica automaticamente le migrazioni generate al database distribuito.
+
+### Applicazione di Migrazioni Esistenti
+
+Quando scarichi file di migrazione creati da altri sviluppatori, applicali al tuo database locale:
+
+<NxCommands commands={['run <project>:migrate']} />
+
+### Esecuzione di Comandi Alembic
+
+Il target `alembic` generato espone la CLI di Alembic, quindi puoi eseguire qualsiasi comando Alembic sul database locale. Consulta il [riferimento dei comandi Alembic](https://alembic.sqlalchemy.org/en/latest/ops.html) per i comandi disponibili.
+
+<NxCommands commands={['run <project>:alembic <alembic-command>']} />
+
+### Arresto del Database Locale
+
+L'arresto di `dev` (ad esempio con `Ctrl+C`) rimuove automaticamente il container del database locale, ma preserva il volume nominato in modo che i tuoi dati persistano tra i riavvii.
+
+:::caution[Windows]
+A causa di limitazioni nella gestione dei segnali su Windows, il container non viene rimosso automaticamente quando `dev` viene arrestato. Dovrai rimuoverlo manualmente:
+
+```bash
+<engine> rm -f <scope>-<db-name>
+```
+
+Sostituisci `<engine>` con il tuo motore di container (`docker` o `finch`), `<scope>` con lo scope del tuo workspace Nx (ad es. `proj`) e `<db-name>` con il nome del tuo progetto di database (ad es. `my-db`).
+:::
+
+## Connessione al Database
+
+Importa `session_context` dal tuo package di database e usalo come async context manager per ottenere un `AsyncSession`:
+
+```python
+from sqlmodel import select
+
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+async def example():
+    async with session_context() as session:
+        results = (await session.execute(select(ExampleModel))).all()
+```
+
+Il client del database automaticamente:
+- Recupera la configurazione del database da AWS AppConfig utilizzando la variabile d'ambiente `RUNTIME_CONFIG_APP_ID`
+- Genera token di autenticazione temporanei tramite `boto3` RDS Signer per l'autenticazione IAM
+- Stabilisce connessioni TLS utilizzando `ssl.create_default_context()`
+
+## Distribuzione del Database
+
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
+
+### Configurazione RDS Proxy
+
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
+
+#### Requisiti SSL per la Connessione Senza RDS Proxy
+
+Il bundle CA di Amazon RDS deve essere presente nel trust store di sistema del runtime.
+
+##### Runtime Container
+
+<Tabs>
+<TabItem label="Amazon Linux">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
+```
+
+</TabItem>
+<TabItem label="Debian">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+</TabItem>
+</Tabs>
+
+##### Funzioni Lambda Zip
+
+Per funzioni Lambda distribuite come zip (come una <Link path="guides/fastapi">`py#api` FastAPI</Link>), il trust store CA integrato nell'ambiente di esecuzione Lambda Amazon Linux 2023 include le CA Root di Amazon utilizzate da RDS.
+
+Quando utilizzi RDS Proxy, non è necessario configurare il bundle CA RDS nel runtime che si connette al database.
+
+### Istanze del Cluster
+
+<Snippet name="rdb/cluster-instances" />
+
+### Capacità Serverless
+
+<Snippet name="rdb/serverless-capacity" />
+
+### Versione del Motore
+
+<Snippet name="rdb/engine-version" />
+
+### Protezione dalla Cancellazione
+
+<Snippet name="rdb/deletion-protection" />
+
+### Policy di Rimozione
+
+<Snippet name="rdb/removal-policy" />
+
+### Logging e Monitoraggio
+
+<Snippet name="rdb/logging" />
+
+### Rotazione della Chiave di Crittografia
+
+<Snippet name="rdb/encryption-key-rotation" />
+
+## Connessioni
+
+Utilizza il generatore <Link path="guides/connection">`connection`</Link> per integrare questo progetto con altri nel tuo workspace. Le seguenti connessioni coinvolgono questo progetto:
+
+<CardGrid>
+  <ConnectionCard
+    title="Python Agent to Relational Database"
+    description="Connect a Python Agent to an Aurora relational database"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-rdb`}
+    source="strands"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="FastAPI to Relational Database"
+    description="Connect a FastAPI to an Aurora relational database"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-rdb`}
+    source="fastapi"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="Python MCP Server to Relational Database"
+    description="Connect a Python MCP Server to an Aurora relational database"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-mcp-server-rdb`}
+    source="mcp"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+</CardGrid>

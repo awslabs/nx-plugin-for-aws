@@ -1,0 +1,107 @@
+---
+title: Implantando seu Banco de Dados Relacional
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+O gerador de banco de dados relacional cria infraestrutura CDK ou Terraform com base no seu `iacProvider` selecionado.
+
+<Infrastructure>
+<Fragment slot="cdk">
+O construtor CDK é criado em `common/constructs`. Exemplo de uso:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Isso provisiona um cluster Aurora com RDS Proxy, credenciais de administrador, usuário de banco de dados da aplicação, registro de configuração de runtime e manipulador de migração.
+
+A infraestrutura gerada cria dois usuários de banco de dados:
+- **Usuário administrador** - Criado durante o provisionamento do cluster com credenciais armazenadas no AWS Secrets Manager
+- **Usuário da aplicação** - Criado via recurso personalizado Lambda com autenticação IAM habilitada e privilégios DML (SELECT, INSERT, UPDATE, DELETE) no banco de dados da aplicação
+</Fragment>
+<Fragment slot="terraform">
+O módulo Terraform é criado em `common/terraform`. Exemplo de uso:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Isso provisiona um cluster Aurora com RDS Proxy, credenciais de administrador, Lambda create-db-user, registro de configuração de runtime, Lambda de migração e recursos de registro de contêiner.
+
+A infraestrutura gerada cria dois usuários de banco de dados:
+- **Usuário administrador** - Criado durante o provisionamento do cluster com credenciais armazenadas no AWS Secrets Manager
+- **Usuário da aplicação** - Criado via função Lambda com autenticação IAM habilitada e privilégios DML (SELECT, INSERT, UPDATE, DELETE) no banco de dados da aplicação
+</Fragment>
+</Infrastructure>
+
+O usuário da aplicação é criado automaticamente com um nome aleatório e autenticação IAM. O cliente de banco de dados gerado já está configurado para autenticar como este usuário usando tokens RDS de curta duração, então o código da sua aplicação nunca manipula senhas de banco de dados.
+
+Sua VPC deve incluir sub-redes públicas, sub-redes privadas com saída e sub-redes privadas isoladas. O banco de dados pode ser executado em sub-redes privadas isoladas, enquanto as funções Lambda da aplicação devem ser executadas em sub-redes privadas com saída para que possam alcançar serviços AWS como AppConfig.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Use o gerador <Link path="guides/connection">`connection`</Link> para conectar um projeto a este banco de dados — consulte o guia de conexão para o tipo de computação relevante (por exemplo, FastAPI, servidor MCP, agente) para a configuração de infraestrutura necessária para alcançá-lo.

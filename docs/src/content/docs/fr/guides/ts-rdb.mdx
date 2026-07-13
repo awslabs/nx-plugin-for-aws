@@ -1,18 +1,17 @@
 ---
-title: Base de données relationnelle
+title: Base de données relationnelle TypeScript
 description: Créer un projet de base de données relationnelle
 generator: ts#rdb
 ---
 
-import { FileTree, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import Infrastructure from '@components/infrastructure.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
 
@@ -64,73 +63,11 @@ Les scripts de développement local sont partagés entre tous les projets de bas
 
 ### Infrastructure
 
-<Snippet name="shared-constructs" />
-
-<Infrastructure>
-  <Fragment slot="cdk">
-    <FileTree>
-      - packages/common/constructs/src
-        - app
-          - dbs
-            - \<name>.ts Infrastructure spécifique à votre base de données
-        - core
-          - rdb
-            - aurora.ts Construction de base de données Aurora générique
-    </FileTree>
-  </Fragment>
-  <Fragment slot="terraform">
-    <FileTree>
-      - packages/common/terraform/src
-        - app
-          - dbs
-            - \<name>
-              - \<name>.tf Module spécifique à votre base de données
-        - core
-          - rdb
-            - aurora
-              - aurora.tf Module Aurora générique
-    </FileTree>
-  </Fragment>
-</Infrastructure>
+<Snippet name="rdb/infrastructure" />
 
 #### Architecture
 
-La base de données déployée a l'architecture suivante. Par défaut, un [Amazon RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.html) se situe devant le cluster Aurora pour mutualiser les connexions et activer [l'authentification IAM](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) — voir [Désactiver RDS Proxy](#désactiver-rds-proxy) pour l'alternative. L'architecture est la même que vous sélectionniez le moteur PostgreSQL ou MySQL ; seule la variante du moteur Aurora diffère.
-
-```d2 inline=true
-direction: right
-
-app: Application\n(Lambda, Agent, ...) {
-  shape: hexagon
-}
-
-migrations: Migrations Lambda {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/lambda.svg
-  near: top-right
-}
-
-proxy: RDS Proxy {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/rds.svg
-}
-
-aurora: Aurora\n(PostgreSQL or MySQL) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/aurora.svg
-}
-
-secrets: Secrets Manager\n(DB credentials) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/secrets-manager.svg
-  near: bottom-right
-}
-
-app -> proxy: SQL (IAM auth)
-proxy -> aurora
-migrations -> aurora: Schema migrations
-proxy -> secrets: Master credential rotation
-```
+<Snippet name="rdb/architecture" />
 
 ## Développement local
 
@@ -248,486 +185,114 @@ Le client Prisma expose des modèles entièrement typés dérivés de votre sch�
 
 ## Déployer votre base de données
 
-Le générateur de base de données relationnelle crée une infrastructure CDK ou Terraform en fonction de votre `iacProvider` sélectionné.
-
-<Infrastructure>
-<Fragment slot="cdk">
-La construction CDK est créée dans `common/constructs`. Exemple d'utilisation :
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
-    super(scope, id, props);
-    ...
-    const db = new MyDatabase(this, 'Db', {
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_ISOLATED,
-      }
-    });
-  }
-}
-```
-
-Cela provisionne un cluster Aurora avec RDS Proxy, identifiants administrateur, utilisateur de base de données d'application, enregistrement de configuration d'exécution et gestionnaire de migration.
-
-L'infrastructure générée crée deux utilisateurs de base de données :
-- **Utilisateur administrateur** - Créé lors du provisionnement du cluster avec les identifiants stockés dans AWS Secrets Manager
-- **Utilisateur d'application** - Créé via une ressource personnalisée Lambda avec l'authentification IAM activée et tous les privilèges sur la base de données d'application
-</Fragment>
-<Fragment slot="terraform">
-Le module Terraform est créé dans `common/terraform`. Exemple d'utilisation :
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-
-  tags = local.common_tags
-}
-```
-
-Cela provisionne un cluster Aurora avec RDS Proxy, identifiants administrateur, Lambda create-db-user, enregistrement de configuration d'exécution, Lambda de migration et ressources de registre de conteneurs.
-
-L'infrastructure générée crée deux utilisateurs de base de données :
-- **Utilisateur administrateur** - Créé lors du provisionnement du cluster avec les identifiants stockés dans AWS Secrets Manager
-- **Utilisateur d'application** - Créé via une fonction Lambda avec l'authentification IAM activée et tous les privilèges sur la base de données d'application
-</Fragment>
-</Infrastructure>
-
-L'utilisateur d'application est automatiquement créé avec un nom aléatoire et l'authentification IAM. `getPrisma()` est déjà configuré pour s'authentifier en tant que cet utilisateur en utilisant des jetons RDS de courte durée, de sorte que votre code d'application ne gère jamais les mots de passe de base de données.
-
-Votre VPC doit inclure des sous-réseaux publics, des sous-réseaux privés avec sortie et des sous-réseaux privés isolés. La base de données peut s'exécuter dans des sous-réseaux privés isolés, tandis que les fonctions Lambda de l'API doivent s'exécuter dans des sous-réseaux privés avec sortie afin qu'elles puissent atteindre les services AWS tels qu'AppConfig.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-const vpc = new Vpc(this, 'Vpc', {
-  subnetConfiguration: [
-    {
-      name: 'public',
-      subnetType: SubnetType.PUBLIC,
-    },
-    {
-      name: 'private_with_egress',
-      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    },
-    {
-      name: 'private_isolated',
-      subnetType: SubnetType.PRIVATE_ISOLATED,
-    },
-  ],
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 6.0"
-
-  name = "app"
-  ...
-  public_subnet_names  = ["public"]
-  private_subnet_names = ["private_with_egress"]
-  intra_subnet_names   = ["private_isolated"]
-
-  enable_nat_gateway = true
-  single_nat_gateway = true
-}
-```
-
-</Fragment>
-</Infrastructure>
-
-### Connecter une API à la base de données
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-Dans votre stack d'application, déployez l'API dans le même VPC que la base de données, puis appelez `allowDefaultPortFrom` et `grantConnect` pour ouvrir le chemin réseau et accorder la permission IAM `rds-db:connect` à chaque gestionnaire Lambda :
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-Déployez les fonctions Lambda de l'API dans un **sous-réseau privé avec sortie** (recommandé) ou un sous-réseau public, pas un sous-réseau privé isolé. À l'exécution, `getPrisma()` récupère les détails de connexion à la base de données depuis AWS AppConfig, qui est un point de terminaison de service AWS public. Les fonctions Lambda dans un sous-réseau privé isolé n'ont pas d'accès Internet sortant et ne peuvent pas atteindre AppConfig. Les sous-réseaux privés avec sortie acheminent le trafic sortant via une passerelle NAT qui se trouve dans un sous-réseau public.
-</Fragment>
-<Fragment slot="terraform">
-
-Transmettez les sorties du module de base de données dans votre module de calcul afin qu'il puisse atteindre la base de données et lire sa configuration d'exécution :
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  # Autoriser l'API à lire la configuration d'exécution depuis AppConfig
-  appconfig_application_id = module.my_database.appconfig_application_id
-
-  # Accorder rds-db:connect pour l'utilisateur de base de données d'application
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-
-  # Autoriser l'accès réseau au port de la base de données
-  database_security_group_id = module.my_database.security_group_id
-  database_port              = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-Déployez les fonctions Lambda de l'API dans des **sous-réseaux privés avec sortie** (recommandé) ou des sous-réseaux publics, pas des sous-réseaux privés isolés. À l'exécution, `getPrisma()` récupère les détails de connexion à la base de données depuis AWS AppConfig, qui est un point de terminaison de service AWS public. Les fonctions Lambda dans un sous-réseau privé isolé n'ont pas d'accès Internet sortant et ne peuvent pas atteindre AppConfig. Les sous-réseaux privés avec sortie acheminent le trafic sortant via une passerelle NAT qui nécessite un sous-réseau public.
-
-Assurez-vous que le rôle Lambda de l'API dispose de `rds-db:connect` sur `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` et des permissions de lecture AppConfig, que le groupe de sécurité de l'API peut atteindre le groupe de sécurité de la base de données sur le port de la base de données, et que l'environnement Lambda inclut `RUNTIME_CONFIG_APP_ID`.
-</Fragment>
-</Infrastructure>
-
-:::note
-Cet exemple accorde à chaque gestionnaire de votre API l'accès, mais si seuls certains gestionnaires ont besoin d'accès, il est préférable de configurer individuellement.
-:::
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
 
 ### Configuration RDS Proxy
 
-L'infrastructure générée inclut un RDS Proxy par défaut, qui se situe entre votre application et le cluster Aurora. RDS Proxy offre plusieurs avantages :
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
 
-- **Pooling de connexions** - Maintient un pool de connexions de base de données qui peuvent être partagées entre les instances d'application, réduisant la surcharge d'établissement de nouvelles connexions
-- **Résilience des connexions** - Gère automatiquement les basculements et les reconnexions lors des remplacements d'instances Aurora ou de la maintenance
-- **Authentification IAM** - Prend en charge l'authentification de base de données basée sur IAM, éliminant le besoin de gérer les identifiants de base de données dans votre code d'application
-- **Sécurité améliorée** - Impose le chiffrement TLS pour toutes les connexions
+#### Exigences SSL lors de la connexion sans RDS Proxy
 
-:::note[Coût supplémentaire]
-RDS Proxy est activé par défaut mais entraîne des frais supplémentaires en plus du coût du cluster Aurora. Consultez la [tarification AWS RDS Proxy](https://aws.amazon.com/rds/proxy/pricing/) pour plus de détails. Si vous préférez désactiver le proxy, consultez la section ci-dessous.
-:::
+Lors de la connexion directe au cluster Aurora (sans RDS Proxy), le runtime qui appelle `getPrisma()` doit faire confiance au bundle CA Amazon RDS. Le client Prisma généré active la vérification des certificats ; la manière dont vous rendez le bundle CA disponible dépend du runtime qui se connecte à la base de données.
 
-#### Désactiver RDS Proxy  
+Pour Amazon RDS, utilisez le bundle CA global depuis :
 
-Vous pouvez désactiver le proxy RDS comme suit :  
+```text
+https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+##### Images de conteneur d'exécution
+
+Si vous préparez votre propre image de conteneur pour le runtime, téléchargez le bundle CA RDS dans votre Dockerfile et ajoutez-le au magasin de confiance du système d'exploitation.
+
+<Tabs>
+<TabItem label="Amazon Linux">
+
+```dockerfile
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \
+    update-ca-trust
+```
+
+</TabItem>
+<TabItem label="Debian">
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+</TabItem>
+</Tabs>
+
+##### Fonctions Lambda compressées
+
+Pour les fonctions Lambda compressées utilisant les runtimes Node.js 20 ou ultérieurs, chargez le bundle CA Amazon RDS en définissant `NODE_EXTRA_CA_CERTS` :
 
 <Infrastructure>
 <Fragment slot="cdk">
 
-
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  enableRdsProxy: false,
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
 });
 ```
 
-Lorsque RDS Proxy est désactivé, votre application se connecte directement au point de terminaison du cluster Aurora.
 </Fragment>
 <Fragment slot="terraform">
 
-Par défaut, RDS Proxy est activé. Le client d'exécution généré (`getPrisma()`) se connecte automatiquement via le point de terminaison du proxy. Vous pouvez le désactiver si nécessaire :
-
 ```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
+module "api" {
+  source = "..."
   ...
-  enable_rds_proxy = false
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
 }
 ```
 
-Lorsque RDS Proxy est désactivé, votre application se connecte directement au point de terminaison du cluster Aurora.
 </Fragment>
 </Infrastructure>
 
-<Snippet name="connection/lambda-rdb-ssl-requirements" parentHeading="Disable RDS Proxy" />
-
-L'infrastructure générée peut être personnalisée pour correspondre aux exigences de votre charge de travail. Les exemples suivants démontrent quelques options de personnalisation courantes disponibles.
+Pour plus de détails, consultez les [exigences SSL/TLS pour les connexions Amazon RDS](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls) d'AWS Lambda. Lors de l'utilisation de RDS Proxy, vous n'avez pas besoin de configurer le bundle CA RDS dans le runtime qui se connecte à la base de données.
 
 ### Instances du cluster
 
-Configurez les instances writer et reader pour votre cluster Aurora.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  writer: ClusterInstance.serverlessV2('writer'),
-  readers: [ClusterInstance.serverlessV2('reader')],
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  instance_count = 2  # 1 writer + 1 reader
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/cluster-instances" />
 
 ### Capacité Serverless
 
-Contrôlez les limites de mise à l'échelle d'Aurora Serverless v2 pour correspondre à votre charge de travail.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  serverlessV2MinCapacity: 0.5,
-  serverlessV2MaxCapacity: 8,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  serverless_min_capacity = 0.5
-  serverless_max_capacity = 8
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/serverless-capacity" />
 
 ### Version du moteur
 
-Épinglez une version spécifique du moteur Aurora.
-
-Par défaut, l'image de conteneur de base de données locale générée correspond à la version du moteur Aurora par défaut. Si vous modifiez la version du moteur Aurora, il est recommandé d'utiliser également une version d'image de conteneur locale correspondante pour une compatibilité maximale. Consultez les notes de version AWS pour les [versions Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html) et les [versions Aurora MySQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html) pour identifier la version de base de données communautaire correspondante.
-
-L'image de base de données locale est configurée dans le champ `localDev.image` du fichier `config.json` généré à la racine de votre projet de base de données. Mettez à jour cette valeur lorsque vous modifiez les versions du moteur.
-
-<OptionFilter when={{ engine: 'postgres' }}>
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  engine_version = "17.7"
-}
-```
-</Fragment>
-</Infrastructure>
-</OptionFilter>
-
-<OptionFilter when={{ engine: 'mysql' }}>
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  engineVersion: AuroraMysqlEngineVersion.VER_3_12_0,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  engine_version = "8.0.mysql_aurora.3.12.0"
-}
-```
-</Fragment>
-</Infrastructure>
-</OptionFilter>
+<Snippet name="rdb/engine-version" />
 
 ### Protection contre la suppression
 
-La protection contre la suppression est activée par défaut (`deletionProtection: true` dans CDK, `deletion_protection = true` dans Terraform) pour protéger le cluster Aurora contre la suppression accidentelle.
-
-#### Désactiver la protection contre la suppression
-
-Vous pouvez désactiver la protection contre la suppression pour les environnements où la suppression de la base de données est attendue, tels que les stacks de développement ou de prévisualisation éphémères.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  deletionProtection: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  deletion_protection = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/deletion-protection" />
 
 ### Politique de suppression
 
-La construction CDK conserve le cluster Aurora par défaut (`removalPolicy: RemovalPolicy.RETAIN`). Modifiez cela lorsque vous souhaitez que la suppression de la stack CDK crée un instantané ou détruise le cluster à la place.
-
-Lors de l'utilisation de `RemovalPolicy.DESTROY`, la protection contre la suppression doit également être désactivée avant que le cluster puisse être supprimé.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RemovalPolicy } from 'aws-cdk-lib';
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  removalPolicy: RemovalPolicy.SNAPSHOT,
-});
-```
-
-Pour un environnement éphémère où la base de données doit être supprimée avec la stack :
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RemovalPolicy } from 'aws-cdk-lib';
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  deletionProtection: false,
-  removalPolicy: RemovalPolicy.DESTROY,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-Terraform n'utilise pas les politiques de suppression CDK. Par défaut, le module crée un instantané final lors de la suppression (`skip_final_snapshot = false`). Pour ignorer l'instantané final pour un environnement éphémère :
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  deletion_protection = false
-  skip_final_snapshot = true
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/removal-policy" />
 
 ### Journalisation et surveillance
 
-Performance Insights est activé par défaut sur l'instance d'écriture Aurora (chiffré avec la clé KMS du cluster). Vous pouvez également exporter les journaux du moteur Aurora vers [CloudWatch Logs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html) (`postgresql` pour [Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.CloudWatch.html) ; `audit`, `error`, `general` et `slowquery` pour [Aurora MySQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Integrating.CloudWatch.html)). Activez l'export des journaux par base de données :
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  enableCloudwatchLogs: true,
-  enablePerformanceInsights: false, // disable if not required
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  enable_cloudwatch_logs      = true
-  enable_performance_insights = false # disable if not required
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/logging" />
 
 ### Rotation de clé de chiffrement
 
-La clé KMS utilisée pour chiffrer le cluster Aurora et son secret d'identifiants a la rotation automatique de clé activée par défaut. Désactivez-la si votre politique de sécurité gère la rotation en externe.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', {
-  ...
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source = "../../common/terraform/src/app/dbs/my-database"
-  ...
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="rdb/encryption-key-rotation" />
 
 ## Limitations
 

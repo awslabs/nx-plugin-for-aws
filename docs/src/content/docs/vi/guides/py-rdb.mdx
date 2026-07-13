@@ -1,0 +1,250 @@
+---
+title: Cơ sở dữ liệu quan hệ Python
+description: Tạo một dự án cơ sở dữ liệu quan hệ Python
+generator: py#rdb
+---
+
+import { FileTree, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import Astro from '@astrojs/react';
+import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator này tạo một dự án cơ sở dữ liệu quan hệ Python mới được hỗ trợ bởi [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL hoặc MySQL), [SQLModel](https://sqlmodel.tiangolo.com/) để mô hình hóa dữ liệu, và [Alembic](https://alembic.sqlalchemy.org/) để di chuyển schema. Nó tạo ra mã ứng dụng và cơ sở hạ tầng cần thiết để cung cấp và quản lý cơ sở dữ liệu bằng AWS CDK hoặc Terraform, với định nghĩa schema khai báo, triển khai migration tự động, và một database client.
+
+## Cách sử dụng
+
+### Tạo một Cơ sở dữ liệu quan hệ
+
+<RunGenerator generator="py#rdb" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#rdb" />
+
+## Kết quả của Generator
+
+Generator tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py Package exports (`get_engine`, `session_context`)
+    - connection.py Database engine và session factory với xác thực IAM
+    - utils.py Runtime config và các helper phát triển cục bộ
+    - migration_handler.py Lambda handler chạy Alembic migrations trong quá trình triển khai
+    - create_db_user_handler.py Lambda handler tạo application database user trong quá trình triển khai
+    - models
+      - example.py Ví dụ định nghĩa bảng SQLModel
+  - migrations
+    - versions Các script migration được tạo bởi Alembic
+    - env.py Môi trường Alembic (kết nối đến cơ sở dữ liệu)
+    - script.py.mako Template script migration Alembic
+  - alembic.ini Cấu hình Alembic
+  - config.json Chi tiết kết nối phát triển cục bộ và runtime config key
+  - Dockerfile.migration Container image cho migration handler
+  - Dockerfile.create-db-user Container image cho create-db-user handler
+  - project.json Cấu hình dự án và build targets
+</FileTree>
+
+Các script phát triển cục bộ được chia sẻ trên tất cả các dự án cơ sở dữ liệu và được tạo vào `packages/common/scripts/`:
+
+<FileTree>
+  - packages/common/scripts/src/rdb
+    - pull-image.ts Kéo database container image
+    - start-container.ts Khởi động một local database container
+    - wait-for-postgres-db.ts Chờ cơ sở dữ liệu cục bộ sẵn sàng (PostgreSQL)
+    - wait-for-mysql-db.ts Chờ cơ sở dữ liệu cục bộ sẵn sàng (MySQL)
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="rdb/infrastructure" />
+
+#### Kiến trúc
+
+<Snippet name="rdb/architecture" />
+
+## Phát triển cục bộ
+
+### Mô hình hóa dữ liệu
+
+Dự án được tạo sử dụng [SQLModel](https://sqlmodel.tiangolo.com/) để định nghĩa schema cơ sở dữ liệu của bạn. Quy trình làm việc là model-first: thêm hoặc cập nhật các lớp bảng SQLModel trong thư mục `<name>/models/` của dự án cơ sở dữ liệu, sau đó tạo một migration từ những thay đổi model đó.
+
+Ví dụ model:
+
+```python title="packages/my_db/my_db/models/example.py"
+from sqlalchemy import Column, String
+from sqlmodel import Field, SQLModel
+
+
+class ExampleModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(sa_column=Column(String(255), nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+```
+
+Import các model của bạn trong `<name>/models/__init__.py` để Alembic có thể phát hiện chúng trong quá trình tự động tạo.
+
+### Tạo Migrations
+
+Sau khi thêm hoặc cập nhật models, sử dụng Alembic để tạo và áp dụng các script migration. Target `alembic` được tạo tự động khởi động một local database container trước khi chạy:
+
+<NxCommands commands={['run <project>:alembic revision --autogenerate -m "describe your change"']} />
+
+Điều này tạo một script migration mới trong `migrations/versions/`. Xem xét script được tạo trước khi áp dụng nó.
+
+Áp dụng migration vào cơ sở dữ liệu cục bộ của bạn:
+
+<NxCommands commands={['run <project>:migrate']} />
+
+Khi bạn triển khai AWS stack, cơ sở hạ tầng được tạo tự động áp dụng các migrations đã tạo vào cơ sở dữ liệu đã triển khai.
+
+### Áp dụng Migrations hiện có
+
+Khi bạn kéo các file migration được tạo bởi các nhà phát triển khác, áp dụng chúng vào cơ sở dữ liệu cục bộ của bạn:
+
+<NxCommands commands={['run <project>:migrate']} />
+
+### Chạy các lệnh Alembic
+
+Target `alembic` được tạo hiển thị Alembic CLI, vì vậy bạn có thể chạy bất kỳ lệnh Alembic nào đối với cơ sở dữ liệu cục bộ. Xem [tài liệu tham khảo lệnh Alembic](https://alembic.sqlalchemy.org/en/latest/ops.html) để biết các lệnh có sẵn.
+
+<NxCommands commands={['run <project>:alembic <alembic-command>']} />
+
+### Dừng Cơ sở dữ liệu cục bộ
+
+Dừng `dev` (ví dụ: với `Ctrl+C`) tự động xóa local database container, nhưng giữ lại named volume để dữ liệu của bạn tồn tại qua các lần khởi động lại.
+
+:::caution[Windows]
+Do hạn chế với xử lý tín hiệu trên Windows, container không được tự động xóa khi `dev` bị dừng. Bạn sẽ cần xóa nó thủ công:
+
+```bash
+<engine> rm -f <scope>-<db-name>
+```
+
+Thay thế `<engine>` bằng container engine của bạn (`docker` hoặc `finch`), `<scope>` bằng Nx workspace scope của bạn (ví dụ: `proj`), và `<db-name>` bằng tên dự án cơ sở dữ liệu của bạn (ví dụ: `my-db`).
+:::
+
+## Kết nối đến Cơ sở dữ liệu
+
+Import `session_context` từ database package của bạn và sử dụng nó như một async context manager để có được một `AsyncSession`:
+
+```python
+from sqlmodel import select
+
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+async def example():
+    async with session_context() as session:
+        results = (await session.execute(select(ExampleModel))).all()
+```
+
+Database client tự động:
+- Lấy cấu hình cơ sở dữ liệu từ AWS AppConfig bằng biến môi trường `RUNTIME_CONFIG_APP_ID`
+- Tạo token xác thực tạm thời qua `boto3` RDS Signer cho xác thực IAM
+- Thiết lập kết nối TLS bằng `ssl.create_default_context()`
+
+## Triển khai Cơ sở dữ liệu của bạn
+
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
+
+### Cấu hình RDS Proxy
+
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
+
+#### Yêu cầu SSL khi kết nối không có RDS Proxy
+
+Amazon RDS CA bundle phải có trong system trust store của runtime.
+
+##### Container Runtimes
+
+<Tabs>
+<TabItem label="Amazon Linux">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
+```
+
+</TabItem>
+<TabItem label="Debian">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+</TabItem>
+</Tabs>
+
+##### Zip Lambda Functions
+
+Đối với các Lambda function được triển khai dưới dạng zip (chẳng hạn như <Link path="guides/fastapi">`py#api` FastAPI</Link>), system trust store tích hợp sẵn của môi trường thực thi Lambda Amazon Linux 2023 bao gồm các Amazon Root CA được sử dụng bởi RDS.
+
+Khi sử dụng RDS Proxy, bạn không cần cấu hình RDS CA bundle trong runtime kết nối đến cơ sở dữ liệu.
+
+### Cluster Instances
+
+<Snippet name="rdb/cluster-instances" />
+
+### Serverless Capacity
+
+<Snippet name="rdb/serverless-capacity" />
+
+### Phiên bản Engine
+
+<Snippet name="rdb/engine-version" />
+
+### Bảo vệ Xóa
+
+<Snippet name="rdb/deletion-protection" />
+
+### Chính sách Xóa
+
+<Snippet name="rdb/removal-policy" />
+
+### Logging và Monitoring
+
+<Snippet name="rdb/logging" />
+
+### Xoay vòng Khóa mã hóa
+
+<Snippet name="rdb/encryption-key-rotation" />
+
+## Kết nối
+
+Sử dụng generator <Link path="guides/connection">`connection`</Link> để tích hợp dự án này với các dự án khác trong workspace của bạn. Các kết nối sau liên quan đến dự án này:
+
+<CardGrid>
+  <ConnectionCard
+    title="Python Agent to Relational Database"
+    description="Kết nối một Python Agent đến cơ sở dữ liệu quan hệ Aurora"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-rdb`}
+    source="strands"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="FastAPI to Relational Database"
+    description="Kết nối một FastAPI đến cơ sở dữ liệu quan hệ Aurora"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-rdb`}
+    source="fastapi"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="Python MCP Server to Relational Database"
+    description="Kết nối một Python MCP Server đến cơ sở dữ liệu quan hệ Aurora"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-mcp-server-rdb`}
+    source="mcp"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+</CardGrid>

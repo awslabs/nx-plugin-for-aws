@@ -2,6 +2,7 @@
 title: RDB API 인프라
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
 
 런타임에 API가 데이터베이스에 연결할 수 있도록 하려면, API Lambda 함수를 데이터베이스와 동일한 VPC에 배포하고 네트워크 및 IAM 액세스 권한을 부여해야 합니다.
 
@@ -39,7 +40,7 @@ API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **외부 연결이 
 </Fragment>
 <Fragment slot="terraform">
 
-데이터베이스 모듈 출력을 API 모듈에 전달하여 데이터베이스에 도달하고 런타임 구성을 읽을 수 있도록 합니다:
+API를 데이터베이스와 동일한 VPC에 배포하고, `additional_iam_policy_statements`를 통해 `rds-db:connect` 권한을 부여하며, 보안 그룹 규칙 쌍으로 네트워크 경로를 엽니다:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -50,24 +51,44 @@ module "my_database" {
 }
 
 module "api" {
-  source             = "..."
-  enable_vpc         = true
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **외부 연결이 가능한 프라이빗 서브넷**에 배포하세요. API Lambda 역할에 `rds-db:connect` 권한이 있고 해당 보안 그룹이 데이터베이스 포트에서 데이터베이스 보안 그룹에 도달할 수 있는지 확인하세요.
+API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **외부 연결이 가능한 프라이빗 서브넷**에 배포하세요. `RUNTIME_CONFIG_APP_ID`는 데이터베이스 모듈의 출력이 아닌 공유 <Link path="guides/runtime-config">런타임 구성</Link> AppConfig 애플리케이션을 가리켜야 합니다.
 
 </Fragment>
 </Infrastructure>

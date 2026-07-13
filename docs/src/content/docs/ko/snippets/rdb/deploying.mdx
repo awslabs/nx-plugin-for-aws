@@ -1,0 +1,107 @@
+---
+title: 관계형 데이터베이스 배포하기
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+관계형 데이터베이스 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라를 생성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 구성은 `common/constructs`에 생성됩니다. 사용 예시:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+이것은 RDS Proxy가 있는 Aurora 클러스터, 관리자 자격 증명, 애플리케이션 데이터베이스 사용자, 런타임 구성 등록 및 마이그레이션 핸들러를 프로비저닝합니다.
+
+생성된 인프라는 두 개의 데이터베이스 사용자를 생성합니다:
+- **관리자 사용자** - 클러스터 프로비저닝 중에 생성되며 자격 증명은 AWS Secrets Manager에 저장됩니다
+- **애플리케이션 사용자** - Lambda 사용자 지정 리소스를 통해 생성되며 IAM 인증이 활성화되고 애플리케이션 데이터베이스에 대한 DML 권한(SELECT, INSERT, UPDATE, DELETE)을 가집니다
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 `common/terraform`에 생성됩니다. 사용 예시:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+이것은 RDS Proxy가 있는 Aurora 클러스터, 관리자 자격 증명, create-db-user Lambda, 런타임 구성 등록, 마이그레이션 Lambda 및 컨테이너 레지스트리 리소스를 프로비저닝합니다.
+
+생성된 인프라는 두 개의 데이터베이스 사용자를 생성합니다:
+- **관리자 사용자** - 클러스터 프로비저닝 중에 생성되며 자격 증명은 AWS Secrets Manager에 저장됩니다
+- **애플리케이션 사용자** - Lambda 함수를 통해 생성되며 IAM 인증이 활성화되고 애플리케이션 데이터베이스에 대한 DML 권한(SELECT, INSERT, UPDATE, DELETE)을 가집니다
+</Fragment>
+</Infrastructure>
+
+애플리케이션 사용자는 임의의 이름과 IAM 인증으로 자동 생성됩니다. 생성된 데이터베이스 클라이언트는 이미 단기 RDS 토큰을 사용하여 이 사용자로 인증하도록 구성되어 있으므로 애플리케이션 코드는 데이터베이스 비밀번호를 처리할 필요가 없습니다.
+
+VPC에는 퍼블릭 서브넷, 이그레스가 있는 프라이빗 서브넷, 프라이빗 격리 서브넷이 포함되어야 합니다. 데이터베이스는 프라이빗 격리 서브넷에서 실행될 수 있으며, 애플리케이션 Lambda 함수는 AppConfig와 같은 AWS 서비스에 도달할 수 있도록 이그레스가 있는 프라이빗 서브넷에서 실행되어야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+<Link path="guides/connection">`connection`</Link> 생성기를 사용하여 프로젝트를 이 데이터베이스에 연결하세요 — 데이터베이스에 도달하는 데 필요한 인프라 연결에 대해서는 관련 컴퓨팅 유형(예: FastAPI, MCP 서버, 에이전트)에 대한 연결 가이드를 참조하세요.
