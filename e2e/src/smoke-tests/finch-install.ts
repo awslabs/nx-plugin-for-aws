@@ -312,9 +312,22 @@ export const setFinchAsContainerEngine = (projectRoot: string): void => {
   if (!existsSync(configPath)) {
     throw new Error(`Expected ${configPath} to exist after workspace creation`);
   }
+  const engineRegex = /containers:\s*\{\s*engine:\s*'([^']*)'\s*\}/;
   const original = readFileSync(configPath, 'utf-8');
+  const match = original.match(engineRegex);
+  if (!match) {
+    throw new Error(
+      `Failed to find containers.engine in ${configPath}:\n${original}`,
+    );
+  }
+  if (match[1] === 'finch') {
+    console.log(
+      `[finch-install] containers.engine already finch in ${configPath}`,
+    );
+    return;
+  }
   const updated = original.replace(
-    /containers:\s*\{\s*engine:\s*'[^']*'\s*\}/,
+    engineRegex,
     "containers: { engine: 'finch' }",
   );
   if (updated === original) {
