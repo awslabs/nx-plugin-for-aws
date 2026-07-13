@@ -106,32 +106,21 @@ export async function sharedConstructsGenerator(
         type: 'library',
       });
 
-      // Add target to reset runtime config as part of the build, ensuring any plan/apply target
-      // which depends on shared terraform will build runtime-config.json from scratch, meaning no old
-      // values will remain when resources are removed.
-      // NB: runtime-config.json starts as an empty object to keep the reader terraform module simple
+      // `build` is a no-op orchestration target that produces no files of its
+      // own. Terraform writes runtime-config entries into
+      // `dist/{projectRoot}/runtime-config` at apply time, and other terraform
+      // projects contribute their own entries to the same directory. Without
+      // explicit outputs, Nx infers `dist/{projectRoot}` as this target's
+      // cached output and, on a cache hit, restores the cached copy over the
+      // freshly-applied config — wiping the very values consumers read. Declare
+      // no outputs so Nx never treats runtime config as a cacheable artifact.
       updateJson(
         tree,
         joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'project.json'),
         (projectConfig: ProjectConfiguration) => {
           projectConfig.targets ??= {};
-          projectConfig.targets['reset-runtime-config'] = {
-            executor: 'nx:run-commands',
-            options: {
-              command: 'tsx scripts/reset-runtime-config.ts',
-              cwd: '{projectRoot}',
-              env: {
-                DIST_DIR: '{workspaceRoot}/dist/{projectRoot}',
-              },
-            },
-          };
           projectConfig.targets.build ??= {};
-          projectConfig.targets.build.dependsOn = [
-            ...(projectConfig.targets.build.dependsOn ?? []).filter(
-              (t) => t !== 'reset-runtime-config',
-            ),
-            'reset-runtime-config',
-          ];
+          projectConfig.targets.build.outputs = [];
           return projectConfig;
         },
       );
@@ -148,8 +137,6 @@ export async function sharedConstructsGenerator(
           overwriteStrategy: OverwriteStrategy.KeepExisting,
         },
       );
-
-      addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
       await formatFilesInSubtree(tree);
     }
