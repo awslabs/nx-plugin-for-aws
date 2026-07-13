@@ -68,9 +68,36 @@ class TestApi:
         if self._owns_client:
             self._client.close()
 
-    def _url(self, path: str, path_params: dict[str, Any]) -> str:
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: Optional[dict[str, tuple[str, bool]]] = None,
+    ) -> str:
         for key, value in path_params.items():
-            path = path.replace("{" + key + "}", quote(str(value), safe=""))
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            values = value if isinstance(value, list) else [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(
+                        ";" + key + "=" + quote(str(v), safe="") for v in values
+                    )
+                else:
+                    rendered = (
+                        ";"
+                        + key
+                        + "="
+                        + ",".join(quote(str(v), safe="") for v in values)
+                    )
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(
+                    quote(str(v), safe="") for v in values
+                )
+            else:
+                rendered = quote(str(value), safe="")
+            path = path.replace("{" + key + "}", rendered)
         return self._base_url + path
 
     def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
@@ -135,7 +162,7 @@ class TestApi:
             return None
         if isinstance(value, BaseModel):
             return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
             return [self._dump(v) for v in value]
         if isinstance(value, dict):
             return {k: self._dump(v) for k, v in value.items()}
@@ -161,9 +188,10 @@ class TestApi:
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
             header_params.setdefault("Content-Type", "application/json")
+        _request_url = self._url("/r", path_params)
         response = self._client.request(
             "POST",
-            self._url("/r", path_params),
+            _request_url,
             params=self._query(query_params, collection_formats),
             headers=self._headers(header_params, collection_formats),
             cookies=self._cookies(cookie_params),

@@ -170,7 +170,13 @@ export const toPythonClassName = (name: string): string => {
 export const isPythonBuiltin = (type: string): boolean => {
   if (!type) return true;
   if (PYTHON_BUILTIN_TYPES.has(type)) return true;
-  if (type.startsWith('list[') || type.startsWith('dict[')) return true;
+  if (
+    type.startsWith('list[') ||
+    type.startsWith('dict[') ||
+    type.startsWith('tuple[')
+  ) {
+    return true;
+  }
   if (type.startsWith('Optional[') || type.startsWith('Union[')) return true;
   if (type.startsWith('Literal[')) return true;
   return false;
@@ -315,6 +321,25 @@ export const qualifyPythonType = (
   if (list) return `list[${qualifyPythonType(list[1], prefix)}]`;
   const dict = /^dict\[str, (.*)\]$/s.exec(type);
   if (dict) return `dict[str, ${qualifyPythonType(dict[1], prefix)}]`;
+  const tuple = /^tuple\[(.*)\]$/s.exec(type);
+  if (tuple) {
+    // Split on top-level commas only — members may themselves be generics.
+    const members: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of tuple[1]) {
+      if (ch === '[') depth++;
+      if (ch === ']') depth--;
+      if (ch === ',' && depth === 0) {
+        members.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) members.push(current.trim());
+    return `tuple[${members.map((m) => qualifyPythonType(m, prefix)).join(', ')}]`;
+  }
   if (
     type.startsWith('Optional[') ||
     type.startsWith('Union[') ||
@@ -354,6 +379,8 @@ export const toPythonAnnotation = (property: Model): string => {
       }
       case 'array':
         return `list[${collectionElement()}]`;
+      case 'tuple':
+        return `tuple[${p.properties.map((member) => render(member)).join(', ')}]`;
       case 'dictionary':
         return `dict[str, ${collectionElement()}]`;
       case 'one-of':

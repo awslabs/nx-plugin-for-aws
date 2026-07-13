@@ -55,6 +55,8 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
 
     def _record(self, request: httpx.Request) -> None:
         try:
+            # Multipart bodies are streamed; read() materialises request.content.
+            request.read()
             body = request.content.decode("utf-8") if request.content else None
         except Exception:
             body = None
@@ -101,6 +103,11 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
         return self._match(request)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            # Async multipart bodies stream; aread() materialises request.content.
+            await request.aread()
+        except Exception:
+            pass
         return self._match(request)
 
 
