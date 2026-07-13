@@ -71,7 +71,6 @@ async def list_examples() -> list:
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
@@ -81,9 +80,6 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    securityGroups: [
-      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
-    ],
   }),
 });
 
@@ -93,25 +89,24 @@ db.grantConnect(myAgent);
 
 `allowDefaultPortFrom` 打开安全组规则，使 agent 运行时可以访问数据库端口。`grantConnect` 向 agent 的执行角色授予 IAM `rds-db:connect` 权限。
 
-
 </Fragment>
 <Fragment slot="terraform">
 
-在与数据库相同的 VPC 中运行 agent，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径。`aws_vpc.main` 和 `aws_subnet` 资源在数据库部署指南中定义：
+在与数据库相同的 VPC 中运行 agent，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -128,7 +123,6 @@ module "my_agent" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
-  description                  = "Allow the agent runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_agent.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -137,7 +131,6 @@ resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
-  description                  = "Allow outbound traffic from the agent runtime to the database"
   security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -146,16 +139,7 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` 来自共享的 <Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，该应用程序在您的根模块中声明一次，而不是来自数据库模块。在实例化它时包含 `database` 命名空间，以便部署数据库模块的运行时配置条目：
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+`appconfig_application_id`/`appconfig_application_arn` 来自共享的 <Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，该应用程序在您的根模块中声明一次，而不是来自数据库模块。
 
 </Fragment>
 </Infrastructure>

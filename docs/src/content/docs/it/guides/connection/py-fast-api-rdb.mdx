@@ -112,21 +112,19 @@ Questo esempio concede l'accesso a ogni gestore nella tua API, ma se solo alcuni
 
 Distribuisci l'API nello stesso VPC del database, concedi il permesso `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group:
 
-L'esempio seguente fa riferimento alle risorse VPC dalla guida di distribuzione <Link path="guides/py-rdb">Python Relational Database</Link>: le subnet `aws_subnet.database` non hanno route internet, mentre le subnet `aws_subnet.private` hanno egress NAT.
-
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "api" {
-  source     = "../../common/terraform/src/app/apis/my-api"
+  source     = "..."
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   additional_iam_policy_statements = [
     {
@@ -134,16 +132,6 @@ module "api" {
       Action = ["rds-db:connect"]
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
-      ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = [
-        "${module.runtime_config_appconfig.application_arn}/*"
       ]
     }
   ]
@@ -154,7 +142,6 @@ module "api" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
-  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -163,7 +150,6 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
-  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -172,18 +158,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa dichiarata una volta nel tuo modulo root, non dal modulo database — passandoli si imposta `RUNTIME_CONFIG_APP_ID` sulle funzioni Lambda e si concede loro l'accesso in lettura all'applicazione.
-
-L'applicazione AppConfig deve esporre il namespace `database` in modo che la voce di configurazione runtime del modulo database venga distribuita. Includilo nei `namespaces` quando istanzi il modulo `runtime-config/appconfig`:
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `RUNTIME_CONFIG_APP_ID` dovrebbe puntare all'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa, non a un output del modulo database.
 
 </Fragment>
 </Infrastructure>

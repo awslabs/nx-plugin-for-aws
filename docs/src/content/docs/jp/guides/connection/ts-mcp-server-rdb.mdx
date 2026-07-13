@@ -85,7 +85,6 @@ export const createServer = async () => {
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
@@ -95,9 +94,6 @@ const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    securityGroups: [
-      new SecurityGroup(this, 'MyMcpServerSecurityGroup', { vpc, allowAllOutbound: true }),
-    ],
   }),
 });
 
@@ -107,25 +103,24 @@ db.grantConnect(myMcpServer);
 
 `allowDefaultPortFrom`はセキュリティグループルールを開き、MCPサーバーランタイムがデータベースポートに到達できるようにします。`grantConnect`は、サーバーの実行ロールにIAM `rds-db:connect`権限を付与します。
 
-
 </Fragment>
 <Fragment slot="terraform">
 
-MCPサーバーをデータベースと同じVPC内で実行し、`additional_iam_policy_statements`を介して`rds-db:connect`を付与し、セキュリティグループルールのペアでネットワークパスを開きます。`aws_vpc.main`と`aws_subnet`リソースは、データベースデプロイメントガイドで定義されています：
+MCPサーバーをデータベースと同じVPC内で実行し、`additional_iam_policy_statements`を介して`rds-db:connect`を付与し、セキュリティグループルールのペアでネットワークパスを開きます：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
   source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -142,7 +137,6 @@ module "my_mcp_server" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
-  description                  = "Allow the MCP server runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_mcp_server.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -151,7 +145,6 @@ resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
-  description                  = "Allow outbound traffic from the MCP server runtime to the database"
   security_group_id            = module.my_mcp_server.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -160,16 +153,7 @@ resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn`は、データベースモジュールからではなく、ルートモジュールで一度宣言された共有<Link path="guides/runtime-config">ランタイム設定</Link> AppConfigアプリケーションから取得されます。データベースモジュールのランタイム設定エントリがデプロイされるように、インスタンス化時に`database`名前空間を含めます：
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+`appconfig_application_id`/`appconfig_application_arn`は、データベースモジュールからではなく、ルートモジュールで一度宣言された共有<Link path="guides/runtime-config">ランタイム設定</Link> AppConfigアプリケーションから取得されます。
 
 </Fragment>
 </Infrastructure>

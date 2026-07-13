@@ -80,7 +80,6 @@ El constructo del servidor MCP generado implementa `IGrantable` e `IConnectable`
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
@@ -90,9 +89,6 @@ const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    securityGroups: [
-      new SecurityGroup(this, 'MyMcpServerSecurityGroup', { vpc, allowAllOutbound: true }),
-    ],
   }),
 });
 
@@ -105,21 +101,21 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Ejecuta el servidor MCP dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad. Los recursos `aws_vpc.main` y `aws_subnet` se definen en la guía de implementación de la base de datos:
+Ejecuta el servidor MCP dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
   source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -136,7 +132,6 @@ module "my_mcp_server" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
-  description                  = "Allow the MCP server runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_mcp_server.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -145,7 +140,6 @@ resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
-  description                  = "Allow outbound traffic from the MCP server runtime to the database"
   security_group_id            = module.my_mcp_server.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -154,16 +148,7 @@ resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos. Incluye el espacio de nombres `database` al instanciarla para que se implemente la entrada de configuración de tiempo de ejecución del módulo de base de datos:
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos.
 
 </Fragment>
 </Infrastructure>

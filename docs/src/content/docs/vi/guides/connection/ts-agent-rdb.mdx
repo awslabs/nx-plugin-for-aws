@@ -86,7 +86,6 @@ Construct agent được tạo ra triển khai `IGrantable` và `IConnectable`, 
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
@@ -96,9 +95,6 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    securityGroups: [
-      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
-    ],
   }),
 });
 
@@ -108,25 +104,24 @@ db.grantConnect(myAgent);
 
 `allowDefaultPortFrom` mở quy tắc security group để agent runtime có thể truy cập cổng cơ sở dữ liệu. `grantConnect` cấp quyền IAM `rds-db:connect` cho execution role của agent.
 
-
 </Fragment>
 <Fragment slot="terraform">
 
-Chạy agent bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng bằng một cặp quy tắc security group. Các tài nguyên `aws_vpc.main` và `aws_subnet` được định nghĩa trong hướng dẫn triển khai cơ sở dữ liệu:
+Chạy agent bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng bằng một cặp quy tắc security group:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -143,7 +138,6 @@ module "my_agent" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
-  description                  = "Allow the agent runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_agent.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -152,7 +146,6 @@ resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
-  description                  = "Allow outbound traffic from the agent runtime to the database"
   security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -161,16 +154,7 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ được khai báo một lần trong root module của bạn, không phải từ database module. Bao gồm namespace `database` khi khởi tạo nó để mục cấu hình runtime của database module được triển khai:
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ được khai báo một lần trong root module của bạn, không phải từ database module.
 
 </Fragment>
 </Infrastructure>

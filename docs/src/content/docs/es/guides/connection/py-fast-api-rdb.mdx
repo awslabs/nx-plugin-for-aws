@@ -112,24 +112,19 @@ Este ejemplo otorga acceso a todos los manejadores de tu API, pero si solo algun
 
 Despliega la API en la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
 
-El ejemplo a continuación hace referencia a los recursos de VPC de la guía de despliegue de <Link path="guides/py-rdb">Base de Datos Relacional de Python</Link>: las subredes `aws_subnet.database` no tienen ruta de internet, mientras que las subredes `aws_subnet.private` tienen salida NAT.
-
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "api" {
-  source     = "../../common/terraform/src/app/apis/my-api"
+  source     = "..."
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
-
-  appconfig_application_id  = module.runtime_config_appconfig.application_id
-  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   additional_iam_policy_statements = [
     {
@@ -140,10 +135,13 @@ module "api" {
       ]
     }
   ]
+
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
+  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
-  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -152,7 +150,6 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
-  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -161,18 +158,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. `appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración en tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos — pasarlos establece `RUNTIME_CONFIG_APP_ID` en las funciones Lambda y les otorga acceso de lectura a la aplicación.
-
-La aplicación AppConfig debe exponer el espacio de nombres `database` para que se despliegue la entrada de configuración en tiempo de ejecución del módulo de base de datos. Inclúyelo en los `namespaces` al instanciar el módulo `runtime-config/appconfig`:
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. `RUNTIME_CONFIG_APP_ID` debe apuntar a la aplicación AppConfig de <Link path="guides/runtime-config">configuración en tiempo de ejecución</Link> compartida, no a una salida del módulo de base de datos.
 
 </Fragment>
 </Infrastructure>

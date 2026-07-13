@@ -112,21 +112,19 @@ Cet exemple accorde à chaque gestionnaire de votre API l'accès, mais si seuls 
 
 Déployez l'API dans le même VPC que la base de données, accordez-lui `rds-db:connect` via `additional_iam_policy_statements`, et ouvrez le chemin réseau avec une paire de règles de groupe de sécurité :
 
-L'exemple ci-dessous fait référence aux ressources VPC du guide de déploiement <Link path="guides/py-rdb">Base de Données Relationnelle Python</Link> : les sous-réseaux `aws_subnet.database` n'ont pas de route Internet, tandis que les sous-réseaux `aws_subnet.private` ont une sortie NAT.
-
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = aws_vpc.main.id
-  database_subnet_ids = aws_subnet.database[*].id
-  lambda_subnet_ids   = aws_subnet.private[*].id
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "api" {
-  source     = "../../common/terraform/src/app/apis/my-api"
+  source     = "..."
   enable_vpc = true
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
   additional_iam_policy_statements = [
     {
@@ -134,16 +132,6 @@ module "api" {
       Action = ["rds-db:connect"]
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
-      ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = [
-        "${module.runtime_config_appconfig.application_arn}/*"
       ]
     }
   ]
@@ -154,7 +142,6 @@ module "api" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
-  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -163,7 +150,6 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
-  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -172,18 +158,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Déployez les fonctions Lambda de l'API dans des **sous-réseaux privés avec sortie**, et non dans des sous-réseaux privés isolés. `appconfig_application_id`/`appconfig_application_arn` proviennent de l'application AppConfig de <Link path="guides/runtime-config">configuration d'exécution</Link> partagée déclarée une fois dans votre module racine, et non du module de base de données — leur transmission définit `RUNTIME_CONFIG_APP_ID` sur les fonctions Lambda et leur accorde un accès en lecture à l'application.
-
-L'application AppConfig doit exposer l'espace de noms `database` afin que l'entrée de configuration d'exécution du module de base de données soit déployée. Incluez-le dans les `namespaces` lors de l'instanciation du module `runtime-config/appconfig` :
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+Déployez les fonctions Lambda de l'API dans des **sous-réseaux privés avec sortie**, et non dans des sous-réseaux privés isolés. `RUNTIME_CONFIG_APP_ID` doit pointer vers l'application AppConfig de <Link path="guides/runtime-config">configuration d'exécution</Link> partagée, et non vers une sortie du module de base de données.
 
 </Fragment>
 </Infrastructure>
