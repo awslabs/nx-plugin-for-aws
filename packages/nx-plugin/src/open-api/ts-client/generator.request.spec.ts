@@ -459,6 +459,7 @@ describe('openApiTsClientGenerator - requests', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
 
     expect(await callGeneratedClient(client, mockFetch, 'postNumber', 42)).toBe(
@@ -476,6 +477,7 @@ describe('openApiTsClientGenerator - requests', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
     await callGeneratedClient(client, mockFetch, 'postString', 'test');
     expect(mockFetch).toHaveBeenCalledWith(
@@ -490,6 +492,7 @@ describe('openApiTsClientGenerator - requests', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
     await callGeneratedClient(client, mockFetch, 'postBoolean', true);
     expect(mockFetch).toHaveBeenCalledWith(
@@ -504,6 +507,7 @@ describe('openApiTsClientGenerator - requests', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
     await callGeneratedClient(client, mockFetch, 'postNumberWithQuery', {
       filter: 'test',
@@ -521,6 +525,7 @@ describe('openApiTsClientGenerator - requests', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
     await callGeneratedClient(client, mockFetch, 'postStringWithQuery', {
       filter: 'filter',
@@ -538,6 +543,7 @@ describe('openApiTsClientGenerator - requests', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
     await callGeneratedClient(client, mockFetch, 'postBooleanWithQuery', {
       body: false,

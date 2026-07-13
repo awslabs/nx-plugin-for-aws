@@ -89,6 +89,7 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
 
   for (const model of data.models) {
     assertNoClashingPropertyNames(model);
+    assertNoConflictingUnionMemberMarshalling(model);
   }
 
   data.models = orderBy(data.models, (d) => d.name);
@@ -509,6 +510,60 @@ const assertNoClashingPropertyNames = (model: Model): void => {
 };
 
 /**
+ * The marshalling semantics of a property — two properties with the same key
+ * convert identically on the wire (so either branch's conversion is safe).
+ */
+const marshallingKey = (m: Model): string => {
+  if (['date', 'date-time'].includes(m.format ?? '')) return 'date';
+  if (m.type === 'binary') return 'binary';
+  // Enums serialise as their bare primitive (no conversion).
+  if (m.isEnum || m.export === 'enum') return 'plain';
+  if (COLLECTION_TYPES.has(m.export)) {
+    return `${m.export}<${m.link ? marshallingKey(m.link) : 'plain'}>`;
+  }
+  if (m.export === 'tuple') {
+    return `tuple<${m.properties.map(marshallingKey).join(',')}>`;
+  }
+  if (m.export === 'reference' && !PRIMITIVE_TYPES.has(m.type)) {
+    return `ref:${m.type}`;
+  }
+  return 'plain';
+};
+
+/**
+ * A non-discriminated `oneOf`/`anyOf` of object members marshals by composing
+ * every member, taking only the properties present on the value. That is sound
+ * exactly when no wire property is claimed by two members with different
+ * marshalling (e.g. a `date-time` in one and a plain string in another) —
+ * otherwise the branch cannot be determined without guessing, so fail fast and
+ * ask for a discriminator rather than corrupt data at runtime.
+ */
+const assertNoConflictingUnionMemberMarshalling = (model: Model): void => {
+  if (
+    (model.export !== 'one-of' && model.export !== 'any-of') ||
+    model.discriminator
+  ) {
+    return;
+  }
+  const seen = new Map<string, { memberName: string; key: string }>();
+  for (const member of model.composedModels ?? []) {
+    for (const property of member.properties) {
+      if (!property.name) continue;
+      const key = marshallingKey(property);
+      const existing = seen.get(property.name);
+      if (existing && existing.key !== key) {
+        throw new Error(
+          `Schema "${model.name}" is a non-discriminated ${camelCase(model.export)} of "${existing.memberName}" and "${member.name}", which both declare a property "${property.name}" with different types, so the correct conversion cannot be determined. Add a discriminator to the union in your OpenAPI specification (e.g. with Pydantic, Field(discriminator=...)).`,
+        );
+      }
+      if (!existing) {
+        seen.set(property.name, { memberName: member.name, key });
+      }
+    }
+  }
+};
+
+/**
  * Group operations by their (camelCased) tags, collecting any untagged
  * operations separately.
  */
@@ -651,6 +706,18 @@ const augmentModelFromSchema = (
     if (subSchema !== true) {
       recurse(model.link, subSchema);
     }
+  }
+
+  // Tuple element types (3.1 `prefixItems`), positionally.
+  if (model.export === 'tuple' && 'prefixItems' in schema) {
+    const memberSchemas =
+      (schema as { prefixItems?: OpenApiSchemaOrRef[] }).prefixItems ?? [];
+    model.properties.forEach((member, i) => {
+      const subSchema = resolveIfRef(spec, memberSchemas[i]);
+      if (subSchema && !visited.has(member)) {
+        recurse(member, subSchema);
+      }
+    });
   }
 
   model.properties

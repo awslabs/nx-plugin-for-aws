@@ -338,6 +338,7 @@ describe('openApiTsClientGenerator - FastAPI', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('success'),
+      json: vi.fn().mockResolvedValue('success'),
     });
 
     const response = await callGeneratedClient(
