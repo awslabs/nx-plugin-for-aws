@@ -2,9 +2,10 @@
 title: 既存プロジェクトへの追加
 description: 既存のNxワークスペースまたは非NxモノレポでAWS/nx-pluginを導入する方法。
 ---
-import { Steps, Aside } from '@astrojs/starlight/components';
+import { Steps, Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
+import Drawer from '@components/drawer.astro';
 import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -19,11 +20,9 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 
 <Snippet name="prerequisites" />
 
-また、**Nxワークスペース**も必要です。プロジェクトがまだNxワークスペースでない場合は、まずNxを追加してください — 以下の[非NxプロジェクトへのNxの追加](#adding-nx-to-a-non-nx-project)を参照してください。すでにNxを使用している場合は、[プラグインの追加](#adding-the-plugin)に直接進んでください。
-
 ## 非NxプロジェクトへのNxの追加
 
-プロジェクトがまだNxを使用していない場合は、まず[`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project)で追加します。これはNx自体が所有するステップです。プラグインは動作するNxワークスペースの上に構築されます。これは、プレーンパッケージ、npm/pnpm/yarnワークスペース、TurborepoまたはLernaモノレポで動作します。
+プロジェクトがまだNxを使用していない場合は、まず[`nx init`](https://nx.dev/recipes/adopting-nx/adding-to-existing-project)で追加します。これはNx自体が所有するステップです。プラグインは動作するNxワークスペースの上に構築されます。これは、プレーンパッケージ、npm/pnpm/yarn/bunワークスペース、TurborepoまたはLernaモノレポで動作します。
 
 <NxInitCommand />
 
@@ -33,7 +32,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 
 Nxとプラグインはnpmパッケージとして配布されているため、Node.jsツールを持たないプロジェクトは、`nx init`が何か有用なことをする前に、最小限のルート`package.json`が必要です。
 
-```json
+```json title="package.json"
 {
   "name": "my-project",
   "private": true,
@@ -72,47 +71,58 @@ Nxとプラグインはnpmパッケージとして配布されているため、
 
 ### `init`ジェネレーターが設定する内容
 
-`init`ジェネレーターは、プラグインのジェネレーターを実行するためにワークスペースが必要とする決定論的な変更を行います。これは**冪等**です — 再度実行してもノーオペレーションです — そして、ワークスペースのモジュール形式を保持します。ルートの`package.json`に`type: "module"`があるワークスペースはESMのままで、それ以外はCommonJSのままであり、生成されたコードもそれに従います。既存の`tsconfig.base.json`を書き換えたり、パッケージマネージャーを移行したり、既存のプロジェクトを再構築したりすることは**ありません**。
+`init`ジェネレーターは、プラグインのジェネレーターを実行するためにワークスペースが必要とする決定論的な変更を行います。ワークスペースのモジュール形式を保持します。ルートの`package.json`に`type: "module"`があるワークスペースはESMのままで、それ以外はCommonJSのままであり、生成されたコードもそれに従います。既存の`tsconfig.base.json`を書き換えたり、パッケージマネージャーを移行したり、既存のプロジェクトを再構築したりすることは**ありません**。
 
-以下を実行します。
+以下のファイルを作成または更新します。
 
-- 選択した<Link path="guides/typescript-infrastructure">infrastructure as codeプロバイダー</Link>（CDKまたはTerraform）とコンテナエンジンを記録する`aws-nx-plugin.config.mts`を作成します。ジェネレーターはこのファイルから`iac.provider`を読み取ります。
-- `nx.json`の`compile`ターゲットに同期ジェネレーター（`@nx/js:typescript-sync`と`@aws/nx-plugin:ts#sync`）を登録し、プロジェクトを追加するときにTypeScriptプロジェクト参照が同期されるようにします。
-- ルートの`tsconfig.json`と`tsconfig.base.json`が存在することを確認します（NxのTypeScript同期とプラグインのプロジェクトに必要です）。欠落しているファイルは作成されます。**既存のファイルはそのまま残されます**ので、他のプロジェクトに影響を与えません。作成された`tsconfig.base.json`には、プラグインのTypeScriptプロジェクトが依存するコンパイラオプションが含まれています — 独自のものを保持する場合、これらは調整すべきオプションです。
+<FileTree>
+- aws-nx-plugin.config.mts 選択したIaCプロバイダー（CDKまたはTerraform）とコンテナエンジンを記録します。ジェネレーターはここから`iac.provider`を読み取ります
+- nx.json `compile`ターゲットに同期ジェネレーター（`@nx/js:typescript-sync`と`@aws/nx-plugin:ts#sync`）を登録し、TypeScriptプロジェクト参照が同期されるようにします
+- tsconfig.json 欠落している場合のみ作成 — 既存のファイルはそのまま残されます
+- tsconfig.base.json 欠落している場合のみ作成（コンパイラオプションについては以下を参照）
+- pnpm-workspace.yaml（pnpmのみ）プラグインの依存関係が必要とするビルドスクリプト（`@swc/core`、`esbuild`、`nx`、`sharp`）を許可リストに追加します
+- package.json 便利なスクリプト（既存のものを上書きせずに）を追加し、`nx`、`@nx/js`、`@nx/workspace`、`typescript`、Biomeの開発依存関係を追加します — `nx`はduplicate-nxデッドロックを回避するために単一バージョンに固定されます（トラブルシューティングを参照）
+- biome.json デフォルトのフォーマッター/リンター設定、存在しない場合のみ書き込まれます
+- .mcp.json 無効にされていない限り、サポートされているコーディングエージェント用のMCPサーバーを設定します（.cursor/、.kiro/、.gemini/、.vscode/、.codex/の同等物も含む）
+</FileTree>
 
-  ```json
-  {
-    "compilerOptions": {
-      "composite": true,
-      "declarationMap": true,
-      "emitDeclarationOnly": true,
-      "importHelpers": true,
-      "isolatedModules": true,
-      "lib": ["es2022"],
-      "module": "nodenext",
-      "moduleResolution": "nodenext",
-      "noEmitOnError": true,
-      "noFallthroughCasesInSwitch": true,
-      "noImplicitOverride": true,
-      "noImplicitReturns": true,
-      "noUnusedLocals": true,
-      "skipLibCheck": true,
-      "strict": true,
-      "target": "es2022"
-    }
+<Link path="get_started/building-with-ai">MCPサーバー</Link>の設定は`--mcp=false`で無効にできます。
+
+<Drawer title="tsconfig.base.json" trigger="作成されたtsconfig.base.jsonが持つコンパイラオプションを確認するにはここをクリックしてください。">
+プラグインのTypeScriptプロジェクトはこれらのコンパイラオプションに依存しています。`init`は既存の`tsconfig.base.json`を決して書き換えないため、独自のものを保持する場合、これらは調整すべきオプションです。
+
+```json title="tsconfig.base.json"
+{
+  "compilerOptions": {
+    "composite": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "importHelpers": true,
+    "isolatedModules": true,
+    "lib": ["es2022"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2022"
   }
-  ```
-
-- `pnpm`ワークスペースの場合、プラグインの依存関係が必要とするビルドスクリプト（`@swc/core`、`esbuild`、`nx`、`sharp`）を`pnpm-workspace.yaml`で許可リストに追加します。
-- ルートの`package.json`に便利なスクリプト（既存のものを上書きせずに）を追加し、`nx`、`@nx/js`、`@nx/workspace`、`typescript`、Biomeの開発依存関係を追加します — `nx`は[duplicate-nxデッドロック](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established)を回避するために単一バージョンに固定されます — そして、存在しない場合はデフォルトの`biome.json`を書き込みます。
-- サポートされているコーディングエージェント用の<Link path="get_started/building-with-ai">MCPサーバー</Link>を設定します（無効にされていない限り）。
+}
+```
+</Drawer>
 
 ### オプション
 
 <GeneratorParameters generator="init" />
 
 <Aside type="note" title="後でアップグレードする">
-プラグインをアップグレードする（そして出荷される自動コード移行を取得する）には、バージョンを手動でバンプするのではなく、[`nx migrate`](https://nx.dev/features/automate-updating-dependencies) — `nx migrate @aws/nx-plugin` — を使用してください。
+プラグインをアップグレードする（そして出荷される自動コード移行を取得する）には、バージョンを手動でバンプするのではなく、[`nx migrate`](https://nx.dev/features/automate-updating-dependencies)を使用してください。
+
+<NxCommands commands={['migrate @aws/nx-plugin']} />
 </Aside>
 
 ## 段階的な導入
