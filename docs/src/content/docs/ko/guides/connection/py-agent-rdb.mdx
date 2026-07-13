@@ -71,6 +71,7 @@ async def list_examples() -> list:
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
@@ -80,6 +81,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -89,24 +93,25 @@ db.grantConnect(myAgent);
 
 `allowDefaultPortFrom`은 에이전트 런타임이 데이터베이스 포트에 도달할 수 있도록 보안 그룹 규칙을 엽니다. `grantConnect`는 에이전트의 실행 역할에 IAM `rds-db:connect` 권한을 부여합니다.
 
+
 </Fragment>
 <Fragment slot="terraform">
 
-데이터베이스와 동일한 VPC 내에서 에이전트를 실행하고, `additional_iam_policy_statements`를 통해 `rds-db:connect` 권한을 부여하며, 보안 그룹 규칙 쌍으로 네트워크 경로를 엽니다:
+데이터베이스와 동일한 VPC 내에서 에이전트를 실행하고, `additional_iam_policy_statements`를 통해 `rds-db:connect` 권한을 부여하며, 보안 그룹 규칙 쌍으로 네트워크 경로를 엽니다. `aws_vpc.main` 및 `aws_subnet` 리소스는 데이터베이스 배포 가이드에 정의되어 있습니다:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -123,6 +128,7 @@ module "my_agent" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  description                  = "Allow the agent runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_agent.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -131,6 +137,7 @@ resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  description                  = "Allow outbound traffic from the agent runtime to the database"
   security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -139,7 +146,16 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn`은 데이터베이스 모듈이 아닌 루트 모듈에서 한 번 선언된 공유 <Link path="guides/runtime-config">런타임 구성</Link> AppConfig 애플리케이션에서 가져옵니다.
+`appconfig_application_id`/`appconfig_application_arn`은 데이터베이스 모듈이 아닌 루트 모듈에서 한 번 선언된 공유 <Link path="guides/runtime-config">런타임 구성</Link> AppConfig 애플리케이션에서 가져옵니다. 데이터베이스 모듈의 런타임 구성 항목이 배포되도록 인스턴스화할 때 `database` 네임스페이스를 포함합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>
