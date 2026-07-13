@@ -417,12 +417,23 @@ describe('smoke test - cdk-deploy-rdb', () => {
     );
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
+    // Auto-apply sync so the stack rewrites don't block `deploy` with a
+    // fatal "workspace is out of sync" error.
+    const nxJsonPath = `${opts.cwd}/nx.json`;
+    const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
+    nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
+    writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
+
     // Stage name is set by main.ts.template (`e2e-test-infra-sandbox-…`).
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
 
     ensureRdsServiceLinkedRole();
 
     try {
+      // Apply any pending sync changes (license headers, tsconfig
+      // references) so `deploy` does not abort on an out-of-sync workspace.
+      await runCLI(`sync`, opts);
+
       await runCLI(
         `deploy infra ${cdkStageName}/* --output-style=stream`,
         opts,
