@@ -112,19 +112,21 @@ Este exemplo concede acesso a todos os manipuladores em sua API, mas se apenas a
 
 Implante a API na mesma VPC que o banco de dados, conceda `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
 
+O exemplo abaixo referencia os recursos VPC do guia de implantação <Link path="guides/py-rdb">Banco de Dados Relacional Python</Link>: as sub-redes `aws_subnet.database` não têm rota de internet, enquanto as sub-redes `aws_subnet.private` têm saída NAT.
+
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source     = "..."
+  source     = "../../common/terraform/src/app/apis/my-api"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   additional_iam_policy_statements = [
     {
@@ -132,6 +134,16 @@ module "api" {
       Action = ["rds-db:connect"]
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    },
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = [
+        "${module.runtime_config_appconfig.application_arn}/*"
       ]
     }
   ]
@@ -142,6 +154,7 @@ module "api" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -150,6 +163,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -159,6 +173,19 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 ```
 
 Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes isoladas privadas. `RUNTIME_CONFIG_APP_ID` deve apontar para a aplicação AppConfig de <Link path="guides/runtime-config">configuração de tempo de execução</Link> compartilhada, não para uma saída do módulo do banco de dados.
+
+A aplicação AppConfig deve expor o namespace `database` para que a entrada de configuração de tempo de execução do módulo do banco de dados seja implantada. Inclua-o nos `namespaces` ao instanciar o módulo `runtime-config/appconfig`:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
+
+Ao invocar a API diretamente, observe que a saída `api_endpoint` é a URL base do API Gateway sem o caminho do estágio — anexe `/prod` (ou use a saída `stage_invoke_url`) ao chamar a API implantada.
 
 </Fragment>
 </Infrastructure>

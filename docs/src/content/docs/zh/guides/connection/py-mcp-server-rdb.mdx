@@ -80,6 +80,7 @@ from my_scope.other_db import session_context as other_db_session_context
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
@@ -89,6 +90,9 @@ const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyMcpServerSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -98,24 +102,28 @@ db.grantConnect(myMcpServer);
 
 `allowDefaultPortFrom` 打开安全组规则，以便 MCP 服务器运行时可以访问数据库端口。`grantConnect` 向服务器的执行角色授予 IAM `rds-db:connect` 权限。
 
+:::caution
+当省略 `securityGroups` 时，`RuntimeNetworkConfiguration.usingVpc` 会在给定作用域上创建一个具有固定构造 ID（`SecurityGroup`）的安全组。如示例所示传递显式安全组可以避免在同一堆栈中定义多个运行时（例如代理和 MCP 服务器）时出现构造 ID 冲突。
+:::
+
 </Fragment>
 <Fragment slot="terraform">
 
-在与数据库相同的 VPC 中运行 MCP 服务器，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径：
+在与数据库相同的 VPC 中运行 MCP 服务器，通过 `additional_iam_policy_statements` 授予它 `rds-db:connect` 权限，并使用一对安全组规则打开网络路径。`aws_vpc.main` 和 `aws_subnet` 资源在数据库部署指南中定义：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_mcp_server" {
   source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -132,6 +140,7 @@ module "my_mcp_server" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  description                  = "Allow the MCP server runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_mcp_server.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -140,6 +149,7 @@ resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  description                  = "Allow outbound traffic from the MCP server runtime to the database"
   security_group_id            = module.my_mcp_server.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -148,7 +158,16 @@ resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` 来自在根模块中声明一次的共享<Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，而不是来自数据库模块。
+`appconfig_application_id`/`appconfig_application_arn` 来自在根模块中声明一次的共享<Link path="guides/runtime-config">运行时配置</Link> AppConfig 应用程序，而不是来自数据库模块。在实例化它时包含 `database` 命名空间，以便部署数据库模块的运行时配置条目：
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

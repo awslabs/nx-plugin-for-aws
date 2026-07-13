@@ -106,21 +106,21 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Execute o servidor MCP dentro da mesma VPC que o banco de dados, conceda a ele `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
+Execute o servidor MCP dentro da mesma VPC que o banco de dados, conceda a ele `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança. Os recursos `aws_vpc.main` e `aws_subnet` são definidos no guia de implantação do banco de dados:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_mcp_server" {
   source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -137,6 +137,7 @@ module "my_mcp_server" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  description                  = "Allow the MCP server runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_mcp_server.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -145,6 +146,7 @@ resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  description                  = "Allow outbound traffic from the MCP server runtime to the database"
   security_group_id            = module.my_mcp_server.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -153,7 +155,16 @@ resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` vêm da <Link path="guides/runtime-config">configuração de runtime</Link> compartilhada da aplicação AppConfig declarada uma vez no seu módulo raiz, não do módulo do banco de dados.
+`appconfig_application_id`/`appconfig_application_arn` vêm da <Link path="guides/runtime-config">configuração de runtime</Link> compartilhada da aplicação AppConfig declarada uma vez no seu módulo raiz, não do módulo do banco de dados. Inclua o namespace `database` ao instanciá-lo para que a entrada de configuração de runtime do módulo do banco de dados seja implantada:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

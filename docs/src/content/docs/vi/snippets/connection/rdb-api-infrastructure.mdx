@@ -40,21 +40,21 @@ Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, 
 </Fragment>
 <Fragment slot="terraform">
 
-Triển khai API vào cùng VPC với cơ sở dữ liệu, cấp quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp security group rules:
+Triển khai API vào cùng VPC với cơ sở dữ liệu, cấp quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp security group rules. Các tài nguyên `aws_vpc.main` và `aws_subnet` được định nghĩa trong hướng dẫn triển khai cơ sở dữ liệu:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source     = "..."
+  source     = "../../common/terraform/src/app/apis/my-api"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   additional_iam_policy_statements = [
     {
@@ -62,6 +62,16 @@ module "api" {
       Action = ["rds-db:connect"]
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    },
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = [
+        "${module.runtime_config_appconfig.application_arn}/*"
       ]
     }
   ]
@@ -72,6 +82,7 @@ module "api" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -80,6 +91,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -88,7 +100,16 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Triển khai các hàm Lambda API vào **private subnets with egress**, không phải private isolated subnets. `RUNTIME_CONFIG_APP_ID` nên trỏ đến ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ, không phải output của database module.
+Triển khai các hàm Lambda API vào **private subnets with egress**, không phải private isolated subnets. `RUNTIME_CONFIG_APP_ID` nên trỏ đến ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ, không phải output của database module. Bao gồm namespace `database` khi khởi tạo nó để entry runtime configuration của database module được triển khai:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>
