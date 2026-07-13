@@ -308,7 +308,8 @@ const annotateReferencedCollectionKind = (
   } else if (
     referenced.export === 'one-of' ||
     referenced.export === 'any-of' ||
-    referenced.export === 'enum'
+    referenced.export === 'enum' ||
+    referenced.export === 'tuple'
   ) {
     entry.referencedCollectionKind = 'alias';
   }

@@ -40,7 +40,7 @@ const responseParseExpr = (resp) => {
   }
   const py = resp.pythonClientType || 'Any';
   if (py === 'Any') return 'response.json()';
-  if (resp.referencedCollectionKind || py.startsWith('list[') || py.startsWith('dict[')) {
+  if (resp.referencedCollectionKind || py.startsWith('list[') || py.startsWith('dict[') || py.startsWith('tuple[')) {
     return `TypeAdapter(${py}).validate_python(response.json())`;
   }
   if (PYTHON_BUILTIN.has(py)) return 'response.json()';
@@ -111,12 +111,29 @@ const pythonClassNameForTag = (tag) =>
   `_Async${tag.charAt(0).toUpperCase()}${tag.slice(1).replace(/[^a-zA-Z0-9_]/g, '_')}Namespace`;
 
 const tagGroups = operationsGroupedByTag(allOperations);
+// A content-based parameter (declared with `content` rather than `schema`)
+// is serialised to its media type — JSON — as a single value.
+const hasContentJsonParams = allOperations.some(op => (op.parameters || []).some(p => p.in !== 'body' && p.mediaType === 'application/json'));
+const hasPartContentTypes = allOperations.some(op => op.parametersBody && op.parametersBody.partContentTypes);
+const hasAllowReservedParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'query' && p.allowReserved));
+// Render the `self._url(...)` expression for an operation, including matrix/
+// label path styles when declared.
+const urlExpr = (op, styledPathInputs) => {
+  let expr = `self._url("${op.path}", path_params`;
+  if (styledPathInputs.length > 0) {
+    expr += `, path_styles={${styledPathInputs.map(k => `"${k.source.wireName}": ("${k.model.pathStyle}", ${k.model.pathExplode ? 'True' : 'False'})`).join(', ')}}`;
+  }
+  return expr + ')';
+};
 _%>
 """Async<%- className %> — AUTO-GENERATED asynchronous client."""
 
 from __future__ import annotations
 
 import datetime
+<%_ if (hasContentJsonParams || hasPartContentTypes) { _%>
+import json
+<%_ } _%>
 import warnings
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -189,11 +206,47 @@ class Async<%- className %>:
         if self._owns_client:
             await self._client.aclose()
 
-    def _url(self, path: str, path_params: dict[str, Any]) -> str:
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: Optional[dict[str, tuple[str, bool]]] = None,
+    ) -> str:
         for key, value in path_params.items():
-            path = path.replace("{" + key + "}", quote(str(value), safe=""))
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            values = value if isinstance(value, list) else [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(";" + key + "=" + quote(str(v), safe="") for v in values)
+                else:
+                    rendered = ";" + key + "=" + ",".join(quote(str(v), safe="") for v in values)
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(quote(str(v), safe="") for v in values)
+            else:
+                rendered = quote(str(value), safe="")
+            path = path.replace("{" + key + "}", rendered)
         return self._base_url + path
 
+<%_ if (hasAllowReservedParams) { _%>
+    def _query_string(
+        self,
+        query_params: dict[str, Any],
+        collection_formats: Optional[dict[str, str]],
+        reserved: set[str],
+    ) -> str:
+        # Build the query string manually: httpx percent-encodes reserved
+        # characters, which allowReserved parameters must keep literal.
+        parts: list[str] = []
+        for key, value in self._query(query_params, collection_formats).items():
+            safe = "/:?#[]@!$&'()*+,;=" if key in reserved else ""
+            values = value if isinstance(value, list) else [value]
+            for v in values:
+                parts.append(quote(str(key), safe="") + "=" + quote(str(v), safe=safe))
+        return "&".join(parts)
+
+<%_ } _%>
     def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
         if isinstance(value, BaseModel):
             value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
@@ -248,7 +301,7 @@ class Async<%- className %>:
             return None
         if isinstance(value, BaseModel):
             return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
             return [self._dump(v) for v in value]
         if isinstance(value, dict):
             return {k: self._dump(v) for k, v in value.items()}
@@ -269,6 +322,11 @@ class Async<%- className %>:
     || undefined;
   const bodyIsBinary = wholeBodyInputs.length === 1 && wholeBodyInputs[0].model.type === 'binary';
   const bodyIsMultipart = bodyMediaType === 'multipart/form-data';
+  const bodyIsUrlEncoded = bodyMediaType === 'application/x-www-form-urlencoded';
+  const contentJsonInputs = [...queryInputs, ...headerInputs, ...cookieInputs].filter(k => k.model.mediaType === 'application/json');
+  const styledPathInputs = pathInputs.filter(k => k.model.pathStyle);
+  const reservedInputs = queryInputs.filter(k => k.model.allowReserved);
+  const partContentTypes = (op.parametersBody && op.parametersBody.partContentTypes) || undefined;
   const hasTag = (op.tags && op.tags.length > 0);
   const methodPrefix = hasTag ? '_' : '';
 _%>
@@ -290,6 +348,15 @@ _%>
         query_params: dict[str, Any] = {<%_ queryInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
         header_params: dict[str, Any] = {<%_ headerInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
         cookie_params: dict[str, Any] = {<%_ cookieInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+<%_ /* A content-based parameter (declared with `content` rather than
+       `schema`) is serialised to its media type — JSON — as a single value. */ _%>
+<%_ contentJsonInputs.forEach((k) => {
+  const params = k.source.kind === 'query' ? 'query_params' : k.source.kind === 'header' ? 'header_params' : 'cookie_params'; _%>
+        if <%- params %>["<%- k.source.wireName %>"] is not None:
+            <%- params %>["<%- k.source.wireName %>"] = json.dumps(
+                self._dump(<%- params %>["<%- k.source.wireName %>"]), separators=(",", ":")
+            )
+<%_ }); _%>
 <%_ if (collectionInputs.length > 0) { _%>
         collection_formats: dict[str, str] = {<%_ collectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
 <%_ } else { _%>
@@ -309,7 +376,24 @@ _%>
         # `files=` or `data=` is supplied; binary values stream as file parts.
         _files = {k: v for k, v in _body_fields.items() if hasattr(v, "read") or isinstance(v, (bytes, tuple))}
         _data = {k: self._dump(v) for k, v in _body_fields.items() if k not in _files}
+<%_ if (partContentTypes) { _%>
+        # Per-part content types declared by the request body `encoding` object.
+        _part_content_types = {<%_ Object.entries(partContentTypes).forEach(([prop, ct], i) => { _%><%- i > 0 ? ', ' : '' %>"<%- prop %>": "<%- ct %>"<%_ }); _%>}
+        for _k, _ct in _part_content_types.items():
+            if _k in _files:
+                _v = _files[_k]
+                _files[_k] = (None, _v, _ct) if not isinstance(_v, tuple) else _v
+            elif _k in _data:
+                _v = _data[_k]
+                _serialized = _v if isinstance(_v, str) else json.dumps(_v, separators=(",", ":"))
+                _files[_k] = (None, _serialized, _ct)
+                del _data[_k]
+<%_ } _%>
         request_kwargs: dict[str, Any] = {"files": _files or None, "data": _data or None}
+<%_ } else if (shape.bodyFromFields.mediaType === 'application/x-www-form-urlencoded') { _%>
+        # httpx URL-encodes `data=` as form key=value pairs (arrays as
+        # repeated keys); None fields were already omitted above.
+        request_kwargs: dict[str, Any] = {"data": {k: self._dump(v) for k, v in _body_fields.items()}}
 <%_ } else { _%>
         body = types_gen.<%- shape.bodyFromFields.model.pythonClassName %>.model_validate(
             _body_fields
@@ -330,12 +414,20 @@ _%>
 <%_ } _%>
 <%_ } else if (bodyIsMultipart) { _%>
         body = <%- wholeBodyInputs[0].pythonName %>
+        if isinstance(body, BaseModel):
+            body = body.model_dump(mode="python", by_alias=True, exclude_unset=True)
         if isinstance(body, dict):
             _files = {k: v for k, v in body.items() if hasattr(v, "read") or isinstance(v, (bytes, tuple))}
-            _data = {k: v for k, v in body.items() if k not in _files}
+            _data = {k: self._dump(v) for k, v in body.items() if k not in _files}
             request_kwargs: dict[str, Any] = {"files": _files or None, "data": _data or None}
         else:
             request_kwargs = {"files": body}
+<%_ } else if (bodyIsUrlEncoded) { _%>
+        body = <%- wholeBodyInputs[0].pythonName %>
+        # httpx URL-encodes `data=` as form key=value pairs (arrays as
+        # repeated keys).
+        _form = self._dump(body)
+        request_kwargs: dict[str, Any] = {"data": {k: v for k, v in (_form or {}).items() if v is not None}}
 <%_ } else { _%>
         body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
         request_kwargs: dict[str, Any] = {"json": body}
@@ -348,11 +440,22 @@ _%>
         body = None
         request_kwargs: dict[str, Any] = {}
 <%_ } _%>
+<%_ if (reservedInputs.length > 0) { _%>
+<%_ /* allowReserved query parameters keep reserved characters literal, so the
+       query string is built manually and appended to the URL — httpx would
+       percent-encode values passed via `params=`. */ _%>
+        _qs = self._query_string(query_params, collection_formats, {<%_ reservedInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>"<%_ }); _%>})
+        _request_url = <%- urlExpr(op, styledPathInputs) %> + ("?" + _qs if _qs else "")
+<%_ } else { _%>
+        _request_url = <%- urlExpr(op, styledPathInputs) %>
+<%_ } _%>
 <%_ if (op.isStreaming) { _%>
         async with self._client.stream(
             "<%- op.method %>",
-            self._url("<%- op.path %>", path_params),
+            _request_url,
+<%_ if (reservedInputs.length === 0) { _%>
             params=self._query(query_params, collection_formats),
+<%_ } _%>
             headers=self._headers(header_params, collection_formats),
             cookies=self._cookies(cookie_params),
             **request_kwargs,
@@ -392,8 +495,10 @@ _%>
 <%_ } else { _%>
         response = await self._client.request(
             "<%- op.method %>",
-            self._url("<%- op.path %>", path_params),
+            _request_url,
+<%_ if (reservedInputs.length === 0) { _%>
             params=self._query(query_params, collection_formats),
+<%_ } _%>
             headers=self._headers(header_params, collection_formats),
             cookies=self._cookies(cookie_params),
             **request_kwargs,
