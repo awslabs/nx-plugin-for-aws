@@ -1,4 +1,4 @@
-import { Lazy, Names } from 'aws-cdk-lib';
+import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -135,6 +135,29 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
    */
   public get connections(): Connections {
     return this.agentCoreRuntime.connections;
+  }
+
+  /**
+<%_ if (serverProtocol === 'mcp') { _%>
+   * The MCP endpoint URL of the runtime, e.g. for use as a Gateway target
+   * endpoint.
+<%_ } else if (serverProtocol === 'a2a') { _%>
+   * The A2A endpoint URL of the runtime (the trailing slash is required).
+<%_ } else { _%>
+   * The HTTPS invocation URL of the runtime.
+<%_ } _%>
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return `https://bedrock-agentcore.${Stack.of(this).region}.amazonaws.com/runtimes/${encodedArn}/invocations<%- serverProtocol === 'a2a' ? '/' : '?qualifier=DEFAULT' %>`;
   }
 <%_ if (auth === 'iam') { _%>
 
