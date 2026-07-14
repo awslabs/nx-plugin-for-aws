@@ -2,7 +2,6 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import { Construct } from 'constructs';
 import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
-import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -22,9 +21,30 @@ export interface ThrottlingOptions {
 }
 
 export interface <%- nameClassName %>Props {
-  readonly userPool: cognito.IUserPool;
-  readonly userPoolClient: cognito.IUserPoolClient;
-  readonly cognitoDomain: cognito.UserPoolDomain;
+  /**
+   * Cognito User Pool id (e.g. `us-east-1_abc123`).
+   */
+  readonly userPoolId: string;
+
+  /**
+   * Cognito User Pool App Client id.
+   */
+  readonly userPoolClientId: string;
+
+  /**
+   * ARN of the Secrets Manager secret holding the Cognito App Client secret.
+   * The token handler reads this at runtime to complete the token exchange;
+   * the secret is never exposed to the client. Create the secret in your own
+   * stack (from your App Client's generated secret) and pass its ARN here.
+   */
+  readonly cognitoClientSecretArn: string;
+
+  /**
+   * Base URL of the Cognito Hosted UI domain, without a trailing slash
+   * (e.g. `https://my-domain.auth.us-east-1.amazoncognito.com`). The proxy
+   * forwards `/authorize` and `/oauth/token` to this host.
+   */
+  readonly cognitoHostedUiBase: string;
 
   /**
    * Full URL of the upstream MCP server (e.g. AgentCore Runtime/Gateway
@@ -89,20 +109,20 @@ export class <%- nameClassName %> extends Construct {
       props.logRetention ?? logs.RetentionDays.ONE_WEEK;
     const removalPolicyDefault = props.removalPolicy ?? RemovalPolicy.DESTROY;
 
-    const clientSecret = new secretsmanager.Secret(this, 'CognitoClientSecret', {
-      secretStringValue: props.userPoolClient.userPoolClientSecret,
-      removalPolicy: removalPolicyDefault,
-    });
+    const clientSecret = secretsmanager.Secret.fromSecretCompleteArn(
+      this,
+      'CognitoClientSecret',
+      props.cognitoClientSecretArn,
+    );
 
-    const cognitoIssuer = `https://cognito-idp.${region}.amazonaws.com/${props.userPool.userPoolId}`;
-    const hostedUiBase = props.cognitoDomain.baseUrl();
+    const cognitoIssuer = `https://cognito-idp.${region}.amazonaws.com/${props.userPoolId}`;
 
     const baseEnv: Record<string, string> = {
-      COGNITO_USER_POOL_ID: props.userPool.userPoolId,
-      COGNITO_CLIENT_ID: props.userPoolClient.userPoolClientId,
+      COGNITO_USER_POOL_ID: props.userPoolId,
+      COGNITO_CLIENT_ID: props.userPoolClientId,
       COGNITO_CLIENT_SECRET_ARN: clientSecret.secretArn,
       COGNITO_ISSUER: cognitoIssuer,
-      COGNITO_HOSTED_UI_BASE: hostedUiBase,
+      COGNITO_HOSTED_UI_BASE: props.cognitoHostedUiBase,
       COGNITO_REGION: region,
       ALLOWED_REDIRECT_PATTERNS: JSON.stringify(
         (props.allowedRedirectPatterns ?? []).map((r) => r.source),
