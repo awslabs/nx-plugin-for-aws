@@ -92,6 +92,10 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     assertNoConflictingUnionMemberMarshalling(model);
   }
 
+  for (const op of allOperations) {
+    assertEncodableUrlEncodedBody(op);
+  }
+
   data.models = orderBy(data.models, (d) => d.name);
   // Default service first, then by name.
   data.services = orderBy(data.services, (s) =>
@@ -569,6 +573,35 @@ const assertNoConflictingUnionMemberMarshalling = (model: Model): void => {
         seen.set(property.name, { memberName: member.name, key });
       }
     }
+  }
+};
+
+/**
+ * An `application/x-www-form-urlencoded` body is form-encoded as `key=value`
+ * pairs, so the wire form is only defined for a schema with named properties
+ * (an object) or a primitive sent verbatim. A top-level array or tuple has no
+ * property names to key on — encoding it would emit index keys (`0=a&1=b`) that
+ * no form parser can decode — so fail fast rather than generate a client that
+ * is silently wrong on the wire.
+ */
+const assertEncodableUrlEncodedBody = (op: Operation): void => {
+  const body = op.parametersBody;
+  if (!body?.mediaTypes) return;
+  const mediaTypes = Array.isArray(body.mediaTypes)
+    ? body.mediaTypes
+    : [body.mediaTypes];
+  // Match the wire media type the client actually sends: JSON is preferred, so
+  // an array body offering both JSON and urlencoded is sent as JSON and is fine.
+  const chosenMediaType =
+    mediaTypes.find(
+      (mt) => mt === 'application/json' || mt.endsWith('+json'),
+    ) ?? mediaTypes[0];
+  if (chosenMediaType !== 'application/x-www-form-urlencoded') return;
+  if (body.isPrimitive) return;
+  if (body.export === 'array' || body.export === 'tuple') {
+    throw new Error(
+      `Operation ${op.method} ${op.path} has an application/x-www-form-urlencoded request body whose schema is a ${body.export}, which has no defined form encoding. Use an object schema (its properties become the form fields) or a primitive schema (sent verbatim) in your OpenAPI specification.`,
+    );
   }
 };
 

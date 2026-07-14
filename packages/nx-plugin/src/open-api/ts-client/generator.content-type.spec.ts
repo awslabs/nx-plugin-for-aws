@@ -508,4 +508,161 @@ describe('openApiTsClientGenerator - content type header', () => {
       }),
     );
   });
+
+  it('should form-encode a urlencoded dictionary (additionalProperties) body', async () => {
+    const spec: Spec = {
+      info: { title, version: '1.0.0' },
+      openapi: '3.0.0',
+      paths: {
+        '/urlencoded-dict': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: { type: 'string' },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue(['ok']),
+    });
+
+    // Each dictionary entry becomes a form field.
+    await callGeneratedClient(client, mockFetch, 'postUrlencodedDict', {
+      first: 'a b',
+      second: 'c&d',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/urlencoded-dict`,
+      expect.objectContaining({
+        method: 'POST',
+        body: 'first=a+b&second=c%26d',
+        headers: [['Content-Type', 'application/x-www-form-urlencoded']],
+      }),
+    );
+  });
+
+  it('should throw for a urlencoded body whose schema is an array', async () => {
+    // A top-level array has no property names to key on, so it has no defined
+    // form encoding — fail fast rather than emit index-keyed pairs (0=a&1=b)
+    // that no form parser can decode.
+    const spec: Spec = {
+      info: { title, version: '1.0.0' },
+      openapi: '3.0.0',
+      paths: {
+        '/urlencoded-array': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(/x-www-form-urlencoded.*array.*no defined form encoding/);
+  });
+
+  it('should not throw for an array body offering both JSON and urlencoded', async () => {
+    // JSON is the preferred wire type, so the array body is sent as JSON — the
+    // urlencoded offering is never used and must not trip the form-encoding guard.
+    const spec: Spec = {
+      info: { title, version: '1.0.0' },
+      openapi: '3.0.0',
+      paths: {
+        '/array-json-or-form': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { type: 'array', items: { type: 'string' } },
+                },
+                'application/x-www-form-urlencoded': {
+                  schema: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({ status: 204 });
+
+    await callGeneratedClient(client, mockFetch, 'postArrayJsonOrForm', [
+      'a',
+      'b',
+    ]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/array-json-or-form`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(['a', 'b']),
+        headers: [['Content-Type', 'application/json']],
+      }),
+    );
+  });
 });
