@@ -145,7 +145,7 @@ export async function invokeAgentCoreGatewayTool(
 export async function invokeAgentCoreAgent(
   arn: string,
   agentName: string,
-  message = 'what is 3 + 5 - 2?',
+  prompt = 'what is 3 + 5 - 2?',
 ): Promise<string> {
   const aws = await createAwsClient('bedrock-agentcore');
   console.log(`Testing ${agentName} with ARN ${arn}`);
@@ -156,7 +156,7 @@ export async function invokeAgentCoreAgent(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const response = await aws.fetch(buildAgentCoreUrl(arn), {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ prompt }),
       headers: {
         'Content-Type': 'application/json',
         'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': AGENT_CORE_SESSION_ID,
@@ -276,7 +276,7 @@ export async function invokeAgentCoreAgUi(
 export async function invokeTrpcAgentCoreAgent(
   arn: string,
   agentName: string,
-  message = 'what is 3 * 5 / 4?',
+  prompt = 'what is 3 * 5 / 4?',
 ): Promise<string> {
   console.log(`Testing ${agentName} with ARN ${arn}`);
 
@@ -289,7 +289,7 @@ export async function invokeTrpcAgentCoreAgent(
     // NB the trpc api is generated code so we don't have a type-safe trpc client here
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (client.invoke as any).subscribe(
-      { message },
+      { prompt },
       {
         onData: (chunk: string) => {
           console.log(chunk);
