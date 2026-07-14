@@ -331,11 +331,11 @@ describe('ts#agent generator', () => {
     expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
       'ncp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/bundle/agent/test-project-agent',
-      'rimraf dist/apps/test-project/trivy',
-      'make-dir dist/apps/test-project/trivy',
-      'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/.trivyignore',
-      'docker save -o dist/apps/test-project/trivy/image-0.tar proj-test-project-agent:latest',
-      'docker run --rm -v "./dist/apps/test-project/trivy":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q',
+      'rimraf dist/apps/test-project/trivy/proj-test-project-agent-latest',
+      'make-dir dist/apps/test-project/trivy/proj-test-project-agent-latest',
+      'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
+      'docker save -o dist/apps/test-project/trivy/proj-test-project-agent-latest/image-0.tar proj-test-project-agent:latest',
+      'docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-agent-latest":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q',
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);

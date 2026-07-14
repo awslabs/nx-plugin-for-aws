@@ -96,5 +96,25 @@ describe('docker utils', () => {
       const joined = commands.join('\n');
       expect(joined).toContain('dist/packages/my-project/trivy');
     });
+
+    it('should stage each docker target in a unique scan directory', () => {
+      const agentA = addDockerImageScanCommands(tree, {
+        containerEngine: 'docker',
+        projectRoot: 'packages/my-project',
+        imageTags: ['scope-agent-a:latest'],
+      });
+      const agentB = addDockerImageScanCommands(tree, {
+        containerEngine: 'docker',
+        projectRoot: 'packages/my-project',
+        imageTags: ['scope-agent-b:latest'],
+      });
+
+      expect(agentA.join('\n')).toContain(
+        'dist/packages/my-project/trivy/scope-agent-a-latest',
+      );
+      expect(agentB.join('\n')).toContain(
+        'dist/packages/my-project/trivy/scope-agent-b-latest',
+      );
+    });
   });
 });

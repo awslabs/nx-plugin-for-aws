@@ -54,7 +54,12 @@ export const addDockerImageScanCommands = (
     tree.write(ignoreFilePath, TRIVY_IGNORE_CONTENTS);
   }
 
-  const scanDir = joinPathFragments('dist', projectRoot, 'trivy');
+  // Stage scan artifacts in a directory unique to this docker target so that
+  // sibling targets in the same project (e.g. multiple agents) don't clobber
+  // each other's tarballs when run in parallel. The first image tag is unique
+  // per target, so it makes a stable, collision-free key.
+  const scanKey = imageTags[0].replace(/[^a-zA-Z0-9-]/g, '-');
+  const scanDir = joinPathFragments('dist', projectRoot, 'trivy', scanKey);
   const trivyImage = `public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy}`;
 
   const fs = new FsCommands(tree);
