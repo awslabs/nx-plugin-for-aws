@@ -902,7 +902,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
             method: 'subscription',
             params: {
               path: 'invoke',
-              input: { message: 'What is 3 times 5?' },
+              input: { prompt: 'What is 3 times 5?' },
             },
           }),
         );
@@ -995,7 +995,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
             JSON.stringify({
               id: 1,
               method: 'subscription',
-              params: { path: 'invoke', input: { message: `call ${tool}` } },
+              params: { path: 'invoke', input: { prompt: `call ${tool}` } },
             }),
           );
         ws.onmessage = (ev) => {
@@ -1079,7 +1079,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: `call ${tool}` }),
+          body: JSON.stringify({ prompt: `call ${tool}` }),
         },
       );
       const body = await res.text();
@@ -1266,7 +1266,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const res = await fetch(`http://127.0.0.1:${ports.pyAgent}/invocations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'What is 3 times 5?' }),
+      body: JSON.stringify({ prompt: 'What is 3 times 5?' }),
     });
     const body = await res.text();
     const lines = body.trim().split('\n').filter(Boolean);
@@ -1442,7 +1442,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'What is 3 times 5?' }),
+        body: JSON.stringify({ prompt: 'What is 3 times 5?' }),
       },
     );
     const body = await res.text();
