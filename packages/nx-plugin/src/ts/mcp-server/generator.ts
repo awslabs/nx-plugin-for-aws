@@ -19,6 +19,7 @@ import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDockerImageScanCommands } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -38,7 +39,11 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import {
+  CONTAINER_VERSIONS,
+  TS_VERSIONS,
+  withVersions,
+} from '../../utils/versions';
 import type { TsMcpServerGeneratorSchema } from './schema';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -105,6 +110,8 @@ export const tsMcpServerGenerator = async (
       distDir,
       adotVersion:
         TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+      nodeBaseImage: CONTAINER_VERSIONS.nodeBaseImage,
+      npmVersion: CONTAINER_VERSIONS.npm,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -155,6 +162,11 @@ export const tsMcpServerGenerator = async (
             `${dockerOutputDir}/Dockerfile`,
           ),
           `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          ...addDockerImageScanCommands(tree, {
+            containerEngine: containers,
+            projectRoot: project.root,
+            imageTags: [dockerImageTag],
+          }),
         ],
         parallel: false,
       },

@@ -14,6 +14,7 @@ import {
 } from '@nx/devkit';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDockerImageScanCommands } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -265,6 +266,11 @@ export const pyRdbGenerator = async (
           commands: [
             `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
             `${containerEngine} build --platform linux/arm64 --provenance=false -t ${createDbUserDockerImageTag} ${createDbUserBundleDir}`,
+            ...addDockerImageScanCommands(tree, {
+              containerEngine,
+              projectRoot: projectConfig.root,
+              imageTags: [migrationDockerImageTag, createDbUserDockerImageTag],
+            }),
           ],
           parallel: false,
         },

@@ -188,6 +188,13 @@ describe('py#rdb generator', () => {
         commands: [
           'docker build --platform linux/arm64 --provenance=false -t proj-db-migration:latest dist/packages/db/docker/migration',
           'docker build --platform linux/arm64 --provenance=false -t proj-db-create-db-user:latest dist/packages/db/docker/create-db-user',
+          'rimraf dist/packages/db/trivy',
+          'make-dir dist/packages/db/trivy',
+          'ncp packages/db/.trivyignore dist/packages/db/trivy/.trivyignore',
+          'docker save -o dist/packages/db/trivy/image-0.tar proj-db-migration:latest',
+          'docker run --rm -v "./dist/packages/db/trivy":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q',
+          'docker save -o dist/packages/db/trivy/image-1.tar proj-db-create-db-user:latest',
+          'docker run --rm -v "./dist/packages/db/trivy":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-1.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q',
         ],
         parallel: false,
       },

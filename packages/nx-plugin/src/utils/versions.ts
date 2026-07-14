@@ -186,6 +186,21 @@ export const VENDORED_VERSIONS = {
 } as const;
 
 /**
+ * Versions for container tooling used by generated Dockerfiles and image
+ * build/scan targets. Pinned exactly so generated images are reproducible.
+ */
+export const CONTAINER_VERSIONS = {
+  // ECR-hosted Trivy image used to scan built images during the build.
+  trivy: '0.72.0',
+  // Node base image for AgentCore runtime/MCP server images.
+  nodeBaseImage: 'public.ecr.aws/docker/library/node:lts-slim',
+  // npm is upgraded in Node images to pick up a bundled npm free of known
+  // HIGH/CRITICAL vulnerabilities (e.g. the undici advisory in the image's
+  // default npm).
+  npm: '12.0.1',
+} as const;
+
+/**
  * Exact versions for Terraform providers used by generated `.tf` modules.
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */

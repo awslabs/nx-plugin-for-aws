@@ -16,6 +16,7 @@ import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDockerImageScanCommands } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -159,6 +160,11 @@ export const pyMcpServerGenerator = async (
             `${dockerOutputDir}/Dockerfile`,
           ),
           `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          ...addDockerImageScanCommands(tree, {
+            containerEngine: containers,
+            projectRoot: project.root,
+            imageTags: [dockerImageTag],
+          }),
         ],
         parallel: false,
       },
