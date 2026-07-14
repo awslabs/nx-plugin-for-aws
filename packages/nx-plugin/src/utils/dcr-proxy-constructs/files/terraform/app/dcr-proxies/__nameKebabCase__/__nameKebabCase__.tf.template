@@ -1,0 +1,410 @@
+# OAuth Dynamic Client Registration (DCR) proxy for Amazon Cognito.
+#
+# Lets MCP clients (Claude Code, Kiro CLI, MCP Inspector, ...) authenticate
+# against an Amazon Cognito User Pool while keeping the Hosted UI flow intact,
+# supporting RFC 7591 Dynamic Client Registration, and never exposing the
+# Cognito App Client secret to the client.
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "<%- archiveProviderVersion %>"
+    }
+  }
+}
+
+# Cognito configuration (injected by the caller)
+variable "user_pool_id" {
+  description = "Cognito User Pool id (e.g. us-east-1_abc123)"
+  type        = string
+}
+
+variable "user_pool_client_id" {
+  description = "Cognito User Pool App Client id"
+  type        = string
+}
+
+variable "cognito_client_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the Cognito App Client secret. The token handler reads this at runtime; the secret is never exposed to the client."
+  type        = string
+}
+
+variable "cognito_hosted_ui_base" {
+  description = "Base URL of the Cognito Hosted UI domain, without a trailing slash (e.g. https://my-domain.auth.us-east-1.amazoncognito.com)"
+  type        = string
+}
+
+variable "upstream_url" {
+  description = "Full URL of the upstream MCP server. The proxy forwards /mcp requests to this URL and rewrites the upstream WWW-Authenticate header."
+  type        = string
+}
+
+variable "allowed_redirect_patterns" {
+  description = "List of regular expression patterns for redirect_uris allowed during Dynamic Client Registration"
+  type        = list(string)
+  default     = []
+}
+
+variable "env" {
+  description = "Additional environment variables applied to all proxy Lambda functions"
+  type        = map(string)
+  default     = {}
+}
+
+# CORS Configuration (passed to the core http-api module)
+variable "cors_allow_headers" {
+  description = "List of allowed headers for CORS"
+  type        = list(string)
+  default     = ["authorization", "content-type", "mcp-protocol-version"]
+}
+
+variable "cors_allow_methods" {
+  description = "List of allowed HTTP methods for CORS"
+  type        = list(string)
+  default     = ["GET", "POST", "DELETE", "OPTIONS"]
+}
+
+variable "cors_allow_origins" {
+  description = "List of allowed origins for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zips. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
+  type        = string
+}
+
+variable "mcp_proxy_timeout" {
+  description = "Timeout (seconds) applied to the MCP proxy Lambda. Defaults to 29 (the API Gateway HTTP API integration limit)."
+  type        = number
+  default     = 29
+}
+
+variable "mcp_proxy_memory_size" {
+  description = "Memory size (MB) for the MCP proxy Lambda"
+  type        = number
+  default     = 512
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+# The Cognito App Client secret, referenced by ARN so the token handler's role
+# can be scoped to read exactly this secret.
+data "aws_secretsmanager_secret" "cognito_client_secret" {
+  arn = var.cognito_client_secret_arn
+}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.region
+
+  base_env = merge({
+    COGNITO_USER_POOL_ID      = var.user_pool_id
+    COGNITO_CLIENT_ID         = var.user_pool_client_id
+    COGNITO_CLIENT_SECRET_ARN = var.cognito_client_secret_arn
+    COGNITO_ISSUER            = "https://cognito-idp.${local.aws_region}.amazonaws.com/${var.user_pool_id}"
+    COGNITO_HOSTED_UI_BASE    = var.cognito_hosted_ui_base
+    COGNITO_REGION            = local.aws_region
+    ALLOWED_REDIRECT_PATTERNS = jsonencode(var.allowed_redirect_patterns)
+  }, var.env)
+
+  # Workspace-root-relative bundle output directory per handler
+  handler_bundle_dirs = {
+    "protected-resource-metadata"   = "<%- bundlePathsFromRoot['protected-resource-metadata'] %>"
+    "authorization-server-metadata" = "<%- bundlePathsFromRoot['authorization-server-metadata'] %>"
+    "register"                      = "<%- bundlePathsFromRoot['register'] %>"
+    "authorize"                     = "<%- bundlePathsFromRoot['authorize'] %>"
+    "token"                         = "<%- bundlePathsFromRoot['token'] %>"
+    "mcp-proxy"                     = "<%- bundlePathsFromRoot['mcp-proxy'] %>"
+  }
+
+  # Handlers deployed with the standard configuration (timeout 10s, mem 256).
+  # mcp-proxy is deployed separately since its env/timeout/memory differ.
+  standard_handlers = {
+    for name, dir in local.handler_bundle_dirs : name => dir if name != "mcp-proxy"
+  }
+}
+
+# Package each handler's rolldown bundle into a deployment zip
+data "archive_file" "handler_zip" {
+  for_each = local.handler_bundle_dirs
+
+  type        = "zip"
+  source_dir  = "${path.module}/../../../../../../../${each.value}"
+  output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/dcr-proxies/<%- nameKebabCase %>/${each.key}/lambda.zip"
+}
+
+resource "aws_s3_object" "handler_zip" {
+  for_each = local.handler_bundle_dirs
+
+  bucket      = var.asset_bucket_name
+  key         = "dcr-proxies/<%- nameKebabCase %>/${each.key}/${data.archive_file.handler_zip[each.key].output_sha256}.zip"
+  source      = data.archive_file.handler_zip[each.key].output_path
+  source_hash = data.archive_file.handler_zip[each.key].output_base64sha256
+  etag        = data.archive_file.handler_zip[each.key].output_md5
+}
+
+# Shared execution role for handlers that do not read the client secret
+resource "aws_iam_role" "proxy" {
+  name = "<%- nameKebabCase %>-proxy-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = var.tags
+}
+
+# Dedicated role for the token handler, additionally granted read access to the
+# Cognito App Client secret only.
+resource "aws_iam_role" "token" {
+  name = "<%- nameKebabCase %>-token-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "proxy_basic" {
+  role       = aws_iam_role.proxy.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "proxy_xray" {
+  role       = aws_iam_role.proxy.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "token_basic" {
+  role       = aws_iam_role.token.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "token_xray" {
+  role       = aws_iam_role.token.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy" "token_secret_read" {
+  name = "<%- nameKebabCase %>-token-secret-read-${random_string.suffix.result}"
+  role = aws_iam_role.token.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = [data.aws_secretsmanager_secret.cognito_client_secret.arn]
+    }]
+  })
+}
+
+# Standard handler Lambda functions
+resource "aws_lambda_function" "standard" {
+  #checkov:skip=CKV_AWS_117:Lambda does not need to be in a VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this use case
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  for_each = local.standard_handlers
+
+  s3_bucket        = aws_s3_object.handler_zip[each.key].bucket
+  s3_key           = aws_s3_object.handler_zip[each.key].key
+  function_name    = "<%- nameKebabCase %>-${each.key}-${random_string.suffix.result}"
+  role             = each.key == "token" ? aws_iam_role.token.arn : aws_iam_role.proxy.arn
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  architectures    = ["arm64"]
+  source_code_hash = data.archive_file.handler_zip[each.key].output_base64sha256
+  timeout          = 10
+  memory_size      = 256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = local.base_env
+  }
+
+  tags = var.tags
+}
+
+# MCP proxy Lambda function (extended env, timeout and memory)
+resource "aws_lambda_function" "mcp_proxy" {
+  #checkov:skip=CKV_AWS_117:Lambda does not need to be in a VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this use case
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  s3_bucket        = aws_s3_object.handler_zip["mcp-proxy"].bucket
+  s3_key           = aws_s3_object.handler_zip["mcp-proxy"].key
+  function_name    = "<%- nameKebabCase %>-mcp-proxy-${random_string.suffix.result}"
+  role             = aws_iam_role.proxy.arn
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  architectures    = ["arm64"]
+  source_code_hash = data.archive_file.handler_zip["mcp-proxy"].output_base64sha256
+  timeout          = var.mcp_proxy_timeout
+  memory_size      = var.mcp_proxy_memory_size
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = merge(local.base_env, {
+      UPSTREAM_URL       = var.upstream_url
+      PROXY_METADATA_URL = "${module.http_api.api_endpoint}/.well-known/oauth-protected-resource"
+    })
+  }
+
+  tags = var.tags
+}
+
+# HTTP API Gateway (shared core module)
+module "http_api" {
+  source = "../../../core/api/http-api"
+
+  api_name           = "<%- nameKebabCase %>-mcp-auth-proxy-${random_string.suffix.result}"
+  api_description    = "MCP-compatible OAuth proxy for Amazon Cognito"
+  stage_name         = "$default"
+  stage_auto_deploy  = true
+  cors_allow_headers = var.cors_allow_headers
+  cors_allow_methods = var.cors_allow_methods
+  cors_allow_origins = var.cors_allow_origins
+
+  tags = var.tags
+}
+
+# Integrations
+resource "aws_apigatewayv2_integration" "standard" {
+  for_each = local.standard_handlers
+
+  api_id                 = module.http_api.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.standard[each.key].invoke_arn
+  payload_format_version = "2.0"
+  timeout_milliseconds   = 30000
+}
+
+resource "aws_apigatewayv2_integration" "mcp_proxy" {
+  api_id                 = module.http_api.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.mcp_proxy.invoke_arn
+  payload_format_version = "2.0"
+  timeout_milliseconds   = 29000
+}
+
+# Routes. jwks_uri/issuer are handled by Cognito; the proxy hosts the OAuth
+# metadata, authorize, token and registration endpoints plus the /mcp proxy.
+locals {
+  routes = {
+    "GET /.well-known/oauth-protected-resource"   = "protected-resource-metadata"
+    "GET /.well-known/oauth-authorization-server" = "authorization-server-metadata"
+    "GET /.well-known/openid-configuration"       = "authorization-server-metadata"
+    "POST /register"                              = "register"
+    "GET /authorize"                              = "authorize"
+    "POST /oauth/token"                           = "token"
+  }
+}
+
+resource "aws_apigatewayv2_route" "standard" {
+  for_each = local.routes
+
+  api_id    = module.http_api.api_id
+  route_key = each.key
+  target    = "integrations/${aws_apigatewayv2_integration.standard[each.value].id}"
+}
+
+resource "aws_apigatewayv2_route" "mcp_proxy" {
+  api_id    = module.http_api.api_id
+  route_key = "ANY /mcp"
+  target    = "integrations/${aws_apigatewayv2_integration.mcp_proxy.id}"
+}
+
+# Permissions for API Gateway to invoke each Lambda
+resource "aws_lambda_permission" "standard" {
+  for_each = local.standard_handlers
+
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.standard[each.key].function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.http_api.api_execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "mcp_proxy" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.mcp_proxy.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.http_api.api_execution_arn}/*/*"
+}
+
+# Outputs
+output "proxy_url" {
+  description = "Base URL of the DCR proxy"
+  value       = module.http_api.api_endpoint
+}
+
+output "mcp_url" {
+  description = "MCP endpoint proxied to the upstream server"
+  value       = "${module.http_api.api_endpoint}/mcp"
+}
+
+output "metadata_url" {
+  description = "OAuth protected-resource metadata URL"
+  value       = "${module.http_api.api_endpoint}/.well-known/oauth-protected-resource"
+}
+
+output "auth_server_metadata_url" {
+  description = "OAuth authorization-server metadata URL"
+  value       = "${module.http_api.api_endpoint}/.well-known/oauth-authorization-server"
+}
+
+output "token_endpoint" {
+  description = "OAuth token endpoint"
+  value       = "${module.http_api.api_endpoint}/oauth/token"
+}
+
+output "registration_endpoint" {
+  description = "Dynamic Client Registration endpoint"
+  value       = "${module.http_api.api_endpoint}/register"
+}
+
+output "api_id" {
+  description = "ID of the HTTP API Gateway"
+  value       = module.http_api.api_id
+}

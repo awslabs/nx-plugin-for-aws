@@ -1,11 +1,9 @@
-import * as path from 'node:path';
 import * as url from 'node:url';
 import { Construct } from 'constructs';
 import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
@@ -80,9 +78,17 @@ const DEFAULT_CORS_HEADERS = [
 const DEFAULT_RATE_LIMIT = 50;
 const DEFAULT_BURST_LIMIT = 100;
 
-const HANDLERS_DIR = url.fileURLToPath(new URL('./handlers', import.meta.url));
-
-const entry = (file: string): string => path.join(HANDLERS_DIR, file);
+// Resolve a handler's rolldown bundle output directory, relative to this
+// compiled construct file, back to the workspace root.
+const asset = (bundlePathFromRoot: string): lambda.Code =>
+  lambda.Code.fromAsset(
+    url.fileURLToPath(
+      new URL(
+        `../../../../../../../${bundlePathFromRoot}`,
+        <% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>,
+      ),
+    ),
+  );
 
 /**
  * OAuth Dynamic Client Registration (DCR) proxy for Amazon Cognito.
@@ -132,46 +138,46 @@ export class <%- nameClassName %> extends Construct {
 
     const makeFn = (
       id_: string,
-      file: string,
-      overrides?: Partial<nodejs.NodejsFunctionProps>,
-    ): nodejs.NodejsFunction => {
+      bundlePathFromRoot: string,
+      overrides?: Partial<lambda.FunctionProps>,
+    ): lambda.Function => {
       const logGroup = new logs.LogGroup(this, `${id_}LogGroup`, {
         retention: logRetentionDefault,
         removalPolicy: removalPolicyDefault,
       });
 
-      return new nodejs.NodejsFunction(this, id_, {
-        entry: entry(file),
-        handler: 'handler',
+      return new lambda.Function(this, id_, {
+        code: asset(bundlePathFromRoot),
+        handler: 'index.handler',
         runtime: lambda.Runtime.NODEJS_20_X,
         architecture: lambda.Architecture.ARM_64,
         timeout: Duration.seconds(10),
         memorySize: 256,
         environment: baseEnv,
         logGroup,
+        tracing: lambda.Tracing.ACTIVE,
         reservedConcurrentExecutions: props.reservedConcurrentExecutions,
-        bundling: {
-          target: 'node20',
-          format: nodejs.OutputFormat.CJS,
-          minify: true,
-          sourceMap: true,
-          externalModules: ['@aws-sdk/*'],
-        },
         ...overrides,
       });
     };
 
     const protectedResourceFn = makeFn(
       'ProtectedResourceFn',
-      'protected-resource-metadata.ts',
+      '<%- bundlePathsFromRoot['protected-resource-metadata'] %>',
     );
     const authServerFn = makeFn(
       'AuthServerFn',
-      'authorization-server-metadata.ts',
+      '<%- bundlePathsFromRoot['authorization-server-metadata'] %>',
     );
-    const registerFn = makeFn('RegisterFn', 'register.ts');
-    const authorizeFn = makeFn('AuthorizeFn', 'authorize.ts');
-    const tokenFn = makeFn('TokenFn', 'token.ts');
+    const registerFn = makeFn(
+      'RegisterFn',
+      '<%- bundlePathsFromRoot['register'] %>',
+    );
+    const authorizeFn = makeFn(
+      'AuthorizeFn',
+      '<%- bundlePathsFromRoot['authorize'] %>',
+    );
+    const tokenFn = makeFn('TokenFn', '<%- bundlePathsFromRoot['token'] %>');
 
     clientSecret.grantRead(tokenFn);
 
@@ -261,15 +267,19 @@ export class <%- nameClassName %> extends Construct {
       integration: new integrations.HttpLambdaIntegration('TokenInt', tokenFn),
     });
 
-    const mcpProxyFn = makeFn('McpProxyFn', 'mcp-proxy.ts', {
-      timeout: props.mcpProxyTimeout ?? Duration.seconds(29),
-      memorySize: props.mcpProxyMemorySize ?? 512,
-      environment: {
-        ...baseEnv,
-        UPSTREAM_URL: props.upstreamUrl,
-        PROXY_METADATA_URL: this.metadataUrl,
+    const mcpProxyFn = makeFn(
+      'McpProxyFn',
+      '<%- bundlePathsFromRoot['mcp-proxy'] %>',
+      {
+        timeout: props.mcpProxyTimeout ?? Duration.seconds(29),
+        memorySize: props.mcpProxyMemorySize ?? 512,
+        environment: {
+          ...baseEnv,
+          UPSTREAM_URL: props.upstreamUrl,
+          PROXY_METADATA_URL: this.metadataUrl,
+        },
       },
-    });
+    );
 
     this.httpApi.addRoutes({
       path: '/mcp',
