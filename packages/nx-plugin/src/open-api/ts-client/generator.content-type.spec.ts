@@ -401,4 +401,111 @@ describe('openApiTsClientGenerator - content type header', () => {
     expect(cookieHeader).toContain('session=s%3D1%3B%20path%3D%2F');
     expect(cookieHeader).toContain('preference=dark%20mode');
   });
+
+  it('should send a primitive urlencoded body verbatim and form-encode an object body', async () => {
+    const arrayResponse = {
+      '200': {
+        content: {
+          'application/json': {
+            schema: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        description: 'Success',
+      },
+    };
+    const spec: Spec = {
+      info: {
+        title,
+        version: '1.0.0',
+      },
+      openapi: '3.0.0',
+      paths: {
+        // A raw @httpPayload string body: the schema is a primitive, so the
+        // body must be sent verbatim rather than passed to $urlEncodedForm
+        // (which expects an object and would fail to type-check).
+        '/urlencoded-string': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: { type: 'string' },
+                },
+              },
+            },
+            responses: arrayResponse,
+          },
+        },
+        // An object body is still form-encoded to `key=value` pairs.
+        '/urlencoded-object': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    properties: { token: { type: 'string' } },
+                  },
+                },
+              },
+            },
+            responses: arrayResponse,
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    // The regression guard: a primitive-string urlencoded body used to be
+    // passed to $urlEncodedForm (typed for an object), so the client failed to
+    // compile.
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue(['ok']),
+    });
+
+    // The string body is sent verbatim, with the urlencoded content type kept.
+    await callGeneratedClient(
+      client,
+      mockFetch,
+      'postUrlencodedString',
+      'some-token=abc123',
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/urlencoded-string`,
+      expect.objectContaining({
+        method: 'POST',
+        body: 'some-token=abc123',
+        headers: [['Content-Type', 'application/x-www-form-urlencoded']],
+      }),
+    );
+
+    // The object body is form-encoded to `key=value` pairs.
+    await callGeneratedClient(client, mockFetch, 'postUrlencodedObject', {
+      token: 'abc 123',
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/urlencoded-object`,
+      expect.objectContaining({
+        method: 'POST',
+        body: 'token=abc+123',
+        headers: [['Content-Type', 'application/x-www-form-urlencoded']],
+      }),
+    );
+  });
 });

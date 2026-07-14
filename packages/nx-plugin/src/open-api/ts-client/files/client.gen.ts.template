@@ -49,7 +49,10 @@ const bodyMediaTypeOf = (op) => {
   return mediaTypes.find(mt => mt === 'application/json' || mt.endsWith('+json')) || mediaTypes[0];
 };
 const hasMultipartBody = allOperations.some(op => bodyMediaTypeOf(op) === 'multipart/form-data');
-const hasUrlEncodedBody = allOperations.some(op => bodyMediaTypeOf(op) === 'application/x-www-form-urlencoded');
+// A urlencoded body is form-encoded only when its schema is an object; a
+// primitive schema (e.g. a raw pre-encoded string) is sent verbatim below.
+const isUrlEncodedObjectBody = (op) => bodyMediaTypeOf(op) === 'application/x-www-form-urlencoded' && !!op.parametersBody && !op.parametersBody.isPrimitive;
+const hasUrlEncodedBody = allOperations.some(op => isUrlEncodedObjectBody(op));
 // Whether any operation uses matrix/label path styles or allowReserved query
 // params, so the extra $url serialisation logic is only emitted when needed.
 const hasStyledPathParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'path' && p.pathStyle));
@@ -751,10 +754,11 @@ export class <%- className %> {
            boundary itself (so the Content-Type header is intentionally unset
            above). */ _%>
     const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$formData(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %><% if (op.parametersBody.partContentTypes) { %>, <%- JSON.stringify(op.parametersBody.partContentTypes) %><% } %>);
-    <%_ } else if (bodyMediaTypeOf(op) === 'application/x-www-form-urlencoded') { _%>
-    <%_ /* A urlencoded body is sent as `key=value&...` pairs — the JSON
+    <%_ } else if (isUrlEncodedObjectBody(op)) { _%>
+    <%_ /* An object urlencoded body is sent as `key=value&...` pairs — the JSON
            serialisation the wire type declares would be rejected by the
-           server's form parser. */ _%>
+           server's form parser. A primitive urlencoded body (e.g. a raw
+           pre-encoded string) falls through to the String(input) branch. */ _%>
     const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$urlEncodedForm(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %>).toString();
     <%_ } else if (op.parametersBody.isPrimitive && ['number', 'boolean', 'string'].includes(op.parametersBody.type) && !['array', 'dictionary'].includes(op.parametersBody.export) && !["date", "date-time"].includes(op.parametersBody.format)) { _%>
     const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>String(input<%- op.explicitRequestBodyParameter ? `.${op.explicitRequestBodyParameter.typescriptName}` : '' %>);
