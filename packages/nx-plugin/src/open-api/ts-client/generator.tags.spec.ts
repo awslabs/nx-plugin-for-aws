@@ -143,6 +143,7 @@ describe('openApiTsClientGenerator - tags', () => {
     mockFetch.mockResolvedValue({
       status: 201,
       text: vi.fn().mockResolvedValue('newUser123'),
+      json: vi.fn().mockResolvedValue('newUser123'),
     });
 
     const newUser = await callGeneratedClient(
@@ -183,6 +184,7 @@ describe('openApiTsClientGenerator - tags', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('healthy'),
+      json: vi.fn().mockResolvedValue('healthy'),
     });
 
     const status = await callGeneratedClient(client, mockFetch, 'getStatus');

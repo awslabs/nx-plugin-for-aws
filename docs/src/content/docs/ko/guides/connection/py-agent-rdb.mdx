@@ -1,0 +1,162 @@
+---
+title: Python Agent에서 관계형 데이터베이스로
+description: Python Agent를 관계형 데이터베이스에 연결
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/py-agent">Python Agent</Link>를 <Link path="guides/py-rdb">Python 관계형 데이터베이스</Link> 프로젝트에 연결하여 에이전트 도구 내에서 데이터베이스 세션을 사용할 수 있도록 합니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/py-agent">`py#agent`</Link> 프로젝트
+2. <Link path="guides/py-rdb">`py#rdb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+Agent 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를 타겟으로 선택합니다. 프로젝트에 여러 에이전트 컴포넌트가 포함된 경우 `sourceComponent`를 지정하여 명확히 구분합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+<FileTree>
+
+- packages/my\_service
+  - project.json `my_agent-dev`에서 데이터베이스의 `dev` 타겟에 대한 종속성 추가
+  - pyproject.toml 데이터베이스 패키지를 워크스페이스 종속성으로 추가
+  - my\_service
+    - my\_agent
+      - Dockerfile 직접 Aurora 연결에 사용되는 RDS CA 번들 추가
+
+</FileTree>
+
+## 에이전트 도구에서 데이터베이스 사용
+
+데이터베이스 패키지에서 `session_context`를 가져와 에이전트 도구 내에서 사용합니다:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+async def list_examples() -> list:
+    """List all example records."""
+    async with session_context() as session:
+        return [item.model_dump() for item in (await session.execute(select(ExampleModel))).all()]
+```
+
+## 인프라
+
+생성된 에이전트 구성은 `IGrantable` 및 `IConnectable`을 구현하므로 구성에서 직접 데이터베이스에 대한 네트워크 및 IAM 액세스 권한을 부여할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom`은 에이전트 런타임이 데이터베이스 포트에 도달할 수 있도록 보안 그룹 규칙을 엽니다. `grantConnect`는 에이전트의 실행 역할에 IAM `rds-db:connect` 권한을 부여합니다.
+
+</Fragment>
+<Fragment slot="terraform">
+
+데이터베이스와 동일한 VPC 내에서 에이전트를 실행하고, `additional_iam_policy_statements`를 통해 `rds-db:connect` 권한을 부여하며, 보안 그룹 규칙 쌍으로 네트워크 경로를 엽니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "my_agent" {
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  security_group_id            = module.my_agent.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+`appconfig_application_id`/`appconfig_application_arn`은 데이터베이스 모듈이 아닌 루트 모듈에서 한 번 선언된 공유 <Link path="guides/runtime-config">런타임 구성</Link> AppConfig 애플리케이션에서 가져옵니다.
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy 없이 연결할 때의 SSL 요구 사항
+
+에이전트가 (RDS Proxy 없이) Aurora 클러스터에 직접 연결하는 경우, 연결 생성기는 생성된 에이전트 Dockerfile을 업데이트하여 Amazon RDS CA 번들을 시스템 신뢰 저장소에 설치합니다:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+RDS Proxy를 사용하는 경우 에이전트 런타임에서 RDS CA 번들을 구성할 필요가 없습니다.
+
+## 로컬 개발
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+이렇게 하면 에이전트와 연결된 모든 데이터베이스가 시작됩니다. `LOCAL_DEV=true` 환경 변수는 데이터베이스 클라이언트가 Aurora 대신 로컬 Docker 데이터베이스에 연결하도록 합니다.

@@ -1,0 +1,250 @@
+---
+title: Python 关系数据库
+description: 创建一个 Python 关系数据库项目
+generator: py#rdb
+---
+
+import { FileTree, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import Astro from '@astrojs/react';
+import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+此生成器创建一个新的 Python 关系数据库项目，由 [Amazon Aurora](https://aws.amazon.com/rds/aurora/)（PostgreSQL 或 MySQL）提供支持，使用 [SQLModel](https://sqlmodel.tiangolo.com/) 进行数据建模，使用 [Alembic](https://alembic.sqlalchemy.org/) 进行架构迁移。它生成应用程序代码和基础设施，使用 AWS CDK 或 Terraform 来配置和管理数据库，具有声明式架构定义、自动迁移部署和数据库客户端。
+
+## 用法
+
+### 生成关系数据库
+
+<RunGenerator generator="py#rdb" />
+
+### 选项
+
+<GeneratorParameters generator="py#rdb" />
+
+## 生成器输出
+
+生成器在 `<directory>/<name>` 目录中创建以下项目结构：
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py 包导出（`get_engine`、`session_context`）
+    - connection.py 带 IAM 身份验证的数据库引擎和会话工厂
+    - utils.py 运行时配置和本地开发助手
+    - migration_handler.py 在部署期间运行 Alembic 迁移的 Lambda 处理程序
+    - create_db_user_handler.py 在部署期间创建应用程序数据库用户的 Lambda 处理程序
+    - models
+      - example.py 示例 SQLModel 表定义
+  - migrations
+    - versions Alembic 生成的迁移脚本
+    - env.py Alembic 环境（连接到数据库）
+    - script.py.mako Alembic 迁移脚本模板
+  - alembic.ini Alembic 配置
+  - config.json 本地开发连接详细信息和运行时配置键
+  - Dockerfile.migration 迁移处理程序的容器镜像
+  - Dockerfile.create-db-user create-db-user 处理程序的容器镜像
+  - project.json 项目配置和构建目标
+</FileTree>
+
+本地开发脚本在所有数据库项目之间共享，并生成到 `packages/common/scripts/` 中：
+
+<FileTree>
+  - packages/common/scripts/src/rdb
+    - pull-image.ts 拉取数据库容器镜像
+    - start-container.ts 启动本地数据库容器
+    - wait-for-postgres-db.ts 等待本地数据库就绪（PostgreSQL）
+    - wait-for-mysql-db.ts 等待本地数据库就绪（MySQL）
+</FileTree>
+
+### 基础设施
+
+<Snippet name="rdb/infrastructure" />
+
+#### 架构
+
+<Snippet name="rdb/architecture" />
+
+## 本地开发
+
+### 数据建模
+
+生成的项目使用 [SQLModel](https://sqlmodel.tiangolo.com/) 来定义数据库架构。工作流程是模型优先的：在数据库项目的 `<name>/models/` 目录下添加或更新 SQLModel 表类，然后从这些模型更改生成迁移。
+
+示例模型：
+
+```python title="packages/my_db/my_db/models/example.py"
+from sqlalchemy import Column, String
+from sqlmodel import Field, SQLModel
+
+
+class ExampleModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(sa_column=Column(String(255), nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+```
+
+在 `<name>/models/__init__.py` 中导入您的模型，以便 Alembic 在自动生成期间可以发现它们。
+
+### 创建迁移
+
+添加或更新模型后，使用 Alembic 生成并应用迁移脚本。生成的 `alembic` 目标在运行之前会自动启动本地数据库容器：
+
+<NxCommands commands={['run <project>:alembic revision --autogenerate -m "describe your change"']} />
+
+这会在 `migrations/versions/` 下生成一个新的迁移脚本。在应用之前请检查生成的脚本。
+
+将迁移应用到本地数据库：
+
+<NxCommands commands={['run <project>:migrate']} />
+
+当您部署 AWS 堆栈时，生成的基础设施会自动将生成的迁移应用到已部署的数据库。
+
+### 应用现有迁移
+
+当您拉取其他开发人员创建的迁移文件时，将它们应用到本地数据库：
+
+<NxCommands commands={['run <project>:migrate']} />
+
+### 运行 Alembic 命令
+
+生成的 `alembic` 目标公开了 Alembic CLI，因此您可以对本地数据库运行任何 Alembic 命令。有关可用命令，请参阅 [Alembic 命令参考](https://alembic.sqlalchemy.org/en/latest/ops.html)。
+
+<NxCommands commands={['run <project>:alembic <alembic-command>']} />
+
+### 停止本地数据库
+
+停止 `dev`（例如使用 `Ctrl+C`）会自动删除本地数据库容器，但保留命名卷，以便您的数据在重启后保持不变。
+
+:::caution[Windows]
+由于 Windows 上信号处理的限制，当 `dev` 停止时容器不会自动删除。您需要手动删除它：
+
+```bash
+<engine> rm -f <scope>-<db-name>
+```
+
+将 `<engine>` 替换为您的容器引擎（`docker` 或 `finch`），将 `<scope>` 替换为您的 Nx 工作区作用域（例如 `proj`），将 `<db-name>` 替换为您的数据库项目名称（例如 `my-db`）。
+:::
+
+## 连接到数据库
+
+从数据库包中导入 `session_context` 并将其用作异步上下文管理器以获取 `AsyncSession`：
+
+```python
+from sqlmodel import select
+
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+async def example():
+    async with session_context() as session:
+        results = (await session.execute(select(ExampleModel))).all()
+```
+
+数据库客户端会自动：
+- 使用 `RUNTIME_CONFIG_APP_ID` 环境变量从 AWS AppConfig 检索数据库配置
+- 通过 `boto3` RDS Signer 为 IAM 身份验证生成临时身份验证令牌
+- 使用 `ssl.create_default_context()` 建立 TLS 连接
+
+## 部署数据库
+
+<Snippet name="rdb/deploying" parentHeading="Deploying your Database" />
+
+### RDS Proxy 配置
+
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy Configuration" />
+
+#### 不使用 RDS Proxy 连接时的 SSL 要求
+
+Amazon RDS CA 捆绑包必须位于运行时的系统信任存储中。
+
+##### 容器运行时
+
+<Tabs>
+<TabItem label="Amazon Linux">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
+```
+
+</TabItem>
+<TabItem label="Debian">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+</TabItem>
+</Tabs>
+
+##### Zip Lambda 函数
+
+对于 zip 部署的 Lambda 函数（例如 <Link path="guides/fastapi">`py#api` FastAPI</Link>），Amazon Linux 2023 Lambda 执行环境的内置 CA 信任存储包含 RDS 使用的 Amazon Root CA。
+
+使用 RDS Proxy 时，您无需在连接到数据库的运行时中配置 RDS CA 捆绑包。
+
+### 集群实例
+
+<Snippet name="rdb/cluster-instances" />
+
+### 无服务器容量
+
+<Snippet name="rdb/serverless-capacity" />
+
+### 引擎版本
+
+<Snippet name="rdb/engine-version" />
+
+### 删除保护
+
+<Snippet name="rdb/deletion-protection" />
+
+### 删除策略
+
+<Snippet name="rdb/removal-policy" />
+
+### 日志记录和监控
+
+<Snippet name="rdb/logging" />
+
+### 加密密钥轮换
+
+<Snippet name="rdb/encryption-key-rotation" />
+
+## 连接
+
+使用 <Link path="guides/connection">`connection`</Link> 生成器将此项目与工作区中的其他项目集成。以下连接涉及此项目：
+
+<CardGrid>
+  <ConnectionCard
+    title="Python Agent to Relational Database"
+    description="将 Python Agent 连接到 Aurora 关系数据库"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-rdb`}
+    source="strands"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="FastAPI to Relational Database"
+    description="将 FastAPI 连接到 Aurora 关系数据库"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-rdb`}
+    source="fastapi"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="Python MCP Server to Relational Database"
+    description="将 Python MCP Server 连接到 Aurora 关系数据库"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-mcp-server-rdb`}
+    source="mcp"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+</CardGrid>

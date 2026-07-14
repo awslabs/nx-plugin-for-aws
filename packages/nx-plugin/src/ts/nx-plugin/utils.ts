@@ -11,6 +11,7 @@ import {
   writeJson,
 } from '@nx/devkit';
 import PackageJson from '../../../package.json' with { type: 'json' };
+import { isEsmWorkspace } from '../../utils/module-format';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { withVersions } from '../../utils/versions';
 
@@ -46,11 +47,13 @@ export const configureTsProjectAsNxPlugin = (
       name: project.name,
     });
   }
+  const esm = isEsmWorkspace(tree);
   updateJson(tree, pluginPackageJsonPath, (pkg) => {
-    // Mark the plugin as ESM so Nx loads its `.ts` generators as ES modules via
-    // Node's native type stripping (the workspace root is also `type: module`).
-    pkg.type ??= 'module';
-    pkg.main ??= './src/index.js';
+    // Match the plugin's module system to the workspace. Nx loads `.ts`
+    // generators via Node's native type stripping, as ESM (workspace root is
+    // `type: module`) or CommonJS accordingly.
+    pkg.type ??= esm ? 'module' : 'commonjs';
+    pkg.main ??= esm ? './src/index.js' : './src/index';
     pkg.generators ??= './generators.json';
     return pkg;
   });

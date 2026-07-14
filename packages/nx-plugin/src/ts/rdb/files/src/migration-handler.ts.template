@@ -1,43 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-<%_ if (engine === 'mysql') { _%>
-import { getDatabaseSecret, withConnectionRetry } from './utils.js';
-<%_ } else { _%>
-import { Signer } from '@aws-sdk/rds-signer';
-import { withConnectionRetry } from './utils.js';
-<%_ } _%>
+import { getDatabaseSecret, withConnectionRetry } from './utils<% if (esm) { %>.js<% } %>';
 
 const buildDatabaseUrl = async (): Promise<string> => {
-<%_ if (engine === 'mysql') { _%>
   const { host, port, dbname, username, password } = await getDatabaseSecret();
 
   return (
-    `mysql://${encodeURIComponent(username)}` +
+    `<%= engine === 'mysql' ? 'mysql' : 'postgresql' %>://${encodeURIComponent(username)}` +
     `:${encodeURIComponent(password)}` +
     `@${host}:${port}/${dbname}` +
     `?sslaccept=strict`
   );
-<%_ } else { _%>
-  const hostname = process.env.HOSTNAME!;
-  const port = process.env.PORT!;
-  const database = process.env.DATABASE!;
-  const dbUser = process.env.DBUSER!;
-  const region = process.env.AWS_REGION!;
-
-  const iamAuthToken = await new Signer({
-    hostname,
-    port: Number(port),
-    region,
-    username: dbUser,
-  }).getAuthToken();
-
-  return (
-    `postgresql://${encodeURIComponent(dbUser)}` +
-    `:${encodeURIComponent(iamAuthToken)}` +
-    `@${hostname}:${port}/${database}` +
-    `?sslaccept=strict` // `sslaccept` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq `sslmode` option.
-  );
-<%_ } _%>
 };
 
 export const handler = async () => {

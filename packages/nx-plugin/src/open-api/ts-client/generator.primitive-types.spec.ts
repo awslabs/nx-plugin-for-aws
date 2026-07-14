@@ -360,6 +360,7 @@ describe('openApiTsClientGenerator - primitive types', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('accepted'),
+      json: vi.fn().mockResolvedValue('accepted'),
     });
 
     expect(
@@ -588,6 +589,7 @@ describe('openApiTsClientGenerator - primitive types', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('2023-01-01'),
+      json: vi.fn().mockResolvedValue('2023-01-01'),
     });
     expect(
       await callGeneratedClient(

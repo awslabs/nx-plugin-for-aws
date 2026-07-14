@@ -2,8 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import camelCase from 'lodash.camelcase';
+import lodashCamelCase from 'lodash.camelcase';
 import deburr from 'lodash.deburr';
+
+/**
+ * camelCase that first transliterates accents and strips any character that is
+ * not a valid identifier character, so inputs like `getFoo≠Bar` or `café` yield
+ * valid JS/TS identifiers rather than leaking the raw symbol into generated code.
+ */
+export const camelCase = (str: string): string =>
+  lodashCamelCase(deburr(str ?? '').replace(/[^a-zA-Z0-9]+/g, ' '));
 
 export const toClassName = (str?: string): string => {
   if (!str) {

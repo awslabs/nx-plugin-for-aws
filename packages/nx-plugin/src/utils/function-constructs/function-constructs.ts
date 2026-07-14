@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Iac } from '../iac';
+import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
@@ -88,6 +89,7 @@ const addLambdaFunctionCdkConstructs = async (
     {
       ...options,
       runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_14' : 'NODEJS_LATEST'}`,
+      ...esmVars(tree),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

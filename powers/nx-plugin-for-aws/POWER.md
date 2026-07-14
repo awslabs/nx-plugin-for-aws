@@ -144,6 +144,7 @@ Add capabilities to existing projects:
 | `ts#rdb`             | Create a relational database project                                                                               |
 | `ts#dynamodb`        | Create a TypeScript DynamoDB project                                                                               |
 | `py#dynamodb`        | Create a Python DynamoDB project                                                                                   |
+| `py#rdb`             | Create a Python relational database project                                                                        |
 
 ## Best Practices
 

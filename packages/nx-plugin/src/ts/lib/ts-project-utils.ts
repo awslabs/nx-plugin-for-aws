@@ -5,6 +5,7 @@
 import { joinPathFragments, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config';
+import { isEsmWorkspace } from '../../utils/module-format';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { configureBiomeLint } from './biome';
 import type { ConfigureProjectOptions } from './types';
@@ -41,7 +42,12 @@ export const configureTsProject = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
-  // Remove conflicting commonjs module from tsconfig
+  // When the caller doesn't specify a module format, infer it from the
+  // workspace root package.json (defaulting to ESM for a fresh workspace).
+  const esm = options.esm ?? isEsmWorkspace(tree);
+
+  // Remove a conflicting `module: commonjs` from the project tsconfig.json
+  // (CommonJS is configured on tsconfig.lib.json below when needed).
   updateJson(tree, join(options.dir, 'tsconfig.json'), (tsConfig) => ({
     ...tsConfig,
     compilerOptions: {
@@ -67,6 +73,11 @@ export const configureTsProject = async (
         rootDir: '.',
         outDir: distDir,
         tsBuildInfoFile: join(distDir, 'tsconfig.lib.tsbuildinfo'),
+        // @nx/js configures the lib for ESM (module `nodenext`). CommonJS
+        // projects use `node16`, which honours the workspace's
+        // `type: commonjs`, emits CommonJS and resolves extensionless relative
+        // imports. (Plain `commonjs`/`node` is deprecated in TypeScript 6.)
+        ...(esm ? {} : { module: 'node16', moduleResolution: 'node16' }),
       },
     }));
   }
@@ -101,10 +112,12 @@ export const configureTsProject = async (
       ]),
     }));
   }
-  // Update the root package.json
+  // Update the root package.json. ESM projects require `type: module`; for
+  // CommonJS we write an explicit `type: commonjs` marker (which Node treats
+  // identically to an absent `type`).
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
-    type: 'module',
+    type: esm ? 'module' : 'commonjs',
   }));
   // Remove package.json if it exists
   if (tree.exists(join(options.dir, 'package.json'))) {

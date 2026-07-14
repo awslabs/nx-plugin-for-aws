@@ -3,7 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as devkit from '@nx/devkit';
-import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  type Tree,
+  updateJson,
+  writeJson,
+} from '@nx/devkit';
 import { vi } from 'vitest';
 import {
   ensureAwsNxPluginConfig,
@@ -39,12 +44,6 @@ describe('ts#mcp-server generator', () => {
 
     // Create tsconfig.json for the project
     writeJson(tree, 'apps/test-project/tsconfig.json', {});
-
-    // Create a basic package.json for the project
-    writeJson(tree, 'apps/test-project/package.json', {
-      name: 'test-project',
-      version: '1.0.0',
-    });
   });
 
   it('should add MCP server to existing TypeScript project with default name', async () => {
@@ -73,14 +72,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
     ).toBeFalsy();
 
-    // Check that package.json was updated with bin entry
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.bin).toBeDefined();
-    expect(packageJson.bin['test-project-mcp-server']).toBe(
-      './src/mcp-server/stdio.js',
-    );
+    // The generator should not vend a nested project package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
@@ -156,13 +149,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/custom-server/http.ts'),
     ).toBeTruthy();
 
-    // Check that package.json was updated with custom bin entry
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.bin['custom-server']).toBe(
-      './src/custom-server/stdio.js',
-    );
+    // The generator should not vend a nested project package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
 
     // Check that project configuration was updated with custom serve target
     const projectConfig = JSON.parse(
@@ -185,12 +173,8 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should handle ESM projects correctly', async () => {
-    // Update package.json to be ESM
-    writeJson(tree, 'apps/test-project/package.json', {
-      name: 'test-project',
-      version: '1.0.0',
-      type: 'module',
-    });
+    // The module system is derived from the workspace root package.json
+    updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'module' }));
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
@@ -213,7 +197,9 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should handle CommonJS projects correctly', async () => {
-    // package.json without type: 'module' defaults to CommonJS
+    // A CommonJS workspace is marked with an explicit type: 'commonjs'
+    updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'commonjs' }));
+
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'cjs-server',
@@ -235,10 +221,7 @@ describe('ts#mcp-server generator', () => {
     expect(indexContent).not.toContain('server.js');
   });
 
-  it('should create package.json if it does not exist', async () => {
-    // Remove the package.json
-    tree.delete('apps/test-project/package.json');
-
+  it('should not create a nested project package.json', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'new-server',
@@ -246,18 +229,12 @@ describe('ts#mcp-server generator', () => {
       iac: 'cdk',
     });
 
-    // Check that package.json was created
-    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
-
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.name).toBe('test-project');
-    expect(packageJson.type).toBe('module'); // Default to ESM
-    expect(packageJson.bin['new-server']).toBe('./src/new-server/stdio.js');
+    // The generator relies on the workspace root package.json rather than
+    // vending a nested one for the project
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
   });
 
-  it('should add dependencies to both root and project package.json', async () => {
+  it('should add dependencies to the workspace root package.json', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
@@ -277,20 +254,8 @@ describe('ts#mcp-server generator', () => {
       rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
 
-    // Check project package.json dependencies
-    const projectPackageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(
-      projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
-    ).toBeDefined();
-    expect(projectPackageJson.dependencies['zod']).toBeDefined();
-    expect(projectPackageJson.dependencies['express']).toBeDefined();
-    expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
-    expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
-    expect(
-      projectPackageJson.devDependencies['@modelcontextprotocol/inspector'],
-    ).toBeDefined();
+    // No nested project package.json should be created
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
   });
 
   it('should handle project without sourceRoot', async () => {
@@ -337,10 +302,11 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/my-special-server/index.ts'),
     ).toBeTruthy();
 
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
+    const serverContent = tree.read(
+      'apps/test-project/src/my-special-server/server.ts',
+      'utf-8',
     );
-    expect(packageJson.bin['my-special-server']).toBeDefined();
+    expect(serverContent).toContain("name: 'my-special-server'");
   });
 
   it('should throw error for non-TypeScript project', async () => {
@@ -386,10 +352,11 @@ describe('ts#mcp-server generator', () => {
       tree.exists('libs/nested-project/src/mcp-server/index.ts'),
     ).toBeTruthy();
 
-    const packageJson = JSON.parse(
-      tree.read('libs/nested-project/package.json', 'utf-8'),
+    const serverContent = tree.read(
+      'libs/nested-project/src/mcp-server/server.ts',
+      'utf-8',
     );
-    expect(packageJson.bin['nested-project-mcp-server']).toBeDefined();
+    expect(serverContent).toContain("name: 'nested-project-mcp-server'");
   });
 
   it('should match snapshot for generated files', async () => {
@@ -422,10 +389,6 @@ describe('ts#mcp-server generator', () => {
     expect(serverContent).toMatchSnapshot('mcp-server-server.ts');
     expect(stdioContent).toMatchSnapshot('mcp-server-stdio.ts');
     expect(httpContent).toMatchSnapshot('mcp-server-http.ts');
-
-    // Snapshot the updated package.json
-    const packageJson = tree.read('apps/test-project/package.json', 'utf-8');
-    expect(packageJson).toMatchSnapshot('updated-package.json');
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
@@ -454,14 +417,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
     ).toBeTruthy();
 
-    // Check that package.json was updated with bin entry
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.bin).toBeDefined();
-    expect(packageJson.bin['test-project-mcp-server']).toBe(
-      './src/mcp-server/stdio.js',
-    );
+    // The generator should not vend a nested project package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
 
     // Check that project configuration was updated with serve targets
     const projectConfig = JSON.parse(
@@ -524,13 +481,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/custom-bedrock-server/Dockerfile'),
     ).toBeTruthy();
 
-    // Check that package.json was updated with custom bin entry
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.bin['custom-bedrock-server']).toBe(
-      './src/custom-bedrock-server/stdio.js',
-    );
+    // The generator should not vend a nested project package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
 
     // Check that project configuration was updated with custom serve targets
     const projectConfig = JSON.parse(
@@ -567,23 +519,12 @@ describe('ts#mcp-server generator', () => {
 
     // Additional dependencies for BedrockAgentCoreRuntime
     expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
-
-    // Check project package.json dependencies
-    const projectPackageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
     expect(
-      projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
+      rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
-    expect(projectPackageJson.dependencies['zod']).toBeDefined();
-    expect(projectPackageJson.dependencies['express']).toBeDefined();
-    expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
-    expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
 
-    // rolldown is only added to root package.json, not project package.json
-    expect(
-      projectPackageJson.devDependencies['@modelcontextprotocol/inspector'],
-    ).toBeDefined();
+    // No nested project package.json should be created
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
   });
 
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {
@@ -974,14 +915,13 @@ describe('ts#mcp-server generator', () => {
       '../../dist/apps/test-project/bundle/mcp/second-server/index.js',
     );
 
-    // Check both package.json bin entries exist
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.bin['first-server']).toBe('./src/first-server/stdio.js');
-    expect(packageJson.bin['second-server']).toBe(
-      './src/second-server/stdio.js',
-    );
+    // Both server directories should be generated
+    expect(
+      tree.exists('apps/test-project/src/first-server/server.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/second-server/server.ts'),
+    ).toBeTruthy();
 
     // Check both CDK constructs exist
     expect(
@@ -1142,13 +1082,8 @@ describe('ts#mcp-server generator', () => {
     );
     expect(serverContent).toContain("name: 'test-project-mcp-server'");
 
-    // Check that package.json was updated with default bin entry
-    const packageJson = JSON.parse(
-      tree.read('apps/test-project/package.json', 'utf-8'),
-    );
-    expect(packageJson.bin['test-project-mcp-server']).toBe(
-      './src/mcp-server/stdio.js',
-    );
+    // The generator should not vend a nested project package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
 
     // Check that project configuration was updated with default serve targets
     const projectConfig = JSON.parse(

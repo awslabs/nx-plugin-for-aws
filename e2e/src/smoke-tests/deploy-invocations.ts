@@ -244,16 +244,20 @@ export async function invokeAgentCoreAgUi(
       }),
     });
 
-    if (response.status !== 200 && attempt < maxAttempts) {
-      const body = await response.text().catch(() => '');
+    // A RUN_ERROR event arrives in a 200 stream, so check the body as well as
+    // the status — transient failures (e.g. a dropped MCP connection mid-run)
+    // surface there rather than as a non-200.
+    const body = await response.text().catch(() => '');
+    if (
+      (response.status !== 200 || body.includes('RUN_ERROR')) &&
+      attempt < maxAttempts
+    ) {
       console.log(
         `${agentName} attempt ${attempt}/${maxAttempts} returned ${response.status}; retrying in 15s. Body: ${body.slice(0, 500)}`,
       );
       await new Promise((resolve) => setTimeout(resolve, 15_000));
       continue;
     }
-
-    const body = await response.text();
     console.log(
       `${agentName} (AG-UI) response status:`,
       response.status,

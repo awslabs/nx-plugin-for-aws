@@ -20,6 +20,7 @@ import { resolveContainers } from '../../utils/containers';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase } from '../../utils/names';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import {
@@ -117,6 +118,7 @@ export async function tsInfraGenerator(
       dir: lib.dir,
       stageConfig,
       ...schema,
+      ...esmVars(tree),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -166,7 +168,7 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk deploy --require-approval=never --express',
+              command: 'cdk deploy --require-approval=never',
             }),
       };
       config.targets['deploy-ci'] = {

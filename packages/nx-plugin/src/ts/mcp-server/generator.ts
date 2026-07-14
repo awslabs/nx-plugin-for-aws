@@ -13,7 +13,6 @@ import {
   type Tree,
   updateJson,
   updateProjectConfiguration,
-  writeJson,
 } from '@nx/devkit';
 import { ensureLicenseExceptions } from '../../license/config';
 import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
@@ -25,6 +24,7 @@ import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { isEsmWorkspace } from '../../utils/module-format';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
@@ -82,32 +82,17 @@ export const tsMcpServerGenerator = async (
 
   const auth = options.auth ?? 'iam';
 
-  // Create a package.json if one doesn't exist, since we want to add the server as a bin target
   const projectPackageJsonPath = joinPathFragments(
     project.root,
     'package.json',
   );
-  if (!tree.exists(projectPackageJsonPath)) {
-    // Default to esm if no package.json found
-    writeJson(tree, projectPackageJsonPath, {
-      name: project.name,
-      type: 'module',
-    });
-  }
 
-  // Generate esm if the package.json is of type module, otherwise we generate commonjs
-  // We support commonjs here because nx plugins must be commonjs
-  // https://github.com/nrwl/nx/issues/15682
-  const esm = readJson(tree, projectPackageJsonPath).type === 'module';
-
-  // Add a target for running the MCP server with stdio transport
-  // This allows for the project to be published to npm and then configured with npx, ie:
-  // npx -p my-package mcp-server
-  updateJson(tree, projectPackageJsonPath, (pkg) => {
-    pkg.bin ??= {};
-    pkg.bin[name] = `${relativeSourceDir}/stdio.js`;
-    return pkg;
-  });
+  // Generate esm if the module system is esm, otherwise commonjs. Projects
+  // don't typically have their own package.json (dependencies are declared in
+  // the workspace root), so fall back to the workspace format when absent.
+  const esm = tree.exists(projectPackageJsonPath)
+    ? readJson(tree, projectPackageJsonPath).type === 'module'
+    : isEsmWorkspace(tree);
 
   // Generate example server
   generateFiles(
@@ -200,7 +185,11 @@ export const tsMcpServerGenerator = async (
   }
 
   addDependenciesToPackageJson(tree, deps, devDeps);
-  addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
+  // Add to the project's package.json too if it has one (e.g. nx plugins),
+  // otherwise dependencies live in the workspace root only.
+  if (tree.exists(projectPackageJsonPath)) {
+    addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
+  }
 
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
   // (^3.25 || ^4.0). Yarn does not dedupe the peer to the workspace's pinned zod, so

@@ -14,6 +14,7 @@ import {
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
@@ -117,6 +118,7 @@ export const tsNxPluginGenerator = async (
     mcpPath,
     {
       name: fullyQualifiedName,
+      ...esmVars(tree),
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );

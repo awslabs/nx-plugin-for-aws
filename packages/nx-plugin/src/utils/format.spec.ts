@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Tree } from '@nx/devkit';
+import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -16,6 +16,36 @@ describe('format utils', () => {
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
+
+  /**
+   * Register a Python project with the given module name, mirroring what the
+   * py#project generator writes: an Nx project plus a pyproject.toml declaring
+   * the importable module in [tool.hatch.build.targets.wheel].packages and an
+   * optional [tool.ruff] line-length.
+   */
+  const addFirstPartyPythonProject = (
+    name: string,
+    moduleName: string,
+    lineLength?: number,
+  ) => {
+    const root = `packages/${name}`;
+    addProjectConfiguration(tree, `proj.${name}`, { root });
+    tree.write(
+      `${root}/pyproject.toml`,
+      [
+        '[tool.hatch.build.targets.wheel]',
+        `packages = [ "${moduleName}" ]`,
+        '',
+        ...(lineLength !== undefined
+          ? ['[tool.ruff]', `line-length = ${lineLength}`, '']
+          : []),
+        '[project]',
+        `name = "proj-${name}"`,
+        '',
+      ].join('\n'),
+    );
+    tree.write(`${root}/${moduleName}/__init__.py`, '');
+  };
   describe('formatFilesInSubtree', () => {
     it('should format files in the given directory', async () => {
       // Setup
@@ -119,6 +149,124 @@ describe('format utils', () => {
           '__all__ = ["beta", "alpha"]',
           '',
         ].join('\n'),
+      );
+    });
+    it('should group a workspace package as first-party even when its module is not on disk', async () => {
+      // During generation the project's module lives only in the tree, so ruff
+      // cannot detect it as first-party from the filesystem. The formatter reads
+      // the project's module name from its pyproject.toml and passes
+      // known-first-party so the project's own imports sort into their own
+      // group, matching what the on-disk build enforces (I001).
+      addFirstPartyPythonProject('my_lib', 'my_lib');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'import os',
+          'import boto3',
+          'from my_lib.core import helper',
+          '',
+          'x = os, boto3, helper',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - stdlib, third-party and first-party each in their own group
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [
+          'import os',
+          '',
+          'import boto3',
+          '',
+          'from my_lib.core import helper',
+          '',
+          'x = os, boto3, helper',
+          '',
+        ].join('\n'),
+      );
+    });
+    it('should treat a sibling workspace project as third-party, matching the on-disk build', async () => {
+      // On disk ruff runs per-project, so a sibling workspace package is
+      // third-party to the importing project (only the owning project's module
+      // is first-party). Scoping known-first-party to the owning project keeps
+      // in-tree formatting consistent with the build (which would otherwise
+      // fail with I001 on a spurious blank line).
+      addFirstPartyPythonProject('other_lib', 'other_lib');
+      addFirstPartyPythonProject('my_lib', 'my_lib');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'import boto3',
+          'from my_lib.core import helper',
+          'from other_lib import thing',
+          '',
+          'x = boto3, helper, thing',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - boto3 and the sibling other_lib share the third-party group;
+      // only my_lib (the owning project) is its own first-party group.
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [
+          'import boto3',
+          'from other_lib import thing',
+          '',
+          'from my_lib.core import helper',
+          '',
+          'x = boto3, helper, thing',
+          '',
+        ].join('\n'),
+      );
+    });
+    it('should not treat installed packages under .venv or node_modules as first-party', async () => {
+      // Installed third-party packages are not Nx projects, so enumerating
+      // first-party modules via the project graph never picks them up — no
+      // ignore list required.
+      tree.write('.venv/lib/boto3/__init__.py', '');
+      tree.write('node_modules/some_pkg/__init__.py', '');
+      addFirstPartyPythonProject('my_lib', 'my_lib');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'import boto3',
+          'from my_lib.core import helper',
+          '',
+          'x = boto3, helper',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - boto3 stays third-party (own group), my_lib first-party
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [
+          'import boto3',
+          '',
+          'from my_lib.core import helper',
+          '',
+          'x = boto3, helper',
+          '',
+        ].join('\n'),
+      );
+    });
+    it("should apply the owning project's line-length when its config is not on disk", async () => {
+      // The project's [tool.ruff] line-length lives only in the tree during
+      // generation, so ruff would otherwise wrap at its default of 88 and
+      // produce output the on-disk build (line-length 120) reformats.
+      addFirstPartyPythonProject('my_lib', 'my_lib', 120);
+      const line =
+        'def compute(first_value, second_value, third_value, fourth_value, fifth_value, sixth_val):';
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [line, '    return first_value', ''].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - the 90-char signature stays on one line at line-length 120
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        [line, '    return first_value', ''].join('\n'),
       );
     });
     it('should format json and css files', async () => {

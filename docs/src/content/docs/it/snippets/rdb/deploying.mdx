@@ -1,0 +1,107 @@
+---
+title: Distribuzione del Database Relazionale
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+Il generatore di database relazionali crea un'infrastruttura CDK o Terraform in base al `iacProvider` selezionato.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Il costrutto CDK viene creato in `common/constructs`. Esempio di utilizzo:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Questo effettua il provisioning di un cluster Aurora con RDS Proxy, credenziali amministrative, utente del database dell'applicazione, registrazione della configurazione runtime e gestore delle migrazioni.
+
+L'infrastruttura generata crea due utenti del database:
+- **Utente amministratore** - Creato durante il provisioning del cluster con credenziali archiviate in AWS Secrets Manager
+- **Utente applicazione** - Creato tramite una risorsa personalizzata Lambda con autenticazione IAM abilitata e privilegi DML (SELECT, INSERT, UPDATE, DELETE) sul database dell'applicazione
+</Fragment>
+<Fragment slot="terraform">
+Il modulo Terraform viene creato in `common/terraform`. Esempio di utilizzo:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Questo effettua il provisioning di un cluster Aurora con RDS Proxy, credenziali amministrative, Lambda create-db-user, registrazione della configurazione runtime, Lambda di migrazione e risorse del registro dei container.
+
+L'infrastruttura generata crea due utenti del database:
+- **Utente amministratore** - Creato durante il provisioning del cluster con credenziali archiviate in AWS Secrets Manager
+- **Utente applicazione** - Creato tramite una funzione Lambda con autenticazione IAM abilitata e privilegi DML (SELECT, INSERT, UPDATE, DELETE) sul database dell'applicazione
+</Fragment>
+</Infrastructure>
+
+L'utente applicazione viene creato automaticamente con un nome casuale e autenticazione IAM. Il client del database generato è già configurato per autenticarsi come questo utente utilizzando token RDS a breve durata, quindi il codice dell'applicazione non gestisce mai le password del database.
+
+Il tuo VPC dovrebbe includere subnet pubbliche, subnet private con egress e subnet private isolate. Il database può essere eseguito in subnet private isolate, mentre le funzioni Lambda dell'applicazione dovrebbero essere eseguite in subnet private con egress in modo che possano raggiungere i servizi AWS come AppConfig.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+Utilizza il generatore <Link path="guides/connection">`connection`</Link> per connettere un progetto a questo database — consulta la guida alla connessione per il tipo di calcolo pertinente (ad esempio FastAPI, server MCP, agente) per il cablaggio dell'infrastruttura necessario per raggiungerlo.

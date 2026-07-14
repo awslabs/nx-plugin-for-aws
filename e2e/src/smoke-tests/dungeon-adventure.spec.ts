@@ -396,10 +396,13 @@ describe('smoke test - dungeon-adventure', () => {
       ...opts,
       prefixWithPackageManagerCmd: false,
     });
-    await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
-      { ...opts, prefixWithPackageManagerCmd: false },
-    );
+    // Skip intermediate build to reduce test time on Windows
+    if (process.platform !== 'win32') {
+      await runCLI(
+        `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
+        { ...opts, prefixWithPackageManagerCmd: false },
+      );
+    }
 
     // Module 3: Story Agent
 
@@ -424,10 +427,13 @@ describe('smoke test - dungeon-adventure', () => {
       ...opts,
       prefixWithPackageManagerCmd: false,
     });
-    await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
-      { ...opts, prefixWithPackageManagerCmd: false },
-    );
+    // Skip intermediate build to reduce test time on Windows
+    if (process.platform !== 'win32') {
+      await runCLI(
+        `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
+        { ...opts, prefixWithPackageManagerCmd: false },
+      );
+    }
 
     // Module 4: UI
 

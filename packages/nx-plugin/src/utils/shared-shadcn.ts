@@ -13,6 +13,7 @@ import {
 import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { formatFilesInSubtree } from './format';
+import { esmVars } from './module-format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { ensurePnpmIgnoresWorkspaceRootCheck } from './pnpm-workspace';
 import {
@@ -55,6 +56,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
       shadcnSrcRoot,
       {
         scopeAlias,
+        ...esmVars(tree),
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,

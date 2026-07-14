@@ -74,8 +74,40 @@ The generated construct creates the following AWS resources:
 - An `AgentCore::Gateway` configured for the MCP protocol with `GatewayAuthorizer.usingAwsIam()` (inbound IAM authentication)
 - An `AgentCore::PolicyEngine` running in `ENFORCE` mode, attached to the Gateway (omitted when `cedarPolicy: false`)
 - One `AgentCore::Policy` per `.cedar` file in `policies/`
+- An AWS WAFv2 Web ACL associated with the Gateway, with request logging to CloudWatch (enabled by default — see <a href="#aws-waf">AWS WAF</a>)
 
 The Gateway URL is automatically registered in the `agentcore.gateways.<ClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> so agents can discover it at runtime.
+
+#### Architecture
+
+The deployed Gateway has the following architecture, with an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL in front of the Gateway, which routes on to its downstream MCP server targets:
+
+```d2 inline=true
+direction: right
+
+client: Client {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/client.svg
+}
+
+waf: WAF {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/waf.svg
+}
+
+gateway: AgentCore Gateway\n(MCP, IAM auth) {
+  shape: image
+  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore-gateway.svg
+}
+
+targets: Downstream MCP Servers\n(Gateway targets) {
+  shape: rectangle
+}
+
+client -> waf
+waf -> gateway
+gateway -> targets
+```
 
 ## Writing Policies
 
@@ -233,6 +265,78 @@ The generator adds a `dev` target to the Gateway project, which runs `local-dev.
 <NxCommands commands={["dev <name>"]} />
 
 See the connection guide for the full local development story.
+
+## Deploying your AgentCore Gateway
+
+The AgentCore Gateway generator creates CDK or Terraform infrastructure as code based on your selected `iacProvider`. You can use this to deploy your Gateway.
+
+<Infrastructure>
+<Fragment slot="cdk">
+The CDK construct for deploying your Gateway lives in the `common/constructs` folder. You can consume this in a CDK application, for example:
+
+```ts {7} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyGateway(this, 'MyGateway');
+  }
+}
+```
+
+This sets up your Gateway infrastructure, including the `AgentCore::Gateway`, its Cedar `PolicyEngine`, and the AWS WAF Web ACL (see [AWS WAF](#aws-waf) below). Register MCP server targets with `gateway.addMcpServer(...)` — see the <Link path="guides/connection/agentcore-gateway-mcp">MCP server connection guide</Link>.
+</Fragment>
+<Fragment slot="terraform">
+The Terraform module for deploying your Gateway is in the `common/terraform` folder. You can use this in a Terraform configuration, for example:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+}
+```
+
+This sets up your Gateway infrastructure, including the `aws_bedrockagentcore_gateway`, its Cedar policy engine, and the AWS WAF Web ACL (see [AWS WAF](#aws-waf) below). Register MCP server targets with an `aws_bedrockagentcore_gateway_target` resource — see the <Link path="guides/connection/agentcore-gateway-mcp">MCP server connection guide</Link>.
+</Fragment>
+</Infrastructure>
+
+### AWS WAF
+
+By default, the generated construct associates an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL with the Gateway. AWS WAF inspects every inbound request inline _before_ it reaches a target, protecting your Gateway from web exploits, bot traffic, and volumetric attacks. The Web ACL uses the AWS managed default ruleset ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) and [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), providing protection against common web exploits including the OWASP Top 10. WAF request logs are written to a CloudWatch Logs group.
+
+The Web ACL is `REGIONAL` and created in the Gateway's region, as required for AgentCore Gateway associations.
+
+:::caution[SizeRestrictions_BODY deviation from defaults]
+The `SizeRestrictions_BODY` rule from `AWSManagedRulesCommonRuleSet` is overridden to `Count` rather than `Block`, since the rule's 8 KB limit is too restrictive for typical MCP tool payloads. Oversized requests will still be recorded as metrics so you can monitor them. See the [AWS WAF body size limits](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) guide for more details.
+:::
+
+You can edit the generated Gateway construct to add, remove, or adjust rules (for example, to add [rate-based rules](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) or additional managed rule groups).
+
+<Infrastructure>
+<Fragment slot="cdk">
+To opt out (for example, to attach your own Web ACL), set `enableWaf` to `false` when you instantiate the Gateway construct:
+
+```ts {2}
+new MyGateway(this, 'MyGateway', {
+  enableWaf: false,
+});
+```
+
+The construct exposes the created Web ACL as `webAcl` for further configuration.
+</Fragment>
+<Fragment slot="terraform">
+To opt out (for example, to attach your own Web ACL), set `enable_waf` to `false` on the Gateway module:
+
+```hcl {2}
+module "my_gateway" {
+  enable_waf = false
+}
+```
+
+The module outputs the created Web ACL ARN as `waf_web_acl_arn` for further configuration.
+</Fragment>
+</Infrastructure>
 
 ## Connections
 

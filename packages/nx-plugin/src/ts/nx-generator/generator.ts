@@ -17,6 +17,7 @@ import { addStarExport, applyGritQL } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import {
   addComponentGeneratorMetadata,
@@ -64,6 +65,7 @@ export const tsNxGeneratorGenerator = async (
     pathToProjectSourceRoot: getRelativePathToRootByDirectory(generatorSubDir),
     generatorDir,
     generatorSubDir,
+    ...esmVars(tree),
   };
 
   // Add the common files, preserving any the user has already implemented
@@ -141,7 +143,8 @@ export const tsNxGeneratorGenerator = async (
 
     const indexPath = joinPathFragments(sourceRoot, 'index.ts');
     if (tree.exists(indexPath)) {
-      // NodeNext requires explicit extensions; the local plugin is ESM.
+      // ESM projects require the explicit `.js` extension; `addStarExport`
+      // strips it for CommonJS workspaces.
       await addStarExport(tree, indexPath, `./${generatorSubDir}/generator.js`);
     }
 

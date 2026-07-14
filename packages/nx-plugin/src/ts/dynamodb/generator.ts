@@ -19,6 +19,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScope } from '../../utils/npm-scope';
 import {
@@ -89,6 +90,7 @@ export const tsDynamoDBGenerator = async (
     localTableName,
     containerName,
     containerEngine,
+    ...esmVars(tree),
   };
 
   generateFiles(

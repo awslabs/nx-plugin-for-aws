@@ -1,0 +1,178 @@
+---
+title: Python Agent to Relational Database
+description: Connect a Python Agent to a Relational Database
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator wires a <Link path="guides/py-agent">Python Agent</Link> to a <Link path="guides/py-rdb">Python Relational Database</Link> project, making the database session available inside your agent tools.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/py-agent">`py#agent`</Link> project
+2. A <Link path="guides/py-rdb">`py#rdb`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your Agent project as the source and your relational database project as the target. If the project contains multiple agent components, specify `sourceComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+<FileTree>
+
+- packages/my\_service
+  - project.json Adds a dependency from `my_agent-dev` on the database's `dev` target
+  - pyproject.toml Adds the database package as a workspace dependency
+  - my\_service
+    - my\_agent
+      - Dockerfile Adds the RDS CA bundle used for direct Aurora connections
+
+</FileTree>
+
+## Using the Database in Agent Tools
+
+Import `session_context` from your database package and use it inside your agent tools:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+async def list_examples() -> list:
+    """List all example records."""
+    async with session_context() as session:
+        return [item.model_dump() for item in (await session.execute(select(ExampleModel))).all()]
+```
+
+## Infrastructure
+
+The generated agent construct implements `IGrantable` and `IConnectable`, so you can grant network and IAM access to the database directly on the construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
+  }),
+});
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` opens the security group rule so the agent runtime can reach the database port. `grantConnect` grants IAM `rds-db:connect` permission to the agent's execution role.
+
+
+</Fragment>
+<Fragment slot="terraform">
+
+Run the agent inside the same VPC as the database, grant it `rds-db:connect` via `additional_iam_policy_statements`, and open the network path with a pair of security group rules. The `aws_vpc.main` and `aws_subnet` resources are defined in the database deployment guide:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
+}
+
+module "my_agent" {
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  description                  = "Allow the agent runtime to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  description                  = "Allow outbound traffic from the agent runtime to the database"
+  security_group_id            = module.my_agent.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+`appconfig_application_id`/`appconfig_application_arn` come from the shared <Link path="guides/runtime-config">runtime configuration</Link> AppConfig application declared once in your root module, not from the database module. Include the `database` namespace when instantiating it so the database module's runtime configuration entry is deployed:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### SSL Requirements When Connecting Without RDS Proxy
+
+When the agent connects directly to the Aurora cluster (without RDS Proxy), the connection generator updates the generated agent Dockerfile to install the Amazon RDS CA bundle into the system trust store:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+When using RDS Proxy, you do not need to configure the RDS CA bundle in the agent runtime.
+
+## Local Development
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+This starts the agent and all connected databases. The `LOCAL_DEV=true` environment variable causes the database client to connect to its local Docker database instead of Aurora.

@@ -3,7 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { joinPathFragments, readJson, type Tree, writeJson } from '@nx/devkit';
+import {
+  joinPathFragments,
+  readJson,
+  type Tree,
+  updateJson,
+  writeJson,
+} from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { expect } from 'vitest';
 import { DEFAULT_BIOME_CONFIG } from './format';
@@ -15,11 +21,15 @@ import { DEFAULT_BIOME_CONFIG } from './format';
  * - package manager workspaces enabled (`pnpm-workspace.yaml` with `packages`)
  * - a root `tsconfig.json` extending `tsconfig.base.json` with empty `include`
  * - `composite: true` in `tsconfig.base.json`
+ * - a root `package.json` with `type: module`, matching the ESM default the
+ *   preset establishes
  */
 export const createTreeUsingTsSolutionSetup = (): Tree => {
   const tree = createTreeWithEmptyWorkspace();
 
   tree.write('pnpm-workspace.yaml', `packages:\n  - packages/*`);
+
+  updateJson(tree, 'package.json', (json) => ({ ...json, type: 'module' }));
 
   const baseTsConfig = readJson(tree, 'tsconfig.base.json');
   writeJson(tree, 'tsconfig.base.json', {

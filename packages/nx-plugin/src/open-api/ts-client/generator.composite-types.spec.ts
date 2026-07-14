@@ -376,6 +376,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue(42),
+      json: vi.fn().mockResolvedValue(42),
     });
 
     expect(
@@ -483,6 +484,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('active'),
+      json: vi.fn().mockResolvedValue('active'),
     });
 
     expect(await callGeneratedClient(client, mockFetch, 'testEnums')).toBe(
@@ -651,6 +653,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', 'test'),
@@ -668,6 +671,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', 123),
@@ -685,6 +689,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', true),
@@ -702,6 +707,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', ['test']),
@@ -719,6 +725,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', [
@@ -738,6 +745,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', { key: 123 }),
@@ -755,6 +763,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', {
@@ -774,6 +783,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', {
@@ -793,6 +803,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('response'),
+      json: vi.fn().mockResolvedValue('response'),
     });
     expect(
       await callGeneratedClient(client, mockFetch, 'composite', null),
@@ -1174,6 +1185,7 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     mockFetch.mockResolvedValue({
       status: 200,
       text: vi.fn().mockResolvedValue('ok'),
+      json: vi.fn().mockResolvedValue('ok'),
     });
 
     await callGeneratedClient(client, mockFetch, 'postMaybeDate', date);
@@ -1184,6 +1196,181 @@ describe('openApiTsClientGenerator - composite schemas', () => {
         body: JSON.stringify(isoString),
       }),
     );
+  });
+
+  it('should not leak fields across the branches of a non-discriminated union', async () => {
+    // FastAPI emits a plain `Union[A, B]` return as an anyOf/oneOf with no
+    // discriminator. Marshalling composes every branch but takes only the
+    // properties present on the value, so a non-matching branch contributes
+    // nothing (previously an SmsEvent gained a spurious `sentAt: Invalid
+    // Date` from the EmailEvent branch's unconditional date conversion).
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          EmailEvent: {
+            type: 'object',
+            properties: {
+              sentAt: { type: 'string', format: 'date-time' },
+              to: { type: 'string' },
+            },
+            required: ['sentAt', 'to'],
+          },
+          SmsEvent: {
+            type: 'object',
+            properties: {
+              deliveredOn: { type: 'string', format: 'date' },
+              number: { type: 'string' },
+            },
+            required: ['deliveredOn', 'number'],
+          },
+        } as any,
+      },
+      paths: {
+        '/last-event': {
+          get: {
+            operationId: 'lastEvent',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      anyOf: [
+                        { $ref: '#/components/schemas/EmailEvent' },
+                        { $ref: '#/components/schemas/SmsEvent' },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          post: {
+            operationId: 'putEvent',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    anyOf: [
+                      { $ref: '#/components/schemas/EmailEvent' },
+                      { $ref: '#/components/schemas/SmsEvent' },
+                    ],
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'ok' } },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+
+    // fromJson: an SMS payload must revive only SMS fields — no leaked
+    // sentAt/to, and deliveredOn is a valid Date.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ deliveredOn: '2026-05-01', number: '+1555' }),
+    });
+    const sms = await callGeneratedClient(client, mockFetch, 'lastEvent');
+    expect(sms.deliveredOn instanceof Date).toBe(true);
+    expect(isNaN((sms.deliveredOn as Date).getTime())).toBe(false);
+    expect('sentAt' in sms).toBe(false);
+    expect('to' in sms).toBe(false);
+    expect(Object.keys(sms).sort()).toEqual(['deliveredOn', 'number']);
+
+    // toJson: sending an email event must serialise only email fields.
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValue({ status: 204 });
+    await callGeneratedClient(client, mockFetch, 'putEvent', {
+      sentAt: new Date('2026-05-01T09:00:00Z'),
+      to: 'a@b.com',
+    });
+    const sentBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(sentBody).toEqual({
+      sentAt: '2026-05-01T09:00:00.000Z',
+      to: 'a@b.com',
+    });
+    expect('deliveredOn' in sentBody).toBe(false);
+  });
+
+  it('should fail fast when non-discriminated union branches claim a property with conflicting types', async () => {
+    // Both branches declare `at`, as a date-time in one and a plain string in
+    // the other. With no discriminator the correct conversion can't be
+    // determined without guessing at runtime, so the generator errors and asks
+    // for a discriminator instead.
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          Scheduled: {
+            type: 'object',
+            properties: {
+              at: { type: 'string', format: 'date-time' },
+            },
+            required: ['at'],
+          },
+          Named: {
+            type: 'object',
+            properties: {
+              at: { type: 'string' },
+            },
+            required: ['at'],
+          },
+        } as any,
+      },
+      paths: {
+        '/event': {
+          get: {
+            operationId: 'getEvent',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      anyOf: [
+                        { $ref: '#/components/schemas/Scheduled' },
+                        { $ref: '#/components/schemas/Named' },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(/discriminator/);
   });
 
   it('should handle FastAPI-style discriminated unions with string const (Literal)', async () => {
@@ -1271,15 +1458,268 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     expect(client).not.toMatch(/\b_String\b/);
     expect(types).not.toMatch(/:\s*undefined\b/);
 
-    // After rewriteConstToEnum + languages.ts defence-in-depth the property
-    // resolves to bare `string` (the generator does not currently propagate
-    // the literal back to the reference site — it's compiled cleanly by tsc
-    // but loses the Literal narrowing). Assert the concrete current shape so
-    // any future tightening of this path is a deliberate, visible change.
-    expect(types).toMatch(/kind:\s*string\b/);
-    expect(types).not.toMatch(/kind:\s*'circle'/);
+    // The discriminator property is typed as its literal per subtype, making
+    // the union a true tagged union that narrows on `kind`.
+    expect(types).toMatch(/kind:\s*'circle'/);
+    expect(types).toMatch(/kind:\s*'square'/);
+
+    // The discriminator must marshal directly to the matching branch, so a
+    // Square must not gain a spurious `radius` from the Circle branch.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi
+        .fn()
+        .mockResolvedValue({ canonical: { kind: 'square', side: 3 } }),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'getShapes');
+    expect(response.canonical).toEqual({ kind: 'square', side: 3 });
+    expect('radius' in response.canonical).toBe(false);
 
     expect(types).toMatchSnapshot();
     expect(client).toMatchSnapshot();
+  });
+
+  it('should marshal an inheritance-style discriminator base to its subtype', async () => {
+    // A base object schema carries the discriminator; subtypes allOf-compose
+    // it. A response typed as the base must still round-trip subtype-only
+    // fields (here a date) rather than dropping them.
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets/{id}': {
+          get: {
+            operationId: 'getPet',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Pet' },
+                  },
+                },
+              },
+            },
+          },
+          put: {
+            operationId: 'putPet',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Pet' },
+                },
+              },
+            },
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Pet: {
+            type: 'object',
+            required: ['petType', 'name'],
+            properties: {
+              petType: { type: 'string' },
+              name: { type: 'string' },
+              bornAt: { type: 'string', format: 'date-time' },
+            },
+            discriminator: {
+              propertyName: 'petType',
+              mapping: {
+                cat: '#/components/schemas/Cat',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          } as never,
+          Cat: {
+            allOf: [
+              { $ref: '#/components/schemas/Pet' },
+              {
+                type: 'object',
+                required: ['lastNapAt'],
+                properties: {
+                  lastNapAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
+          },
+          Dog: {
+            allOf: [
+              { $ref: '#/components/schemas/Pet' },
+              {
+                type: 'object',
+                properties: { packSize: { type: 'integer' } },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+
+    // The base dispatches to subtypes; subtypes compose the base's
+    // non-dispatching body (no infinite recursion).
+    expect(client).toContain('$toJsonBase');
+    expect(client).toContain('$IO.Pet.$toJsonBase(model)');
+    expect(client).toMatch(/case 'cat':\s*return \$IO\.Cat\.toJson/);
+
+    // GET: a Cat payload through the Pet-typed response revives lastNapAt.
+    const getFetch = vi.fn();
+    getFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        petType: 'cat',
+        name: 'felix',
+        bornAt: '2020-01-02T03:04:05.000Z',
+        lastNapAt: '2024-01-02T03:04:05.000Z',
+      }),
+    });
+    const getRes = await callGeneratedClient(client, getFetch, 'getPet', {
+      id: 'felix',
+    });
+    expect(getRes.lastNapAt).toEqual(new Date('2024-01-02T03:04:05.000Z'));
+    expect(getRes.bornAt).toEqual(new Date('2020-01-02T03:04:05.000Z'));
+
+    // PUT: a Cat through the Pet-typed body serialises lastNapAt.
+    const putFetch = vi.fn();
+    putFetch.mockResolvedValue({ status: 200 });
+    await callGeneratedClient(client, putFetch, 'putPet', {
+      id: 'felix',
+      petType: 'cat',
+      name: 'felix',
+      bornAt: new Date('2020-01-02T03:04:05.000Z'),
+      lastNapAt: new Date('2024-01-02T03:04:05.000Z'),
+    } as never);
+    const [, putRequest] = putFetch.mock.calls[0];
+    expect(JSON.parse(putRequest.body)).toEqual({
+      petType: 'cat',
+      name: 'felix',
+      bornAt: '2020-01-02T03:04:05.000Z',
+      lastNapAt: '2024-01-02T03:04:05.000Z',
+    });
+  });
+
+  it('marshals a polymorphic list as an array of a discriminated union', async () => {
+    // The supported shape for a polymorphic list: an array whose items are a
+    // discriminated union (not a oneOf of arrays). Each element marshals to its
+    // matching branch, so branch-only dates round-trip without leaking.
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/Animal' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Cat: {
+            type: 'object',
+            required: ['kind', 'napAt'],
+            properties: {
+              kind: { type: 'string' },
+              napAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Dog: {
+            type: 'object',
+            required: ['kind', 'walkAt'],
+            properties: {
+              kind: { type: 'string' },
+              walkAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          Animal: {
+            oneOf: [
+              { $ref: '#/components/schemas/Cat' },
+              { $ref: '#/components/schemas/Dog' },
+            ],
+            discriminator: {
+              propertyName: 'kind',
+              mapping: {
+                cat: '#/components/schemas/Cat',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          } as never,
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
+
+    // A mixed list: each element deserialises via its own branch, so the Cat
+    // keeps napAt and the Dog keeps walkAt with no cross-branch leakage.
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue([
+        { kind: 'cat', napAt: '2024-01-02T03:04:05.000Z' },
+        { kind: 'dog', walkAt: '2024-06-07T08:09:10.000Z' },
+      ]),
+    });
+    const response = await callGeneratedClient(client, mockFetch, 'listPets');
+    expect(response).toEqual([
+      { kind: 'cat', napAt: new Date('2024-01-02T03:04:05.000Z') },
+      { kind: 'dog', walkAt: new Date('2024-06-07T08:09:10.000Z') },
+    ]);
+    expect('walkAt' in response[0]).toBe(false);
+    expect('napAt' in response[1]).toBe(false);
   });
 });

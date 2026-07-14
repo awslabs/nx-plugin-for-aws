@@ -1,0 +1,162 @@
+---
+title: Agente Python a Base de Datos Relacional
+description: Conectar un Agente Python a una Base de Datos Relacional
+when:
+  sourceType: py#agent
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` conecta un <Link path="guides/py-agent">Agente Python</Link> a un proyecto de <Link path="guides/py-rdb">Base de Datos Relacional Python</Link>, haciendo que la sesión de base de datos esté disponible dentro de las herramientas de tu agente.
+
+## Requisitos Previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/py-agent">`py#agent`</Link>
+2. Un proyecto <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto de Agente como origen y tu proyecto de base de datos relacional como destino. Si el proyecto contiene múltiples componentes de agente, especifica `sourceComponent` para desambiguar.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+<FileTree>
+
+- packages/my\_service
+  - project.json Agrega una dependencia de `my_agent-dev` en el objetivo `dev` de la base de datos
+  - pyproject.toml Agrega el paquete de base de datos como una dependencia del espacio de trabajo
+  - my\_service
+    - my\_agent
+      - Dockerfile Agrega el paquete CA de RDS utilizado para conexiones directas a Aurora
+
+</FileTree>
+
+## Usar la Base de Datos en Herramientas del Agente
+
+Importa `session_context` desde tu paquete de base de datos y úsalo dentro de las herramientas de tu agente:
+
+```python title="packages/my_service/my_service/my_agent/agent.py"
+from sqlmodel import select
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+from strands import tool
+
+@tool
+async def list_examples() -> list:
+    """List all example records."""
+    async with session_context() as session:
+        return [item.model_dump() for item in (await session.execute(select(ExampleModel))).all()]
+```
+
+## Infraestructura
+
+El constructo de agente generado implementa `IGrantable` e `IConnectable`, por lo que puedes otorgar acceso de red e IAM a la base de datos directamente en el constructo.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` abre la regla del grupo de seguridad para que el entorno de ejecución del agente pueda alcanzar el puerto de la base de datos. `grantConnect` otorga el permiso IAM `rds-db:connect` al rol de ejecución del agente.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Ejecuta el agente dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "my_agent" {
+  source     = "../../common/terraform/src/app/agents/my-agent"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_agent.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  security_group_id            = module.my_agent.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos.
+
+</Fragment>
+</Infrastructure>
+
+### Requisitos SSL al Conectar sin RDS Proxy
+
+Cuando el agente se conecta directamente al clúster Aurora (sin RDS Proxy), el generador de conexión actualiza el Dockerfile del agente generado para instalar el paquete CA de Amazon RDS en el almacén de confianza del sistema:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+Cuando uses RDS Proxy, no necesitas configurar el paquete CA de RDS en el entorno de ejecución del agente.
+
+## Desarrollo Local
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+Esto inicia el agente y todas las bases de datos conectadas. La variable de entorno `LOCAL_DEV=true` hace que el cliente de base de datos se conecte a su base de datos Docker local en lugar de Aurora.

@@ -7,8 +7,23 @@ import { QueryBuilder } from '@getgrit/gritql';
 import type { Tree } from '@nx/devkit';
 import * as path from 'path';
 import { updateGitIgnore } from './git';
+import { isEsmWorkspace } from './module-format';
 
 const GRIT_DIR = '.grit';
+
+/**
+ * Normalize a relative module specifier for the workspace's module format.
+ * ESM (`nodenext`) requires an explicit `.js` extension on relative imports;
+ * CommonJS (`node16`) resolves them extensionless. Callers always pass the ESM
+ * form (with `.js`); this strips the extension for CommonJS workspaces.
+ */
+const normalizeModuleSpecifier = (tree: Tree, from: string): string => {
+  if (isEsmWorkspace(tree)) {
+    return from;
+  }
+  const isRelative = from.startsWith('./') || from.startsWith('../');
+  return isRelative && from.endsWith('.js') ? from.slice(0, -'.js'.length) : from;
+};
 
 // Pin the gritql native library's "global" stdlib directory to <workspace>/.grit so it doesn't try to write to /usr/local/.grit (or wherever node's grandparent resolves to).
 const ensureGritDir = (tree: Tree) => {
@@ -29,6 +44,7 @@ export const addDestructuredImport = async (
   from: string,
 ) => {
   assertFilePath(tree, filePath);
+  from = normalizeModuleSpecifier(tree, from);
 
   // Check if there's an existing import from this module
   const hasExistingImport = await matchGritQL(
@@ -141,6 +157,7 @@ export const addSingleImport = async (
   from: string,
 ) => {
   assertFilePath(tree, filePath);
+  from = normalizeModuleSpecifier(tree, from);
 
   // Check if default import already exists using GritQL
   const alreadyImported = await matchGritQL(
@@ -166,6 +183,7 @@ export const addStarExport = async (
   filePath: string,
   from: string,
 ) => {
+  from = normalizeModuleSpecifier(tree, from);
   const contents = tree.read(filePath)?.toString() ?? '';
 
   // For empty/non-existent files, just write the export

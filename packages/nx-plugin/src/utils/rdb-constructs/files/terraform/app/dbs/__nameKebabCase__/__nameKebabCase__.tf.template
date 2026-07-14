@@ -120,16 +120,26 @@ variable "tags" {
   default     = {}
 }
 
-variable "docker_image_tag" {
+variable "migration_docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
-  default     = "<%= dockerImageTag %>"
+  default     = "<%= migrationDockerImageTag %>"
 }
 
+<%_ if (framework === 'sqlmodel') { _%>
+variable "create_db_user_docker_image_tag" {
+  description = "Docker image tag for the Python create-db-user handler. Defaults to the tag built by the Nx docker target."
+  type        = string
+  default     = "<%= createDbUserDockerImageTag %>"
+}
+<%_ } _%>
+
+<%_ if (framework !== 'sqlmodel') { _%>
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
   type        = string
 }
+<%_ } _%>
 
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -143,7 +153,9 @@ resource "random_string" "suffix" {
 locals {
   config                       = jsondecode(file("${path.module}/../../../../../../../<%= projectRoot %>/config.json"))
   runtime_config_key           = local.config.runtimeConfigKey
+<%_ if (framework !== 'sqlmodel') { _%>
   create_db_user_bundle_path   = "${path.module}/../../../../../../../<%- createDbUserBundleDir %>"
+<%_ } _%>
   migration_function_name      = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
   create_db_user_function_name = "<%= nameKebabCase %>-create-db-user-${random_string.suffix.result}"
   database_runtime_user        = "db_${random_string.suffix.result}"
@@ -183,6 +195,22 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+<%_ if (engine === 'mysql' && framework !== 'sqlmodel') { _%>
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
+      }
+<%_ } else { _%>
       {
         Effect = "Allow"
         Action = ["rds-db:connect"]
@@ -190,10 +218,12 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
           "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
         ]
       }
+<%_ } _%>
     ]
   })
 }
 
+<%_ if (framework !== 'sqlmodel') { _%>
 data "archive_file" "create_db_user_zip" {
   type        = "zip"
   source_dir  = local.create_db_user_bundle_path
@@ -207,6 +237,7 @@ resource "aws_s3_object" "create_db_user_zip" {
   source_hash = data.archive_file.create_db_user_zip.output_base64sha256
   etag        = data.archive_file.create_db_user_zip.output_md5
 }
+<%_ } _%>
 
 module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
@@ -274,33 +305,55 @@ resource "aws_ecr_repository_policy" "migration_handler" {
 }
 
 data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containerEngine %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containerEngine %> inspect ${var.migration_docker_image_tag} --format '{{.Id}}')'\"}' "]
 }
 
 locals {
   # Content-based, immutable image tag derived from the local image digest
   image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
 }
+<%_ if (framework === 'sqlmodel') { _%>
+data "external" "create_db_user_docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containerEngine %> inspect ${var.create_db_user_docker_image_tag} --format '{{.Id}}')'\"}' "]
+}
+
+locals {
+  create_db_user_image_tag = replace(data.external.create_db_user_docker_digest.result.digest, "sha256:", "")
+}
+<%_ } _%>
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
     repository_url   = aws_ecr_repository.migration_handler.repository_url
-    docker_image_tag = var.docker_image_tag
+    migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
+<%_ if (framework === 'sqlmodel') { _%>
+    create_db_user_docker_digest    = data.external.create_db_user_docker_digest.result.digest
+    create_db_user_docker_image_tag = var.create_db_user_docker_image_tag
+    create_db_user_image_tag        = local.create_db_user_image_tag
+<%_ } _%>
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region "$AWS_REGION" | <%= containerEngine %> login --username AWS --password-stdin "$REPOSITORY_URL"
-      <%= containerEngine %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      <%= containerEngine %> tag "$MIGRATION_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
       <%= containerEngine %> push "$REPOSITORY_URL:$IMAGE_TAG"
+<%_ if (framework === 'sqlmodel') { _%>
+      <%= containerEngine %> tag "$CREATE_DB_USER_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
+      <%= containerEngine %> push "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
+<%_ } _%>
     EOT
     environment = {
       AWS_REGION       = data.aws_region.current.region
       REPOSITORY_URL   = self.triggers.repository_url
-      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      MIGRATION_DOCKER_IMAGE_TAG = self.triggers.migration_docker_image_tag
       IMAGE_TAG        = self.triggers.image_tag
+<%_ if (framework === 'sqlmodel') { _%>
+      CREATE_DB_USER_DOCKER_IMAGE_TAG = self.triggers.create_db_user_docker_image_tag
+      CREATE_DB_USER_IMAGE_TAG        = self.triggers.create_db_user_image_tag
+<%_ } _%>
     }
   }
 
@@ -347,7 +400,6 @@ resource "aws_iam_role_policy" "migration_handler_access" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-<%_ if (engine === 'mysql') { _%>
       {
         Effect = "Allow"
         Action = [
@@ -362,17 +414,6 @@ resource "aws_iam_role_policy" "migration_handler_access" {
         ]
         Resource = [module.aurora.kms_key_arn]
       }
-<%_ } else { _%>
-      {
-        Effect = "Allow"
-        Action = [
-          "rds-db:connect"
-        ]
-        Resource = [
-          "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/${local.database_runtime_user}"
-        ]
-      }
-<%_ } _%>
     ]
   })
 }
@@ -459,13 +500,8 @@ resource "aws_security_group" "migration_handler" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
-<%_ if (engine === 'mysql') { _%>
   security_group_id            = aws_security_group.migration_handler.id
   referenced_security_group_id = module.aurora.database_security_group_id
-<%_ } else { _%>
-  security_group_id            = aws_security_group.migration_handler.id
-  referenced_security_group_id = module.aurora.security_group_id
-<%_ } _%>
   from_port   = module.aurora.cluster_port
   to_port     = module.aurora.cluster_port
   ip_protocol = "tcp"
@@ -507,11 +543,7 @@ resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
-<%_ if (engine === 'mysql') { _%>
   security_group_id            = module.aurora.database_security_group_id
-<%_ } else { _%>
-  security_group_id            = module.aurora.security_group_id
-<%_ } _%>
   referenced_security_group_id = aws_security_group.migration_handler.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
@@ -533,6 +565,18 @@ resource "aws_lambda_function" "create_db_user" {
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
   #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
+<%_ if (framework === 'sqlmodel') { _%>
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.migration_handler.repository_url}:create-db-user-${local.create_db_user_image_tag}"
+  function_name = local.create_db_user_function_name
+  role          = aws_iam_role.create_db_user.arn
+  timeout       = 300
+  architectures = ["arm64"]
+
+  image_config {
+    command = ["<%= databasePackageAlias %>.create_db_user_handler.handler"]
+  }
+<%_ } else { _%>
   s3_bucket         = aws_s3_object.create_db_user_zip.bucket
   s3_key            = aws_s3_object.create_db_user_zip.key
   s3_object_version = aws_s3_object.create_db_user_zip.version_id
@@ -543,6 +587,7 @@ resource "aws_lambda_function" "create_db_user" {
   runtime           = "nodejs24.x"
   timeout          = 300
   architectures    = ["arm64"]
+<%_ } _%>
 
   tracing_config {
     mode = "Active"
@@ -556,14 +601,20 @@ resource "aws_lambda_function" "create_db_user" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+<%_ if (framework === 'prisma') { _%>
       NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+<%_ } _%>
     }
   }
 
   tags = var.tags
 
   depends_on = [
+<%_ if (framework === 'sqlmodel') { _%>
+    null_resource.docker_publish,
+<%_ } else { _%>
     aws_s3_object.create_db_user_zip,
+<%_ } _%>
     aws_iam_role_policy_attachment.create_db_user_basic_execution,
     aws_iam_role_policy_attachment.create_db_user_vpc_access,
     aws_iam_role_policy_attachment.create_db_user_xray,
@@ -578,7 +629,11 @@ resource "null_resource" "create_db_user_trigger" {
     cluster_arn   = module.aurora.cluster_arn
     function_name = aws_lambda_function.create_db_user.function_name
     db_user       = local.database_runtime_user
+<%_ if (framework === 'sqlmodel') { _%>
+    bundle_hash   = data.external.create_db_user_docker_digest.result.digest
+<%_ } else { _%>
     bundle_hash   = data.archive_file.create_db_user_zip.output_base64sha256
+<%_ } _%>
   }
 
   provisioner "local-exec" {
@@ -632,14 +687,7 @@ resource "aws_lambda_function" "migration_handler" {
 
   environment {
     variables = {
-<%_ if (engine === 'mysql') { _%>
       DATABASE_SECRET_ARN = module.aurora.secret_arn
-<%_ } else { _%>
-      HOSTNAME = module.aurora.cluster_endpoint
-      DATABASE = module.aurora.database_name
-      PORT     = tostring(module.aurora.cluster_port)
-      DBUSER   = local.database_runtime_user
-<%_ } _%>
     }
   }
 
@@ -662,7 +710,7 @@ resource "null_resource" "migration_trigger" {
     cluster_arn    = module.aurora.cluster_arn
     database_ready = module.aurora.database_ready
     function_name  = aws_lambda_function.migration_handler.function_name
-<%_ if (engine !== 'mysql') { _%>
+<%_ if (engine !== 'mysql' && framework !== 'sqlmodel') { _%>
     db_user        = local.database_runtime_user
 <%_ } _%>
   }
@@ -717,6 +765,11 @@ output "proxy_resource_id" {
   value       = module.aurora.proxy_resource_id
 }
 
+output "connect_resource_id" {
+  description = "Resource ID to use in IAM rds-db:connect policies for the application database user. Resolves to the RDS Proxy resource ID when the proxy is enabled (the default), or the Aurora cluster resource ID when it is disabled — connecting through the proxy and connecting directly to the cluster are different IAM permission boundaries."
+  value       = module.aurora.connect_resource_id
+}
+
 output "kms_key_arn" {
   description = "ARN of the KMS key protecting Aurora and the admin credentials secret, used to grant decrypt access alongside secret_arn."
   value       = module.aurora.kms_key_arn
@@ -751,4 +804,3 @@ output "database_runtime_user" {
   description = "Application database user created for IAM-authenticated access."
   value       = local.database_runtime_user
 }
-

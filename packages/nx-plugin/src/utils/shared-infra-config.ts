@@ -10,6 +10,7 @@ import {
 } from '@nx/devkit';
 import tsProjectGenerator from '../ts/lib/generator';
 import { formatFilesInSubtree } from './format';
+import { esmVars } from './module-format';
 import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
@@ -53,6 +54,7 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
     joinPathFragments(configDir, 'src'),
     {
       pkgMgrRunNx: `${displayCmds.exec} nx`,
+      ...esmVars(tree),
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );

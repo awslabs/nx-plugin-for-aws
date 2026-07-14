@@ -21,6 +21,7 @@ import { addDestructuredImport, addStarExport } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { esmVars } from '../../../utils/module-format';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
@@ -83,6 +84,7 @@ export const tsAgentMcpConnectionGenerator = async (
       mcpServerKebabCase,
       mcpServerClassName,
       mcpServerPort,
+      ...esmVars(tree),
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );

@@ -1226,6 +1226,76 @@ describe('openApiTsHooksGenerator', () => {
     );
   });
 
+  it('should import the cursor model when the cursor parameter is a $ref', async () => {
+    // Regression: when the infinite-query cursor parameter is a $ref to a named
+    // schema (e.g. an enum), the options proxy references that model in the
+    // cursor type but must also import it, or the proxy fails to compile.
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/records': {
+          get: {
+            ...{ 'x-cursor': 'token' },
+            operationId: 'listRecords',
+            parameters: [
+              {
+                name: 'token',
+                in: 'query',
+                required: false,
+                schema: { $ref: '#/components/schemas/PageToken' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['records'],
+                      properties: {
+                        records: { type: 'array', items: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          PageToken: { type: 'string', enum: ['a', 'b', 'c'] },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsHooksGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    const optionsProxy = tree.read(
+      'src/generated/options-proxy.gen.ts',
+      'utf-8',
+    )!;
+    // The cursor model is used in the cursor type and imported from types.gen.
+    expect(optionsProxy).toContain('PageToken | undefined | null');
+    expect(optionsProxy).toMatch(
+      /import type \{[\s\S]*PageToken,[\s\S]*\} from '\.\/types\.gen\.js'/,
+    );
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+      'src/generated/options-proxy.gen.ts',
+    ]);
+  });
+
   it('should handle infinite query with custom cursor parameter via object vendor extension', async () => {
     const spec: Spec = {
       openapi: '3.0.0',

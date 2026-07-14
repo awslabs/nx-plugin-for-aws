@@ -403,7 +403,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -662,7 +662,7 @@ exports[`tsSmithyApiGenerator > should generate smithy ts api with Terraform pro
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
   }
 }
@@ -684,9 +684,45 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). When set, the Lambda functions receive \`RUNTIME_CONFIG_APP_ID\` and read access to the application."
+  type        = string
+  default     = null
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the Lambda functions."
+  type        = string
+  default     = null
+}
+
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
   type        = string
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Deploy the Lambda function into a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
 }
 
 # CORS Configuration (passed to core module)
@@ -785,9 +821,31 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
   depends_on = [aws_api_gateway_stage.api_stage]
 }
 
+# Security group for the API Lambda function, used when deployed into a VPC
+resource "aws_security_group" "api_lambda" {
+  count = var.enable_vpc ? 1 : 0
+
+  #checkov:skip=CKV2_AWS_5:Attached to api_lambda via vpc_config block; Checkov cannot resolve this reference
+  name_prefix = "test-api-lambda-"
+  description = "Security group for the TestApi API Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
+  count = var.enable_vpc ? 1 : 0
+
+  security_group_id = aws_security_group.api_lambda[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
 # Lambda function
 resource "aws_lambda_function" "api_lambda" {
-  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
@@ -809,13 +867,25 @@ resource "aws_lambda_function" "api_lambda" {
     mode = "Active"
   }
 
+  dynamic "vpc_config" {
+    for_each = var.enable_vpc ? [1] : []
+    content {
+      subnet_ids         = var.subnet_ids
+      security_group_ids = [aws_security_group.api_lambda[0].id]
+    }
+  }
+
 
   environment {
     variables = merge({
-    }, var.env)
+    }, var.appconfig_application_id != null ? {
+      RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+    } : {}, var.env)
   }
 
   tags = var.tags
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_vpc_access]
 }
 
 # IAM role for Lambda execution
@@ -850,16 +920,37 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
   role       = aws_iam_role.lambda_execution_role.name
 }
 
+# Attach VPC access policy to Lambda role when deployed into a VPC
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_vpc ? 1 : 0
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
   name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = var.additional_iam_policy_statements
+    Statement = local.lambda_policy_statements
   })
+}
+
+locals {
+  # Grant read access to the runtime-config AppConfig application when wired
+  lambda_policy_statements = concat(var.appconfig_application_arn != null ? [
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    }
+  ] : [], var.additional_iam_policy_statements)
 }
 
 # CloudWatch Log Group for Lambda
@@ -1316,6 +1407,11 @@ output "lambda_execution_role_name" {
   value       = aws_iam_role.lambda_execution_role.name
 }
 
+output "security_group_id" {
+  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
+}
+
 # Integration Outputs
 output "integration_id" {
   description = "ID of the Lambda integration"
@@ -1759,7 +1855,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -2015,7 +2111,7 @@ output "waf_web_acl_arn" {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
   }
 }
@@ -2047,9 +2143,45 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). When set, the Lambda functions receive \`RUNTIME_CONFIG_APP_ID\` and read access to the application."
+  type        = string
+  default     = null
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the Lambda functions."
+  type        = string
+  default     = null
+}
+
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
   type        = string
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Deploy the Lambda function into a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
 }
 
 # CORS Configuration (passed to core module)
@@ -2148,9 +2280,31 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
   depends_on = [aws_api_gateway_stage.api_stage]
 }
 
+# Security group for the API Lambda function, used when deployed into a VPC
+resource "aws_security_group" "api_lambda" {
+  count = var.enable_vpc ? 1 : 0
+
+  #checkov:skip=CKV2_AWS_5:Attached to api_lambda via vpc_config block; Checkov cannot resolve this reference
+  name_prefix = "test-api-lambda-"
+  description = "Security group for the TestApi API Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
+  count = var.enable_vpc ? 1 : 0
+
+  security_group_id = aws_security_group.api_lambda[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
 # Lambda function
 resource "aws_lambda_function" "api_lambda" {
-  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
@@ -2172,13 +2326,25 @@ resource "aws_lambda_function" "api_lambda" {
     mode = "Active"
   }
 
+  dynamic "vpc_config" {
+    for_each = var.enable_vpc ? [1] : []
+    content {
+      subnet_ids         = var.subnet_ids
+      security_group_ids = [aws_security_group.api_lambda[0].id]
+    }
+  }
+
 
   environment {
     variables = merge({
-    }, var.env)
+    }, var.appconfig_application_id != null ? {
+      RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+    } : {}, var.env)
   }
 
   tags = var.tags
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_vpc_access]
 }
 
 # IAM role for Lambda execution
@@ -2213,16 +2379,37 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
   role       = aws_iam_role.lambda_execution_role.name
 }
 
+# Attach VPC access policy to Lambda role when deployed into a VPC
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_vpc ? 1 : 0
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
   name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = var.additional_iam_policy_statements
+    Statement = local.lambda_policy_statements
   })
+}
+
+locals {
+  # Grant read access to the runtime-config AppConfig application when wired
+  lambda_policy_statements = concat(var.appconfig_application_arn != null ? [
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    }
+  ] : [], var.additional_iam_policy_statements)
 }
 
 # CloudWatch Log Group for Lambda
@@ -2597,6 +2784,11 @@ output "lambda_execution_role_name" {
   value       = aws_iam_role.lambda_execution_role.name
 }
 
+output "security_group_id" {
+  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
+}
+
 # Integration Outputs
 output "integration_id" {
   description = "ID of the Lambda integration"
@@ -2638,7 +2830,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -2894,7 +3086,7 @@ output "waf_web_acl_arn" {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
   }
 }
@@ -2916,9 +3108,45 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). When set, the Lambda functions receive \`RUNTIME_CONFIG_APP_ID\` and read access to the application."
+  type        = string
+  default     = null
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the Lambda functions."
+  type        = string
+  default     = null
+}
+
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
   type        = string
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Deploy the Lambda function into a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
 }
 
 # CORS Configuration (passed to core module)
@@ -3017,9 +3245,31 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
   depends_on = [aws_api_gateway_stage.api_stage]
 }
 
+# Security group for the API Lambda function, used when deployed into a VPC
+resource "aws_security_group" "api_lambda" {
+  count = var.enable_vpc ? 1 : 0
+
+  #checkov:skip=CKV2_AWS_5:Attached to api_lambda via vpc_config block; Checkov cannot resolve this reference
+  name_prefix = "test-api-lambda-"
+  description = "Security group for the TestApi API Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
+  count = var.enable_vpc ? 1 : 0
+
+  security_group_id = aws_security_group.api_lambda[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
 # Lambda function
 resource "aws_lambda_function" "api_lambda" {
-  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
@@ -3041,13 +3291,25 @@ resource "aws_lambda_function" "api_lambda" {
     mode = "Active"
   }
 
+  dynamic "vpc_config" {
+    for_each = var.enable_vpc ? [1] : []
+    content {
+      subnet_ids         = var.subnet_ids
+      security_group_ids = [aws_security_group.api_lambda[0].id]
+    }
+  }
+
 
   environment {
     variables = merge({
-    }, var.env)
+    }, var.appconfig_application_id != null ? {
+      RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+    } : {}, var.env)
   }
 
   tags = var.tags
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_vpc_access]
 }
 
 # IAM role for Lambda execution
@@ -3082,16 +3344,37 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
   role       = aws_iam_role.lambda_execution_role.name
 }
 
+# Attach VPC access policy to Lambda role when deployed into a VPC
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_vpc ? 1 : 0
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
   name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = var.additional_iam_policy_statements
+    Statement = local.lambda_policy_statements
   })
+}
+
+locals {
+  # Grant read access to the runtime-config AppConfig application when wired
+  lambda_policy_statements = concat(var.appconfig_application_arn != null ? [
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    }
+  ] : [], var.additional_iam_policy_statements)
 }
 
 # CloudWatch Log Group for Lambda
@@ -3465,6 +3748,11 @@ output "lambda_execution_role_name" {
   value       = aws_iam_role.lambda_execution_role.name
 }
 
+output "security_group_id" {
+  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
+}
+
 # Integration Outputs
 output "integration_id" {
   description = "ID of the Lambda integration"
@@ -3502,7 +3790,7 @@ exports[`tsSmithyApiGenerator > terraform iac > should generate terraform with c
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
   }
 }
@@ -3524,9 +3812,45 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). When set, the Lambda functions receive \`RUNTIME_CONFIG_APP_ID\` and read access to the application."
+  type        = string
+  default     = null
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the Lambda functions."
+  type        = string
+  default     = null
+}
+
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
   type        = string
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Deploy the Lambda function into a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to deploy the Lambda function into. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
 }
 
 # CORS Configuration (passed to core module)
@@ -3625,9 +3949,31 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
   depends_on = [aws_api_gateway_stage.api_stage]
 }
 
+# Security group for the API Lambda function, used when deployed into a VPC
+resource "aws_security_group" "api_lambda" {
+  count = var.enable_vpc ? 1 : 0
+
+  #checkov:skip=CKV2_AWS_5:Attached to api_lambda via vpc_config block; Checkov cannot resolve this reference
+  name_prefix = "custom-api-lambda-"
+  description = "Security group for the CustomApi API Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
+  count = var.enable_vpc ? 1 : 0
+
+  security_group_id = aws_security_group.api_lambda[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
 # Lambda function
 resource "aws_lambda_function" "api_lambda" {
-  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
@@ -3649,13 +3995,25 @@ resource "aws_lambda_function" "api_lambda" {
     mode = "Active"
   }
 
+  dynamic "vpc_config" {
+    for_each = var.enable_vpc ? [1] : []
+    content {
+      subnet_ids         = var.subnet_ids
+      security_group_ids = [aws_security_group.api_lambda[0].id]
+    }
+  }
+
 
   environment {
     variables = merge({
-    }, var.env)
+    }, var.appconfig_application_id != null ? {
+      RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+    } : {}, var.env)
   }
 
   tags = var.tags
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_vpc_access]
 }
 
 # IAM role for Lambda execution
@@ -3690,16 +4048,37 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
   role       = aws_iam_role.lambda_execution_role.name
 }
 
+# Attach VPC access policy to Lambda role when deployed into a VPC
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  count      = var.enable_vpc ? 1 : 0
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
   name  = "CustomApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = var.additional_iam_policy_statements
+    Statement = local.lambda_policy_statements
   })
+}
+
+locals {
+  # Grant read access to the runtime-config AppConfig application when wired
+  lambda_policy_statements = concat(var.appconfig_application_arn != null ? [
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    }
+  ] : [], var.additional_iam_policy_statements)
 }
 
 # CloudWatch Log Group for Lambda
@@ -4154,6 +4533,11 @@ output "lambda_execution_role_arn" {
 output "lambda_execution_role_name" {
   description = "Name of the Lambda execution role"
   value       = aws_iam_role.lambda_execution_role.name
+}
+
+output "security_group_id" {
+  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
 # Integration Outputs

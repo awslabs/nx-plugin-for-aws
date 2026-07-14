@@ -4,11 +4,12 @@
  */
 
 import { Biome } from '@biomejs/js-api/nodejs';
-import type { Tree } from '@nx/devkit';
+import { getProjects, type Tree } from '@nx/devkit';
 import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
+import { readToml } from './toml';
 
 const require = createRequire(import.meta.url);
 
@@ -97,6 +98,12 @@ export async function formatFilesInSubtree(
     BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)),
   );
 
+  // Resolve each project's ruff settings (module names, line-length) so files
+  // are formatted to match the on-disk build (see getPythonProjectRuffConfigs).
+  const pythonProjectConfigs = pyFiles.length
+    ? getPythonProjectRuffConfigs(tree)
+    : [];
+
   // Format Python files with ruff (lint fixes + formatting)
   for (const file of pyFiles) {
     try {
@@ -104,6 +111,7 @@ export async function formatFilesInSubtree(
         file.content.toString('utf-8'),
         file.path,
         hasRuffConfigOnDisk(tree, file.path),
+        getOwningProjectRuffConfig(file.path, pythonProjectConfigs),
       );
       tree.write(file.path, content);
     } catch {
@@ -299,6 +307,78 @@ function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
   }
 }
 
+interface PythonProjectRuffConfig {
+  /** Project root, normalised to use forward slashes. */
+  readonly root: string;
+  /** Top-level importable module names declared by the project. */
+  readonly modules: string[];
+  /** The project's `[tool.ruff].line-length`, if set. */
+  readonly lineLength?: number;
+}
+
+/**
+ * Map each Nx project with a `pyproject.toml` to the ruff settings the on-disk
+ * build enforces for it: its top-level module names (from
+ * `[tool.hatch.build.targets.wheel].packages`) and its `[tool.ruff].line-length`.
+ */
+function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
+  const configs: PythonProjectRuffConfig[] = [];
+
+  for (const project of getProjects(tree).values()) {
+    const pyprojectPath = path.join(project.root, 'pyproject.toml');
+    if (tree.exists(pyprojectPath)) {
+      try {
+        const pyproject = readToml(tree, pyprojectPath) as any;
+        const wheelPackages: unknown =
+          pyproject?.tool?.hatch?.build?.targets?.wheel?.packages;
+        // Record the top-level module segment (`pkg/sub` -> `pkg`), which is
+        // all `known-first-party` keys off.
+        const modules = Array.isArray(wheelPackages)
+          ? wheelPackages
+              .filter((pkg): pkg is string => typeof pkg === 'string' && !!pkg)
+              .map((pkg) => pkg.split('/')[0])
+          : [];
+        const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
+        if (modules.length || typeof lineLength === 'number') {
+          configs.push({
+            root: project.root.split(path.sep).join('/'),
+            modules,
+            lineLength: typeof lineLength === 'number' ? lineLength : undefined,
+          });
+        }
+      } catch {
+        // Skip projects whose pyproject.toml cannot be parsed
+      }
+    }
+  }
+
+  return configs;
+}
+
+/**
+ * Resolve the ruff config for the project that owns a file (the project with
+ * the longest root that is a prefix of the file path). Ruff runs per-project on
+ * disk, so a file's settings come from its own project — only its own module is
+ * first-party (sibling workspace packages are third-party) and its own
+ * line-length applies — and scoping this way keeps in-tree formatting
+ * consistent with the on-disk build.
+ */
+function getOwningProjectRuffConfig(
+  filePath: string,
+  configs: PythonProjectRuffConfig[],
+): PythonProjectRuffConfig | undefined {
+  let owner: PythonProjectRuffConfig | undefined;
+  for (const config of configs) {
+    if (
+      (filePath === config.root || filePath.startsWith(`${config.root}/`)) &&
+      (!owner || config.root.length > owner.root.length)
+    ) {
+      owner = config;
+    }
+  }
+  return owner;
+}
+
 /**
  * Run ruff check --fix and ruff format on Python file content via stdin.
  * Applies all configured lint fixes (including import sorting) and formatting.
@@ -308,21 +388,42 @@ function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
  * build fails on unsorted imports (I001). In that case we add `--extend-select
  * I` so import sorting matches what the build enforces. When a config does
  * exist we defer to it entirely, honouring the user's rule selection.
+ *
+ * `projectConfig` carries the owning project's ruff settings, which ruff cannot
+ * detect from the filesystem during generation because the project lives only
+ * in the tree. We pass them via `--config` so in-tree formatting matches the
+ * on-disk build: `known-first-party` (the project's own modules) keeps its
+ * imports in their own group, and `line-length` keeps wrapping consistent (the
+ * generated config raises it above ruff's default of 88). These are additive to
+ * any on-disk config, so they are safe to pass regardless of `hasConfig`.
  */
 function ruffFixAndFormat(
   content: string,
   filePath: string,
   hasConfig: boolean,
+  projectConfig?: PythonProjectRuffConfig,
 ): string {
   const ruff = getRuffCommand();
   if (!ruff) return content;
 
   const extendSelect = hasConfig ? '' : ' --extend-select I';
+  const configArgs: string[] = [];
+  if (projectConfig?.modules.length) {
+    configArgs.push(
+      `lint.isort.known-first-party = ${JSON.stringify(projectConfig.modules)}`,
+    );
+  }
+  if (typeof projectConfig?.lineLength === 'number') {
+    configArgs.push(`line-length = ${projectConfig.lineLength}`);
+  }
+  const config = configArgs
+    .map((arg) => ` --config ${JSON.stringify(arg)}`)
+    .join('');
 
   // First apply lint fixes (import sorting, unused imports, etc.)
   try {
     const result = execSync(
-      `${ruff} check --fix${extendSelect} --stdin-filename ${filePath} -`,
+      `${ruff} check --fix${extendSelect}${config} --stdin-filename ${filePath} -`,
       { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
     content = result;
@@ -336,11 +437,14 @@ function ruffFixAndFormat(
 
   // Then apply formatting
   try {
-    content = execSync(`${ruff} format --stdin-filename ${filePath} -`, {
-      input: content,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    content = execSync(
+      `${ruff} format${config} --stdin-filename ${filePath} -`,
+      {
+        input: content,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
   } catch {
     // Fall through with whatever content we have
   }

@@ -1,0 +1,53 @@
+---
+title: Política de Eliminación
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+El constructo CDK retiene el clúster Aurora por defecto (`removalPolicy: RemovalPolicy.RETAIN`). Cambia esto cuando quieras que la eliminación del stack CDK haga una instantánea o destruya el clúster en su lugar.
+
+Cuando uses `RemovalPolicy.DESTROY`, la protección contra eliminación también debe estar deshabilitada antes de que el clúster pueda ser eliminado.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+Para un entorno efímero donde la base de datos debe ser eliminada con el stack:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform no utiliza políticas de eliminación de CDK. Por defecto, el módulo crea una instantánea final al eliminar (`skip_final_snapshot = false`). Para omitir la instantánea final en un entorno efímero:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
+}
+```
+
+::::caution[Pérdida de Datos]
+`skip_final_snapshot = true` borrará permanentemente todos los datos cuando se elimine el clúster. Úsalo solo en entornos efímeros (como pruebas automatizadas). Mantén `skip_final_snapshot = false` para todos los stacks persistentes y de producción para prevenir la pérdida de datos.
+::::
+</Fragment>
+</Infrastructure>

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, type Tree } from '@nx/devkit';
+import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -262,5 +262,57 @@ describe('ts lib generator', () => {
     expect(readJson(tree, 'test-lib/project.json').targets).toEqual(
       targetsBefore,
     );
+  });
+
+  it('should mark the workspace as ESM by default', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+    expect(readJson(tree, 'package.json').type).toBe('module');
+    // ESM leaves the @nx/js-generated tsconfig module settings in place (it
+    // does not force a CommonJS module system).
+    expect(
+      readJson(tree, 'test-lib/tsconfig.lib.json').compilerOptions?.module,
+    ).not.toBe('node16');
+  });
+
+  it('should configure the project for CommonJS in a commonjs workspace', async () => {
+    // The preset establishes the workspace format; generators infer it.
+    writeJson(tree, 'package.json', {
+      ...readJson(tree, 'package.json'),
+      type: 'commonjs',
+    });
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+    // CommonJS workspaces keep their explicit `type: commonjs`.
+    expect(readJson(tree, 'package.json').type).toBe('commonjs');
+    const compilerOptions = readJson(
+      tree,
+      'test-lib/tsconfig.lib.json',
+    ).compilerOptions;
+    expect(compilerOptions?.module).toBe('node16');
+    expect(compilerOptions?.moduleResolution).toBe('node16');
+  });
+
+  it('should infer CommonJS from an existing commonjs workspace', async () => {
+    writeJson(tree, 'package.json', {
+      ...readJson(tree, 'package.json'),
+      type: 'commonjs',
+    });
+    await tsProjectGenerator(tree, {
+      name: 'first-lib',
+      preferInstallDependencies: false,
+    });
+    await tsProjectGenerator(tree, {
+      name: 'second-lib',
+      preferInstallDependencies: false,
+    });
+    expect(readJson(tree, 'package.json').type).toBe('commonjs');
+    expect(
+      readJson(tree, 'second-lib/tsconfig.lib.json').compilerOptions?.module,
+    ).toBe('node16');
   });
 });

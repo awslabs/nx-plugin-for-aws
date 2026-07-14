@@ -358,11 +358,11 @@ runTerraformDeployVariant({
   requiresRdsServiceLinkedRole: false,
 });
 
-// terraform-deploy-rdb — relational databases only (PostgreSQL + MySQL
-// Aurora clusters with a dedicated VPC). Splitting these out keeps the
-// main terraform-deploy variant under the IAM session limit, since
-// Aurora cluster create + destroy plus VPC ENI cleanup for the
-// migration/credential Lambdas dominates the runtime.
+// terraform-deploy-rdb — relational databases only: TypeScript and Python
+// PostgreSQL + MySQL Aurora clusters, all sharing a dedicated VPC.
+// Splitting these out keeps the main terraform-deploy variant under the
+// IAM session limit, since Aurora cluster create + destroy plus VPC ENI
+// cleanup for the migration/credential Lambdas dominates the runtime.
 runTerraformDeployVariant({
   variant: 'terraform-deploy-rdb',
   mainTfTemplate: 'terraform-deploy/main-rdb.tf.template',

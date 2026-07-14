@@ -100,11 +100,11 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
  * agents, MCP servers, Lambda functions, website), exercises every
  * invocation surface, and tears down.
  *
- * The relational database constructs (`PostgresDb`, `MySqlDb`) are
- * exercised by the separate `cdk-deploy-rdb` variant — Aurora cluster
- * create + destroy plus VPC ENI cleanup for the rotation Lambdas
- * dominate the runtime, so isolating them keeps both variants under the
- * IAM session limit.
+ * The relational database constructs (`PostgresDb`, `MySqlDb`,
+ * `PyPostgresDb`, `PyMysqlDb`) are exercised by the separate
+ * `cdk-deploy-rdb` variant — Aurora cluster create + destroy plus VPC
+ * ENI cleanup for the rotation Lambdas dominate the runtime, so
+ * isolating them keeps both variants under the IAM session limit.
  */
 describe('smoke test - cdk-deploy', () => {
   const pkgMgr = 'npm';
@@ -372,11 +372,12 @@ describe('smoke test - cdk-deploy', () => {
 });
 
 /**
- * cdk-deploy-rdb smoke test — deploys only the relational database stack
- * (PostgreSQL + MySQL Aurora clusters with a dedicated VPC). The full
- * generator matrix is still scaffolded and built so the rdb generator's
- * coexistence with the rest of the matrix is verified, but only the
- * database constructs are deployed to AWS.
+ * cdk-deploy-rdb smoke test — deploys only the relational database stack:
+ * TypeScript (`ts#rdb`) and Python (`py#rdb`) PostgreSQL + MySQL Aurora
+ * clusters, all sharing a dedicated VPC. The full generator matrix is
+ * still scaffolded and built so both rdb generators' coexistence with
+ * the rest of the matrix is verified, but only the database constructs
+ * are deployed to AWS.
  */
 describe('smoke test - cdk-deploy-rdb', () => {
   const pkgMgr = 'npm';
@@ -416,12 +417,23 @@ describe('smoke test - cdk-deploy-rdb', () => {
     );
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
+    // Auto-apply sync so the stack rewrites don't block `deploy` with a
+    // fatal "workspace is out of sync" error.
+    const nxJsonPath = `${opts.cwd}/nx.json`;
+    const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
+    nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
+    writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
+
     // Stage name is set by main.ts.template (`e2e-test-infra-sandbox-…`).
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
 
     ensureRdsServiceLinkedRole();
 
     try {
+      // Apply any pending sync changes (license headers, tsconfig
+      // references) so `deploy` does not abort on an out-of-sync workspace.
+      await runCLI(`sync`, opts);
+
       await runCLI(
         `deploy infra ${cdkStageName}/* --output-style=stream`,
         opts,

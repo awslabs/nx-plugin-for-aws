@@ -68,7 +68,7 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
       [
         \`CREATE USER IF NOT EXISTS \${quotedUser}@\${quotedHost} IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'\`,
         \`ALTER USER \${quotedUser}@\${quotedHost} IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS' REQUIRE SSL\`,
-        \`GRANT ALL PRIVILEGES ON \${quotedDbName}.* TO \${quotedUser}@\${quotedHost}\`,
+        \`GRANT SELECT, INSERT, UPDATE, DELETE ON \${quotedDbName}.* TO \${quotedUser}@\${quotedHost}\`,
       ].join(';\\n'),
     );
   } finally {
@@ -359,14 +359,10 @@ import { CustomResource } from 'aws-cdk-lib';
 import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
 import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import {
   Architecture,
-  Code,
-  DockerImageCode,
-  DockerImageFunction,
   Function,
-  Runtime,
+  FunctionOptions,
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import {
@@ -483,16 +479,6 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
   readonly runtimeConfigKey: string;
 
   /**
-   * Migration bundle used to create a migration handler Lambda.
-   */
-  readonly migrationBundleDir: string;
-
-  /**
-   * Bundle used to create or reconcile the application database user.
-   */
-  readonly createDbUserBundleDir: string;
-
-  /**
    * Writer instance for the Aurora cluster.
    */
   readonly writer?: DatabaseClusterProps['writer'];
@@ -566,8 +552,6 @@ export abstract class AuroraDatabase extends Construct {
       adminUser,
       databaseName,
       runtimeConfigKey,
-      migrationBundleDir,
-      createDbUserBundleDir,
       vpcSubnets,
       writer,
       enableRdsProxy = true,
@@ -645,23 +629,23 @@ export abstract class AuroraDatabase extends Construct {
       this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
     const databasePort = this.cluster.clusterEndpoint.port;
 
-    const createDbUserHandler = new Function(this, 'CreateDbUserHandler', {
-      code: Code.fromAsset(createDbUserBundleDir),
-      handler: 'index.handler',
-      runtime: Runtime.NODEJS_LATEST,
+    const commonProps: FunctionOptions = {
+      vpc,
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
-      vpc,
+      architecture: Architecture.ARM_64,
+    };
+
+    const createDbUserHandler = this.createDbUserHandler({
+      ...commonProps,
       vpcSubnets: {
         subnetType: SubnetType.PRIVATE_WITH_EGRESS,
       },
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
-      architecture: Architecture.ARM_64,
     });
-
+    createDbUserHandler.addEnvironment(
+      'DATABASE_SECRET_ARN',
+      this.cluster.secret!.secretArn,
+    );
     this.cluster.connections.allowDefaultPortFrom(
       createDbUserHandler,
       'Allow the create-db-user handler to connect to the database',
@@ -698,40 +682,21 @@ export abstract class AuroraDatabase extends Construct {
       region: Stack.of(this).region,
     });
 
-    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
-      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
-        platform: Platform.LINUX_ARM64,
-      }),
+    const migrationHandler = this.createMigrationHandler({
+      ...commonProps,
       memorySize: 1024,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      environment:
-        engine.type === 'mysql'
-          ? {
-              DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-            }
-          : {
-              HOSTNAME: databaseHostname,
-              DATABASE: databaseName,
-              PORT: databasePort.toString(),
-              DBUSER: this.dbUser,
-            },
-      architecture: Architecture.ARM_64,
     });
+    migrationHandler.addEnvironment(
+      'DATABASE_SECRET_ARN',
+      this.cluster.secret!.secretArn,
+    );
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+    this.grantSecretRead(migrationHandler);
 
-    if (engine.type === 'mysql') {
-      this.cluster.connections.allowDefaultPortFrom(migrationHandler);
-      this.grantSecretRead(migrationHandler);
-    } else {
-      this.allowDefaultPortFrom(migrationHandler);
-      this.grantConnect(migrationHandler);
-    }
-
-    const trigger = new Trigger(this, 'MigrationTrigger', {
+    const migrationTrigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
     });
-    trigger.node.addDependency(createDbUserResource);
+    migrationTrigger.node.addDependency(createDbUserResource);
 
     new CfnOutput(this, 'ClusterEndpoint', {
       value: this.cluster.clusterEndpoint.hostname,
@@ -743,6 +708,18 @@ export abstract class AuroraDatabase extends Construct {
       });
     }
   }
+
+  /**
+   * Creates the Lambda handler used to create or reconcile the application database user.
+   */
+  protected abstract createDbUserHandler(baseProps: FunctionOptions): Function;
+
+  /**
+   * Creates the Lambda handler used to run database migrations.
+   */
+  protected abstract createMigrationHandler(
+    baseProps: FunctionOptions,
+  ): Function;
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {
     if (this.proxy) {
@@ -805,7 +782,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -1252,27 +1229,6 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
-resource "aws_iam_role_policy" "proxy_secret_access" {
-  count = var.enable_rds_proxy ? 1 : 0
-  role  = aws_iam_role.proxy[0].name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = [aws_secretsmanager_secret.credentials.arn]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt"]
-        Resource = [aws_kms_key.database.arn]
-      }
-    ]
-  })
-}
-
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -1296,17 +1252,6 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
-
-  auth {
-    auth_scheme = "SECRETS"
-    iam_auth    = "REQUIRED"
-    secret_arn  = aws_secretsmanager_secret.credentials.arn
-  }
-
-  depends_on = [
-    aws_iam_role_policy.proxy_secret_access,
-    aws_secretsmanager_secret_version.credentials,
-  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
@@ -1489,6 +1434,11 @@ output "proxy_resource_id" {
   value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : null
 }
 
+output "connect_resource_id" {
+  description = "Resource ID to use in IAM rds-db:connect policies for the application database user. Resolves to the RDS Proxy resource ID when the proxy is enabled (the default), or the Aurora cluster resource ID when it is disabled — connecting through the proxy and connecting directly to the cluster are different IAM permission boundaries."
+  value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : aws_rds_cluster.database.cluster_resource_id
+}
+
 output "cluster_endpoint" {
   description = "Writer endpoint of the Aurora cluster or proxy."
   value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
@@ -1567,7 +1517,7 @@ exports[`ts#rdb generator > should generate terraform modules when iac is Terraf
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -1679,11 +1629,12 @@ variable "tags" {
   default     = {}
 }
 
-variable "docker_image_tag" {
+variable "migration_docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
   default     = "proj-db-migration:latest"
 }
+
 
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
@@ -1833,7 +1784,7 @@ resource "aws_ecr_repository_policy" "migration_handler" {
 }
 
 data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.docker_image_tag} --format '{{.Id}}')'\\"}' "]
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.migration_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
@@ -1845,20 +1796,20 @@ resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
     repository_url   = aws_ecr_repository.migration_handler.repository_url
-    docker_image_tag = var.docker_image_tag
+    migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URL"
-      docker tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      docker tag "$MIGRATION_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
       docker push "$REPOSITORY_URL:$IMAGE_TAG"
     EOT
     environment = {
       AWS_REGION       = data.aws_region.current.region
       REPOSITORY_URL   = self.triggers.repository_url
-      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      MIGRATION_DOCKER_IMAGE_TAG = self.triggers.migration_docker_image_tag
       IMAGE_TAG        = self.triggers.image_tag
     }
   }
@@ -1909,11 +1860,16 @@ resource "aws_iam_role_policy" "migration_handler_access" {
       {
         Effect = "Allow"
         Action = [
-          "rds-db:connect"
+          "secretsmanager:GetSecretValue"
         ]
-        Resource = [
-          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
         ]
+        Resource = [module.aurora.kms_key_arn]
       }
     ]
   })
@@ -2002,7 +1958,7 @@ resource "aws_security_group" "migration_handler" {
 
 resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
   security_group_id            = aws_security_group.migration_handler.id
-  referenced_security_group_id = module.aurora.security_group_id
+  referenced_security_group_id = module.aurora.database_security_group_id
   from_port   = module.aurora.cluster_port
   to_port     = module.aurora.cluster_port
   ip_protocol = "tcp"
@@ -2044,7 +2000,7 @@ resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
-  security_group_id            = module.aurora.security_group_id
+  security_group_id            = module.aurora.database_security_group_id
   referenced_security_group_id = aws_security_group.migration_handler.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
@@ -2165,10 +2121,7 @@ resource "aws_lambda_function" "migration_handler" {
 
   environment {
     variables = {
-      HOSTNAME = module.aurora.cluster_endpoint
-      DATABASE = module.aurora.database_name
-      PORT     = tostring(module.aurora.cluster_port)
-      DBUSER   = local.database_runtime_user
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
     }
   }
 
@@ -2244,6 +2197,11 @@ output "proxy_resource_id" {
   value       = module.aurora.proxy_resource_id
 }
 
+output "connect_resource_id" {
+  description = "Resource ID to use in IAM rds-db:connect policies for the application database user. Resolves to the RDS Proxy resource ID when the proxy is enabled (the default), or the Aurora cluster resource ID when it is disabled — connecting through the proxy and connecting directly to the cluster are different IAM permission boundaries."
+  value       = module.aurora.connect_resource_id
+}
+
 output "kms_key_arn" {
   description = "ARN of the KMS key protecting Aurora and the admin credentials secret, used to grant decrypt access alongside secret_arn."
   value       = module.aurora.kms_key_arn
@@ -2278,7 +2236,6 @@ output "database_runtime_user" {
   description = "Application database user created for IAM-authenticated access."
   value       = local.database_runtime_user
 }
-
 "
 `;
 
@@ -2292,7 +2249,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -2739,27 +2696,6 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
-resource "aws_iam_role_policy" "proxy_secret_access" {
-  count = var.enable_rds_proxy ? 1 : 0
-  role  = aws_iam_role.proxy[0].name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = [aws_secretsmanager_secret.credentials.arn]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt"]
-        Resource = [aws_kms_key.database.arn]
-      }
-    ]
-  })
-}
-
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -2783,17 +2719,6 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
-
-  auth {
-    auth_scheme = "SECRETS"
-    iam_auth    = "REQUIRED"
-    secret_arn  = aws_secretsmanager_secret.credentials.arn
-  }
-
-  depends_on = [
-    aws_iam_role_policy.proxy_secret_access,
-    aws_secretsmanager_secret_version.credentials,
-  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
@@ -2976,6 +2901,11 @@ output "proxy_resource_id" {
   value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : null
 }
 
+output "connect_resource_id" {
+  description = "Resource ID to use in IAM rds-db:connect policies for the application database user. Resolves to the RDS Proxy resource ID when the proxy is enabled (the default), or the Aurora cluster resource ID when it is disabled — connecting through the proxy and connecting directly to the cluster are different IAM permission boundaries."
+  value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : aws_rds_cluster.database.cluster_resource_id
+}
+
 output "cluster_endpoint" {
   description = "Writer endpoint of the Aurora cluster or proxy."
   value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
@@ -3054,7 +2984,7 @@ exports[`ts#rdb generator > should generate terraform modules with MySQL engine 
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "6.52.0"
+      version = "6.54.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -3166,11 +3096,12 @@ variable "tags" {
   default     = {}
 }
 
-variable "docker_image_tag" {
+variable "migration_docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
   default     = "proj-db-migration:latest"
 }
+
 
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
@@ -3231,10 +3162,17 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
     Statement = [
       {
         Effect = "Allow"
-        Action = ["rds-db:connect"]
-        Resource = [
-          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
+        Action = [
+          "secretsmanager:GetSecretValue"
         ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
       }
     ]
   })
@@ -3320,7 +3258,7 @@ resource "aws_ecr_repository_policy" "migration_handler" {
 }
 
 data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.docker_image_tag} --format '{{.Id}}')'\\"}' "]
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.migration_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
@@ -3332,20 +3270,20 @@ resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
     repository_url   = aws_ecr_repository.migration_handler.repository_url
-    docker_image_tag = var.docker_image_tag
+    migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URL"
-      docker tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      docker tag "$MIGRATION_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
       docker push "$REPOSITORY_URL:$IMAGE_TAG"
     EOT
     environment = {
       AWS_REGION       = data.aws_region.current.region
       REPOSITORY_URL   = self.triggers.repository_url
-      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      MIGRATION_DOCKER_IMAGE_TAG = self.triggers.migration_docker_image_tag
       IMAGE_TAG        = self.triggers.image_tag
     }
   }
@@ -3732,6 +3670,11 @@ output "proxy_resource_id" {
   value       = module.aurora.proxy_resource_id
 }
 
+output "connect_resource_id" {
+  description = "Resource ID to use in IAM rds-db:connect policies for the application database user. Resolves to the RDS Proxy resource ID when the proxy is enabled (the default), or the Aurora cluster resource ID when it is disabled — connecting through the proxy and connecting directly to the cluster are different IAM permission boundaries."
+  value       = module.aurora.connect_resource_id
+}
+
 output "kms_key_arn" {
   description = "ARN of the KMS key protecting Aurora and the admin credentials secret, used to grant decrypt access alongside secret_arn."
   value       = module.aurora.kms_key_arn
@@ -3766,7 +3709,6 @@ output "database_runtime_user" {
   description = "Application database user created for IAM-authenticated access."
   value       = local.database_runtime_user
 }
-
 "
 `;
 
@@ -3841,14 +3783,12 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
 
     await client.query(
       \`ALTER ROLE \${quotedDbUser} WITH LOGIN;
-      GRANT ALL PRIVILEGES ON DATABASE \${quotedDbName} TO \${quotedDbUser};
-      GRANT USAGE, CREATE ON SCHEMA public TO \${quotedDbUser};
-      GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \${quotedDbUser};
-      GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \${quotedDbUser};
-      GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO \${quotedDbUser};
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO \${quotedDbUser};
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO \${quotedDbUser};
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO \${quotedDbUser};
+      GRANT CONNECT ON DATABASE \${quotedDbName} TO \${quotedDbUser};
+      GRANT USAGE ON SCHEMA public TO \${quotedDbUser};
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \${quotedDbUser};
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \${quotedDbUser};
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \${quotedDbUser};
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \${quotedDbUser};
       GRANT rds_iam TO \${quotedDbUser};\`,
     );
 
@@ -3890,28 +3830,16 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Signer } from '@aws-sdk/rds-signer';
-import { withConnectionRetry } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
 const buildDatabaseUrl = async (): Promise<string> => {
-  const hostname = process.env.HOSTNAME!;
-  const port = process.env.PORT!;
-  const database = process.env.DATABASE!;
-  const dbUser = process.env.DBUSER!;
-  const region = process.env.AWS_REGION!;
-
-  const iamAuthToken = await new Signer({
-    hostname,
-    port: Number(port),
-    region,
-    username: dbUser,
-  }).getAuthToken();
+  const { host, port, dbname, username, password } = await getDatabaseSecret();
 
   return (
-    \`postgresql://\${encodeURIComponent(dbUser)}\` +
-    \`:\${encodeURIComponent(iamAuthToken)}\` +
-    \`@\${hostname}:\${port}/\${database}\` +
-    \`?sslaccept=strict\` // \`sslaccept\` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq \`sslmode\` option.
+    \`postgresql://\${encodeURIComponent(username)}\` +
+    \`:\${encodeURIComponent(password)}\` +
+    \`@\${host}:\${port}/\${dbname}\` +
+    \`?sslaccept=strict\`
   );
 };
 
@@ -4168,14 +4096,10 @@ import { CustomResource } from 'aws-cdk-lib';
 import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
 import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import {
   Architecture,
-  Code,
-  DockerImageCode,
-  DockerImageFunction,
   Function,
-  Runtime,
+  FunctionOptions,
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import {
@@ -4292,16 +4216,6 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
   readonly runtimeConfigKey: string;
 
   /**
-   * Migration bundle used to create a migration handler Lambda.
-   */
-  readonly migrationBundleDir: string;
-
-  /**
-   * Bundle used to create or reconcile the application database user.
-   */
-  readonly createDbUserBundleDir: string;
-
-  /**
    * Writer instance for the Aurora cluster.
    */
   readonly writer?: DatabaseClusterProps['writer'];
@@ -4375,8 +4289,6 @@ export abstract class AuroraDatabase extends Construct {
       adminUser,
       databaseName,
       runtimeConfigKey,
-      migrationBundleDir,
-      createDbUserBundleDir,
       vpcSubnets,
       writer,
       enableRdsProxy = true,
@@ -4454,23 +4366,23 @@ export abstract class AuroraDatabase extends Construct {
       this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
     const databasePort = this.cluster.clusterEndpoint.port;
 
-    const createDbUserHandler = new Function(this, 'CreateDbUserHandler', {
-      code: Code.fromAsset(createDbUserBundleDir),
-      handler: 'index.handler',
-      runtime: Runtime.NODEJS_LATEST,
+    const commonProps: FunctionOptions = {
+      vpc,
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
-      vpc,
+      architecture: Architecture.ARM_64,
+    };
+
+    const createDbUserHandler = this.createDbUserHandler({
+      ...commonProps,
       vpcSubnets: {
         subnetType: SubnetType.PRIVATE_WITH_EGRESS,
       },
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
-      architecture: Architecture.ARM_64,
     });
-
+    createDbUserHandler.addEnvironment(
+      'DATABASE_SECRET_ARN',
+      this.cluster.secret!.secretArn,
+    );
     this.cluster.connections.allowDefaultPortFrom(
       createDbUserHandler,
       'Allow the create-db-user handler to connect to the database',
@@ -4507,40 +4419,21 @@ export abstract class AuroraDatabase extends Construct {
       region: Stack.of(this).region,
     });
 
-    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
-      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
-        platform: Platform.LINUX_ARM64,
-      }),
+    const migrationHandler = this.createMigrationHandler({
+      ...commonProps,
       memorySize: 1024,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      environment:
-        engine.type === 'mysql'
-          ? {
-              DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-            }
-          : {
-              HOSTNAME: databaseHostname,
-              DATABASE: databaseName,
-              PORT: databasePort.toString(),
-              DBUSER: this.dbUser,
-            },
-      architecture: Architecture.ARM_64,
     });
+    migrationHandler.addEnvironment(
+      'DATABASE_SECRET_ARN',
+      this.cluster.secret!.secretArn,
+    );
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+    this.grantSecretRead(migrationHandler);
 
-    if (engine.type === 'mysql') {
-      this.cluster.connections.allowDefaultPortFrom(migrationHandler);
-      this.grantSecretRead(migrationHandler);
-    } else {
-      this.allowDefaultPortFrom(migrationHandler);
-      this.grantConnect(migrationHandler);
-    }
-
-    const trigger = new Trigger(this, 'MigrationTrigger', {
+    const migrationTrigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
     });
-    trigger.node.addDependency(createDbUserResource);
+    migrationTrigger.node.addDependency(createDbUserResource);
 
     new CfnOutput(this, 'ClusterEndpoint', {
       value: this.cluster.clusterEndpoint.hostname,
@@ -4552,6 +4445,18 @@ export abstract class AuroraDatabase extends Construct {
       });
     }
   }
+
+  /**
+   * Creates the Lambda handler used to create or reconcile the application database user.
+   */
+  protected abstract createDbUserHandler(baseProps: FunctionOptions): Function;
+
+  /**
+   * Creates the Lambda handler used to run database migrations.
+   */
+  protected abstract createMigrationHandler(
+    baseProps: FunctionOptions,
+  ): Function;
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {
     if (this.proxy) {
@@ -4583,6 +4488,15 @@ exports[`ts#rdb generator > should generate the aurora shared construct 2`] = `
 import * as url from 'url';
 import { readFileSync } from 'fs';
 import { Construct } from 'constructs';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Code,
+  DockerImageCode,
+  DockerImageFunction,
+  Function,
+  FunctionOptions,
+  Runtime,
+} from 'aws-cdk-lib/aws-lambda';
 import {
   AuroraDatabase,
   AuroraDatabaseEngines,
@@ -4600,14 +4514,19 @@ const { runtimeConfigKey } = JSON.parse(
   ),
 ) as { runtimeConfigKey: string };
 
+const migrationBundleDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/packages/db/bundle/migration',
+);
+
+const createDbUserBundleDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/packages/db/bundle/create-db-user',
+);
+
 export type DbProps = Omit<
   AuroraDatabaseProps,
-  | 'databaseName'
-  | 'adminUser'
-  | 'createDbUserBundleDir'
-  | 'engine'
-  | 'runtimeConfigKey'
-  | 'migrationBundleDir'
+  'databaseName' | 'adminUser' | 'runtimeConfigKey' | 'engine'
 >;
 
 /**
@@ -4620,15 +4539,30 @@ export class Db extends AuroraDatabase {
       databaseName: 'database_name',
       adminUser: 'databaseUser',
       runtimeConfigKey,
-      migrationBundleDir: path.join(
-        findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-        'dist/packages/db/bundle/migration',
-      ),
-      createDbUserBundleDir: path.join(
-        findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-        'dist/packages/db/bundle/create-db-user',
-      ),
       engine: AuroraDatabaseEngines.postgres({}),
+    });
+  }
+
+  protected override createDbUserHandler(baseProps: FunctionOptions): Function {
+    return new Function(this, 'CreateDbUserHandler', {
+      ...baseProps,
+      code: Code.fromAsset(createDbUserBundleDir),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    });
+  }
+
+  protected override createMigrationHandler(
+    baseProps: FunctionOptions,
+  ): Function {
+    return new DockerImageFunction(this, 'MigrationHandler', {
+      ...baseProps,
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+      }),
     });
   }
 }

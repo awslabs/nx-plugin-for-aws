@@ -16,7 +16,50 @@ const uniqStrings = (strings) => {
     return true;
   });
 };
-const returnTypeSet = new Set(allOperations.map(op => op.result.typescriptType));
+const returnTypeSet = new Set(allOperations.flatMap(op => op.result ? [op.result.typescriptType] : []));
+// Names of discriminator "base" models (an object schema whose subtypes allOf-
+// compose it). A subtype composes its base's non-dispatching `$toJsonBase`/
+// `$fromJsonBase` body, so composing the dispatching `toJson`/`fromJson` would
+// recurse infinitely (base -> subtype -> base).
+const discriminatorBaseNames = new Set(models.filter(m => m.discriminator && m.discriminator.isBase).map(m => m.name));
+const modelByName = Object.fromEntries(models.map(m => [m.name, m]));
+// The $IO marshaller call for a composed member: a subtype composes its base's
+// non-dispatching body to avoid recursing back through the base's dispatch.
+const composedMarshaller = (property, method) =>
+  property.export === 'reference' && discriminatorBaseNames.has(property.type)
+    ? `$IO.${property.typescriptType}.$${method}Base`
+    : `$IO.${property.typescriptType}.${method}`;
+// Names of object models composed by a non-discriminated one-of/any-of. These
+// additionally emit an internal `$fromJsonPartial` marshaller that converts
+// only the properties present on the wire value, so composing the union's
+// members never fabricates values (e.g. an Invalid Date) from a non-matching
+// member's absent required fields. Discriminated unions dispatch to a single
+// member instead and never compose, so they don't need the partial form.
+const unionMemberNames = new Set(models
+  .filter(m => (m.export === 'one-of' || m.export === 'any-of') && !m.discriminator)
+  .flatMap(m => (m.composedModels || []).map(c => c.name)));
+const hasPartialMarshaller = (name) => {
+  const member = unionMemberNames.has(name) && modelByName[name];
+  return member && !['one-of', 'any-of', 'all-of', 'dictionary', 'enum', 'tuple'].includes(member.export);
+};
+// The single wire media type chosen for an operation's request body, if any.
+const bodyMediaTypeOf = (op) => {
+  if (!op.parametersBody || !op.parametersBody.mediaTypes) return undefined;
+  const mediaTypes = Array.isArray(op.parametersBody.mediaTypes) ? op.parametersBody.mediaTypes : [op.parametersBody.mediaTypes];
+  return mediaTypes.find(mt => mt === 'application/json' || mt.endsWith('+json')) || mediaTypes[0];
+};
+const hasMultipartBody = allOperations.some(op => bodyMediaTypeOf(op) === 'multipart/form-data');
+// A urlencoded body is form-encoded only when its schema is an object; a
+// primitive schema (e.g. a raw pre-encoded string) is sent verbatim below.
+const isUrlEncodedObjectBody = (op) => bodyMediaTypeOf(op) === 'application/x-www-form-urlencoded' && !!op.parametersBody && !op.parametersBody.isPrimitive;
+const hasUrlEncodedBody = allOperations.some(op => isUrlEncodedObjectBody(op));
+// Whether any operation uses matrix/label path styles or allowReserved query
+// params, so the extra $url serialisation logic is only emitted when needed.
+const hasStyledPathParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'path' && p.pathStyle));
+const hasAllowReservedParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'query' && p.allowReserved));
+// Whether a response is JSON on the wire (so primitives arrive JSON-encoded,
+// e.g. a string response body is `"hello"` including the quotes).
+const isJsonResponse = (response) => (response.mediaTypes || []).some(mt => mt === 'application/json' || mt.split(';')[0].endsWith('+json'));
 _%>
 <%_ if ((models.length + allOperations.filter(p => p.parameters.length > 0).length) > 0) { _%>
 import type {
@@ -26,7 +69,7 @@ import type {
 <%_ allOperations.filter(p => p.parameters.length > 0).forEach((op) => { _%>
   <%- op.requestTypeName %>,
 <%_ }); _%>
-} from './types.gen.js';
+} from './types.gen<% if (esm) { %>.js<% } %>';
 <%_ } _%>
 <%_
 // Nested arrays of primitives (besides dates) don't need to have .map(...) called to convert them as the base case will be a noop
@@ -34,6 +77,9 @@ import type {
 const canShortCircuitConversion = (property) => {
   if (["array", "dictionary"].includes(property.export)) {
     return !property.link || canShortCircuitConversion(property.link);
+  }
+  if (property.export === "tuple") {
+    return property.properties.every(canShortCircuitConversion);
   }
   return property.isPrimitive && !["date", "date-time"].includes(property.format);
 };
@@ -44,17 +90,27 @@ const renderToJsonDateValue = (identifier, format) => {
 // Renders the appropriate nested function for .map() or $mapValues() for arrays and dictionaries for the given type
 const renderNestedToJsonValue = (type, argumentType = undefined, depth = 0) => {
   const itemIdentifier = `item${depth}`;
-  const argType = `${argumentType ? `: ${argumentType}` : ''}`;
+  // Nested items (depth > 0) come from mapping over an `any`, so annotate them
+  // to satisfy noImplicitAny.
+  const argType = `${argumentType ? `: ${argumentType}` : (depth > 0 ? ': any' : '')}`;
   if (type.isPrimitive || type.typescriptType === 'unknown' || type.export === 'enum' || type.isEnum) {
     return `(${itemIdentifier}${argType}) => ${["date", "date-time"].includes(type.format) ? renderToJsonDateValue(itemIdentifier, type.format) : itemIdentifier}`;
   } else if (type.export === "array") {
     return `(${itemIdentifier}${argType}) => ${itemIdentifier}.map(${renderNestedToJsonValue(type.link, argumentType, depth + 1)})`;
+  } else if (type.export === "tuple") {
+    return `(${itemIdentifier}${argType}) => ${renderTupleToJsonValue(type, itemIdentifier)}`;
   } else if (type.export === "dictionary") {
     return `(${itemIdentifier}${argType}) => $IO.$mapValues(${itemIdentifier}, ${renderNestedToJsonValue(type.link, argumentType, depth + 1)})`;
-  } else if (type.type === 'unknown') {
+  } else if (type.type === 'unknown' && !["one-of", "any-of", "all-of"].includes(type.export)) {
+    // A bare `unknown` element passes through; a composite has type `unknown`
+    // but must still be marshalled via its own $IO entry.
     return `(${itemIdentifier}${argType}) => ${itemIdentifier}`;
   }
   return `$IO.${type.typescriptType || type.typescriptName}.toJson`;
+};
+// Renders a tuple's positional element-wise conversion, e.g. `[f(v[0]), g(v[1])]`
+const renderTupleToJsonValue = (property, value) => {
+  return `[${property.properties.map((member, i) => renderToJsonValue(member, `(${value} as any)[${i}]`)).join(', ')}]`;
 };
 // Renders the code to transform a property of the model to its json representation from the model types
 const renderToJsonValue = (property, value, argumentType = undefined) => {
@@ -67,6 +123,8 @@ const renderToJsonValue = (property, value, argumentType = undefined) => {
   } else if (property.export === "array") {
     const prefix = property.uniqueItems ? `Array.from(${value})` : `${value}`;
     rendered = `(${prefix}.map(${renderNestedToJsonValue(property.link, argumentType)}))`;
+  } else if (property.export === "tuple") {
+    rendered = `(${renderTupleToJsonValue(property, value)})`;
   } else if (property.export === "dictionary") {
     rendered = `($IO.$mapValues(${value}, ${renderNestedToJsonValue(property.link, argumentType)}))`;
   } else if (property.type !== "any") {
@@ -75,7 +133,7 @@ const renderToJsonValue = (property, value, argumentType = undefined) => {
     rendered = value;
   }
 
-  if ((property.isPrimitive && ["date", "date-time"].includes(property.format)) || (!property.isPrimitive && ["array", "dictionary"].includes(property.export))) {
+  if ((property.isPrimitive && ["date", "date-time"].includes(property.format)) || (!property.isPrimitive && ["array", "tuple", "dictionary"].includes(property.export))) {
     rendered = property.isNullable ? `${value} === null ? null : ${rendered}` : rendered;
   }
   return rendered;
@@ -83,17 +141,27 @@ const renderToJsonValue = (property, value, argumentType = undefined) => {
 // Renders the appropriate nested function for .map() or $mapValues() for arrays and dictionaries for the given type
 const renderNestedFromJsonValue = (type, argumentType = undefined, depth = 0) => {
     const itemIdentifier = `item${depth}`;
-    const argType = `${argumentType ? `: ${argumentType}` : ''}`;
+    // Nested items (depth > 0) come from mapping over an `any`, so annotate them
+    // to satisfy noImplicitAny.
+    const argType = `${argumentType ? `: ${argumentType}` : (depth > 0 ? ': any' : '')}`;
     if (type.isPrimitive || type.typescriptType === 'unknown' || type.export === 'enum' || type.isEnum) {
         return `(${itemIdentifier}${argType}) => ${["date", "date-time"].includes(type.format) ? `new Date(${itemIdentifier})` : itemIdentifier}`;
     } else if (type.export === "array") {
         return `(${itemIdentifier}${argType}) => ${itemIdentifier}.map(${renderNestedFromJsonValue(type.link, argumentType, depth + 1)})`;
+    } else if (type.export === "tuple") {
+        return `(${itemIdentifier}${argType}) => ${renderTupleFromJsonValue(type, itemIdentifier)}`;
     } else if (type.export === "dictionary") {
         return `(${itemIdentifier}${argType}) => $IO.$mapValues(${itemIdentifier}, ${renderNestedFromJsonValue(type.link, argumentType, depth + 1)})`;
-    } else if (type.type === 'unknown') {
+    } else if (type.type === 'unknown' && !["one-of", "any-of", "all-of"].includes(type.export)) {
+      // A bare `unknown` element passes through; a composite has type `unknown`
+      // but must still be marshalled via its own $IO entry.
       return `(${itemIdentifier}${argType}) => ${itemIdentifier}`;
     }
     return `$IO.${type.typescriptType || type.typescriptName}.fromJson`;
+};
+// Renders a tuple's positional element-wise revival, e.g. `[f(v[0]), g(v[1])]`
+const renderTupleFromJsonValue = (property, value) => {
+  return `([${property.properties.map((member, i) => renderFromJsonValue(member, `(${value})[${i}]`)).join(', ')}] as ${property.typescriptType})`;
 };
 // Renders the code to transform a property of the model from its json representation into the model types
 const renderFromJsonValue = (property, value, argumentType = undefined) => {
@@ -105,6 +173,8 @@ const renderFromJsonValue = (property, value, argumentType = undefined) => {
     } else if (property.export === "array") {
         rendered = `((${value} as Array<any>).map(${renderNestedFromJsonValue(property.link, argumentType)}))`;
         rendered = property.uniqueItems ? `new Set(${rendered})` : rendered;
+    } else if (property.export === "tuple") {
+        rendered = renderTupleFromJsonValue(property, value);
     } else if (property.export === "dictionary") {
         rendered = `($IO.$mapValues(${value}, ${renderNestedFromJsonValue(property.link, argumentType)}))`;
     } else {
@@ -122,8 +192,13 @@ const renderResponseCondition = (code) => {
   }
   return `response.status === ${code}`;
 };
-// Renders the code which handles deserialising the response from a fetch call
+// Renders the code which handles deserialising the response from a fetch call.
+// A primitive on a JSON wire arrives JSON-encoded (a string body is `"hello"`,
+// quotes included), so it must be JSON-parsed rather than read as raw text.
+// Streaming chunks (options provided) keep raw-text semantics: an x-streaming
+// chunk is an arbitrary fragment, not a complete JSON document.
 const renderResponse = (response, options) => {
+  const jsonWire = !options && isJsonResponse(response);
   let opts = options || {
     asText: 'await response.text()',
     asJson: 'await response.json()',
@@ -132,7 +207,13 @@ const renderResponse = (response, options) => {
   if (response.type === 'binary') {
     return opts.asBlob;
   }
-  if ((response.isPrimitive || ['unknown', 'any'].includes(response.type)) && !['array', 'dictionary'].includes(response.export)) {
+  if ((response.isPrimitive || ['unknown', 'any'].includes(response.type)) && !['array', 'tuple', 'dictionary'].includes(response.export)) {
+    if (jsonWire) {
+      if (['date', 'date-time'].includes(response.format)) {
+        return `new Date(${opts.asJson})`;
+      }
+      return `${opts.asJson}${['unknown', 'any'].includes(response.type) ? ' as any' : ''}`;
+    }
     if (response.type === 'number') {
       return `Number(${opts.asText})`;
     } else if (response.type === 'boolean') {
@@ -143,7 +224,7 @@ const renderResponse = (response, options) => {
     return `${opts.asText}${['unknown', 'any'].includes(response.type) ? ' as any' : ''}`;
   }
   if (response.isEnum || response.export === 'enum') {
-    return `(${opts.asText}) as ${response.typescriptType}`;
+    return `(${jsonWire ? opts.asJson : opts.asText}) as ${response.typescriptType}`;
   }
   return renderFromJsonValue(response, `(${opts.asJson})`);
 };
@@ -163,13 +244,60 @@ _%>
  * Utility for serialisation and deserialisation of API types.
  */
 export class $IO {
-  protected static $mapValues = (data: any, fn: (item: any) => any) =>
+  public static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 <%_ models.filter(m => m.export !== 'enum').forEach((model) => { _%>
 <%_ const isComposite = model.export === "one-of" || model.export === "any-of" || model.export === "all-of"; _%>
+<%_ /* A discriminator base emits its plain (own-fields) body under a $-prefixed
+      name that its subtypes compose, while its public toJson/fromJson dispatch
+      to the matching subtype — so composing a subtype never recurses back into
+      the dispatch. */ _%>
+<%_ const isBase = model.discriminator && model.discriminator.isBase; _%>
+<%_ const toJsonName = isBase ? '$toJsonBase' : 'toJson'; _%>
+<%_ const fromJsonName = isBase ? '$fromJsonBase' : 'fromJson'; _%>
 
+  <%_ if (model.export === 'tuple') { _%>
   public static <%- model.typescriptName %> = {
     toJson: (model: <%- model.typescriptName %>): any => {
+      if (model === undefined || model === null) {
+        return model;
+      }
+      return <%- renderToJsonValue(model, 'model') %>;
+    },
+    fromJson: (json: any): <%- model.typescriptName %> => {
+      if (json === undefined || json === null) {
+        return json;
+      }
+      return <%- renderFromJsonValue(model, 'json') %>;
+    },
+  };
+  <%_ return; } _%>
+  public static <%- model.typescriptName %> = {
+    <%_ if (isBase) { _%>
+    toJson: (model: <%- model.typescriptName %>): any => {
+      if (model === undefined || model === null) {
+        return model;
+      }
+      switch ((model as any).<%- model.discriminator.typescriptPropertyName %>) {
+        <%_ model.discriminator.mapping.filter(m => modelByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- modelByName[modelName].typescriptName %>.toJson(model as <%- modelByName[modelName].typescriptName %>);
+        <%_ }); _%>
+      }
+      return $IO.<%- model.typescriptName %>.$toJsonBase(model);
+    },
+    fromJson: (json: any): <%- model.typescriptName %> => {
+      if (json === undefined || json === null) {
+        return json;
+      }
+      switch (json?.[<%- JSON.stringify(model.discriminator.propertyName) %>]) {
+        <%_ model.discriminator.mapping.filter(m => modelByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- modelByName[modelName].typescriptName %>.fromJson(json);
+        <%_ }); _%>
+      }
+      return $IO.<%- model.typescriptName %>.$fromJsonBase(json);
+    },
+    <%_ } _%>
+    <%- toJsonName %>: (model: <%- model.typescriptName %>): any => {
       if (model === undefined || model === null) {
         return model;
       }
@@ -202,10 +330,25 @@ export class $IO {
           return <%- renderToJsonValue(arrayOfNonPrimitives, 'model') %>;
       }
       <%_ } _%>
+      <%_ /* A discriminated composite marshals directly to the matching branch,
+            rather than merging every branch (which would leak fields from the
+            non-matching branches). Unknown values fall through to the merge. */ _%>
+      <%_ if (model.discriminator) { _%>
+      <%_ const discToJsonByName = Object.fromEntries(model.composedModels.map(m => [m.name, m.typescriptName])); _%>
+      switch ((model as any).<%- model.discriminator.typescriptPropertyName %>) {
+        <%_ model.discriminator.mapping.filter(m => discToJsonByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- discToJsonByName[modelName] %>.toJson(model as <%- discToJsonByName[modelName] %>);
+        <%_ }); _%>
+      }
+      <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((property, i) => { _%>
+        <%_ if (property.export === 'reference' && discriminatorBaseNames.has(property.type)) { _%>
+        ...<%- composedMarshaller(property, 'toJson') %>(model),
+        <%_ } else { _%>
         ...<%- renderToJsonValue(property, `model${(model.export !== 'all-of' && property.export !== 'dictionary') ? ` as ${property.typescriptType}` : ''}`) %>,
+        <%_ } _%>
         <%_ }); _%>
       };
       <%_ } else { _%>
@@ -238,7 +381,7 @@ export class $IO {
       };
       <%_ } _%>
     },
-    fromJson: (json: any): <%- model.typescriptName %> => {
+    <%- fromJsonName %>: (json: any): <%- model.typescriptName %> => {
       if (json === undefined || json === null) {
         return json;
       }
@@ -270,10 +413,30 @@ export class $IO {
           return <%- renderFromJsonValue(arrayOfNonPrimitives, 'json') %>;
       }
       <%_ } _%>
+      <%_ /* A discriminated composite marshals directly to the matching branch;
+            the discriminator value comes off the raw json by its wire name.
+            Unknown values fall through to the merge. */ _%>
+      <%_ if (model.discriminator) { _%>
+      <%_ const discFromJsonByName = Object.fromEntries(model.composedModels.map(m => [m.name, m.typescriptName])); _%>
+      switch (json?.[<%- JSON.stringify(model.discriminator.propertyName) %>]) {
+        <%_ model.discriminator.mapping.filter(m => discFromJsonByName[m.modelName]).forEach(({ value, modelName }) => { _%>
+        case <%- JSON.stringify(value) %>: return $IO.<%- discFromJsonByName[modelName] %>.fromJson(json);
+        <%_ }); _%>
+      }
+      <%_ } _%>
       <%_ if (model.composedModels.length > 0) { _%>
+      <%_ /* A non-discriminated union's members marshal via their partial form:
+            the value matches one member, so the others must convert only the
+            properties actually present rather than fabricate their own. */ _%>
       return {
         <%_ model.properties.filter(p => !p.isPrimitive && p.export !== 'array').forEach((composedType) => { _%>
+        <%_ if (composedType.export === 'reference' && discriminatorBaseNames.has(composedType.type)) { _%>
+        ...<%- composedMarshaller(composedType, 'fromJson') %>(json),
+        <%_ } else if (model.export !== 'all-of' && composedType.export === 'reference' && hasPartialMarshaller(composedType.type)) { _%>
+        ...$IO.<%- composedType.typescriptType %>.$fromJsonPartial(json),
+        <%_ } else { _%>
         ...<%- renderFromJsonValue(composedType, 'json') %>,
+        <%_ } _%>
         <%_ }); _%>
       };
       <%_ } else { _%>
@@ -310,6 +473,36 @@ export class $IO {
       };
       <%_ } _%>
     },
+    <%_ if (hasPartialMarshaller(model.name)) { _%>
+    <%_ /* Converts only the properties present on the wire value — a required
+          field that is absent is skipped, never fabricated (e.g. no
+          `new Date(undefined)`). Used solely when composing this model as a
+          member of a non-discriminated union, where the value may match a
+          different member; `fromJson` remains the fully-typed marshaller. */ _%>
+    $fromJsonPartial: (json: any): any => {
+      return {
+        <%_ if (model.hasPatternProperties && model.patternPropertiesModels.length > 0) { _%>
+        <%_ model.patternPropertiesModels.forEach(({ pattern, model: patternProperty }) => { _%>
+          ...$IO.$mapValues(Object.fromEntries(Object.entries(json).filter(([key]) => <% if (model.properties.length > 0) { %>![<%- model.properties.map(p => `'${p.name}'`).join(', ') %>].includes(key) && <% } %>
+          <%- matchPattern(pattern, 'key') %>
+          )), (patternProperty) => <%- renderFromJsonValue(patternProperty, 'patternProperty', 'any') %>),
+        <%_ }); _%>
+        <%_ } _%>
+        <%_ if (model.hasAdditionalProperties) { _%>
+        ...$IO.$mapValues(Object.fromEntries(Object.entries(json).filter(([key]) => <% if (model.properties.length > 0) { %>![<%- model.properties.map(p => `'${p.name}'`).join(', ') %>].includes(key)<% } %>
+        <%_ if (model.hasPatternProperties && model.patternPropertiesModels.length > 0) { _%>
+        <% if (model.properties.length > 0) { %>&& <% } %>!(<%- model.patternPropertiesModels.map(({ pattern }) => matchPattern(pattern, 'key')).join(' || ') %>)
+        <%_ } _%>
+        )), (additionalProperty) => <%- renderFromJsonValue(model.additionalPropertiesModel, 'additionalProperty', 'any') %>),
+        <%_ } _%>
+        <%_ model.properties.forEach((property) => { _%>
+        ...(json['<%- property.name %>'] === undefined ? {} : {
+          <%= property.typescriptName %>: <%- renderFromJsonValue(property, `json['${property.name}']`) %>,
+        }),
+        <%_ }); _%>
+      };
+    },
+    <%_ } _%>
   };
 <%_ }) _%>
 }
@@ -355,29 +548,129 @@ export class <%- className %> {
     <%_ }); _%>
   }
 
-  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): string => {
+  private $collectionDelimiters: { [format: string]: string } = { csv: ',', ssv: ' ', pipes: '|' };
+
+  private $deepObject = (key: string, value: any): string[] => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (typeof value !== 'object') {
+      return [`${key}=${encodeURIComponent(String(value))}`];
+    }
+    return Object.entries(value).flatMap(([prop, v]) =>
+      this.$deepObject(`${key}[${encodeURIComponent(prop)}]`, v),
+    );
+  };
+
+  private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' | 'deepObject' }<% if (hasStyledPathParams) { %>, pathStyles?: { [key: string]: { style: 'matrix' | 'label'; explode: boolean } }<% } %><% if (hasAllowReservedParams) { %>, allowReserved?: string[]<% } %>): string => {
     const baseUrl = this.$config.url.endsWith('/') ? this.$config.url.slice(0, -1) : this.$config.url;
+    <%_ if (hasAllowReservedParams) { _%>
+    // Reserved characters stay literal when a query parameter declares allowReserved
+    const encodeQueryValue = (key: string, v: string): string =>
+      allowReserved?.includes(key) ? encodeURIComponent(v).replace(/%(2F|3A|3F|23|5B|5D|40|21|24|26|27|28|29|2A|2B|2C|3B|3D)/gi, (m) => decodeURIComponent(m)) : encodeURIComponent(v);
+    <%_ } _%>
+    <%_ if (hasStyledPathParams) { _%>
+    const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) => {
+      const pathStyle = pathStyles?.[key];
+      let rendered: string;
+      if (pathStyle?.style === 'matrix') {
+        // RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+        rendered = Array.isArray(value) && pathStyle.explode
+          ? value.map(v => `;${key}=${encodeURIComponent(`${v}`)}`).join('')
+          : `;${key}=${(Array.isArray(value) ? value : [value]).map(v => encodeURIComponent(`${v}`)).join(',')}`;
+      } else if (pathStyle?.style === 'label') {
+        // RFC 6570 label expansion: .a,b (explode: .a.b)
+        rendered = `.${(Array.isArray(value) ? value : [value]).map(v => encodeURIComponent(`${v}`)).join(pathStyle.explode ? '.' : ',')}`;
+      } else {
+        rendered = encodeURIComponent(`${value}`);
+      }
+      return withParams.replace(`{${key}}`, rendered);
+    }, path);
+    <%_ } else { _%>
     const pathWithParameters = Object.entries(pathParameters).reduce((withParams, [key, value]) =>
       withParams.replace(`{${key}}`, encodeURIComponent(`${value}`))
     , path);
-    const queryString = Object.entries(queryParameters).map(([key, value]) => {
+    <%_ } _%>
+    const queryString = Object.entries(queryParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
-        return value.map(v => `${encodeURIComponent(key)}=${encodeURIComponent(`${v}`)}`).join('&');
+        return value.map(v => `${encodeURIComponent(key)}=<% if (hasAllowReservedParams) { %>${encodeQueryValue(key, `${v}`)}<% } else { %>${encodeURIComponent(`${v}`)}<% } %>`);
       }
-      return `${encodeURIComponent(key)}=${encodeURIComponent(Array.isArray(value) ? value.map(String).join(',') : String(value))}`;
+      if (collectionFormats?.[key] === 'deepObject' && value !== null && typeof value === 'object') {
+        return this.$deepObject(encodeURIComponent(key), value);
+      }
+      const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [`${encodeURIComponent(key)}=<% if (hasAllowReservedParams) { %>${encodeQueryValue(key, Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}<% } else { %>${encodeURIComponent(Array.isArray(value) ? value.map(String).join(delimiter) : String(value))}<% } %>`];
     }).join('&');
     return baseUrl + pathWithParameters + (queryString ? `?${queryString}` : '');
   };
 
-  private $headers = (headerParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): [string, string][] => {
+  private $headers = (headerParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' | 'ssv' | 'pipes' }): [string, string][] => {
     return Object.entries(headerParameters).flatMap(([key, value]) => {
       if (Array.isArray(value) && collectionFormats?.[key] === 'multi') {
         return value.map(v => [key, String(v)]) as [string, string][];
       }
-      return [[key, String(value)]];
+      const delimiter = this.$collectionDelimiters[collectionFormats?.[key] ?? 'csv'] ?? ',';
+      return [[key, Array.isArray(value) ? value.map(String).join(delimiter) : String(value)]];
     });
   };
 
+  <%_ if (hasMultipartBody) { _%>
+  private $formData = (
+    model: { [key: string]: any },
+    partContentTypes?: { [key: string]: string },
+  ): FormData => {
+    const formData = new FormData();
+    const append = (key: string, value: any): void => {
+      if (value === undefined || value === null) {
+        return;
+      }
+      const partContentType = partContentTypes?.[key];
+      if (value instanceof Blob || typeof value === 'string') {
+        // A declared part content type overrides the default (text/plain for
+        // strings, the Blob's own type otherwise)
+        if (partContentType) {
+          formData.append(key, new Blob([value], { type: partContentType }));
+        } else {
+          formData.append(key, value);
+        }
+      } else if (Array.isArray(value)) {
+        value.forEach((v) => append(key, v));
+      } else if (typeof value === 'object') {
+        const serialized = JSON.stringify(value);
+        if (partContentType) {
+          formData.append(key, new Blob([serialized], { type: partContentType }));
+        } else {
+          formData.append(key, serialized);
+        }
+      } else {
+        formData.append(key, String(value));
+      }
+    };
+    Object.entries(model).forEach(([key, value]) => append(key, value));
+    return formData;
+  };
+
+  <%_ } _%>
+  <%_ if (hasUrlEncodedBody) { _%>
+  private $urlEncodedForm = (model: { [key: string]: any }): URLSearchParams => {
+    const params = new URLSearchParams();
+    const append = (key: string, value: any): void => {
+      if (value === undefined || value === null) {
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((v) => append(key, v));
+      } else if (typeof value === 'object') {
+        params.append(key, JSON.stringify(value));
+      } else {
+        params.append(key, String(value));
+      }
+    };
+    Object.entries(model).forEach(([key, value]) => append(key, value));
+    return params;
+  };
+
+  <%_ } _%>
   private $fetch: typeof fetch = (...args) => (this.$config.fetch ?? fetch)(...args);
   <%_ allOperations.forEach((op) => { _%>
   <%_ const hasTag = op.tags && op.tags.length > 0; _%>
@@ -388,6 +681,14 @@ export class <%- className %> {
     <%_ ['path', 'query', 'header'].forEach((position) => { _%>
     <%_ if (op.parameters.map(p => p.in).includes(position)) { _%>
     const <%- position %>Parameters: {[key: string]: any} = $IO.<%- op.operationIdPascalCase %>Request<%- upperFirst(position) %>Parameters.toJson(input);
+    <%_ /* A content-based parameter (declared with `content` rather than
+           `schema`) is serialised to its media type — JSON — as a single
+           value. */ _%>
+    <%_ op.parameters.filter(p => p.in === position && p.mediaType === 'application/json').forEach((parameter) => { _%>
+    if (<%- position %>Parameters['<%- parameter.prop %>'] !== undefined) {
+      <%- position %>Parameters['<%- parameter.prop %>'] = JSON.stringify(<%- position %>Parameters['<%- parameter.prop %>']);
+    }
+    <%_ }); _%>
     <%_ } else { _%>
     const <%- position %>Parameters: {[key: string]: any} = {};
     <%_ } _%>
@@ -418,15 +719,48 @@ export class <%- className %> {
     }
     <%_ } _%>
     <%_ } _%>
-    <%_ if (op.parameters.filter(p => p.collectionFormat).length > 0) { _%>
-    const collectionFormats = {
-      <%_ op.parameters.filter(p => p.collectionFormat).forEach((parameter) => { _%>
+    <%_ /* Query and header collection formats are kept in separate maps: a
+           query and a header parameter may share a name, which would collide
+           in a single object literal. */ _%>
+    <%_ const queryCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'query'); _%>
+    <%_ const headerCollectionParams = op.parameters.filter(p => p.collectionFormat && p.in === 'header'); _%>
+    <%_ const styledPathParams = op.parameters.filter(p => p.pathStyle && p.in === 'path'); _%>
+    <%_ const allowReservedParams = op.parameters.filter(p => p.allowReserved && p.in === 'query'); _%>
+    <%_ if (queryCollectionParams.length > 0) { _%>
+    const queryCollectionFormats = {
+      <%_ queryCollectionParams.forEach((parameter) => { _%>
+      '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
+      <%_ }); _%>
+    } as const;
+    <%_ } _%>
+    <%_ if (styledPathParams.length > 0) { _%>
+    const pathParameterStyles = {
+      <%_ styledPathParams.forEach((parameter) => { _%>
+      '<%- parameter.prop %>': { style: '<%- parameter.pathStyle %>', explode: <%- !!parameter.pathExplode %> },
+      <%_ }); _%>
+    } as const;
+    <%_ } _%>
+    <%_ if (headerCollectionParams.length > 0) { _%>
+    const headerCollectionFormats = {
+      <%_ headerCollectionParams.forEach((parameter) => { _%>
       '<%- parameter.prop %>': '<%- parameter.collectionFormat %>',
       <%_ }); _%>
     } as const;
     <%_ } _%>
     <%_ if (op.parametersBody) { _%>
-    <%_ if (op.parametersBody.isPrimitive && ['number', 'boolean', 'string'].includes(op.parametersBody.type) && !['array', 'dictionary'].includes(op.parametersBody.export) && !["date", "date-time"].includes(op.parametersBody.format)) { _%>
+    <%_ if (bodyMediaTypeOf(op) === 'multipart/form-data') { _%>
+    <%_ /* A multipart body is sent as FormData: Blob fields stream as file
+           parts, primitives serialise to strings, and fetch computes the
+           boundary itself (so the Content-Type header is intentionally unset
+           above). */ _%>
+    const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$formData(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %><% if (op.parametersBody.partContentTypes) { %>, <%- JSON.stringify(op.parametersBody.partContentTypes) %><% } %>);
+    <%_ } else if (isUrlEncodedObjectBody(op)) { _%>
+    <%_ /* An object urlencoded body is sent as `key=value&...` pairs — the JSON
+           serialisation the wire type declares would be rejected by the
+           server's form parser. A primitive urlencoded body (e.g. a raw
+           pre-encoded string) falls through to the String(input) branch. */ _%>
+    const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>this.$urlEncodedForm(<%- op.explicitRequestBodyParameter ? `$IO.${op.operationIdPascalCase}RequestBodyParameters.toJson(input).${op.explicitRequestBodyParameter.prop}` : renderToJsonValue(op.parametersBody, 'input') %>).toString();
+    <%_ } else if (op.parametersBody.isPrimitive && ['number', 'boolean', 'string'].includes(op.parametersBody.type) && !['array', 'dictionary'].includes(op.parametersBody.export) && !["date", "date-time"].includes(op.parametersBody.format)) { _%>
     const body = <% if (!op.parametersBody.isRequired) { %>input === undefined ? undefined : <% } %>String(input<%- op.explicitRequestBodyParameter ? `.${op.explicitRequestBodyParameter.typescriptName}` : '' %>);
     <%_ } else if (op.parametersBody.isPrimitive && ["date", "date-time"].includes(op.parametersBody.format)) { _%>
     const body = <%- renderToJsonDateValue('input', op.parametersBody.format) %>;
@@ -457,8 +791,8 @@ export class <%- className %> {
     const body = undefined;
     <%_ } _%>
 
-    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (op.parameters.filter(p => p.collectionFormat).length > 0) { %>, collectionFormats<% } %>), {
-      headers: this.$headers(headerParameters<% if (op.parameters.filter(p => p.collectionFormat).length > 0) { %>, collectionFormats<% } %>),
+    const response = await this.$fetch(this.$url('<%- op.path %>', pathParameters, queryParameters<% if (queryCollectionParams.length > 0 || styledPathParams.length > 0 || allowReservedParams.length > 0) { %>, <%- queryCollectionParams.length > 0 ? 'queryCollectionFormats' : 'undefined' %><% } %><% if (styledPathParams.length > 0 || allowReservedParams.length > 0) { %>, <%- styledPathParams.length > 0 ? 'pathParameterStyles' : 'undefined' %><% } %><% if (allowReservedParams.length > 0) { %>, [<%- allowReservedParams.map(p => `'${p.prop}'`).join(', ') %>]<% } %>), {
+      headers: this.$headers(headerParameters<% if (headerCollectionParams.length > 0) { %>, headerCollectionFormats<% } %>),
       method: '<%- op.method %>',
       body,
     });

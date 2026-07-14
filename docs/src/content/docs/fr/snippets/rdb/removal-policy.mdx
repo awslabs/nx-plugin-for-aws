@@ -1,0 +1,53 @@
+---
+title: Politique de suppression
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Le construct CDK conserve le cluster Aurora par défaut (`removalPolicy: RemovalPolicy.RETAIN`). Modifiez ceci lorsque vous souhaitez que la suppression de la stack CDK crée un snapshot ou détruise le cluster à la place.
+
+Lors de l'utilisation de `RemovalPolicy.DESTROY`, la protection contre la suppression doit également être désactivée avant que le cluster puisse être supprimé.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+Pour un environnement éphémère où la base de données doit être supprimée avec la stack :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform n'utilise pas les politiques de suppression CDK. Par défaut, le module crée un snapshot final lors de la suppression (`skip_final_snapshot = false`). Pour ignorer le snapshot final pour un environnement éphémère :
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
+}
+```
+
+::::caution[Perte de données]
+`skip_final_snapshot = true` effacera définitivement toutes les données lorsque le cluster sera supprimé. À utiliser uniquement dans des environnements éphémères (tels que les tests automatisés). Conservez `skip_final_snapshot = false` pour toutes les stacks persistantes et de production afin d'éviter la perte de données.
+::::
+</Fragment>
+</Infrastructure>

@@ -10,6 +10,7 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
+  SHARED_TERRAFORM_DIR,
 } from './shared-constructs-constants';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from './test';
 
@@ -26,6 +27,7 @@ describe('shared-constructs utils', () => {
         name: '@test-scope/source',
         version: '0.0.0',
         license: 'MIT',
+        type: 'module',
         dependencies: {},
         devDependencies: {},
       }),
@@ -116,6 +118,28 @@ describe('shared-constructs utils', () => {
 
       // Check if marker file still exists (meaning the directory wasn't recreated)
       expect(tree.exists(markerFilePath)).toBeTruthy();
+    });
+
+    it('should declare no cached outputs on the shared terraform build target', async () => {
+      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+
+      const projectConfig = JSON.parse(
+        tree.read(
+          joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'project.json'),
+          'utf-8',
+        ),
+      );
+
+      // `build` writes runtime-config into dist at apply time; declaring empty
+      // outputs stops Nx caching (and restoring a stale copy over) that config.
+      expect(projectConfig.targets.build.outputs).toEqual([]);
+
+      // The old reset-runtime-config target wiped shared runtime config and
+      // must not be reintroduced.
+      expect(projectConfig.targets['reset-runtime-config']).toBeUndefined();
+      expect(projectConfig.targets.build.dependsOn ?? []).not.toContain(
+        'reset-runtime-config',
+      );
     });
   });
 });

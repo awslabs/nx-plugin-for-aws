@@ -1,0 +1,107 @@
+---
+title: リレーショナルデータベースのデプロイ
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+リレーショナルデータベースジェネレーターは、選択した `iacProvider` に基づいて CDK または Terraform インフラストラクチャを作成します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK コンストラクトは `common/constructs` に作成されます。使用例：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+これにより、RDS Proxy を備えた Aurora クラスター、管理者認証情報、アプリケーションデータベースユーザー、ランタイム設定の登録、およびマイグレーションハンドラーがプロビジョニングされます。
+
+生成されたインフラストラクチャは、2つのデータベースユーザーを作成します：
+- **管理者ユーザー** - クラスターのプロビジョニング中に作成され、認証情報は AWS Secrets Manager に保存されます
+- **アプリケーションユーザー** - Lambda カスタムリソースを介して作成され、IAM 認証が有効化され、アプリケーションデータベースに対する DML 権限（SELECT、INSERT、UPDATE、DELETE）が付与されます
+</Fragment>
+<Fragment slot="terraform">
+Terraform モジュールは `common/terraform` に作成されます。使用例：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+これにより、RDS Proxy を備えた Aurora クラスター、管理者認証情報、create-db-user Lambda、ランタイム設定の登録、マイグレーション Lambda、およびコンテナレジストリリソースがプロビジョニングされます。
+
+生成されたインフラストラクチャは、2つのデータベースユーザーを作成します：
+- **管理者ユーザー** - クラスターのプロビジョニング中に作成され、認証情報は AWS Secrets Manager に保存されます
+- **アプリケーションユーザー** - Lambda 関数を介して作成され、IAM 認証が有効化され、アプリケーションデータベースに対する DML 権限（SELECT、INSERT、UPDATE、DELETE）が付与されます
+</Fragment>
+</Infrastructure>
+
+アプリケーションユーザーは、ランダムな名前と IAM 認証で自動的に作成されます。生成されたデータベースクライアントは、短期間有効な RDS トークンを使用してこのユーザーとして認証するように既に設定されているため、アプリケーションコードがデータベースパスワードを処理することはありません。
+
+VPC には、パブリックサブネット、エグレス付きプライベートサブネット、およびプライベート分離サブネットを含める必要があります。データベースはプライベート分離サブネットで実行でき、アプリケーション Lambda 関数は AppConfig などの AWS サービスに到達できるように、エグレス付きプライベートサブネットで実行する必要があります。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+<Link path="guides/connection">`connection`</Link> ジェネレーターを使用して、プロジェクトをこのデータベースに接続します。データベースに到達するために必要なインフラストラクチャの配線については、関連するコンピュートタイプ（例：FastAPI、MCP サーバー、エージェント）の接続ガイドを参照してください。

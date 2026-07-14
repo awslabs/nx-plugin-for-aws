@@ -13,13 +13,14 @@ import {
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
-  CfnUserPoolDomain,
   FeaturePlan,
+  ManagedLoginVersion,
   Mfa,
   OAuthScope,
   StandardThreatProtectionMode,
   UserPool,
   UserPoolClient,
+  UserPoolDomain,
 } from 'aws-cdk-lib/aws-cognito';
 import {
   CfnLoggingConfiguration,
@@ -28,9 +29,9 @@ import {
 } from 'aws-cdk-lib/aws-wafv2';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import { RuntimeConfig } from './runtime-config.js';
+import { RuntimeConfig } from './runtime-config<% if (esm) { %>.js<% } %>';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
-import { suppressRules } from './checkov.js';
+import { suppressRules } from './checkov<% if (esm) { %>.js<% } %>';
 
 const WEB_CLIENT_ID = 'WebClient';
 
@@ -53,7 +54,7 @@ export class UserIdentity extends Construct {
   public readonly identityPool: IdentityPool;
   public readonly userPool: UserPool;
   public readonly userPoolClient: UserPoolClient;
-  public readonly userPoolDomain: CfnUserPoolDomain;
+  public readonly userPoolDomain: UserPoolDomain;
 
   /** The WAFv2 Web ACL associated with the user pool, if WAF is enabled */
   public readonly webAcl?: CfnWebACL;
@@ -229,10 +230,12 @@ export class UserIdentity extends Construct {
   };
 
   private createUserPoolDomain = (userPool: UserPool) =>
-    new CfnUserPoolDomain(this, 'UserPoolDomain', {
-      domain: `<%= cognitoDomain %>-${Stack.of(this).account}`,
-      userPoolId: userPool.userPoolId,
-      managedLoginVersion: 2,
+    new UserPoolDomain(this, 'UserPoolDomain', {
+      userPool,
+      cognitoDomain: {
+        domainPrefix: `<%= cognitoDomain %>-${Stack.of(this).account}`,
+      },
+      managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
 
   private createUserPoolClient = (userPool: UserPool) => {
@@ -282,7 +285,7 @@ export class UserIdentity extends Construct {
   private createManagedLoginBranding = (
     userPool: UserPool,
     userPoolClient: UserPoolClient,
-    userPoolDomain: CfnUserPoolDomain
+    userPoolDomain: UserPoolDomain
   ) => {
     new CfnManagedLoginBranding(this, 'ManagedLoginBranding', {
       userPoolId: userPool.userPoolId,

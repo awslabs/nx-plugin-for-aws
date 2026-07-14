@@ -9,6 +9,7 @@ import {
   joinPathFragments,
   OverwriteStrategy,
 } from '@nx/devkit';
+import { esmVars } from '../module-format';
 
 export type AgentChatProtocol = 'http' | 'a2a' | 'ag-ui';
 export type AgentChatAuth = 'iam' | 'cognito';
@@ -45,6 +46,7 @@ export const addAgentChatScripts = (
     agentNameClassName: options.agentNameClassName,
     auth: options.auth,
     relativeAgentImport: options.relativeAgentImport ?? '',
+    ...esmVars(tree),
   };
 
   // Shared remote-resolution + auth helper, used by every protocol.

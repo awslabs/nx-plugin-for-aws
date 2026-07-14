@@ -1,0 +1,250 @@
+---
+title: Python リレーショナルデータベース
+description: Python リレーショナルデータベースプロジェクトを作成する
+generator: py#rdb
+---
+
+import { FileTree, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import Astro from '@astrojs/react';
+import ConnectionCard from '@components/connection-card.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+このジェネレーターは、[Amazon Aurora](https://aws.amazon.com/rds/aurora/)（PostgreSQL または MySQL）、データモデリング用の [SQLModel](https://sqlmodel.tiangolo.com/)、スキーママイグレーション用の [Alembic](https://alembic.sqlalchemy.org/) をベースとした新しい Python リレーショナルデータベースプロジェクトを作成します。AWS CDK または Terraform を使用してデータベースをプロビジョニングおよび管理するために必要なアプリケーションコードとインフラストラクチャを生成し、宣言的なスキーマ定義、自動マイグレーションデプロイ、データベースクライアントを提供します。
+
+## 使用方法
+
+### リレーショナルデータベースを生成する
+
+<RunGenerator generator="py#rdb" />
+
+### オプション
+
+<GeneratorParameters generator="py#rdb" />
+
+## ジェネレーターの出力
+
+ジェネレーターは `<directory>/<name>` ディレクトリに以下のプロジェクト構造を作成します：
+
+<FileTree>
+  - \<name>
+    - \_\_init\_\_.py パッケージエクスポート（`get_engine`、`session_context`）
+    - connection.py IAM 認証を使用したデータベースエンジンとセッションファクトリ
+    - utils.py ランタイム設定とローカル開発ヘルパー
+    - migration_handler.py デプロイ時に Alembic マイグレーションを実行する Lambda ハンドラー
+    - create_db_user_handler.py デプロイ時にアプリケーションデータベースユーザーを作成する Lambda ハンドラー
+    - models
+      - example.py SQLModel テーブル定義の例
+  - migrations
+    - versions Alembic が生成したマイグレーションスクリプト
+    - env.py Alembic 環境（データベースに接続）
+    - script.py.mako Alembic マイグレーションスクリプトテンプレート
+  - alembic.ini Alembic 設定
+  - config.json ローカル開発接続の詳細とランタイム設定キー
+  - Dockerfile.migration マイグレーションハンドラー用のコンテナイメージ
+  - Dockerfile.create-db-user create-db-user ハンドラー用のコンテナイメージ
+  - project.json プロジェクト設定とビルドターゲット
+</FileTree>
+
+ローカル開発スクリプトはすべてのデータベースプロジェクト間で共有され、`packages/common/scripts/` に生成されます：
+
+<FileTree>
+  - packages/common/scripts/src/rdb
+    - pull-image.ts データベースコンテナイメージをプル
+    - start-container.ts ローカルデータベースコンテナを起動
+    - wait-for-postgres-db.ts ローカルデータベースの準備完了を待機（PostgreSQL）
+    - wait-for-mysql-db.ts ローカルデータベースの準備完了を待機（MySQL）
+</FileTree>
+
+### インフラストラクチャ
+
+<Snippet name="rdb/infrastructure" />
+
+#### アーキテクチャ
+
+<Snippet name="rdb/architecture" />
+
+## ローカル開発
+
+### データモデリング
+
+生成されたプロジェクトは [SQLModel](https://sqlmodel.tiangolo.com/) を使用してデータベーススキーマを定義します。ワークフローはモデルファーストです：データベースプロジェクトの `<name>/models/` ディレクトリ配下に SQLModel テーブルクラスを追加または更新し、それらのモデル変更からマイグレーションを生成します。
+
+モデルの例：
+
+```python title="packages/my_db/my_db/models/example.py"
+from sqlalchemy import Column, String
+from sqlmodel import Field, SQLModel
+
+
+class ExampleModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(sa_column=Column(String(255), nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+```
+
+Alembic が自動生成時にモデルを検出できるように、`<name>/models/__init__.py` でモデルをインポートしてください。
+
+### マイグレーションの作成
+
+モデルを追加または更新した後、Alembic を使用してマイグレーションスクリプトを生成および適用します。生成された `alembic` ターゲットは、実行前に自動的にローカルデータベースコンテナを起動します：
+
+<NxCommands commands={['run <project>:alembic revision --autogenerate -m "describe your change"']} />
+
+これにより、`migrations/versions/` 配下に新しいマイグレーションスクリプトが生成されます。適用する前に生成されたスクリプトを確認してください。
+
+ローカルデータベースにマイグレーションを適用します：
+
+<NxCommands commands={['run <project>:migrate']} />
+
+AWS スタックをデプロイすると、生成されたインフラストラクチャが自動的に生成されたマイグレーションをデプロイされたデータベースに適用します。
+
+### 既存のマイグレーションの適用
+
+他の開発者が作成したマイグレーションファイルをプルした場合、ローカルデータベースに適用します：
+
+<NxCommands commands={['run <project>:migrate']} />
+
+### Alembic コマンドの実行
+
+生成された `alembic` ターゲットは Alembic CLI を公開するため、ローカルデータベースに対して任意の Alembic コマンドを実行できます。利用可能なコマンドについては、[Alembic コマンドリファレンス](https://alembic.sqlalchemy.org/en/latest/ops.html)を参照してください。
+
+<NxCommands commands={['run <project>:alembic <alembic-command>']} />
+
+### ローカルデータベースの停止
+
+`dev` を停止する（例：`Ctrl+C` で）と、ローカルデータベースコンテナは自動的に削除されますが、名前付きボリュームは保持されるため、再起動してもデータは保持されます。
+
+:::caution[Windows]
+Windows でのシグナル処理の制限により、`dev` を停止してもコンテナは自動的に削除されません。手動で削除する必要があります：
+
+```bash
+<engine> rm -f <scope>-<db-name>
+```
+
+`<engine>` をコンテナエンジン（`docker` または `finch`）、`<scope>` を Nx ワークスペーススコープ（例：`proj`）、`<db-name>` をデータベースプロジェクト名（例：`my-db`）に置き換えてください。
+:::
+
+## データベースへの接続
+
+データベースパッケージから `session_context` をインポートし、非同期コンテキストマネージャーとして使用して `AsyncSession` を取得します：
+
+```python
+from sqlmodel import select
+
+from my_scope.my_db import session_context
+from my_scope.my_db.models.example import ExampleModel
+
+async def example():
+    async with session_context() as session:
+        results = (await session.execute(select(ExampleModel))).all()
+```
+
+データベースクライアントは自動的に以下を行います：
+- `RUNTIME_CONFIG_APP_ID` 環境変数を使用して AWS AppConfig からデータベース設定を取得
+- IAM 認証用に `boto3` RDS Signer を介して一時的な認証トークンを生成
+- `ssl.create_default_context()` を使用して TLS 接続を確立
+
+## データベースのデプロイ
+
+<Snippet name="rdb/deploying" parentHeading="データベースのデプロイ" />
+
+### RDS Proxy の設定
+
+<Snippet name="rdb/rds-proxy" parentHeading="RDS Proxy の設定" />
+
+#### RDS Proxy を使用せずに接続する場合の SSL 要件
+
+Amazon RDS CA バンドルは、ランタイムのシステムトラストストアに含まれている必要があります。
+
+##### コンテナランタイム
+
+<Tabs>
+<TabItem label="Amazon Linux">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/pki/ca-trust/source/anchors/global-bundle.pem
+RUN update-ca-trust
+```
+
+</TabItem>
+<TabItem label="Debian">
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+</TabItem>
+</Tabs>
+
+##### Zip 形式の Lambda 関数
+
+Zip 形式でデプロイされる Lambda 関数（<Link path="guides/fastapi">`py#api` FastAPI</Link> など）の場合、Amazon Linux 2023 Lambda 実行環境の組み込み CA トラストストアには、RDS で使用される Amazon ルート CA が含まれています。
+
+RDS Proxy を使用する場合、データベースに接続するランタイムで RDS CA バンドルを設定する必要はありません。
+
+### クラスターインスタンス
+
+<Snippet name="rdb/cluster-instances" />
+
+### サーバーレス容量
+
+<Snippet name="rdb/serverless-capacity" />
+
+### エンジンバージョン
+
+<Snippet name="rdb/engine-version" />
+
+### 削除保護
+
+<Snippet name="rdb/deletion-protection" />
+
+### 削除ポリシー
+
+<Snippet name="rdb/removal-policy" />
+
+### ロギングとモニタリング
+
+<Snippet name="rdb/logging" />
+
+### 暗号化キーのローテーション
+
+<Snippet name="rdb/encryption-key-rotation" />
+
+## 接続
+
+<Link path="guides/connection">`connection`</Link> ジェネレーターを使用して、このプロジェクトをワークスペース内の他のプロジェクトと統合します。このプロジェクトに関連する接続は以下の通りです：
+
+<CardGrid>
+  <ConnectionCard
+    title="Python Agent to Relational Database"
+    description="Python Agent を Aurora リレーショナルデータベースに接続する"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-agent-rdb`}
+    source="strands"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="FastAPI to Relational Database"
+    description="FastAPI を Aurora リレーショナルデータベースに接続する"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-fast-api-rdb`}
+    source="fastapi"
+    target="aurora"
+    targetBadge="python"
+  />
+  <ConnectionCard
+    title="Python MCP Server to Relational Database"
+    description="Python MCP Server を Aurora リレーショナルデータベースに接続する"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-mcp-server-rdb`}
+    source="mcp"
+    sourceBadge="python"
+    target="aurora"
+    targetBadge="python"
+  />
+</CardGrid>

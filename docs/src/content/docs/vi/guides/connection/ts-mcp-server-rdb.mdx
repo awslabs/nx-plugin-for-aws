@@ -46,9 +46,9 @@ Generator sửa đổi hai tệp trong thư mục nguồn của MCP server của
 
 </FileTree>
 
-Ngoài ra, target `<mcp-server-name>-serve-local` được cập nhật để phụ thuộc vào target `serve-local` của cơ sở dữ liệu.
+Ngoài ra, target `<mcp-server-name>-dev` được cập nhật để phụ thuộc vào target `dev` của cơ sở dữ liệu.
 
-## Cách hoạt động
+## Sử dụng Cơ sở dữ liệu trong MCP Tools
 
 Prisma client được lấy bên trong `createServer` và khả dụng cho tất cả các công cụ và tài nguyên được đăng ký ở đó:
 
@@ -85,10 +85,17 @@ Construct MCP server được tạo ra triển khai `IGrantable` và `IConnectab
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { MyDatabase } from ':my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
-const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
 
 db.allowDefaultPortFrom(myMcpServer);
 db.grantConnect(myMcpServer);
@@ -99,34 +106,61 @@ db.grantConnect(myMcpServer);
 </Fragment>
 <Fragment slot="terraform">
 
-Truyền các đầu ra của module cơ sở dữ liệu vào module MCP server của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+Chạy MCP server bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp quy tắc security group:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
   vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
 
 module "my_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_mcp_server.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  security_group_id            = module.my_mcp_server.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Đảm bảo execution role của MCP server có quyền `rds-db:connect` và security group của nó có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng AppConfig <Link path="guides/runtime-config">cấu hình runtime</Link> được chia sẻ được khai báo một lần trong root module của bạn, không phải từ module cơ sở dữ liệu.
 
 </Fragment>
 </Infrastructure>
 
 ### Yêu cầu SSL Khi Kết nối Không qua RDS Proxy
 
-<Snippet name="connection/mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/ts-mcp-server-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
 
 ## Phát triển Cục bộ
 

@@ -2,6 +2,7 @@
 title: Infrastructure API RDB
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
 
 Pour permettre à votre API de se connecter à la base de données lors de l'exécution, les fonctions Lambda de l'API doivent être déployées dans le même VPC que la base de données et bénéficier d'un accès réseau et IAM.
 
@@ -39,34 +40,62 @@ Cet exemple accorde l'accès à tous les gestionnaires de votre API, mais si seu
 </Fragment>
 <Fragment slot="terraform">
 
-Transmettez les sorties du module de base de données à votre module API afin qu'il puisse atteindre la base de données et lire sa configuration d'exécution :
+Déployez l'API dans le même VPC que la base de données, accordez-lui `rds-db:connect` via `additional_iam_policy_statements`, et ouvrez le chemin réseau avec une paire de règles de groupe de sécurité. Les ressources `aws_vpc.main` et `aws_subnet` sont définies dans le guide de déploiement de la base de données :
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  source     = "../../common/terraform/src/app/apis/my-api"
+  enable_vpc = true
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+}
 
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
 }
 ```
 
-Déployez les fonctions Lambda de l'API dans des **sous-réseaux privés avec sortie**, et non dans des sous-réseaux privés isolés. Assurez-vous que le rôle Lambda de l'API dispose de la permission `rds-db:connect` et que son groupe de sécurité peut atteindre le groupe de sécurité de la base de données sur le port de la base de données.
+Déployez les fonctions Lambda de l'API dans des **sous-réseaux privés avec sortie**, et non dans des sous-réseaux privés isolés. `appconfig_application_id`/`appconfig_application_arn` proviennent de l'application AppConfig de <Link path="guides/runtime-config">configuration d'exécution</Link> partagée déclarée une fois dans votre module racine, et non du module de base de données — leur transmission définit `RUNTIME_CONFIG_APP_ID` sur les fonctions Lambda et leur accorde un accès en lecture à l'application. Incluez l'espace de noms `database` lors de son instanciation afin que l'entrée de configuration d'exécution du module de base de données soit déployée :
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

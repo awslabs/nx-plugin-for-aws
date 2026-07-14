@@ -1,0 +1,170 @@
+---
+title: FastAPI đến Cơ sở dữ liệu Quan hệ
+description: Kết nối FastAPI với Cơ sở dữ liệu Quan hệ Python
+when:
+  sourceType: py#fast-api
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` kết nối một <Link path="guides/fastapi">FastAPI</Link> với dự án <Link path="guides/py-rdb">Python Relational Database</Link>, tiêm một session SQLModel có kiểu vào các route handler của bạn thông qua dependency của FastAPI.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/fastapi">`py#fast-api`</Link>
+2. Một dự án <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án FastAPI của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator sẽ sửa đổi dự án FastAPI của bạn:
+
+<FileTree>
+
+- packages/my_api
+  - project.json Thêm dependency từ `dev` vào target `dev` của cơ sở dữ liệu
+  - pyproject.toml Thêm gói cơ sở dữ liệu làm dependency workspace
+  - my_api
+    - dependencies
+      - my_db.py Dependency `MyDbSession` của FastAPI cho database session
+
+</FileTree>
+
+## Sử dụng Cơ sở dữ liệu trong Route Handler
+
+Generator này cấu hình một [FastAPI Dependency](https://fastapi.tiangolo.com/tutorial/dependencies/) có thể tiêm mà bạn có thể sử dụng trong các route handler của mình:
+
+```python title="packages/my_api/my_api/api.py" {2,6,10}
+from sqlmodel import select
+from my_api.dependencies.my_db import MyDbSession
+from my_scope.my_db.models.example import ExampleModel
+
+@app.get("/examples")
+async def list_examples(my_db: MyDbSession):
+    return (await my_db.execute(select(ExampleModel))).all()
+
+@app.post("/examples")
+async def create_example(name: str, my_db: MyDbSession):
+    item = ExampleModel(name=name)
+    my_db.add(item)
+    await my_db.commit()
+    await my_db.refresh(item)
+    return item
+```
+
+FastAPI tự động mở một session mới cho mỗi request và đóng nó khi handler trả về.
+
+## Hạ tầng
+
+Để cho phép hàm Lambda FastAPI kết nối với cơ sở dữ liệu tại runtime, nó phải được triển khai vào cùng VPC với cơ sở dữ liệu và được cấp quyền truy cập mạng và IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho Lambda handler:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Triển khai các hàm Lambda API vào **private subnet với egress**, không phải private isolated subnet. Tại runtime, `session_context()` lấy cấu hình cơ sở dữ liệu từ AWS AppConfig, đây là một endpoint dịch vụ AWS công khai yêu cầu quyền truy cập internet ra ngoài.
+
+:::note
+Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần quyền truy cập thì tốt hơn là cấu hình riêng lẻ.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Triển khai API vào cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng bằng một cặp quy tắc security group:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source     = "..."
+  enable_vpc = true
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnet_ids
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = ["rds-db:connect"]
+      Resource = [
+        "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
+      ]
+    }
+  ]
+
+  env = {
+    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.api.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  security_group_id            = module.api.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+Triển khai các hàm Lambda API vào **private subnet với egress**, không phải private isolated subnet. `RUNTIME_CONFIG_APP_ID` nên trỏ đến ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ, không phải output của database module.
+
+</Fragment>
+</Infrastructure>
+
+## Phát triển Cục bộ
+
+<NxCommands commands={["dev <project-name>"]} />
+
+Lệnh này khởi động FastAPI và tất cả các cơ sở dữ liệu được kết nối. Biến môi trường `LOCAL_DEV=true` khiến database client kết nối với cơ sở dữ liệu Docker cục bộ của nó thay vì Aurora.

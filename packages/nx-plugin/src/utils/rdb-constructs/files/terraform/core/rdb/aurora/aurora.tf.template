@@ -454,27 +454,6 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
-resource "aws_iam_role_policy" "proxy_secret_access" {
-  count = var.enable_rds_proxy ? 1 : 0
-  role  = aws_iam_role.proxy[0].name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = [aws_secretsmanager_secret.credentials.arn]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt"]
-        Resource = [aws_kms_key.database.arn]
-      }
-    ]
-  })
-}
-
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -498,17 +477,6 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
-
-  auth {
-    auth_scheme = "SECRETS"
-    iam_auth    = "REQUIRED"
-    secret_arn  = aws_secretsmanager_secret.credentials.arn
-  }
-
-  depends_on = [
-    aws_iam_role_policy.proxy_secret_access,
-    aws_secretsmanager_secret_version.credentials,
-  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
@@ -689,6 +657,11 @@ output "cluster_resource_id" {
 output "proxy_resource_id" {
   description = "Resource identifier of the RDS Proxy (prx-XXXX), used for IAM rds-db:connect policies when connecting through the proxy. Null if RDS Proxy is disabled."
   value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : null
+}
+
+output "connect_resource_id" {
+  description = "Resource ID to use in IAM rds-db:connect policies for the application database user. Resolves to the RDS Proxy resource ID when the proxy is enabled (the default), or the Aurora cluster resource ID when it is disabled — connecting through the proxy and connecting directly to the cluster are different IAM permission boundaries."
+  value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : aws_rds_cluster.database.cluster_resource_id
 }
 
 output "cluster_endpoint" {

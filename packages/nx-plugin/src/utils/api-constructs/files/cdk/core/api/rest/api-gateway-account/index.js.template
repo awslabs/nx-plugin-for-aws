@@ -16,8 +16,33 @@ const iam = new IAMClient();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const RETRYABLE = ['BadRequestException', 'TooManyRequestsException'];
+
+// Throttling may surface as a bare 429 with no modeled error code, so check
+// response metadata as well as error names
+const isRetryable = (e) =>
+  RETRYABLE.includes(e.name) ||
+  e.$metadata?.httpStatusCode === 429 ||
+  e.$retryable?.throttling === true;
+
+// Retry while the freshly created role propagates through IAM, and on
+// throttling of the account-level API (shared across concurrent deployments)
+const send = async (command) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await apigw.send(command);
+    } catch (e) {
+      if (isRetryable(e) && attempt < 11) {
+        await sleep(5000);
+      } else {
+        throw e;
+      }
+    }
+  }
+};
+
 const hasLiveRole = async () => {
-  const { cloudwatchRoleArn } = await apigw.send(new GetAccountCommand({}));
+  const { cloudwatchRoleArn } = await send(new GetAccountCommand({}));
   if (!cloudwatchRoleArn) return false;
   try {
     await iam.send(
@@ -30,25 +55,12 @@ const hasLiveRole = async () => {
   }
 };
 
-const RETRYABLE = ['BadRequestException', 'TooManyRequestsException'];
-
-const setRole = async (value) => {
-  const command = new UpdateAccountCommand({
-    patchOperations: [{ op: 'replace', path: '/cloudwatchRoleArn', value }],
-  });
-  // Retry while the freshly created role propagates through IAM, and on throttling
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await apigw.send(command);
-    } catch (e) {
-      if (RETRYABLE.includes(e.name) && attempt < 11) {
-        await sleep(5000);
-      } else {
-        throw e;
-      }
-    }
-  }
-};
+const setRole = (value) =>
+  send(
+    new UpdateAccountCommand({
+      patchOperations: [{ op: 'replace', path: '/cloudwatchRoleArn', value }],
+    }),
+  );
 
 exports.handler = async (event) => {
   if (event.RequestType !== 'Delete' && !(await hasLiveRole())) {

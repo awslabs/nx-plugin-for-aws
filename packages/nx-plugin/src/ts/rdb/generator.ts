@@ -21,6 +21,7 @@ import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { esmVars } from '../../utils/module-format';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import {
@@ -118,6 +119,7 @@ export const tsRdbGenerator = async (
     containerEngine,
     containerName,
     dockerImage,
+    ...esmVars(tree),
   };
 
   generateFiles(
@@ -127,10 +129,7 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
-  await sharedRdbScriptsGenerator(
-    tree,
-    options.engine === 'mysql' ? 'mysql' : 'postgres',
-  );
+  await sharedRdbScriptsGenerator(tree, options.engine);
   const waitForDbScript =
     options.engine === 'mysql'
       ? 'wait-for-mysql-db.ts'
@@ -149,7 +148,7 @@ export const tsRdbGenerator = async (
     'bundle',
     'migration',
   );
-  const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
+  const migrationDockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
 
   if (options.infra !== 'none') {
     await addTypeScriptBundleTarget(tree, projectConfig, {
@@ -240,7 +239,7 @@ export const tsRdbGenerator = async (
         cache: true,
         executor: 'nx:run-commands',
         options: {
-          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
+          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
         },
         dependsOn: ['bundle'],
       };
@@ -266,7 +265,7 @@ export const tsRdbGenerator = async (
       databasePackageAlias: toScopeAlias(fullyQualifiedName),
       databaseName,
       adminUser: databaseUser,
-      engine: options.engine === 'mysql' ? 'mysql' : 'postgres',
+      engine: options.engine,
       migrationBundleDir,
       createDbUserBundleDir: joinPathFragments(
         'dist',
@@ -274,7 +273,8 @@ export const tsRdbGenerator = async (
         'bundle',
         'create-db-user',
       ),
-      dockerImageTag,
+      framework: options.framework,
+      migrationDockerImageTag,
       containerEngine,
     });
   }

@@ -1,0 +1,97 @@
+import asyncio
+import secrets
+import ssl
+from typing import Any
+
+<%_ if (engine === 'mysql') { _%>
+import aiomysql
+<%_ } else { _%>
+import asyncpg
+<%_ } _%>
+
+from .utils import get_database_secret, with_connection_retry
+
+<%_ if (engine === 'mysql') { _%>
+async def _ensure_database_user(db_user: str) -> None:
+    secret = get_database_secret()
+    conn = await aiomysql.connect(
+        host=secret['host'],
+        port=int(secret['port']),
+        db=secret['dbname'],
+        user=secret['username'],
+        password=secret['password'],
+        ssl=ssl.create_default_context(),
+    )
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'",
+                (db_user,),
+            )
+            await cursor.execute(
+                "ALTER USER %s@'%%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS' REQUIRE SSL",
+                (db_user,),
+            )
+            await cursor.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON `{secret['dbname']}`.* TO %s@'%%'",
+                (db_user,),
+            )
+        await conn.commit()
+    finally:
+        conn.close()
+<%_ } else { _%>
+async def _ensure_database_user(db_user: str) -> None:
+    secret = get_database_secret()
+    conn = await asyncpg.connect(
+        host=secret['host'],
+        port=int(secret['port']),
+        database=secret['dbname'],
+        user=secret['username'],
+        password=secret['password'],
+        ssl=ssl.create_default_context(),
+    )
+    try:
+        quoted = await conn.fetchrow(
+            'SELECT quote_ident($1) AS role_q, quote_ident($2) AS db_q',
+            db_user, secret['dbname'],
+        )
+        role_q, db_q = quoted['role_q'], quoted['db_q']
+        row = await conn.fetchrow('SELECT 1 FROM pg_roles WHERE rolname = $1', db_user)
+        if row is None:
+            await conn.execute(f'CREATE ROLE {role_q} WITH LOGIN')
+        await conn.execute(f'''
+            ALTER ROLE {role_q} WITH LOGIN;
+            GRANT CONNECT ON DATABASE {db_q} TO {role_q};
+            GRANT USAGE ON SCHEMA public TO {role_q};
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role_q};
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role_q};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role_q};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+                GRANT USAGE, SELECT ON SEQUENCES TO {role_q};
+            GRANT rds_iam TO {role_q};
+        ''')
+    finally:
+        await conn.close()
+<%_ } _%>
+
+
+_PHYSICAL_RESOURCE_ID_PREFIX = 'db-user:'
+
+
+def _resolve_db_user(physical_resource_id: str | None) -> str:
+    if physical_resource_id and physical_resource_id.startswith(_PHYSICAL_RESOURCE_ID_PREFIX):
+        return physical_resource_id[len(_PHYSICAL_RESOURCE_ID_PREFIX):]
+    return f'db_{secrets.token_hex(8)}'
+
+
+def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    db_user = _resolve_db_user(event.get('PhysicalResourceId'))
+
+    if event.get('RequestType') != 'Delete':
+        with_connection_retry(lambda: asyncio.run(_ensure_database_user(db_user)))
+
+    return {
+        'PhysicalResourceId': f'{_PHYSICAL_RESOURCE_ID_PREFIX}{db_user}',
+        'Data': {'dbUser': db_user},
+    }

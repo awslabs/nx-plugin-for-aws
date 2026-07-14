@@ -1,0 +1,53 @@
+---
+title: Chính Sách Xóa
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Cấu trúc CDK giữ lại cụm Aurora theo mặc định (`removalPolicy: RemovalPolicy.RETAIN`). Thay đổi điều này khi bạn muốn việc xóa CDK stack tạo snapshot hoặc phá hủy cụm thay vào đó.
+
+Khi sử dụng `RemovalPolicy.DESTROY`, bảo vệ xóa cũng phải được tắt trước khi cụm có thể bị xóa.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+Đối với môi trường tạm thời mà cơ sở dữ liệu nên được xóa cùng với stack:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform không sử dụng chính sách xóa của CDK. Theo mặc định, module tạo một snapshot cuối cùng khi xóa (`skip_final_snapshot = false`). Để bỏ qua snapshot cuối cùng cho môi trường tạm thời:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
+}
+```
+
+::::caution[Data Loss]
+`skip_final_snapshot = true` sẽ xóa vĩnh viễn tất cả dữ liệu khi cụm bị xóa. Chỉ sử dụng trong các môi trường tạm thời (chẳng hạn như các bài kiểm tra tự động). Giữ `skip_final_snapshot = false` cho tất cả các stack liên tục và sản xuất để ngăn chặn mất dữ liệu.
+::::
+</Fragment>
+</Infrastructure>
