@@ -110,6 +110,11 @@ output "agent_core_runtime_arn" {
   value       = module.agent_core_runtime.agent_core_runtime_arn
 }
 
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime"
+  value       = module.agent_core_runtime.invocation_url
+}
+
 output "appconfig_application_id" {
   description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
   value       = var.appconfig_application_id
@@ -583,6 +588,12 @@ print(f'Runtime {runtime_arn} is serving MCP')
 }
 
 # Outputs
+locals {
+  # For MCP runtimes the ARN flows through the readiness probe, so consumers
+  # wait until the runtime serves MCP.
+  ready_runtime_arn = var.server_protocol == "MCP" ? null_resource.runtime_ready[0].triggers.runtime_arn : aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+}
+
 output "agent_core_runtime_role_arn" {
   description = "ARN of the Agent Core Runtime IAM role"
   value       = aws_iam_role.agent_core_runtime_role.arn
@@ -600,7 +611,12 @@ output "agent_runtime_name" {
 
 output "agent_core_runtime_arn" {
   description = "ARN of the Bedrock Agent Core runtime. For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
-  value       = var.server_protocol == "MCP" ? null_resource.runtime_ready[0].triggers.runtime_arn : aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+  value       = local.ready_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime. MCP runtimes get the MCP endpoint (e.g. for use as a Gateway target endpoint), A2A runtimes the A2A endpoint (trailing slash required). For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = "https://bedrock-agentcore.\${local.aws_region}.amazonaws.com/runtimes/\${urlencode(local.ready_runtime_arn)}/invocations\${var.server_protocol == "A2A" ? "/" : "?qualifier=DEFAULT"}"
 }
 
 output "agent_runtime_id" {
