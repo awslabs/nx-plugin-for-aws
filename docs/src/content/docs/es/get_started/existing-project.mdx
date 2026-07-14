@@ -65,16 +65,37 @@ El plugin está diseñado para monorepos — genera cada proyecto en su propio d
 <Steps>
 
 1. Crea un directorio `packages/<tu-paquete>/` y mueve tu código fuente, `package.json` y `tsconfig.json` en él.
-2. Crea un nuevo `package.json` raíz que actúe como el manifiesto del espacio de trabajo en lugar de un proyecto en sí mismo, por ejemplo `{ "name": "<tu-espacio-de-trabajo>", "private": true }`.
-3. Declara el espacio de trabajo: para `pnpm`, agrega un `pnpm-workspace.yaml` con `packages: ['packages/*']`; para `npm`/`yarn`/`bun`, agrega `"workspaces": ["packages/*"]` al nuevo `package.json` raíz.
+2. Crea un nuevo `package.json` raíz que actúe como el manifiesto del espacio de trabajo en lugar de un proyecto en sí mismo:
+
+   ```json title="package.json"
+   {
+     "name": "<tu-espacio-de-trabajo>",
+     "private": true,
+     "type": "module"
+   }
+   ```
+
+3. Declara el espacio de trabajo para que tu gestor de paquetes descubra proyectos bajo `packages/`. Para `pnpm`, agrega un `pnpm-workspace.yaml`:
+
+   ```yaml title="pnpm-workspace.yaml"
+   packages:
+     - packages/*
+   ```
+
+   Para `npm`/`yarn`/`bun`, agrega un campo `workspaces` al `package.json` raíz en su lugar:
+
+   ```json title="package.json"
+   {
+     "workspaces": ["packages/*"]
+   }
+   ```
+
 4. Ejecuta `nx init` (si no lo has hecho), luego [agrega el plugin](#agregar-el-plugin).
 
 </Steps>
 
-Mantener la raíz como un manifiesto de espacio de trabajo (en lugar de un proyecto) es lo que permite que `nx run-many --target build --all` construya cada proyecto sin que una tarea se refiera a sí misma — consulta [la nota de recursión](#recursive-task-invocation-detected) a continuación.
-
-<Aside type="note" title="Gestor de paquetes y diseño">
-Los proyectos del plugin se generan bajo un directorio `packages/`. `pnpm` lee los globs del espacio de trabajo desde `pnpm-workspace.yaml`; otros gestores de paquetes leen el campo `workspaces` del `package.json` raíz — `init` actualiza el que use tu espacio de trabajo. Si tu espacio de trabajo usa un diseño diferente (como `apps/` y `libs/`), los proyectos del plugin viven bajo `packages/` junto a tu estructura existente.
+<Aside type="note" title="Gestor de paquetes">
+Los proyectos del plugin se generan bajo un directorio `packages/`. `pnpm` lee los globs del espacio de trabajo desde `pnpm-workspace.yaml`; otros gestores de paquetes leen el campo `workspaces` del `package.json` raíz — `init` actualiza el que use tu espacio de trabajo.
 </Aside>
 
 ## Agregar el plugin
@@ -141,6 +162,13 @@ Tu `package.json` **raíz** está registrado como un proyecto Nx (tiene una clav
 #### Errores de TypeScript en tus proyectos **existentes** después de agregar el plugin (`TS6059`, `TS7016`, `TS5011`, `NG4006`)
 
 Los propios proyectos generados del plugin llevan la configuración de TypeScript que necesitan en su `tsconfig.lib.json` por proyecto, por lo que se construyen independientemente de tu `tsconfig.base.json`. Estos errores aparecen en cambio en un **proyecto preexistente tuyo** que hereda un `tsconfig.base.json` que `init` creó (con `composite`/`emitDeclarationOnly`/`nodenext`) pero no es compatible con esas configuraciones — por ejemplo, el compilador Angular rechaza `emitDeclarationOnly` (`NG4006`), o un proyecto que establece `outDir` sin un `rootDir` ahora necesita uno (`TS5011`). Agrega sobrescrituras de `tsconfig` por proyecto redeclarando las opciones conflictivas para esos proyectos (por ejemplo, `"rootDir": "src"`), o apunta los proyectos del plugin y tus proyectos a configuraciones base separadas.
+
+`init` nunca reescribe un `tsconfig.base.json` existente, precisamente para que no pueda romper silenciosamente los proyectos que heredan de él — resolver estos desajustes es una decisión que solo tú puedes tomar para tu código base.
+
+<Aside type="note" title="ESM y CommonJS">
+El formato de módulo es a nivel de espacio de trabajo, leído del campo `type` del `package.json` raíz: `type: "module"` significa ESM, cualquier otra cosa (incluida la ausencia del campo `type`) significa CommonJS. `init` preserva el que use tu espacio de trabajo, y los generadores TypeScript del plugin emiten código coincidente. Si más tarde quieres cambiar, cambia el `type` raíz — pero esa es una migración de tu código existente, no algo que `init` haga por ti.
+</Aside>
+eó (con `composite`/`emitDeclarationOnly`/`nodenext`) pero no es compatible con esas configuraciones — por ejemplo, el compilador Angular rechaza `emitDeclarationOnly` (`NG4006`), o un proyecto que establece `outDir` sin un `rootDir` ahora necesita uno (`TS5011`). Agrega sobrescrituras de `tsconfig` por proyecto redeclarando las opciones conflictivas para esos proyectos (por ejemplo, `"rootDir": "src"`), o apunta los proyectos del plugin y tus proyectos a configuraciones base separadas.
 
 `init` nunca reescribe un `tsconfig.base.json` existente, precisamente para que no pueda romper silenciosamente los proyectos que heredan de él — resolver estos desajustes es una decisión que solo tú puedes tomar para tu código base.
 

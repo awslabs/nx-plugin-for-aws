@@ -65,8 +65,31 @@ Il plugin è progettato per monorepo — genera ogni progetto nella propria dire
 <Steps>
 
 1. Crea una directory `packages/<your-package>/` e sposta il tuo sorgente, `package.json` e `tsconfig.json` al suo interno.
-2. Crea un nuovo `package.json` radice che agisce come manifest del workspace piuttosto che un progetto stesso, ad esempio `{ "name": "<your-workspace>", "private": true }`.
-3. Dichiara il workspace: per `pnpm`, aggiungi un `pnpm-workspace.yaml` con `packages: ['packages/*']`; per `npm`/`yarn`/`bun`, aggiungi `"workspaces": ["packages/*"]` al nuovo `package.json` radice.
+2. Crea un nuovo `package.json` radice che agisce come manifest del workspace piuttosto che un progetto stesso:
+
+   ```json title="package.json"
+   {
+     "name": "<your-workspace>",
+     "private": true,
+     "type": "module"
+   }
+   ```
+
+3. Dichiara il workspace in modo che il tuo package manager scopra i progetti sotto `packages/`. Per `pnpm`, aggiungi un `pnpm-workspace.yaml`:
+
+   ```yaml title="pnpm-workspace.yaml"
+   packages:
+     - packages/*
+   ```
+
+   Per `npm`/`yarn`/`bun`, aggiungi invece un campo `workspaces` al `package.json` radice:
+
+   ```json title="package.json"
+   {
+     "workspaces": ["packages/*"]
+   }
+   ```
+
 4. Esegui `nx init` (se non l'hai fatto), quindi [aggiungi il plugin](#adding-the-plugin).
 
 </Steps>
@@ -139,6 +162,13 @@ Il tuo `package.json` **radice** è registrato come progetto Nx (ha una chiave `
 #### Errori TypeScript nei tuoi progetti **esistenti** dopo aver aggiunto il plugin (`TS6059`, `TS7016`, `TS5011`, `NG4006`)
 
 I progetti generati dal plugin stesso portano le impostazioni TypeScript di cui hanno bisogno nel loro `tsconfig.lib.json` per progetto, quindi compilano indipendentemente dal tuo `tsconfig.base.json`. Questi errori compaiono invece in un **progetto preesistente tuo** che eredita un `tsconfig.base.json` creato da `init` (con `composite`/`emitDeclarationOnly`/`nodenext`) ma non è compatibile con quelle impostazioni — ad esempio, il compilatore Angular rifiuta `emitDeclarationOnly` (`NG4006`), o un progetto che imposta `outDir` senza un `rootDir` ora ne ha bisogno di uno (`TS5011`). Aggiungi override `tsconfig` per progetto ridichiarando le opzioni in conflitto per quei progetti (ad es. `"rootDir": "src"`), o punta i progetti del plugin e i tuoi progetti a configurazioni base separate.
+
+`init` non riscrive mai un `tsconfig.base.json` esistente, proprio per non poter rompere silenziosamente i progetti che ne ereditano — risolvere questi disallineamenti è una decisione che solo tu puoi prendere per la tua codebase.
+
+<Aside type="note" title="ESM e CommonJS">
+Il formato del modulo è a livello di workspace, letto dal campo `type` del `package.json` radice: `type: "module"` significa ESM, qualsiasi altra cosa (inclusa l'assenza del campo `type`) significa CommonJS. `init` preserva quello che usa il tuo workspace, e i generatori TypeScript del plugin emettono codice corrispondente. Se in seguito vuoi cambiare, modifica il `type` radice — ma quella è una migrazione del tuo codice esistente, non qualcosa che `init` fa per te.
+</Aside>
+eparate.
 
 `init` non riscrive mai un `tsconfig.base.json` esistente, proprio per non poter rompere silenziosamente i progetti che ne ereditano — risolvere questi disallineamenti è una decisione che solo tu puoi prendere per la tua codebase.
 

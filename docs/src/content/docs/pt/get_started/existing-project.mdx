@@ -65,8 +65,31 @@ O plugin é projetado para monorepos — ele gera cada projeto em seu próprio d
 <Steps>
 
 1. Crie um diretório `packages/<seu-pacote>/` e mova seu código-fonte, `package.json` e `tsconfig.json` para ele.
-2. Crie um novo `package.json` raiz que atua como o manifesto do workspace em vez de um projeto em si, por exemplo `{ "name": "<seu-workspace>", "private": true }`.
-3. Declare o workspace: para `pnpm`, adicione um `pnpm-workspace.yaml` com `packages: ['packages/*']`; para `npm`/`yarn`/`bun`, adicione `"workspaces": ["packages/*"]` ao novo `package.json` raiz.
+2. Crie um novo `package.json` raiz que atua como o manifesto do workspace em vez de um projeto em si:
+
+   ```json title="package.json"
+   {
+     "name": "<seu-workspace>",
+     "private": true,
+     "type": "module"
+   }
+   ```
+
+3. Declare o workspace para que seu gerenciador de pacotes descubra projetos sob `packages/`. Para `pnpm`, adicione um `pnpm-workspace.yaml`:
+
+   ```yaml title="pnpm-workspace.yaml"
+   packages:
+     - packages/*
+   ```
+
+   Para `npm`/`yarn`/`bun`, adicione um campo `workspaces` ao `package.json` raiz em vez disso:
+
+   ```json title="package.json"
+   {
+     "workspaces": ["packages/*"]
+   }
+   ```
+
 4. Execute `nx init` (se ainda não o fez), então [adicione o plugin](#adicionando-o-plugin).
 
 </Steps>
@@ -139,6 +162,13 @@ Seu `package.json` **raiz** está registrado como um projeto Nx (ele tem uma cha
 #### Erros TypeScript em seus projetos **existentes** após adicionar o plugin (`TS6059`, `TS7016`, `TS5011`, `NG4006`)
 
 Os próprios projetos gerados pelo plugin carregam as configurações TypeScript de que precisam em seu `tsconfig.lib.json` por projeto, então eles constroem independentemente do seu `tsconfig.base.json`. Esses erros aparecem em vez disso em um **projeto pré-existente seu** que herda um `tsconfig.base.json` que `init` criou (com `composite`/`emitDeclarationOnly`/`nodenext`) mas não é compatível com essas configurações — por exemplo, o compilador Angular rejeita `emitDeclarationOnly` (`NG4006`), ou um projeto que define `outDir` sem um `rootDir` agora precisa de um (`TS5011`). Adicione sobrescritas de `tsconfig` por projeto redeclarando as opções conflitantes para esses projetos (por exemplo, `"rootDir": "src"`), ou aponte os projetos do plugin e seus projetos para configurações base separadas.
+
+`init` nunca reescreve um `tsconfig.base.json` existente, precisamente para que não possa quebrar silenciosamente os projetos que herdam dele — resolver essas incompatibilidades é uma decisão que apenas você pode tomar para sua base de código.
+
+<Aside type="note" title="ESM e CommonJS">
+O formato de módulo é amplo ao workspace, lido do campo `type` do `package.json` raiz: `type: "module"` significa ESM, qualquer outra coisa (incluindo nenhum campo `type`) significa CommonJS. `init` preserva o que seu workspace usa, e os geradores TypeScript do plugin emitem código correspondente. Se você quiser mudar mais tarde, altere o `type` raiz — mas essa é uma migração do seu código existente, não algo que `init` faz por você.
+</Aside>
+�ões base separadas.
 
 `init` nunca reescreve um `tsconfig.base.json` existente, precisamente para que não possa quebrar silenciosamente os projetos que herdam dele — resolver essas incompatibilidades é uma decisão que apenas você pode tomar para sua base de código.
 
