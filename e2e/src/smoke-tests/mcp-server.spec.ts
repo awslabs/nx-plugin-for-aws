@@ -43,6 +43,7 @@ describe('smoke test - mcp-server', () => {
       expect(toolNames).toContain('create-workspace-command');
       expect(toolNames).toContain('list-generators');
       expect(toolNames).toContain('generator-guide');
+      expect(toolNames).toContain('add-to-existing-project');
 
       // Every tool must have a description (required by Amazon Q CLI)
       for (const tool of tools) {
@@ -83,6 +84,21 @@ describe('smoke test - mcp-server', () => {
       expect((guidanceResult.content[0] as { text: string }).text).toContain(
         'Nx Plugin for AWS',
       );
+
+      // Test add-to-existing-project — its guide content is pulled from the
+      // `get_started/existing-project` docs page bundled into the package,
+      // proving the widened docs bundle is reachable at runtime.
+      const existingResult = await client.callTool({
+        name: 'add-to-existing-project',
+        arguments: {
+          packageManager: 'pnpm',
+          errorMessage: 'IaC provider "inherit" requires iac.provider to be set',
+        },
+      });
+      const existingText = (existingResult.content[0] as { text: string }).text;
+      expect(existingText).toContain('init');
+      // Content sourced from the bundled docs guide (not just the static map)
+      expect(existingText).toContain('existing');
     } finally {
       await client.close();
     }

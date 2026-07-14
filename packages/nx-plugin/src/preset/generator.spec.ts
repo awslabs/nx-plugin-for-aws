@@ -55,6 +55,25 @@ describe('preset generator', () => {
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('terraform');
   });
 
+  it('should write type module for the default (esm) module format', async () => {
+    await presetGenerator(tree, {
+      iac: 'cdk',
+      containers: 'docker',
+    });
+
+    expect(readJson(tree, 'package.json').type).toBe('module');
+  });
+
+  it('should write type commonjs when module is cjs', async () => {
+    await presetGenerator(tree, {
+      iac: 'cdk',
+      containers: 'docker',
+      module: 'cjs',
+    });
+
+    expect(readJson(tree, 'package.json').type).toBe('commonjs');
+  });
+
   it('should store container engine in config', async () => {
     await presetGenerator(tree, {
       iac: 'cdk',

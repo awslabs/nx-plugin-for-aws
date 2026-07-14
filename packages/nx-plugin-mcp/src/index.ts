@@ -6,6 +6,7 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { buildGeneratorInfoList } from '../../nx-plugin/src/utils/generators';
+import { addToExistingProjectTool } from '../../nx-plugin/src/mcp-server/tools/add-to-existing-project';
 import { addCreateWorkspaceCommandTool } from '../../nx-plugin/src/mcp-server/tools/create-workspace-command';
 import { addListGeneratorsTool } from '../../nx-plugin/src/mcp-server/tools/list-generators';
 import { addGeneratorGuideTool } from '../../nx-plugin/src/mcp-server/tools/generator-guide';
@@ -49,6 +50,7 @@ ${TOOL_SELECTION_GUIDE}
   addCreateWorkspaceCommandTool(server);
   addListGeneratorsTool(server, generators);
   addGeneratorGuideTool(server, generators);
+  addToExistingProjectTool(server, generators);
 
   return server;
 };
