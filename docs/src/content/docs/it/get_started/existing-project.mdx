@@ -8,6 +8,7 @@ import Snippet from '@components/snippet.astro';
 import Drawer from '@components/drawer.astro';
 import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
+import TsConfigBaseCompilerOptions from '@components/tsconfig-base-compiler-options.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
 Non tutti i progetti iniziano con `pnpm create @aws/nx-workspace`. Se hai già un [workspace Nx](https://nx.dev) — o un monorepo a cui puoi aggiungere Nx — puoi adottare `@aws/nx-plugin` in modo incrementale senza ricreare il tuo progetto.
@@ -32,9 +33,7 @@ Se il tuo progetto non usa ancora Nx, aggiungilo prima con [`nx init`](https://n
 
 <NxInitCommand />
 
-Il comando fissa `nx` alla versione su cui è costruito il plugin — eseguire un `nx init` non fissato può installare una versione patch più recente, lasciando due versioni di `nx` nell'albero una volta aggiunto il plugin (vedi [la nota sul plugin worker](#nx-sync-hangs-or-plugin-worker--exited-before-the-connection-was-established) di seguito).
-
-`nx init` è lo strumento proprio di Nx per adottare Nx — rileva i tuoi strumenti, scrive `nx.json` e collega i tuoi script esistenti in Nx. Segui i prompt. Quando viene eseguito in modo non interattivo (CI o un agente AI), passa `--interactive=false`; se Nx rileva plugin di strumenti per il tuo stack (ad es. `@nx/vite`) chiederà anche una scelta esplicita — passa `--plugins=skip` per rimandare (i plugin possono essere aggiunti in seguito con `nx add`) o `--plugins=all` per accettarli. Una volta completato e il tuo workspace compila sotto Nx, [aggiungi il plugin](#adding-the-plugin) come di seguito.
+Segui i prompt per aggiungere Nx al tuo workspace. Per maggiori dettagli consulta la [Documentazione Nx](https://nx.dev/recipes/adopting-nx/adding-to-existing-project).
 
 <Aside type="note" title="pnpm workspaces">
 pnpm esegue solo gli script di installazione per i pacchetti nella allow-list, e `nx` ha bisogno del suo script di installazione — senza di esso, l'installazione eseguita da `nx init` può fallire, lasciando un placeholder `set this to true or false` in `pnpm-workspace.yaml`. Inseriscilo nella allow-list prima di eseguire `nx init`:
@@ -43,8 +42,6 @@ pnpm esegue solo gli script di installazione per i pacchetti nella allow-list, e
 allowBuilds:
   - nx
 ```
-
-Il generatore `init` successivamente estende questa allow-list con il resto dei pacchetti di cui gli strumenti del plugin hanno bisogno.
 </Aside>
 
 ### Progetti non-Node (Python, Go, Java, Rust, …)
@@ -74,10 +71,8 @@ Il plugin è progettato per monorepo — genera ogni progetto nella propria dire
 
 </Steps>
 
-Mantenere la radice come manifest del workspace (piuttosto che un progetto) è ciò che permette a `nx run-many --target build --all` di compilare ogni progetto senza che un task faccia riferimento a se stesso — vedi [la nota sulla ricorsione](#recursive-task-invocation-detected) di seguito.
-
-<Aside type="note" title="Package manager e layout">
-I progetti del plugin sono generati sotto una directory `packages/`. `pnpm` legge i glob del workspace da `pnpm-workspace.yaml`; altri package manager leggono il campo `workspaces` del `package.json` radice — `init` aggiorna quello che usa il tuo workspace. Se il tuo workspace usa un layout diverso (come `apps/` e `libs/`), i progetti del plugin vivono sotto `packages/` accanto alla tua struttura esistente.
+<Aside type="note" title="Package manager">
+I progetti del plugin sono generati sotto una directory `packages/`. `pnpm` legge i glob del workspace da `pnpm-workspace.yaml`; altri package manager leggono il campo `workspaces` del `package.json` radice — `init` aggiorna quello che usa il tuo workspace.
 </Aside>
 
 ## Aggiungere il plugin
@@ -86,75 +81,36 @@ Usa [`nx add`](https://nx.dev/nx-api/nx/documents/add), che installa il plugin i
 
 <NxCommands commands={['add @aws/nx-plugin']} />
 
-Una volta completato, il tuo workspace è pronto — scegli i generatori di cui hai bisogno dalle <Link path="guides/index">guide</Link> e inizia a generare progetti.
+Una volta completato, il tuo workspace è pronto — scegli i generatori di cui hai bisogno e inizia a generare progetti.
 
-### Cosa configura il generatore `init`
+### Cosa configura questo generatore
 
-Il generatore `init` apporta le modifiche deterministiche di cui un workspace ha bisogno per eseguire i generatori del plugin. Preserva il formato del modulo del tuo workspace: un workspace il cui `package.json` radice ha `type: "module"` rimane ESM, qualsiasi altra cosa rimane CommonJS, e il codice generato segue di conseguenza. **Non** riscrive un `tsconfig.base.json` esistente, non migra il tuo package manager e non ristruttura i tuoi progetti esistenti.
+L'aggiunta del plugin apporta le modifiche deterministiche di cui un workspace ha bisogno per eseguire i generatori del plugin. Preserva il formato del modulo del tuo workspace: un workspace il cui `package.json` radice ha `type: "module"` rimane ESM, qualsiasi altra cosa rimane CommonJS, e il codice generato segue di conseguenza. Non sovrascrive i file esistenti, e potrebbe essere necessario apportare alcune modifiche manuali dopo questo passaggio a seconda della configurazione esistente.
 
 Crea o aggiorna i seguenti file:
 
 <FileTree>
 - aws-nx-plugin.config.mts registra il tuo provider IaC scelto (CDK o Terraform) e il motore container; i generatori leggono `iac.provider` da qui
 - nx.json registra i generatori di sincronizzazione (`@nx/js:typescript-sync` e `@aws/nx-plugin:ts#sync`) sul target `compile` in modo che i riferimenti ai progetti TypeScript rimangano sincronizzati
-- tsconfig.json creato solo se mancante — i file esistenti vengono lasciati intatti
-- tsconfig.base.json creato solo se mancante (vedi sotto per le opzioni del compilatore che contiene)
+- tsconfig.json una configurazione TypeScript radice che fa riferimento ai progetti del tuo workspace, che la sincronizzazione TypeScript di Nx mantiene aggiornata
+- tsconfig.base.json le opzioni del compilatore condivise che i progetti TypeScript del plugin estendono (vedi sotto per cosa contiene)
 - pnpm-workspace.yaml (solo pnpm) inserisce nella allow-list gli script di build di cui le dipendenze del plugin hanno bisogno (`@swc/core`, `esbuild`, `nx`, `sharp`)
-- package.json aggiunge script di convenienza (senza sovrascrivere i tuoi), più le dev dependencies `nx`, `@nx/js`, `@nx/workspace`, `typescript` e Biome
-- biome.json configurazione predefinita di formatter/linter, scritta solo se non ne esiste una
+- package.json script di convenienza per attività comuni, più le dev dependencies `nx`, `@nx/js`, `@nx/workspace`, `typescript` e Biome
+- biome.json configurazione predefinita del formatter e linter Biome
 - .mcp.json configura il server MCP per gli agenti di codifica supportati a meno che non sia disabilitato (anche gli equivalenti .cursor/, .kiro/, .gemini/, .vscode/ e .codex/)
 </FileTree>
 
 La configurazione del <Link path="get_started/building-with-ai">server MCP</Link> può essere disabilitata con `--mcp=false`.
 
 <Drawer title="tsconfig.base.json" trigger="Clicca qui per vedere le opzioni del compilatore che contiene un tsconfig.base.json creato.">
-I progetti TypeScript del plugin si basano su queste opzioni del compilatore. `init` non riscrive mai un `tsconfig.base.json` esistente, quindi se mantieni il tuo queste sono le opzioni con cui allinearsi:
+I progetti TypeScript del plugin si basano su queste opzioni del compilatore. Se un `tsconfig.base.json` esiste già viene lasciato così com'è, quindi se mantieni il tuo queste sono le opzioni con cui allinearsi:
 
-```json title="tsconfig.base.json"
-{
-  "compilerOptions": {
-    "composite": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "importHelpers": true,
-    "isolatedModules": true,
-    "lib": ["es2022"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noUnusedLocals": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "target": "es2022"
-  }
-}
-```
+<TsConfigBaseCompilerOptions />
 </Drawer>
 
 ### Opzioni
 
 <GeneratorParameters generator="init" />
-
-<Aside type="note" title="Aggiornamento successivo">
-Per aggiornare il plugin (e raccogliere eventuali migrazioni di codice automatizzate che fornisce), usa [`nx migrate`](https://nx.dev/features/automate-updating-dependencies) piuttosto che aumentare la versione manualmente:
-
-<NxCommands commands={['migrate @aws/nx-plugin']} />
-</Aside>
-
-## Adozione incrementale
-
-Non devi convertire tutto il tuo workspace in una volta. Un buon percorso è:
-
-<Steps>
-
-1. Aggiungi il plugin, quindi genera un singolo progetto (ad esempio un <Link path="guides/typescript-project">progetto TypeScript</Link> o un'<Link path="guides/ts-api">API</Link>) e compilalo.
-2. Aggiungi ulteriori progetti man mano che ne hai bisogno — siti web, API, infrastruttura — usando le <Link path="guides/index">guide ai generatori</Link>.
-3. Migra il tuo codice esistente nel workspace nel tempo, se lo desideri. I progetti del plugin si trovano accanto a quelli esistenti; non richiedono di spostare nulla.
-
-</Steps>
 
 ## Risoluzione dei problemi
 
@@ -188,8 +144,4 @@ I progetti generati dal plugin stesso portano le impostazioni TypeScript di cui 
 
 <Aside type="note" title="ESM e CommonJS">
 Il formato del modulo è a livello di workspace, letto dal campo `type` del `package.json` radice: `type: "module"` significa ESM, qualsiasi altra cosa (inclusa l'assenza del campo `type`) significa CommonJS. `init` preserva quello che usa il tuo workspace, e i generatori TypeScript del plugin emettono codice corrispondente. Se in seguito vuoi cambiare, modifica il `type` radice — ma quella è una migrazione del tuo codice esistente, non qualcosa che `init` fa per te.
-</Aside>
-
-<Aside type="tip">
-Quando lavori con un assistente AI, il <Link path="get_started/building-with-ai">server MCP Nx Plugin for AWS</Link> espone uno strumento `add-to-existing-project` che fornisce questa guida direttamente al tuo assistente.
 </Aside>

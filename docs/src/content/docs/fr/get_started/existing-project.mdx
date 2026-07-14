@@ -8,6 +8,7 @@ import Snippet from '@components/snippet.astro';
 import Drawer from '@components/drawer.astro';
 import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
+import TsConfigBaseCompilerOptions from '@components/tsconfig-base-compiler-options.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
 Tous les projets ne commencent pas avec `pnpm create @aws/nx-workspace`. Si vous avez déjà un [espace de travail Nx](https://nx.dev) — ou un monorepo auquel vous pouvez ajouter Nx — vous pouvez adopter `@aws/nx-plugin` de manière incrémentale sans recréer votre projet.
@@ -32,7 +33,16 @@ Si votre projet n'utilise pas encore Nx, ajoutez-le d'abord avec [`nx init`](htt
 
 <NxInitCommand />
 
-`nx init` est l'outil propre à Nx pour adopter Nx — il détecte vos outils, écrit `nx.json` et connecte vos scripts existants à Nx. Suivez les invites. Lors de l'exécution en mode non interactif (CI ou agent IA), passez `--interactive=false` ; si Nx détecte des plugins d'outils pour votre stack (par exemple `@nx/vite`), il demandera également un choix explicite — passez `--plugins=skip` pour reporter (les plugins peuvent être ajoutés plus tard avec `nx add`) ou `--plugins=all` pour les accepter. Une fois terminé et que votre espace de travail se construit sous Nx, [ajoutez le plugin](#adding-the-plugin) comme ci-dessous.
+Suivez les invites pour ajouter Nx à votre espace de travail. Pour plus de détails, consultez la [Documentation Nx](https://nx.dev/recipes/adopting-nx/adding-to-existing-project).
+
+<Aside type="note" title="pnpm workspaces">
+pnpm n'exécute les scripts d'installation que pour les paquets de la liste blanche, et `nx` a besoin de son script d'installation — sans cela, l'installation effectuée par `nx init` peut échouer, laissant un espace réservé `set this to true or false` dans `pnpm-workspace.yaml`. Ajoutez-le à la liste blanche avant d'exécuter `nx init` :
+
+```yaml title="pnpm-workspace.yaml"
+allowBuilds:
+  - nx
+```
+</Aside>
 
 ### Projets non-Node (Python, Go, Java, Rust, …)
 
@@ -61,10 +71,8 @@ Le plugin est conçu pour les monorepos — il génère chaque projet dans son p
 
 </Steps>
 
-Garder la racine comme manifeste d'espace de travail (plutôt qu'un projet) est ce qui permet à `nx run-many --target build --all` de construire chaque projet sans qu'une tâche ne se réfère à elle-même — voir [la note sur la récursion](#recursive-task-invocation-detected) ci-dessous.
-
-<Aside type="note" title="Gestionnaire de paquets et disposition">
-Les projets du plugin sont générés sous un répertoire `packages/`. `pnpm` lit les globs d'espace de travail depuis `pnpm-workspace.yaml` ; les autres gestionnaires de paquets lisent le champ `workspaces` du `package.json` racine — `init` met à jour celui que votre espace de travail utilise. Si votre espace de travail utilise une disposition différente (comme `apps/` et `libs/`), les projets du plugin vivent sous `packages/` aux côtés de votre structure existante.
+<Aside type="note" title="Gestionnaire de paquets">
+Les projets du plugin sont générés sous un répertoire `packages/`. `pnpm` lit les globs d'espace de travail depuis `pnpm-workspace.yaml` ; les autres gestionnaires de paquets lisent le champ `workspaces` du `package.json` racine — `init` met à jour celui que votre espace de travail utilise.
 </Aside>
 
 ## Ajouter le plugin
@@ -73,52 +81,31 @@ Utilisez [`nx add`](https://nx.dev/nx-api/nx/documents/add), qui installe le plu
 
 <NxCommands commands={['add @aws/nx-plugin']} />
 
-Une fois terminé, votre espace de travail est prêt — choisissez les générateurs dont vous avez besoin dans les <Link path="guides/index">guides</Link> et commencez à générer des projets.
+Une fois terminé, votre espace de travail est prêt — choisissez les générateurs dont vous avez besoin et commencez à générer des projets.
 
-### Ce que configure le générateur `init`
+### Ce que configure ce générateur
 
-Le générateur `init` effectue les modifications déterministes dont un espace de travail a besoin pour exécuter les générateurs du plugin. Il préserve le format de module de votre espace de travail : un espace de travail dont le `package.json` racine a `type: "module"` reste en ESM, tout le reste reste en CommonJS, et le code généré suit le même modèle. Il ne **réécrit pas** un `tsconfig.base.json` existant, ne migre pas votre gestionnaire de paquets et ne restructure pas vos projets existants.
+L'ajout du plugin effectue les modifications déterministes dont un espace de travail a besoin pour exécuter les générateurs du plugin. Il préserve le format de module de votre espace de travail : un espace de travail dont le `package.json` racine a `type: "module"` reste en ESM, tout le reste reste en CommonJS, et le code généré suit le même modèle. Il n'écrase pas les fichiers existants, et vous devrez peut-être effectuer quelques modifications manuelles après cette étape en fonction de votre configuration existante.
 
 Il crée ou met à jour les fichiers suivants :
 
 <FileTree>
 - aws-nx-plugin.config.mts enregistre votre fournisseur IaC choisi (CDK ou Terraform) et le moteur de conteneurs ; les générateurs lisent `iac.provider` depuis ce fichier
 - nx.json enregistre les générateurs de synchronisation (`@nx/js:typescript-sync` et `@aws/nx-plugin:ts#sync`) sur la cible `compile` afin que les références de projet TypeScript restent synchronisées
-- tsconfig.json créé uniquement s'il est manquant — les fichiers existants sont laissés intacts
-- tsconfig.base.json créé uniquement s'il est manquant (voir ci-dessous pour les options du compilateur qu'il contient)
+- tsconfig.json une configuration TypeScript racine référençant les projets de votre espace de travail, que la synchronisation TypeScript de Nx maintient à jour
+- tsconfig.base.json les options de compilateur partagées que les projets TypeScript du plugin étendent (voir ci-dessous pour ce qu'il contient)
 - pnpm-workspace.yaml (pnpm uniquement) ajoute à la liste blanche les scripts de construction dont les dépendances du plugin ont besoin (`@swc/core`, `esbuild`, `nx`, `sharp`)
-- package.json ajoute des scripts de commodité (sans écraser les vôtres), plus les dépendances de développement `nx`, `@nx/js`, `@nx/workspace`, `typescript` et Biome
-- biome.json configuration par défaut du formateur/linter, écrite uniquement si aucune n'existe
+- package.json scripts de commodité pour les tâches courantes, plus les dépendances de développement `nx`, `@nx/js`, `@nx/workspace`, `typescript` et Biome
+- biome.json configuration par défaut du formateur et du linter Biome
 - .mcp.json configure le serveur MCP pour les agents de codage pris en charge sauf si désactivé (également les équivalents .cursor/, .kiro/, .gemini/, .vscode/ et .codex/)
 </FileTree>
 
 La configuration du <Link path="get_started/building-with-ai">serveur MCP</Link> peut être désactivée avec `--mcp=false`.
 
 <Drawer title="tsconfig.base.json" trigger="Cliquez ici pour voir les options du compilateur qu'un tsconfig.base.json créé contient.">
-Les projets TypeScript du plugin s'appuient sur ces options du compilateur. `init` ne réécrit jamais un `tsconfig.base.json` existant, donc si vous conservez le vôtre, voici les options à aligner :
+Les projets TypeScript du plugin s'appuient sur ces options du compilateur. Si un `tsconfig.base.json` existe déjà, il est laissé tel quel, donc si vous conservez le vôtre, voici les options à aligner :
 
-```json title="tsconfig.base.json"
-{
-  "compilerOptions": {
-    "composite": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "importHelpers": true,
-    "isolatedModules": true,
-    "lib": ["es2022"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noUnusedLocals": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "target": "es2022"
-  }
-}
-```
+<TsConfigBaseCompilerOptions />
 </Drawer>
 
 ### Options
@@ -175,8 +162,4 @@ Les propres projets générés par le plugin portent les paramètres TypeScript 
 
 <Aside type="note" title="ESM et CommonJS">
 Le format de module est à l'échelle de l'espace de travail, lu depuis le champ `type` du `package.json` racine : `type: "module"` signifie ESM, tout le reste (y compris l'absence de champ `type`) signifie CommonJS. `init` préserve celui que votre espace de travail utilise, et les générateurs TypeScript du plugin émettent du code correspondant. Si vous souhaitez changer plus tard, modifiez le `type` racine — mais c'est une migration de votre code existant, pas quelque chose que `init` fait pour vous.
-</Aside>
-
-<Aside type="tip">
-Lorsque vous travaillez avec un assistant IA, le <Link path="get_started/building-with-ai">serveur MCP Nx Plugin for AWS</Link> expose un outil `add-to-existing-project` qui fournit ce guide directement à votre assistant.
 </Aside>
