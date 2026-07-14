@@ -1,0 +1,27 @@
+---
+title: 容器镜像扫描
+---
+
+为此项目构建的 Docker 镜像会在构建过程中使用 [Trivy](https://trivy.dev/) 进行漏洞扫描，运行来自 [ECR 托管的 Trivy 镜像](https://gallery.ecr.aws/aquasecurity/trivy)。
+
+扫描在镜像构建后运行，如果发现任何可修复的 `HIGH` 或 `CRITICAL` 严重级别漏洞，将**导致构建失败**。没有可用修复的漏洞会被忽略，这样无法采取行动的基础镜像建议就不会阻塞您的构建。
+
+扫描使用与镜像构建相同的容器引擎（`docker` 或 `finch`），因此不需要额外的工具。
+
+:::caution[绿色基础镜像]
+生成的 `Dockerfile` 使用在生成时没有已知 `HIGH` 或 `CRITICAL` 漏洞的基础镜像，并升级捆绑的工具（如 `npm`）以保持这种状态。随着时间推移会披露新的漏洞，因此今天通过的构建可能会在漏洞数据库更新后失败。当这种情况发生时，请更新到已修复漏洞的较新基础镜像，或按照下面描述的方法抑制该发现。
+:::
+
+#### 抑制 Trivy 发现
+
+在某些情况下，您可能希望抑制特定的漏洞，例如当尚无可用修复且您已评估风险为可接受时。
+
+将漏洞 ID（每行一个）添加到项目根目录的 `.trivyignore` 文件中：
+
+```text
+// .trivyignore
+# node-tar arbitrary file write - not exploitable in our usage
+CVE-2024-XXXXX
+```
+
+有关过滤发现的更多详细信息，请参阅 [Trivy 过滤文档](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids)。
