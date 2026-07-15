@@ -14,6 +14,7 @@ import {
 } from '@nx/devkit';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -271,6 +272,14 @@ export const pyRdbGenerator = async (
         dependsOn: ['bundle-migration', 'bundle-create-db-user'],
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+
+      addDockerScanTarget(tree, {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag, createDbUserDockerImageTag],
+      });
     }
     addDependencyToTargetIfNotPresent(
       projectConfig,

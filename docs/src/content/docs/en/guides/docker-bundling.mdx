@@ -3,10 +3,34 @@ title: Docker Bundling
 description: Build and deploy Docker images for TypeScript and Python projects in an Nx Plugin for AWS workspace.
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 Several generators (such as <Link path="/guides/ts-agent">`ts#agent`</Link> and <Link path="/guides/py-agent">`py#agent`</Link>) produce a Docker image that is pushed to Amazon ECR and consumed by AWS infrastructure. This guide describes the pattern they follow so that you can apply it to other use cases — for example, running a <Link path="/guides/fastapi">FastAPI</Link> project on Amazon ECS, or deploying a containerised Express server.
 
@@ -252,6 +276,36 @@ Add a `docker` target which copies the `Dockerfile` into the bundle output direc
 This clears the output directory, then copies both the bundle contents and the `Dockerfile` into `dist/.../docker`, which becomes the Docker build context.
 
 <NxCommands commands={['docker my-project']} />
+
+## Scanning Images with Trivy
+
+It's good practice to scan your images for known vulnerabilities. The generators that follow this pattern add a `trivy` target which scans the built image with [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), and fails the build on `HIGH` or `CRITICAL` findings.
+
+Add a `trivy` target which `dependsOn` your `docker` target. It saves the built image to a tarball and scans it via a workspace-relative bind mount, so the same command works under both `docker` and `finch`:
+
+<Code lang="json" code={trivyTarget} />
+
+Then make `build` depend on `trivy` so the scan runs as part of a build:
+
+```json
+{
+  "targets": {
+    "build": {
+      "dependsOn": ["trivy"]
+    }
+  }
+}
+```
+
+<NxCommands commands={['trivy my-project']} />
+
+:::tip[Caching skips unchanged images]
+Because the image is fully determined by your project source, declaring `inputs` (here `default` and `^production`, matching the `bundle` target) lets Nx cache the scan and skip re-scanning an image that hasn't changed. Pin the Trivy image version (e.g. <code>trivy:<TrivyVersion /></code>) so scans are reproducible.
+:::
+
+:::note[Suppressing findings]
+Trivy reads a `.trivyignore` file (a list of vulnerability IDs, one per line) from the root of your project. `--ignore-unfixed` skips vulnerabilities with no available fix, so the scan only fails on issues you can action by upgrading tooling in your `Dockerfile`. See the [Trivy filtering documentation](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) for details.
+:::
 
 ## Infrastructure
 

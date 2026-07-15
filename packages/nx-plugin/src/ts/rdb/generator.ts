@@ -15,6 +15,7 @@ import {
 } from '@nx/devkit';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
@@ -105,6 +106,7 @@ export const tsRdbGenerator = async (
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
     databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
+    npmVersion: TS_VERSIONS.npm,
     prismaAdapterPackage:
       options.engine === 'mysql'
         ? '@prisma/adapter-mariadb'
@@ -244,6 +246,14 @@ export const tsRdbGenerator = async (
         dependsOn: ['bundle'],
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+
+      addDockerScanTarget(tree, {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag],
+      });
     }
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
   }

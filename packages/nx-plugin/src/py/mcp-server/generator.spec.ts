@@ -4,6 +4,7 @@
  */
 
 import { parse } from '@iarna/toml';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   addProjectConfiguration,
   joinPathFragments,
@@ -407,6 +408,31 @@ dev-dependencies = []
 
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
+
+    // Check that a cacheable trivy scan target was added
+    expect(projectConfig.targets['mcp-server-trivy']).toEqual({
+      cache: true,
+      inputs: ['default', '^production'],
+      outputs: [
+        '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
+      ],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'rimraf dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
+          'make-dir dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
+          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/.trivyignore',
+          'docker save -o dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/image-0.tar proj-test-project-mcp-server:latest',
+          `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-mcp-server-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
+        ],
+        parallel: false,
+      },
+      dependsOn: ['mcp-server-docker'],
+    });
+    expect(projectConfig.targets['trivy'].dependsOn).toContain(
+      'mcp-server-trivy',
+    );
+    expect(projectConfig.targets.build.dependsOn).toContain('trivy');
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and custom name', async () => {

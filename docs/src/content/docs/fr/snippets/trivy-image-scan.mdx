@@ -1,0 +1,27 @@
+---
+title: Analyse des images de conteneur
+---
+
+L'image Docker construite pour ce projet est analysée pour détecter les vulnérabilités dans le cadre de la construction en utilisant [Trivy](https://trivy.dev/), exécuté à partir de l'[image Trivy hébergée sur ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+
+Une cible `trivy` est ajoutée à votre projet qui analyse l'image construite et **fait échouer la construction** si une vulnérabilité de gravité `HIGH` ou `CRITICAL` est trouvée. Le `Dockerfile` généré utilise une image de base sans vulnérabilité corrigeable connue de ces gravités au moment de la génération, et met à niveau les outils intégrés (tels que `npm`) pour le maintenir ainsi.
+
+L'analyse utilise le même moteur de conteneur que votre construction d'image (`docker` ou `finch`), donc aucun outillage supplémentaire n'est requis. Étant donné que l'analyse n'est réexécutée que lorsque l'image change, une image inchangée n'est pas réanalysée.
+
+:::caution[Les vulnérabilités non corrigeables sont ignorées]
+L'analyse s'exécute avec `--ignore-unfixed`, donc les vulnérabilités sans correctif disponible ne font pas échouer la construction, car elles ne peuvent pas être corrigées en mettant à niveau les outils dans votre `Dockerfile` — elles ne sont pas signalées dans la sortie d'analyse de la construction. Au fur et à mesure que de nouvelles vulnérabilités sont divulguées, le résultat des analyses peut changer au fil du temps, donc examinez l'image périodiquement en exécutant `trivy image <your-image>` sans le flag, et reconstruisez avec une image de base plus récente (ou ajoutez des étapes de conteneur pour appliquer les correctifs disponibles) une fois qu'un correctif est publié.
+:::
+
+#### Suppression des résultats Trivy
+
+Il peut y avoir des cas où vous souhaitez supprimer une vulnérabilité spécifique, par exemple lorsqu'aucun correctif n'est encore disponible et que vous avez évalué le risque comme acceptable.
+
+Ajoutez l'ID de vulnérabilité (un par ligne) au fichier `.trivyignore` à la racine de votre projet :
+
+```gitignore
+# .trivyignore
+# node-tar arbitrary file write - not exploitable in our usage
+CVE-2024-XXXXX
+```
+
+Pour plus de détails sur le filtrage des résultats, consultez la [documentation de filtrage Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids).

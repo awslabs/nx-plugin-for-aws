@@ -23,6 +23,7 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
@@ -49,7 +50,7 @@ import {
   addWorkspaceDependencyToPyProject,
 } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { withVersions } from '../../utils/versions';
+import { BASE_IMAGES, withVersions } from '../../utils/versions';
 import type { PyAgentGeneratorSchema } from './schema';
 
 export const PY_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -248,6 +249,7 @@ export const pyAgentGenerator = async (
         moduleName,
         bundleOutputDir,
         protocol,
+        pythonBaseImage: BASE_IMAGES.python,
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
@@ -283,6 +285,14 @@ export const pyAgentGenerator = async (
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+
+    addDockerScanTarget(tree, {
+      project,
+      containerEngine: containers,
+      trivyTargetName: `${agentTargetPrefix}-trivy`,
+      dockerTargetName,
+      imageTags: [dockerImageTag],
+    });
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);

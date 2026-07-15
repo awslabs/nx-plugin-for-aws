@@ -3,10 +3,34 @@ title: "Docker 打包"
 description: "在 Nx Plugin for AWS 工作空间中为 TypeScript 和 Python 项目构建和部署 Docker 镜像。"
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 多个生成器(例如 <Link path="/guides/ts-agent">`ts#agent`</Link> 和 <Link path="/guides/py-agent">`py#agent`</Link>)会生成一个 Docker 镜像,该镜像被推送到 Amazon ECR 并由 AWS 基础设施使用。本指南描述了它们遵循的模式,以便您可以将其应用于其他用例——例如,在 Amazon ECS 上运行 <Link path="/guides/fastapi">FastAPI</Link> 项目,或部署容器化的 Express 服务器。
 
@@ -252,6 +276,36 @@ CMD ["python", "-m", "my_project.main"]
 这会清除输出目录,然后将包内容和 `Dockerfile` 都复制到 `dist/.../docker` 中,该目录成为 Docker 构建上下文。
 
 <NxCommands commands={['docker my-project']} />
+
+## 使用 Trivy 扫描镜像
+
+扫描镜像以查找已知漏洞是一个好习惯。遵循此模式的生成器会添加一个 `trivy` 目标,该目标使用 [Trivy](https://trivy.dev/) 扫描构建的镜像,从 [ECR 托管的 Trivy 镜像](https://gallery.ecr.aws/aquasecurity/trivy)运行,并在发现 `HIGH` 或 `CRITICAL` 级别的问题时使构建失败。
+
+添加一个 `dependsOn` 您的 `docker` 目标的 `trivy` 目标。它将构建的镜像保存为 tarball 并通过工作区相对绑定挂载进行扫描,因此相同的命令在 `docker` 和 `finch` 下都可以工作:
+
+<Code lang="json" code={trivyTarget} />
+
+然后让 `build` 依赖于 `trivy`,以便扫描作为构建的一部分运行:
+
+```json
+{
+  "targets": {
+    "build": {
+      "dependsOn": ["trivy"]
+    }
+  }
+}
+```
+
+<NxCommands commands={['trivy my-project']} />
+
+:::tip[缓存跳过未更改的镜像]
+因为镜像完全由您的项目源代码决定,声明 `inputs`(这里是 `default` 和 `^production`,与 `bundle` 目标匹配)让 Nx 缓存扫描并跳过重新扫描未更改的镜像。固定 Trivy 镜像版本(例如 <code>trivy:<TrivyVersion /></code>),以便扫描是可重现的。
+:::
+
+:::note[抑制发现]
+Trivy 从项目根目录读取 `.trivyignore` 文件(漏洞 ID 列表,每行一个)。`--ignore-unfixed` 跳过没有可用修复的漏洞,因此扫描仅在您可以通过升级 `Dockerfile` 中的工具来采取行动的问题上失败。有关详细信息,请参阅 [Trivy 过滤文档](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids)。
+:::
 
 ## 基础设施
 
