@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { resolveContainers } from '../../utils/containers';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
@@ -188,19 +189,34 @@ describe('py#rdb generator', () => {
         commands: [
           'docker build --platform linux/arm64 --provenance=false -t proj-db-migration:latest dist/packages/db/docker/migration',
           'docker build --platform linux/arm64 --provenance=false -t proj-db-create-db-user:latest dist/packages/db/docker/create-db-user',
-          'rimraf dist/packages/db/trivy/proj-db-migration-latest',
-          'make-dir dist/packages/db/trivy/proj-db-migration-latest',
-          'ncp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
-          'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-0.tar proj-db-migration:latest',
-          'docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q',
-          'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-1.tar proj-db-create-db-user:latest',
-          'docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-1.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q',
         ],
         parallel: false,
       },
       dependsOn: ['bundle-migration', 'bundle-create-db-user'],
     });
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
+
+    // Check that a cacheable trivy scan target was added covering both images
+    expect(projectConfig.targets.trivy).toEqual({
+      cache: true,
+      inputs: ['default', '^production'],
+      outputs: ['{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest'],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'rimraf dist/packages/db/trivy/proj-db-migration-latest',
+          'make-dir dist/packages/db/trivy/proj-db-migration-latest',
+          'ncp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
+          'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-0.tar proj-db-migration:latest',
+          `docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
+          'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-1.tar proj-db-create-db-user:latest',
+          `docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-1.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
+        ],
+        parallel: false,
+      },
+      dependsOn: ['docker'],
+    });
+    expect(projectConfig.targets.build.dependsOn).toContain('trivy');
   });
 
   it('should generate local database support without infrastructure', async () => {

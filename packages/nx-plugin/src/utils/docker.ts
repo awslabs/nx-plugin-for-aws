@@ -2,8 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, type Tree } from '@nx/devkit';
+import {
+  joinPathFragments,
+  type ProjectConfiguration,
+  type Tree,
+} from '@nx/devkit';
 import { FsCommands } from './fs';
+import { addDependencyToTargetIfNotPresent } from './nx';
 import { CONTAINER_VERSIONS } from './versions';
 
 const TRIVY_IGNORE_FILE = '.trivyignore';
@@ -13,16 +18,24 @@ const TRIVY_IGNORE_CONTENTS = `# Trivy ignore file. Add one vulnerability ID (e.
 # https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids
 `;
 
-export interface DockerImageScanOptions {
+export interface DockerScanTargetOptions {
+  /**
+   * Project configuration to add the scan target to (mutated in place).
+   */
+  readonly project: ProjectConfiguration;
   /**
    * Container engine command to invoke (\`docker\` or \`finch\`).
    */
   readonly containerEngine: string;
   /**
-   * Root of the project the image belongs to, used to locate the project's
-   * \`.trivyignore\` and to stage scan artifacts under \`dist\`.
+   * Name of the scan target to add, e.g. \`my-agent-trivy\`.
    */
-  readonly projectRoot: string;
+  readonly trivyTargetName: string;
+  /**
+   * Name of the docker target that builds the image(s) to scan. The scan
+   * target depends on it.
+   */
+  readonly dockerTargetName: string;
   /**
    * Tags of the images built by the docker target which should be scanned.
    */
@@ -30,31 +43,35 @@ export interface DockerImageScanOptions {
 }
 
 /**
- * Vend a \`.trivyignore\` at the project root (kept if it already exists) and
- * return the commands that scan each built image with the pinned ECR-hosted
- * Trivy image.
+ * Add a cacheable Trivy scan target for the images built by a docker target,
+ * wire it under the aggregate \`trivy\` target, and make \`build\` depend on it.
  *
- * Each image is saved to a tarball under \`dist/<projectRoot>/trivy\` (kept out
- * of any Docker build context) and scanned via a workspace-relative bind mount
- * so the same commands work under both docker and finch. The scan fails the
- * build (exit code 1) on fixable HIGH/CRITICAL vulnerabilities; \`--ignore-unfixed\`
- * keeps unactionable base-image advisories from blocking the build.
+ * The scan target depends on the docker target and declares the project source
+ * as its inputs, so an unchanged image is never re-scanned (a cache hit skips
+ * the scan entirely). Each image is saved to a tarball under
+ * \`dist/<projectRoot>/trivy/<scan-key>\` (kept out of any Docker build context)
+ * and scanned with the pinned ECR-hosted Trivy image via a workspace-relative
+ * bind mount, so the same commands work under both docker and finch. The scan
+ * fails the build (exit code 1) on HIGH/CRITICAL vulnerabilities.
  *
- * The returned commands are intended to be appended to the docker target's
- * \`commands\`, running after the image build.
+ * A \`.trivyignore\` is vended at the project root (kept if it already exists)
+ * for suppressing findings.
  */
-export const addDockerImageScanCommands = (
+export const addDockerScanTarget = (
   tree: Tree,
-  options: DockerImageScanOptions,
-): string[] => {
-  const { containerEngine, projectRoot, imageTags } = options;
+  options: DockerScanTargetOptions,
+): void => {
+  const { project, containerEngine, trivyTargetName, dockerTargetName } =
+    options;
+  const { imageTags } = options;
+  const projectRoot = project.root;
 
   const ignoreFilePath = joinPathFragments(projectRoot, TRIVY_IGNORE_FILE);
   if (!tree.exists(ignoreFilePath)) {
     tree.write(ignoreFilePath, TRIVY_IGNORE_CONTENTS);
   }
 
-  // Stage scan artifacts in a directory unique to this docker target so that
+  // Stage scan artifacts in a directory unique to this scan target so that
   // sibling targets in the same project (e.g. multiple agents) don't clobber
   // each other's tarballs when run in parallel. The first image tag is unique
   // per target, so it makes a stable, collision-free key.
@@ -77,5 +94,25 @@ export const addDockerImageScanCommands = (
     );
   });
 
-  return commands;
+  project.targets ??= {};
+  project.targets[trivyTargetName] = {
+    cache: true,
+    // The scanned image is fully determined by the project source, so caching
+    // on the source ensures an unchanged image is never re-scanned.
+    inputs: ['default', '^production'],
+    outputs: [`{workspaceRoot}/${scanDir}`],
+    executor: 'nx:run-commands',
+    options: {
+      commands,
+      parallel: false,
+    },
+    dependsOn: [dockerTargetName],
+  };
+
+  // Aggregate per-component scan targets under a single `trivy` target, and
+  // make `build` run the scan.
+  if (trivyTargetName !== 'trivy') {
+    addDependencyToTargetIfNotPresent(project, 'trivy', trivyTargetName);
+  }
+  addDependencyToTargetIfNotPresent(project, 'build', 'trivy');
 };

@@ -19,7 +19,7 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { addDockerImageScanCommands } from '../../utils/docker';
+import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -39,11 +39,7 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import {
-  CONTAINER_VERSIONS,
-  TS_VERSIONS,
-  withVersions,
-} from '../../utils/versions';
+import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
 export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -144,8 +140,8 @@ export const tsAgentGenerator = async (
         protocol,
         adotVersion:
           TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
-        nodeBaseImage: CONTAINER_VERSIONS.nodeBaseImage,
-        npmVersion: CONTAINER_VERSIONS.npm,
+        nodeBaseImage: BASE_IMAGES.node,
+        npmVersion: TS_VERSIONS.npm,
         ...esmVars(tree),
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -172,11 +168,6 @@ export const tsAgentGenerator = async (
             `${dockerOutputDir}/Dockerfile`,
           ),
           `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
-          ...addDockerImageScanCommands(tree, {
-            containerEngine: containers,
-            projectRoot: project.root,
-            imageTags: [dockerImageTag],
-          }),
         ],
         parallel: false,
       },
@@ -185,6 +176,14 @@ export const tsAgentGenerator = async (
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+
+    addDockerScanTarget(tree, {
+      project,
+      containerEngine: containers,
+      trivyTargetName: `${agentTargetPrefix}-trivy`,
+      dockerTargetName,
+      imageTags: [dockerImageTag],
+    });
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);

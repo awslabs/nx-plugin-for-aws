@@ -15,7 +15,7 @@ import {
 } from '@nx/devkit';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { addDockerImageScanCommands } from '../../utils/docker';
+import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
@@ -41,11 +41,7 @@ import {
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
 import { sharedRdbScriptsGenerator } from '../../utils/shared-rdb-scripts';
-import {
-  CONTAINER_VERSIONS,
-  TS_VERSIONS,
-  withVersions,
-} from '../../utils/versions';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsRdbGeneratorSchema } from './schema';
 
@@ -110,7 +106,7 @@ export const tsRdbGenerator = async (
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
     databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
-    npmVersion: CONTAINER_VERSIONS.npm,
+    npmVersion: TS_VERSIONS.npm,
     prismaAdapterPackage:
       options.engine === 'mysql'
         ? '@prisma/adapter-mariadb'
@@ -245,19 +241,19 @@ export const tsRdbGenerator = async (
         cache: true,
         executor: 'nx:run-commands',
         options: {
-          commands: [
-            `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
-            ...addDockerImageScanCommands(tree, {
-              containerEngine,
-              projectRoot: projectConfig.root,
-              imageTags: [migrationDockerImageTag],
-            }),
-          ],
-          parallel: false,
+          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
         },
         dependsOn: ['bundle'],
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+
+      addDockerScanTarget(tree, {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag],
+      });
     }
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
   }

@@ -100,6 +100,7 @@ export const TS_VERSIONS = {
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
   ncp: '2.0.0',
+  npm: '12.0.1',
   'npm-check-updates': '22.2.9',
   'oidc-client-ts': '3.5.0',
   pg: '8.22.0',
@@ -186,18 +187,22 @@ export const VENDORED_VERSIONS = {
 } as const;
 
 /**
- * Versions for container tooling used by generated Dockerfiles and image
- * build/scan targets. Pinned exactly so generated images are reproducible.
+ * Base container images used by generated Dockerfiles. Pinned exactly so
+ * generated images are reproducible, and chosen to be free of known
+ * HIGH/CRITICAL vulnerabilities at time of generation.
+ */
+export const BASE_IMAGES = {
+  node: 'public.ecr.aws/docker/library/node:lts-slim',
+  python: 'public.ecr.aws/docker/library/python:3.14-slim',
+} as const;
+
+/**
+ * Versions for container tooling used by generated image build/scan targets.
+ * Pinned exactly so generated images are reproducible.
  */
 export const CONTAINER_VERSIONS = {
   // ECR-hosted Trivy image used to scan built images during the build.
   trivy: '0.72.0',
-  // Node base image for AgentCore runtime/MCP server images.
-  nodeBaseImage: 'public.ecr.aws/docker/library/node:lts-slim',
-  // npm is upgraded in Node images to pick up a bundled npm free of known
-  // HIGH/CRITICAL vulnerabilities (e.g. the undici advisory in the image's
-  // default npm).
-  npm: '12.0.1',
 } as const;
 
 /**
