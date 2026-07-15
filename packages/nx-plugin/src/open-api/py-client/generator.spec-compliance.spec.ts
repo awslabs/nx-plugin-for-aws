@@ -141,6 +141,72 @@ describe('openApiPyClientGenerator - spec compliance', () => {
     expect(res.calls?.[0]?.body).toBe('username=alice');
   });
 
+  it('sends a primitive urlencoded body verbatim', async () => {
+    // A urlencoded body whose schema is a raw (pre-encoded) string has no
+    // fields to form-encode — it is sent as-is with the declared content type.
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/raw': {
+          post: {
+            operationId: 'sendRaw',
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: { type: 'string' },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+    await generateAndRead(verifier, tree, spec);
+    const res = await callGeneratedClient(
+      verifier,
+      'send_raw',
+      {},
+      { status: 204 },
+      ['a=1&b=two%20words'],
+    );
+    expect(res.ok).toBe(true);
+    expect(res.calls?.[0]?.body).toBe('a=1&b=two%20words');
+    expect(res.calls?.[0]?.headers['content-type']).toBe(
+      'application/x-www-form-urlencoded',
+    );
+  });
+
+  it('throws at generation time for a urlencoded array body', async () => {
+    // Inherited from the shared codegen guard (#938): a top-level array has
+    // no property names to key on, so it has no defined form encoding.
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/urlencoded-array': {
+          post: {
+            operationId: 'sendArray',
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+    await expect(generateAndRead(verifier, tree, spec)).rejects.toThrow(
+      /x-www-form-urlencoded.*array.*no defined form encoding/,
+    );
+  });
+
   it('types tuples positionally and round-trips them', async () => {
     const spec: Spec = {
       openapi: '3.1.0',
