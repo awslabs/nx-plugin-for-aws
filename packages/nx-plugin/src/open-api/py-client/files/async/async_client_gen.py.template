@@ -422,12 +422,19 @@ _%>
             request_kwargs: dict[str, Any] = {"files": _files or None, "data": _data or None}
         else:
             request_kwargs = {"files": body}
-<%_ } else if (bodyIsUrlEncoded) { _%>
+<%_ } else if (bodyIsUrlEncoded && !wholeBodyInputs[0].model.isPrimitive) { _%>
         body = <%- wholeBodyInputs[0].pythonName %>
         # httpx URL-encodes `data=` as form key=value pairs (arrays as
         # repeated keys).
         _form = self._dump(body)
         request_kwargs: dict[str, Any] = {"data": {k: v for k, v in (_form or {}).items() if v is not None}}
+<%_ } else if (bodyIsUrlEncoded) { _%>
+        # A primitive urlencoded body (e.g. a raw pre-encoded string) is sent
+        # verbatim; only object bodies are form-encoded.
+        body = <%- wholeBodyInputs[0].pythonName %>
+        request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
+        if body is not None and not self._config.omit_content_type_header:
+            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
 <%_ } else { _%>
         body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
         request_kwargs: dict[str, Any] = {"json": body}
