@@ -3,10 +3,34 @@ title: "Empaquetado Docker"
 description: "Construye y despliega imágenes Docker para proyectos TypeScript y Python en un espacio de trabajo Nx Plugin for AWS."
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 Varios generadores (como <Link path="/guides/ts-agent">`ts#agent`</Link> y <Link path="/guides/py-agent">`py#agent`</Link>) producen una imagen Docker que se envía a Amazon ECR y es consumida por la infraestructura de AWS. Esta guía describe el patrón que siguen para que puedas aplicarlo a otros casos de uso — por ejemplo, ejecutar un proyecto <Link path="/guides/fastapi">FastAPI</Link> en Amazon ECS, o desplegar un servidor Express en contenedor.
 
@@ -253,6 +277,36 @@ Esto limpia el directorio de salida, luego copia tanto el contenido del bundle c
 
 <NxCommands commands={['docker my-project']} />
 
+## Escaneo de Imágenes con Trivy
+
+Es una buena práctica escanear tus imágenes en busca de vulnerabilidades conocidas. Los generadores que siguen este patrón agregan un target `trivy` que escanea la imagen construida con [Trivy](https://trivy.dev/), ejecutándose desde la [imagen Trivy alojada en ECR](https://gallery.ecr.aws/aquasecurity/trivy), y falla la construcción en hallazgos `HIGH` o `CRITICAL`.
+
+Agrega un target `trivy` que tenga `dependsOn` en tu target `docker`. Guarda la imagen construida en un tarball y la escanea a través de un montaje de enlace relativo al workspace, por lo que el mismo comando funciona tanto con `docker` como con `finch`:
+
+<Code lang="json" code={trivyTarget} />
+
+Luego haz que `build` dependa de `trivy` para que el escaneo se ejecute como parte de una construcción:
+
+```json
+{
+  "targets": {
+    "build": {
+      "dependsOn": ["trivy"]
+    }
+  }
+}
+```
+
+<NxCommands commands={['trivy my-project']} />
+
+:::tip[El caché omite imágenes sin cambios]
+Debido a que la imagen está completamente determinada por el código fuente de tu proyecto, declarar `inputs` (aquí `default` y `^production`, coincidiendo con el target `bundle`) permite a Nx cachear el escaneo y omitir el re-escaneo de una imagen que no ha cambiado. Fija la versión de la imagen Trivy (por ejemplo, <code>trivy:<TrivyVersion /></code>) para que los escaneos sean reproducibles.
+:::
+
+:::note[Supresión de hallazgos]
+Trivy lee un archivo `.trivyignore` (una lista de IDs de vulnerabilidad, uno por línea) desde la raíz de tu proyecto. `--ignore-unfixed` omite vulnerabilidades sin solución disponible, por lo que el escaneo solo falla en problemas que puedes solucionar actualizando herramientas en tu `Dockerfile`. Consulta la [documentación de filtrado de Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) para más detalles.
+:::
+
 ## Infraestructura
 
 Conectar el directorio de contexto de construcción resultante a la infraestructura como código es lo mismo tanto para TypeScript como para Python — solo difiere la ruta al directorio de contexto de construcción (`dist/packages/my-project/bundle` para TypeScript, `dist/packages/my-project/docker` para Python).
@@ -318,8 +372,8 @@ El proveedor de AWS de Terraform no tiene un recurso de primera clase para "cons
 
 1. El target `build` del proyecto ejecuta `docker build`, produciendo una imagen local etiquetada como `my-scope-my-project:latest`.
 2. Un `aws_ecr_repository` para almacenar la imagen.
-3. Un `null_resource` con un provisionador `local-exec` que autentica en ECR, re-etiqueta la imagen construida localmente y la envía.
-4. El recurso downstream (por ejemplo, `aws_ecs_task_definition`) referencia `"${aws_ecr_repository.repo.repository_url}:latest"`.
+3. Un `null_resource` con un provisionador `local-exec` que autentica en ECR, re-etiqueta la imagen construida localmente con su digest de contenido, y la envía.
+4. El recurso downstream (por ejemplo, `aws_ecs_task_definition`) referencia la imagen por su etiqueta inmutable basada en digest.
 
 ```d2
 direction: down
@@ -393,7 +447,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-El bloque `data.external.docker_digest` asegura que el `null_resource` se vuelva a ejecutar cada vez que cambie el hash de la imagen local, desencadenando un nuevo push en cada cambio de código significativo.
+El bloque `data.external.docker_digest` asegura que el `null_resource` se vuelva a ejecutar cada vez que cambie el hash de la imagen local, desencadenando un nuevo push en cada cambio de código significativo. La imagen se envía bajo una etiqueta inmutable basada en contenido derivada de su digest, por lo que el repositorio ECR puede usar mutabilidad de etiqueta `IMMUTABLE` y rechazar cualquier intento de sobrescribir una etiqueta existente.
 
 :::note[Ejecutar bundle antes del apply]
 `nx apply <project>` requiere que la etiqueta de imagen `my-scope-my-project:latest` ya exista localmente. Ejecuta `nx build my-project` (o `nx docker my-project`) antes de `nx apply <project>`.
