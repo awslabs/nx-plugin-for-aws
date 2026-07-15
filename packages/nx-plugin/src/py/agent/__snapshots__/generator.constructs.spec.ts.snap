@@ -20,7 +20,7 @@ CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "proj_test_projec
 `;
 
 exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
-"import { Lazy, Names } from 'aws-cdk-lib';
+"import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -122,6 +122,22 @@ export class SnapshotBedrockAgent
   }
 
   /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+  }
+
+  /**
    * Grants IAM permissions to invoke this agent runtime.
    *
    * @param grantee - The IAM principal to grant permissions to
@@ -215,7 +231,7 @@ _agent = _agent_ctx.__enter__()
 
 
 class InvokeInput(BaseModel):
-    message: str = Field(max_length=100000)
+    prompt: str = Field(max_length=100000)
 
 
 class StreamChunk(BaseModel):
@@ -224,7 +240,7 @@ class StreamChunk(BaseModel):
 
 async def handle_invoke(input: InvokeInput):
     """Streaming handler for agent invocation"""
-    stream = _agent.stream_async(input.message)
+    stream = _agent.stream_async(input.prompt)
     async for event in stream:
         text = (
             event.get("event", {})

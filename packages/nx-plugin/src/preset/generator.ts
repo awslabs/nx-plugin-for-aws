@@ -4,75 +4,29 @@
  */
 import {
   addDependenciesToPackageJson,
-  detectPackageManager,
   type GeneratorCallback,
-  generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  readNxJson,
   type Tree,
   updateJson,
-  updateNxJson,
 } from '@nx/devkit';
-import { initGenerator } from '@nx/js';
 import { execSync } from 'child_process';
 import enquirer from 'enquirer';
 import { readFileSync } from 'fs';
-import yaml from 'js-yaml';
-import { readModulePackageJson } from 'nx/src/utils/package-json';
-import GeneratorsJson from '../../generators.json' with { type: 'json' };
-import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
-import { inferContainers } from '../utils/containers';
-import { DEFAULT_BIOME_CONFIG, formatFilesInSubtree } from '../utils/format';
+import { formatFilesInSubtree } from '../utils/format';
+import { applyWorkspaceInit } from '../utils/init';
 import { installDependencies } from '../utils/install';
-import { configureMcpServers } from '../utils/mcp';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { getNpmScope } from '../utils/npm-scope';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
-import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
 import { withVersions } from '../utils/versions';
 import type { PresetGeneratorSchema } from './schema';
-
-const WORKSPACES = ['packages/*'];
-const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
-
-// Built dependencies whose install scripts the generated workspace trusts.
-// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
-// pnpm 11 reads `allowBuilds` instead. Any dep NOT in this allowlist will
-// have its install scripts skipped with a warning — matching pnpm 10's
-// default behaviour. The user can opt-in later via `pnpm approve-builds`.
-const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
 );
-
-const setUpWorkspaces = (tree: Tree) => {
-  if (detectPackageManager() === 'pnpm') {
-    tree.write(
-      'pnpm-workspace.yaml',
-      yaml.dump(
-        {
-          packages: WORKSPACES,
-          allowBuilds: Object.fromEntries(
-            PNPM_BUILT_DEPENDENCIES.map((dep) => [dep, true]),
-          ),
-          onlyBuiltDependencies: PNPM_BUILT_DEPENDENCIES,
-        },
-        { quotingType: "'" },
-      ),
-    );
-  } else {
-    updateJson(tree, 'package.json', (json) => {
-      json.workspaces = WORKSPACES;
-      return json;
-    });
-  }
-};
 
 /**
  * Determines if the current user is an Amazon employee based on their git configuration.
@@ -170,9 +124,6 @@ export const presetGenerator = async (
     preferInstallDependencies,
   }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const resolvedContainers =
-    !containers || containers === 'infer' ? inferContainers() : containers;
-  const esm = (module ?? 'esm') === 'esm';
   if (
     isAmazonian() &&
     !process.env.VITEST &&
@@ -195,106 +146,31 @@ export const presetGenerator = async (
     }
   }
 
-  // Write IaC provider and container engine to plugin config
-  await ensureAwsNxPluginConfig(tree);
-  await updateAwsNxPluginConfig(tree, {
-    iac: { provider: iac },
-    containers: { engine: resolvedContainers },
-  });
+  // The preset owns the greenfield workspace's module format: write the root
+  // `type` explicitly from the chosen `--module` so later generators can
+  // infer it. The `init` generator never touches an existing workspace's
+  // `type` field.
+  updateJson(tree, 'package.json', (packageJson) => ({
+    ...packageJson,
+    type: (module ?? 'esm') === 'esm' ? 'module' : 'commonjs',
+  }));
 
-  await initGenerator(tree, {
-    formatter: 'none',
-    addTsPlugin: true,
+  // Apply the deterministic workspace configuration shared with the `init`
+  // generator. The preset owns the README of a greenfield workspace.
+  await applyWorkspaceInit(tree, {
+    iac,
+    containers,
+    mcp,
+    readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
+    overwriteScripts: true,
   });
 
   tree.delete('apps/.gitkeep');
   tree.delete('libs/.gitkeep');
   tree.write('packages/.gitkeep', '');
 
-  setUpWorkspaces(tree);
-
-  const nxJson = readNxJson(tree);
-  updateNxJson(tree, {
-    ...nxJson,
-    analytics: false,
-    targetDefaults: {
-      ...nxJson.targetDefaults,
-      compile: {
-        ...nxJson.targetDefaults?.compile,
-        syncGenerators: [
-          ...(nxJson.targetDefaults?.compile?.syncGenerators ?? []).filter(
-            (g) =>
-              ![TS_SYNC_GENERATOR_NAME, NX_TYPESCRIPT_SYNC_GENERATOR].includes(
-                g,
-              ),
-          ),
-          NX_TYPESCRIPT_SYNC_GENERATOR,
-          TS_SYNC_GENERATOR_NAME,
-        ],
-      },
-    },
-  });
-
-  updateJson(tree, 'package.json', (packageJson) => ({
-    ...packageJson,
-    // Written explicitly so later generators can infer the workspace's module
-    // format from the root `type`.
-    type: esm ? 'module' : 'commonjs',
-    scripts: {
-      ...packageJson.scripts,
-      dev: 'nx run-many --target dev',
-      build: 'nx run-many --target build',
-      lint: 'nx run-many --target lint --configuration=fix',
-      test: 'nx run-many --target test --all',
-      'build:skip-lint': 'nx run-many --target build --configuration=skip-lint',
-      'build:all': 'nx run-many --target build --all',
-      'affected:all': 'nx affected --target build',
-    },
-  }));
-
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    {
-      '@nx/workspace': readModulePackageJson('@nx/js').packageJson.version,
-      ...withVersions(['typescript', '@biomejs/biome']),
-    },
-  );
-
-  // Write biome.json for formatting and linting
-  if (!tree.exists('biome.json')) {
-    tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
-  }
-
-  generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(import.meta.dirname, 'files'),
-    '.',
-    {
-      projectName: getNpmScope(tree),
-      generators: Object.entries(GeneratorsJson.generators)
-        .filter(([_, v]) => !v['hidden'])
-        .map(([k, v]) => ({ name: k, description: v.description })),
-      ...(() => {
-        const cmds = getPackageManagerDisplayCommands();
-        return {
-          pkgMgrCmd: cmds.exec,
-          buildCmd: `${cmds.run} build`,
-          lintCmd: `${cmds.run} lint`,
-        };
-      })(),
-    },
-    {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
-    },
-  );
-
   if (gitSecrets !== false) {
     setUpGitSecrets(tree);
-  }
-
-  if (mcp !== false) {
-    configureMcpServers(tree);
   }
 
   await formatFilesInSubtree(tree);

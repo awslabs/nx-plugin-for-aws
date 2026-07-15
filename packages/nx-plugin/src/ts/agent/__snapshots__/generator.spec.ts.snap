@@ -444,7 +444,7 @@ class TrpcWebSocketAdapter implements ChatAdapter {
     const stream = new ReadableStream<string>({
       start: (controller) => {
         this.client.invoke.subscribe(
-          { message: text },
+          { prompt: text },
           {
             onData: (chunk: string) => controller.enqueue(chunk),
             onComplete: () => controller.close(),
@@ -546,7 +546,7 @@ class TrpcWebSocketAdapter implements ChatAdapter {
     const stream = new ReadableStream<string>({
       start: (controller) => {
         this.client.invoke.subscribe(
-          { message: text },
+          { prompt: text },
           {
             onData: (chunk: string) => controller.enqueue(chunk),
             onComplete: () => controller.close(),
@@ -585,7 +585,7 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
 `;
 
 exports[`ts#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
-"import { Lazy, Names } from 'aws-cdk-lib';
+"import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -684,6 +684,22 @@ export class SnapshotBedrockAgent
    */
   public get connections(): Connections {
     return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
   }
 
   /**
@@ -833,6 +849,11 @@ output "agent_core_runtime_role_arn" {
 output "agent_core_runtime_arn" {
   description = "ARN of the Bedrock Agent Core runtime"
   value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime"
+  value       = module.agent_core_runtime.invocation_url
 }
 
 output "appconfig_application_id" {
@@ -1308,6 +1329,12 @@ print(f'Runtime {runtime_arn} is serving MCP')
 }
 
 # Outputs
+locals {
+  # For MCP runtimes the ARN flows through the readiness probe, so consumers
+  # wait until the runtime serves MCP.
+  ready_runtime_arn = var.server_protocol == "MCP" ? null_resource.runtime_ready[0].triggers.runtime_arn : aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+}
+
 output "agent_core_runtime_role_arn" {
   description = "ARN of the Agent Core Runtime IAM role"
   value       = aws_iam_role.agent_core_runtime_role.arn
@@ -1325,7 +1352,12 @@ output "agent_runtime_name" {
 
 output "agent_core_runtime_arn" {
   description = "ARN of the Bedrock Agent Core runtime. For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
-  value       = var.server_protocol == "MCP" ? null_resource.runtime_ready[0].triggers.runtime_arn : aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+  value       = local.ready_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime. MCP runtimes get the MCP endpoint (e.g. for use as a Gateway target endpoint), A2A runtimes the A2A endpoint (trailing slash required). For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = "https://bedrock-agentcore.\${local.aws_region}.amazonaws.com/runtimes/\${urlencode(local.ready_runtime_arn)}/invocations\${var.server_protocol == "A2A" ? "/" : "?qualifier=DEFAULT"}"
 }
 
 output "agent_runtime_id" {
@@ -1661,7 +1693,7 @@ const agent = withSessionId(getAgent);
 
 export const appRouter = router({
   invoke: publicProcedure
-    .input(z.object({ message: z.string().max(100000) }))
+    .input(z.object({ prompt: z.string().max(100000) }))
     .output(
       zAsyncIterable({
         yield: z.string(),
@@ -1671,7 +1703,7 @@ export const appRouter = router({
     .subscription(async function* (opts) {
       // Bind the session ID for this subscription so downstream MCP / A2A clients forward it on outbound calls.
       enterSessionContext(opts.ctx.sessionId);
-      for await (const event of agent.stream(opts.input.message)) {
+      for await (const event of agent.stream(opts.input.prompt)) {
         if (
           event.type === 'modelStreamUpdateEvent' &&
           event.event.type === 'modelContentBlockDeltaEvent' &&

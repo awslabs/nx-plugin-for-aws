@@ -2,6 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { TS_VERSIONS } from './versions';
+
+/**
+ * The nx version the plugin is built against. Commands that download nx
+ * (e.g. `nx init`) pin to this version so the workspace's nx matches the
+ * plugin's `@nx/*` packages — a mismatch deadlocks `nx sync`.
+ */
+export const NX_VERSION = TS_VERSIONS['@nx/devkit'];
+
 /**
  * Display-friendly command prefixes for each package manager.
  *
@@ -65,6 +74,17 @@ export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
     default:
       return `${pm} install ${dev ? '-D ' : ''}${pkg}`;
   }
+};
+
+/**
+ * Build the command that adds Nx to a non-Nx project, pinned to the nx
+ * version the plugin is built against.
+ */
+export const buildNxInitCommand = (pm: string) => {
+  const dlxPrefix =
+    { npm: 'npx', pnpm: 'pnpm dlx', yarn: 'yarn dlx', bun: 'bunx' }[pm] ??
+    'npx';
+  return `${dlxPrefix} nx@${NX_VERSION} init`;
 };
 
 /**

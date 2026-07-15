@@ -12,6 +12,7 @@ export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 
 - Use the \`general-guidance\` tool for guidance and best practices for working with Nx and the Nx Plugin for AWS.
 - Use the \`create-workspace-command\` tool to discover how to create a workspace to start a new project.
+- Use the \`add-to-existing-project\` tool when adding the plugin to an existing Nx workspace or non-Nx monorepo, or when troubleshooting configuration errors in such a workspace.
 - Use the \`list-generators\` tool to discover the available generators and how to run them.
 - Use the \`generator-guide\` tool to retrieve detailed information about a specific generator.`;
 

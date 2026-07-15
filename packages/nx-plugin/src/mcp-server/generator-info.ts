@@ -371,29 +371,47 @@ const parseGuide = async (
 };
 
 /**
- * Probe paths for finding guide MDX files locally. Checked in order:
+ * Base directories to probe for guide MDX files, relative to this module.
+ * Each is checked in order:
  * 1. Bundled docs in the published @aws/nx-plugin-mcp package
  * 2. Source checkout when running from the monorepo (dev/test)
  * 3. Rolldown-bundled binary in dist/ (monorepo layout)
  */
-const GUIDES_RELATIVE_PROBES = [
-  // Bundled docs inside published @aws/nx-plugin-mcp package (bin/ → ../docs/guides)
-  '../docs/guides',
+const GUIDE_BASE_PROBES = [
+  // Bundled docs inside published @aws/nx-plugin-mcp package (bin/ → ../docs)
+  '../docs',
   // nx-plugin package compiled from source (src/mcp-server/…)
-  '../../../docs/src/content/docs/en/guides',
+  '../../../docs/src/content/docs/en',
   // rolldown-bundled `@aws/nx-plugin-mcp` binary in dist (monorepo layout)
-  '../../../../docs/src/content/docs/en/guides',
+  '../../../../docs/src/content/docs/en',
 ];
 
+/**
+ * Content sub-directories that hold pages a generator may reference via
+ * `guidePages`. Both the per-generator reference guides (`guides/`) and the
+ * getting-started pages (`get_started/`) are fetchable, so a page can live in
+ * whichever section reads best for humans while still being served by the MCP
+ * tools. Bare `guidePages` names may also include a sub-path (e.g.
+ * `connection/react-trpc`).
+ */
+const GUIDE_SECTIONS = ['guides', 'get_started'];
+
 const fetchLocalGuide = (guide: string): string | undefined => {
-  for (const rel of GUIDES_RELATIVE_PROBES) {
-    const candidate = path.resolve(import.meta.dirname, rel, `${guide}.mdx`);
-    try {
-      if (fs.existsSync(candidate)) {
-        return fs.readFileSync(candidate, 'utf-8');
+  for (const base of GUIDE_BASE_PROBES) {
+    for (const section of GUIDE_SECTIONS) {
+      const candidate = path.resolve(
+        import.meta.dirname,
+        base,
+        section,
+        `${guide}.mdx`,
+      );
+      try {
+        if (fs.existsSync(candidate)) {
+          return fs.readFileSync(candidate, 'utf-8');
+        }
+      } catch {
+        // Probe failure → keep looking.
       }
-    } catch {
-      // Probe failure → keep looking.
     }
   }
   return undefined;
