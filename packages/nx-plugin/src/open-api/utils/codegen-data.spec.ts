@@ -915,6 +915,7 @@ describe('openapi codegen data utils', () => {
       expect(animal.discriminator).toEqual({
         propertyName: 'kind',
         typescriptPropertyName: 'kind',
+        pythonPropertyName: 'kind',
         mapping: [
           { value: 'cat', modelName: 'Cat' },
           { value: 'dog', modelName: 'Dog' },
@@ -1120,6 +1121,7 @@ describe('openapi codegen data utils', () => {
       expect(base.discriminator).toEqual({
         propertyName: 'kind',
         typescriptPropertyName: 'kind',
+        pythonPropertyName: 'kind',
         isBase: true,
         mapping: [
           { value: 'cat', modelName: 'Cat' },
