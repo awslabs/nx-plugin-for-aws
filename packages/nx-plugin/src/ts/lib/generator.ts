@@ -22,6 +22,7 @@ import { toKebabCase } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
   addGeneratorMetadata,
+  asTargetDefaultObject,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
@@ -158,30 +159,30 @@ export const tsProjectGenerator = async (
       ...nxJson.targetDefaults,
       compile: {
         cache: true,
-        ...nxJson.targetDefaults?.compile,
+        ...asTargetDefaultObject(nxJson.targetDefaults?.compile),
         inputs: [
-          ...(nxJson.targetDefaults?.compile?.inputs ?? []).filter(
-            (i) => i !== 'default',
-          ),
+          ...(
+            asTargetDefaultObject(nxJson.targetDefaults?.compile).inputs ?? []
+          ).filter((i) => i !== 'default'),
           'default',
         ],
       },
       build: {
         cache: true,
-        ...nxJson.targetDefaults?.build,
+        ...asTargetDefaultObject(nxJson.targetDefaults?.build),
         inputs: [
-          ...(nxJson.targetDefaults?.build?.inputs ?? []).filter(
-            (i) => i !== 'default',
-          ),
+          ...(
+            asTargetDefaultObject(nxJson.targetDefaults?.build).inputs ?? []
+          ).filter((i) => i !== 'default'),
           'default',
         ],
       },
       test: {
-        ...nxJson.targetDefaults?.test,
+        ...asTargetDefaultObject(nxJson.targetDefaults?.test),
         inputs: [
-          ...(nxJson.targetDefaults?.test?.inputs ?? []).filter(
-            (i) => i !== 'default',
-          ),
+          ...(
+            asTargetDefaultObject(nxJson.targetDefaults?.test).inputs ?? []
+          ).filter((i) => i !== 'default'),
           'default',
         ],
       },

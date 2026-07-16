@@ -29,6 +29,7 @@ import { DEFAULT_BIOME_CONFIG } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
+import { asTargetDefaultObject } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { withVersions } from './versions';
 
@@ -250,9 +251,12 @@ export const applyWorkspaceInit = async (
     targetDefaults: {
       ...nxJson.targetDefaults,
       compile: {
-        ...nxJson.targetDefaults?.compile,
+        ...asTargetDefaultObject(nxJson.targetDefaults?.compile),
         syncGenerators: [
-          ...(nxJson.targetDefaults?.compile?.syncGenerators ?? []).filter(
+          ...(
+            asTargetDefaultObject(nxJson.targetDefaults?.compile)
+              .syncGenerators ?? []
+          ).filter(
             (g) =>
               ![TS_SYNC_GENERATOR_NAME, NX_TYPESCRIPT_SYNC_GENERATOR].includes(
                 g,

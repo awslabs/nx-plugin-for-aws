@@ -6,6 +6,7 @@ import {
   getProjects,
   type ProjectConfiguration,
   readProjectConfiguration,
+  type TargetConfiguration,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
@@ -162,6 +163,22 @@ export const addComponentGeneratorMetadata = (
     });
   }
 };
+
+/**
+ * An `nx.json` `targetDefaults` value. Nx 23.1 widened this to either a config
+ * object or an ordered array of filtered entries; the plugin only ever authors
+ * the object form.
+ */
+type TargetDefaultValue = TargetConfiguration | unknown[];
+
+/**
+ * Narrow a `targetDefaults` entry to its object form. Returns an empty object
+ * for the array form (which the plugin never authors), so callers can read and
+ * merge config properties without repeating the union check.
+ */
+export const asTargetDefaultObject = (
+  value: TargetDefaultValue | undefined,
+): TargetConfiguration => (value && !Array.isArray(value) ? value : {});
 
 /**
  * A single entry in an Nx `dependsOn` array.
