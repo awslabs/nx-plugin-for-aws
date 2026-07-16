@@ -610,6 +610,20 @@ export default defineConfig({
               },
               link: '/guides/docker-bundling',
             },
+            {
+              label: 'Security',
+              translations: {
+                jp: 'セキュリティ',
+                ko: '보안',
+                fr: 'Sécurité',
+                it: 'Sicurezza',
+                es: 'Seguridad',
+                pt: 'Segurança',
+                zh: '安全',
+                vi: 'Bảo mật',
+              },
+              link: '/guides/security',
+            },
           ],
         },
         {
