@@ -10,9 +10,9 @@ import { ensureAwsNxPluginConfig } from '../utils/config/utils';
 import { formatFilesInSubtree } from '../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import {
-  asTargetDefaultObject,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  readTargetDefaultToMerge,
 } from '../utils/nx';
 import {
   addLicenseCheckToAllLintTargets,
@@ -67,12 +67,13 @@ export async function licenseGenerator(
   }
 
   const nxJson = readNxJson(tree);
+  const lintDefault = readTargetDefaultToMerge(nxJson.targetDefaults, 'lint');
   const lintTargetDefault = {
-    ...asTargetDefaultObject(nxJson.targetDefaults?.lint),
+    ...lintDefault,
     syncGenerators: [
-      ...(
-        asTargetDefaultObject(nxJson.targetDefaults?.lint).syncGenerators ?? []
-      ).filter((g) => g !== SYNC_GENERATOR_NAME),
+      ...(lintDefault.syncGenerators ?? []).filter(
+        (g) => g !== SYNC_GENERATOR_NAME,
+      ),
       SYNC_GENERATOR_NAME,
     ],
   };

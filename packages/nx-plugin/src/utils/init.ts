@@ -29,7 +29,7 @@ import { DEFAULT_BIOME_CONFIG } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
-import { asTargetDefaultObject } from './nx';
+import { readTargetDefaultToMerge } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { withVersions } from './versions';
 
@@ -244,6 +244,10 @@ export const applyWorkspaceInit = async (
   setUpWorkspaces(tree);
 
   const nxJson = readNxJson(tree);
+  const compileDefault = readTargetDefaultToMerge(
+    nxJson.targetDefaults,
+    'compile',
+  );
   updateNxJson(tree, {
     ...nxJson,
     // Preserve an explicit analytics choice in an existing workspace.
@@ -251,12 +255,9 @@ export const applyWorkspaceInit = async (
     targetDefaults: {
       ...nxJson.targetDefaults,
       compile: {
-        ...asTargetDefaultObject(nxJson.targetDefaults?.compile),
+        ...compileDefault,
         syncGenerators: [
-          ...(
-            asTargetDefaultObject(nxJson.targetDefaults?.compile)
-              .syncGenerators ?? []
-          ).filter(
+          ...(compileDefault.syncGenerators ?? []).filter(
             (g) =>
               ![TS_SYNC_GENERATOR_NAME, NX_TYPESCRIPT_SYNC_GENERATOR].includes(
                 g,

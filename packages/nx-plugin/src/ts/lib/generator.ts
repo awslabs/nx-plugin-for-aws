@@ -22,10 +22,10 @@ import { toKebabCase } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
   addGeneratorMetadata,
-  asTargetDefaultObject,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
+  readTargetDefaultToMerge,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
@@ -155,34 +155,38 @@ export const tsProjectGenerator = async (
       ],
     };
 
+    const compileDefault = readTargetDefaultToMerge(
+      nxJson.targetDefaults,
+      'compile',
+    );
+    const buildDefault = readTargetDefaultToMerge(
+      nxJson.targetDefaults,
+      'build',
+    );
+    const testDefault = readTargetDefaultToMerge(nxJson.targetDefaults, 'test');
+
     nxJson.targetDefaults = {
       ...nxJson.targetDefaults,
       compile: {
         cache: true,
-        ...asTargetDefaultObject(nxJson.targetDefaults?.compile),
+        ...compileDefault,
         inputs: [
-          ...(
-            asTargetDefaultObject(nxJson.targetDefaults?.compile).inputs ?? []
-          ).filter((i) => i !== 'default'),
+          ...(compileDefault.inputs ?? []).filter((i) => i !== 'default'),
           'default',
         ],
       },
       build: {
         cache: true,
-        ...asTargetDefaultObject(nxJson.targetDefaults?.build),
+        ...buildDefault,
         inputs: [
-          ...(
-            asTargetDefaultObject(nxJson.targetDefaults?.build).inputs ?? []
-          ).filter((i) => i !== 'default'),
+          ...(buildDefault.inputs ?? []).filter((i) => i !== 'default'),
           'default',
         ],
       },
       test: {
-        ...asTargetDefaultObject(nxJson.targetDefaults?.test),
+        ...testDefault,
         inputs: [
-          ...(
-            asTargetDefaultObject(nxJson.targetDefaults?.test).inputs ?? []
-          ).filter((i) => i !== 'default'),
+          ...(testDefault.inputs ?? []).filter((i) => i !== 'default'),
           'default',
         ],
       },

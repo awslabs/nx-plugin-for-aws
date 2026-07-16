@@ -12,6 +12,7 @@ import {
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
+  readTargetDefaultToMerge,
 } from './nx';
 import { createTreeUsingTsSolutionSetup } from './test';
 
@@ -643,5 +644,28 @@ describe('addComponentDevTarget', () => {
     addComponentDevTarget(targets, 'my-mcp-dev');
     addComponentDevTarget(targets, 'my-mcp-dev');
     expect(targets.dev.dependsOn).toEqual(['my-mcp-dev']);
+  });
+});
+
+describe('readTargetDefaultToMerge', () => {
+  it('should return an empty object when the key is unset', () => {
+    expect(readTargetDefaultToMerge({}, 'build')).toEqual({});
+    expect(readTargetDefaultToMerge(undefined, 'build')).toEqual({});
+  });
+
+  it('should return the existing config object so a generator can merge onto it', () => {
+    const existing = { cache: true, inputs: ['default'] };
+    expect(readTargetDefaultToMerge({ build: existing }, 'build')).toBe(
+      existing,
+    );
+  });
+
+  it('should throw rather than silently discard the filtered array form', () => {
+    expect(() =>
+      readTargetDefaultToMerge(
+        { build: [{ cache: true }, { filter: { plugin: '@nx/vite' } }] },
+        'build',
+      ),
+    ).toThrow(/targetDefaults\.build uses the filtered array form/);
   });
 });

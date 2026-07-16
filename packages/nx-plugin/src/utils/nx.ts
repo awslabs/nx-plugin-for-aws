@@ -166,16 +166,30 @@ export const addComponentGeneratorMetadata = (
 };
 
 /**
- * Narrow a `targetDefaults` entry to its object form. Nx 23.1 widened each
- * value to either a config object or an ordered array of filtered entries; the
- * plugin only ever authors the object form. Returns an empty object for the
- * array form, so callers can read and merge config properties without repeating
- * the union check.
+ * Read an `nx.json` `targetDefaults` entry so a generator can merge its own
+ * config onto it (`{ ...readTargetDefaultToMerge(defaults, key), ...ours }`),
+ * preserving whatever the workspace already had.
+ *
+ * Nx 23.1 widened each value to either a config object or an ordered array of
+ * filtered entries. The plugin only authors and knows how to merge the object
+ * form, so returns `{}` when the key is unset. If the workspace has authored
+ * the array (filtered) form, we throw rather than silently discard it — the
+ * calling generator would otherwise overwrite the key with a bare object and
+ * lose the user's filters. Convert the entry to the object form (or move the
+ * plugin's target config into a project's `project.json`) and re-run.
  */
-export const asTargetDefaultObject = (
-  value: TargetDefaultValue | undefined,
-): Partial<TargetConfiguration> =>
-  value && !Array.isArray(value) ? value : {};
+export const readTargetDefaultToMerge = (
+  targetDefaults: Record<string, TargetDefaultValue> | undefined,
+  key: string,
+): Partial<TargetConfiguration> => {
+  const value = targetDefaults?.[key];
+  if (Array.isArray(value)) {
+    throw new Error(
+      `nx.json targetDefaults.${key} uses the filtered array form, which this generator cannot safely merge into. Convert it to a single config object and re-run.`,
+    );
+  }
+  return value ?? {};
+};
 
 /**
  * A single entry in an Nx `dependsOn` array.
