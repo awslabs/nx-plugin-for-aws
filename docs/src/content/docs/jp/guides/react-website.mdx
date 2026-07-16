@@ -137,6 +137,49 @@ CloudFrontディストリビューションは、すべてのレスポンスに`
 
 `runtime-config.json`は`Cache-Control: no-cache`で配信されるため、ブラウザは再デプロイ後に古いキャッシュコピーではなく常に最新の設定を取得します。
 
+#### カスタムドメインとTLS
+
+デフォルトでは、ディストリビューションはデフォルトのCloudFrontドメイン名（`*.cloudfront.net`）とそのデフォルト証明書を使用しますが、これは最小TLSバージョン1.2の強制をサポートしていません。独自のドメインからウェブサイトを配信するには、[ACM証明書](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（CloudFrontで使用するため`us-east-1`に存在する必要があります）とドメイン名を指定します。これにより、ビューアーに対して最小TLSバージョン1.2が強制されます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+`packages/common/constructs/src/app/static-websites`の生成されたウェブサイトコンストラクトで、`certificate`と`domainNames`プロパティを渡します：
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+`packages/common/terraform/src/app/static-websites`の生成されたウェブサイトモジュールで、`custom_domain_names`と`acm_certificate_arn`変数を設定します：
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+また、ドメインをCloudFrontディストリビューションに向けるDNSレコード（例：Route 53）を作成する必要があります。
+
 ## Reactウェブサイトの実装
 
 [Reactドキュメント](https://react.dev/learn)はReact開発の基本を学ぶのに適しています。

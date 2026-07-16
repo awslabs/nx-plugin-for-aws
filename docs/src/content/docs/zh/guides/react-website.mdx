@@ -137,6 +137,49 @@ CloudFront 分发应用响应头策略，在所有响应中设置 `Strict-Transp
 
 `runtime-config.json` 使用 `Cache-Control: no-cache` 提供服务，以便浏览器在重新部署后始终获取最新配置，而不是使用过时的缓存副本。
 
+#### 自定义域名与 TLS
+
+默认情况下，分发使用默认的 CloudFront 域名（`*.cloudfront.net`）及其默认证书，该证书不支持强制执行最低 TLS 版本 1.2。要从您自己的域名提供网站服务，请提供一个 [ACM 证书](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（必须位于 `us-east-1` 区域才能与 CloudFront 一起使用）和您的域名 — 然后将为查看者强制执行最低 TLS 版本 1.2：
+
+<Infrastructure>
+<Fragment slot="cdk">
+在 `packages/common/constructs/src/app/static-websites` 中生成的网站构造中传递 `certificate` 和 `domainNames` 属性：
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+在 `packages/common/terraform/src/app/static-websites` 中生成的网站模块中设置 `custom_domain_names` 和 `acm_certificate_arn` 变量：
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+您还需要创建 DNS 记录（例如在 Route 53 中）将您的域名指向 CloudFront 分发。
+
 ## 开发 React 网站
 
 [React 文档](https://react.dev/learn) 是学习 React 基础的良好起点。
