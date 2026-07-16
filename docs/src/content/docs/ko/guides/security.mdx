@@ -1,0 +1,55 @@
+---
+title: 보안
+description: Nx Plugin for AWS에서 생성된 프로젝트에 포함된 보안 기능
+---
+
+import Link from '@components/link.astro';
+
+Nx Plugin for AWS로 스캐폴딩된 프로젝트에는 기본적으로 여러 보안 제어 기능이 포함되어 있습니다. 이 페이지는 이러한 제어 기능에 대한 개요와 자세한 내용을 확인할 수 있는 관련 가이드 링크를 제공합니다.
+
+Nx Plugin for AWS 자체의 잠재적인 보안 문제를 보고하려면 [SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md)를 참조하시기 바랍니다. 공개 GitHub 이슈를 생성하지 마십시오.
+
+## 인프라 스캐닝
+
+인프라 프로젝트는 `build` 타겟의 일부로 [Checkov](https://www.checkov.io/)가 구성되어 있어, 안전하지 않은 인프라 구성이 있으면 빌드가 실패합니다:
+
+- CDK 프로젝트는 Checkov로 스캔되는 CloudFormation 템플릿을 합성합니다. 자세한 내용은 <Link path="/guides/typescript-infrastructure#security-testing">Security Testing</Link>을 참조하세요.
+- Terraform 프로젝트는 Terraform 코드에 대해 Checkov를 직접 실행합니다. <Link path="/guides/terraform-project">Terraform Projects</Link>를 참조하세요.
+
+제공된 인프라가 Checkov 규칙을 억제하는 경우, 억제는 특정 리소스로 범위가 지정되고 정당화 사유가 주석으로 표시됩니다. 공유 `suppressRules` 헬퍼는 모든 억제에 대해 이유를 요구하며, 자체 코드에서도 동일한 관행을 따르는 것을 권장합니다. <Link path="/guides/typescript-infrastructure#suppressing-checkov-checks">Suppressing Checkov Checks</Link>를 참조하세요.
+
+## 컨테이너 이미지 스캐닝
+
+컨테이너 이미지를 빌드하는 프로젝트(예: 에이전트, MCP 서버, 데이터베이스 마이그레이션 이미지)에는 배포 전에 HIGH 및 CRITICAL 취약점에 대해 이미지를 스캔하는 `trivy` 타겟이 포함되어 있으며, 발견 시 빌드가 실패합니다. `.trivyignore` 파일로 발견 사항을 억제하는 방법을 포함한 자세한 내용은 <Link path="/guides/docker-bundling">Docker Bundling</Link>을 참조하세요.
+
+## 자격 증명 스캐닝
+
+워크스페이스에는 스테이징된 파일에서 AWS 자격 증명 패턴을 스캔하는 [git-secrets](https://github.com/awslabs/git-secrets) pre-commit 훅이 포함되어 있어, 액세스 키 및 기타 민감한 값의 실수로 인한 커밋을 방지합니다. 워크스페이스 가이드의 <Link path="/guides/workspace#git-secrets">Git Secrets</Link> 섹션을 참조하세요.
+
+## 인증
+
+API, 에이전트, MCP 서버는 기본적으로 AWS IAM (SigV4) 인증을 사용합니다:
+
+- <Link path="/guides/trpc">tRPC</Link>, <Link path="/guides/fastapi">FastAPI</Link>, <Link path="/guides/ts-smithy-api">Smithy</Link> API는 기본적으로 IAM 인증을 사용하며, Cognito 및 사용자 지정 권한 부여자를 옵션으로 사용할 수 있습니다. 제공된 사용자 지정 권한 부여자 스텁은 기본적으로 요청을 거부합니다.
+- Amazon Bedrock AgentCore Runtime에 배포된 <Link path="/guides/ts-agent">Agents</Link> 및 <Link path="/guides/ts-mcp-server">MCP servers</Link>는 기본적으로 IAM (SigV4) 인증을 사용하며, JWT 기반 Cognito 인증을 옵션으로 사용할 수 있습니다.
+- <Link path="/guides/react-website-auth">website auth generator</Link>는 다중 인증(MFA)이 필수이고, 강력한 비밀번호 정책과 삭제 보호가 활성화된 Amazon Cognito 사용자 풀을 제공합니다.
+
+## 암호화
+
+제공된 인프라는 전송 중 및 저장 중 데이터를 암호화합니다:
+
+- 웹사이트는 HTTP가 HTTPS로 리디렉션되는 CloudFront를 통해 제공되며, HTTP Strict Transport Security (HSTS), Content Security Policy 및 기타 <Link path="/guides/react-website#security-headers">security headers</Link>를 포함하는 응답 헤더 정책이 적용됩니다. AWS 관리형 규칙이 있는 WAF가 배포와 연결되어 있습니다.
+- S3 버킷은 모든 퍼블릭 액세스를 차단하고, 버킷 정책을 통해 SSL 전용 액세스를 강제하며, 암호화되고(웹사이트 콘텐츠의 경우 키 로테이션이 있는 KMS), 전용 로그 버킷에 서버 액세스 로깅이 활성화되어 있습니다.
+- API 액세스 로그는 로테이션이 활성화된 고객 관리형 KMS 키로 암호화된 CloudWatch 로그 그룹에 기록됩니다.
+- <Link path="/guides/ts-rdb">Aurora databases</Link>는 고객 관리형 KMS 키로 스토리지 암호화를 활성화하고, AWS Secrets Manager에서 자격 증명을 생성하며(하드코딩되지 않음), 자동 자격 증명 로테이션을 지원합니다.
+
+## 최소 권한
+
+제공된 CDK 구성 요소 및 Terraform 모듈은 최소 권한 원칙을 따릅니다:
+
+- 구성 요소는 `grant*` 메서드(예: API 및 에이전트의 `grantInvokeAccess`, 데이터베이스의 `grantConnect`)를 노출하여 소비자가 필요한 액세스만 부여할 수 있도록 합니다.
+- 제공된 인프라의 IAM 정책은 특정 리소스 및 작업으로 범위가 지정됩니다. AWS 서비스에서 와일드카드 리소스가 필요한 경우(예: `ecr:GetAuthorizationToken`), 해당 작업으로 제한되고 지원되는 경우 조건으로 범위가 지정됩니다.
+
+## 종속성 라이선싱
+
+<Link path="/guides/license">license generator</Link>는 자동화된 라이선스 헤더 관리 및 승인된 라이선스 허용 목록에 대한 종속성 라이선스 검사를 구성하여, 문제가 있는 전이 종속성이 배포되기 전에 포착할 수 있도록 도와줍니다.

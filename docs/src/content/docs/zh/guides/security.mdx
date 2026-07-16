@@ -1,0 +1,55 @@
+---
+title: 安全性
+description: Nx Plugin for AWS 生成的项目中包含的安全功能
+---
+
+import Link from '@components/link.astro';
+
+由 Nx Plugin for AWS 生成的项目开箱即包含多项安全控制。本页面概述了这些控制措施，并提供了相关指南的链接以获取更多详细信息。
+
+如需报告 Nx Plugin for AWS 本身的潜在安全问题，请参阅 [SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md) — 请勿创建公开的 GitHub issue。
+
+## 基础设施扫描
+
+基础设施项目配置了 [Checkov](https://www.checkov.io/) 作为 `build` 目标的一部分，因此不安全的基础设施配置会导致构建失败：
+
+- CDK 项目合成 CloudFormation 模板，这些模板会被 Checkov 扫描。详情请参阅<Link path="/guides/typescript-infrastructure#security-testing">安全测试</Link>。
+- Terraform 项目直接针对您的 Terraform 代码运行 Checkov。请参阅<Link path="/guides/terraform-project">Terraform 项目</Link>。
+
+当提供的基础设施抑制 Checkov 规则时，抑制范围限定于特定资源，并附有理由说明。共享的 `suppressRules` 辅助函数要求为每个抑制提供原因，我们建议您在自己的代码中遵循相同的做法。请参阅<Link path="/guides/typescript-infrastructure#suppressing-checkov-checks">抑制 Checkov 检查</Link>。
+
+## 容器镜像扫描
+
+构建容器镜像的项目（例如代理、MCP 服务器和数据库迁移镜像）包含一个 `trivy` 目标，该目标在部署前扫描镜像中的 HIGH 和 CRITICAL 漏洞，如果发现问题则构建失败。详情请参阅<Link path="/guides/docker-bundling">Docker 打包</Link>，包括如何使用 `.trivyignore` 文件抑制发现的问题。
+
+## 凭证扫描
+
+工作空间包含 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，用于扫描暂存文件中的 AWS 凭证模式，防止意外提交访问密钥和其他敏感值。请参阅工作空间指南的<Link path="/guides/workspace#git-secrets">Git Secrets</Link> 部分。
+
+## 身份验证
+
+API、代理和 MCP 服务器默认使用 AWS IAM (SigV4) 身份验证：
+
+- <Link path="/guides/trpc">tRPC</Link>、<Link path="/guides/fastapi">FastAPI</Link> 和 <Link path="/guides/ts-smithy-api">Smithy</Link> API 默认使用 IAM 身份验证，并提供 Cognito 和自定义授权器作为选项。提供的自定义授权器存根默认拒绝请求。
+- 部署到 Amazon Bedrock AgentCore Runtime 的<Link path="/guides/ts-agent">代理</Link>和 <Link path="/guides/ts-mcp-server">MCP 服务器</Link>默认使用 IAM (SigV4) 身份验证，并提供基于 JWT 的 Cognito 身份验证作为选项。
+- <Link path="/guides/react-website-auth">网站身份验证生成器</Link>提供一个 Amazon Cognito 用户池，要求多因素身份验证 (MFA)，具有强密码策略，并启用删除保护。
+
+## 加密
+
+提供的基础设施对传输中和静态数据进行加密：
+
+- 网站通过 CloudFront 提供服务，HTTP 重定向到 HTTPS，响应头策略包括 HTTP 严格传输安全 (HSTS)、内容安全策略和其他<Link path="/guides/react-website#security-headers">安全头</Link>。分发关联了带有 AWS 托管规则的 WAF。
+- S3 存储桶阻止所有公共访问，通过存储桶策略强制仅 SSL 访问，已加密（网站内容使用带密钥轮换的 KMS），并启用服务器访问日志记录到专用日志存储桶。
+- API 访问日志写入使用客户托管 KMS 密钥加密的 CloudWatch 日志组，并启用轮换。
+- <Link path="/guides/ts-rdb">Aurora 数据库</Link>使用客户托管 KMS 密钥启用存储加密，在 AWS Secrets Manager 中生成凭证（从不硬编码），并支持自动凭证轮换。
+
+## 最小权限
+
+提供的 CDK 构造和 Terraform 模块遵循最小权限原则：
+
+- 构造公开 `grant*` 方法（例如 API 和代理上的 `grantInvokeAccess`，数据库上的 `grantConnect`），以便使用者仅授予所需的访问权限。
+- 提供的基础设施中的 IAM 策略限定于特定资源和操作。当 AWS 服务需要通配符资源时（例如 `ecr:GetAuthorizationToken`），它仅限于这些操作，并在支持的情况下使用条件限定范围。
+
+## 依赖许可
+
+<Link path="/guides/license">许可生成器</Link>配置自动化的许可证头管理和依赖许可证检查，针对已批准许可证的允许列表进行检查，帮助您在发布前捕获有问题的传递依赖项。
