@@ -1,0 +1,107 @@
+---
+title: Proteggere il tuo Agent
+---
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+
+Gli agent agiscono su input non attendibili e possono eseguire azioni reali attraverso i loro strumenti, quindi vale la pena considerare la sicurezza fin dall'inizio. Le seguenti pratiche si applicano all'agent generato.
+
+### Tratta input e output del modello come non attendibili
+
+I prompt possono contenere istruzioni avversarie (prompt injection) e l'output del modello è non deterministico — nessuno dei due dovrebbe essere considerato attendibile nella logica sensibile alla sicurezza:
+
+- Definisci schemi di input rigorosi per i tuoi strumenti, come nello strumento di esempio generato. Vincola i valori a ciò di cui lo strumento ha effettivamente bisogno (enum, limiti di lunghezza, intervalli numerici) piuttosto che accettare stringhe in formato libero.
+- Non passare mai l'output del modello direttamente in comandi shell, query SQL, valutazione di codice o HTML renderizzato senza validazione o codifica.
+- Applica controlli di autorizzazione nei tuoi strumenti e servizi downstream — non fare affidamento sul prompt di sistema per impedire al modello di utilizzare in modo improprio uno strumento a cui ha accesso.
+
+### Limita rigorosamente i permessi degli strumenti
+
+Concedi al ruolo IAM dell'agent solo i permessi di cui i suoi strumenti hanno bisogno. I costrutti CDK e i moduli Terraform forniti espongono metodi `grant*` e policy con ambito limitato per questo scopo — ad esempio concedendo a un agent l'accesso per invocare un'API specifica piuttosto che allegare policy gestite ampie. Quando uno strumento agisce per conto di un utente, preferisci autorizzare l'azione utilizzando l'identità dell'utente chiamante (passata attraverso il contesto della richiesta) rispetto ai permessi ambientali propri dell'agent.
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) fornisce filtri di contenuto configurabili, argomenti negati e filtri per informazioni sensibili (PII) che vengono valutati sull'input e output del modello. Puoi allegare un guardrail al modello utilizzato dall'agent generato:
+
+<Tabs syncKey="language">
+<TabItem label="TypeScript">
+```typescript
+// agent.ts
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+
+const model = new BedrockModel({
+  modelId: process.env.MODEL_ID,
+  guardrailConfig: {
+    guardrailIdentifier: process.env.GUARDRAIL_ID!,
+    guardrailVersion: process.env.GUARDRAIL_VERSION ?? 'DRAFT',
+  },
+});
+
+const agent = new Agent({ model, /* ... */ });
+```
+</TabItem>
+<TabItem label="Python (Strands)">
+```python
+# agent.py
+import os
+
+from strands import Agent
+from strands.models import BedrockModel
+
+model = BedrockModel(
+    model_id=os.environ.get("MODEL_ID"),
+    guardrail_id=os.environ["GUARDRAIL_ID"],
+    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
+)
+
+agent = Agent(model=model)
+```
+</TabItem>
+<TabItem label="Python (LangChain)">
+```python
+# agent.py
+import os
+
+from langchain_aws import ChatBedrockConverse
+
+model = ChatBedrockConverse(
+    model=os.environ.get("MODEL_ID"),
+    guardrail_config={
+        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
+        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
+    },
+)
+```
+</TabItem>
+</Tabs>
+
+### Fornisci un interruttore di emergenza
+
+Poiché il comportamento del modello può cambiare in modi inaspettati, pianifica la possibilità di disabilitare o sostituire rapidamente il modello senza una modifica al codice:
+
+- Leggi l'ID del modello dalla configurazione (ad esempio una variabile d'ambiente `MODEL_ID`) in modo che gli operatori possano cambiare o ripristinare un modello diverso aggiornando la configurazione.
+- Proteggi l'agent dietro un feature flag in modo che la sua funzionalità AI possa essere disabilitata completamente. Quando disabilitato, restituisci un messaggio generico piuttosto che un errore e assicurati che il resto della tua applicazione si degradi in modo elegante:
+
+<Tabs syncKey="language">
+<TabItem label="TypeScript">
+```typescript
+if (process.env.AGENT_DISABLED === 'true') {
+  return 'This assistant is temporarily unavailable. Please try again later.';
+}
+```
+</TabItem>
+<TabItem label="Python">
+```python
+if os.environ.get("AGENT_DISABLED") == "true":
+    return "This assistant is temporarily unavailable. Please try again later."
+```
+</TabItem>
+</Tabs>
+
+Documenta come attivare questi controlli nel tuo manuale operativo.
+
+### Proteggi i dati sensibili
+
+- Evita di registrare nei log prompt e completamenti, che potrebbero contenere dati utente. L'hook di logging degli errori del modello dell'agent generato registra solo i metadati degli errori, non il contenuto della conversazione — mantieni questa proprietà quando aggiungi il tuo logging.
+- Restituisci messaggi di errore generici agli utenti; registra gli errori dettagliati lato server.
+- Isola lo stato della conversazione tra utenti e sessioni e autorizza l'accesso a qualsiasi dato di sessione persistente.

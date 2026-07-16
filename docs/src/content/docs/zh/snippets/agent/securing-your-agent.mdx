@@ -1,0 +1,107 @@
+---
+title: 保护您的 Agent
+---
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+
+Agent 会处理不受信任的输入，并可以通过其工具驱动实际操作，因此从一开始就考虑安全性是值得的。以下实践适用于生成的 agent。
+
+### 将模型输入和输出视为不受信任
+
+提示可能包含对抗性指令（提示注入），并且模型输出是非确定性的——在安全敏感的逻辑中都不应信任它们：
+
+- 为您的工具定义严格的输入模式，就像生成的示例工具一样。将值约束为工具实际需要的内容（枚举、长度限制、数值范围），而不是接受自由格式的字符串。
+- 永远不要在没有验证或编码的情况下将模型输出直接传递到 shell 命令、SQL 查询、代码评估或渲染的 HTML 中。
+- 在您的工具和下游服务中应用授权检查——不要依赖系统提示来防止模型滥用它有权访问的工具。
+
+### 严格限制工具权限范围
+
+仅授予 agent 的 IAM 角色其工具所需的权限。提供的 CDK 构造和 Terraform 模块公开了 `grant*` 方法和范围策略以实现此目的——例如，授予 agent 访问权限以调用特定 API，而不是附加广泛的托管策略。当工具代表用户执行操作时，优先使用调用用户的身份（通过请求上下文传递）来授权操作，而不是使用 agent 自身的环境权限。
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) 提供可配置的内容过滤器、拒绝主题和敏感信息 (PII) 过滤器，这些过滤器会在模型输入和输出上进行评估。您可以将护栏附加到生成的 agent 使用的模型：
+
+<Tabs syncKey="language">
+<TabItem label="TypeScript">
+```typescript
+// agent.ts
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+
+const model = new BedrockModel({
+  modelId: process.env.MODEL_ID,
+  guardrailConfig: {
+    guardrailIdentifier: process.env.GUARDRAIL_ID!,
+    guardrailVersion: process.env.GUARDRAIL_VERSION ?? 'DRAFT',
+  },
+});
+
+const agent = new Agent({ model, /* ... */ });
+```
+</TabItem>
+<TabItem label="Python (Strands)">
+```python
+# agent.py
+import os
+
+from strands import Agent
+from strands.models import BedrockModel
+
+model = BedrockModel(
+    model_id=os.environ.get("MODEL_ID"),
+    guardrail_id=os.environ["GUARDRAIL_ID"],
+    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
+)
+
+agent = Agent(model=model)
+```
+</TabItem>
+<TabItem label="Python (LangChain)">
+```python
+# agent.py
+import os
+
+from langchain_aws import ChatBedrockConverse
+
+model = ChatBedrockConverse(
+    model=os.environ.get("MODEL_ID"),
+    guardrail_config={
+        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
+        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
+    },
+)
+```
+</TabItem>
+</Tabs>
+
+### 提供紧急开关
+
+由于模型行为可能以意外方式发生变化，因此应计划在不更改代码的情况下快速禁用或切换模型：
+
+- 从配置中读取模型 ID（例如 `MODEL_ID` 环境变量），以便操作员可以通过更新配置来切换或回滚到不同的模型。
+- 在功能标志后面设置 agent，以便可以完全禁用其 AI 功能。禁用时，返回通用消息而不是错误，并确保应用程序的其余部分能够优雅降级：
+
+<Tabs syncKey="language">
+<TabItem label="TypeScript">
+```typescript
+if (process.env.AGENT_DISABLED === 'true') {
+  return 'This assistant is temporarily unavailable. Please try again later.';
+}
+```
+</TabItem>
+<TabItem label="Python">
+```python
+if os.environ.get("AGENT_DISABLED") == "true":
+    return "This assistant is temporarily unavailable. Please try again later."
+```
+</TabItem>
+</Tabs>
+
+在您的操作手册中记录如何切换这些控制。
+
+### 保护敏感数据
+
+- 避免记录提示和完成内容，因为它们可能包含用户数据。生成的 agent 的模型错误日志记录钩子仅记录错误元数据，而不记录对话内容——在添加自己的日志记录时保持此属性。
+- 向用户返回通用错误消息；在服务器端记录详细错误。
+- 在用户和会话之间隔离对话状态，并授权访问任何持久化的会话数据。

@@ -1,0 +1,107 @@
+---
+title: Bảo mật Agent của bạn
+---
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+
+Các Agent hoạt động dựa trên đầu vào không đáng tin cậy và có thể thực hiện các hành động thực tế thông qua các công cụ của chúng, vì vậy đáng để xem xét bảo mật ngay từ đầu. Các thực hành sau đây áp dụng cho agent được tạo ra.
+
+### Coi đầu vào và đầu ra của mô hình là không đáng tin cậy
+
+Các prompt có thể chứa các chỉ thị đối nghịch (prompt injection), và đầu ra của mô hình là không xác định — cả hai đều không nên được tin cậy trong logic nhạy cảm về bảo mật:
+
+- Định nghĩa các schema đầu vào nghiêm ngặt cho các công cụ của bạn, như trong công cụ ví dụ được tạo ra. Hạn chế các giá trị theo những gì công cụ thực sự cần (enums, giới hạn độ dài, phạm vi số) thay vì chấp nhận các chuỗi tự do.
+- Không bao giờ truyền đầu ra của mô hình trực tiếp vào các lệnh shell, truy vấn SQL, đánh giá mã, hoặc HTML được render mà không có xác thực hoặc mã hóa.
+- Áp dụng các kiểm tra ủy quyền trong các công cụ và dịch vụ downstream của bạn — đừng dựa vào system prompt để ngăn mô hình sử dụng sai một công cụ mà nó có quyền truy cập.
+
+### Giới hạn quyền của công cụ một cách chặt chẽ
+
+Chỉ cấp cho IAM role của agent những quyền mà các công cụ của nó cần. Các CDK constructs và Terraform modules được cung cấp expose các phương thức `grant*` và các chính sách có phạm vi cho mục đích này — ví dụ cấp cho agent quyền truy cập để gọi một API cụ thể thay vì đính kèm các chính sách được quản lý rộng. Khi một công cụ hoạt động thay mặt cho người dùng, ưu tiên ủy quyền hành động bằng cách sử dụng danh tính của người dùng đang gọi (được truyền qua thông qua ngữ cảnh yêu cầu) thay vì các quyền môi trường của chính agent.
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) cung cấp các bộ lọc nội dung có thể cấu hình, các chủ đề bị từ chối và các bộ lọc thông tin nhạy cảm (PII) được đánh giá trên đầu vào và đầu ra của mô hình. Bạn có thể đính kèm một guardrail vào mô hình được sử dụng bởi agent được tạo ra:
+
+<Tabs syncKey="language">
+<TabItem label="TypeScript">
+```typescript
+// agent.ts
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+
+const model = new BedrockModel({
+  modelId: process.env.MODEL_ID,
+  guardrailConfig: {
+    guardrailIdentifier: process.env.GUARDRAIL_ID!,
+    guardrailVersion: process.env.GUARDRAIL_VERSION ?? 'DRAFT',
+  },
+});
+
+const agent = new Agent({ model, /* ... */ });
+```
+</TabItem>
+<TabItem label="Python (Strands)">
+```python
+# agent.py
+import os
+
+from strands import Agent
+from strands.models import BedrockModel
+
+model = BedrockModel(
+    model_id=os.environ.get("MODEL_ID"),
+    guardrail_id=os.environ["GUARDRAIL_ID"],
+    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
+)
+
+agent = Agent(model=model)
+```
+</TabItem>
+<TabItem label="Python (LangChain)">
+```python
+# agent.py
+import os
+
+from langchain_aws import ChatBedrockConverse
+
+model = ChatBedrockConverse(
+    model=os.environ.get("MODEL_ID"),
+    guardrail_config={
+        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
+        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
+    },
+)
+```
+</TabItem>
+</Tabs>
+
+### Cung cấp một công tắc khẩn cấp
+
+Vì hành vi của mô hình có thể thay đổi theo những cách không mong đợi, hãy lên kế hoạch để nhanh chóng vô hiệu hóa hoặc thay thế mô hình mà không cần thay đổi mã:
+
+- Đọc model ID từ cấu hình (ví dụ một biến môi trường `MODEL_ID`) để các nhà vận hành có thể chuyển đổi hoặc quay lại một mô hình khác bằng cách cập nhật cấu hình.
+- Đặt agent phía sau một feature flag để chức năng AI của nó có thể bị vô hiệu hóa hoàn toàn. Khi bị vô hiệu hóa, trả về một thông báo chung thay vì một lỗi, và đảm bảo phần còn lại của ứng dụng của bạn giảm hiệu suất một cách nhẹ nhàng:
+
+<Tabs syncKey="language">
+<TabItem label="TypeScript">
+```typescript
+if (process.env.AGENT_DISABLED === 'true') {
+  return 'This assistant is temporarily unavailable. Please try again later.';
+}
+```
+</TabItem>
+<TabItem label="Python">
+```python
+if os.environ.get("AGENT_DISABLED") == "true":
+    return "This assistant is temporarily unavailable. Please try again later."
+```
+</TabItem>
+</Tabs>
+
+Ghi lại cách chuyển đổi các điều khiển này trong sổ tay vận hành của bạn.
+
+### Bảo vệ dữ liệu nhạy cảm
+
+- Tránh ghi log các prompt và completion, có thể chứa dữ liệu người dùng. Hook ghi log lỗi mô hình của agent được tạo ra chỉ ghi log metadata lỗi, không phải nội dung cuộc trò chuyện — giữ thuộc tính này khi thêm logging của riêng bạn.
+- Trả về các thông báo lỗi chung cho người dùng; ghi log các lỗi chi tiết ở phía máy chủ.
+- Cô lập trạng thái cuộc trò chuyện giữa người dùng và phiên, và ủy quyền truy cập vào bất kỳ dữ liệu phiên được lưu trữ nào.
