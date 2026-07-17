@@ -12,10 +12,13 @@ import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
   invokeAgentCoreAgUi,
+  invokeAgentCoreGatewayNoAuthDenied,
   invokeAgentCoreGatewayTool,
   invokeAgentCoreMcp,
+  invokeAgentCoreNoAuthDenied,
   invokeCustomAuthApi,
   invokeCustomAuthTrpcApi,
+  invokeIamApiNoAuthDenied,
   invokeLambda,
   invokeRestApi,
   invokeTrpcAgentCoreAgent,
@@ -218,6 +221,28 @@ describe('smoke test - cdk-deploy', () => {
         'FastAPI HTTP Custom Auth',
       );
 
+      // IAM-auth APIs — unsigned (no SigV4) requests must be denied
+      await invokeIamApiNoAuthDenied(
+        findOutput('MyApiEndpoint'),
+        'tRPC REST API',
+      );
+      await invokeIamApiNoAuthDenied(
+        findOutput('MyApiHttpMyApiHttpUrl'),
+        'tRPC HTTP API',
+      );
+      await invokeIamApiNoAuthDenied(
+        findOutput('PyApiEndpoint'),
+        'FastAPI REST',
+      );
+      await invokeIamApiNoAuthDenied(
+        findOutput('PyApiHttpPyApiHttpUrl'),
+        'FastAPI HTTP',
+      );
+      await invokeIamApiNoAuthDenied(
+        findOutput('MySmithyApiEndpoint'),
+        'Smithy REST',
+      );
+
       // MCP
       await invokeAgentCoreMcp(
         findOutput('TsMcpServerArn'),
@@ -332,6 +357,47 @@ describe('smoke test - cdk-deploy', () => {
         'my-gateway___hosted-mcp-server___divide',
         { a: 6, b: 2 },
         '3',
+      );
+
+      // AgentCore runtimes and gateway — unsigned (no SigV4) requests must be
+      // denied across every MCP server, agent (HTTP/AG-UI/tRPC), A2A runtime
+      // and the gateway.
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('TsMcpServerArn'),
+        'TypeScript MCP Server',
+      );
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('PyMcpServerArn'),
+        'Python MCP Server',
+      );
+      await invokeAgentCoreNoAuthDenied(findOutput('PyAgentArn'), 'Python Agent');
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('TsAgentArn'),
+        'TypeScript Agent',
+      );
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('PyLangchainAgentArn'),
+        'Python LangChain Agent (AG-UI)',
+      );
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('PyLangchainHttpAgentArn'),
+        'Python LangChain Agent (HTTP)',
+      );
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('TsA2aAgentArn'),
+        'TypeScript A2A Agent',
+      );
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('PyA2aAgentArn'),
+        'Python A2A Agent',
+      );
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('PyLangchainA2aAgentArn'),
+        'Python LangChain A2A Agent',
+      );
+      await invokeAgentCoreGatewayNoAuthDenied(
+        findOutput('ParentGatewayUrl'),
+        'Parent Gateway',
       );
 
       // Lambda functions
