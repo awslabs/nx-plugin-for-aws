@@ -270,6 +270,31 @@ describe('python project generator', () => {
     expect(projectConfig.targets.lint.dependsOn).toContain('format');
   });
 
+  it('should configure the format target to check by default with fix and skip-lint', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+
+    // Base format target checks formatting rather than writing (so build/lint
+    // don't silently rewrite source)
+    expect(projectConfig.targets.format.options.check).toBe(true);
+    expect(projectConfig.targets.format.cache).toBe(true);
+
+    // fix writes the changes, skip-lint writes without failing
+    expect(projectConfig.targets.format.configurations.fix).toEqual({
+      check: false,
+    });
+    expect(projectConfig.targets.format.configurations['skip-lint']).toEqual({
+      check: false,
+    });
+  });
+
   it('should configure cache, fix and skip-lint on the project lint target', async () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',

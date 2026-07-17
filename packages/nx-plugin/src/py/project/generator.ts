@@ -277,6 +277,31 @@ export const pyProjectGenerator = async (
 
   addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', ['ty']);
 
+  // The format target defaults to writing files (@nxlv/python:ruff-format has
+  // `check: false`), which would silently rewrite source when it runs as part
+  // of build/lint. Make the base target check formatting instead (failing when
+  // files aren't formatted) and expose configurations mirroring lint: `fix`
+  // writes the changes and `skip-lint` writes without failing so it stays a
+  // no-op escape hatch when propagated through the lint -> format dependency.
+  projectConfiguration.targets.format = {
+    ...projectConfiguration.targets.format,
+    cache: true,
+    inputs: ['default', '^production'],
+    options: {
+      ...projectConfiguration.targets.format?.options,
+      check: true,
+    },
+    configurations: {
+      ...projectConfiguration.targets.format?.configurations,
+      fix: {
+        check: false,
+      },
+      'skip-lint': {
+        check: false,
+      },
+    },
+  };
+
   // Add a dependency on the format target for lint in order to reduce the number of
   // fixable lint errors (eg line too long)
   projectConfiguration.targets.lint = {
