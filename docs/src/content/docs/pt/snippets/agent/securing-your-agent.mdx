@@ -1,8 +1,6 @@
 ---
 title: Protegendo seu Agente
 ---
-import { Tabs, TabItem } from '@astrojs/starlight/components';
-import Link from '@components/link.astro';
 
 Os agentes atuam em entradas não confiáveis e podem executar ações reais através de suas ferramentas, por isso vale a pena considerar a segurança desde o início. As práticas a seguir se aplicam ao agente gerado.
 
@@ -18,85 +16,12 @@ Os prompts podem conter instruções adversárias (injeção de prompt), e a sa�
 
 Conceda ao papel IAM do agente apenas as permissões que suas ferramentas precisam. Os construtos CDK e módulos Terraform fornecidos expõem métodos `grant*` e políticas com escopo definido para esse propósito — por exemplo, concedendo a um agente acesso para invocar uma API específica em vez de anexar políticas gerenciadas amplas. Quando uma ferramenta age em nome de um usuário, prefira autorizar a ação usando a identidade do usuário chamador (passada através do contexto da solicitação) em vez das permissões ambientes próprias do agente.
 
-### Amazon Bedrock Guardrails
-
-[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) fornecem filtros de conteúdo configuráveis, tópicos negados e filtros de informações sensíveis (PII) que são avaliados na entrada e saída do modelo. Você pode anexar um guardrail ao modelo usado pelo agente gerado:
-
-<Tabs syncKey="language">
-<TabItem label="TypeScript">
-```typescript
-// agent.ts
-import { Agent } from '@strands-agents/sdk';
-import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
-
-const model = new BedrockModel({
-  modelId: process.env.MODEL_ID,
-  guardrailConfig: {
-    guardrailIdentifier: process.env.GUARDRAIL_ID!,
-    guardrailVersion: process.env.GUARDRAIL_VERSION ?? 'DRAFT',
-  },
-});
-
-const agent = new Agent({ model, /* ... */ });
-```
-</TabItem>
-<TabItem label="Python (Strands)">
-```python
-# agent.py
-import os
-
-from strands import Agent
-from strands.models import BedrockModel
-
-model = BedrockModel(
-    model_id=os.environ.get("MODEL_ID"),
-    guardrail_id=os.environ["GUARDRAIL_ID"],
-    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-)
-
-agent = Agent(model=model)
-```
-</TabItem>
-<TabItem label="Python (LangChain)">
-```python
-# agent.py
-import os
-
-from langchain_aws import ChatBedrockConverse
-
-model = ChatBedrockConverse(
-    model=os.environ.get("MODEL_ID"),
-    guardrail_config={
-        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
-        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-    },
-)
-```
-</TabItem>
-</Tabs>
-
 ### Forneça um interruptor de emergência
 
 Como o comportamento do modelo pode mudar de maneiras inesperadas, planeje desabilitar ou trocar o modelo rapidamente sem uma alteração de código:
 
 - Leia o ID do modelo da configuração (por exemplo, uma variável de ambiente `MODEL_ID`) para que os operadores possam alternar ou reverter para um modelo diferente atualizando a configuração.
-- Coloque o agente atrás de uma feature flag para que sua funcionalidade de IA possa ser desabilitada completamente. Quando desabilitado, retorne uma mensagem genérica em vez de um erro, e garanta que o resto da sua aplicação degrade graciosamente:
-
-<Tabs syncKey="language">
-<TabItem label="TypeScript">
-```typescript
-if (process.env.AGENT_DISABLED === 'true') {
-  return 'This assistant is temporarily unavailable. Please try again later.';
-}
-```
-</TabItem>
-<TabItem label="Python">
-```python
-if os.environ.get("AGENT_DISABLED") == "true":
-    return "This assistant is temporarily unavailable. Please try again later."
-```
-</TabItem>
-</Tabs>
+- Coloque o agente atrás de uma feature flag para que sua funcionalidade de IA possa ser desabilitada completamente. Quando desabilitado, retorne uma mensagem genérica em vez de um erro, e garanta que o resto da sua aplicação degrade graciosamente.
 
 Documente como ativar esses controles em seu manual operacional.
 
@@ -105,3 +30,7 @@ Documente como ativar esses controles em seu manual operacional.
 - Evite registrar prompts e conclusões, que podem conter dados do usuário. O hook de registro de erros do modelo do agente gerado registra apenas metadados de erro, não o conteúdo da conversa — mantenha essa propriedade ao adicionar seu próprio registro.
 - Retorne mensagens de erro genéricas aos usuários; registre erros detalhados no lado do servidor.
 - Isole o estado da conversa entre usuários e sessões, e autorize o acesso a quaisquer dados de sessão persistidos.
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) fornecem filtros de conteúdo configuráveis, tópicos negados e filtros de informações sensíveis (PII) que são avaliados na entrada e saída do modelo. Você pode anexar um guardrail ao modelo usado pelo agente gerado:

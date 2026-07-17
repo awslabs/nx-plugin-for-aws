@@ -1,8 +1,6 @@
 ---
 title: エージェントのセキュリティ保護
 ---
-import { Tabs, TabItem } from '@astrojs/starlight/components';
-import Link from '@components/link.astro';
 
 エージェントは信頼できない入力に対して動作し、ツールを通じて実際のアクションを実行できるため、最初からセキュリティを考慮する価値があります。以下のプラクティスは、生成されたエージェントに適用されます。
 
@@ -18,85 +16,12 @@ import Link from '@components/link.astro';
 
 エージェントのIAMロールには、そのツールが必要とする権限のみを付与します。提供されるCDKコンストラクトとTerraformモジュールは、この目的のために`grant*`メソッドとスコープ化されたポリシーを公開しています。たとえば、広範なマネージドポリシーをアタッチするのではなく、特定のAPIを呼び出すアクセス権をエージェントに付与します。ツールがユーザーの代わりに動作する場合は、エージェント自身の環境権限よりも、呼び出し元ユーザーのアイデンティティ（リクエストコンテキストを通じて渡される）を使用してアクションを認可することを優先してください。
 
-### Amazon Bedrock Guardrails
-
-[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)は、モデルの入力と出力で評価される、設定可能なコンテンツフィルター、拒否トピック、機密情報（PII）フィルターを提供します。生成されたエージェントが使用するモデルにガードレールをアタッチできます：
-
-<Tabs syncKey="language">
-<TabItem label="TypeScript">
-```typescript
-// agent.ts
-import { Agent } from '@strands-agents/sdk';
-import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
-
-const model = new BedrockModel({
-  modelId: process.env.MODEL_ID,
-  guardrailConfig: {
-    guardrailIdentifier: process.env.GUARDRAIL_ID!,
-    guardrailVersion: process.env.GUARDRAIL_VERSION ?? 'DRAFT',
-  },
-});
-
-const agent = new Agent({ model, /* ... */ });
-```
-</TabItem>
-<TabItem label="Python (Strands)">
-```python
-# agent.py
-import os
-
-from strands import Agent
-from strands.models import BedrockModel
-
-model = BedrockModel(
-    model_id=os.environ.get("MODEL_ID"),
-    guardrail_id=os.environ["GUARDRAIL_ID"],
-    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-)
-
-agent = Agent(model=model)
-```
-</TabItem>
-<TabItem label="Python (LangChain)">
-```python
-# agent.py
-import os
-
-from langchain_aws import ChatBedrockConverse
-
-model = ChatBedrockConverse(
-    model=os.environ.get("MODEL_ID"),
-    guardrail_config={
-        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
-        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-    },
-)
-```
-</TabItem>
-</Tabs>
-
 ### キルスイッチを提供する
 
 モデルの動作は予期しない方法で変化する可能性があるため、コード変更なしでモデルを迅速に無効化または交換できるように計画してください：
 
 - モデルIDを設定から読み取ります（たとえば`MODEL_ID`環境変数）。これにより、オペレーターは設定を更新することで別のモデルに切り替えたりロールバックしたりできます。
-- エージェントをフィーチャーフラグの背後に配置して、AI機能を完全に無効化できるようにします。無効化された場合は、エラーではなく汎用メッセージを返し、アプリケーションの残りの部分が適切に劣化することを確認してください：
-
-<Tabs syncKey="language">
-<TabItem label="TypeScript">
-```typescript
-if (process.env.AGENT_DISABLED === 'true') {
-  return 'This assistant is temporarily unavailable. Please try again later.';
-}
-```
-</TabItem>
-<TabItem label="Python">
-```python
-if os.environ.get("AGENT_DISABLED") == "true":
-    return "This assistant is temporarily unavailable. Please try again later."
-```
-</TabItem>
-</Tabs>
+- エージェントをフィーチャーフラグの背後に配置して、AI機能を完全に無効化できるようにします。無効化された場合は、エラーではなく汎用メッセージを返し、アプリケーションの残りの部分が適切に劣化することを確認してください。
 
 運用ランブックに、これらのコントロールを切り替える方法を文書化してください。
 
@@ -105,3 +30,7 @@ if os.environ.get("AGENT_DISABLED") == "true":
 - ユーザーデータが含まれる可能性があるため、プロンプトと補完のログ記録を避けてください。生成されたエージェントのモデルエラーログフックは、会話内容ではなくエラーメタデータのみをログに記録します。独自のログを追加する際は、このプロパティを維持してください。
 - ユーザーには汎用エラーメッセージを返し、詳細なエラーはサーバー側でログに記録します。
 - ユーザーとセッション間で会話状態を分離し、永続化されたセッションデータへのアクセスを認可します。
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)は、モデルの入力と出力で評価される、設定可能なコンテンツフィルター、拒否トピック、機密情報（PII）フィルターを提供します。生成されたエージェントが使用するモデルにガードレールをアタッチできます：

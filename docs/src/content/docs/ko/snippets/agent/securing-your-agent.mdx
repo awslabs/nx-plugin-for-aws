@@ -1,8 +1,6 @@
 ---
 title: 에이전트 보안
 ---
-import { Tabs, TabItem } from '@astrojs/starlight/components';
-import Link from '@components/link.astro';
 
 에이전트는 신뢰할 수 없는 입력에 대해 작동하며 도구를 통해 실제 작업을 수행할 수 있으므로, 처음부터 보안을 고려할 가치가 있습니다. 다음 관행은 생성된 에이전트에 적용됩니다.
 
@@ -18,85 +16,12 @@ import Link from '@components/link.astro';
 
 에이전트의 IAM 역할에 도구가 필요로 하는 권한만 부여하세요. 제공되는 CDK 구성 및 Terraform 모듈은 이러한 목적을 위해 `grant*` 메서드와 범위가 지정된 정책을 노출합니다. 예를 들어 광범위한 관리형 정책을 연결하는 대신 특정 API를 호출할 수 있는 액세스 권한을 에이전트에 부여합니다. 도구가 사용자를 대신하여 작동하는 경우, 에이전트 자체의 주변 권한보다 호출하는 사용자의 ID(요청 컨텍스트를 통해 전달됨)를 사용하여 작업을 승인하는 것을 선호하세요.
 
-### Amazon Bedrock Guardrails
-
-[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)는 모델 입력 및 출력에서 평가되는 구성 가능한 콘텐츠 필터, 거부된 주제 및 민감한 정보(PII) 필터를 제공합니다. 생성된 에이전트가 사용하는 모델에 가드레일을 연결할 수 있습니다:
-
-<Tabs syncKey="language">
-<TabItem label="TypeScript">
-```typescript
-// agent.ts
-import { Agent } from '@strands-agents/sdk';
-import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
-
-const model = new BedrockModel({
-  modelId: process.env.MODEL_ID,
-  guardrailConfig: {
-    guardrailIdentifier: process.env.GUARDRAIL_ID!,
-    guardrailVersion: process.env.GUARDRAIL_VERSION ?? 'DRAFT',
-  },
-});
-
-const agent = new Agent({ model, /* ... */ });
-```
-</TabItem>
-<TabItem label="Python (Strands)">
-```python
-# agent.py
-import os
-
-from strands import Agent
-from strands.models import BedrockModel
-
-model = BedrockModel(
-    model_id=os.environ.get("MODEL_ID"),
-    guardrail_id=os.environ["GUARDRAIL_ID"],
-    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-)
-
-agent = Agent(model=model)
-```
-</TabItem>
-<TabItem label="Python (LangChain)">
-```python
-# agent.py
-import os
-
-from langchain_aws import ChatBedrockConverse
-
-model = ChatBedrockConverse(
-    model=os.environ.get("MODEL_ID"),
-    guardrail_config={
-        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
-        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-    },
-)
-```
-</TabItem>
-</Tabs>
-
 ### 킬 스위치 제공
 
 모델 동작이 예상치 못한 방식으로 변경될 수 있으므로, 코드 변경 없이 모델을 신속하게 비활성화하거나 교체할 수 있도록 계획하세요:
 
 - 운영자가 구성을 업데이트하여 다른 모델로 전환하거나 롤백할 수 있도록 구성에서 모델 ID를 읽으세요(예: `MODEL_ID` 환경 변수).
-- 에이전트를 기능 플래그 뒤에 배치하여 AI 기능을 완전히 비활성화할 수 있도록 하세요. 비활성화된 경우 오류 대신 일반 메시지를 반환하고 애플리케이션의 나머지 부분이 정상적으로 저하되도록 하세요:
-
-<Tabs syncKey="language">
-<TabItem label="TypeScript">
-```typescript
-if (process.env.AGENT_DISABLED === 'true') {
-  return 'This assistant is temporarily unavailable. Please try again later.';
-}
-```
-</TabItem>
-<TabItem label="Python">
-```python
-if os.environ.get("AGENT_DISABLED") == "true":
-    return "This assistant is temporarily unavailable. Please try again later."
-```
-</TabItem>
-</Tabs>
+- 에이전트를 기능 플래그 뒤에 배치하여 AI 기능을 완전히 비활성화할 수 있도록 하세요. 비활성화된 경우 오류 대신 일반 메시지를 반환하고 애플리케이션의 나머지 부분이 정상적으로 저하되도록 하세요.
 
 운영 런북에 이러한 제어를 전환하는 방법을 문서화하세요.
 
@@ -105,3 +30,7 @@ if os.environ.get("AGENT_DISABLED") == "true":
 - 사용자 데이터가 포함될 수 있는 프롬프트 및 완료를 로깅하지 마세요. 생성된 에이전트의 모델 오류 로깅 훅은 대화 내용이 아닌 오류 메타데이터만 로깅합니다. 자체 로깅을 추가할 때 이 속성을 유지하세요.
 - 사용자에게 일반적인 오류 메시지를 반환하고, 자세한 오류는 서버 측에서 로깅하세요.
 - 사용자와 세션 간의 대화 상태를 격리하고, 지속된 세션 데이터에 대한 액세스를 승인하세요.
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)는 모델 입력 및 출력에서 평가되는 구성 가능한 콘텐츠 필터, 거부된 주제 및 민감한 정보(PII) 필터를 제공합니다. 생성된 에이전트가 사용하는 모델에 가드레일을 연결할 수 있습니다:
