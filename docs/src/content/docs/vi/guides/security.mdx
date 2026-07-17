@@ -1,0 +1,76 @@
+---
+title: Bảo mật
+description: Các tính năng bảo mật được bao gồm trong các dự án được tạo bởi Nx Plugin for AWS
+---
+
+import Link from '@components/link.astro';
+
+:::caution[Báo cáo Vấn đề Bảo mật]
+Để báo cáo một vấn đề bảo mật tiềm ẩn trong chính Nx Plugin for AWS, vui lòng tham khảo [SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md) — không tạo issue công khai trên GitHub.
+:::
+
+## Kiểm soát Bảo mật
+
+Các dự án được tạo bởi Nx Plugin for AWS bao gồm một số kiểm soát bảo mật ngay từ đầu. Trang này cung cấp tổng quan về các kiểm soát đó và liên kết đến các hướng dẫn liên quan để biết thêm chi tiết.
+
+### Quét Hạ tầng
+
+Các dự án hạ tầng được cấu hình với [Checkov](https://www.checkov.io/) như một phần của target `build`, do đó cấu hình hạ tầng không an toàn sẽ làm build thất bại:
+
+- Các dự án CDK tổng hợp các template CloudFormation được quét bởi Checkov. Xem <Link path="/guides/typescript-infrastructure#security-testing">Security Testing</Link> để biết chi tiết.
+- Các dự án Terraform chạy Checkov trực tiếp trên mã Terraform của bạn. Xem <Link path="/guides/terraform-project">Terraform Projects</Link>.
+
+Khi hạ tầng được cung cấp bỏ qua một quy tắc Checkov, việc bỏ qua được giới hạn trong tài nguyên cụ thể và được chú thích với lý do giải thích. Helper `suppressRules` được chia sẻ yêu cầu một lý do cho mọi việc bỏ qua, và chúng tôi khuyến nghị tuân theo cùng một thực hành trong mã của bạn. Xem <Link path="/guides/typescript-infrastructure#suppressing-checkov-checks">Suppressing Checkov Checks</Link>.
+
+### Quét Container Image
+
+Các dự án xây dựng container image (ví dụ: agents, MCP servers và database migration images) bao gồm một target `trivy` quét các image để tìm các lỗ hổng HIGH và CRITICAL trước khi chúng được triển khai, làm build thất bại khi phát hiện. Xem <Link path="/guides/docker-bundling">Docker Bundling</Link> để biết chi tiết, bao gồm cách bỏ qua các phát hiện với tệp `.trivyignore`.
+
+### Quét Thông tin Xác thực
+
+Các workspace bao gồm các pre-commit hook [git-secrets](https://github.com/awslabs/git-secrets) quét các tệp được staged để tìm các mẫu thông tin xác thực AWS, ngăn chặn việc commit ngẫu nhiên các access key và các giá trị nhạy cảm khác. Xem phần <Link path="/guides/workspace#git-secrets">Git Secrets</Link> của hướng dẫn workspace.
+
+### Xác thực
+
+API, agents và MCP servers sử dụng xác thực AWS IAM (SigV4) theo mặc định:
+
+- <Link path="/guides/trpc">tRPC</Link>, <Link path="/guides/fastapi">FastAPI</Link> và <Link path="/guides/ts-smithy-api">Smithy</Link> API mặc định sử dụng xác thực IAM, với Cognito và custom authorizers có sẵn như các tùy chọn. Custom authorizer stub được cung cấp từ chối các yêu cầu theo mặc định.
+- <Link path="/guides/ts-agent">Agents</Link> và <Link path="/guides/ts-mcp-server">MCP servers</Link> được triển khai lên Amazon Bedrock AgentCore Runtime sử dụng xác thực IAM (SigV4) theo mặc định, với xác thực Cognito dựa trên JWT như một tùy chọn.
+- <Link path="/guides/react-website-auth">website auth generator</Link> cung cấp một Amazon Cognito user pool với xác thực đa yếu tố (MFA) được yêu cầu, chính sách mật khẩu mạnh và bảo vệ xóa được bật.
+
+### Mã hóa
+
+Hạ tầng được cung cấp mã hóa dữ liệu trong quá trình truyền tải và khi lưu trữ:
+
+- Các website được phục vụ qua CloudFront với HTTP được chuyển hướng sang HTTPS, và một chính sách response headers bao gồm HTTP Strict Transport Security (HSTS), Content Security Policy và các <Link path="/guides/react-website#security-headers">security headers</Link> khác. Một WAF với các quy tắc được quản lý bởi AWS được liên kết với distribution.
+- Các S3 bucket chặn tất cả quyền truy cập công khai, thực thi quyền truy cập chỉ SSL thông qua bucket policies, được mã hóa (KMS với key rotation cho nội dung website) và có server access logging được bật vào một log bucket chuyên dụng.
+- Các API access log được ghi vào các CloudWatch log group được mã hóa bằng các KMS key do khách hàng quản lý với rotation được bật.
+- <Link path="/guides/ts-rdb">Aurora databases</Link> bật mã hóa lưu trữ với KMS key do khách hàng quản lý, tạo thông tin xác thực trong AWS Secrets Manager (không bao giờ hardcode) và hỗ trợ rotation thông tin xác thực tự động.
+
+### Đặc quyền Tối thiểu
+
+Các CDK construct và Terraform module được cung cấp tuân theo đặc quyền tối thiểu:
+
+- Các construct expose các phương thức `grant*` (ví dụ: `grantInvokeAccess` trên API và agents, `grantConnect` trên databases) để người dùng chỉ cấp quyền truy cập mà họ cần.
+- Các IAM policy trong hạ tầng được cung cấp được giới hạn trong các tài nguyên và hành động cụ thể. Khi một tài nguyên wildcard được yêu cầu bởi dịch vụ AWS (ví dụ: `ecr:GetAuthorizationToken`), nó được giới hạn trong các hành động đó và được giới hạn bằng các điều kiện khi được hỗ trợ.
+
+### Cấp phép Phụ thuộc
+
+<Link path="/guides/license">license generator</Link> cấu hình quản lý license header tự động và kiểm tra license phụ thuộc dựa trên danh sách cho phép các license được phê duyệt, giúp bạn phát hiện các phụ thuộc bắc cầu có vấn đề trước khi chúng được triển khai.
+
+## Trách nhiệm
+
+Bảo mật và tuân thủ là trách nhiệm chung. AWS mô tả điều này thông qua [Mô hình Trách nhiệm Chung](https://aws.amazon.com/compliance/shared-responsibility-model/), phân biệt giữa bảo mật *của* đám mây (trách nhiệm của AWS) và bảo mật *trong* đám mây (trách nhiệm của bạn với tư cách là khách hàng).
+
+Nx Plugin for AWS giúp bạn giải quyết các phần trong phía của bạn trong mô hình đó. Các generator của nó cung cấp nền tảng bảo mật và mã hóa các thực hành tốt nhất của AWS trong phạm vi mã mà chúng tạo ra — các kiểm soát được mô tả ở trên. Điều này giảm nỗ lực cần thiết để xây dựng một cách an toàn, nhưng nó không chuyển quyền sở hữu bảo mật cho plugin.
+
+**Bạn sở hữu mã được tạo vào workspace của bạn và vẫn chịu trách nhiệm về bảo mật của nó.** Sau khi được cung cấp, mã được tạo là của bạn để sửa đổi, mở rộng và vận hành, và nó phải được xử lý giống như bất kỳ mã nào khác mà bạn viết.
+
+Cụ thể:
+
+- **Phạm vi của plugin chỉ giới hạn ở các generator của nó.** Plugin không có kiến thức về logic nghiệp vụ của ứng dụng, phân loại dữ liệu, mô hình mối đe dọa hoặc nghĩa vụ quy định của bạn, và không thể đưa ra quyết định phụ thuộc vào chúng.
+- **Xác thực được cấu hình, nhưng ủy quyền thì không.** API được bảo vệ bằng xác thực theo mặc định (ví dụ: IAM/SigV4), nhưng plugin không thể xác định *những* principal đã xác thực nào nên được phép thực hiện *những* thao tác nào trên *những* tài nguyên nào. Ủy quyền chi tiết phụ thuộc vào logic nghiệp vụ của bạn và phải được thiết kế, triển khai và kiểm tra bởi bạn.
+- **Mã được tạo là điểm khởi đầu, không phải sản phẩm hoàn thiện.** Khi bạn thêm chức năng, bạn đưa vào các cân nhắc bảo mật mà plugin không thể dự đoán — xác thực đầu vào, xử lý dữ liệu, quản lý bí mật, lựa chọn phụ thuộc và tích hợp với các hệ thống khác.
+
+Theo đó, bạn nên xem xét mã được tạo và các ứng dụng bạn xây dựng trên đó phù hợp với các chính sách bảo mật, tiêu chuẩn và quy trình xem xét của tổ chức bạn, và áp dụng chúng vào cùng mô hình hóa mối đe dọa, kiểm tra bảo mật và cổng phê duyệt mà bạn áp dụng cho bất kỳ khối lượng công việc sản xuất nào. Các kiểm soát được cung cấp bởi plugin nhằm bổ sung cho các quy trình đó, không phải thay thế chúng.
+

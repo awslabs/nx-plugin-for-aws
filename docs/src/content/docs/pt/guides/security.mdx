@@ -1,0 +1,76 @@
+---
+title: Segurança
+description: Recursos de segurança incluídos em projetos gerados pelo Nx Plugin for AWS
+---
+
+import Link from '@components/link.astro';
+
+:::caution[Relatar Problemas de Segurança]
+Para relatar um possível problema de segurança no próprio Nx Plugin for AWS, consulte [SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md) — não crie uma issue pública no GitHub.
+:::
+
+## Controles de Segurança
+
+Projetos criados pelo Nx Plugin for AWS incluem uma série de controles de segurança prontos para uso. Esta página fornece uma visão geral desses controles e links para os guias relevantes para mais detalhes.
+
+### Verificação de Infraestrutura
+
+Projetos de infraestrutura são configurados com [Checkov](https://www.checkov.io/) como parte do target `build`, de modo que configurações de infraestrutura inseguras falham a build:
+
+- Projetos CDK sintetizam templates CloudFormation que são verificados pelo Checkov. Consulte <Link path="/guides/typescript-infrastructure#security-testing">Security Testing</Link> para detalhes.
+- Projetos Terraform executam o Checkov diretamente no seu código Terraform. Consulte <Link path="/guides/terraform-project">Terraform Projects</Link>.
+
+Quando a infraestrutura fornecida suprime uma regra do Checkov, a supressão é limitada ao recurso específico e anotada com uma justificativa. O helper compartilhado `suppressRules` requer uma razão para cada supressão, e recomendamos seguir a mesma prática no seu próprio código. Consulte <Link path="/guides/typescript-infrastructure#suppressing-checkov-checks">Suppressing Checkov Checks</Link>.
+
+### Verificação de Imagens de Contêiner
+
+Projetos que constroem imagens de contêiner (por exemplo, agents, servidores MCP e imagens de migração de banco de dados) incluem um target `trivy` que verifica imagens em busca de vulnerabilidades HIGH e CRITICAL antes de serem implantadas, falhando a build em caso de descobertas. Consulte <Link path="/guides/docker-bundling">Docker Bundling</Link> para detalhes, incluindo como suprimir descobertas com um arquivo `.trivyignore`.
+
+### Verificação de Credenciais
+
+Workspaces incluem hooks de pré-commit do [git-secrets](https://github.com/awslabs/git-secrets) que verificam arquivos preparados em busca de padrões de credenciais AWS, prevenindo commits acidentais de chaves de acesso e outros valores sensíveis. Consulte a seção <Link path="/guides/workspace#git-secrets">Git Secrets</Link> do guia de workspace.
+
+### Autenticação
+
+APIs, agents e servidores MCP usam autenticação AWS IAM (SigV4) por padrão:
+
+- APIs <Link path="/guides/trpc">tRPC</Link>, <Link path="/guides/fastapi">FastAPI</Link> e <Link path="/guides/ts-smithy-api">Smithy</Link> usam autenticação IAM por padrão, com Cognito e autorizadores personalizados disponíveis como opções. O stub de autorizador personalizado fornecido nega requisições por padrão.
+- <Link path="/guides/ts-agent">Agents</Link> e <Link path="/guides/ts-mcp-server">servidores MCP</Link> implantados no Amazon Bedrock AgentCore Runtime usam autenticação IAM (SigV4) por padrão, com autenticação Cognito baseada em JWT como opção.
+- O <Link path="/guides/react-website-auth">gerador de autenticação de website</Link> fornece um user pool do Amazon Cognito com autenticação multifator (MFA) obrigatória, uma política de senha forte e proteção contra exclusão habilitada.
+
+### Criptografia
+
+A infraestrutura fornecida criptografa dados em trânsito e em repouso:
+
+- Websites são servidos via CloudFront com HTTP redirecionado para HTTPS, e uma política de cabeçalhos de resposta incluindo HTTP Strict Transport Security (HSTS), uma Content Security Policy e outros <Link path="/guides/react-website#security-headers">cabeçalhos de segurança</Link>. Um WAF com regras gerenciadas pela AWS está associado à distribuição.
+- Buckets S3 bloqueiam todo acesso público, impõem acesso somente SSL via políticas de bucket, são criptografados (KMS com rotação de chaves para conteúdo de website) e têm registro de acesso ao servidor habilitado para um bucket de log dedicado.
+- Logs de acesso de API são gravados em grupos de log do CloudWatch criptografados com chaves KMS gerenciadas pelo cliente com rotação habilitada.
+- <Link path="/guides/ts-rdb">Bancos de dados Aurora</Link> habilitam criptografia de armazenamento com uma chave KMS gerenciada pelo cliente, geram credenciais no AWS Secrets Manager (nunca codificadas) e suportam rotação automática de credenciais.
+
+### Privilégio Mínimo
+
+Constructs CDK e módulos Terraform fornecidos seguem o princípio do privilégio mínimo:
+
+- Constructs expõem métodos `grant*` (por exemplo, `grantInvokeAccess` em APIs e agents, `grantConnect` em bancos de dados) para que os consumidores concedam apenas o acesso necessário.
+- Políticas IAM na infraestrutura fornecida são limitadas a recursos e ações específicas. Quando um recurso curinga é exigido pelo serviço AWS (por exemplo, `ecr:GetAuthorizationToken`), ele é limitado a essas ações e restringido com condições quando suportado.
+
+### Licenciamento de Dependências
+
+O <Link path="/guides/license">gerador de licença</Link> configura gerenciamento automatizado de cabeçalhos de licença e verificação de licenças de dependências contra uma lista de permissões de licenças aprovadas, ajudando você a detectar dependências transitivas problemáticas antes de serem enviadas.
+
+## Responsabilidade
+
+Segurança e conformidade é uma responsabilidade compartilhada. A AWS descreve isso através do [Modelo de Responsabilidade Compartilhada](https://aws.amazon.com/compliance/shared-responsibility-model/), que distingue entre segurança *da* nuvem (responsabilidade da AWS) e segurança *na* nuvem (sua responsabilidade como cliente).
+
+O Nx Plugin for AWS ajuda você a abordar partes do seu lado desse modelo. Seus geradores fornecem fundações seguras e codificam as melhores práticas da AWS dentro do escopo do código que produzem — os controles descritos acima. Isso reduz o esforço necessário para construir com segurança, mas não transfere a propriedade da segurança para o plugin.
+
+**Você é proprietário do código que é gerado em seu workspace e permanece responsável por sua segurança.** Uma vez fornecido, o código gerado é seu para modificar, estender e operar, e deve ser tratado da mesma forma que qualquer outro código que você escreve.
+
+Em particular:
+
+- **O escopo do plugin é limitado aos seus geradores.** O plugin não tem conhecimento da lógica de negócios da sua aplicação, classificação de dados, modelo de ameaças ou obrigações regulatórias, e não pode tomar decisões que dependam deles.
+- **A autenticação está configurada, mas a autorização não.** As APIs são protegidas com autenticação por padrão (por exemplo, IAM/SigV4), mas o plugin não pode determinar *quais* principais autenticados devem ter permissão para executar *quais* operações em *quais* recursos. A autorização refinada depende da sua lógica de negócios e deve ser projetada, implementada e testada por você.
+- **O código gerado é um ponto de partida, não um produto acabado.** À medida que você adiciona funcionalidades, você introduz considerações de segurança que o plugin não pode antecipar — validação de entrada, manipulação de dados, gerenciamento de segredos, escolhas de dependências e integrações com outros sistemas.
+
+Consequentemente, você deve revisar o código gerado e as aplicações que você constrói sobre ele de acordo com as políticas de segurança, padrões e processos de revisão da sua própria organização, e submetê-los à mesma modelagem de ameaças, testes de segurança e portões de aprovação que você aplica a qualquer carga de trabalho de produção. Os controles fornecidos pelo plugin são destinados a complementar esses processos, não a substituí-los.
+
