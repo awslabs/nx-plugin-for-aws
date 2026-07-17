@@ -108,6 +108,7 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/.venv',
       '!**/*.css',
       '!**/*.gen.*',
+      '!**/generated/**',
     ],
   },
 };
