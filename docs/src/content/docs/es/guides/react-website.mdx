@@ -137,6 +137,49 @@ Se aplica una `Content-Security-Policy` predeterminada. Restringe scripts y fram
 
 `runtime-config.json` se sirve con `Cache-Control: no-cache` para que los navegadores siempre obtengan la configuración más reciente después de un redespliegue, en lugar de usar una copia en caché obsoleta.
 
+#### Dominio personalizado y TLS
+
+Por defecto, la distribución utiliza el nombre de dominio predeterminado de CloudFront (`*.cloudfront.net`) y su certificado predeterminado, que no admite la aplicación de una versión mínima de TLS de 1.2. Para servir tu sitio web desde tu propio dominio, proporciona un [certificado ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (que debe residir en `us-east-1` para su uso con CloudFront) y tus nombres de dominio — entonces se aplicará una versión mínima de TLS de 1.2 para los visitantes:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pasa las props `certificate` y `domainNames` en tu construct de sitio web generado en `packages/common/constructs/src/app/static-websites`:
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Establece las variables `custom_domain_names` y `acm_certificate_arn` en tu módulo de sitio web generado en `packages/common/terraform/src/app/static-websites`:
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+También necesitarás crear registros DNS (por ejemplo, en Route 53) que apunten tu dominio a la distribución de CloudFront.
+
 ## Implementando tu sitio web React
 
 La [documentación de React](https://react.dev/learn) es un buen punto de partida para aprender los fundamentos.

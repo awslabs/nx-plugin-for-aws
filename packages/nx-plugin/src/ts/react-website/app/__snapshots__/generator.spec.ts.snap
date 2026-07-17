@@ -152,6 +152,18 @@ variable "website_file_path" {
   type        = string
 }
 
+variable "custom_domain_names" {
+  description = "Custom domain names (aliases) for the CloudFront distribution. Requires acm_certificate_arn."
+  type        = list(string)
+  default     = []
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in us-east-1) for the custom domain names. When set, viewers are required to use TLS 1.2 or later."
+  type        = string
+  default     = null
+}
+
 # Content-Security-Policy enforced on all responses. Restricts scripts and
 # framing to mitigate XSS and clickjacking, while permitting HTTPS/WSS calls
 # (connect-src) to AWS service endpoints such as API Gateway, Cognito and
@@ -568,6 +580,7 @@ resource "aws_cloudfront_distribution" "website" {
   is_ipv6_enabled     = true
   default_root_object = "index.html"
   web_acl_id          = aws_wafv2_web_acl.cloudfront_waf.arn
+  aliases             = var.custom_domain_names
 
   logging_config {
     include_cookies = false
@@ -614,7 +627,10 @@ resource "aws_cloudfront_distribution" "website" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = var.acm_certificate_arn == null
+    acm_certificate_arn            = var.acm_certificate_arn
+    ssl_support_method             = var.acm_certificate_arn == null ? null : "sni-only"
+    minimum_protocol_version       = var.acm_certificate_arn == null ? "TLSv1" : "TLSv1.2_2021"
   }
 
   tags = {
@@ -1543,8 +1559,10 @@ import {
   HeadersFrameOption,
   HeadersReferrerPolicy,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -1586,6 +1604,15 @@ const CONTENT_SECURITY_POLICY = [
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * Custom domain names for the CloudFront distribution. Requires \`certificate\`.
+   */
+  readonly domainNames?: string[];
+  /**
+   * ACM certificate for the custom domain names. Must be in us-east-1.
+   * When provided, viewers are required to use TLS 1.2 or later.
+   */
+  readonly certificate?: ICertificate;
 }
 
 /**
@@ -1604,7 +1631,12 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps,
+    {
+      websiteFilePath,
+      websiteName,
+      domainNames,
+      certificate,
+    }: StaticWebsiteProps,
   ) {
     super(scope, id);
     this.node.setContext(
@@ -1712,6 +1744,13 @@ export class StaticWebsite extends Construct {
         webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
+        ...(certificate
+          ? {
+              certificate,
+              domainNames,
+              minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            }
+          : {}),
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -1732,12 +1771,14 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
-    // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
-    suppressRules(
-      this.cloudFrontDistribution,
-      ['CKV_AWS_174'],
-      'Cloudfront default certificate does not use TLS 1.2',
-    );
+    if (!certificate) {
+      // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
+      suppressRules(
+        this.cloudFrontDistribution,
+        ['CKV_AWS_174'],
+        'Cloudfront default certificate does not use TLS 1.2',
+      );
+    }
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
@@ -3119,8 +3160,10 @@ import {
   HeadersFrameOption,
   HeadersReferrerPolicy,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -3162,6 +3205,15 @@ const CONTENT_SECURITY_POLICY = [
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * Custom domain names for the CloudFront distribution. Requires \`certificate\`.
+   */
+  readonly domainNames?: string[];
+  /**
+   * ACM certificate for the custom domain names. Must be in us-east-1.
+   * When provided, viewers are required to use TLS 1.2 or later.
+   */
+  readonly certificate?: ICertificate;
 }
 
 /**
@@ -3180,7 +3232,12 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps,
+    {
+      websiteFilePath,
+      websiteName,
+      domainNames,
+      certificate,
+    }: StaticWebsiteProps,
   ) {
     super(scope, id);
     this.node.setContext(
@@ -3288,6 +3345,13 @@ export class StaticWebsite extends Construct {
         webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
+        ...(certificate
+          ? {
+              certificate,
+              domainNames,
+              minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            }
+          : {}),
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -3308,12 +3372,14 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
-    // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
-    suppressRules(
-      this.cloudFrontDistribution,
-      ['CKV_AWS_174'],
-      'Cloudfront default certificate does not use TLS 1.2',
-    );
+    if (!certificate) {
+      // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
+      suppressRules(
+        this.cloudFrontDistribution,
+        ['CKV_AWS_174'],
+        'Cloudfront default certificate does not use TLS 1.2',
+      );
+    }
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
@@ -4622,8 +4688,10 @@ import {
   HeadersFrameOption,
   HeadersReferrerPolicy,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -4665,6 +4733,15 @@ const CONTENT_SECURITY_POLICY = [
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * Custom domain names for the CloudFront distribution. Requires \`certificate\`.
+   */
+  readonly domainNames?: string[];
+  /**
+   * ACM certificate for the custom domain names. Must be in us-east-1.
+   * When provided, viewers are required to use TLS 1.2 or later.
+   */
+  readonly certificate?: ICertificate;
 }
 
 /**
@@ -4683,7 +4760,12 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps,
+    {
+      websiteFilePath,
+      websiteName,
+      domainNames,
+      certificate,
+    }: StaticWebsiteProps,
   ) {
     super(scope, id);
     this.node.setContext(
@@ -4791,6 +4873,13 @@ export class StaticWebsite extends Construct {
         webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
+        ...(certificate
+          ? {
+              certificate,
+              domainNames,
+              minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            }
+          : {}),
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -4811,12 +4900,14 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
-    // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
-    suppressRules(
-      this.cloudFrontDistribution,
-      ['CKV_AWS_174'],
-      'Cloudfront default certificate does not use TLS 1.2',
-    );
+    if (!certificate) {
+      // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
+      suppressRules(
+        this.cloudFrontDistribution,
+        ['CKV_AWS_174'],
+        'Cloudfront default certificate does not use TLS 1.2',
+      );
+    }
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
