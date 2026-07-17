@@ -81,7 +81,9 @@ describe('smoke test - idempotency', () => {
     // initial commit. The generated .gitignore keeps node_modules / build
     // output out of the snapshot. --no-verify skips the git-secrets hook.
     git('add -A');
-    git('-c user.name=e2e -c user.email=e2e@example.com commit -m baseline --no-verify');
+    git(
+      '-c user.name=e2e -c user.email=e2e@example.com commit -m baseline --no-verify',
+    );
 
     // Second pass — re-run the exact same matrix on the committed workspace.
     await runCLI(

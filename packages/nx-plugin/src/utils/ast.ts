@@ -22,7 +22,9 @@ const normalizeModuleSpecifier = (tree: Tree, from: string): string => {
     return from;
   }
   const isRelative = from.startsWith('./') || from.startsWith('../');
-  return isRelative && from.endsWith('.js') ? from.slice(0, -'.js'.length) : from;
+  return isRelative && from.endsWith('.js')
+    ? from.slice(0, -'.js'.length)
+    : from;
 };
 
 // Pin the gritql native library's "global" stdlib directory to <workspace>/.grit so it doesn't try to write to /usr/local/.grit (or wherever node's grandparent resolves to).

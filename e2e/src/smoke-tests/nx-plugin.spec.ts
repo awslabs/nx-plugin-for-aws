@@ -6,7 +6,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 /**
@@ -24,18 +24,21 @@ describe('smoke test - nx-plugin', () => {
   const targetDir = `${tmpProjPath()}/nx-plugin-${pkgMgr}`;
   let projectRoot: string;
 
-  beforeAll(async () => {
-    if (existsSync(targetDir)) {
-      rmSync(targetDir, { force: true, recursive: true });
-    }
-    ensureDirSync(targetDir);
-    projectRoot = await createTestWorkspace(
-      pkgMgr,
-      targetDir,
-      'nx-plugin-test',
-      'cdk',
-    );
-  }, 15 * 60 * 1000);
+  beforeAll(
+    async () => {
+      if (existsSync(targetDir)) {
+        rmSync(targetDir, { force: true, recursive: true });
+      }
+      ensureDirSync(targetDir);
+      projectRoot = await createTestWorkspace(
+        pkgMgr,
+        targetDir,
+        'nx-plugin-test',
+        'cdk',
+      );
+    },
+    15 * 60 * 1000,
+  );
 
   afterAll(() => {
     if (existsSync(targetDir)) {
