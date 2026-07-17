@@ -2,108 +2,108 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { readJson, readProjectConfiguration, type Tree } from "@nx/devkit";
+import { expectHasMetricTags } from "../../utils/metrics.spec";
+import { sharedConstructsGenerator } from "../../utils/shared-constructs";
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { TS_NX_PLUGIN_GENERATOR_INFO, tsNxPluginGenerator } from './generator';
+} from "../../utils/test";
+import { TS_NX_PLUGIN_GENERATOR_INFO, tsNxPluginGenerator } from "./generator";
 
-describe('ts#nx-plugin generator', () => {
+describe("ts#nx-plugin generator", () => {
   let tree: Tree;
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should configure the project as an Nx Plugin with correct targets', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+  it("should configure the project as an Nx Plugin with correct targets", async () => {
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    const project = readProjectConfiguration(tree, '@proj/test-plugin');
+    const project = readProjectConfiguration(tree, "@proj/test-plugin");
 
     // Should have package target
     expect(project.targets?.package).toBeDefined();
-    expect(project.targets?.package?.executor).toBe('@nx/js:tsc');
-    expect(project.targets?.package?.outputs).toEqual(['{options.outputPath}']);
+    expect(project.targets?.package?.executor).toBe("@nx/js:tsc");
+    expect(project.targets?.package?.outputs).toEqual(["{options.outputPath}"]);
     expect(project.targets?.package?.options?.outputPath).toBe(
-      'dist/{projectRoot}/package',
+      "dist/{projectRoot}/package",
     );
     expect(project.targets?.package?.options?.main).toBe(
-      '{projectRoot}/src/index.ts',
+      "{projectRoot}/src/index.ts",
     );
     expect(project.targets?.package?.options?.tsConfig).toBe(
-      '{projectRoot}/tsconfig.lib.json',
+      "{projectRoot}/tsconfig.lib.json",
     );
 
     // Should have correct assets
     const assets = project.targets?.package?.options?.assets;
-    expect(assets).toContain('{projectRoot}/*.md');
-    expect(assets).toContain('{projectRoot}/LICENSE*');
-    expect(assets).toContain('{projectRoot}/NOTICE');
+    expect(assets).toContain("{projectRoot}/*.md");
+    expect(assets).toContain("{projectRoot}/LICENSE*");
+    expect(assets).toContain("{projectRoot}/NOTICE");
     expect(assets).toContainEqual({
-      input: './{projectRoot}/src',
-      glob: '**/!(*.ts)',
-      output: './src',
+      input: "./{projectRoot}/src",
+      glob: "**/!(*.ts)",
+      output: "./src",
     });
     expect(assets).toContainEqual({
-      input: './{projectRoot}/src',
-      glob: '**/*.d.ts',
-      output: './src',
+      input: "./{projectRoot}/src",
+      glob: "**/*.d.ts",
+      output: "./src",
     });
     expect(assets).toContainEqual({
-      input: './{projectRoot}',
-      glob: 'generators.json',
-      output: '.',
+      input: "./{projectRoot}",
+      glob: "generators.json",
+      output: ".",
     });
     expect(assets).toContainEqual({
-      input: './{projectRoot}',
-      glob: 'executors.json',
-      output: '.',
+      input: "./{projectRoot}",
+      glob: "executors.json",
+      output: ".",
     });
   });
 
-  it('should configure build target to depend on package', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+  it("should configure build target to depend on package", async () => {
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    const project = readProjectConfiguration(tree, '@proj/test-plugin');
+    const project = readProjectConfiguration(tree, "@proj/test-plugin");
 
-    expect(project.targets?.build?.dependsOn).toContain('package');
+    expect(project.targets?.build?.dependsOn).toContain("package");
   });
 
-  it('should leave index.ts as created by the ts#project generator', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+  it("should leave index.ts as created by the ts#project generator", async () => {
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    expect(tree.read('test-plugin/src/index.ts')?.toString()?.trim()).toBe(
-      '// Export your library code here',
+    expect(tree.read("test-plugin/src/index.ts")?.toString()?.trim()).toBe(
+      "// Export your library code here",
     );
   });
 
-  it('should configure TypeScript project as Nx Plugin', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+  it("should configure TypeScript project as Nx Plugin", async () => {
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
     // Nx 23 loads `.ts` generators as ESM via native type stripping, so the
     // plugin must not be forced to commonjs.
-    const tsConfig = readJson(tree, 'test-plugin/tsconfig.json');
-    expect(tsConfig.compilerOptions?.module).not.toBe('commonjs');
+    const tsConfig = readJson(tree, "test-plugin/tsconfig.json");
+    expect(tsConfig.compilerOptions?.module).not.toBe("commonjs");
 
     // Check generators.json exists
-    expect(tree.exists('test-plugin/generators.json')).toBe(true);
-    const generatorsJson = readJson(tree, 'test-plugin/generators.json');
+    expect(tree.exists("test-plugin/generators.json")) === true;
+    const generatorsJson = readJson(tree, "test-plugin/generators.json");
     expect(generatorsJson.generators).toBeDefined();
 
     // Check package.json configuration
-    expect(tree.exists('test-plugin/package.json')).toBe(true);
-    const packageJson = readJson(tree, 'test-plugin/package.json');
-    expect(packageJson.main).toBe('./src/index.js');
-    expect(packageJson.generators).toBe('./generators.json');
+    expect(tree.exists("test-plugin/package.json")).toBe(true);
+    const packageJson = readJson(tree, "test-plugin/package.json");
+    expect(packageJson.main).toBe("./src/index.js");
+    expect(packageJson.generators).toBe("./generators.json");
   });
 
-  it('should generate MCP server files', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+  it("should generate MCP server files", async () => {
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    const project = readProjectConfiguration(tree, '@proj/test-plugin');
+    const project = readProjectConfiguration(tree, "@proj/test-plugin");
     const mcpPath = `${project.sourceRoot}/mcp-server`;
 
     // Should generate MCP server files
@@ -117,10 +117,10 @@ describe('ts#nx-plugin generator', () => {
     snapshotTreeDir(tree, mcpPath);
   });
 
-  it('should remove sample MCP server files', async () => {
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+  it("should remove sample MCP server files", async () => {
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    const project = readProjectConfiguration(tree, '@proj/test-plugin');
+    const project = readProjectConfiguration(tree, "@proj/test-plugin");
     const mcpPath = `${project.sourceRoot}/mcp-server`;
 
     // Should not have sample files
@@ -128,53 +128,53 @@ describe('ts#nx-plugin generator', () => {
     expect(tree.exists(`${mcpPath}/resources/sample-guidance.ts`)).toBe(false);
   });
 
-  it('should add required dependencies', async () => {
+  it("should add required dependencies", async () => {
     // Modify package.json to simulate external workspace
     tree.write(
-      'package.json',
+      "package.json",
       JSON.stringify({
-        name: 'external-workspace',
-        version: '1.0.0',
+        name: "external-workspace",
+        version: "1.0.0",
       }),
     );
 
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    const rootPackageJson = readJson(tree, 'package.json');
-    expect(rootPackageJson.devDependencies?.['@nx/devkit']).toBeDefined();
-    expect(rootPackageJson.devDependencies?.['@aws/nx-plugin']).toBeDefined();
+    const rootPackageJson = readJson(tree, "package.json");
+    expect(rootPackageJson.devDependencies?.["@nx/devkit"]).toBeDefined();
+    expect(rootPackageJson.devDependencies?.["@aws/nx-plugin"]).toBeDefined();
 
-    const projectPackageJson = readJson(tree, 'test-plugin/package.json');
-    expect(projectPackageJson.dependencies?.['@nx/devkit']).toBeDefined();
-    expect(projectPackageJson.dependencies?.['@aws/nx-plugin']).toBeDefined();
+    const projectPackageJson = readJson(tree, "test-plugin/package.json");
+    expect(projectPackageJson.dependencies?.["@nx/devkit"]).toBeDefined();
+    expect(projectPackageJson.dependencies?.["@aws/nx-plugin"]).toBeDefined();
   });
 
-  it('should not add swc transpiler dev dependencies', async () => {
+  it("should not add swc transpiler dev dependencies", async () => {
     // Generated workspaces are `"type": "module"`, so Nx loads the plugin's
     // `.ts` generators as ESM via Node's native type stripping — no swc/ts-node
     // transpiler is required.
     tree.write(
-      'package.json',
-      JSON.stringify({ name: 'external-workspace', version: '1.0.0' }),
+      "package.json",
+      JSON.stringify({ name: "external-workspace", version: "1.0.0" }),
     );
 
-    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+    await tsNxPluginGenerator(tree, { name: "test-plugin" });
 
-    const rootPackageJson = readJson(tree, 'package.json');
+    const rootPackageJson = readJson(tree, "package.json");
     expect(
-      rootPackageJson.devDependencies?.['@swc-node/register'],
+      rootPackageJson.devDependencies?.["@swc-node/register"],
     ).toBeUndefined();
 
-    const projectPackageJson = readJson(tree, 'test-plugin/package.json');
+    const projectPackageJson = readJson(tree, "test-plugin/package.json");
     expect(
-      projectPackageJson.devDependencies?.['@swc-node/register'],
+      projectPackageJson.devDependencies?.["@swc-node/register"],
     ).toBeUndefined();
   });
 
-  it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+  it("should add generator metric to app.ts", async () => {
+    await sharedConstructsGenerator(tree, { iac: "cdk" });
 
-    await tsNxPluginGenerator(tree, { name: 'my-plugin' });
+    await tsNxPluginGenerator(tree, { name: "my-plugin" });
 
     expectHasMetricTags(tree, TS_NX_PLUGIN_GENERATOR_INFO.metric);
   });
