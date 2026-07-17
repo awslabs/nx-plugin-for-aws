@@ -5,11 +5,15 @@ description: Nx Plugin for AWS 生成的项目中包含的安全功能
 
 import Link from '@components/link.astro';
 
+:::caution[报告安全问题]
+如需报告 Nx Plugin for AWS 本身的潜在安全问题，请参阅 [SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md) — 请勿创建公开的 GitHub issue。
+:::
+
+## 安全控制
+
 由 Nx Plugin for AWS 生成的项目开箱即包含多项安全控制。本页面概述了这些控制措施，并提供了相关指南的链接以获取更多详细信息。
 
-如需报告 Nx Plugin for AWS 本身的潜在安全问题，请参阅 [SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md) — 请勿创建公开的 GitHub issue。
-
-## 基础设施扫描
+### 基础设施扫描
 
 基础设施项目配置了 [Checkov](https://www.checkov.io/) 作为 `build` 目标的一部分，因此不安全的基础设施配置会导致构建失败：
 
@@ -18,15 +22,15 @@ import Link from '@components/link.astro';
 
 当提供的基础设施抑制 Checkov 规则时，抑制范围限定于特定资源，并附有理由说明。共享的 `suppressRules` 辅助函数要求为每个抑制提供原因，我们建议您在自己的代码中遵循相同的做法。请参阅<Link path="/guides/typescript-infrastructure#suppressing-checkov-checks">抑制 Checkov 检查</Link>。
 
-## 容器镜像扫描
+### 容器镜像扫描
 
 构建容器镜像的项目（例如代理、MCP 服务器和数据库迁移镜像）包含一个 `trivy` 目标，该目标在部署前扫描镜像中的 HIGH 和 CRITICAL 漏洞，如果发现问题则构建失败。详情请参阅<Link path="/guides/docker-bundling">Docker 打包</Link>，包括如何使用 `.trivyignore` 文件抑制发现的问题。
 
-## 凭证扫描
+### 凭证扫描
 
 工作空间包含 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，用于扫描暂存文件中的 AWS 凭证模式，防止意外提交访问密钥和其他敏感值。请参阅工作空间指南的<Link path="/guides/workspace#git-secrets">Git Secrets</Link> 部分。
 
-## 身份验证
+### 身份验证
 
 API、代理和 MCP 服务器默认使用 AWS IAM (SigV4) 身份验证：
 
@@ -43,13 +47,29 @@ API、代理和 MCP 服务器默认使用 AWS IAM (SigV4) 身份验证：
 - API 访问日志写入使用客户托管 KMS 密钥加密的 CloudWatch 日志组，并启用轮换。
 - <Link path="/guides/ts-rdb">Aurora 数据库</Link>使用客户托管 KMS 密钥启用存储加密，在 AWS Secrets Manager 中生成凭证（从不硬编码），并支持自动凭证轮换。
 
-## 最小权限
+### 最小权限
 
 提供的 CDK 构造和 Terraform 模块遵循最小权限原则：
 
 - 构造公开 `grant*` 方法（例如 API 和代理上的 `grantInvokeAccess`，数据库上的 `grantConnect`），以便使用者仅授予所需的访问权限。
 - 提供的基础设施中的 IAM 策略限定于特定资源和操作。当 AWS 服务需要通配符资源时（例如 `ecr:GetAuthorizationToken`），它仅限于这些操作，并在支持的情况下使用条件限定范围。
 
-## 依赖许可
+### 依赖许可
 
 <Link path="/guides/license">许可生成器</Link>配置自动化的许可证头管理和依赖许可证检查，针对已批准许可证的允许列表进行检查，帮助您在发布前捕获有问题的传递依赖项。
+
+## 责任
+
+安全性和合规性是共同责任。AWS 通过[共同责任模型](https://aws.amazon.com/compliance/shared-responsibility-model/)来描述这一点，该模型区分了云*本身*的安全性（AWS 的责任）和云*中*的安全性（作为客户的您的责任）。
+
+Nx Plugin for AWS 帮助您处理该模型中您这一方的部分内容。其生成器提供安全基础，并在其生成的代码范围内编码 AWS 最佳实践——即上述控制措施。这减少了安全构建所需的工作量，但并不将安全性的所有权转移给插件。
+
+**您拥有生成到工作空间中的代码，并对其安全性负责。**一旦生成，生成的代码就是您的，可以修改、扩展和操作，必须像对待您编写的任何其他代码一样对待它。
+
+特别是：
+
+- **插件的范围仅限于其生成器。**插件不了解您应用程序的业务逻辑、数据分类、威胁模型或监管义务，也无法做出依赖于这些因素的决策。
+- **身份验证已配置，但授权未配置。**API 默认受身份验证保护（例如 IAM/SigV4），但插件无法确定*哪些*经过身份验证的主体应被允许对*哪些*资源执行*哪些*操作。细粒度授权取决于您的业务逻辑，必须由您设计、实现和测试。
+- **生成的代码是起点，而非成品。**当您添加功能时，会引入插件无法预料的安全考虑因素——输入验证、数据处理、密钥管理、依赖项选择以及与其他系统的集成。
+
+因此，您应该根据自己组织的安全策略、标准和审查流程来审查生成的代码以及在其基础上构建的应用程序，并对它们进行与应用于任何生产工作负载相同的威胁建模、安全测试和批准审核。插件提供的控制措施旨在补充这些流程，而非取代它们。
