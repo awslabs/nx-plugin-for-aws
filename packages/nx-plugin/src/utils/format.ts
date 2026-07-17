@@ -5,58 +5,97 @@
 
 import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
-import { execFile, execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
-import { promisify } from 'util';
 import { readToml } from './toml';
 
 const require = createRequire(import.meta.url);
-const execFileAsync = promisify(execFile);
 
 /** Hard ceiling on any formatter subprocess so a hung tool cannot stall generation. */
 const EXEC_TIMEOUT_MS = 60_000;
-/** Seconds uv waits for its global cache lock before giving up on a ruff call. */
+/**
+ * Seconds uv waits for its global cache lock before giving up. uv serialises
+ * cache writes behind a global lock (`<uv cache>/.lock`) and by default waits
+ * minutes for it. Capping the wait lets a single attempt ride out transient
+ * contention (another uv process installing ruff finishes in seconds) while
+ * failing fast if the lock is genuinely stuck, rather than stalling generation.
+ */
 const UV_LOCK_TIMEOUT_SECONDS = 20;
 
-/**
- * uv serialises cache writes behind a global lock (`<uv cache>/.lock`) and by
- * default waits minutes for it. Cap the wait so contention with other uv
- * processes (e.g. parallel generator runs installing ruff) fails fast instead
- * of stalling generation, honouring any user override.
- */
 const uvEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
   UV_LOCK_TIMEOUT:
     process.env.UV_LOCK_TIMEOUT ?? String(UV_LOCK_TIMEOUT_SECONDS),
 });
 
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  timedOut: boolean;
+}
+
 /**
- * Run a command asynchronously with content piped to stdin, capturing stdout.
- * Async execution keeps the event loop free (so callers' timeouts can fire)
- * and the timeout kills processes that hang.
+ * Run a command with content piped to stdin, resolving at the deadline no
+ * matter what the child does. The subprocess runs in its own process group
+ * (`detached`) which is SIGKILLed on timeout, so a wedged tool — or any child
+ * it spawned (e.g. uv's download workers) — cannot keep the promise pending and
+ * stall generation. The timeout timer is `unref`ed so it never keeps the
+ * process alive on its own. Resolves with captured output and exit status;
+ * rejects only when the command cannot be spawned.
  */
-function execFileWithInput(
+function execWithInput(
   command: string,
   args: string[],
   input: string,
   opts?: { env?: NodeJS.ProcessEnv; cwd?: string },
-): Promise<string> {
-  const promise = execFileAsync(command, args, {
-    encoding: 'utf-8',
-    timeout: EXEC_TIMEOUT_MS,
-    ...opts,
+): Promise<ExecResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: opts?.env,
+      cwd: opts?.cwd,
+      detached: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (result: ExecResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      // Kill the whole process group so grandchildren die with the child.
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Process group already gone
+      }
+      finish({ stdout, stderr, code: null, timedOut: true });
+    }, EXEC_TIMEOUT_MS);
+    timer.unref();
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('error', (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) =>
+      finish({ stdout, stderr, code, timedOut: false }),
+    );
+    child.stdin.on('error', () => {}); // Swallow EPIPE if stdin closes early
+    child.stdin.end(input);
   });
-  // Swallow EPIPE if the process exits before consuming its stdin
-  promise.child.stdin?.on('error', () => {});
-  promise.child.stdin?.end(input);
-  return promise.then(({ stdout }) => stdout);
 }
 
 /** Run ruff with the capped uv lock timeout applied. */
-function execRuff(argv: string[], input: string): Promise<string> {
-  return execFileWithInput(argv[0], argv.slice(1), input, { env: uvEnv() });
+function execRuff(argv: string[], input: string): Promise<ExecResult> {
+  return execWithInput(argv[0], argv.slice(1), input, { env: uvEnv() });
 }
 
 export const DEFAULT_BIOME_CONFIG = {
@@ -194,13 +233,17 @@ async function formatWithBiomeCli(
 
   for (const file of files) {
     try {
-      const content = await execFileWithInput(
+      const result = await execWithInput(
         biome.command,
         [...biome.args, 'format', `--stdin-file-path=${file.path}`],
         file.content?.toString('utf-8') ?? '',
         { cwd: tree.root },
       );
-      tree.write(file.path, content);
+      // Only adopt output from a clean exit; a non-zero or killed process may
+      // have written nothing or partial content.
+      if (result.code === 0) {
+        tree.write(file.path, result.stdout);
+      }
     } catch {
       // Leave individual files that fail to format untouched
     }
@@ -304,11 +347,13 @@ async function getRuffCommand(): Promise<string[] | undefined> {
     ['uvx', 'ruff'],
   ]) {
     try {
-      await execRuff([...argv, '--version'], '');
-      _ruffCommand = argv;
-      return argv;
+      const result = await execRuff([...argv, '--version'], '');
+      if (result.code === 0) {
+        _ruffCommand = argv;
+        return argv;
+      }
     } catch {
-      // Try next command
+      // Try next command (spawn error, e.g. binary not found)
     }
   }
   _ruffCommand = [];
@@ -461,9 +506,12 @@ async function ruffFixAndFormat(
     configArgs.push('--config', `line-length = ${projectConfig.lineLength}`);
   }
 
-  // First apply lint fixes (import sorting, unused imports, etc.)
+  // First apply lint fixes (import sorting, unused imports, etc.). ruff check
+  // exits non-zero when it finds unfixable issues, but stdout still contains the
+  // fixed content, so adopt stdout on any completed run. A killed (timed-out)
+  // process may have written only partial content, so never use its output.
   try {
-    content = await execRuff(
+    const result = await execRuff(
       [
         ...ruff,
         'check',
@@ -476,21 +524,22 @@ async function ruffFixAndFormat(
       ],
       content,
     );
-  } catch (e: any) {
-    // ruff check exits non-zero when it finds unfixable issues, but stdout
-    // still contains the fixed content. A killed (timed-out) process may have
-    // written only part of it, so never use output from a killed process.
-    if (e.stdout && !e.killed) {
-      content = e.stdout;
+    if (!result.timedOut && result.stdout) {
+      content = result.stdout;
     }
+  } catch {
+    // Fall through with whatever content we have (spawn error)
   }
 
-  // Then apply formatting
+  // Then apply formatting. Only adopt output from a clean exit.
   try {
-    content = await execRuff(
+    const result = await execRuff(
       [...ruff, 'format', ...configArgs, '--stdin-filename', filePath, '-'],
       content,
     );
+    if (result.code === 0) {
+      content = result.stdout;
+    }
   } catch {
     // Fall through with whatever content we have
   }
