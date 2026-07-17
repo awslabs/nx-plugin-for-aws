@@ -6,21 +6,21 @@ import {
   joinPathFragments,
   type Tree,
   updateProjectConfiguration,
-} from '@nx/devkit';
-import camelCase from 'lodash.camelcase';
-import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { pascalCase } from '../../../utils/names';
-import { toScopeAlias } from '../../../utils/npm-scope';
+} from "@nx/devkit";
+import camelCase from "lodash.camelcase";
+import { addDestructuredImport, applyGritQL } from "../../../utils/ast";
+import { formatFilesInSubtree } from "../../../utils/format";
+import { addGeneratorMetricsIfApplicable } from "../../../utils/metrics";
+import { pascalCase } from "../../../utils/names";
+import { toScopeAlias } from "../../../utils/npm-scope";
 import {
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { injectRdsCaBundleIntoDockerfile } from '../utils';
-import type { TsRdbMcpServerConnectionGeneratorSchema } from './schema';
+} from "../../../utils/nx";
+import { injectRdsCaBundleIntoDockerfile } from "../utils";
+import type { TsRdbMcpServerConnectionGeneratorSchema } from "./schema";
 
 export const TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -38,18 +38,18 @@ export const tsRdbMcpServerConnectionGenerator = async (
     options.targetProject,
   );
 
-  const mcpServerName = options.sourceComponent?.name ?? 'mcp-server';
+  const mcpServerName = options.sourceComponent?.name ?? "mcp-server";
   const devTarget = `${mcpServerName}-dev`;
 
   if (sourceProject.targets?.[devTarget]) {
     addDependencyToTargetIfNotPresent(sourceProject, devTarget, {
       projects: [targetProject.name],
-      target: 'dev',
+      target: "dev",
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  const rdbBaseName = targetProject.name.split('/').pop();
+  const rdbBaseName = targetProject.name.split("/").pop();
   const rdbNameCamel = camelCase(rdbBaseName);
   const rdbNamePascal = pascalCase(rdbBaseName);
   const rdbPackageAlias = toScopeAlias(targetProject.name);
@@ -57,17 +57,17 @@ export const tsRdbMcpServerConnectionGenerator = async (
 
   const serverPath = joinPathFragments(
     sourceProject.root,
-    'src',
+    "src",
     mcpServerName,
-    'server.ts',
+    "server.ts",
   );
 
   // Dockerfile: install RDS CA bundle for direct Aurora SSL connections
   const dockerfilePath = joinPathFragments(
     sourceProject.root,
-    'src',
+    "src",
     mcpServerName,
-    'Dockerfile',
+    "Dockerfile",
   );
   injectRdsCaBundleIntoDockerfile(tree, dockerfilePath);
 
@@ -93,7 +93,7 @@ export const tsRdbMcpServerConnectionGenerator = async (
     // Done via string replacement because GritQL treats $on as a metavariable.
     const dbDecl = `const ${rdbNameCamel} = await get${rdbNamePascal}();`;
     const onCall = `${rdbNameCamel}.$on('error', console.error);`;
-    const content = tree.read(serverPath, 'utf-8')!;
+    const content = tree.read(serverPath, "utf-8")!;
     if (content.includes(dbDecl) && !content.includes(`${rdbNameCamel}.$on`)) {
       tree.write(serverPath, content.replace(dbDecl, `${dbDecl}\n  ${onCall}`));
     }
