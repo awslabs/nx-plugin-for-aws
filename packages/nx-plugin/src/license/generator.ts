@@ -11,8 +11,8 @@ import { formatFilesInSubtree } from '../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import {
   getGeneratorInfo,
+  mergeTargetDefault,
   type NxGeneratorInfo,
-  readTargetDefaultToMerge,
 } from '../utils/nx';
 import {
   addLicenseCheckToAllLintTargets,
@@ -67,22 +67,19 @@ export async function licenseGenerator(
   }
 
   const nxJson = readNxJson(tree);
-  const lintDefault = readTargetDefaultToMerge(nxJson.targetDefaults, 'lint');
-  const lintTargetDefault = {
-    ...lintDefault,
-    syncGenerators: [
-      ...(lintDefault.syncGenerators ?? []).filter(
-        (g) => g !== SYNC_GENERATOR_NAME,
-      ),
-      SYNC_GENERATOR_NAME,
-    ],
-  };
-
   const updatedNxJson = {
     ...nxJson,
     targetDefaults: {
       ...nxJson.targetDefaults,
-      lint: lintTargetDefault,
+      lint: mergeTargetDefault(nxJson.targetDefaults?.lint, (base) => ({
+        ...base,
+        syncGenerators: [
+          ...(base.syncGenerators ?? []).filter(
+            (g) => g !== SYNC_GENERATOR_NAME,
+          ),
+          SYNC_GENERATOR_NAME,
+        ],
+      })),
     },
   };
 

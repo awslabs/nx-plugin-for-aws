@@ -166,29 +166,32 @@ export const addComponentGeneratorMetadata = (
 };
 
 /**
- * Read an `nx.json` `targetDefaults` entry so a generator can merge its own
- * config onto it (`{ ...readTargetDefaultToMerge(defaults, key), ...ours }`),
- * preserving whatever the workspace already had.
+ * Merge a generator's own config into an `nx.json` `targetDefaults` value,
+ * preserving whatever the workspace already had. `apply` receives the config to
+ * layer onto and returns the merged config (e.g. `(base) => ({ cache: true,
+ * ...base })`); it must be idempotent so re-running the generator is a no-op.
  *
  * Nx 23.1 widened each value to either a config object or an ordered array of
- * filtered entries. The plugin only authors and knows how to merge the object
- * form, so returns `{}` when the key is unset. If the workspace has authored
- * the array (filtered) form, we throw rather than silently discard it — the
- * calling generator would otherwise overwrite the key with a bare object and
- * lose the user's filters. Convert the entry to the object form (or move the
- * plugin's target config into a project's `project.json`) and re-run.
+ * filtered entries. The plugin only contributes unfiltered (catch-all) config,
+ * so the input's shape is preserved: an object (or unset) stays an object;
+ * an array keeps the user's filtered entries and `apply` merges into its first
+ * unfiltered entry, prepending one as the base if none exists (Nx layers later
+ * matches on top, so our catch-all must stay first to not override a filter).
  */
-export const readTargetDefaultToMerge = (
-  targetDefaults: Record<string, TargetDefaultValue> | undefined,
-  key: string,
-): Partial<TargetConfiguration> => {
-  const value = targetDefaults?.[key];
-  if (Array.isArray(value)) {
-    throw new Error(
-      `nx.json targetDefaults.${key} uses the filtered array form, which this generator cannot safely merge into. Convert it to a single config object and re-run.`,
-    );
+export const mergeTargetDefault = (
+  value: TargetDefaultValue | undefined,
+  apply: (base: Partial<TargetConfiguration>) => Partial<TargetConfiguration>,
+): TargetDefaultValue => {
+  if (!Array.isArray(value)) {
+    return apply(value ?? {});
   }
-  return value ?? {};
+  const catchAllIndex = value.findIndex((entry) => entry.filter === undefined);
+  if (catchAllIndex === -1) {
+    return [apply({}), ...value];
+  }
+  return value.map((entry, index) =>
+    index === catchAllIndex ? apply(entry) : entry,
+  );
 };
 
 /**

@@ -9,10 +9,10 @@ import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
+  mergeTargetDefault,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
-  readTargetDefaultToMerge,
 } from './nx';
 import { createTreeUsingTsSolutionSetup } from './test';
 
@@ -647,25 +647,55 @@ describe('addComponentDevTarget', () => {
   });
 });
 
-describe('readTargetDefaultToMerge', () => {
-  it('should return an empty object when the key is unset', () => {
-    expect(readTargetDefaultToMerge({}, 'build')).toEqual({});
-    expect(readTargetDefaultToMerge(undefined, 'build')).toEqual({});
+describe('mergeTargetDefault', () => {
+  const addCache = (base: any) => ({ ...base, cache: true });
+
+  it('should apply to an empty object when the value is unset', () => {
+    expect(mergeTargetDefault(undefined, addCache)).toEqual({ cache: true });
   });
 
-  it('should return the existing config object so a generator can merge onto it', () => {
-    const existing = { cache: true, inputs: ['default'] };
-    expect(readTargetDefaultToMerge({ build: existing }, 'build')).toBe(
-      existing,
-    );
+  it('should merge onto and preserve the object form', () => {
+    expect(mergeTargetDefault({ dependsOn: ['^build'] }, addCache)).toEqual({
+      dependsOn: ['^build'],
+      cache: true,
+    });
   });
 
-  it('should throw rather than silently discard the filtered array form', () => {
-    expect(() =>
-      readTargetDefaultToMerge(
-        { build: [{ cache: true }, { filter: { plugin: '@nx/vite' } }] },
-        'build',
+  it('should merge into the first unfiltered entry of the array form', () => {
+    expect(
+      mergeTargetDefault(
+        [{ dependsOn: ['^build'] }, { filter: { plugin: '@nx/vite' } }],
+        addCache,
       ),
-    ).toThrow(/targetDefaults\.build uses the filtered array form/);
+    ).toEqual([
+      { dependsOn: ['^build'], cache: true },
+      { filter: { plugin: '@nx/vite' } },
+    ]);
+  });
+
+  it('should prepend a catch-all entry when the array has only filtered entries', () => {
+    expect(
+      mergeTargetDefault([{ filter: { plugin: '@nx/vite' } }], addCache),
+    ).toEqual([{ cache: true }, { filter: { plugin: '@nx/vite' } }]);
+  });
+
+  it('should preserve the user filtered entries and their order', () => {
+    const filtered = { filter: { projects: ['tag:app'] }, inputs: ['custom'] };
+    const [, kept] = mergeTargetDefault([{}, filtered], addCache) as any[];
+    expect(kept).toEqual(filtered);
+  });
+
+  it('should be idempotent for the object form', () => {
+    const once = mergeTargetDefault(undefined, addCache);
+    expect(mergeTargetDefault(once, addCache)).toEqual(once);
+  });
+
+  it('should be idempotent for the array form', () => {
+    const seed = [
+      { dependsOn: ['^build'] },
+      { filter: { plugin: '@nx/vite' } },
+    ];
+    const once = mergeTargetDefault(seed, addCache);
+    expect(mergeTargetDefault(once, addCache)).toEqual(once);
   });
 });

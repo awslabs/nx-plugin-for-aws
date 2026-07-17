@@ -9,6 +9,7 @@ import {
   type NxJsonConfiguration,
   OverwriteStrategy,
   readProjectConfiguration,
+  type TargetConfiguration,
   type Tree,
   updateJson,
   updateProjectConfiguration,
@@ -23,9 +24,9 @@ import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
+  mergeTargetDefault,
   type NxGeneratorInfo,
   projectExists,
-  readTargetDefaultToMerge,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
@@ -155,41 +156,25 @@ export const tsProjectGenerator = async (
       ],
     };
 
-    const compileDefault = readTargetDefaultToMerge(
-      nxJson.targetDefaults,
-      'compile',
-    );
-    const buildDefault = readTargetDefaultToMerge(
-      nxJson.targetDefaults,
-      'build',
-    );
-    const testDefault = readTargetDefaultToMerge(nxJson.targetDefaults, 'test');
+    const withDefaultInput = (base: Partial<TargetConfiguration>) => ({
+      ...base,
+      inputs: [
+        ...(base.inputs ?? []).filter((i) => i !== 'default'),
+        'default',
+      ],
+    });
 
     nxJson.targetDefaults = {
       ...nxJson.targetDefaults,
-      compile: {
+      compile: mergeTargetDefault(nxJson.targetDefaults?.compile, (base) => ({
         cache: true,
-        ...compileDefault,
-        inputs: [
-          ...(compileDefault.inputs ?? []).filter((i) => i !== 'default'),
-          'default',
-        ],
-      },
-      build: {
+        ...withDefaultInput(base),
+      })),
+      build: mergeTargetDefault(nxJson.targetDefaults?.build, (base) => ({
         cache: true,
-        ...buildDefault,
-        inputs: [
-          ...(buildDefault.inputs ?? []).filter((i) => i !== 'default'),
-          'default',
-        ],
-      },
-      test: {
-        ...testDefault,
-        inputs: [
-          ...(testDefault.inputs ?? []).filter((i) => i !== 'default'),
-          'default',
-        ],
-      },
+        ...withDefaultInput(base),
+      })),
+      test: mergeTargetDefault(nxJson.targetDefaults?.test, withDefaultInput),
     };
 
     // Ensure we only declare a single typescript plugin with the correct settings
