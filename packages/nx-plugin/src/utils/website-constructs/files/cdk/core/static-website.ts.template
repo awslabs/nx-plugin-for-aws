@@ -24,6 +24,14 @@ import {
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config<% if (esm) { %>.js<% } %>';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
 import { suppressRules } from './checkov<% if (esm) { %>.js<% } %>';
 
@@ -79,36 +87,40 @@ export class StaticWebsite extends Construct {
     { websiteFilePath, websiteName, domainNames, certificate }: StaticWebsiteProps
   ) {
     super(scope, id);
-    this.node.setContext(
-      '@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy',
-      true
-    );
 
     const websiteKey = new Key(this, 'WebsiteKey', {
       enableKeyRotation: true,
     });
 
-    const accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
-      versioned: false,
-      enforceSSL: true,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+    // Allow CloudWatch Logs to use the website key for server access log delivery.
+    const stack = Stack.of(this);
+    websiteKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(`logs.${stack.region}.amazonaws.com`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${stack.region}:${stack.account}:log-group:*`,
+          },
+        },
+      }),
+    );
+
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
       encryptionKey: websiteKey,
-      objectOwnership: ObjectOwnership.OBJECT_WRITER,
-      publicReadAccess: false,
-      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_21'],
-      'Access log bucket does not need versioning enabled',
-    );
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_18'],
-      'Access log bucket does not need an access log bucket',
-    );
 
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
@@ -121,13 +133,23 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'website-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      this.websiteBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch(
+      'Website',
+      this.websiteBucket,
+      accessLogs,
+    );
     // Web ACL
     const wafStack = new CloudfrontWebAcl(this, 'waf');
 
-    // Cloudfront Distribution
+    // Bucket holding CloudFront standard access logs. CloudFront delivers its
+    // own logs to S3 only, so this bucket is retained; its S3 server access
+    // logs are delivered to CloudWatch Logs.
     const logBucket = new Bucket(this, 'DistributionLogBucket', {
       enforceSSL: true,
       autoDeleteObjects: true,
@@ -137,14 +159,18 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'distribution-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
     suppressRules(
       logBucket,
       ['CKV_AWS_21'],
       'Distribution log bucket does not need versioning enabled',
     );
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch('Distribution', logBucket, accessLogs);
 
     // Security headers applied to all responses.
     const responseHeadersPolicy = new ResponseHeadersPolicy(
@@ -264,6 +290,34 @@ export class StaticWebsite extends Construct {
     });
     new CfnOutput(this, `${websiteName}WebsiteBucketName`, {
       value: this.websiteBucket.bucketName,
+    });
+  }
+
+  /**
+   * Delivers a bucket's S3 server access logs to a CloudWatch log group using
+   * CloudWatch Logs vended log delivery.
+   */
+  private deliverAccessLogsToCloudWatch(
+    id: string,
+    bucket: IBucket,
+    logGroup: LogGroup,
+  ) {
+    const source = new CfnDeliverySource(this, `${id}AccessLogsSource`, {
+      name: `${Stack.of(this).stackName}-${id}-access-logs`,
+      logType: 'S3_SERVER_ACCESS_LOGS',
+      resourceArn: bucket.bucketArn,
+    });
+    const destination = new CfnDeliveryDestination(
+      this,
+      `${id}AccessLogsDestination`,
+      {
+        name: `${Stack.of(this).stackName}-${id}-access-logs`,
+        destinationResourceArn: logGroup.logGroupArn,
+      },
+    );
+    new CfnDelivery(this, `${id}AccessLogsDelivery`, {
+      deliverySourceName: source.name,
+      deliveryDestinationArn: destination.attrArn,
     });
   }
 }
