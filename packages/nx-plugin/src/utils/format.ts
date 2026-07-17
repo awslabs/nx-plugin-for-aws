@@ -328,7 +328,41 @@ interface PythonProjectRuffConfig {
   readonly modules: string[];
   /** The project's `[tool.ruff].line-length`, if set. */
   readonly lineLength?: number;
+  /**
+   * The project's ruff `target-version` (eg `py314`), derived from
+   * `[project].requires-python`. On disk ruff infers this from the pyproject,
+   * but during generation it reads content via stdin with no pyproject, so we
+   * pass it explicitly — its formatting differs by target (eg it drops the
+   * parentheses from `except (A, B):` for py314+).
+   */
+  readonly targetVersion?: string;
 }
+
+/**
+ * Derive ruff's `target-version` (eg `py314`) from a PEP 508
+ * `requires-python` specifier (eg `>=3.14`). Ruff targets the minimum
+ * supported version, so take the lowest `major.minor` mentioned.
+ */
+export const requiresPythonToRuffTarget = (
+  requiresPython: unknown,
+): string | undefined => {
+  if (typeof requiresPython !== 'string') {
+    return undefined;
+  }
+  let min: { major: number; minor: number } | undefined;
+  for (const match of requiresPython.matchAll(/(\d+)\.(\d+)/g)) {
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    if (
+      !min ||
+      major < min.major ||
+      (major === min.major && minor < min.minor)
+    ) {
+      min = { major, minor };
+    }
+  }
+  return min ? `py${min.major}${min.minor}` : undefined;
+};
 
 /**
  * Map each Nx project with a `pyproject.toml` to the ruff settings the on-disk
@@ -353,11 +387,15 @@ function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
               .map((pkg) => pkg.split('/')[0])
           : [];
         const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
-        if (modules.length || typeof lineLength === 'number') {
+        const targetVersion = requiresPythonToRuffTarget(
+          pyproject?.project?.['requires-python'],
+        );
+        if (modules.length || typeof lineLength === 'number' || targetVersion) {
           configs.push({
             root: project.root.split(path.sep).join('/'),
             modules,
             lineLength: typeof lineLength === 'number' ? lineLength : undefined,
+            targetVersion,
           });
         }
       } catch {
@@ -429,6 +467,9 @@ function ruffFixAndFormat(
   }
   if (typeof projectConfig?.lineLength === 'number') {
     configArgs.push(`line-length = ${projectConfig.lineLength}`);
+  }
+  if (projectConfig?.targetVersion) {
+    configArgs.push(`target-version = "${projectConfig.targetVersion}"`);
   }
   const config = configArgs
     .map((arg) => ` --config ${JSON.stringify(arg)}`)
