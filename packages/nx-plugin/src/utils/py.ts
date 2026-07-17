@@ -2,23 +2,23 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { parse, stringify } from '@iarna/toml';
-import { joinPathFragments, type Tree } from '@nx/devkit';
-import { parsePipRequirementsLine } from 'pip-requirements-js';
-import { normalizeDistributionName } from './names';
-import type { UVPyprojectToml } from './nxlv-python';
-import { readToml, updateToml } from './toml';
-import { type IPyDepVersion, withPyVersions } from './versions';
+import { parse, stringify } from "@iarna/toml";
+import { joinPathFragments, type Tree } from "@nx/devkit";
+import { parsePipRequirementsLine } from "pip-requirements-js";
+import { normalizeDistributionName } from "./names";
+import type { UVPyprojectToml } from "./nxlv-python";
+import { readToml, updateToml } from "./toml";
+import { type IPyDepVersion, withPyVersions } from "./versions";
 
 // Dedup key that distinguishes bare packages from the same package with
 // extras (e.g. `foo` vs `foo[bar]`), so adding a bare dep doesn't drop a
 // previously-added variant with extras.
 const depKey = (dep: string): string => {
   const parsed = parsePipRequirementsLine(dep);
-  if (parsed?.type !== 'ProjectName') {
+  if (parsed?.type !== "ProjectName") {
     return dep;
   }
-  const extras = [...(parsed.extras ?? [])].sort().join(',');
+  const extras = [...(parsed.extras ?? [])].sort().join(",");
   return extras ? `${parsed.name}[${extras}]` : parsed.name;
 };
 
@@ -51,14 +51,14 @@ export const addDependenciesToPyProjectToml = (
   deps: IPyDepVersion[],
 ) => {
   const projectToml = parse(
-    tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
+    tree.read(joinPathFragments(projectRoot, "pyproject.toml"), "utf8"),
   ) as UVPyprojectToml;
   projectToml.project.dependencies = mergeDeps(
     projectToml.project?.dependencies,
     deps,
   );
   tree.write(
-    joinPathFragments(projectRoot, 'pyproject.toml'),
+    joinPathFragments(projectRoot, "pyproject.toml"),
     stringify(projectToml),
   );
 };
@@ -70,14 +70,14 @@ export const addDependenciesToDependencyGroupInPyProjectToml = (
   deps: IPyDepVersion[],
 ) => {
   const projectToml = parse(
-    tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
+    tree.read(joinPathFragments(projectRoot, "pyproject.toml"), "utf8"),
   ) as UVPyprojectToml;
-  projectToml['dependency-groups'] = {
-    ...projectToml['dependency-groups'],
-    [group]: mergeDeps(projectToml['dependency-groups']?.[group], deps),
+  projectToml["dependency-groups"] = {
+    ...projectToml["dependency-groups"],
+    [group]: mergeDeps(projectToml["dependency-groups"]?.[group], deps),
   };
   tree.write(
-    joinPathFragments(projectRoot, 'pyproject.toml'),
+    joinPathFragments(projectRoot, "pyproject.toml"),
     stringify(projectToml),
   );
 };
@@ -103,11 +103,11 @@ export const uvxCommand = (
       ? `${withDeps
           .map(
             ({ dep, version, specifier }) =>
-              `--with ${dep}${specifier ?? '=='}${version}`,
+              `--with ${dep}${specifier ?? "=="}${version}`,
           )
-          .join(' ')} `
-      : ''
-  }${dep}${args ? ` ${args}` : ''}`;
+          .join(" ")} `
+      : ""
+  }${dep}${args ? ` ${args}` : ""}`;
 };
 
 /**
@@ -125,12 +125,12 @@ const getPyDistributionName = (
   tree: Tree,
   project: { name?: string; root: string },
 ): string => {
-  const pyprojectPath = joinPathFragments(project.root, 'pyproject.toml');
+  const pyprojectPath = joinPathFragments(project.root, "pyproject.toml");
   const projectName = tree.exists(pyprojectPath)
     ? (readToml(tree, pyprojectPath) as unknown as UVPyprojectToml).project
         ?.name
     : undefined;
-  return normalizeDistributionName(projectName ?? project.name ?? '');
+  return normalizeDistributionName(projectName ?? project.name ?? "");
 };
 
 /**
@@ -151,7 +151,7 @@ export const addWorkspaceDependencyToPyProject = (
 ): void => {
   const pyprojectPath = joinPathFragments(
     dependentProject.root,
-    'pyproject.toml',
+    "pyproject.toml",
   );
   if (!tree.exists(pyprojectPath)) {
     return;
