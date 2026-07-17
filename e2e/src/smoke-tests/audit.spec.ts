@@ -137,12 +137,6 @@ describe('smoke test - audit', () => {
         2,
       ),
     );
-    // Resolve against the public registry so the audit reflects what users
-    // install, regardless of any registry mirror configured on the runner.
-    writeFileSync(
-      join(dir, '.npmrc'),
-      'registry=https://registry.npmjs.org/\n',
-    );
 
     execFileSync('pnpm', ['install', '--lockfile-only', '--ignore-scripts'], {
       cwd: dir,
@@ -161,8 +155,9 @@ describe('smoke test - audit', () => {
     mkdirSync(dir, { recursive: true });
 
     // checkov, ty and pip-* are CLI tools run via uvx, not project runtime
-    // dependencies, and are excluded (as in license-check). ag-ui-strands
-    // caps python <3.14 and is resolved via its own project.
+    // dependencies, and are excluded (as in license-check). ag-ui-strands caps
+    // python <3.14, below the vended base image, and is resolved via its own
+    // project.
     const dependencies = Object.entries(PY_VERSIONS)
       .filter(
         ([name]) =>
@@ -179,13 +174,13 @@ describe('smoke test - audit', () => {
         '[project]',
         'name = "vended-py-audit"',
         'version = "0.0.0"',
-        'requires-python = ">=3.13,<3.14"',
+        'requires-python = ">=3.14,<3.15"',
         `dependencies = [${dependencies.join(', ')}]`,
         '',
       ].join('\n'),
     );
 
-    execFileSync('uvx', ['--python', '3.13', '--from', 'uv', 'uv', 'lock'], {
+    execFileSync('uvx', ['--python', '3.14', '--from', 'uv', 'uv', 'lock'], {
       cwd: dir,
       stdio: 'inherit',
     });
