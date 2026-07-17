@@ -1,0 +1,39 @@
+---
+title: Protegendo seu Agente
+---
+
+Os agentes atuam em entradas não confiáveis e podem executar ações reais através de suas ferramentas, por isso vale a pena considerar a segurança desde o início. As práticas a seguir se aplicam ao agente gerado.
+
+### Trate a entrada e saída do modelo como não confiáveis
+
+Os prompts podem conter instruções adversárias (injeção de prompt), e a saída do modelo é não determinística — nenhum dos dois deve ser confiável em lógica sensível à segurança:
+
+- Defina esquemas de entrada estritos para suas ferramentas, como na ferramenta de exemplo gerada. Restrinja os valores ao que a ferramenta realmente precisa (enums, limites de comprimento, intervalos numéricos) em vez de aceitar strings de formato livre.
+- Nunca passe a saída do modelo diretamente para comandos shell, consultas SQL, avaliação de código ou HTML renderizado sem validação ou codificação.
+- Aplique verificações de autorização em suas ferramentas e serviços downstream — não confie no prompt do sistema para impedir que o modelo use indevidamente uma ferramenta à qual tem acesso.
+
+Os guias de [Engenharia de Prompts](https://strandsagents.com/docs/user-guide/safety-security/prompt-engineering/) e [IA Responsável](https://strandsagents.com/docs/user-guide/safety-security/responsible-ai/) do Strands abordam como escrever prompts de sistema robustos e conscientes da segurança.
+
+### Defina permissões de ferramentas de forma restrita
+
+Conceda ao papel IAM do agente apenas as permissões que suas ferramentas precisam. Os construtos CDK e módulos Terraform fornecidos expõem métodos `grant*` e políticas com escopo definido para esse propósito — por exemplo, concedendo a um agente acesso para invocar uma API específica em vez de anexar políticas gerenciadas amplas. Quando uma ferramenta age em nome de um usuário, prefira autorizar a ação usando a identidade do usuário chamador (passada através do contexto da solicitação) em vez das permissões ambientes próprias do agente.
+
+### Forneça um interruptor de emergência
+
+Como o comportamento do modelo pode mudar de maneiras inesperadas, planeje desabilitar ou trocar o modelo rapidamente sem uma alteração de código:
+
+- Leia o ID do modelo da configuração (por exemplo, uma variável de ambiente `MODEL_ID`) para que os operadores possam alternar ou reverter para um modelo diferente atualizando a configuração.
+- Coloque o agente atrás de uma feature flag para que sua funcionalidade de IA possa ser desabilitada completamente. Quando desabilitado, retorne uma mensagem genérica em vez de um erro, e garanta que o resto da sua aplicação degrade graciosamente.
+
+Documente como ativar esses controles em seu manual operacional.
+
+### Proteja dados sensíveis
+
+- Evite registrar prompts e conclusões, que podem conter dados do usuário. O hook de registro de erros do modelo do agente gerado registra apenas metadados de erro, não o conteúdo da conversa — mantenha essa propriedade ao adicionar seu próprio registro.
+- Retorne mensagens de erro genéricas aos usuários; registre erros detalhados no lado do servidor.
+- Isole o estado da conversa entre usuários e sessões, e autorize o acesso a quaisquer dados de sessão persistidos.
+- Remova informações de identificação pessoal (PII) de prompts e saídas — seja com um filtro de informações sensíveis do Bedrock Guardrail (abaixo) ou, para agentes Strands, as abordagens no guia de [PII Redaction](https://strandsagents.com/docs/user-guide/safety-security/pii-redaction/).
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) fornecem filtros de conteúdo configuráveis, tópicos negados e filtros de informações sensíveis (PII) que são avaliados na entrada e saída do modelo. Você pode anexar um guardrail ao modelo usado pelo agente gerado:
