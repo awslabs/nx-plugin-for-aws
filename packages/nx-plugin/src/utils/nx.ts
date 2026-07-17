@@ -6,6 +6,8 @@ import {
   getProjects,
   type ProjectConfiguration,
   readProjectConfiguration,
+  type TargetConfiguration,
+  type TargetDefaultValue,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
@@ -161,6 +163,35 @@ export const addComponentGeneratorMetadata = (
       ...(targets ? { targets } : {}),
     });
   }
+};
+
+/**
+ * Merge a generator's own config into an `nx.json` `targetDefaults` value,
+ * preserving whatever the workspace already had. `apply` receives the config to
+ * layer onto and returns the merged config (e.g. `(base) => ({ cache: true,
+ * ...base })`); it must be idempotent so re-running the generator is a no-op.
+ *
+ * Nx 23.1 widened each value to either a config object or an ordered array of
+ * filtered entries. The plugin only contributes unfiltered (catch-all) config,
+ * so the input's shape is preserved: an object (or unset) stays an object;
+ * an array keeps the user's filtered entries and `apply` merges into its first
+ * unfiltered entry, prepending one as the base if none exists (Nx layers later
+ * matches on top, so our catch-all must stay first to not override a filter).
+ */
+export const mergeTargetDefault = (
+  value: TargetDefaultValue | undefined,
+  apply: (base: Partial<TargetConfiguration>) => Partial<TargetConfiguration>,
+): TargetDefaultValue => {
+  if (!Array.isArray(value)) {
+    return apply(value ?? {});
+  }
+  const catchAllIndex = value.findIndex((entry) => entry.filter === undefined);
+  if (catchAllIndex === -1) {
+    return [apply({}), ...value];
+  }
+  return value.map((entry, index) =>
+    index === catchAllIndex ? apply(entry) : entry,
+  );
 };
 
 /**

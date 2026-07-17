@@ -9,7 +9,11 @@ import { TS_MCP_SERVER_GENERATOR_INFO } from '../ts/mcp-server/generator';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
 import { formatFilesInSubtree } from '../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
+import {
+  getGeneratorInfo,
+  mergeTargetDefault,
+  type NxGeneratorInfo,
+} from '../utils/nx';
 import {
   addLicenseCheckToAllLintTargets,
   defaultLicenseConfig,
@@ -63,21 +67,19 @@ export async function licenseGenerator(
   }
 
   const nxJson = readNxJson(tree);
-  const lintTargetDefault = {
-    ...nxJson.targetDefaults?.lint,
-    syncGenerators: [
-      ...(nxJson.targetDefaults?.lint?.syncGenerators ?? []).filter(
-        (g) => g !== SYNC_GENERATOR_NAME,
-      ),
-      SYNC_GENERATOR_NAME,
-    ],
-  };
-
   const updatedNxJson = {
     ...nxJson,
     targetDefaults: {
       ...nxJson.targetDefaults,
-      lint: lintTargetDefault,
+      lint: mergeTargetDefault(nxJson.targetDefaults?.lint, (base) => ({
+        ...base,
+        syncGenerators: [
+          ...(base.syncGenerators ?? []).filter(
+            (g) => g !== SYNC_GENERATOR_NAME,
+          ),
+          SYNC_GENERATOR_NAME,
+        ],
+      })),
     },
   };
 
