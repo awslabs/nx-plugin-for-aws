@@ -171,6 +171,10 @@ variable "acm_certificate_arn" {
 # connect-src to your specific origins once they are known.
 locals {
   content_security_policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+  # Delivery source/destination names have a 60 character maximum. Truncate the
+  # website name so the longest delivery name stays within the limit.
+  access_logs_name_prefix = substr(lower(var.website_name), 0, 16)
 }
 
 
@@ -327,13 +331,13 @@ resource "aws_s3_bucket_ownership_controls" "website_ownership" {
 
 # Deliver the website bucket's server access logs to CloudWatch Logs.
 resource "aws_cloudwatch_log_delivery_source" "website" {
-  name         = "\${lower(var.website_name)}-website-access-logs-\${random_id.bucket_suffix.hex}"
+  name         = "\${local.access_logs_name_prefix}-website-logs-\${random_id.bucket_suffix.hex}"
   log_type     = "S3_SERVER_ACCESS_LOGS"
   resource_arn = aws_s3_bucket.website.arn
 }
 
 resource "aws_cloudwatch_log_delivery_destination" "access_logs" {
-  name = "\${lower(var.website_name)}-access-logs-\${random_id.bucket_suffix.hex}"
+  name = "\${local.access_logs_name_prefix}-access-logs-\${random_id.bucket_suffix.hex}"
 
   delivery_destination_configuration {
     destination_resource_arn = aws_cloudwatch_log_group.access_logs.arn
@@ -401,7 +405,7 @@ resource "aws_s3_bucket_acl" "distribution_logs_acl" {
 
 # Deliver the distribution log bucket's server access logs to CloudWatch Logs.
 resource "aws_cloudwatch_log_delivery_source" "distribution_logs" {
-  name         = "\${lower(var.website_name)}-distribution-access-logs-\${random_id.bucket_suffix.hex}"
+  name         = "\${local.access_logs_name_prefix}-distribution-logs-\${random_id.bucket_suffix.hex}"
   log_type     = "S3_SERVER_ACCESS_LOGS"
   resource_arn = aws_s3_bucket.distribution_logs.arn
 }
@@ -1554,6 +1558,7 @@ exports[`react-website generator > Tanstack router integration > should generate
   CfnResource,
   Duration,
   Lazy,
+  Names,
   RemovalPolicy,
   Stack,
 } from 'aws-cdk-lib';
@@ -1866,23 +1871,33 @@ export class StaticWebsite extends Construct {
     bucket: IBucket,
     logGroup: LogGroup,
   ) {
-    const source = new CfnDeliverySource(this, \`\${id}AccessLogsSource\`, {
-      name: \`\${Stack.of(this).stackName}-\${id}-access-logs\`,
-      logType: 'S3_SERVER_ACCESS_LOGS',
-      resourceArn: bucket.bucketArn,
-    });
-    const destination = new CfnDeliveryDestination(
+    const source: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      \`\${id}AccessLogsSource\`,
+      {
+        name: Lazy.string({
+          produce: () => Names.uniqueResourceName(source, { maxLength: 60 }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: bucket.bucketArn,
+      },
+    );
+    const destination: CfnDeliveryDestination = new CfnDeliveryDestination(
       this,
       \`\${id}AccessLogsDestination\`,
       {
-        name: \`\${Stack.of(this).stackName}-\${id}-access-logs\`,
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(destination, { maxLength: 60 }),
+        }),
         destinationResourceArn: logGroup.logGroupArn,
       },
     );
-    new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
+    const delivery = new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
       deliverySourceName: source.name,
       deliveryDestinationArn: destination.attrArn,
     });
+    delivery.addDependency(source);
   }
 }
 
@@ -3261,6 +3276,7 @@ exports[`react-website generator > Tanstack router integration > should generate
   CfnResource,
   Duration,
   Lazy,
+  Names,
   RemovalPolicy,
   Stack,
 } from 'aws-cdk-lib';
@@ -3573,23 +3589,33 @@ export class StaticWebsite extends Construct {
     bucket: IBucket,
     logGroup: LogGroup,
   ) {
-    const source = new CfnDeliverySource(this, \`\${id}AccessLogsSource\`, {
-      name: \`\${Stack.of(this).stackName}-\${id}-access-logs\`,
-      logType: 'S3_SERVER_ACCESS_LOGS',
-      resourceArn: bucket.bucketArn,
-    });
-    const destination = new CfnDeliveryDestination(
+    const source: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      \`\${id}AccessLogsSource\`,
+      {
+        name: Lazy.string({
+          produce: () => Names.uniqueResourceName(source, { maxLength: 60 }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: bucket.bucketArn,
+      },
+    );
+    const destination: CfnDeliveryDestination = new CfnDeliveryDestination(
       this,
       \`\${id}AccessLogsDestination\`,
       {
-        name: \`\${Stack.of(this).stackName}-\${id}-access-logs\`,
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(destination, { maxLength: 60 }),
+        }),
         destinationResourceArn: logGroup.logGroupArn,
       },
     );
-    new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
+    const delivery = new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
       deliverySourceName: source.name,
       deliveryDestinationArn: destination.attrArn,
     });
+    delivery.addDependency(source);
   }
 }
 
@@ -4875,6 +4901,7 @@ exports[`react-website generator > should generate shared constructs > common/co
   CfnResource,
   Duration,
   Lazy,
+  Names,
   RemovalPolicy,
   Stack,
 } from 'aws-cdk-lib';
@@ -5187,23 +5214,33 @@ export class StaticWebsite extends Construct {
     bucket: IBucket,
     logGroup: LogGroup,
   ) {
-    const source = new CfnDeliverySource(this, \`\${id}AccessLogsSource\`, {
-      name: \`\${Stack.of(this).stackName}-\${id}-access-logs\`,
-      logType: 'S3_SERVER_ACCESS_LOGS',
-      resourceArn: bucket.bucketArn,
-    });
-    const destination = new CfnDeliveryDestination(
+    const source: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      \`\${id}AccessLogsSource\`,
+      {
+        name: Lazy.string({
+          produce: () => Names.uniqueResourceName(source, { maxLength: 60 }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: bucket.bucketArn,
+      },
+    );
+    const destination: CfnDeliveryDestination = new CfnDeliveryDestination(
       this,
       \`\${id}AccessLogsDestination\`,
       {
-        name: \`\${Stack.of(this).stackName}-\${id}-access-logs\`,
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(destination, { maxLength: 60 }),
+        }),
         destinationResourceArn: logGroup.logGroupArn,
       },
     );
-    new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
+    const delivery = new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
       deliverySourceName: source.name,
       deliveryDestinationArn: destination.attrArn,
     });
+    delivery.addDependency(source);
   }
 }
 

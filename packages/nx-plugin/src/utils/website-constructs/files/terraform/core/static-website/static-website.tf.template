@@ -42,6 +42,10 @@ variable "acm_certificate_arn" {
 # connect-src to your specific origins once they are known.
 locals {
   content_security_policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+  # Delivery source/destination names have a 60 character maximum. Truncate the
+  # website name so the longest delivery name stays within the limit.
+  access_logs_name_prefix = substr(lower(var.website_name), 0, 16)
 }
 
 
@@ -198,13 +202,13 @@ resource "aws_s3_bucket_ownership_controls" "website_ownership" {
 
 # Deliver the website bucket's server access logs to CloudWatch Logs.
 resource "aws_cloudwatch_log_delivery_source" "website" {
-  name         = "${lower(var.website_name)}-website-access-logs-${random_id.bucket_suffix.hex}"
+  name         = "${local.access_logs_name_prefix}-website-logs-${random_id.bucket_suffix.hex}"
   log_type     = "S3_SERVER_ACCESS_LOGS"
   resource_arn = aws_s3_bucket.website.arn
 }
 
 resource "aws_cloudwatch_log_delivery_destination" "access_logs" {
-  name = "${lower(var.website_name)}-access-logs-${random_id.bucket_suffix.hex}"
+  name = "${local.access_logs_name_prefix}-access-logs-${random_id.bucket_suffix.hex}"
 
   delivery_destination_configuration {
     destination_resource_arn = aws_cloudwatch_log_group.access_logs.arn
@@ -272,7 +276,7 @@ resource "aws_s3_bucket_acl" "distribution_logs_acl" {
 
 # Deliver the distribution log bucket's server access logs to CloudWatch Logs.
 resource "aws_cloudwatch_log_delivery_source" "distribution_logs" {
-  name         = "${lower(var.website_name)}-distribution-access-logs-${random_id.bucket_suffix.hex}"
+  name         = "${local.access_logs_name_prefix}-distribution-logs-${random_id.bucket_suffix.hex}"
   log_type     = "S3_SERVER_ACCESS_LOGS"
   resource_arn = aws_s3_bucket.distribution_logs.arn
 }
