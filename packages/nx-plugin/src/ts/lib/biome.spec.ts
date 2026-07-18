@@ -30,7 +30,27 @@ describe('configureBiomeLint', () => {
     expect(targets.lint.inputs).toEqual(['biome']);
   });
 
-  it('should make the lint target a no-op when there is no root biome.json', async () => {
+  it('should configure a biome format target when a root biome.json exists', () => {
+    const { targets } = readProjectConfiguration(tree, '@proj/test');
+    expect(targets.format.executor).toBe('nx:run-commands');
+    // The base format target checks formatting (does not write)
+    expect(targets.format.options.command).toBe('biome format {projectRoot}');
+    expect(targets.format.configurations.fix.command).toBe(
+      'biome format --write {projectRoot}',
+    );
+    // skip-lint must be a cross-platform no-op (`true` is unavailable on Windows)
+    expect(targets.format.configurations['skip-lint'].command).toBe(
+      'node -e ""',
+    );
+    expect(targets.format.inputs).toEqual(['biome']);
+  });
+
+  it('should make the lint target depend on the format target', () => {
+    const { targets } = readProjectConfiguration(tree, '@proj/test');
+    expect(targets.lint.dependsOn).toContain('format');
+  });
+
+  it('should make the lint and format targets no-ops when there is no root biome.json', async () => {
     tree.delete('biome.json');
     await configureBiomeLint(tree, {
       dir: 'test',
@@ -38,5 +58,6 @@ describe('configureBiomeLint', () => {
     });
     const { targets } = readProjectConfiguration(tree, '@proj/test');
     expect(targets.lint).toEqual({ executor: 'nx:noop' });
+    expect(targets.format).toEqual({ executor: 'nx:noop' });
   });
 });

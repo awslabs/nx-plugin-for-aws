@@ -370,7 +370,10 @@ describe('smoke test - cdk-deploy', () => {
         findOutput('PyMcpServerArn'),
         'Python MCP Server',
       );
-      await invokeAgentCoreNoAuthDenied(findOutput('PyAgentArn'), 'Python Agent');
+      await invokeAgentCoreNoAuthDenied(
+        findOutput('PyAgentArn'),
+        'Python Agent',
+      );
       await invokeAgentCoreNoAuthDenied(
         findOutput('TsAgentArn'),
         'TypeScript Agent',

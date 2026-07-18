@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type ProjectConfiguration, type Tree } from '@nx/devkit';
+import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import { addDockerScanTarget } from './docker';
 import { createTreeUsingTsSolutionSetup } from './test';
 import { CONTAINER_VERSIONS } from './versions';
@@ -85,9 +85,8 @@ describe('docker utils', () => {
         imageTags: ['scope-my-agent:latest'],
       });
 
-      const joined = project.targets['my-agent-trivy'].options.commands.join(
-        '\n',
-      );
+      const joined =
+        project.targets['my-agent-trivy'].options.commands.join('\n');
       expect(joined).toContain(
         `public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy}`,
       );
@@ -122,9 +121,8 @@ describe('docker utils', () => {
         imageTags: ['scope-my-agent:latest'],
       });
 
-      const joined = project.targets['my-agent-trivy'].options.commands.join(
-        '\n',
-      );
+      const joined =
+        project.targets['my-agent-trivy'].options.commands.join('\n');
       expect(joined).toContain('finch save');
       expect(joined).toContain('finch run --rm');
       expect(joined).not.toContain('docker save');

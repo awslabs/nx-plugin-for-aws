@@ -13,7 +13,6 @@ import {
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { relative } from 'path';
 import PackageJson from '../../../package.json' with { type: 'json' };
-import { formatFilesInSubtree } from '../../utils/format';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 
 export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -60,8 +59,6 @@ export const tsSyncGeneratorGenerator = async (
   if (Object.keys(changesByConfigFile).length === 0) {
     return {};
   }
-
-  await formatFilesInSubtree(tree);
 
   return {
     outOfSyncMessage: buildOutOfSyncMessage(changesByConfigFile),

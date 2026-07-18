@@ -107,6 +107,9 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/.nx',
       '!**/.venv',
       '!**/*.css',
+      '!**/*.gen.*',
+      '!**/generated/**',
+      '!**/tsconfig*.json',
     ],
   },
 };
@@ -125,6 +128,10 @@ const BIOME_FORMATTABLE_EXTENSIONS = new Set([
   '.css',
 ]);
 
+/** Matches `tsconfig.json` and variants like `tsconfig.lib.json`. */
+const isTsConfig = (filePath: string): boolean =>
+  /(^|\/)tsconfig[^/]*\.json$/.test(filePath);
+
 /**
  * Format files in the given directory within the tree.
  * Handles both TypeScript/JavaScript/JSON (via biome) and Python (via ruff) files.
@@ -140,8 +147,15 @@ export async function formatFilesInSubtree(
     .filter((file) => (dir ? file.path.startsWith(dir) : true));
 
   const pyFiles = changedFiles.filter((file) => file.path.endsWith('.py'));
-  const otherFiles = changedFiles.filter((file) =>
-    BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)),
+  const otherFiles = changedFiles.filter(
+    (file) =>
+      BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)) &&
+      // tsconfigs are not biome-managed: they're excluded from the vended
+      // format target (Nx's typescript-sync rewrites them without formatting),
+      // so formatting them at generation would only diverge from the form
+      // written on later runs. Leave them as updateJson/writeJson emit them so
+      // repeated generation stays idempotent.
+      !isTsConfig(file.path),
   );
 
   // Resolve each project's ruff settings (module names, line-length) so files

@@ -92,7 +92,8 @@ describe('smoke test - mcp-server', () => {
         name: 'add-to-existing-project',
         arguments: {
           packageManager: 'pnpm',
-          errorMessage: 'IaC provider "inherit" requires iac.provider to be set',
+          errorMessage:
+            'IaC provider "inherit" requires iac.provider to be set',
         },
       });
       const existingText = (existingResult.content[0] as { text: string }).text;

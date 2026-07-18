@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { resolveContainers } from '../../utils/containers';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
@@ -12,6 +11,7 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { PY_RDB_GENERATOR_INFO, pyRdbGenerator } from './generator';
 
 vi.mock('../../utils/containers', () => ({
@@ -200,7 +200,9 @@ describe('py#rdb generator', () => {
     expect(projectConfig.targets.trivy).toEqual({
       cache: true,
       inputs: ['default', '^production'],
-      outputs: ['{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest'],
+      outputs: [
+        '{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest',
+      ],
       executor: 'nx:run-commands',
       options: {
         commands: [
