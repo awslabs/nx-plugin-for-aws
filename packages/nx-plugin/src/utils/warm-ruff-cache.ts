@@ -12,18 +12,13 @@ import { execFileSync } from 'child_process';
  * installs ruff; with many parallel workers each racing that lock, generation
  * stalls. Installing ruff once up front means every worker hits a warm cache,
  * where uv only takes shared locks and calls run concurrently without
- * contention. Both command forms the formatter may use are warmed; if uv is
- * unavailable the formatter skips ruff anyway, so failures here are ignored.
+ * contention. If uv is unavailable the formatter skips ruff anyway, so a
+ * failure here is ignored.
  */
 export default function setup() {
-  for (const [command, ...args] of [
-    ['uv', 'run', 'ruff', '--version'],
-    ['uvx', 'ruff', '--version'],
-  ]) {
-    try {
-      execFileSync(command, args, { stdio: 'ignore' });
-    } catch {
-      // Ignore — the formatter falls back or skips ruff when it is unavailable
-    }
+  try {
+    execFileSync('uvx', ['ruff', '--version'], { stdio: 'ignore' });
+  } catch {
+    // Ignore — the formatter skips ruff when it is unavailable
   }
 }

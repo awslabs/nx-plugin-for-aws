@@ -262,36 +262,37 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
 }
 
 /**
- * Find the ruff command. Prefers `uv run ruff` (the project's own ruff), and
- * falls back to `uvx ruff`, which runs ruff from uv's tool cache independent of
- * any project virtual environment — so formatting still works before a project
- * is installed. Both resolve the same latest ruff the generated projects pin
- * (`ruff>=<floor>`), so the output matches the on-disk build.
+ * Find the ruff command. Uses `uvx ruff`, which runs ruff from uv's tool cache
+ * independent of any project virtual environment. This is deliberate: `uv run
+ * ruff` re-resolves the whole uv workspace before running, so during generation
+ * it fails whenever a project has been scaffolded with its install deferred
+ * (`preferInstallDependencies=false`) — its dependencies aren't in the lockfile
+ * or venv yet, resolution errors out, and the file is left unformatted. `uvx`
+ * has no such dependency on workspace state, so it formats reliably at
+ * generation time. It resolves the same latest ruff the generated projects pin
+ * (`ruff>=<floor>`), so the output matches what the on-disk build enforces.
  *
  * Only a successful probe is cached. A failure is not: the plugin's generators
  * share one long-lived process (the Nx daemon), and ruff can become available
- * partway through a run (a project's install populates the venv, or uvx warms
- * its cache), so caching "unavailable" once would leave every later generator
- * silently skipping formatting.
+ * partway through a run (uvx warms its tool cache), so caching "unavailable"
+ * once would leave every later generator silently skipping formatting.
  */
 let _ruffCommand: string | undefined;
 function getRuffCommand(): string | undefined {
   if (_ruffCommand) {
     return _ruffCommand;
   }
-  for (const cmd of ['uv run ruff', 'uvx ruff']) {
-    try {
-      execSync(`${cmd} --version`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      _ruffCommand = cmd;
-      return cmd;
-    } catch {
-      // Try next command
-    }
+  const cmd = 'uvx ruff';
+  try {
+    execSync(`${cmd} --version`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    _ruffCommand = cmd;
+    return cmd;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 /**
