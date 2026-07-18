@@ -263,26 +263,12 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
 }
 
 /**
- * Find the ruff command. Uses `uvx --from ruff==<version> ruff`, which runs ruff
- * from uv's tool cache independent of any project virtual environment. This is
- * deliberate on two counts:
- *
- * - `uvx` (vs `uv run ruff`): `uv run ruff` re-resolves the whole uv workspace
- *   before running, so during generation it fails whenever a project has been
- *   scaffolded with its install deferred (`preferInstallDependencies=false`) —
- *   its dependencies aren't in the lockfile or venv yet, resolution errors out,
- *   and the file is left unformatted. `uvx` has no such dependency on workspace
- *   state, so it formats reliably at generation time.
- * - Pinned version (vs bare `ruff`): the on-disk `format` target checks with the
- *   project's ruff, pinned to the same `ruff==<version>` (see PY_VERSIONS).
- *   Pinning generation to the same version keeps ruff's formatting — which can
- *   change between releases — identical on both sides, so generated files stay
- *   `ruff format --check`-clean regardless of what "latest" resolves to.
- *
- * Only a successful probe is cached. A failure is not: the plugin's generators
- * share one long-lived process (the Nx daemon), and ruff can become available
- * partway through a run (uvx warms its tool cache), so caching "unavailable"
- * once would leave every later generator silently skipping formatting.
+ * Find the ruff command: `uvx --from ruff==<version> ruff`. uvx works
+ * regardless of workspace resolution state (unlike `uv run ruff`, which fails
+ * while installs are deferred), and the version pin matches the project's
+ * `format` target (PY_VERSIONS) so generation and check format identically.
+ * Only a successful probe is cached — ruff can become available mid-run in the
+ * long-lived Nx daemon, so a cached failure would skip formatting thereafter.
  */
 let _ruffCommand: string | undefined;
 function getRuffCommand(): string | undefined {
@@ -345,11 +331,9 @@ interface PythonProjectRuffConfig {
   /** The project's `[tool.ruff].line-length`, if set. */
   readonly lineLength?: number;
   /**
-   * The project's ruff `target-version` (eg `py314`), derived from
-   * `[project].requires-python`. On disk ruff infers this from the pyproject,
-   * but during generation it reads content via stdin with no pyproject, so we
-   * pass it explicitly — its formatting differs by target (eg it drops the
-   * parentheses from `except (A, B):` for py314+).
+   * Ruff `target-version` (eg `py314`) derived from `[project].requires-python`.
+   * Generation formats via stdin with no pyproject, so it must be passed
+   * explicitly — ruff's formatting differs by target.
    */
   readonly targetVersion?: string;
 }

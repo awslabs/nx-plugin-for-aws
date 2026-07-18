@@ -102,10 +102,7 @@ describe('python project generator', () => {
   });
 
   it('pins ruff to an exact version in the root pyproject.toml', async () => {
-    // Generation-time formatting runs `uvx --from ruff==<version>` and the
-    // check-based format target uses this pinned ruff, so both sides agree
-    // regardless of what the unbounded `ruff>=<floor>` @nxlv/python writes would
-    // otherwise resolve to (ruff's formatting can change between releases).
+    // Must match the pinned ruff generation-time formatting runs
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
@@ -299,12 +296,9 @@ describe('python project generator', () => {
       tree.read('apps/test_project/project.json', 'utf-8'),
     );
 
-    // Base format target checks formatting rather than writing (so build/lint
-    // don't silently rewrite source)
     expect(projectConfig.targets.format.options.check).toBe(true);
     expect(projectConfig.targets.format.cache).toBe(true);
 
-    // fix writes the changes, skip-lint writes without failing
     expect(projectConfig.targets.format.configurations.fix).toEqual({
       check: false,
     });

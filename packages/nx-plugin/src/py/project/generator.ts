@@ -275,22 +275,16 @@ export const pyProjectGenerator = async (
     },
   );
 
-  // Pin ruff to the exact version generation-time formatting runs (via
-  // `uvx --from ruff==<version>`; see PY_VERSIONS and getRuffCommand). ruff's
-  // formatting can change between releases, so pinning both sides keeps
-  // generated files `ruff format --check`-clean regardless of what the
-  // unbounded `ruff>=<floor>` that @nxlv/python writes would otherwise resolve.
+  // Pin ruff to the version generation-time formatting uses (PY_VERSIONS), so
+  // generated files stay `ruff format --check`-clean across ruff releases.
   addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', [
     'ruff',
     'ty',
   ]);
 
-  // The format target defaults to writing files (@nxlv/python:ruff-format has
-  // `check: false`), which would silently rewrite source when it runs as part
-  // of build/lint. Make the base target check formatting instead (failing when
-  // files aren't formatted) and expose configurations mirroring lint: `fix`
-  // writes the changes and `skip-lint` writes without failing so it stays a
-  // no-op escape hatch when propagated through the lint -> format dependency.
+  // Base format target checks rather than writes (so build/lint don't rewrite
+  // source); `fix` writes, and `skip-lint` writes without failing so it stays
+  // a no-op when propagated through the lint -> format dependency.
   projectConfiguration.targets.format = {
     ...projectConfiguration.targets.format,
     cache: true,

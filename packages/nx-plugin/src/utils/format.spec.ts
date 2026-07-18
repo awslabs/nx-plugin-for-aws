@@ -289,10 +289,7 @@ describe('format utils', () => {
       );
     });
     it("should apply the owning project's target-version so output matches the on-disk build", async () => {
-      // The project's requires-python lives only in the tree during generation.
-      // On disk ruff infers target-version from it and drops the parentheses
-      // from a multi-exception `except` for py314+; without passing it, ruff
-      // keeps them and produces output the on-disk build reformats.
+      // For py314+ ruff drops the parentheses from a multi-exception `except`
       addFirstPartyPythonProject('my_lib', 'my_lib', undefined, '>=3.14');
       tree.write(
         'packages/my_lib/my_lib/main.py',
