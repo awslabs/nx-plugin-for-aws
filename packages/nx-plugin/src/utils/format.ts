@@ -5,59 +5,13 @@
 
 import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
-import { execFile, execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
-import { promisify } from 'util';
 import { readToml } from './toml';
 
 const require = createRequire(import.meta.url);
-const execFileAsync = promisify(execFile);
-
-/** Hard ceiling on any formatter subprocess so a hung tool cannot stall generation. */
-const EXEC_TIMEOUT_MS = 60_000;
-/** Seconds uv waits for its global cache lock before giving up on a ruff call. */
-const UV_LOCK_TIMEOUT_SECONDS = 20;
-
-/**
- * uv serialises cache writes behind a global lock (`<uv cache>/.lock`) and by
- * default waits minutes for it. Cap the wait so contention with other uv
- * processes (e.g. parallel generator runs installing ruff) fails fast instead
- * of stalling generation, honouring any user override.
- */
-const uvEnv = (): NodeJS.ProcessEnv => ({
-  ...process.env,
-  UV_LOCK_TIMEOUT:
-    process.env.UV_LOCK_TIMEOUT ?? String(UV_LOCK_TIMEOUT_SECONDS),
-});
-
-/**
- * Run a command asynchronously with content piped to stdin, capturing stdout.
- * Async execution keeps the event loop free (so callers' timeouts can fire)
- * and the timeout kills processes that hang.
- */
-function execFileWithInput(
-  command: string,
-  args: string[],
-  input: string,
-  opts?: { env?: NodeJS.ProcessEnv; cwd?: string },
-): Promise<string> {
-  const promise = execFileAsync(command, args, {
-    encoding: 'utf-8',
-    timeout: EXEC_TIMEOUT_MS,
-    ...opts,
-  });
-  // Swallow EPIPE if the process exits before consuming its stdin
-  promise.child.stdin?.on('error', () => {});
-  promise.child.stdin?.end(input);
-  return promise.then(({ stdout }) => stdout);
-}
-
-/** Run ruff with the capped uv lock timeout applied. */
-function execRuff(argv: string[], input: string): Promise<string> {
-  return execFileWithInput(argv[0], argv.slice(1), input, { env: uvEnv() });
-}
 
 export const DEFAULT_BIOME_CONFIG = {
   $schema: 'https://biomejs.dev/schemas/2.4.16/schema.json',
@@ -167,7 +121,7 @@ export async function formatFilesInSubtree(
   // Format Python files with ruff (lint fixes + formatting)
   for (const file of pyFiles) {
     try {
-      const content = await ruffFixAndFormat(
+      const content = ruffFixAndFormat(
         file.content.toString('utf-8'),
         file.path,
         hasRuffConfigOnDisk(tree, file.path),
@@ -185,7 +139,7 @@ export async function formatFilesInSubtree(
   // exists on disk; otherwise format via the bundled library API with the
   // in-memory tree config. The CLI path does not see in-tree config changes.
   if (existsSync(path.join(tree.root, 'biome.json'))) {
-    await formatWithBiomeCli(tree, otherFiles);
+    formatWithBiomeCli(tree, otherFiles);
   } else {
     formatWithBiomeApi(tree, otherFiles);
   }
@@ -195,10 +149,10 @@ export async function formatFilesInSubtree(
  * Format files via the workspace's Biome CLI, run from the workspace root so it
  * discovers the on-disk biome.json.
  */
-async function formatWithBiomeCli(
+function formatWithBiomeCli(
   tree: Tree,
   files: { path: string; content: Buffer | null }[],
-): Promise<void> {
+): void {
   const biome = getBiomeCommand(tree.root);
   if (!biome) {
     // Fall back to the library API if the CLI cannot be resolved
@@ -208,11 +162,15 @@ async function formatWithBiomeCli(
 
   for (const file of files) {
     try {
-      const content = await execFileWithInput(
+      const content = execFileSync(
         biome.command,
         [...biome.args, 'format', `--stdin-file-path=${file.path}`],
-        file.content?.toString('utf-8') ?? '',
-        { cwd: tree.root },
+        {
+          input: file.content?.toString('utf-8') ?? '',
+          encoding: 'utf-8',
+          cwd: tree.root,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
       );
       tree.write(file.path, content);
     } catch {
@@ -290,10 +248,9 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
   }
 
   try {
-    execFileSync('biome', ['--version'], {
+    execSync('biome --version', {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: EXEC_TIMEOUT_MS,
     });
     const command = { command: 'biome', args: [] };
     _biomeCommands.set(root, command);
@@ -308,24 +265,24 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
  * Find the ruff command. Tries 'uv run ruff', then 'uvx ruff'.
  * Matches how @nxlv/python runs ruff via the UV provider.
  */
-let _ruffCommand: string[] | undefined;
-async function getRuffCommand(): Promise<string[] | undefined> {
+let _ruffCommand: string | undefined;
+function getRuffCommand(): string | undefined {
   if (_ruffCommand !== undefined) {
-    return _ruffCommand.length ? _ruffCommand : undefined;
+    return _ruffCommand || undefined;
   }
-  for (const argv of [
-    ['uv', 'run', 'ruff'],
-    ['uvx', 'ruff'],
-  ]) {
+  for (const cmd of ['uv run ruff', 'uvx ruff']) {
     try {
-      await execRuff([...argv, '--version'], '');
-      _ruffCommand = argv;
-      return argv;
+      execSync(`${cmd} --version`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      _ruffCommand = cmd;
+      return cmd;
     } catch {
       // Try next command
     }
   }
-  _ruffCommand = [];
+  _ruffCommand = '';
   return undefined;
 }
 
@@ -454,56 +411,53 @@ function getOwningProjectRuffConfig(
  * generated config raises it above ruff's default of 88). These are additive to
  * any on-disk config, so they are safe to pass regardless of `hasConfig`.
  */
-async function ruffFixAndFormat(
+function ruffFixAndFormat(
   content: string,
   filePath: string,
   hasConfig: boolean,
   projectConfig?: PythonProjectRuffConfig,
-): Promise<string> {
-  const ruff = await getRuffCommand();
+): string {
+  const ruff = getRuffCommand();
   if (!ruff) return content;
 
-  const extendSelect = hasConfig ? [] : ['--extend-select', 'I'];
+  const extendSelect = hasConfig ? '' : ' --extend-select I';
   const configArgs: string[] = [];
   if (projectConfig?.modules.length) {
     configArgs.push(
-      '--config',
       `lint.isort.known-first-party = ${JSON.stringify(projectConfig.modules)}`,
     );
   }
   if (typeof projectConfig?.lineLength === 'number') {
-    configArgs.push('--config', `line-length = ${projectConfig.lineLength}`);
+    configArgs.push(`line-length = ${projectConfig.lineLength}`);
   }
+  const config = configArgs
+    .map((arg) => ` --config ${JSON.stringify(arg)}`)
+    .join('');
 
   // First apply lint fixes (import sorting, unused imports, etc.)
   try {
-    content = await execRuff(
-      [
-        ...ruff,
-        'check',
-        '--fix',
-        ...extendSelect,
-        ...configArgs,
-        '--stdin-filename',
-        filePath,
-        '-',
-      ],
-      content,
+    const result = execSync(
+      `${ruff} check --fix${extendSelect}${config} --stdin-filename ${filePath} -`,
+      { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
+    content = result;
   } catch (e: any) {
-    // ruff check exits non-zero when it finds unfixable issues, but stdout
-    // still contains the fixed content. A killed (timed-out) process may have
-    // written only part of it, so never use output from a killed process.
-    if (e.stdout && !e.killed) {
+    // ruff check exits non-zero when it finds unfixable issues,
+    // but stdout still contains the fixed content
+    if (e.stdout) {
       content = e.stdout;
     }
   }
 
   // Then apply formatting
   try {
-    content = await execRuff(
-      [...ruff, 'format', ...configArgs, '--stdin-filename', filePath, '-'],
-      content,
+    content = execSync(
+      `${ruff} format${config} --stdin-filename ${filePath} -`,
+      {
+        input: content,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
     );
   } catch {
     // Fall through with whatever content we have
