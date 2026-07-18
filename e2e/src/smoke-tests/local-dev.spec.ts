@@ -582,7 +582,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       // Add the browser-driven integration-test page to the website. It uses
       // the website's vended hooks to invoke every connected API and agent, so
       // it must be written before the build so its imports resolve.
-      writeIntegrationTestPage(
+      await writeIntegrationTestPage(
         `${projectRoot}/packages/website`,
         WEBSITE_APIS,
         WEBSITE_AGENTS,

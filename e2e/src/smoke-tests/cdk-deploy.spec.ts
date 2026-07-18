@@ -129,7 +129,7 @@ describe('smoke test - cdk-deploy', () => {
       // Add the browser-driven integration-test page to the website before the
       // build so it is bundled into the deployed site.
       async (projectRoot) => {
-        writeIntegrationTestPage(
+        await writeIntegrationTestPage(
           `${projectRoot}/packages/website`,
           WEBSITE_APIS,
           WEBSITE_AGENTS,
