@@ -104,7 +104,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
         // application variant deploys the website.
         config.variant === 'terraform-deploy'
           ? async (projectRoot) => {
-              writeIntegrationTestPage(
+              await writeIntegrationTestPage(
                 `${projectRoot}/packages/website`,
                 WEBSITE_APIS,
                 WEBSITE_AGENTS,
