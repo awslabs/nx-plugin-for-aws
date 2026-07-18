@@ -591,10 +591,13 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       // Ensure the Playwright browser is available for the integration test.
       await installChromium();
 
-      // Lint fix + build
+      // Lint fix + build. Use `--configuration=fix` (the vended convenience
+      // script's flag) rather than the `--fix` passthrough: the fix
+      // configuration propagates through the lint -> format dependency so the
+      // format target writes its changes too, matching how users run it.
       await runCLI(`sync --verbose`, opts);
       await runCLI(
-        `run-many --target lint --all --fix --output-style=stream`,
+        `run-many --target lint --all --configuration=fix --output-style=stream`,
         opts,
       );
       await runCLI(
