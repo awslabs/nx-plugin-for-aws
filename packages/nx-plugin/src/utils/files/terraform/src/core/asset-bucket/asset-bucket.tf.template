@@ -34,6 +34,12 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Delivery source/destination names have a 60 character maximum. Truncate the
+  # bucket name prefix so the delivery names stay within the limit.
+  access_logs_name_prefix = substr(var.bucket_name_prefix, 0, 16)
+}
+
 # KMS key encrypting the server access logs delivered to CloudWatch Logs.
 resource "aws_kms_key" "access_logs" {
   description             = "KMS key for ${var.bucket_name_prefix} asset bucket access logs"
@@ -124,13 +130,13 @@ resource "aws_s3_bucket_public_access_block" "assets" {
 
 # Deliver the asset bucket's server access logs to CloudWatch Logs.
 resource "aws_cloudwatch_log_delivery_source" "assets" {
-  name         = "${var.bucket_name_prefix}-access-logs-source-${random_string.suffix.result}"
+  name         = "${local.access_logs_name_prefix}-access-logs-source-${random_string.suffix.result}"
   log_type     = "S3_SERVER_ACCESS_LOGS"
   resource_arn = aws_s3_bucket.assets.arn
 }
 
 resource "aws_cloudwatch_log_delivery_destination" "assets" {
-  name = "${var.bucket_name_prefix}-access-logs-dest-${random_string.suffix.result}"
+  name = "${local.access_logs_name_prefix}-access-logs-dest-${random_string.suffix.result}"
 
   delivery_destination_configuration {
     destination_resource_arn = aws_cloudwatch_log_group.access_logs.arn
