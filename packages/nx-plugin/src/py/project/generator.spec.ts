@@ -101,6 +101,24 @@ describe('python project generator', () => {
     );
   });
 
+  it('pins ruff to an exact version in the root pyproject.toml', async () => {
+    // Generation-time formatting runs `uvx --from ruff==<version>` and the
+    // check-based format target uses this pinned ruff, so both sides agree
+    // regardless of what the unbounded `ruff>=<floor>` @nxlv/python writes would
+    // otherwise resolve to (ruff's formatting can change between releases).
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const rootPyproject = parse(tree.read('pyproject.toml', 'utf-8'));
+
+    expect((rootPyproject as any)['dependency-groups']?.dev).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^ruff==/)]),
+    );
+  });
+
   it('should configure python dependencies correctly', async () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',

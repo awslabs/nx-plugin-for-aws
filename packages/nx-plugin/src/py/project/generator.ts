@@ -275,7 +275,15 @@ export const pyProjectGenerator = async (
     },
   );
 
-  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', ['ty']);
+  // Pin ruff to the exact version generation-time formatting runs (via
+  // `uvx --from ruff==<version>`; see PY_VERSIONS and getRuffCommand). ruff's
+  // formatting can change between releases, so pinning both sides keeps
+  // generated files `ruff format --check`-clean regardless of what the
+  // unbounded `ruff>=<floor>` that @nxlv/python writes would otherwise resolve.
+  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', [
+    'ruff',
+    'ty',
+  ]);
 
   // The format target defaults to writing files (@nxlv/python:ruff-format has
   // `check: false`), which would silently rewrite source when it runs as part

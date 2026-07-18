@@ -9,6 +9,7 @@ import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
+import { uvxCommand } from './py';
 import { readToml } from './toml';
 
 const require = createRequire(import.meta.url);
@@ -262,15 +263,21 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
 }
 
 /**
- * Find the ruff command. Uses `uvx ruff`, which runs ruff from uv's tool cache
- * independent of any project virtual environment. This is deliberate: `uv run
- * ruff` re-resolves the whole uv workspace before running, so during generation
- * it fails whenever a project has been scaffolded with its install deferred
- * (`preferInstallDependencies=false`) — its dependencies aren't in the lockfile
- * or venv yet, resolution errors out, and the file is left unformatted. `uvx`
- * has no such dependency on workspace state, so it formats reliably at
- * generation time. It resolves the same latest ruff the generated projects pin
- * (`ruff>=<floor>`), so the output matches what the on-disk build enforces.
+ * Find the ruff command. Uses `uvx --from ruff==<version> ruff`, which runs ruff
+ * from uv's tool cache independent of any project virtual environment. This is
+ * deliberate on two counts:
+ *
+ * - `uvx` (vs `uv run ruff`): `uv run ruff` re-resolves the whole uv workspace
+ *   before running, so during generation it fails whenever a project has been
+ *   scaffolded with its install deferred (`preferInstallDependencies=false`) —
+ *   its dependencies aren't in the lockfile or venv yet, resolution errors out,
+ *   and the file is left unformatted. `uvx` has no such dependency on workspace
+ *   state, so it formats reliably at generation time.
+ * - Pinned version (vs bare `ruff`): the on-disk `format` target checks with the
+ *   project's ruff, pinned to the same `ruff==<version>` (see PY_VERSIONS).
+ *   Pinning generation to the same version keeps ruff's formatting — which can
+ *   change between releases — identical on both sides, so generated files stay
+ *   `ruff format --check`-clean regardless of what "latest" resolves to.
  *
  * Only a successful probe is cached. A failure is not: the plugin's generators
  * share one long-lived process (the Nx daemon), and ruff can become available
@@ -282,7 +289,7 @@ function getRuffCommand(): string | undefined {
   if (_ruffCommand) {
     return _ruffCommand;
   }
-  const cmd = 'uvx ruff';
+  const cmd = uvxCommand('ruff');
   try {
     execSync(`${cmd} --version`, {
       encoding: 'utf-8',
