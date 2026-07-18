@@ -262,13 +262,22 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
 }
 
 /**
- * Find the ruff command. Tries 'uv run ruff', then 'uvx ruff'.
- * Matches how @nxlv/python runs ruff via the UV provider.
+ * Find the ruff command. Prefers `uv run ruff` (the project's own ruff), and
+ * falls back to `uvx ruff`, which runs ruff from uv's tool cache independent of
+ * any project virtual environment — so formatting still works before a project
+ * is installed. Both resolve the same latest ruff the generated projects pin
+ * (`ruff>=<floor>`), so the output matches the on-disk build.
+ *
+ * Only a successful probe is cached. A failure is not: the plugin's generators
+ * share one long-lived process (the Nx daemon), and ruff can become available
+ * partway through a run (a project's install populates the venv, or uvx warms
+ * its cache), so caching "unavailable" once would leave every later generator
+ * silently skipping formatting.
  */
 let _ruffCommand: string | undefined;
 function getRuffCommand(): string | undefined {
-  if (_ruffCommand !== undefined) {
-    return _ruffCommand || undefined;
+  if (_ruffCommand) {
+    return _ruffCommand;
   }
   for (const cmd of ['uv run ruff', 'uvx ruff']) {
     try {
@@ -282,7 +291,6 @@ function getRuffCommand(): string | undefined {
       // Try next command
     }
   }
-  _ruffCommand = '';
   return undefined;
 }
 

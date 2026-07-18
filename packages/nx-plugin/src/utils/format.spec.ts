@@ -8,10 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  formatFilesInSubtree,
-  requiresPythonToRuffTarget,
-} from './format';
+import { formatFilesInSubtree, requiresPythonToRuffTarget } from './format';
 import { createTreeUsingTsSolutionSetup } from './test';
 
 describe('requiresPythonToRuffTarget', () => {
