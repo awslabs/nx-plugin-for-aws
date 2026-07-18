@@ -109,6 +109,7 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/*.css',
       '!**/*.gen.*',
       '!**/generated/**',
+      '!**/tsconfig*.json',
     ],
   },
 };
