@@ -51,22 +51,6 @@ const allResolvable = (root: string, packages: string[]): boolean =>
   packages.every((pkg) => existsSync(join(root, 'node_modules', pkg)));
 
 /**
- * Whether ruff is installed in the workspace's uv virtual environment.
- *
- * Python generators format their output with ruff during generation, and the
- * check-based `format` target then verifies it. ruff lives in the shared
- * `.venv`, which only exists once a `uv sync` has run — so a deferred install
- * (the first Python project scaffolded with `preferInstallDependencies=false`)
- * would leave ruff absent and generated files unformatted. Detecting it here
- * lets the install run anyway, matching how a missing graph dep forces a
- * TypeScript install.
- */
-const ruffAvailable = (root: string): boolean =>
-  ['.venv/bin/ruff', '.venv/Scripts/ruff.exe'].some((p) =>
-    existsSync(join(root, p)),
-  );
-
-/**
  * Installs dependencies for the given languages.
  *
  * Call from a generator's returned callback:
@@ -87,13 +71,9 @@ export const installDependencies = async (
     ...ensureResolvable,
     ...languages.flatMap((language) => LANGUAGE_GRAPH_DEPS[language]),
   ];
-  // A deferred install is honoured only when everything the next `nx` command
-  // (and generation-time formatting) needs already resolves: the graph deps,
-  // plus ruff in the venv for Python so generated files can be formatted.
   if (
     preferInstallDependencies === false &&
-    allResolvable(tree.root, mustResolve) &&
-    (!languages.includes('python') || ruffAvailable(tree.root))
+    allResolvable(tree.root, mustResolve)
   ) {
     return;
   }
