@@ -30,7 +30,10 @@ vi.mock('./nxlv-python', () => ({
  * Creates a real on-disk workspace directory (the resolvability check reads the
  * filesystem) and returns a minimal tree-like object pointing at it.
  */
-const createWorkspace = (installedPackages: string[] = []) => {
+const createWorkspace = (
+  installedPackages: string[] = [],
+  { ruffInVenv = false }: { ruffInVenv?: boolean } = {},
+) => {
   const root = mkdtempSync(join(tmpdir(), 'install-spec-'));
   for (const pkg of installedPackages) {
     const dir = join(root, 'node_modules', pkg);
@@ -40,13 +43,21 @@ const createWorkspace = (installedPackages: string[] = []) => {
       JSON.stringify({ name: pkg, version: '1.0.0' }),
     );
   }
+  if (ruffInVenv) {
+    const binDir = join(root, '.venv', 'bin');
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(binDir, 'ruff'), '');
+  }
   return { root } as devkit.Tree;
 };
 
 describe('installDependencies', () => {
   const cleanups: string[] = [];
-  const workspace = (installedPackages: string[] = []) => {
-    const tree = createWorkspace(installedPackages);
+  const workspace = (
+    installedPackages: string[] = [],
+    opts: { ruffInVenv?: boolean } = {},
+  ) => {
+    const tree = createWorkspace(installedPackages, opts);
     cleanups.push(tree.root);
     return tree;
   };
@@ -104,6 +115,25 @@ describe('installDependencies', () => {
     // exist in any ancestor node_modules so the assertion is deterministic.
     await installDependencies(workspace(), false, { languages: ['python'] });
     expect(install).toHaveBeenCalledOnce();
+  });
+
+  it('installs despite the defer preference when ruff is not yet in the venv', async () => {
+    // The graph dep resolves, but ruff (needed for generation-time formatting)
+    // isn't in the venv, so the install must run — this is what makes the first
+    // deferred Python project format its generated files.
+    await installDependencies(workspace(['@nxlv/python']), false, {
+      languages: ['python'],
+    });
+    expect(install).toHaveBeenCalledOnce();
+  });
+
+  it('defers for python when the graph dep and venv ruff are both present', async () => {
+    await installDependencies(
+      workspace(['@nxlv/python'], { ruffInVenv: true }),
+      false,
+      { languages: ['python'] },
+    );
+    expect(install).not.toHaveBeenCalled();
   });
 
   it('installs despite the defer preference when an extra ensureResolvable package is missing', async () => {
