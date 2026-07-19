@@ -275,7 +275,34 @@ export const pyProjectGenerator = async (
     },
   );
 
-  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', ['ty']);
+  // Pin ruff to the version generation-time formatting uses (PY_VERSIONS), so
+  // generated files stay `ruff format --check`-clean across ruff releases.
+  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', [
+    'ruff',
+    'ty',
+  ]);
+
+  // Base format target checks rather than writes (so build/lint don't rewrite
+  // source); `fix` writes, and `skip-lint` writes without failing so it stays
+  // a no-op when propagated through the lint -> format dependency.
+  projectConfiguration.targets.format = {
+    ...projectConfiguration.targets.format,
+    cache: true,
+    inputs: ['default', '^production'],
+    options: {
+      ...projectConfiguration.targets.format?.options,
+      check: true,
+    },
+    configurations: {
+      ...projectConfiguration.targets.format?.configurations,
+      fix: {
+        check: false,
+      },
+      'skip-lint': {
+        check: false,
+      },
+    },
+  };
 
   // Add a dependency on the format target for lint in order to reduce the number of
   // fixable lint errors (eg line too long)
