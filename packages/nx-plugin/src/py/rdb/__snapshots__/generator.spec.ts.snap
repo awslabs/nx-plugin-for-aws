@@ -1813,7 +1813,11 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    * Whether to export Aurora engine logs to CloudWatch Logs.
    * See https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html
    *
-   * @default false
+   * PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables
+   * Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL).
+   * Neither logs statement parameter values, to avoid leaking PII into log data.
+   *
+   * @default true
    */
   readonly enableCloudwatchLogs?: boolean;
 
@@ -1850,7 +1854,7 @@ export abstract class AuroraDatabase extends Construct {
       deletionProtection = true,
       removalPolicy = RemovalPolicy.RETAIN,
       enableKeyRotation = true,
-      enableCloudwatchLogs = false,
+      enableCloudwatchLogs = true,
       enablePerformanceInsights = true,
       engine,
       engineVersion,
@@ -1882,8 +1886,19 @@ export abstract class AuroraDatabase extends Construct {
       monitoringInterval: Duration.seconds(5),
       cloudwatchLogsExports: enableCloudwatchLogs
         ? engine.type === 'mysql'
-          ? ['audit', 'error', 'general', 'slowquery']
+          ? ['audit', 'error']
           : ['postgresql']
+        : undefined,
+      parameters: enableCloudwatchLogs
+        ? engine.type === 'mysql'
+          ? {
+              server_audit_logging: '1',
+              server_audit_events: 'CONNECT,QUERY_DDL',
+            }
+          : // Only safe statement-at-a-time; a multi-statement batch mixing
+            // DDL with DML (e.g. one \`psql -c "a;b;c"\` call) logs the whole
+            // raw text verbatim, including any literal DML values.
+            { log_statement: 'ddl' }
         : undefined,
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
