@@ -424,16 +424,17 @@ describe('ts-lambda-function generator', () => {
     expect(tree.exists(constructPath)).toBeTruthy();
   });
 
-  it.each(
-    Object.keys(TS_HANDLER_RETURN_TYPES),
-  )('should generate a lambda function which compiles with event %s', async (event: EventSource) => {
-    await tsLambdaFunctionGenerator(tree, {
-      ...options,
-      event,
-    });
+  it.each(Object.keys(TS_HANDLER_RETURN_TYPES))(
+    'should generate a lambda function which compiles with event %s',
+    async (event: EventSource) => {
+      await tsLambdaFunctionGenerator(tree, {
+        ...options,
+        event,
+      });
 
-    validateTypeScript(['packages/test-project/src/test-function.ts']);
-  });
+      validateTypeScript(['packages/test-project/src/test-function.ts']);
+    },
+  );
 
   describe('terraform iac', () => {
     it('should generate terraform files for lambda function and snapshot them', async () => {
