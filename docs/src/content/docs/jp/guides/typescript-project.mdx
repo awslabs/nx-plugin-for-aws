@@ -33,6 +33,7 @@ TypeScriptプロジェクトジェネレータは、[ECMAScript Modules (ESM)](h
 
   - src TypeScriptソースコード
     - index.ts
+  - package.json プロジェクトのパッケージ名を定義する最小限のプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - tsconfig.json このプロジェクトの基本TypeScript設定（ワークスペースルートのtsconfig.base.jsonを継承）
   - tsconfig.lib.json ライブラリ用TypeScript設定（ランタイムまたはパッケージ化ソース用）
@@ -41,8 +42,8 @@ TypeScriptプロジェクトジェネレータは、[ECMAScript Modules (ESM)](h
 
 </FileTree>
 
-:::tip[package.json不要]
-`package.json`ファイルが作成されていないことに注意してください！理由は[後述](#dependencies)をご覧ください。
+:::tip[プロジェクトのpackage.json]
+プロジェクトの`package.json`は最小限の状態で開始されます。ランタイム依存関係を追加すると、ここで宣言されます（共有ビルド/テストツールはワークスペースルートに残ります）— 詳細は[後述](#dependencies)をご覧ください。
 :::
 
 ワークスペースルートの以下のファイルにも変更が加えられます:
@@ -136,13 +137,27 @@ No, run the tasks without syncing the changes
 
 ### 依存関係
 
-TypeScriptプロジェクトに`package.json`ファイルが存在しないことに気付くかもしれません。これは従来のTypeScriptモノレポに慣れている場合、予期しないことでしょう。
+各TypeScriptプロジェクトは、**ソースコードがインポートするサードパーティのランタイム依存関係**を独自の`package.json`で宣言します。これにより、すべてのプロジェクトが自己記述的になり（マニフェストに必要なものが正確にリストされる）、Biomeの[`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/)リントルールがプロジェクトが宣言していないパッケージをインポートしないことを強制できます。
 
-モノレポ内のTypeScriptパッケージの依存関係を追加するには、ワークスペースルートの`package.json`に依存関係を追加します。パッケージマネージャのコマンドラインから追加できます:
+**ビルドおよびテストツール**（例：`vitest`、`tsx`、`rolldown`、`@nx/*`、`typescript`、`@biomejs/biome`）はワークスペース全体で共有されるため、各プロジェクトではなく**ルート**の`package.json`の`devDependencies`に配置されます。これらのツールは設定ファイル、ビルドスクリプト、テストからのみ参照され、リントルールはこれらを除外します。
 
-<InstallCommand pkg="some-npm-package" />
+プロジェクトにランタイム依存関係を追加するには、そのプロジェクトの`package.json`に追加します。パッケージマネージャのフィルター/ワークスペースフラグを使用して適切なプロジェクトをターゲットにします。例えばpnpmの場合:
 
-これにより、ワークスペース内のすべてのTypeScriptプロジェクトで依存関係を使用できるようになります。
+```bash
+pnpm add some-npm-package --filter @my-scope/my-library
+```
+
+共有開発ツールを追加するには、ワークスペースルートに追加します:
+
+<InstallCommand pkg="-D some-dev-tool" />
+
+これは[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)に従っており、すべてのプロジェクトが各依存関係の同じバージョンを使用します。これにより、型の競合やデプロイメントバンドル内のパッケージの複数コピーを回避できます。カタログをサポートするパッケージマネージャ（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs)、[bun](https://bun.com/docs/install/catalogs)）の場合、ジェネレータは各バージョンをカタログに記録し、`catalog:`プロトコル（例：`"zod": "catalog:"`）で参照するため、どのプロジェクトが依存関係を宣言しているかに関係なく、カタログがバージョンの唯一の信頼できる情報源となります。提供される`biome.json`はBiomeの[`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs)リゾルバを有効にするため、リントルールは`catalog:`参照を理解します。
+
+:::tip[npmでのバージョン調整]
+npmにはカタログ機能がないため、バージョンは各`package.json`に直接宣言されます。npmワークスペース内のプロジェクト間でバージョンの一貫性を保つには、[syncpack](https://github.com/JamieMason/syncpack)の使用をお勧めします。
+:::
+
+ワークスペース内のあるプロジェクトが別のプロジェクトをインポートする場合、手動で宣言する必要はありません。TypeScriptパスエイリアスがビルド用にインポートを解決し、`ts#sync`ジェネレータ（`compile`の前に実行されるか、`nx sync`経由でオンデマンドで実行）がインポートされたプロジェクトをワークスペース依存関係としてインポート元プロジェクトの`package.json`に宣言します（パッケージマネージャがワークスペースプロトコルをサポートする場合は`workspace:*`、npmとyarn classicでは`*`）。これにより、各プロジェクトのマニフェストが使用するものの正確な記録となり、手動での管理なしに`noUndeclaredDependencies`リントルールを満たします。
 
 #### ランタイムコード
 
@@ -195,9 +210,7 @@ AWS Lambda関数を構築する場合は、<Link path="/guides/ts-lambda-functio
 
 #### NPMへの公開
 
-TypeScriptプロジェクトをNPMに公開する場合は、`package.json`ファイルを作成する必要があります。
-
-このファイルにはプロジェクトが参照する依存関係を宣言する必要があります。ビルド時にはワークスペースルートの`package.json`経由でインストールされた依存関係が解決されるため、Biomeの`noUndeclaredDependencies`ルールは、プロジェクトが`package.json`にリストされていないパッケージをインポートした場合に警告します。
+TypeScriptプロジェクトをNPMに公開する場合、その`package.json`にはプロジェクトが参照する依存関係とエントリポイント（`main`/`exports`）を宣言する必要があります。ビルド時にはワークスペースルートの`package.json`経由でインストールされた依存関係が解決されるため、Biomeの`noUndeclaredDependencies`ルールは、プロジェクトが`package.json`にリストされていないパッケージをインポートした場合に警告します。
 
 ### ビルド
 

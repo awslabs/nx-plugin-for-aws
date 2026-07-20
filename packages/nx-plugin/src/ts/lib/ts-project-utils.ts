@@ -6,7 +6,7 @@ import { joinPathFragments, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config';
 import { isEsmWorkspace } from '../../utils/module-format';
-import { toScopeAlias } from '../../utils/npm-scope';
+import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { configureBiomeLint } from './biome';
 import type { ConfigureProjectOptions } from './types';
 import { configureVitest } from './vitest';
@@ -90,14 +90,13 @@ export const configureTsProject = async (
       baseUrl: undefined,
       rootDir: '.',
       paths: {
-        // Remove any path aliases for this project with the npm scope prefix (eg remove @foo/bar)
+        // Remove any legacy colon-form alias for this project (eg :foo/bar)
         ...Object.fromEntries(
           Object.entries(tsConfig.compilerOptions?.paths ?? {}).filter(
-            ([k]) => k !== options.fullyQualifiedName,
+            ([k]) => k !== `:${options.fullyQualifiedName.slice(1)}`,
           ),
         ),
-        // Add aliases which begin with colon (eg :foo/bar) to avoid sniping attacks
-        [toScopeAlias(options.fullyQualifiedName)]: [
+        [options.fullyQualifiedName]: [
           `./${joinPathFragments(options.dir, 'src', 'index.ts')}`,
         ],
       },
@@ -112,10 +111,13 @@ export const configureTsProject = async (
       ]),
     }));
   }
-  // Remove package.json if it exists
-  if (tree.exists(join(options.dir, 'package.json'))) {
-    tree.delete(join(options.dir, 'package.json'));
-  }
+  // Every project carries a minimal private package.json so the workspace
+  // follows the standard npm package layout (see ensureProjectPackageJson).
+  ensureProjectPackageJson(tree, {
+    dir: options.dir,
+    fullyQualifiedName: options.fullyQualifiedName,
+    esm,
+  });
 
   await configureBiomeLint(tree, options);
   await configureVitest(tree, options);

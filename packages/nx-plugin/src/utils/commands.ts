@@ -59,9 +59,32 @@ export const buildPackageManagerShortCommand = (
 };
 
 /**
- * Build an install command for a given package manager
+ * Build an install command for a given package manager.
+ *
+ * When `project` is given the command targets that project's package.json
+ * (runtime deps of a project belong in its own manifest); otherwise the
+ * dependency is added to the workspace root (shared build/test tooling).
  */
-export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
+export const buildInstallCommand = (
+  pm: string,
+  pkg: string,
+  dev: boolean,
+  project?: string,
+) => {
+  if (project) {
+    switch (pm) {
+      case 'pnpm':
+        return `pnpm add ${dev ? '-D ' : ''}${pkg} --filter ${project}`;
+      case 'yarn':
+        return `yarn workspace ${project} add ${dev ? '-D ' : ''}${pkg}`;
+      case 'npm':
+        return `npm install --legacy-peer-deps ${dev ? '-D ' : ''}${pkg} -w ${project}`;
+      case 'bun':
+        return `bun add ${dev ? '-D ' : ''}${pkg} --filter ${project}`;
+      default:
+        return `${pm} install ${dev ? '-D ' : ''}${pkg}`;
+    }
+  }
   switch (pm) {
     case 'pnpm':
       return `pnpm add ${dev ? '-D' : '-'}w ${pkg}`;

@@ -197,12 +197,14 @@ describe('ts-lambda-function generator', () => {
     expect(buildTarget.dependsOn).toEqual(['other-target', 'bundle']);
   });
 
-  it('should add required dependencies to root package.json', async () => {
+  it('should add required dependencies to the project package.json', async () => {
     await tsLambdaFunctionGenerator(tree, options);
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Runtime dependencies live in the project's own package.json
+    const packageJson = JSON.parse(
+      tree.read('packages/test-project/package.json', 'utf-8'),
+    );
 
-    // Check dependencies were added to root package.json
     expect(
       packageJson.dependencies['@aws-lambda-powertools/tracer'],
     ).toBeDefined();
@@ -217,8 +219,9 @@ describe('ts-lambda-function generator', () => {
     ).toBeDefined();
     expect(packageJson.dependencies['@middy/core']).toBeDefined();
 
-    // Check dev dependencies
-    expect(packageJson.devDependencies['rolldown']).toBeDefined();
+    // Build tooling stays in the root package.json
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
   });
 
   it('should handle function path', async () => {

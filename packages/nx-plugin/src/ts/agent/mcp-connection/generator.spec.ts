@@ -391,7 +391,7 @@ export const getAgent = async (sessionId: string) => {
 
     // Should have exactly one import statement from agent-connection
     const importSourceCount = (
-      agentContent.match(/from ':proj\/agent-connection'/g) ?? []
+      agentContent.match(/from '@proj\/agent-connection'/g) ?? []
     ).length;
     expect(importSourceCount).toBe(1);
 

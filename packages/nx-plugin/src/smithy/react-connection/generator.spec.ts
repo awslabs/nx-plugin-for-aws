@@ -326,16 +326,18 @@ export function Main() {
       // Verify sigv4 hook was added for IAM auth
       expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-      // Verify IAM-specific dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
-      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+      // Verify IAM-specific dependencies were added to the frontend manifest
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['oidc-client-ts']).toBe('catalog:');
+      expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
       expect(
         packageJson.dependencies[
           '@aws-sdk/credential-provider-cognito-identity'
         ],
-      ).toBeDefined();
-      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+      ).toBe('catalog:');
+      expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
 
       // Create snapshot of generated provider with IAM auth
       expect(
@@ -361,9 +363,11 @@ export function Main() {
       // Verify sigv4 hook was NOT added for Cognito auth
       expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-      // Verify Cognito-specific dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+      // Verify Cognito-specific dependencies were added to the frontend manifest
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
 
       // Create snapshot of generated provider with Cognito auth
       expect(
@@ -1104,14 +1108,16 @@ export function Main() {
       // Verify IAM-specific files were generated
       expect(tree.exists('frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-      // Verify IAM-specific dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+      // Verify IAM-specific dependencies were added to the frontend manifest
+      const packageJson = JSON.parse(
+        tree.read('frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
       expect(
         packageJson.dependencies[
           '@aws-sdk/credential-provider-cognito-identity'
         ],
-      ).toBeDefined();
+      ).toBe('catalog:');
 
       // Verify that the runtime config includes the correct API
       const runtimeConfigContent = tree.read(

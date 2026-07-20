@@ -29,7 +29,15 @@ export const createTreeUsingTsSolutionSetup = (): Tree => {
 
   tree.write('pnpm-workspace.yaml', `packages:\n  - packages/*`);
 
-  updateJson(tree, 'package.json', (json) => ({ ...json, type: 'module' }));
+  // Write both workspace markers (pnpm-workspace.yaml above and the
+  // `workspaces` field) so package-manager detection — which follows the
+  // invoking package manager's user agent — finds workspaces enabled
+  // regardless of whether tests run via pnpm or npm/npx.
+  updateJson(tree, 'package.json', (json) => ({
+    ...json,
+    type: 'module',
+    workspaces: ['packages/*'],
+  }));
 
   const baseTsConfig = readJson(tree, 'tsconfig.base.json');
   writeJson(tree, 'tsconfig.base.json', {

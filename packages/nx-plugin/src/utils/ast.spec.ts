@@ -81,13 +81,13 @@ describe('ast utils', () => {
         tree,
         'file.ts',
         ['ClientA'],
-        ':scope/agent-connection',
+        '@scope/agent-connection',
       );
       await addDestructuredImport(
         tree,
         'file.ts',
         ['ClientB'],
-        ':scope/agent-connection',
+        '@scope/agent-connection',
       );
 
       const writtenContent = tree.read('file.ts', 'utf-8')!;

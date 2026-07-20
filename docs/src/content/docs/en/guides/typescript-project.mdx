@@ -33,6 +33,7 @@ The generator will create the following project structure in the `<directory>/<n
 
   - src TypeScript source code
     - index.ts
+  - package.json Minimal project manifest defining the project's package name
   - project.json Project configuration and build targets
   - tsconfig.json Base TypeScript configuration for this project (extends workspace root tsconfig.base.json)
   - tsconfig.lib.json TypeScript configuration for your library (your runtime or packaged source)
@@ -41,8 +42,8 @@ The generator will create the following project structure in the `<directory>/<n
 
 </FileTree>
 
-:::tip[No package.json Needed]
-Notice that no `package.json` file is created for this project! You can find out why [below](#dependencies).
+:::tip[Project package.json]
+The project's `package.json` starts minimal. As you add runtime dependencies they are declared here (shared build/test tooling stays in the workspace root) — you can find out more [below](#dependencies).
 :::
 
 You will also notice some changes to the following files in your workspace root:
@@ -85,11 +86,11 @@ export * from './algorithms/index.js';
 [TypeScript aliases](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) for your project are configured in your workspace `tsconfig.base.json`, which allows you to reference your TypeScript project from other TypeScript projects:
 
 ```ts title="packages/my-other-project/src/index.ts"
-import { sayHello } from ':my-scope/my-library';
+import { sayHello } from '@my-scope/my-library';
 ```
 
 :::note[Project Aliases]
-Aliases for your TypeScript projects begin with a `:` rather than the traditional `@`, since this avoids the possibility of name conflicts between local packages in your workspace and remote packages in [NPM](https://www.npmjs.com/).
+Aliases match your projects' package names, so any project in your workspace can be imported by the name declared in its `package.json` — no need to declare local projects as dependencies.
 :::
 
 When you add an import statement for a new project in your workspace for the first time, you will likely see an error in your IDE similar to the below:
@@ -136,13 +137,27 @@ If you add custom `compilerOptions.paths` entries in a project's `tsconfig.json`
 
 ### Dependencies
 
-You will notice that your TypeScript project does not have a `package.json` file, which might be unexpected if you are used to traditional TypeScript monorepos.
+Each TypeScript project declares the third-party **runtime dependencies its source code imports** in its own `package.json`. This keeps every project self-describing — its manifest lists exactly what it needs — and lets Biome's [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) lint rule enforce that a project never imports a package it hasn't declared.
 
-To add a dependency for any TypeScript package in your monorepo, simply add the dependency to the `package.json` in the root of your workspace. You can do this via the command line for your package manager:
+**Build and test tooling** (for example `vitest`, `tsx`, `rolldown`, `@nx/*`, `typescript`, `@biomejs/biome`) is shared across the workspace, so it lives in the **root** `package.json` `devDependencies` rather than in each project. These tools are only referenced from config files, build scripts and tests, which the lint rule exempts.
 
-<InstallCommand pkg="some-npm-package" />
+To add a runtime dependency to a project, add it to that project's `package.json`. Using your package manager's filter/workspace flag targets the right project, for example with pnpm:
 
-The dependency is then available for any of the TypeScript projects in your workspace to use.
+```bash
+pnpm add some-npm-package --filter @my-scope/my-library
+```
+
+To add a shared dev tool, add it to the workspace root:
+
+<InstallCommand pkg="-D some-dev-tool" />
+
+This follows a [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), meaning all projects use the same version of each dependency — avoiding type conflicts and multiple copies of packages in deployment bundles. For package managers which support catalogs ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) and [bun](https://bun.com/docs/install/catalogs)), generators record each version in the catalog and reference it with the `catalog:` protocol (eg `"zod": "catalog:"`), so the catalog is the single source of truth for versions regardless of which project declares the dependency. The vended `biome.json` enables Biome's [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) resolver so the lint rule understands `catalog:` references.
+
+:::tip[Aligning versions on npm]
+npm has no catalog feature, so versions are declared directly in each `package.json`. To keep them consistent across projects in an npm workspace, we recommend [syncpack](https://github.com/JamieMason/syncpack).
+:::
+
+When one project imports another project in your workspace, you don't need to declare it by hand: the TypeScript path aliases resolve the import for building, and the `ts#sync` generator (which runs before `compile`, or on demand via `nx sync`) declares the imported project as a workspace dependency in the importing project's `package.json` (`workspace:*` where the package manager supports the workspace protocol, `*` on npm and yarn classic). This keeps each project's manifest an accurate record of what it uses — satisfying the `noUndeclaredDependencies` lint rule — without manual bookkeeping.
 
 #### Runtime Code
 
@@ -195,9 +210,7 @@ If you're building an AWS Lambda function, check out the <Link path="/guides/ts-
 
 #### Publishing to NPM
 
-If you are publishing your TypeScript project to NPM, you must create a `package.json` file for it.
-
-This must declare the dependencies that your project references. Since at build time your project will resolve dependencies installed via the workspace root `package.json`, Biome's `noUndeclaredDependencies` rule will warn you if your project imports a package that isn't listed in its `package.json`.
+If you are publishing your TypeScript project to NPM, its `package.json` must declare the dependencies your project references, along with entry points (`main`/`exports`). Since at build time your project resolves dependencies installed via the workspace root `package.json`, Biome's `noUndeclaredDependencies` rule will warn you if your project imports a package that isn't listed in its `package.json`.
 
 ### Building
 

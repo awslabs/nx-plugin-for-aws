@@ -34,6 +34,7 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<nam
 
   - src Mã nguồn TypeScript
     - index.ts
+  - package.json Manifest dự án tối thiểu định nghĩa tên package của dự án
   - project.json Cấu hình dự án và các build targets
   - tsconfig.json Cấu hình TypeScript cơ bản cho dự án này (kế thừa từ tsconfig.base.json ở workspace root)
   - tsconfig.lib.json Cấu hình TypeScript cho thư viện của bạn (mã nguồn runtime hoặc đóng gói)
@@ -42,8 +43,8 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<nam
 
 </FileTree>
 
-:::tip[Không cần package.json]
-Lưu ý rằng không có file `package.json` nào được tạo cho dự án này! Bạn có thể tìm hiểu lý do [bên dưới](#dependencies).
+:::tip[package.json của dự án]
+`package.json` của dự án bắt đầu tối thiểu. Khi bạn thêm các runtime dependencies, chúng được khai báo ở đây (các công cụ build/test dùng chung vẫn ở workspace root) — bạn có thể tìm hiểu thêm [bên dưới](#dependencies).
 :::
 
 Bạn cũng sẽ nhận thấy một số thay đổi đối với các file sau trong workspace root của bạn:
@@ -86,11 +87,11 @@ export * from './algorithms/index.js';
 [TypeScript aliases](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) cho dự án của bạn được cấu hình trong `tsconfig.base.json` của workspace, cho phép bạn tham chiếu dự án TypeScript của mình từ các dự án TypeScript khác:
 
 ```ts title="packages/my-other-project/src/index.ts"
-import { sayHello } from ':my-scope/my-library';
+import { sayHello } from '@my-scope/my-library';
 ```
 
 :::note[Bí danh dự án]
-Aliases cho các dự án TypeScript của bạn bắt đầu bằng `:` thay vì `@` truyền thống, vì điều này tránh khả năng xung đột tên giữa các packages cục bộ trong workspace của bạn và các packages từ xa trong [NPM](https://www.npmjs.com/).
+Aliases khớp với tên package của các dự án, vì vậy bất kỳ dự án nào trong workspace của bạn đều có thể được import bằng tên được khai báo trong `package.json` của nó — không cần khai báo các dự án cục bộ làm dependencies.
 :::
 
 Khi bạn thêm một câu lệnh import cho một dự án mới trong workspace lần đầu tiên, bạn có thể sẽ thấy lỗi trong IDE tương tự như bên dưới:
@@ -137,13 +138,27 @@ Nếu bạn thêm các entries `compilerOptions.paths` tùy chỉnh trong `tscon
 
 ### Dependencies
 
-Bạn sẽ nhận thấy rằng dự án TypeScript của bạn không có file `package.json`, điều này có thể bất ngờ nếu bạn quen với các monorepos TypeScript truyền thống.
+Mỗi dự án TypeScript khai báo các **runtime dependencies của bên thứ ba mà mã nguồn của nó import** trong `package.json` riêng của nó. Điều này giúp mọi dự án tự mô tả — manifest của nó liệt kê chính xác những gì nó cần — và cho phép quy tắc lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) của Biome đảm bảo rằng một dự án không bao giờ import một package mà nó chưa khai báo.
 
-Để thêm một dependency cho bất kỳ package TypeScript nào trong monorepo của bạn, chỉ cần thêm dependency vào `package.json` ở root của workspace. Bạn có thể thực hiện điều này qua command line cho package manager của bạn:
+**Các công cụ build và test** (ví dụ `vitest`, `tsx`, `rolldown`, `@nx/*`, `typescript`, `@biomejs/biome`) được chia sẻ trên toàn workspace, vì vậy chúng nằm trong `devDependencies` của `package.json` **root** thay vì trong mỗi dự án. Các công cụ này chỉ được tham chiếu từ các file cấu hình, build scripts và tests, mà quy tắc lint miễn trừ.
 
-<InstallCommand pkg="some-npm-package" />
+Để thêm một runtime dependency vào một dự án, hãy thêm nó vào `package.json` của dự án đó. Sử dụng flag filter/workspace của package manager để nhắm đúng dự án, ví dụ với pnpm:
 
-Dependency sau đó có sẵn cho bất kỳ dự án TypeScript nào trong workspace của bạn sử dụng.
+```bash
+pnpm add some-npm-package --filter @my-scope/my-library
+```
+
+Để thêm một công cụ dev dùng chung, hãy thêm nó vào workspace root:
+
+<InstallCommand pkg="-D some-dev-tool" />
+
+Điều này tuân theo [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), có nghĩa là tất cả các dự án sử dụng cùng một phiên bản của mỗi dependency — tránh xung đột kiểu và nhiều bản sao của các packages trong deployment bundles. Đối với các package managers hỗ trợ catalogs ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) và [bun](https://bun.com/docs/install/catalogs)), các generators ghi lại mỗi phiên bản trong catalog và tham chiếu nó bằng protocol `catalog:` (ví dụ `"zod": "catalog:"`), vì vậy catalog là nguồn duy nhất về phiên bản bất kể dự án nào khai báo dependency. `biome.json` được cung cấp kích hoạt resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) của Biome để quy tắc lint hiểu các tham chiếu `catalog:`.
+
+:::tip[Căn chỉnh phiên bản trên npm]
+npm không có tính năng catalog, vì vậy các phiên bản được khai báo trực tiếp trong mỗi `package.json`. Để giữ chúng nhất quán giữa các dự án trong một npm workspace, chúng tôi khuyên dùng [syncpack](https://github.com/JamieMason/syncpack).
+:::
+
+Khi một dự án import một dự án khác trong workspace của bạn, bạn không cần khai báo nó thủ công: các path aliases TypeScript resolve import để build, và generator `ts#sync` (chạy trước `compile`, hoặc theo yêu cầu qua `nx sync`) khai báo dự án được import làm workspace dependency trong `package.json` của dự án import (`workspace:*` khi package manager hỗ trợ workspace protocol, `*` trên npm và yarn classic). Điều này giữ cho manifest của mỗi dự án là một bản ghi chính xác về những gì nó sử dụng — thỏa mãn quy tắc lint `noUndeclaredDependencies` — mà không cần ghi chép thủ công.
 
 #### Mã Runtime
 

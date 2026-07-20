@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { detectPackageManager, type Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
+import { detectWorkspacePackageManager } from './dependencies';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 
@@ -34,7 +35,7 @@ export const registerPnpmBuiltDependencies = (
   tree: Tree,
   entries: Record<string, boolean>,
 ): void => {
-  if (detectPackageManager(tree.root) !== 'pnpm') {
+  if (detectWorkspacePackageManager(tree) !== 'pnpm') {
     return;
   }
   if (!tree.exists(WORKSPACE_FILE)) {
@@ -80,7 +81,7 @@ export const registerPnpmBuiltDependencies = (
  * No-op for non-pnpm workspaces or when `pnpm-workspace.yaml` is absent.
  */
 export const ensurePnpmIgnoresWorkspaceRootCheck = (tree: Tree): boolean => {
-  if (detectPackageManager(tree.root) !== 'pnpm') {
+  if (detectWorkspacePackageManager(tree) !== 'pnpm') {
     return false;
   }
   if (!tree.exists(WORKSPACE_FILE)) {

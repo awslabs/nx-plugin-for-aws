@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import { addDependenciesToPackageJson } from './dependencies';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
@@ -46,5 +46,9 @@ export async function sharedDynamoDBScriptsGenerator(
     tree,
     withVersions(['@aws-sdk/client-dynamodb']),
     withVersions(['tsx']),
+    joinPathFragments(
+      joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR),
+      'package.json',
+    ),
   );
 }

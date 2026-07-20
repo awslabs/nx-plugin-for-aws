@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   names,
@@ -20,12 +19,13 @@ import {
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -66,7 +66,7 @@ export async function tsReactWebsiteGenerator(
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const scopeAlias = npmScopePrefix;
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
   const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
@@ -489,7 +489,12 @@ export async function tsReactWebsiteGenerator(
       '@cloudscape-design/global-styles',
     );
   } else if (ux === 'shadcn') {
-    // not required to add any dependencies because dependencies are added by the common/shadcn package.
+    // Shared shadcn components live in the common/shadcn package, but the
+    // website's own generated components (e.g. the tanstack-router sidebar)
+    // import lucide-react directly, so the website must declare it.
+    if (tanstackRouter) {
+      dependencies.push('lucide-react');
+    }
   }
 
   // Add TailwindCSS dependencies if enabled
@@ -511,6 +516,7 @@ export async function tsReactWebsiteGenerator(
     tree,
     withVersions(dependencies),
     withVersions(devDependencies),
+    joinPathFragments(libraryRoot, 'package.json'),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

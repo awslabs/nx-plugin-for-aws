@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   detectPackageManager,
   type GeneratorCallback,
@@ -18,6 +17,7 @@ import {
 } from '@nx/devkit';
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -299,6 +299,7 @@ export async function terraformProjectGenerator(
       '@smithy/config-resolver',
       '@smithy/node-config-provider',
     ]),
+    joinPathFragments('packages', SHARED_TERRAFORM_DIR, 'package.json'),
   );
 
   // @nx-extend/terraform has a peer dependency on @nx/devkit ^21.0.0 which causes

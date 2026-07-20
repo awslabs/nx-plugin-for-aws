@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
+import { addDependenciesToPackageJson } from '../dependencies';
 import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
@@ -20,7 +21,11 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { PY_VERSIONS, terraformProviderVersions } from '../versions';
+import {
+  PY_VERSIONS,
+  terraformProviderVersions,
+  withVersions,
+} from '../versions';
 
 type IACProvider = { iac: Iac };
 
@@ -365,6 +370,16 @@ const addAgentCoreGatewayCDKInfra = async (
       'index.ts',
     ),
     './gateways/index.js',
+  );
+
+  // The gateway construct renders Cedar policies with ejs, and its readiness
+  // probe Lambda uses the AgentCore SDK client — declare both in the shared
+  // constructs project so noUndeclaredDependencies passes.
+  addDependenciesToPackageJson(
+    tree,
+    withVersions(['ejs', '@aws-sdk/client-bedrock-agentcore']),
+    withVersions(['@types/ejs']),
+    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'package.json'),
   );
 };
 

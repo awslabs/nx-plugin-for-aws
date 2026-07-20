@@ -12,7 +12,6 @@ import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { pascalCase } from '../../../utils/names';
-import { toScopeAlias } from '../../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
@@ -52,7 +51,7 @@ export const tsRdbMcpServerConnectionGenerator = async (
   const rdbBaseName = targetProject.name.split('/').pop();
   const rdbNameCamel = camelCase(rdbBaseName);
   const rdbNamePascal = pascalCase(rdbBaseName);
-  const rdbPackageAlias = toScopeAlias(targetProject.name);
+  const rdbPackageAlias = targetProject.name;
   const getterAlias = `getPrisma as get${rdbNamePascal}`;
 
   const serverPath = joinPathFragments(

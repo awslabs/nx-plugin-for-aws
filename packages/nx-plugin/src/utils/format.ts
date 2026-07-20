@@ -29,6 +29,11 @@ export const DEFAULT_BIOME_CONFIG = {
       quoteStyle: 'single',
       trailingCommas: 'all',
     },
+    // Resolve dependencies declared via the package manager's catalog so
+    // `noUndeclaredDependencies` understands `catalog:` references.
+    resolver: {
+      experimentalPnpmCatalogs: true,
+    },
   },
   css: {
     formatter: {
@@ -43,7 +48,9 @@ export const DEFAULT_BIOME_CONFIG = {
     rules: {
       preset: 'none',
       correctness: {
-        noUndeclaredDependencies: 'warn',
+        // Every project must declare the third-party dependencies its source
+        // code imports in its own package.json.
+        noUndeclaredDependencies: 'error',
       },
     },
   },
@@ -68,6 +75,26 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/tsconfig*.json',
     ],
   },
+  // Config files, build scripts and tests import shared build/test tooling
+  // from the workspace root rather than declaring it per-project, so the
+  // undeclared-dependency rule is disabled for them (source code stays
+  // enforced).
+  overrides: [
+    {
+      includes: [
+        '**/*.config.{ts,mts,cts,js,mjs,cjs}',
+        '**/*.{spec,test}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}',
+        '**/*.stories.{ts,tsx}',
+      ],
+      linter: {
+        rules: {
+          correctness: {
+            noUndeclaredDependencies: 'off',
+          },
+        },
+      },
+    },
+  ],
 };
 
 const BIOME_FORMATTABLE_EXTENSIONS = new Set([

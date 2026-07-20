@@ -84,12 +84,22 @@ describe('shared-constructs utils', () => {
     it('should add required dependencies when generating shared constructs', async () => {
       await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
-      // Read package.json and check if dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      // Dependencies are declared in the shared constructs project manifest as
+      // catalog references
+      const packageJson = JSON.parse(
+        tree.read(
+          joinPathFragments(
+            PACKAGES_DIR,
+            SHARED_CONSTRUCTS_DIR,
+            'package.json',
+          ),
+          'utf-8',
+        ),
+      );
 
-      expect(packageJson.dependencies).toHaveProperty('constructs');
-      expect(packageJson.dependencies).toHaveProperty('aws-cdk-lib');
-      expect(packageJson.devDependencies).toHaveProperty('@types/node');
+      expect(packageJson.dependencies.constructs).toBe('catalog:');
+      expect(packageJson.dependencies['aws-cdk-lib']).toBe('catalog:');
+      expect(packageJson.devDependencies['@types/node']).toBe('catalog:');
     });
 
     it('should not generate shared constructs when they already exist', async () => {

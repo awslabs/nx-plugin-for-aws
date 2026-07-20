@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   detectPackageManager,
   type GeneratorCallback,
   generateFiles,
@@ -19,6 +18,7 @@ import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
@@ -196,12 +196,9 @@ export const tsMcpServerGenerator = async (
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
-  addDependenciesToPackageJson(tree, deps, devDeps);
-  // Add to the project's package.json too if it has one (e.g. nx plugins),
-  // otherwise dependencies live in the workspace root only.
-  if (tree.exists(projectPackageJsonPath)) {
-    addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
-  }
+  // The MCP server's runtime dependencies belong to its own project manifest;
+  // the wrapper redirects any build/test tooling to the workspace root.
+  addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
 
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
   // (^3.25 || ^4.0). Yarn does not dedupe the peer to the workspace's pinned zod, so

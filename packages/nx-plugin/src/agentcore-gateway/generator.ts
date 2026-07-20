@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
@@ -14,6 +13,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addAgentCoreGatewayInfra } from '../utils/agent-core-constructs/agent-core-constructs';
+import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';
@@ -28,6 +28,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
 import { assignPort } from '../utils/port';
+import { ensureProjectPackageJson } from '../utils/project-package-json';
 import { sharedConstructsGenerator } from '../utils/shared-constructs';
 import { withVersions } from '../utils/versions';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
@@ -92,6 +93,12 @@ export const agentcoreGatewayGenerator = async (
     });
     project = readProjectConfigurationUnqualified(tree, fullyQualifiedName);
   }
+  // Ensure the project has its own package.json so its runtime dependencies
+  // (added below) are declared in it rather than the workspace root.
+  ensureProjectPackageJson(tree, {
+    dir: projectRoot,
+    fullyQualifiedName,
+  });
   const port = assignPort(tree, project, 8100);
   // A gateway is its own standalone project, so it uses plain `serve` / `dev`
   // targets. Re-run: keep existing targets (their dependsOn may have been
@@ -141,6 +148,7 @@ export const agentcoreGatewayGenerator = async (
     tree,
     withVersions(['@modelcontextprotocol/sdk', 'express']),
     withVersions(['tsx', '@types/express', 'ejs', '@types/ejs']),
+    joinPathFragments(projectRoot, 'package.json'),
   );
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds

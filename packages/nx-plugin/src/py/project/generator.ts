@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   ensurePackage,
   type GeneratorCallback,
   joinPathFragments,
@@ -17,6 +16,7 @@ import {
   addLicenseCheckToLintTarget,
   ensurePythonLicenseCollector,
 } from '../../license/config';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';

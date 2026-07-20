@@ -13,6 +13,9 @@ export const TS_VERSIONS = {
   // transitively (2.8.0) to clear CVE-2026-59892 (HIGH).
   '@opentelemetry/propagator-jaeger': '2.9.0',
   '@aws-sdk/client-dynamodb': '3.1090.0',
+  '@aws-sdk/client-api-gateway': '3.1090.0',
+  '@aws-sdk/client-iam': '3.1090.0',
+  '@aws-sdk/client-bedrock-agentcore': '3.1090.0',
   '@aws-sdk/client-bedrock-runtime': '3.1090.0',
   '@aws-sdk/client-s3': '3.1090.0',
   '@aws-sdk/client-sts': '3.1090.0',

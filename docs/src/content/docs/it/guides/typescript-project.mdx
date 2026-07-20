@@ -34,6 +34,7 @@ Il generatore creerà la seguente struttura del progetto nella directory `<direc
 
   - src Codice sorgente TypeScript
     - index.ts
+  - package.json Manifesto minimo del progetto che definisce il nome del pacchetto
   - project.json Configurazione del progetto e target di build
   - tsconfig.json Configurazione TypeScript di base per questo progetto (estende tsconfig.base.json nella root del workspace)
   - tsconfig.lib.json Configurazione TypeScript per la tua libreria (codice runtime o sorgente impacchettato)
@@ -42,8 +43,8 @@ Il generatore creerà la seguente struttura del progetto nella directory `<direc
 
 </FileTree>
 
-:::tip[Nessun package.json necessario]
-Nota che non viene creato alcun file `package.json` per questo progetto! Puoi scoprire il motivo [qui sotto](#dependencies).
+:::tip[Package.json del progetto]
+Il `package.json` del progetto inizia minimo. Man mano che aggiungi dipendenze runtime, vengono dichiarate qui (gli strumenti di build/test condivisi rimangono nella root del workspace) — puoi scoprire di più [qui sotto](#dependencies).
 :::
 
 Noterai anche alcune modifiche ai seguenti file nella root del workspace:
@@ -86,11 +87,11 @@ export * from './algorithms/index.js';
 Gli [alias TypeScript](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) per il tuo progetto sono configurati nel `tsconfig.base.json` del workspace, consentendo di riferire il tuo progetto TypeScript da altri progetti TypeScript:
 
 ```ts title="packages/my-other-project/src/index.ts"
-import { sayHello } from ':my-scope/my-library';
+import { sayHello } from '@my-scope/my-library';
 ```
 
 :::note[Alias di progetto]
-Gli alias per i progetti TypeScript iniziano con `:` invece del tradizionale `@`, per evitare possibili conflitti di nome tra pacchetti locali nel workspace e pacchetti remoti su [NPM](https://www.npmjs.com/).
+Gli alias corrispondono ai nomi dei pacchetti dei tuoi progetti, quindi qualsiasi progetto nel workspace può essere importato con il nome dichiarato nel suo `package.json` — non è necessario dichiarare i progetti locali come dipendenze.
 :::
 
 Quando aggiungi un'istruzione di import per un nuovo progetto nel workspace per la prima volta, potresti vedere un errore nel tuo IDE simile al seguente:
@@ -137,13 +138,27 @@ Se aggiungi voci personalizzate `compilerOptions.paths` nel `tsconfig.json` di u
 
 ### Dipendenze
 
-Noterai che il tuo progetto TypeScript non ha un file `package.json`, cosa che potrebbe sorprendere se sei abituato a monorepo TypeScript tradizionali.
+Ogni progetto TypeScript dichiara le **dipendenze runtime di terze parti che il suo codice sorgente importa** nel proprio `package.json`. Questo mantiene ogni progetto auto-descrittivo — il suo manifesto elenca esattamente ciò di cui ha bisogno — e permette alla regola di lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) di Biome di garantire che un progetto non importi mai un pacchetto che non ha dichiarato.
 
-Per aggiungere una dipendenza a un pacchetto TypeScript nel tuo monorepo, aggiungi semplicemente la dipendenza al `package.json` nella root del workspace. Puoi farlo tramite la linea di comando del tuo package manager:
+**Gli strumenti di build e test** (ad esempio `vitest`, `tsx`, `rolldown`, `@nx/*`, `typescript`, `@biomejs/biome`) sono condivisi nell'intero workspace, quindi risiedono nelle `devDependencies` del `package.json` **root** anziché in ogni progetto. Questi strumenti sono referenziati solo da file di configurazione, script di build e test, che la regola di lint esclude.
 
-<InstallCommand pkg="some-npm-package" />
+Per aggiungere una dipendenza runtime a un progetto, aggiungila al `package.json` di quel progetto. Utilizzando il flag filter/workspace del tuo package manager si punta al progetto corretto, ad esempio con pnpm:
 
-La dipendenza sarà quindi disponibile per qualsiasi progetto TypeScript nel workspace.
+```bash
+pnpm add some-npm-package --filter @my-scope/my-library
+```
+
+Per aggiungere uno strumento di sviluppo condiviso, aggiungilo alla root del workspace:
+
+<InstallCommand pkg="-D some-dev-tool" />
+
+Questo segue una [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), il che significa che tutti i progetti utilizzano la stessa versione di ogni dipendenza — evitando conflitti di tipo e copie multiple di pacchetti nei bundle di deployment. Per i package manager che supportano i catalog ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) e [bun](https://bun.com/docs/install/catalogs)), i generatori registrano ogni versione nel catalog e la referenziano con il protocollo `catalog:` (ad es. `"zod": "catalog:"`), quindi il catalog è l'unica fonte di verità per le versioni indipendentemente da quale progetto dichiara la dipendenza. Il `biome.json` fornito abilita il resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) di Biome in modo che la regola di lint comprenda i riferimenti `catalog:`.
+
+:::tip[Allineamento delle versioni su npm]
+npm non ha una funzionalità di catalog, quindi le versioni sono dichiarate direttamente in ogni `package.json`. Per mantenerle coerenti tra i progetti in un workspace npm, raccomandiamo [syncpack](https://github.com/JamieMason/syncpack).
+:::
+
+Quando un progetto importa un altro progetto nel tuo workspace, non è necessario dichiararlo manualmente: gli alias di percorso TypeScript risolvono l'import per la build, e il generatore `ts#sync` (che viene eseguito prima di `compile`, o su richiesta tramite `nx sync`) dichiara il progetto importato come dipendenza workspace nel `package.json` del progetto importatore (`workspace:*` dove il package manager supporta il protocollo workspace, `*` su npm e yarn classic). Questo mantiene il manifesto di ogni progetto un registro accurato di ciò che utilizza — soddisfacendo la regola di lint `noUndeclaredDependencies` — senza contabilità manuale.
 
 #### Codice runtime
 
@@ -196,9 +211,7 @@ Se stai costruendo una funzione AWS Lambda, consulta il generatore <Link path="/
 
 #### Pubblicazione su NPM
 
-Se pubblichi il tuo progetto TypeScript su NPM, devi creare un file `package.json` per esso.
-
-Questo deve dichiarare le dipendenze utilizzate dal progetto. Poiché al momento della build le dipendenze vengono risolte tramite il `package.json` della root del workspace, la regola `noUndeclaredDependencies` di Biome ti avviserà se il tuo progetto importa un pacchetto che non è elencato nel suo `package.json`.
+Se pubblichi il tuo progetto TypeScript su NPM, il suo `package.json` deve dichiarare le dipendenze utilizzate dal progetto, insieme ai punti di ingresso (`main`/`exports`). Poiché al momento della build le dipendenze vengono risolte tramite il `package.json` della root del workspace, la regola `noUndeclaredDependencies` di Biome ti avviserà se il tuo progetto importa un pacchetto che non è elencato nel suo `package.json`.
 
 ### Build
 

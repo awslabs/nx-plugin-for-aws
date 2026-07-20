@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -14,10 +13,11 @@ import {
 import terraformProjectGenerator from '../terraform/project/generator';
 import tsProjectGenerator from '../ts/lib/generator';
 import { readAwsNxPluginConfig } from './config/utils';
+import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import type { Iac } from './iac';
 import { esmVars } from './module-format';
-import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
+import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
@@ -65,7 +65,7 @@ export async function sharedConstructsGenerator(
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'),
         {
           npmScopePrefix,
-          scopeAlias: toScopeAlias(npmScopePrefix),
+          scopeAlias: npmScopePrefix,
           tags: (await readAwsNxPluginConfig(tree))?.tags ?? [],
           ...esmVars(tree),
         },
@@ -90,6 +90,10 @@ export async function sharedConstructsGenerator(
         tree,
         withVersions(['constructs', 'aws-cdk-lib']),
         withVersions(['@types/node']),
+        joinPathFragments(
+          joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+          'package.json',
+        ),
       );
       await formatFilesInSubtree(tree);
     }

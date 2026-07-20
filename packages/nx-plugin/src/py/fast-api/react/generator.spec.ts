@@ -280,8 +280,10 @@ export function Main() {
     // Verify sigv4 hook was added
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-    // Verify IAM-specific dependencies were added
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Verify IAM-specific dependencies were added to the frontend project
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
     expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
     expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
     expect(
@@ -311,8 +313,10 @@ export function Main() {
     // Verify sigv4 hook was added
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-    // Verify Cognito-specific dependencies were added
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Verify Cognito-specific dependencies were added to the frontend project
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
     expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
 
     // Create snapshot of generated provider with Cognito auth

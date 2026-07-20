@@ -4,7 +4,6 @@
  */
 import { relative } from 'node:path';
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -14,6 +13,7 @@ import {
 } from '@nx/devkit';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';

@@ -116,7 +116,10 @@ describe('react-website generator', () => {
 
   it('should update package.json with required dependencies', async () => {
     await tsReactWebsiteGenerator(tree, options);
-    const packageJson = JSON.parse(tree.read('package.json').toString());
+    // The website's runtime dependencies live in its own project manifest
+    const packageJson = JSON.parse(
+      tree.read('test-app/package.json').toString(),
+    );
     // Check for Tanstack router dependencies
     expect(packageJson.dependencies).toMatchObject({
       '@tanstack/react-router': expect.any(String),
@@ -125,12 +128,18 @@ describe('react-website generator', () => {
     expect(packageJson.dependencies).toMatchObject({
       tailwindcss: expect.any(String),
     });
-    expect(packageJson.devDependencies).toMatchObject({
+
+    // Pure build tooling stays in the workspace root devDependencies
+    const rootPackageJson = JSON.parse(tree.read('package.json').toString());
+    expect(rootPackageJson.devDependencies).toMatchObject({
       '@tailwindcss/vite': expect.any(String),
     });
 
-    // Check for AWS CDK dependencies
-    expect(packageJson.dependencies).toMatchObject({
+    // AWS CDK dependencies live in the shared constructs project manifest
+    const constructsPackageJson = JSON.parse(
+      tree.read('packages/common/constructs/package.json').toString(),
+    );
+    expect(constructsPackageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
       'aws-cdk-lib': expect.any(String),
     });
@@ -263,11 +272,17 @@ describe('react-website generator', () => {
   describe('TailwindCSS integration', () => {
     it('should include TailwindCSS dependencies by default', async () => {
       await tsReactWebsiteGenerator(tree, options);
-      const packageJson = JSON.parse(tree.read('package.json').toString());
-
-      // Check for TailwindCSS dependencies
+      // tailwindcss is a runtime dep declared in the project manifest
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
       expect(packageJson.dependencies).toHaveProperty('tailwindcss');
-      expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
+
+      // @tailwindcss/vite is build tooling and stays at the root
+      const rootPackageJson = JSON.parse(tree.read('package.json').toString());
+      expect(rootPackageJson.devDependencies).toHaveProperty(
+        '@tailwindcss/vite',
+      );
     });
 
     it('should configure vite with TailwindCSS plugin by default', async () => {
@@ -294,11 +309,14 @@ describe('react-website generator', () => {
 
     it('should not include TailwindCSS when disabled', async () => {
       await tsReactWebsiteGenerator(tree, optionsWithoutTailwind);
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
+      const rootPackageJson = JSON.parse(tree.read('package.json').toString());
 
       // Check that TailwindCSS dependencies are NOT included
       expect(packageJson.dependencies).not.toHaveProperty('tailwindcss');
-      expect(packageJson.devDependencies).not.toHaveProperty(
+      expect(rootPackageJson.devDependencies).not.toHaveProperty(
         '@tailwindcss/vite',
       );
     });
@@ -326,13 +344,18 @@ describe('react-website generator', () => {
 
     it('should handle tailwind explicitly set to true', async () => {
       await tsReactWebsiteGenerator(tree, { ...options, tailwind: true });
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
+      const rootPackageJson = JSON.parse(tree.read('package.json').toString());
       const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
       const stylesContent = tree.read('test-app/src/styles.css')?.toString();
 
       // Verify TailwindCSS is included
       expect(packageJson.dependencies).toHaveProperty('tailwindcss');
-      expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
+      expect(rootPackageJson.devDependencies).toHaveProperty(
+        '@tailwindcss/vite',
+      );
       expect(viteConfig).toContain('tailwindcss()');
       expect(stylesContent).toContain('@import');
       expect(stylesContent).toContain('tailwindcss');
@@ -796,7 +819,10 @@ describe('react-website generator ux tests', () => {
     it('should update package.json with required dependencies', async () => {
       await tsReactWebsiteGenerator(tree, options);
       snapshotTreeDir(tree, 'test-app/src');
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      // Website runtime dependencies live in the website's own manifest
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
       // Check for website dependencies
       expect(packageJson.dependencies).toMatchObject({
         '@cloudscape-design/components': expect.any(String),
@@ -815,7 +841,10 @@ describe('react-website generator ux tests', () => {
     it('should update package.json with required dependencies', async () => {
       await tsReactWebsiteGenerator(tree, options);
       snapshotTreeDir(tree, 'test-app/src');
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      // Shadcn dependencies are declared on the shared shadcn package manifest
+      const packageJson = JSON.parse(
+        tree.read('packages/common/shadcn/package.json').toString(),
+      );
       expect(packageJson.dependencies).toMatchObject({
         'class-variance-authority': expect.any(String),
         clsx: expect.any(String),

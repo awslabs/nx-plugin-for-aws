@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
-  detectPackageManager,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -25,6 +23,10 @@ import {
   updateAwsNxPluginConfig,
 } from './config/utils';
 import { type Containers, inferContainers } from './containers';
+import {
+  addDependenciesToPackageJson,
+  detectWorkspacePackageManager,
+} from './dependencies';
 import { DEFAULT_BIOME_CONFIG } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
@@ -127,7 +129,7 @@ const setUpPnpmWorkspace = (tree: Tree) => {
  * manager reads the `workspaces` field of the root `package.json`.
  */
 const setUpWorkspaces = (tree: Tree) => {
-  if (detectPackageManager() === 'pnpm') {
+  if (detectWorkspacePackageManager(tree) === 'pnpm') {
     setUpPnpmWorkspace(tree);
   } else {
     updateJson(tree, 'package.json', (json) => ({

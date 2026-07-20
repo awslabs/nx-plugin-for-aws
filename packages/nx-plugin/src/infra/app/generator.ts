@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -17,12 +16,13 @@ import path from 'path';
 import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { esmVars } from '../../utils/module-format';
 import { kebabCase } from '../../utils/names';
-import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
@@ -101,7 +101,7 @@ export async function tsInfraGenerator(
   const projectConfig = readProjectConfiguration(tree, lib.fullyQualifiedName);
   const libraryRoot = projectConfig.root;
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const scopeAlias = npmScopePrefix;
   const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
   tree.delete(joinPathFragments(libraryRoot, 'src'));
 
@@ -226,6 +226,7 @@ export async function tsInfraGenerator(
       'source-map-support',
     ]),
     withVersions(['tsx']),
+    joinPathFragments(libraryRoot, 'package.json'),
   );
 
   updateJson(tree, `${libraryRoot}/tsconfig.lib.json`, (tsConfig) => ({

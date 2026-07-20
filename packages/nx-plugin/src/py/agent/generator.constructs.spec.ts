@@ -374,8 +374,10 @@ dev-dependencies = []
       iac: 'cdk',
     });
 
-    // Check root package.json dependencies
-    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.dependencies['aws-cdk-lib']).toBeDefined();
+    // Check shared constructs project package.json dependencies
+    const constructsPackageJson = JSON.parse(
+      tree.read('packages/common/constructs/package.json', 'utf-8'),
+    );
+    expect(constructsPackageJson.dependencies['aws-cdk-lib']).toBeDefined();
   });
 });

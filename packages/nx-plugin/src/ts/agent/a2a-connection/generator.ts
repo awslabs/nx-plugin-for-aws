@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -21,6 +20,7 @@ import {
   addStarExport,
   applyGritQL,
 } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -135,7 +135,7 @@ export const tsAgentA2aConnectionGenerator = async (
       tree,
       agentFilePath,
       [clientClassName],
-      `:${npmScope}/agent-connection`,
+      `@${npmScope}/agent-connection`,
     );
 
     // Build the tool creation + Agent wiring.

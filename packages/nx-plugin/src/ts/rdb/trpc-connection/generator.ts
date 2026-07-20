@@ -13,7 +13,6 @@ import camelCase from 'lodash.camelcase';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, pascalCase } from '../../../utils/names';
-import { toScopeAlias } from '../../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
@@ -50,7 +49,7 @@ export const tsRdbTrpcConnectionGenerator = async (
   const rdbNameKebab = kebabCase(rdbBaseName);
   const rdbNameCamel = camelCase(rdbBaseName);
   const rdbNamePascal = pascalCase(rdbBaseName);
-  const rdbPackageAlias = toScopeAlias(targetProject.name);
+  const rdbPackageAlias = targetProject.name;
   const engine = ((targetProject.metadata as any) ?? {}).engine ?? 'PostgreSQL';
 
   generateFiles(

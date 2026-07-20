@@ -345,14 +345,22 @@ describe('cognito-auth generator', () => {
     `,
     );
     await tsReactWebsiteAuthGenerator(tree, options);
-    // Read package.json
-    const packageJson = JSON.parse(tree.read('package.json').toString());
-    // Verify dependencies are added
+    // The website's runtime dependencies live in its own package.json
+    const packageJson = JSON.parse(
+      tree.read('packages/test-project/package.json').toString(),
+    );
     expect(packageJson.dependencies).toMatchObject({
-      constructs: expect.any(String),
-      'aws-cdk-lib': expect.any(String),
       'oidc-client-ts': expect.any(String),
       'react-oidc-context': expect.any(String),
+    });
+
+    // The shared constructs dependencies live in the shared constructs manifest
+    const constructsPackageJson = JSON.parse(
+      tree.read('packages/common/constructs/package.json').toString(),
+    );
+    expect(constructsPackageJson.dependencies).toMatchObject({
+      constructs: expect.any(String),
+      'aws-cdk-lib': expect.any(String),
     });
   });
 

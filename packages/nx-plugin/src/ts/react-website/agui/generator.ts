@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -16,8 +15,9 @@ import {
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { kebabCase } from '../../../utils/names';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
 import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
 import { withVersions } from '../../../utils/versions';
@@ -58,7 +58,7 @@ export const addAgUiReactConnection = async (
     options;
 
   const theme = resolveAgUiTheme(frontendProjectConfig);
-  const scopeAlias = toScopeAlias(getNpmScopePrefix(tree));
+  const scopeAlias = getNpmScopePrefix(tree);
 
   // Generates `src/components/AguiProvider.tsx` (if absent) and
   // `src/hooks/useAgui<AgentName>.tsx`. Existing files are kept so re-running
@@ -151,6 +151,7 @@ export const addAgUiReactConnection = async (
       ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
     withVersions([...((auth === 'iam' ? ['@smithy/types'] : []) as any)]),
+    joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 
   // Agents only publish their runtime ARN to the 'agentcore' namespace by

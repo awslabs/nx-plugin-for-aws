@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -19,6 +18,7 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
@@ -97,7 +97,7 @@ export const tsAgentGenerator = async (
     name,
     agentNameClassName,
     distDir,
-    agentConnectionImport: `:${getNpmScope(tree)}/agent-connection`,
+    agentConnectionImport: `@${getNpmScope(tree)}/agent-connection`,
     ...esmVars(tree),
   };
 
@@ -257,6 +257,7 @@ export const tsAgentGenerator = async (
         ? (['@types/express', '@types/cors'] as const)
         : (['@types/ws', '@types/cors'] as const)),
     ]),
+    joinPathFragments(project.root, 'package.json'),
   );
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.

@@ -90,15 +90,17 @@ export function Main() {
       frontendProjectName: 'frontend',
       backendProjectName: 'backend',
     });
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    // Verify dependencies were added
-    expect(
-      packageJson.dependencies['@trpc/tanstack-react-query'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
-    expect(
-      packageJson.dependencies['@tanstack/react-query-devtools'],
-    ).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    // Verify dependencies were added to the frontend project manifest
+    expect(packageJson.dependencies['@trpc/tanstack-react-query']).toBe(
+      'catalog:',
+    );
+    expect(packageJson.dependencies['@tanstack/react-query']).toBe('catalog:');
+    expect(packageJson.dependencies['@tanstack/react-query-devtools']).toBe(
+      'catalog:',
+    );
   });
 
   it('should handle IAM auth option', async () => {
@@ -127,21 +129,23 @@ export function Main() {
       tree.read('apps/frontend/src/hooks/useSigV4.tsx', 'utf-8'),
     ).toMatchSnapshot('useSigV4.tsx');
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    // Verify dependencies were added
-    expect(
-      packageJson.dependencies['@trpc/tanstack-react-query'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
-    expect(
-      packageJson.dependencies['@tanstack/react-query-devtools'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    // Verify dependencies were added to the frontend project manifest
+    expect(packageJson.dependencies['@trpc/tanstack-react-query']).toBe(
+      'catalog:',
+    );
+    expect(packageJson.dependencies['@tanstack/react-query']).toBe('catalog:');
+    expect(packageJson.dependencies['@tanstack/react-query-devtools']).toBe(
+      'catalog:',
+    );
+    expect(packageJson.dependencies['oidc-client-ts']).toBe('catalog:');
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
     expect(
       packageJson.dependencies['@aws-sdk/credential-provider-cognito-identity'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+    ).toBe('catalog:');
+    expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
   });
 
   it('should handle Cognito auth option', async () => {
@@ -167,16 +171,18 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    // Verify dependencies were added
-    expect(
-      packageJson.dependencies['@trpc/tanstack-react-query'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
-    expect(
-      packageJson.dependencies['@tanstack/react-query-devtools'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    // Verify dependencies were added to the frontend project manifest
+    expect(packageJson.dependencies['@trpc/tanstack-react-query']).toBe(
+      'catalog:',
+    );
+    expect(packageJson.dependencies['@tanstack/react-query']).toBe('catalog:');
+    expect(packageJson.dependencies['@tanstack/react-query-devtools']).toBe(
+      'catalog:',
+    );
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -216,8 +222,12 @@ export function Main() {
       ).toMatchSnapshot('TestApiClientProvider-REST-Custom.tsx');
 
       // Custom auth still uses EventSourcePolyfill for subscription support
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['event-source-polyfill']).toBe(
+        'catalog:',
+      );
     });
 
     it('should generate REST API client provider with splitLink for IAM auth', async () => {
@@ -241,12 +251,16 @@ export function Main() {
         ),
       ).toMatchSnapshot('TestApiClientProvider-REST-IAM.tsx');
 
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
-      expect(
-        packageJson.devDependencies['@types/event-source-polyfill'],
-      ).toBeDefined();
-      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['event-source-polyfill']).toBe(
+        'catalog:',
+      );
+      expect(packageJson.devDependencies['@types/event-source-polyfill']).toBe(
+        'catalog:',
+      );
+      expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
     });
 
     it('should generate REST API client provider with splitLink for Cognito auth', async () => {
@@ -270,12 +284,16 @@ export function Main() {
         ),
       ).toMatchSnapshot('TestApiClientProvider-REST-Cognito.tsx');
 
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
-      expect(
-        packageJson.devDependencies['@types/event-source-polyfill'],
-      ).toBeDefined();
-      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['event-source-polyfill']).toBe(
+        'catalog:',
+      );
+      expect(packageJson.devDependencies['@types/event-source-polyfill']).toBe(
+        'catalog:',
+      );
+      expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
     });
 
     it('should not add event-source-polyfill for HTTP API', async () => {
@@ -292,7 +310,9 @@ export function Main() {
         backendProjectName: 'backend',
       });
 
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
       expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
       expect(
         packageJson.devDependencies?.['@types/event-source-polyfill'],

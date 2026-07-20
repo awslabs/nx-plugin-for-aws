@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
@@ -12,6 +11,7 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -25,6 +25,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { type ITsDepVersion, withVersions } from '../../utils/versions';
 import type { TsAstroDocsGeneratorSchema } from './schema';
 
@@ -101,6 +102,8 @@ export const tsAstroDocsGenerator = async (
       targets,
     });
   }
+
+  ensureProjectPackageJson(tree, { dir, fullyQualifiedName });
 
   const templateOptions = {
     fullyQualifiedName,

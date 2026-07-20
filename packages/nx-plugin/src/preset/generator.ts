@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   joinPathFragments,
   OverwriteStrategy,
@@ -17,6 +16,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
+import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { applyWorkspaceInit } from '../utils/init';
 import { installDependencies } from '../utils/install';

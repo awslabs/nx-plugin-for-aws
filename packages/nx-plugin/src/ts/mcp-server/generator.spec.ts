@@ -9,6 +9,7 @@ import {
   updateJson,
   writeJson,
 } from '@nx/devkit';
+import yaml from 'js-yaml';
 import { vi } from 'vitest';
 import {
   ensureAwsNxPluginConfig,
@@ -73,8 +74,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
     ).toBeFalsy();
 
-    // The generator should not vend a nested project package.json
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
@@ -150,8 +151,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/custom-server/http.ts'),
     ).toBeTruthy();
 
-    // The generator should not vend a nested project package.json
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
 
     // Check that project configuration was updated with custom serve target
     const projectConfig = JSON.parse(
@@ -222,7 +223,7 @@ describe('ts#mcp-server generator', () => {
     expect(indexContent).not.toContain('server.js');
   });
 
-  it('should not create a nested project package.json', async () => {
+  it('should create a nested project package.json', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'new-server',
@@ -230,33 +231,40 @@ describe('ts#mcp-server generator', () => {
       iac: 'cdk',
     });
 
-    // The generator relies on the workspace root package.json rather than
-    // vending a nested one for the project
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
   });
 
-  it('should add dependencies to the workspace root package.json', async () => {
+  it('should add dependencies to the project and root package.json', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       infra: 'none',
       iac: 'cdk',
     });
 
-    // Check root package.json dependencies
+    // Runtime dependencies (and the @types/* backing type imports) land in the
+    // project's own manifest as catalog references
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.dependencies['@modelcontextprotocol/sdk']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['zod']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['express']).toBe('catalog:');
+    expect(projectPackageJson.devDependencies['@types/express']).toBe(
+      'catalog:',
+    );
+
+    // Pure build/test tooling stays in the workspace root devDependencies
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(
-      rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
-    ).toBeDefined();
-    expect(rootPackageJson.dependencies['zod']).toBeDefined();
-    expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
     expect(
       rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
 
-    // No nested project package.json should be created
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
   });
 
   it('should handle project without sourceRoot', async () => {
@@ -418,8 +426,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
     ).toBeTruthy();
 
-    // The generator should not vend a nested project package.json
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
 
     // Check that project configuration was updated with serve targets
     const projectConfig = JSON.parse(
@@ -510,8 +518,8 @@ describe('ts#mcp-server generator', () => {
       tree.exists('apps/test-project/src/custom-bedrock-server/Dockerfile'),
     ).toBeTruthy();
 
-    // The generator should not vend a nested project package.json
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
 
     // Check that project configuration was updated with custom serve targets
     const projectConfig = JSON.parse(
@@ -536,15 +544,23 @@ describe('ts#mcp-server generator', () => {
       iac: 'cdk',
     });
 
-    // Check root package.json dependencies
+    // Runtime dependencies (and the @types/* backing type imports) land in the
+    // project's own manifest as catalog references
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.dependencies['@modelcontextprotocol/sdk']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['zod']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['express']).toBe('catalog:');
+    expect(projectPackageJson.devDependencies['@types/express']).toBe(
+      'catalog:',
+    );
+
+    // Pure build/test tooling stays in the workspace root devDependencies
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(
-      rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
-    ).toBeDefined();
-    expect(rootPackageJson.dependencies['zod']).toBeDefined();
-    expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
 
     // Additional dependencies for BedrockAgentCoreRuntime
     expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
@@ -552,8 +568,8 @@ describe('ts#mcp-server generator', () => {
       rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
 
-    // No nested project package.json should be created
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
   });
 
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {
@@ -1057,6 +1073,8 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should pin @modelcontextprotocol/sdk zod via yarn resolutions to match the workspace zod', async () => {
+    // Remove the pnpm workspace marker so the tree reads as a yarn workspace
+    tree.delete('pnpm-workspace.yaml');
     vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('yarn');
 
     await tsMcpServerGenerator(tree, {
@@ -1065,10 +1083,19 @@ describe('ts#mcp-server generator', () => {
       iac: 'cdk',
     });
 
+    // The dependency is declared via the yarn catalog in the project manifest;
+    // the resolution pins the same version the catalog records.
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.dependencies.zod).toBe('catalog:');
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    const yarnRc = yaml.load(tree.read('.yarnrc.yml', 'utf-8')) as {
+      catalog: Record<string, string>;
+    };
     expect(
       rootPackageJson.resolutions?.['**/@modelcontextprotocol/sdk/zod'],
-    ).toBe(rootPackageJson.dependencies.zod);
+    ).toBe(yarnRc.catalog.zod);
   });
 
   it.each(['pnpm', 'npm', 'bun'] as const)(
@@ -1110,8 +1137,8 @@ describe('ts#mcp-server generator', () => {
     );
     expect(serverContent).toContain("name: 'test-project-mcp-server'");
 
-    // The generator should not vend a nested project package.json
-    expect(tree.exists('apps/test-project/package.json')).toBeFalsy();
+    // The project always has its own package.json
+    expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
 
     // Check that project configuration was updated with default serve targets
     const projectConfig = JSON.parse(

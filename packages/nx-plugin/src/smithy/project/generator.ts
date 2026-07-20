@@ -23,6 +23,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx';
+import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
 export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -66,6 +67,8 @@ export const smithyProjectGenerator = async (
       },
     });
   }
+
+  ensureProjectPackageJson(tree, { dir, fullyQualifiedName });
 
   const serviceName = options.serviceName ?? options.name;
   const serviceNameClassName = toClassName(serviceName);

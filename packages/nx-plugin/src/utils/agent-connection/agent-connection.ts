@@ -13,9 +13,14 @@ import pyProjectGenerator, {
 } from '../../py/project/generator';
 import tsProjectGenerator from '../../ts/lib/generator';
 import { addStarExport, applyGritQL, matchGritQL } from '../ast';
+import { addDependenciesToPackageJson } from '../dependencies';
 import { esmVars } from '../module-format';
 import { addDependenciesToPyProjectToml } from '../py';
-import type { IPyDepVersion } from '../versions';
+import {
+  type IPyDepVersion,
+  type ITsDepVersion,
+  withVersions,
+} from '../versions';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -249,7 +254,28 @@ const MCP_TRANSPORT_PROTOCOLS: ConnectionProtocol[] = ['mcp', 'gateway'];
 const tsCoreDir = () =>
   joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core');
 
-const emitTs = (tree: Tree, templateDir: string) =>
+/**
+ * Runtime dependencies each TypeScript core template directory imports. Emitting
+ * a template also declares its dependencies in the agent-connection project's
+ * package.json so the `noUndeclaredDependencies` lint rule passes.
+ */
+const TS_TEMPLATE_DEPS: Record<string, ITsDepVersion[]> = {
+  'core-runtime-config': ['@aws-lambda-powertools/parameters'],
+  'core-auth': ['@aws-sdk/credential-providers', 'aws4fetch'],
+  'core-shared': ['@aws-sdk/credential-providers', '@modelcontextprotocol/sdk'],
+  'core-mcp': ['@aws-sdk/credential-providers', '@modelcontextprotocol/sdk'],
+  'core-gateway': [
+    '@aws-sdk/credential-providers',
+    '@modelcontextprotocol/sdk',
+  ],
+  'core-a2a': ['@aws-sdk/credential-providers', '@a2a-js/sdk'],
+  'core-strands/base': ['@strands-agents/sdk'],
+  'core-strands/mcp': ['@strands-agents/sdk'],
+  'core-strands/gateway': ['@strands-agents/sdk'],
+  'core-strands/a2a': ['@strands-agents/sdk'],
+};
+
+const emitTs = (tree: Tree, templateDir: string) => {
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', templateDir),
@@ -257,6 +283,16 @@ const emitTs = (tree: Tree, templateDir: string) =>
     { ...esmVars(tree) },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+  const deps = TS_TEMPLATE_DEPS[templateDir];
+  if (deps?.length) {
+    addDependenciesToPackageJson(
+      tree,
+      withVersions(deps),
+      {},
+      joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'package.json'),
+    );
+  }
+};
 
 /**
  * Ensure the shared TypeScript agent-connection project exists and has the
