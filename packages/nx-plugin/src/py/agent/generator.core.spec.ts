@@ -4,10 +4,10 @@
  */
 
 import { parse } from '@iarna/toml';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { pyAgentGenerator } from './generator';
 
 describe('py#agent generator', () => {

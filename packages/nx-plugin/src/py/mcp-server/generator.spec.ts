@@ -4,7 +4,6 @@
  */
 
 import { parse } from '@iarna/toml';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   addProjectConfiguration,
   joinPathFragments,
@@ -23,6 +22,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   PY_MCP_SERVER_GENERATOR_INFO,
   pyMcpServerGenerator,

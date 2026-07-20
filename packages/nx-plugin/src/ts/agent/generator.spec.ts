@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -11,6 +10,7 @@ import {
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { TS_AGENT_GENERATOR_INFO, tsAgentGenerator } from './generator';
 
 describe('ts#agent generator', () => {
