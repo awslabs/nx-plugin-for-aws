@@ -71,6 +71,33 @@ export const readAwsNxPluginConfig = async (
 };
 
 /**
+ * Read config from the tree synchronously.
+ *
+ * `jiti.evalModule` evaluates the TypeScript source in-memory synchronously, so
+ * this suits synchronous callers (e.g. dependency helpers) that can't await.
+ * Returns undefined when the config file is absent or fails to evaluate — the
+ * caller is expected to fall back to defaults.
+ */
+export const readAwsNxPluginConfigSync = (
+  tree: Tree,
+): AwsNxPluginConfig | undefined => {
+  if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
+    return undefined;
+  }
+  try {
+    const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
+    const configFilePath = join(tree.root, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+    const jiti = createJiti(import.meta.filename, {
+      alias: AWS_NX_PLUGIN_JITI_ALIASES,
+    });
+    const mod = jiti.evalModule(source, { filename: configFilePath });
+    return (mod as any).default ?? mod;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Read config directly from disk. Used by executors that run in the real
  * workspace (not a virtual Tree). Resolves all imports — including
  * third-party dependencies — from the workspace's node_modules.

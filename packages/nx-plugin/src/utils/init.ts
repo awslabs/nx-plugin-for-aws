@@ -73,6 +73,13 @@ export interface ApplyWorkspaceInitOptions {
    * the default) — it only adds the convenience scripts that are absent.
    */
   readonly overwriteScripts?: boolean;
+  /**
+   * Whether generators use the package manager's dependency catalog. Recorded
+   * in the plugin config; when enabled on pnpm, the workspace is also set to
+   * add dependencies to the catalog by default (`catalogMode: prefer`) so
+   * `pnpm add` keeps using it. Defaults to true.
+   */
+  readonly catalogs?: boolean;
 }
 
 /**
@@ -86,7 +93,7 @@ export interface ApplyWorkspaceInitOptions {
  * build script. This makes the file self-consistent so the first generator's
  * install doesn't fail with `ERR_PNPM_IGNORED_BUILDS`.
  */
-const setUpPnpmWorkspace = (tree: Tree) => {
+const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
   const existing = tree.exists('pnpm-workspace.yaml')
     ? ((yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
         string,
@@ -108,6 +115,14 @@ const setUpPnpmWorkspace = (tree: Tree) => {
     ...Object.fromEntries(PNPM_BUILT_DEPENDENCIES.map((dep) => [dep, true])),
   };
 
+  // When catalogs are enabled, add new dependencies to the catalog by default
+  // so `pnpm add` keeps the single-version policy without manual editing.
+  // `prefer` falls back to a direct range when no compatible catalog version
+  // exists (unlike `strict`, which errors). Preserve an explicit user choice.
+  const catalogMode = catalogs
+    ? (existing.catalogMode ?? 'prefer')
+    : existing.catalogMode;
+
   tree.write(
     'pnpm-workspace.yaml',
     yaml.dump(
@@ -116,6 +131,7 @@ const setUpPnpmWorkspace = (tree: Tree) => {
         packages,
         allowBuilds,
         onlyBuiltDependencies: PNPM_BUILT_DEPENDENCIES,
+        ...(catalogMode ? { catalogMode } : {}),
       },
       { quotingType: "'" },
     ),
@@ -128,9 +144,9 @@ const setUpPnpmWorkspace = (tree: Tree) => {
  * pnpm workspaces are declared in `pnpm-workspace.yaml`; every other package
  * manager reads the `workspaces` field of the root `package.json`.
  */
-const setUpWorkspaces = (tree: Tree) => {
+const setUpWorkspaces = (tree: Tree, catalogs: boolean) => {
   if (detectWorkspacePackageManager(tree) === 'pnpm') {
-    setUpPnpmWorkspace(tree);
+    setUpPnpmWorkspace(tree, catalogs);
   } else {
     updateJson(tree, 'package.json', (json) => ({
       ...json,
@@ -220,16 +236,20 @@ export const applyWorkspaceInit = async (
     mcp,
     readmeOverwriteStrategy = OverwriteStrategy.KeepExisting,
     overwriteScripts = false,
+    catalogs = true,
   }: ApplyWorkspaceInitOptions,
 ) => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
 
-  // Write IaC provider and container engine to plugin config
+  // Write IaC provider, container engine and package-manager settings to the
+  // plugin config. The catalogs flag is written explicitly (even when true) so
+  // the workspace records its dependency-management choice.
   await ensureAwsNxPluginConfig(tree);
   await updateAwsNxPluginConfig(tree, {
     iac: { provider: iac },
     containers: { engine: resolvedContainers },
+    packageManager: { catalogs },
   });
 
   // Set up the TypeScript plugin, base tsconfig, formatter etc. `@nx/js`
@@ -243,7 +263,7 @@ export const applyWorkspaceInit = async (
   ensureBaseTsConfig(tree);
   ensureRootTsConfig(tree);
 
-  setUpWorkspaces(tree);
+  setUpWorkspaces(tree, catalogs);
 
   const nxJson = readNxJson(tree);
   updateNxJson(tree, {

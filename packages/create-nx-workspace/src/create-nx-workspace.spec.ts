@@ -154,6 +154,18 @@ describe('create-nx-workspace', () => {
       expect(result).toContain('--pm=pnpm');
     });
 
+    it('should keep a space-separated flag value with its flag', () => {
+      const result = buildArgs(['my-project', '--catalog', 'false']);
+      // `false` is the value of `--catalog`, not a second positional arg: the
+      // two stay adjacent and in order after the injected preset/default flags.
+      const catalogIndex = result.indexOf('--catalog');
+      expect(catalogIndex).toBeGreaterThan(-1);
+      expect(result[catalogIndex + 1]).toBe('false');
+      // The workspace name remains the only leading positional.
+      expect(result[0]).toBe('my-project');
+      expect(result[1]).toBe(`--preset=@aws/nx-plugin@${OWN_VERSION}`);
+    });
+
     it('should handle no args', () => {
       expect(buildArgs([])).toEqual([
         `--preset=@aws/nx-plugin@${OWN_VERSION}`,

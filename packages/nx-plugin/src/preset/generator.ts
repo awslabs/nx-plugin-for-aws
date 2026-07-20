@@ -121,6 +121,7 @@ export const presetGenerator = async (
     mcp,
     containers,
     module,
+    catalog,
     preferInstallDependencies,
   }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
@@ -161,6 +162,7 @@ export const presetGenerator = async (
     iac,
     containers,
     mcp,
+    catalogs: catalog ?? true,
     readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
     overwriteScripts: true,
   });

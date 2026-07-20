@@ -14,6 +14,7 @@ import {
   writeJson,
 } from '@nx/devkit';
 import yaml from 'js-yaml';
+import { readAwsNxPluginConfigSync } from './config/utils';
 
 /**
  * Package managers with catalog support, and the version that introduced it.
@@ -159,6 +160,22 @@ export const supportsCatalogs = (tree: Tree): boolean => {
 };
 
 /**
+ * Whether generators should record dependency versions in the package
+ * manager's catalog. True when the package manager supports catalogs (see
+ * `supportsCatalogs`) and the workspace hasn't opted out via
+ * `packageManager.catalogs: false` in `aws-nx-plugin.config.mts`. When
+ * disabled, generators write direct version ranges to each project's
+ * package.json and keeping versions aligned is the user's responsibility.
+ */
+export const catalogsEnabled = (tree: Tree): boolean => {
+  if (!supportsCatalogs(tree)) {
+    return false;
+  }
+  const config = readAwsNxPluginConfigSync(tree);
+  return config?.packageManager?.catalogs !== false;
+};
+
+/**
  * Build/test tooling that is only ever imported from config files, build
  * scripts, or the Nx toolchain — never from a project's runtime `src` code.
  * These always belong in the workspace root `package.json` devDependencies,
@@ -236,13 +253,15 @@ const pick = (
  * package manager's dependency catalog when supported.
  *
  * This is a drop-in replacement for `addDependenciesToPackageJson` from
- * `@nx/devkit` and generators use it for all dependency additions. On
- * pnpm/yarn/bun each entry is written as a `catalog:` reference with the
- * version range recorded in the package manager's catalog
- * (pnpm-workspace.yaml, .yarnrc.yml, or the root package.json `catalog` field
- * respectively), so the catalog remains the single source of truth for
- * dependency versions across the workspace. On npm — which has no catalog
- * feature — direct version ranges are written as-is.
+ * `@nx/devkit` and generators use it for all dependency additions. When
+ * catalogs are enabled (see `catalogsEnabled`) on pnpm/yarn/bun, each entry is
+ * written as a `catalog:` reference with the version range recorded in the
+ * package manager's catalog (pnpm-workspace.yaml, .yarnrc.yml, or the root
+ * package.json `catalog` field respectively), so the catalog remains the
+ * single source of truth for dependency versions across the workspace. On
+ * npm — which has no catalog feature — or when the workspace opts out via
+ * `packageManager.catalogs: false`, direct version ranges are written as-is
+ * and keeping them aligned is the user's responsibility.
  *
  * When `packageJsonPath` targets a project's own manifest (not the workspace
  * root), the project's runtime dependencies are written there while pure
@@ -295,7 +314,7 @@ export const addDependenciesToPackageJson = (
     devkitAddDependenciesToPackageJson(tree, {}, rootDevDependencies);
   }
 
-  if (supportsCatalogs(tree)) {
+  if (catalogsEnabled(tree)) {
     convertDependenciesToCatalog(tree, packageJsonPath, [
       ...Object.keys(projectDependencies),
       ...Object.keys(projectDevDependencies),

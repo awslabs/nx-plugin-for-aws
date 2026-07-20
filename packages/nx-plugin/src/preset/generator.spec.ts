@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readJson, readNxJson, type Tree } from '@nx/devkit';
+import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
@@ -72,6 +73,37 @@ describe('preset generator', () => {
     });
 
     expect(readJson(tree, 'package.json').type).toBe('commonjs');
+  });
+
+  it('should enable catalogs by default and set pnpm catalogMode to prefer', async () => {
+    await presetGenerator(tree, {
+      iac: 'cdk',
+      containers: 'docker',
+    });
+
+    expect((await readAwsNxPluginConfig(tree)).packageManager?.catalogs).toBe(
+      true,
+    );
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalogMode).toBe('prefer');
+  });
+
+  it('should disable catalogs when catalog is false and not set catalogMode', async () => {
+    await presetGenerator(tree, {
+      iac: 'cdk',
+      containers: 'docker',
+      catalog: false,
+    });
+
+    expect((await readAwsNxPluginConfig(tree)).packageManager?.catalogs).toBe(
+      false,
+    );
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalogMode).toBeUndefined();
   });
 
   it('should store container engine in config', async () => {

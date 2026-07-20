@@ -255,6 +255,65 @@ describe('addDependenciesToPackageJson', () => {
     expect(workspaceYaml.catalog.zod).toBe('next');
   });
 
+  it('should write direct version ranges when catalogs are disabled via config', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    // Opt out of catalogs in the plugin config.
+    tree.write(
+      'aws-nx-plugin.config.mts',
+      [
+        "import { AwsNxPluginConfig } from '@aws/nx-plugin';",
+        '',
+        'export default {',
+        '  packageManager: { catalogs: false },',
+        '} satisfies AwsNxPluginConfig;',
+        '',
+      ].join('\n'),
+    );
+    tree.write(
+      'packages/lib/package.json',
+      JSON.stringify({ name: '@proj/lib' }),
+    );
+
+    addDependenciesToPackageJson(
+      tree,
+      { zod: '4.4.3' },
+      {},
+      'packages/lib/package.json',
+    );
+
+    // Version is written directly to the project manifest; no catalog entry.
+    expect(readJson(tree, 'packages/lib/package.json').dependencies.zod).toBe(
+      '4.4.3',
+    );
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog).toBeUndefined();
+  });
+
+  it('should still use catalogs when the config enables them explicitly', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    tree.write(
+      'aws-nx-plugin.config.mts',
+      [
+        "import { AwsNxPluginConfig } from '@aws/nx-plugin';",
+        '',
+        'export default {',
+        '  packageManager: { catalogs: true },',
+        '} satisfies AwsNxPluginConfig;',
+        '',
+      ].join('\n'),
+    );
+
+    addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+
+    expect(readJson(tree, 'package.json').dependencies.zod).toBe('catalog:');
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog.zod).toBe('4.4.3');
+  });
+
   it('should be idempotent when re-run with the same dependencies', () => {
     mockPackageManager(tree, 'pnpm', '10.0.0');
     addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
