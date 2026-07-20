@@ -59,14 +59,15 @@ describe('cognito-auth generator ux tests', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it.each(
-    SUPPORTED_UX_PROVIDERS.map((p) => [p]),
-  )('should run generator without error for ux=%s', async (ux) => {
-    setupTree(ux);
+  it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
+    'should run generator without error for ux=%s',
+    async (ux) => {
+      setupTree(ux);
 
-    // If this test fails, you need to implement support for this ux provider in this generator!
-    await tsReactWebsiteAuthGenerator(tree, options);
-  });
+      // If this test fails, you need to implement support for this ux provider in this generator!
+      await tsReactWebsiteAuthGenerator(tree, options);
+    },
+  );
 
   describe('None', () => {
     beforeEach(() => {
