@@ -1,0 +1,27 @@
+---
+title: Quét Image Container
+---
+
+Docker image được xây dựng cho dự án này được quét các lỗ hổng bảo mật như một phần của quá trình build bằng cách sử dụng [Trivy](https://trivy.dev/), chạy từ [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy).
+
+Một target `trivy` được thêm vào dự án của bạn để quét built image và **làm thất bại build** nếu phát hiện bất kỳ lỗ hổng bảo mật mức độ nghiêm trọng `HIGH` hoặc `CRITICAL` nào. `Dockerfile` được tạo ra sử dụng base image không có lỗ hổng bảo mật có thể sửa chữa được biết đến với các mức độ nghiêm trọng này tại thời điểm tạo, và nâng cấp các công cụ đi kèm (như `npm`) để duy trì trạng thái đó.
+
+Quá trình quét sử dụng cùng container engine với quá trình build image của bạn (`docker` hoặc `finch`), do đó không cần thêm công cụ nào khác. Vì quá trình quét chỉ được chạy lại khi image thay đổi, một image không thay đổi sẽ không bị quét lại.
+
+:::caution[Các lỗ hổng không thể sửa chữa được bỏ qua]
+Quá trình quét chạy với `--ignore-unfixed`, do đó các lỗ hổng không có bản vá sẵn có sẽ không làm thất bại build, vì chúng không thể được xử lý bằng cách nâng cấp công cụ trong `Dockerfile` của bạn — chúng không được báo cáo trong kết quả quét của build. Khi các lỗ hổng mới được công bố, kết quả quét có thể thay đổi theo thời gian, do đó hãy xem xét image định kỳ bằng cách chạy `trivy image <your-image>` mà không có flag, và rebuild lại với base image mới hơn (hoặc thêm các bước container để áp dụng các bản vá có sẵn) khi có bản vá được phát hành.
+:::
+
+#### Loại Trừ Các Phát Hiện Của Trivy
+
+Có thể có những trường hợp bạn muốn loại trừ một lỗ hổng cụ thể, ví dụ khi chưa có bản vá và bạn đã đánh giá rủi ro là chấp nhận được.
+
+Thêm ID lỗ hổng (mỗi dòng một ID) vào file `.trivyignore` trong thư mục gốc của dự án (tức là bên cạnh `project.json` của bạn):
+
+```gitignore
+# .trivyignore
+# node-tar arbitrary file write - not exploitable in our usage
+CVE-2024-XXXXX
+```
+
+Để biết thêm chi tiết về việc lọc các phát hiện, tham khảo [tài liệu lọc của Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids).

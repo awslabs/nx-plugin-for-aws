@@ -1,0 +1,39 @@
+---
+title: Sécuriser votre Agent
+---
+
+Les agents agissent sur des entrées non fiables et peuvent déclencher des actions réelles via leurs outils, il est donc important de considérer la sécurité dès le départ. Les pratiques suivantes s'appliquent à l'agent généré.
+
+### Traiter les entrées et sorties du modèle comme non fiables
+
+Les prompts peuvent contenir des instructions adverses (injection de prompt), et la sortie du modèle est non déterministe — ni l'un ni l'autre ne doivent être considérés comme fiables dans une logique sensible à la sécurité :
+
+- Définissez des schémas d'entrée stricts pour vos outils, comme dans l'outil d'exemple généré. Contraignez les valeurs à ce dont l'outil a réellement besoin (énumérations, limites de longueur, plages numériques) plutôt que d'accepter des chaînes de caractères libres.
+- Ne passez jamais la sortie du modèle directement dans des commandes shell, des requêtes SQL, une évaluation de code ou du HTML rendu sans validation ou encodage.
+- Appliquez des vérifications d'autorisation dans vos outils et services en aval — ne comptez pas sur le prompt système pour empêcher le modèle d'abuser d'un outil auquel il a accès.
+
+Les guides [Ingénierie des prompts](https://strandsagents.com/docs/user-guide/safety-security/prompt-engineering/) et [IA responsable](https://strandsagents.com/docs/user-guide/safety-security/responsible-ai/) de Strands expliquent comment rédiger des prompts système robustes et soucieux de la sécurité.
+
+### Limiter strictement les permissions des outils
+
+Accordez au rôle IAM de l'agent uniquement les permissions dont ses outils ont besoin. Les constructs CDK et modules Terraform fournis exposent des méthodes `grant*` et des politiques limitées à cet effet — par exemple, accorder à un agent l'accès pour invoquer une API spécifique plutôt que d'attacher des politiques gérées larges. Lorsqu'un outil agit au nom d'un utilisateur, préférez autoriser l'action en utilisant l'identité de l'utilisateur appelant (transmise via le contexte de la requête) plutôt que les permissions ambiantes propres à l'agent.
+
+### Fournir un interrupteur d'urgence
+
+Étant donné que le comportement du modèle peut changer de manière inattendue, prévoyez de désactiver ou de remplacer rapidement le modèle sans modification de code :
+
+- Lisez l'ID du modèle à partir de la configuration (par exemple une variable d'environnement `MODEL_ID`) afin que les opérateurs puissent basculer ou revenir à un modèle différent en mettant à jour la configuration.
+- Placez l'agent derrière un feature flag afin que sa fonctionnalité IA puisse être désactivée entièrement. Lorsqu'il est désactivé, renvoyez un message générique plutôt qu'une erreur, et assurez-vous que le reste de votre application se dégrade gracieusement.
+
+Documentez comment activer ces contrôles dans votre manuel opérationnel.
+
+### Protéger les données sensibles
+
+- Évitez de journaliser les prompts et les complétions, qui peuvent contenir des données utilisateur. Le hook de journalisation des erreurs du modèle de l'agent généré journalise uniquement les métadonnées d'erreur, pas le contenu de la conversation — conservez cette propriété lors de l'ajout de votre propre journalisation.
+- Renvoyez des messages d'erreur génériques aux utilisateurs ; journalisez les erreurs détaillées côté serveur.
+- Isolez l'état de conversation entre les utilisateurs et les sessions, et autorisez l'accès à toutes les données de session persistées.
+- Expurgez les informations personnellement identifiables (PII) des prompts et des sorties — soit avec un filtre d'informations sensibles Bedrock Guardrail (ci-dessous), soit, pour les agents Strands, avec les approches du guide [PII Redaction](https://strandsagents.com/docs/user-guide/safety-security/pii-redaction/).
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) fournissent des filtres de contenu configurables, des sujets interdits et des filtres d'informations sensibles (PII) qui sont évalués sur les entrées et sorties du modèle. Vous pouvez attacher un guardrail au modèle utilisé par l'agent généré :

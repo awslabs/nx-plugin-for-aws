@@ -152,6 +152,18 @@ variable "website_file_path" {
   type        = string
 }
 
+variable "custom_domain_names" {
+  description = "Custom domain names (aliases) for the CloudFront distribution. Requires acm_certificate_arn."
+  type        = list(string)
+  default     = []
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in us-east-1) for the custom domain names. When set, viewers are required to use TLS 1.2 or later."
+  type        = string
+  default     = null
+}
+
 # Content-Security-Policy enforced on all responses. Restricts scripts and
 # framing to mitigate XSS and clickjacking, while permitting HTTPS/WSS calls
 # (connect-src) to AWS service endpoints such as API Gateway, Cognito and
@@ -159,6 +171,10 @@ variable "website_file_path" {
 # connect-src to your specific origins once they are known.
 locals {
   content_security_policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+  # Delivery source/destination names have a 60 character maximum. Truncate the
+  # website name so the longest delivery name stays within the limit.
+  access_logs_name_prefix = substr(lower(var.website_name), 0, 16)
 }
 
 
@@ -198,6 +214,26 @@ resource "aws_kms_key" "website_key" {
         Resource = "*"
       },
       {
+        Sid    = "AllowCloudWatchLogs"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.\${data.aws_region.current.region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      },
+      {
         Sid    = "AllowCloudFrontServicePrincipalSSE-KMS"
         Effect = "Allow"
         Principal = {
@@ -228,18 +264,12 @@ resource "aws_kms_alias" "website_key_alias" {
   target_key_id = aws_kms_key.website_key.key_id
 }
 
-# Access Logs Bucket
-resource "aws_s3_bucket" "access_logs" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for access logs bucket
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for access logs
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for access logs bucket
-  #checkov:skip=CKV_AWS_21:Versioning disabled for access logs to reduce storage costs
-  bucket        = "\${lower(var.website_name)}-access-logs-\${random_id.bucket_suffix.hex}"
-  force_destroy = true
-
-  tags = {
-    Name = "\${lower(var.website_name)}-access-logs"
-  }
+# CloudWatch log group receiving S3 server access logs for the website and
+# distribution log buckets.
+resource "aws_cloudwatch_log_group" "access_logs" {
+  name              = "/aws/s3/\${lower(var.website_name)}-access-logs-\${random_id.bucket_suffix.hex}"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.website_key.arn
 }
 
 resource "random_id" "unique_suffix" {
@@ -250,63 +280,12 @@ resource "random_id" "bucket_suffix" {
   byte_length = 8
 }
 
-resource "aws_s3_bucket_versioning" "access_logs_versioning" {
-  bucket = aws_s3_bucket.access_logs.id
-  versioning_configuration {
-    status = "Disabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs_encryption" {
-  bucket = aws_s3_bucket.access_logs.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.website_key.arn
-      sse_algorithm     = "aws:kms"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "access_logs_pab" {
-  bucket = aws_s3_bucket.access_logs.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "access_logs_ssl_policy" {
-  bucket = aws_s3_bucket.access_logs.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.access_logs.arn,
-          "\${aws_s3_bucket.access_logs.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
 # Website Bucket
 resource "aws_s3_bucket" "website" {
   #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for static website content
   #checkov:skip=CKV_AWS_144:Cross-region replication not required for static website
   #checkov:skip=CKV2_AWS_62:Event notifications not required for static website bucket
+  #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.website)
   bucket        = "\${lower(var.website_name)}-website-\${random_id.bucket_suffix.hex}"
   force_destroy = true
 
@@ -350,20 +329,35 @@ resource "aws_s3_bucket_ownership_controls" "website_ownership" {
   }
 }
 
-resource "aws_s3_bucket_logging" "website_logging" {
-  bucket = aws_s3_bucket.website.id
+# Deliver the website bucket's server access logs to CloudWatch Logs.
+resource "aws_cloudwatch_log_delivery_source" "website" {
+  name         = "\${local.access_logs_name_prefix}-website-logs-\${random_id.bucket_suffix.hex}"
+  log_type     = "S3_SERVER_ACCESS_LOGS"
+  resource_arn = aws_s3_bucket.website.arn
+}
 
-  target_bucket = aws_s3_bucket.access_logs.id
-  target_prefix = "website-access-logs/"
+resource "aws_cloudwatch_log_delivery_destination" "access_logs" {
+  name = "\${local.access_logs_name_prefix}-access-logs-\${random_id.bucket_suffix.hex}"
+
+  delivery_destination_configuration {
+    destination_resource_arn = aws_cloudwatch_log_group.access_logs.arn
+  }
+}
+
+resource "aws_cloudwatch_log_delivery" "website" {
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.website.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.access_logs.arn
 }
 
 
-# Distribution Log Bucket
+# Distribution Log Bucket — holds CloudFront standard access logs (CloudFront
+# delivers only to S3). Its own S3 server access logs go to CloudWatch Logs.
 resource "aws_s3_bucket" "distribution_logs" {
   #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for CloudFront logs
   #checkov:skip=CKV_AWS_144:Cross-region replication not required for CloudFront logs
   #checkov:skip=CKV2_AWS_62:Event notifications not required for CloudFront logs bucket
   #checkov:skip=CKV_AWS_21:Versioning not required for CloudFront access logs
+  #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.distribution_logs)
   bucket        = "\${lower(var.website_name)}-distribution-logs-\${random_id.bucket_suffix.hex}"
   force_destroy = true
 
@@ -409,11 +403,16 @@ resource "aws_s3_bucket_acl" "distribution_logs_acl" {
   depends_on = [aws_s3_bucket_ownership_controls.distribution_logs_ownership]
 }
 
-resource "aws_s3_bucket_logging" "distribution_logs_logging" {
-  bucket = aws_s3_bucket.distribution_logs.id
+# Deliver the distribution log bucket's server access logs to CloudWatch Logs.
+resource "aws_cloudwatch_log_delivery_source" "distribution_logs" {
+  name         = "\${local.access_logs_name_prefix}-distribution-logs-\${random_id.bucket_suffix.hex}"
+  log_type     = "S3_SERVER_ACCESS_LOGS"
+  resource_arn = aws_s3_bucket.distribution_logs.arn
+}
 
-  target_bucket = aws_s3_bucket.access_logs.id
-  target_prefix = "distribution-access-logs/"
+resource "aws_cloudwatch_log_delivery" "distribution_logs" {
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.distribution_logs.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.access_logs.arn
 }
 
 resource "aws_s3_bucket_policy" "distribution_logs_ssl_policy" {
@@ -568,6 +567,7 @@ resource "aws_cloudfront_distribution" "website" {
   is_ipv6_enabled     = true
   default_root_object = "index.html"
   web_acl_id          = aws_wafv2_web_acl.cloudfront_waf.arn
+  aliases             = var.custom_domain_names
 
   logging_config {
     include_cookies = false
@@ -614,7 +614,10 @@ resource "aws_cloudfront_distribution" "website" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = var.acm_certificate_arn == null
+    acm_certificate_arn            = var.acm_certificate_arn
+    ssl_support_method             = var.acm_certificate_arn == null ? null : "sni-only"
+    minimum_protocol_version       = var.acm_certificate_arn == null ? "TLSv1" : "TLSv1.2_2021"
   }
 
   tags = {
@@ -1004,7 +1007,10 @@ exports[`react-website generator > Tanstack router integration > should generate
       "!**/node_modules",
       "!**/.nx",
       "!**/.venv",
-      "!**/*.css"
+      "!**/*.css",
+      "!**/*.gen.*",
+      "!**/generated/**",
+      "!**/tsconfig*.json"
     ]
   }
 }
@@ -1123,11 +1129,11 @@ exports[`react-website generator > Tanstack router integration > should generate
     "tailwindcss": "4.3.2"
   },
   "devDependencies": {
-    "@nx/js": "23.0.2",
-    "@nx/react": "23.0.2",
-    "@nx/vite": "23.0.2",
-    "@nx/vitest": "23.0.2",
-    "@nx/web": "23.0.2",
+    "@nx/js": "23.1.0",
+    "@nx/react": "23.1.0",
+    "@nx/vite": "23.1.0",
+    "@nx/vitest": "23.1.0",
+    "@nx/web": "23.1.0",
     "@swc/helpers": "~0.5.18",
     "@tailwindcss/vite": "4.3.2",
     "@testing-library/dom": "10.4.0",
@@ -1140,7 +1146,7 @@ exports[`react-website generator > Tanstack router integration > should generate
     "@vitest/ui": "4.1.10",
     "jiti": "2.4.2",
     "jsdom": "^27.1.0",
-    "typescript": "~5.9.2",
+    "typescript": "~6.0.3",
     "vite": "8.1.4",
     "vitest": "4.1.10"
   },
@@ -1208,10 +1214,27 @@ exports[`react-website generator > Tanstack router integration > should generate
         "cwd": "{projectRoot}"
       }
     },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["biome"],
+      "options": {
+        "command": "biome format {projectRoot}"
+      },
+      "configurations": {
+        "fix": {
+          "command": "biome format --write {projectRoot}"
+        },
+        "skip-lint": {
+          "command": "node -e \\"\\""
+        }
+      }
+    },
     "lint": {
       "executor": "nx:run-commands",
       "cache": true,
       "inputs": ["biome"],
+      "dependsOn": ["format"],
       "options": {
         "command": "biome lint {projectRoot}"
       },
@@ -1535,6 +1558,7 @@ exports[`react-website generator > Tanstack router integration > should generate
   CfnResource,
   Duration,
   Lazy,
+  Names,
   RemovalPolicy,
   Stack,
 } from 'aws-cdk-lib';
@@ -1543,8 +1567,10 @@ import {
   HeadersFrameOption,
   HeadersReferrerPolicy,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -1561,6 +1587,14 @@ import {
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
 import { suppressRules } from './checkov.js';
 
@@ -1586,6 +1620,15 @@ const CONTENT_SECURITY_POLICY = [
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * Custom domain names for the CloudFront distribution. Requires \`certificate\`.
+   */
+  readonly domainNames?: string[];
+  /**
+   * ACM certificate for the custom domain names. Must be in us-east-1.
+   * When provided, viewers are required to use TLS 1.2 or later.
+   */
+  readonly certificate?: ICertificate;
 }
 
 /**
@@ -1604,39 +1647,48 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps,
+    {
+      websiteFilePath,
+      websiteName,
+      domainNames,
+      certificate,
+    }: StaticWebsiteProps,
   ) {
     super(scope, id);
-    this.node.setContext(
-      '@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy',
-      true,
-    );
 
     const websiteKey = new Key(this, 'WebsiteKey', {
       enableKeyRotation: true,
     });
 
-    const accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
-      versioned: false,
-      enforceSSL: true,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+    // Allow CloudWatch Logs to use the website key for server access log delivery.
+    const stack = Stack.of(this);
+    websiteKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
       encryptionKey: websiteKey,
-      objectOwnership: ObjectOwnership.OBJECT_WRITER,
-      publicReadAccess: false,
-      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_21'],
-      'Access log bucket does not need versioning enabled',
-    );
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_18'],
-      'Access log bucket does not need an access log bucket',
-    );
 
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
@@ -1649,13 +1701,23 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'website-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      this.websiteBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch(
+      'Website',
+      this.websiteBucket,
+      accessLogs,
+    );
     // Web ACL
     const wafStack = new CloudfrontWebAcl(this, 'waf');
 
-    // Cloudfront Distribution
+    // Bucket holding CloudFront standard access logs. CloudFront delivers its
+    // own logs to S3 only, so this bucket is retained; its S3 server access
+    // logs are delivered to CloudWatch Logs.
     const logBucket = new Bucket(this, 'DistributionLogBucket', {
       enforceSSL: true,
       autoDeleteObjects: true,
@@ -1665,14 +1727,18 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'distribution-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
     suppressRules(
       logBucket,
       ['CKV_AWS_21'],
       'Distribution log bucket does not need versioning enabled',
     );
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch('Distribution', logBucket, accessLogs);
 
     // Security headers applied to all responses.
     const responseHeadersPolicy = new ResponseHeadersPolicy(
@@ -1712,6 +1778,13 @@ export class StaticWebsite extends Construct {
         webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
+        ...(certificate
+          ? {
+              certificate,
+              domainNames,
+              minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            }
+          : {}),
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -1732,12 +1805,14 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
-    // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
-    suppressRules(
-      this.cloudFrontDistribution,
-      ['CKV_AWS_174'],
-      'Cloudfront default certificate does not use TLS 1.2',
-    );
+    if (!certificate) {
+      // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
+      suppressRules(
+        this.cloudFrontDistribution,
+        ['CKV_AWS_174'],
+        'Cloudfront default certificate does not use TLS 1.2',
+      );
+    }
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
@@ -1785,6 +1860,44 @@ export class StaticWebsite extends Construct {
     new CfnOutput(this, \`\${websiteName}WebsiteBucketName\`, {
       value: this.websiteBucket.bucketName,
     });
+  }
+
+  /**
+   * Delivers a bucket's S3 server access logs to a CloudWatch log group using
+   * CloudWatch Logs vended log delivery.
+   */
+  private deliverAccessLogsToCloudWatch(
+    id: string,
+    bucket: IBucket,
+    logGroup: LogGroup,
+  ) {
+    const source: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      \`\${id}AccessLogsSource\`,
+      {
+        name: Lazy.string({
+          produce: () => Names.uniqueResourceName(source, { maxLength: 60 }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: bucket.bucketArn,
+      },
+    );
+    const destination: CfnDeliveryDestination = new CfnDeliveryDestination(
+      this,
+      \`\${id}AccessLogsDestination\`,
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(destination, { maxLength: 60 }),
+        }),
+        destinationResourceArn: logGroup.logGroupArn,
+      },
+    );
+    const delivery = new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
+      deliverySourceName: source.name,
+      deliveryDestinationArn: destination.attrArn,
+    });
+    delivery.addDependency(source);
   }
 }
 
@@ -1908,9 +2021,13 @@ exports[`react-website generator > Tanstack router integration > should generate
     "emitDeclarationOnly": false,
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [],
   "exclude": [
     "vite.config.ts",
@@ -2104,6 +2221,22 @@ exports[`react-website generator > Tanstack router integration > should generate
         "cwd": "{projectRoot}"
       }
     },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["biome"],
+      "options": {
+        "command": "biome format {projectRoot}"
+      },
+      "configurations": {
+        "fix": {
+          "command": "biome format --write {projectRoot}"
+        },
+        "skip-lint": {
+          "command": "node -e \\"\\""
+        }
+      }
+    },
     "lint": {
       "executor": "nx:run-commands",
       "cache": true,
@@ -2118,7 +2251,8 @@ exports[`react-website generator > Tanstack router integration > should generate
         "skip-lint": {
           "command": "node -e \\"\\""
         }
-      }
+      },
+      "dependsOn": ["format"]
     },
     "load:runtime-config": {
       "executor": "nx:run-commands",
@@ -2334,7 +2468,9 @@ exports[`react-website generator > Tanstack router integration > should generate
     "outDir": "../dist/test-app/tsc",
     "tsBuildInfoFile": "../dist/test-app/tsc/tsconfig.lib.tsbuildinfo",
     "jsx": "react-jsx",
-    "lib": ["DOM"],
+    "lib": [
+      "DOM"
+    ],
     "types": [
       "node",
       "@nx/react/typings/cssmodule.d.ts",
@@ -2361,7 +2497,12 @@ exports[`react-website generator > Tanstack router integration > should generate
     "vitest.config.ts",
     "vitest.config.mts"
   ],
-  "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"]
+  "include": [
+    "src/**/*.js",
+    "src/**/*.jsx",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
 }
 "
 `;
@@ -2482,8 +2623,12 @@ exports[`react-website generator > Tanstack router integration > should generate
 "{
   "compilerOptions": {
     "paths": {
-      ":proj/test-app": ["./test-app/src/index.ts"],
-      ":proj/common-constructs": ["./packages/common/constructs/src/index.ts"]
+      ":proj/test-app": [
+        "./test-app/src/index.ts"
+      ],
+      ":proj/common-constructs": [
+        "./packages/common/constructs/src/index.ts"
+      ]
     },
     "composite": true,
     "rootDir": "."
@@ -2575,7 +2720,10 @@ exports[`react-website generator > Tanstack router integration > should generate
       "!**/node_modules",
       "!**/.nx",
       "!**/.venv",
-      "!**/*.css"
+      "!**/*.css",
+      "!**/*.gen.*",
+      "!**/generated/**",
+      "!**/tsconfig*.json"
     ]
   }
 }
@@ -2695,11 +2843,11 @@ exports[`react-website generator > Tanstack router integration > should generate
     "tailwindcss": "4.3.2"
   },
   "devDependencies": {
-    "@nx/js": "23.0.2",
-    "@nx/react": "23.0.2",
-    "@nx/vite": "23.0.2",
-    "@nx/vitest": "23.0.2",
-    "@nx/web": "23.0.2",
+    "@nx/js": "23.1.0",
+    "@nx/react": "23.1.0",
+    "@nx/vite": "23.1.0",
+    "@nx/vitest": "23.1.0",
+    "@nx/web": "23.1.0",
     "@swc/helpers": "~0.5.18",
     "@tailwindcss/vite": "4.3.2",
     "@tanstack/router-generator": "1.167.18",
@@ -2716,7 +2864,7 @@ exports[`react-website generator > Tanstack router integration > should generate
     "@vitest/ui": "4.1.10",
     "jiti": "2.4.2",
     "jsdom": "^27.1.0",
-    "typescript": "~5.9.2",
+    "typescript": "~6.0.3",
     "vite": "8.1.4",
     "vitest": "4.1.10"
   },
@@ -2784,10 +2932,27 @@ exports[`react-website generator > Tanstack router integration > should generate
         "cwd": "{projectRoot}"
       }
     },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["biome"],
+      "options": {
+        "command": "biome format {projectRoot}"
+      },
+      "configurations": {
+        "fix": {
+          "command": "biome format --write {projectRoot}"
+        },
+        "skip-lint": {
+          "command": "node -e \\"\\""
+        }
+      }
+    },
     "lint": {
       "executor": "nx:run-commands",
       "cache": true,
       "inputs": ["biome"],
+      "dependsOn": ["format"],
       "options": {
         "command": "biome lint {projectRoot}"
       },
@@ -3111,6 +3276,7 @@ exports[`react-website generator > Tanstack router integration > should generate
   CfnResource,
   Duration,
   Lazy,
+  Names,
   RemovalPolicy,
   Stack,
 } from 'aws-cdk-lib';
@@ -3119,8 +3285,10 @@ import {
   HeadersFrameOption,
   HeadersReferrerPolicy,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -3137,6 +3305,14 @@ import {
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
 import { suppressRules } from './checkov.js';
 
@@ -3162,6 +3338,15 @@ const CONTENT_SECURITY_POLICY = [
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * Custom domain names for the CloudFront distribution. Requires \`certificate\`.
+   */
+  readonly domainNames?: string[];
+  /**
+   * ACM certificate for the custom domain names. Must be in us-east-1.
+   * When provided, viewers are required to use TLS 1.2 or later.
+   */
+  readonly certificate?: ICertificate;
 }
 
 /**
@@ -3180,39 +3365,48 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps,
+    {
+      websiteFilePath,
+      websiteName,
+      domainNames,
+      certificate,
+    }: StaticWebsiteProps,
   ) {
     super(scope, id);
-    this.node.setContext(
-      '@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy',
-      true,
-    );
 
     const websiteKey = new Key(this, 'WebsiteKey', {
       enableKeyRotation: true,
     });
 
-    const accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
-      versioned: false,
-      enforceSSL: true,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+    // Allow CloudWatch Logs to use the website key for server access log delivery.
+    const stack = Stack.of(this);
+    websiteKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
       encryptionKey: websiteKey,
-      objectOwnership: ObjectOwnership.OBJECT_WRITER,
-      publicReadAccess: false,
-      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_21'],
-      'Access log bucket does not need versioning enabled',
-    );
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_18'],
-      'Access log bucket does not need an access log bucket',
-    );
 
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
@@ -3225,13 +3419,23 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'website-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      this.websiteBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch(
+      'Website',
+      this.websiteBucket,
+      accessLogs,
+    );
     // Web ACL
     const wafStack = new CloudfrontWebAcl(this, 'waf');
 
-    // Cloudfront Distribution
+    // Bucket holding CloudFront standard access logs. CloudFront delivers its
+    // own logs to S3 only, so this bucket is retained; its S3 server access
+    // logs are delivered to CloudWatch Logs.
     const logBucket = new Bucket(this, 'DistributionLogBucket', {
       enforceSSL: true,
       autoDeleteObjects: true,
@@ -3241,14 +3445,18 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'distribution-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
     suppressRules(
       logBucket,
       ['CKV_AWS_21'],
       'Distribution log bucket does not need versioning enabled',
     );
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch('Distribution', logBucket, accessLogs);
 
     // Security headers applied to all responses.
     const responseHeadersPolicy = new ResponseHeadersPolicy(
@@ -3288,6 +3496,13 @@ export class StaticWebsite extends Construct {
         webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
+        ...(certificate
+          ? {
+              certificate,
+              domainNames,
+              minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            }
+          : {}),
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -3308,12 +3523,14 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
-    // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
-    suppressRules(
-      this.cloudFrontDistribution,
-      ['CKV_AWS_174'],
-      'Cloudfront default certificate does not use TLS 1.2',
-    );
+    if (!certificate) {
+      // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
+      suppressRules(
+        this.cloudFrontDistribution,
+        ['CKV_AWS_174'],
+        'Cloudfront default certificate does not use TLS 1.2',
+      );
+    }
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
@@ -3361,6 +3578,44 @@ export class StaticWebsite extends Construct {
     new CfnOutput(this, \`\${websiteName}WebsiteBucketName\`, {
       value: this.websiteBucket.bucketName,
     });
+  }
+
+  /**
+   * Delivers a bucket's S3 server access logs to a CloudWatch log group using
+   * CloudWatch Logs vended log delivery.
+   */
+  private deliverAccessLogsToCloudWatch(
+    id: string,
+    bucket: IBucket,
+    logGroup: LogGroup,
+  ) {
+    const source: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      \`\${id}AccessLogsSource\`,
+      {
+        name: Lazy.string({
+          produce: () => Names.uniqueResourceName(source, { maxLength: 60 }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: bucket.bucketArn,
+      },
+    );
+    const destination: CfnDeliveryDestination = new CfnDeliveryDestination(
+      this,
+      \`\${id}AccessLogsDestination\`,
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(destination, { maxLength: 60 }),
+        }),
+        destinationResourceArn: logGroup.logGroupArn,
+      },
+    );
+    const delivery = new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
+      deliverySourceName: source.name,
+      deliveryDestinationArn: destination.attrArn,
+    });
+    delivery.addDependency(source);
   }
 }
 
@@ -3484,9 +3739,13 @@ exports[`react-website generator > Tanstack router integration > should generate
     "emitDeclarationOnly": false,
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [],
   "exclude": [
     "vite.config.ts",
@@ -3680,6 +3939,22 @@ exports[`react-website generator > Tanstack router integration > should generate
         "cwd": "{projectRoot}"
       }
     },
+    "format": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["biome"],
+      "options": {
+        "command": "biome format {projectRoot}"
+      },
+      "configurations": {
+        "fix": {
+          "command": "biome format --write {projectRoot}"
+        },
+        "skip-lint": {
+          "command": "node -e \\"\\""
+        }
+      }
+    },
     "lint": {
       "executor": "nx:run-commands",
       "cache": true,
@@ -3694,7 +3969,8 @@ exports[`react-website generator > Tanstack router integration > should generate
         "skip-lint": {
           "command": "node -e \\"\\""
         }
-      }
+      },
+      "dependsOn": ["format"]
     },
     "load:runtime-config": {
       "executor": "nx:run-commands",
@@ -4094,7 +4370,9 @@ exports[`react-website generator > Tanstack router integration > should generate
     "outDir": "../dist/test-app/tsc",
     "tsBuildInfoFile": "../dist/test-app/tsc/tsconfig.lib.tsbuildinfo",
     "jsx": "react-jsx",
-    "lib": ["DOM"],
+    "lib": [
+      "DOM"
+    ],
     "types": [
       "node",
       "@nx/react/typings/cssmodule.d.ts",
@@ -4121,7 +4399,12 @@ exports[`react-website generator > Tanstack router integration > should generate
     "vitest.config.ts",
     "vitest.config.mts"
   ],
-  "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"]
+  "include": [
+    "src/**/*.js",
+    "src/**/*.jsx",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
 }
 "
 `;
@@ -4251,8 +4534,12 @@ exports[`react-website generator > Tanstack router integration > should generate
 "{
   "compilerOptions": {
     "paths": {
-      ":proj/test-app": ["./test-app/src/index.ts"],
-      ":proj/common-constructs": ["./packages/common/constructs/src/index.ts"]
+      ":proj/test-app": [
+        "./test-app/src/index.ts"
+      ],
+      ":proj/common-constructs": [
+        "./packages/common/constructs/src/index.ts"
+      ]
     },
     "composite": true,
     "rootDir": "."
@@ -4614,6 +4901,7 @@ exports[`react-website generator > should generate shared constructs > common/co
   CfnResource,
   Duration,
   Lazy,
+  Names,
   RemovalPolicy,
   Stack,
 } from 'aws-cdk-lib';
@@ -4622,8 +4910,10 @@ import {
   HeadersFrameOption,
   HeadersReferrerPolicy,
   ResponseHeadersPolicy,
+  SecurityPolicyProtocol,
   ViewerProtocolPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   BlockPublicAccess,
@@ -4640,6 +4930,14 @@ import {
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
 import { suppressRules } from './checkov.js';
 
@@ -4665,6 +4963,15 @@ const CONTENT_SECURITY_POLICY = [
 export interface StaticWebsiteProps {
   readonly websiteName: string;
   readonly websiteFilePath: string;
+  /**
+   * Custom domain names for the CloudFront distribution. Requires \`certificate\`.
+   */
+  readonly domainNames?: string[];
+  /**
+   * ACM certificate for the custom domain names. Must be in us-east-1.
+   * When provided, viewers are required to use TLS 1.2 or later.
+   */
+  readonly certificate?: ICertificate;
 }
 
 /**
@@ -4683,39 +4990,48 @@ export class StaticWebsite extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { websiteFilePath, websiteName }: StaticWebsiteProps,
+    {
+      websiteFilePath,
+      websiteName,
+      domainNames,
+      certificate,
+    }: StaticWebsiteProps,
   ) {
     super(scope, id);
-    this.node.setContext(
-      '@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy',
-      true,
-    );
 
     const websiteKey = new Key(this, 'WebsiteKey', {
       enableKeyRotation: true,
     });
 
-    const accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
-      versioned: false,
-      enforceSSL: true,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+    // Allow CloudWatch Logs to use the website key for server access log delivery.
+    const stack = Stack.of(this);
+    websiteKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
       encryptionKey: websiteKey,
-      objectOwnership: ObjectOwnership.OBJECT_WRITER,
-      publicReadAccess: false,
-      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_21'],
-      'Access log bucket does not need versioning enabled',
-    );
-    suppressRules(
-      accessLogsBucket,
-      ['CKV_AWS_18'],
-      'Access log bucket does not need an access log bucket',
-    );
 
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
@@ -4728,13 +5044,23 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'website-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      this.websiteBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch(
+      'Website',
+      this.websiteBucket,
+      accessLogs,
+    );
     // Web ACL
     const wafStack = new CloudfrontWebAcl(this, 'waf');
 
-    // Cloudfront Distribution
+    // Bucket holding CloudFront standard access logs. CloudFront delivers its
+    // own logs to S3 only, so this bucket is retained; its S3 server access
+    // logs are delivered to CloudWatch Logs.
     const logBucket = new Bucket(this, 'DistributionLogBucket', {
       enforceSSL: true,
       autoDeleteObjects: true,
@@ -4744,14 +5070,18 @@ export class StaticWebsite extends Construct {
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      serverAccessLogsPrefix: 'distribution-access-logs',
-      serverAccessLogsBucket: accessLogsBucket,
     });
     suppressRules(
       logBucket,
       ['CKV_AWS_21'],
       'Distribution log bucket does not need versioning enabled',
     );
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+    this.deliverAccessLogsToCloudWatch('Distribution', logBucket, accessLogs);
 
     // Security headers applied to all responses.
     const responseHeadersPolicy = new ResponseHeadersPolicy(
@@ -4791,6 +5121,13 @@ export class StaticWebsite extends Construct {
         webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
+        ...(certificate
+          ? {
+              certificate,
+              domainNames,
+              minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+            }
+          : {}),
         defaultBehavior: {
           origin: S3BucketOrigin.withOriginAccessControl(this.websiteBucket),
           viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -4811,12 +5148,14 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
-    // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
-    suppressRules(
-      this.cloudFrontDistribution,
-      ['CKV_AWS_174'],
-      'Cloudfront default certificate does not use TLS 1.2',
-    );
+    if (!certificate) {
+      // See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesGeneral.html
+      suppressRules(
+        this.cloudFrontDistribution,
+        ['CKV_AWS_174'],
+        'Cloudfront default certificate does not use TLS 1.2',
+      );
+    }
 
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
@@ -4864,6 +5203,44 @@ export class StaticWebsite extends Construct {
     new CfnOutput(this, \`\${websiteName}WebsiteBucketName\`, {
       value: this.websiteBucket.bucketName,
     });
+  }
+
+  /**
+   * Delivers a bucket's S3 server access logs to a CloudWatch log group using
+   * CloudWatch Logs vended log delivery.
+   */
+  private deliverAccessLogsToCloudWatch(
+    id: string,
+    bucket: IBucket,
+    logGroup: LogGroup,
+  ) {
+    const source: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      \`\${id}AccessLogsSource\`,
+      {
+        name: Lazy.string({
+          produce: () => Names.uniqueResourceName(source, { maxLength: 60 }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: bucket.bucketArn,
+      },
+    );
+    const destination: CfnDeliveryDestination = new CfnDeliveryDestination(
+      this,
+      \`\${id}AccessLogsDestination\`,
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(destination, { maxLength: 60 }),
+        }),
+        destinationResourceArn: logGroup.logGroupArn,
+      },
+    );
+    const delivery = new CfnDelivery(this, \`\${id}AccessLogsDelivery\`, {
+      deliverySourceName: source.name,
+      deliveryDestinationArn: destination.attrArn,
+    });
+    delivery.addDependency(source);
   }
 }
 

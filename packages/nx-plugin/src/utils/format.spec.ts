@@ -8,8 +8,23 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatFilesInSubtree } from './format';
+import { formatFilesInSubtree, requiresPythonToRuffTarget } from './format';
 import { createTreeUsingTsSolutionSetup } from './test';
+
+describe('requiresPythonToRuffTarget', () => {
+  it('maps a lower-bound specifier to a ruff target', () => {
+    expect(requiresPythonToRuffTarget('>=3.14')).toBe('py314');
+    expect(requiresPythonToRuffTarget('>=3.9')).toBe('py39');
+  });
+  it('uses the lowest version in a range', () => {
+    expect(requiresPythonToRuffTarget('>=3.12,<3.15')).toBe('py312');
+  });
+  it('returns undefined for missing or unparseable input', () => {
+    expect(requiresPythonToRuffTarget(undefined)).toBeUndefined();
+    expect(requiresPythonToRuffTarget('')).toBeUndefined();
+    expect(requiresPythonToRuffTarget(3.14 as unknown)).toBeUndefined();
+  });
+});
 
 describe('format utils', () => {
   let tree: Tree;
@@ -27,6 +42,7 @@ describe('format utils', () => {
     name: string,
     moduleName: string,
     lineLength?: number,
+    requiresPython?: string,
   ) => {
     const root = `packages/${name}`;
     addProjectConfiguration(tree, `proj.${name}`, { root });
@@ -41,6 +57,9 @@ describe('format utils', () => {
           : []),
         '[project]',
         `name = "proj-${name}"`,
+        ...(requiresPython !== undefined
+          ? [`requires-python = "${requiresPython}"`]
+          : []),
         '',
       ].join('\n'),
     );
@@ -267,6 +286,27 @@ describe('format utils', () => {
       // Verify - the 90-char signature stays on one line at line-length 120
       expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
         [line, '    return first_value', ''].join('\n'),
+      );
+    });
+    it("should apply the owning project's target-version so output matches the on-disk build", async () => {
+      // For py314+ ruff drops the parentheses from a multi-exception `except`
+      addFirstPartyPythonProject('my_lib', 'my_lib', undefined, '>=3.14');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'def f():',
+          '    try:',
+          '        pass',
+          '    except (ValueError, KeyError):',
+          '        pass',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - py314 formatting removes the parentheses
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toContain(
+        'except ValueError, KeyError:',
       );
     });
     it('should format json and css files', async () => {

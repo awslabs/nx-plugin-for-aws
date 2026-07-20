@@ -216,4 +216,27 @@ describe('ts-sync generator', () => {
     });
     expect(result).toEqual({});
   });
+
+  it('should not format the tree (sync must have no formatting side effects)', async () => {
+    // Writing files (formatting or otherwise) that the caller did not ask for
+    // is a surprising side effect of `nx sync`, so the generator only syncs
+    // path aliases. tsconfigs are excluded from the biome format target
+    // instead, so their formatting does not need policing here.
+    writeJson('tsconfig.base.json', { compilerOptions: { paths: {} } });
+    addProjectConfiguration(tree, 'proj', {
+      root: 'packages/proj',
+      targets: {},
+    });
+    // No compilerOptions.paths to sync, and deliberately unformatted (expanded
+    // array, no trailing newline).
+    const unformatted =
+      '{\n  "include": [\n    "src/**/*.ts",\n    "src/**/*.tsx"\n  ]\n}';
+    tree.write('packages/proj/tsconfig.json', unformatted);
+
+    const result = await tsSyncGeneratorGenerator(tree);
+
+    expect(result).toEqual({});
+    // Left exactly as written — the generator did not reformat it.
+    expect(tree.read('packages/proj/tsconfig.json', 'utf-8')).toBe(unformatted);
+  });
 });

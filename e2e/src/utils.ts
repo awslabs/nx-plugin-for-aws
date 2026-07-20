@@ -174,14 +174,16 @@ function getPackageManagerCommand({
 }
 
 /**
- * Run a bare dependency install for the package manager detected in `cwd`.
+ * Install the dependencies accumulated across all generators — a bare install
+ * for the package manager detected in `cwd`, plus a `uv sync` when the
+ * workspace contains Python projects.
  *
  * Used by the smoke tests, which generate every project with
  * `--prefer-install-dependencies=false` and then install once at the end.
- *
- * The generators add dependencies to `package.json` without updating the
- * lockfile, so the install must be allowed to update it. CI sets each package
- * manager to a frozen/immutable lockfile by default, hence the explicit flags.
+ * Lockfiles must be allowed to update (CI defaults them to frozen/immutable),
+ * hence the explicit flags. The `uv sync` brings `uv.lock` up to date with all
+ * generated Python projects — the vended `compile` target runs
+ * `uv export --frozen`, which fails on a stale lockfile.
  */
 export async function runInstall(opts: {
   cwd: string;
@@ -203,6 +205,14 @@ export async function runInstall(opts: {
     prefixWithPackageManagerCmd: false,
     redirectStderr: true,
   });
+  if (existsSync(join(opts.cwd, 'pyproject.toml'))) {
+    await runCLI('uv sync', {
+      cwd: opts.cwd,
+      env: opts.env,
+      prefixWithPackageManagerCmd: false,
+      redirectStderr: true,
+    });
+  }
 }
 
 /**

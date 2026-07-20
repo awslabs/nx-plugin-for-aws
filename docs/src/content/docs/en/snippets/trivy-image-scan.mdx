@@ -1,0 +1,27 @@
+---
+title: Container Image Scanning
+---
+
+The Docker image built for this project is scanned for vulnerabilities as part of the build using [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy).
+
+A `trivy` target is added to your project which scans the built image and **fails the build** if any `HIGH` or `CRITICAL` severity vulnerability is found. The generated `Dockerfile` uses a base image with no known fixable vulnerabilities of these severities at time of generation, and upgrades bundled tooling (such as `npm`) to keep it that way.
+
+The scan uses the same container engine as your image build (`docker` or `finch`), so no additional tooling is required. Since the scan is only re-run when the image changes, an unchanged image is not re-scanned.
+
+:::caution[Unfixable vulnerabilities are ignored]
+The scan runs with `--ignore-unfixed`, so vulnerabilities without an available fix do not fail the build, since they cannot be actioned by upgrading tooling in your `Dockerfile` — they are not reported in the build's scan output. As new vulnerabilities are disclosed the result of scans may change over time, so review the image periodically by running `trivy image <your-image>` without the flag, and rebuild against a newer base image (or add container steps to apply available patches) once a fix is published.
+:::
+
+#### Suppressing Trivy Findings
+
+There may be instances where you want to suppress a specific vulnerability, for example when no fix is yet available and you have assessed the risk as acceptable.
+
+Add the vulnerability ID (one per line) to the `.trivyignore` file in the root of your project (i.e. next to your `project.json`):
+
+```gitignore
+# .trivyignore
+# node-tar arbitrary file write - not exploitable in our usage
+CVE-2024-XXXXX
+```
+
+For more details on filtering findings, refer to the [Trivy filtering documentation](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids).

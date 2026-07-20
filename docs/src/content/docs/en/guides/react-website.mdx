@@ -136,6 +136,49 @@ A default `Content-Security-Policy` is enforced. It restricts scripts and framin
 
 `runtime-config.json` is served with `Cache-Control: no-cache` so that browsers always fetch the latest configuration after a redeploy, rather than using a stale cached copy.
 
+#### Custom Domain & TLS
+
+By default the distribution uses the default CloudFront domain name (`*.cloudfront.net`) and its default certificate, which does not support enforcing a minimum TLS version of 1.2. To serve your website from your own domain, supply an [ACM certificate](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (which must reside in `us-east-1` for use with CloudFront) and your domain names — a minimum TLS version of 1.2 is then enforced for viewers:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pass the `certificate` and `domainNames` props through in your generated website construct in `packages/common/constructs/src/app/static-websites`:
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Set the `custom_domain_names` and `acm_certificate_arn` variables in your generated website module in `packages/common/terraform/src/app/static-websites`:
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+You will also need to create DNS records (for example in Route 53) pointing your domain at the CloudFront distribution.
+
 ## Implementing your React Website
 
 The [React documentation](https://react.dev/learn) is a good place to start to learn the basics of building with React.

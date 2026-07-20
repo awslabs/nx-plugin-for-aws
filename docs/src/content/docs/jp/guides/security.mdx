@@ -1,0 +1,76 @@
+---
+title: セキュリティ
+description: Nx Plugin for AWS によって生成されるプロジェクトに含まれるセキュリティ機能
+---
+
+import Link from '@components/link.astro';
+
+:::caution[セキュリティ問題の報告]
+Nx Plugin for AWS 自体の潜在的なセキュリティ問題を報告する場合は、[SECURITY.md](https://github.com/awslabs/nx-plugin-for-aws/blob/main/SECURITY.md) を参照してください。公開の GitHub issue は作成しないでください。
+:::
+
+## セキュリティコントロール
+
+Nx Plugin for AWS によってスキャフォールドされたプロジェクトには、多数のセキュリティコントロールが最初から含まれています。このページでは、これらのコントロールの概要と、詳細情報へのリンクを提供します。
+
+### インフラストラクチャスキャン
+
+インフラストラクチャプロジェクトは、`build` ターゲットの一部として [Checkov](https://www.checkov.io/) で構成されているため、安全でないインフラストラクチャ構成はビルドを失敗させます：
+
+- CDK プロジェクトは CloudFormation テンプレートを合成し、Checkov によってスキャンされます。詳細は <Link path="/guides/typescript-infrastructure#security-testing">Security Testing</Link> を参照してください。
+- Terraform プロジェクトは、Terraform コードに対して直接 Checkov を実行します。<Link path="/guides/terraform-project">Terraform Projects</Link> を参照してください。
+
+提供されたインフラストラクチャが Checkov ルールを抑制する場合、抑制は特定のリソースにスコープされ、正当化の注釈が付けられます。共有の `suppressRules` ヘルパーは、すべての抑制に理由を必要とします。独自のコードでも同じ慣行に従うことをお勧めします。<Link path="/guides/typescript-infrastructure#suppressing-checkov-checks">Suppressing Checkov Checks</Link> を参照してください。
+
+### コンテナイメージスキャン
+
+コンテナイメージをビルドするプロジェクト（例：エージェント、MCP サーバー、データベースマイグレーションイメージ）には、デプロイ前にイメージの HIGH および CRITICAL の脆弱性をスキャンする `trivy` ターゲットが含まれており、検出結果があればビルドを失敗させます。`.trivyignore` ファイルで検出結果を抑制する方法を含む詳細は、<Link path="/guides/docker-bundling">Docker Bundling</Link> を参照してください。
+
+### 認証情報スキャン
+
+ワークスペースには [git-secrets](https://github.com/awslabs/git-secrets) プリコミットフックが含まれており、ステージングされたファイルを AWS 認証情報パターンでスキャンし、アクセスキーやその他の機密値の誤ったコミットを防ぎます。ワークスペースガイドの <Link path="/guides/workspace#git-secrets">Git Secrets</Link> セクションを参照してください。
+
+### 認証
+
+API、エージェント、MCP サーバーは、デフォルトで AWS IAM（SigV4）認証を使用します：
+
+- <Link path="/guides/trpc">tRPC</Link>、<Link path="/guides/fastapi">FastAPI</Link>、<Link path="/guides/ts-smithy-api">Smithy</Link> API は、デフォルトで IAM 認証を使用し、Cognito とカスタムオーソライザーがオプションとして利用可能です。提供されたカスタムオーソライザースタブは、デフォルトでリクエストを拒否します。
+- Amazon Bedrock AgentCore Runtime にデプロイされた <Link path="/guides/ts-agent">Agents</Link> と <Link path="/guides/ts-mcp-server">MCP servers</Link> は、デフォルトで IAM（SigV4）認証を使用し、JWT ベースの Cognito 認証がオプションとして利用可能です。
+- <Link path="/guides/react-website-auth">website auth generator</Link> は、多要素認証（MFA）が必須で、強力なパスワードポリシーと削除保護が有効になった Amazon Cognito ユーザープールを提供します。
+
+### 暗号化
+
+提供されたインフラストラクチャは、転送中および保管中のデータを暗号化します：
+
+- ウェブサイトは CloudFront 経由で提供され、HTTP は HTTPS にリダイレクトされ、HTTP Strict Transport Security（HSTS）、Content Security Policy、その他の<Link path="/guides/react-website#security-headers">セキュリティヘッダー</Link>を含むレスポンスヘッダーポリシーが適用されます。AWS マネージドルールを持つ WAF がディストリビューションに関連付けられています。
+- S3 バケットは、すべてのパブリックアクセスをブロックし、バケットポリシーを介して SSL のみのアクセスを強制し、暗号化され（ウェブサイトコンテンツには KMS とキーローテーション）、カスタマー管理 KMS キーで暗号化された CloudWatch ロググループにサーバーアクセスログを配信します。これにより、Logs Insights でクエリを実行したり、アラームを設定したりできます。
+- API アクセスログは、ローテーションが有効なカスタマー管理 KMS キーで暗号化された CloudWatch ロググループに書き込まれます。
+- <Link path="/guides/ts-rdb">Aurora databases</Link> は、カスタマー管理 KMS キーによるストレージ暗号化を有効にし、AWS Secrets Manager で認証情報を生成し（ハードコードされることはありません）、自動認証情報ローテーションをサポートします。
+
+### 最小権限
+
+提供された CDK コンストラクトと Terraform モジュールは、最小権限に従います：
+
+- コンストラクトは `grant*` メソッド（例：API とエージェントの `grantInvokeAccess`、データベースの `grantConnect`）を公開し、コンシューマーが必要なアクセスのみを付与できるようにします。
+- 提供されたインフラストラクチャの IAM ポリシーは、特定のリソースとアクションにスコープされています。AWS サービスによってワイルドカードリソースが必要な場合（例：`ecr:GetAuthorizationToken`）、それらのアクションに制限され、サポートされている場合は条件でスコープされます。
+
+### 依存関係ライセンス
+
+<Link path="/guides/license">license generator</Link> は、自動化されたライセンスヘッダー管理と、承認されたライセンスの許可リストに対する依存関係ライセンスチェックを構成し、問題のある推移的依存関係を出荷前に検出するのに役立ちます。
+
+## 責任
+
+セキュリティとコンプライアンスは共有責任です。AWS は、これを[責任共有モデル](https://aws.amazon.com/compliance/shared-responsibility-model/)を通じて説明しており、クラウド*の*セキュリティ（AWS の責任）とクラウド*における*セキュリティ（顧客としてのあなたの責任）を区別しています。
+
+Nx Plugin for AWS は、そのモデルのあなた側の一部に対処するのに役立ちます。そのジェネレーターは、安全な基盤を提供し、生成されるコードの範囲内で AWS のベストプラクティスをエンコードします — 上記で説明したコントロールです。これにより、安全に構築するために必要な労力が削減されますが、セキュリティの所有権がプラグインに移転するわけではありません。
+
+**ワークスペースに生成されたコードはあなたが所有し、そのセキュリティについて引き続き責任を負います。** 一度提供されると、生成されたコードはあなたが変更、拡張、運用するものであり、あなたが作成する他のコードと同じように扱う必要があります。
+
+特に：
+
+- **プラグインのスコープはそのジェネレーターに限定されています。** プラグインは、アプリケーションのビジネスロジック、データ分類、脅威モデル、規制上の義務について知識がなく、それらに依存する決定を行うことはできません。
+- **認証は構成されていますが、認可は構成されていません。** API はデフォルトで認証（例：IAM/SigV4）で保護されていますが、プラグインは*どの*認証されたプリンシパルが*どの*リソースに対して*どの*操作を実行することを許可されるべきかを判断できません。きめ細かい認可はビジネスロジックに依存し、あなたによって設計、実装、テストされる必要があります。
+- **生成されたコードは出発点であり、完成品ではありません。** 機能を追加すると、プラグインが予測できないセキュリティ上の考慮事項が導入されます — 入力検証、データ処理、シークレット管理、依存関係の選択、他のシステムとの統合などです。
+
+したがって、生成されたコードとその上に構築するアプリケーションを、組織独自のセキュリティポリシー、標準、レビュープロセスに沿ってレビューし、本番ワークロードに適用するのと同じ脅威モデリング、セキュリティテスト、承認ゲートの対象とする必要があります。プラグインによって提供されるコントロールは、これらのプロセスを補完することを意図しており、置き換えることを意図していません。
+

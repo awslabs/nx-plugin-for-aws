@@ -3,10 +3,34 @@ title: "Bundling Docker"
 description: "Costruisci e distribuisci immagini Docker per progetti TypeScript e Python in un workspace Nx Plugin for AWS."
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 Diversi generatori (come <Link path="/guides/ts-agent">`ts#agent`</Link> e <Link path="/guides/py-agent">`py#agent`</Link>) producono un'immagine Docker che viene caricata su Amazon ECR e utilizzata dall'infrastruttura AWS. Questa guida descrive il pattern che seguono in modo da poterlo applicare ad altri casi d'uso — ad esempio, eseguire un progetto <Link path="/guides/fastapi">FastAPI</Link> su Amazon ECS o distribuire un server Express containerizzato.
 
@@ -252,6 +276,36 @@ Aggiungi un target `docker` che copia il `Dockerfile` nella directory di output 
 Questo cancella la directory di output, quindi copia sia i contenuti del bundle che il `Dockerfile` in `dist/.../docker`, che diventa il contesto di build Docker.
 
 <NxCommands commands={['docker my-project']} />
+
+## Scansione delle Immagini con Trivy
+
+È buona pratica scansionare le tue immagini per vulnerabilità note. I generatori che seguono questo pattern aggiungono un target `trivy` che scansiona l'immagine costruita con [Trivy](https://trivy.dev/), eseguito dall'[immagine Trivy ospitata su ECR](https://gallery.ecr.aws/aquasecurity/trivy), e fa fallire la build in caso di risultati `HIGH` o `CRITICAL`.
+
+Aggiungi un target `trivy` che `dependsOn` il tuo target `docker`. Salva l'immagine costruita in un tarball e la scansiona tramite un bind mount relativo al workspace, quindi lo stesso comando funziona sia con `docker` che con `finch`:
+
+<Code lang="json" code={trivyTarget} />
+
+Quindi fai dipendere `build` da `trivy` in modo che la scansione venga eseguita come parte di una build:
+
+```json
+{
+  "targets": {
+    "build": {
+      "dependsOn": ["trivy"]
+    }
+  }
+}
+```
+
+<NxCommands commands={['trivy my-project']} />
+
+:::tip[La cache salta le immagini non modificate]
+Poiché l'immagine è completamente determinata dal sorgente del tuo progetto, dichiarare gli `inputs` (qui `default` e `^production`, corrispondenti al target `bundle`) permette a Nx di cachare la scansione e saltare la ri-scansione di un'immagine che non è cambiata. Fissa la versione dell'immagine Trivy (ad es. <code>trivy:<TrivyVersion /></code>) in modo che le scansioni siano riproducibili.
+:::
+
+:::note[Soppressione dei risultati]
+Trivy legge un file `.trivyignore` (un elenco di ID di vulnerabilità, uno per riga) dalla radice del tuo progetto. `--ignore-unfixed` salta le vulnerabilità senza una correzione disponibile, quindi la scansione fallisce solo su problemi su cui puoi agire aggiornando gli strumenti nel tuo `Dockerfile`. Vedi la [documentazione sul filtraggio di Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) per i dettagli.
+:::
 
 ## Infrastructure
 

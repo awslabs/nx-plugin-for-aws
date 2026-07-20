@@ -3,10 +3,34 @@ title: "Bundling Docker"
 description: "Créez et déployez des images Docker pour des projets TypeScript et Python dans un espace de travail Nx Plugin for AWS."
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 Plusieurs générateurs (tels que <Link path="/guides/ts-agent">`ts#agent`</Link> et <Link path="/guides/py-agent">`py#agent`</Link>) produisent une image Docker qui est poussée vers Amazon ECR et consommée par l'infrastructure AWS. Ce guide décrit le modèle qu'ils suivent afin que vous puissiez l'appliquer à d'autres cas d'usage — par exemple, exécuter un projet <Link path="/guides/fastapi">FastAPI</Link> sur Amazon ECS, ou déployer un serveur Express conteneurisé.
 
@@ -253,6 +277,36 @@ Cela efface le répertoire de sortie, puis copie à la fois le contenu du bundle
 
 <NxCommands commands={['docker my-project']} />
 
+## Analyse des Images avec Trivy
+
+C'est une bonne pratique d'analyser vos images pour détecter les vulnérabilités connues. Les générateurs qui suivent ce modèle ajoutent une cible `trivy` qui analyse l'image construite avec [Trivy](https://trivy.dev/), s'exécutant depuis l'[image Trivy hébergée sur ECR](https://gallery.ecr.aws/aquasecurity/trivy), et fait échouer le build sur les résultats `HIGH` ou `CRITICAL`.
+
+Ajoutez une cible `trivy` qui `dependsOn` votre cible `docker`. Elle sauvegarde l'image construite dans un tarball et l'analyse via un montage bind relatif au workspace, de sorte que la même commande fonctionne sous `docker` et `finch` :
+
+<Code lang="json" code={trivyTarget} />
+
+Ensuite, faites dépendre `build` de `trivy` pour que l'analyse s'exécute dans le cadre d'un build :
+
+```json
+{
+  "targets": {
+    "build": {
+      "dependsOn": ["trivy"]
+    }
+  }
+}
+```
+
+<NxCommands commands={['trivy my-project']} />
+
+:::tip[La mise en cache ignore les images inchangées]
+Parce que l'image est entièrement déterminée par la source de votre projet, déclarer des `inputs` (ici `default` et `^production`, correspondant à la cible `bundle`) permet à Nx de mettre en cache l'analyse et d'éviter de réanalyser une image qui n'a pas changé. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.
+:::
+
+:::note[Suppression des résultats]
+Trivy lit un fichier `.trivyignore` (une liste d'identifiants de vulnérabilité, un par ligne) depuis la racine de votre projet. `--ignore-unfixed` ignore les vulnérabilités sans correctif disponible, de sorte que l'analyse échoue uniquement sur les problèmes que vous pouvez résoudre en mettant à niveau les outils dans votre `Dockerfile`. Consultez la [documentation de filtrage de Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) pour plus de détails.
+:::
+
 ## Infrastructure
 
 Connecter le répertoire de contexte de build résultant à l'infrastructure en tant que code est identique pour TypeScript et Python — seul le chemin vers le répertoire de contexte de build diffère (`dist/packages/my-project/bundle` pour TypeScript, `dist/packages/my-project/docker` pour Python).
@@ -318,8 +372,8 @@ Le provider AWS de Terraform n'a pas de ressource de première classe "build and
 
 1. La cible `build` du projet exécute `docker build`, produisant une image locale taguée `my-scope-my-project:latest`.
 2. Un `aws_ecr_repository` pour contenir l'image.
-3. Une `null_resource` avec un provisionneur `local-exec` qui s'authentifie auprès d'ECR, re-tague l'image construite localement et la pousse.
-4. La ressource en aval (par exemple `aws_ecs_task_definition`) référence `"${aws_ecr_repository.repo.repository_url}:latest"`.
+3. Une `null_resource` avec un provisionneur `local-exec` qui s'authentifie auprès d'ECR, re-tague l'image construite localement avec son digest de contenu, et la pousse.
+4. La ressource en aval (par exemple `aws_ecs_task_definition`) référence l'image par son tag immuable basé sur le digest.
 
 ```d2
 direction: down
@@ -361,7 +415,7 @@ infra.repo -> ecr
 ```hcl
 resource "aws_ecr_repository" "repo" {
   name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 }
 
@@ -370,18 +424,24 @@ data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
 }
 
+locals {
+  # Content-based, immutable image tag derived from the local image digest
+  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+}
+
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
     repository_url = aws_ecr_repository.repo.repository_url
+    image_tag      = local.image_tag
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region ${data.aws_region.current.id} \
         | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:${self.triggers.image_tag}
+      docker push ${self.triggers.repository_url}:${self.triggers.image_tag}
     EOT
   }
 }

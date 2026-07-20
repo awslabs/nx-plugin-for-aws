@@ -101,6 +101,21 @@ describe('python project generator', () => {
     );
   });
 
+  it('pins ruff to an exact version in the root pyproject.toml', async () => {
+    // Must match the pinned ruff generation-time formatting runs
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const rootPyproject = parse(tree.read('pyproject.toml', 'utf-8'));
+
+    expect((rootPyproject as any)['dependency-groups']?.dev).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^ruff==/)]),
+    );
+  });
+
   it('should configure python dependencies correctly', async () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
@@ -268,6 +283,28 @@ describe('python project generator', () => {
 
     // Verify lint target depends on format
     expect(projectConfig.targets.lint.dependsOn).toContain('format');
+  });
+
+  it('should configure the format target to check by default with fix and skip-lint', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      type: 'application',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.targets.format.options.check).toBe(true);
+    expect(projectConfig.targets.format.cache).toBe(true);
+
+    expect(projectConfig.targets.format.configurations.fix).toEqual({
+      check: false,
+    });
+    expect(projectConfig.targets.format.configurations['skip-lint']).toEqual({
+      check: false,
+    });
   });
 
   it('should configure cache, fix and skip-lint on the project lint target', async () => {

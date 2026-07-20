@@ -11,6 +11,7 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
+import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions';
 import { PY_RDB_GENERATOR_INFO, pyRdbGenerator } from './generator';
 
 vi.mock('../../utils/containers', () => ({
@@ -54,9 +55,9 @@ describe('py#rdb generator', () => {
     expect(tree.read('packages/db/config.json', 'utf-8')).toMatchSnapshot();
     expect(pyproject).toMatchSnapshot();
 
-    expect(pyproject).toContain('sqlmodel==0.0.38');
-    expect(pyproject).toContain('alembic==1.18.4');
-    expect(pyproject).toContain('asyncpg==0.31.0');
+    expect(pyproject).toContain(withPyVersions(['sqlmodel'])[0]);
+    expect(pyproject).toContain(withPyVersions(['alembic'])[0]);
+    expect(pyproject).toContain(withPyVersions(['asyncpg'])[0]);
     expect(pyproject).not.toContain('psycopg');
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
@@ -155,7 +156,7 @@ describe('py#rdb generator', () => {
     await pyRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
 
     const pyproject = tree.read('packages/db/pyproject.toml', 'utf-8');
-    expect(pyproject).toContain('aiomysql==0.3.2');
+    expect(pyproject).toContain(withPyVersions(['aiomysql'])[0]);
     expect(pyproject).not.toContain('asyncpg');
     expect(
       tree.read('packages/db/proj_db/connection.py', 'utf-8'),
@@ -194,6 +195,30 @@ describe('py#rdb generator', () => {
       dependsOn: ['bundle-migration', 'bundle-create-db-user'],
     });
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
+
+    // Check that a cacheable trivy scan target was added covering both images
+    expect(projectConfig.targets.trivy).toEqual({
+      cache: true,
+      inputs: ['default', '^production'],
+      outputs: [
+        '{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest',
+      ],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'rimraf dist/packages/db/trivy/proj-db-migration-latest',
+          'make-dir dist/packages/db/trivy/proj-db-migration-latest',
+          'ncp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
+          'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-0.tar proj-db-migration:latest',
+          `docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
+          'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-1.tar proj-db-create-db-user:latest',
+          `docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-1.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
+        ],
+        parallel: false,
+      },
+      dependsOn: ['docker'],
+    });
+    expect(projectConfig.targets.build.dependsOn).toContain('trivy');
   });
 
   it('should generate local database support without infrastructure', async () => {

@@ -28,9 +28,9 @@ export const TS_VERSIONS = {
   '@middy/core': '7.7.0',
   '@nxlv/python': '22.2.1',
   '@nx-extend/terraform': '10.3.0',
-  '@nx/devkit': '23.0.2',
-  '@nx/react': '23.0.2',
-  'create-nx-workspace': '23.0.2',
+  '@nx/devkit': '23.1.0',
+  '@nx/react': '23.1.0',
+  'create-nx-workspace': '23.1.0',
   '@swc-node/register': '1.11.1',
   '@swc/core': '1.15.43',
   '@modelcontextprotocol/sdk': '1.29.0',
@@ -100,6 +100,7 @@ export const TS_VERSIONS = {
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
   ncp: '2.0.0',
+  npm: '12.0.1',
   'npm-check-updates': '22.2.9',
   'oidc-client-ts': '3.5.0',
   pg: '8.22.0',
@@ -159,6 +160,7 @@ export const PY_VERSIONS = {
   mcp: '==1.28.1',
   'pip-check-updates': '==0.29.0',
   'pip-licenses': '==5.5.5',
+  ruff: '==0.15.22',
   'strands-agents': '==1.47.0',
   'strands-agents[a2a]': '==1.47.0',
   'strands-agents-tools': '==0.8.3',
@@ -183,6 +185,25 @@ export const withPyVersions = (deps: IPyDepVersion[]) =>
  */
 export const VENDORED_VERSIONS = {
   'git-secrets': '1.3.0',
+} as const;
+
+/**
+ * Base container images used by generated Dockerfiles. Pinned exactly so
+ * generated images are reproducible, and chosen to be free of known
+ * HIGH/CRITICAL vulnerabilities at time of generation.
+ */
+export const BASE_IMAGES = {
+  node: 'public.ecr.aws/docker/library/node:lts-slim',
+  python: 'public.ecr.aws/docker/library/python:3.14-slim',
+} as const;
+
+/**
+ * Versions for container tooling used by generated image build/scan targets.
+ * Pinned exactly so generated images are reproducible.
+ */
+export const CONTAINER_VERSIONS = {
+  // ECR-hosted Trivy image used to scan built images during the build.
+  trivy: '0.72.0',
 } as const;
 
 /**

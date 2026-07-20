@@ -9,6 +9,7 @@ import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
+  mergeTargetDefault,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
@@ -643,5 +644,58 @@ describe('addComponentDevTarget', () => {
     addComponentDevTarget(targets, 'my-mcp-dev');
     addComponentDevTarget(targets, 'my-mcp-dev');
     expect(targets.dev.dependsOn).toEqual(['my-mcp-dev']);
+  });
+});
+
+describe('mergeTargetDefault', () => {
+  const addCache = (base: any) => ({ ...base, cache: true });
+
+  it('should apply to an empty object when the value is unset', () => {
+    expect(mergeTargetDefault(undefined, addCache)).toEqual({ cache: true });
+  });
+
+  it('should merge onto and preserve the object form', () => {
+    expect(mergeTargetDefault({ dependsOn: ['^build'] }, addCache)).toEqual({
+      dependsOn: ['^build'],
+      cache: true,
+    });
+  });
+
+  it('should merge into the first unfiltered entry of the array form', () => {
+    expect(
+      mergeTargetDefault(
+        [{ dependsOn: ['^build'] }, { filter: { plugin: '@nx/vite' } }],
+        addCache,
+      ),
+    ).toEqual([
+      { dependsOn: ['^build'], cache: true },
+      { filter: { plugin: '@nx/vite' } },
+    ]);
+  });
+
+  it('should prepend a catch-all entry when the array has only filtered entries', () => {
+    expect(
+      mergeTargetDefault([{ filter: { plugin: '@nx/vite' } }], addCache),
+    ).toEqual([{ cache: true }, { filter: { plugin: '@nx/vite' } }]);
+  });
+
+  it('should preserve the user filtered entries and their order', () => {
+    const filtered = { filter: { projects: ['tag:app'] }, inputs: ['custom'] };
+    const [, kept] = mergeTargetDefault([{}, filtered], addCache) as any[];
+    expect(kept).toEqual(filtered);
+  });
+
+  it('should be idempotent for the object form', () => {
+    const once = mergeTargetDefault(undefined, addCache);
+    expect(mergeTargetDefault(once, addCache)).toEqual(once);
+  });
+
+  it('should be idempotent for the array form', () => {
+    const seed = [
+      { dependsOn: ['^build'] },
+      { filter: { plugin: '@nx/vite' } },
+    ];
+    const once = mergeTargetDefault(seed, addCache);
+    expect(mergeTargetDefault(once, addCache)).toEqual(once);
   });
 });

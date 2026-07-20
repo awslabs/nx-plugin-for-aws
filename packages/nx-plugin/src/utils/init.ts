@@ -29,6 +29,7 @@ import { DEFAULT_BIOME_CONFIG } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
+import { mergeTargetDefault } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { withVersions } from './versions';
 
@@ -249,10 +250,10 @@ export const applyWorkspaceInit = async (
     analytics: (nxJson as { analytics?: boolean }).analytics ?? false,
     targetDefaults: {
       ...nxJson.targetDefaults,
-      compile: {
-        ...nxJson.targetDefaults?.compile,
+      compile: mergeTargetDefault(nxJson.targetDefaults?.compile, (base) => ({
+        ...base,
         syncGenerators: [
-          ...(nxJson.targetDefaults?.compile?.syncGenerators ?? []).filter(
+          ...(base.syncGenerators ?? []).filter(
             (g) =>
               ![TS_SYNC_GENERATOR_NAME, NX_TYPESCRIPT_SYNC_GENERATOR].includes(
                 g,
@@ -261,7 +262,7 @@ export const applyWorkspaceInit = async (
           NX_TYPESCRIPT_SYNC_GENERATOR,
           TS_SYNC_GENERATOR_NAME,
         ],
-      },
+      })),
     },
   });
 

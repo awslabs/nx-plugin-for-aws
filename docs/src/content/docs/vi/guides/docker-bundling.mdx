@@ -3,10 +3,34 @@ title: "Đóng gói Docker"
 description: "Xây dựng và triển khai Docker images cho các dự án TypeScript và Python trong workspace Nx Plugin for AWS."
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 Một số generator (như <Link path="/guides/ts-agent">`ts#agent`</Link> và <Link path="/guides/py-agent">`py#agent`</Link>) tạo ra Docker image được đẩy lên Amazon ECR và được sử dụng bởi hạ tầng AWS. Hướng dẫn này mô tả mẫu thiết kế mà chúng tuân theo để bạn có thể áp dụng cho các trường hợp sử dụng khác — ví dụ, chạy dự án <Link path="/guides/fastapi">FastAPI</Link> trên Amazon ECS, hoặc triển khai máy chủ Express được container hóa.
 
@@ -252,6 +276,36 @@ Thêm target `docker` sao chép `Dockerfile` vào thư mục đầu ra bundle, s
 Điều này xóa thư mục đầu ra, sau đó sao chép cả nội dung bundle và `Dockerfile` vào `dist/.../docker`, trở thành Docker build context.
 
 <NxCommands commands={['docker my-project']} />
+
+## Quét Image với Trivy
+
+Việc quét image của bạn để tìm các lỗ hổng đã biết là một thực hành tốt. Các generator tuân theo mẫu này thêm target `trivy` để quét image đã build bằng [Trivy](https://trivy.dev/), chạy từ [Trivy image được host trên ECR](https://gallery.ecr.aws/aquasecurity/trivy), và làm thất bại build khi phát hiện các lỗ hổng `HIGH` hoặc `CRITICAL`.
+
+Thêm target `trivy` có `dependsOn` target `docker` của bạn. Nó lưu image đã build vào một tarball và quét nó thông qua bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
+
+<Code lang="json" code={trivyTarget} />
+
+Sau đó làm cho `build` phụ thuộc vào `trivy` để quá trình quét chạy như một phần của build:
+
+```json
+{
+  "targets": {
+    "build": {
+      "dependsOn": ["trivy"]
+    }
+  }
+}
+```
+
+<NxCommands commands={['trivy my-project']} />
+
+:::tip[Caching bỏ qua các image không thay đổi]
+Vì image được xác định hoàn toàn bởi source code dự án của bạn, việc khai báo `inputs` (ở đây là `default` và `^production`, khớp với target `bundle`) cho phép Nx cache quá trình quét và bỏ qua việc quét lại một image không thay đổi. Cố định phiên bản Trivy image (ví dụ <code>trivy:<TrivyVersion /></code>) để các lần quét có thể tái tạo được.
+:::
+
+:::note[Loại bỏ các phát hiện]
+Trivy đọc file `.trivyignore` (danh sách các ID lỗ hổng, mỗi ID một dòng) từ thư mục gốc của dự án. `--ignore-unfixed` bỏ qua các lỗ hổng không có bản sửa lỗi, do đó quá trình quét chỉ thất bại trên các vấn đề bạn có thể hành động bằng cách nâng cấp công cụ trong `Dockerfile` của bạn. Xem [tài liệu lọc Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) để biết chi tiết.
+:::
 
 ## Infrastructure
 

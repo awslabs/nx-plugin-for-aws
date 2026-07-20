@@ -9,6 +9,7 @@ import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
+import { uvxCommand } from './py';
 import { readToml } from './toml';
 
 const require = createRequire(import.meta.url);
@@ -61,6 +62,9 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/.nx',
       '!**/.venv',
       '!**/*.css',
+      '!**/*.gen.*',
+      '!**/generated/**',
+      '!**/tsconfig*.json',
     ],
   },
 };
@@ -79,6 +83,10 @@ const BIOME_FORMATTABLE_EXTENSIONS = new Set([
   '.css',
 ]);
 
+/** Matches `tsconfig.json` and variants like `tsconfig.lib.json`. */
+const isTsConfig = (filePath: string): boolean =>
+  /(^|\/)tsconfig[^/]*\.json$/.test(filePath);
+
 /**
  * Format files in the given directory within the tree.
  * Handles both TypeScript/JavaScript/JSON (via biome) and Python (via ruff) files.
@@ -94,8 +102,15 @@ export async function formatFilesInSubtree(
     .filter((file) => (dir ? file.path.startsWith(dir) : true));
 
   const pyFiles = changedFiles.filter((file) => file.path.endsWith('.py'));
-  const otherFiles = changedFiles.filter((file) =>
-    BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)),
+  const otherFiles = changedFiles.filter(
+    (file) =>
+      BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(file.path)) &&
+      // tsconfigs are not biome-managed: they're excluded from the vended
+      // format target (Nx's typescript-sync rewrites them without formatting),
+      // so formatting them at generation would only diverge from the form
+      // written on later runs. Leave them as updateJson/writeJson emit them so
+      // repeated generation stays idempotent.
+      !isTsConfig(file.path),
   );
 
   // Resolve each project's ruff settings (module names, line-length) so files
@@ -248,28 +263,29 @@ function getBiomeCommand(root: string): BiomeCommand | undefined {
 }
 
 /**
- * Find the ruff command. Tries 'uv run ruff', then 'uvx ruff'.
- * Matches how @nxlv/python runs ruff via the UV provider.
+ * Find the ruff command: `uvx --from ruff==<version> ruff`. uvx works
+ * regardless of workspace resolution state (unlike `uv run ruff`, which fails
+ * while installs are deferred), and the version pin matches the project's
+ * `format` target (PY_VERSIONS) so generation and check format identically.
+ * Only a successful probe is cached — ruff can become available mid-run in the
+ * long-lived Nx daemon, so a cached failure would skip formatting thereafter.
  */
 let _ruffCommand: string | undefined;
 function getRuffCommand(): string | undefined {
-  if (_ruffCommand !== undefined) {
-    return _ruffCommand || undefined;
+  if (_ruffCommand) {
+    return _ruffCommand;
   }
-  for (const cmd of ['uv run ruff', 'uvx ruff']) {
-    try {
-      execSync(`${cmd} --version`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      _ruffCommand = cmd;
-      return cmd;
-    } catch {
-      // Try next command
-    }
+  const cmd = uvxCommand('ruff');
+  try {
+    execSync(`${cmd} --version`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    _ruffCommand = cmd;
+    return cmd;
+  } catch {
+    return undefined;
   }
-  _ruffCommand = '';
-  return undefined;
 }
 
 /**
@@ -314,7 +330,39 @@ interface PythonProjectRuffConfig {
   readonly modules: string[];
   /** The project's `[tool.ruff].line-length`, if set. */
   readonly lineLength?: number;
+  /**
+   * Ruff `target-version` (eg `py314`) derived from `[project].requires-python`.
+   * Generation formats via stdin with no pyproject, so it must be passed
+   * explicitly — ruff's formatting differs by target.
+   */
+  readonly targetVersion?: string;
 }
+
+/**
+ * Derive ruff's `target-version` (eg `py314`) from a PEP 508
+ * `requires-python` specifier (eg `>=3.14`). Ruff targets the minimum
+ * supported version, so take the lowest `major.minor` mentioned.
+ */
+export const requiresPythonToRuffTarget = (
+  requiresPython: unknown,
+): string | undefined => {
+  if (typeof requiresPython !== 'string') {
+    return undefined;
+  }
+  let min: { major: number; minor: number } | undefined;
+  for (const match of requiresPython.matchAll(/(\d+)\.(\d+)/g)) {
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    if (
+      !min ||
+      major < min.major ||
+      (major === min.major && minor < min.minor)
+    ) {
+      min = { major, minor };
+    }
+  }
+  return min ? `py${min.major}${min.minor}` : undefined;
+};
 
 /**
  * Map each Nx project with a `pyproject.toml` to the ruff settings the on-disk
@@ -339,11 +387,15 @@ function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
               .map((pkg) => pkg.split('/')[0])
           : [];
         const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
-        if (modules.length || typeof lineLength === 'number') {
+        const targetVersion = requiresPythonToRuffTarget(
+          pyproject?.project?.['requires-python'],
+        );
+        if (modules.length || typeof lineLength === 'number' || targetVersion) {
           configs.push({
             root: project.root.split(path.sep).join('/'),
             modules,
             lineLength: typeof lineLength === 'number' ? lineLength : undefined,
+            targetVersion,
           });
         }
       } catch {
@@ -415,6 +467,9 @@ function ruffFixAndFormat(
   }
   if (typeof projectConfig?.lineLength === 'number') {
     configArgs.push(`line-length = ${projectConfig.lineLength}`);
+  }
+  if (projectConfig?.targetVersion) {
+    configArgs.push(`target-version = "${projectConfig.targetVersion}"`);
   }
   const config = configArgs
     .map((arg) => ` --config ${JSON.stringify(arg)}`)
