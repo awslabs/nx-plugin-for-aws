@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as devkit from '@nx/devkit';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   addProjectConfiguration,
   type Tree,
@@ -18,6 +17,7 @@ import {
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   TS_MCP_SERVER_GENERATOR_INFO,
   tsMcpServerGenerator,
