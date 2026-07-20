@@ -11,7 +11,7 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
+import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions';
 import { PY_RDB_GENERATOR_INFO, pyRdbGenerator } from './generator';
 
 vi.mock('../../utils/containers', () => ({
@@ -55,9 +55,9 @@ describe('py#rdb generator', () => {
     expect(tree.read('packages/db/config.json', 'utf-8')).toMatchSnapshot();
     expect(pyproject).toMatchSnapshot();
 
-    expect(pyproject).toContain('sqlmodel==0.0.38');
-    expect(pyproject).toContain('alembic==1.18.4');
-    expect(pyproject).toContain('asyncpg==0.31.0');
+    expect(pyproject).toContain(withPyVersions(['sqlmodel'])[0]);
+    expect(pyproject).toContain(withPyVersions(['alembic'])[0]);
+    expect(pyproject).toContain(withPyVersions(['asyncpg'])[0]);
     expect(pyproject).not.toContain('psycopg');
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
@@ -156,7 +156,7 @@ describe('py#rdb generator', () => {
     await pyRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
 
     const pyproject = tree.read('packages/db/pyproject.toml', 'utf-8');
-    expect(pyproject).toContain('aiomysql==0.3.2');
+    expect(pyproject).toContain(withPyVersions(['aiomysql'])[0]);
     expect(pyproject).not.toContain('asyncpg');
     expect(
       tree.read('packages/db/proj_db/connection.py', 'utf-8'),
