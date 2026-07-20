@@ -401,26 +401,29 @@ describe('ts-sync generator', () => {
     it.each([
       ['npm', '11.0.0'],
       ['yarn', '1.22.22'],
-    ])('declares local projects with * on %s (no workspace protocol support)', async (packageManager, version) => {
-      tree.delete('pnpm-workspace.yaml');
-      vi.mocked(devkit.detectPackageManager).mockReturnValue(
-        packageManager as devkit.PackageManager,
-      );
-      vi.mocked(devkit.getPackageManagerVersion).mockReturnValue(version);
-      addProject('lib-a', '@proj/lib-a');
-      addProject('lib-b', '@proj/lib-b');
-      addDependency('lib-b', 'lib-a');
-      setProjectGraph(graph);
+    ])(
+      'declares local projects with * on %s (no workspace protocol support)',
+      async (packageManager, version) => {
+        tree.delete('pnpm-workspace.yaml');
+        vi.mocked(devkit.detectPackageManager).mockReturnValue(
+          packageManager as devkit.PackageManager,
+        );
+        vi.mocked(devkit.getPackageManagerVersion).mockReturnValue(version);
+        addProject('lib-a', '@proj/lib-a');
+        addProject('lib-b', '@proj/lib-b');
+        addDependency('lib-b', 'lib-a');
+        setProjectGraph(graph);
 
-      const result = await tsSyncGeneratorGenerator(tree);
+        const result = await tsSyncGeneratorGenerator(tree);
 
-      expect(result.outOfSyncMessage).toContain('@proj/lib-a: *');
-      expect(
-        readJson(tree, 'packages/lib-b/package.json').dependencies[
-          '@proj/lib-a'
-        ],
-      ).toBe('*');
-    });
+        expect(result.outOfSyncMessage).toContain('@proj/lib-a: *');
+        expect(
+          readJson(tree, 'packages/lib-b/package.json').dependencies[
+            '@proj/lib-a'
+          ],
+        ).toBe('*');
+      },
+    );
 
     it('declares local projects with workspace:* on yarn berry', async () => {
       tree.delete('pnpm-workspace.yaml');
