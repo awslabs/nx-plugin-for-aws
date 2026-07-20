@@ -229,19 +229,6 @@ const ROOT_DEV_TOOLING = new Set<string>([
 const isRootDevTooling = (packageName: string): boolean =>
   ROOT_DEV_TOOLING.has(packageName);
 
-/**
- * Packages whose installed version is read back — and parsed with semver — by
- * Nx's own generators (e.g. `@nx/vitest` reads `vite`/`vitest` versions to pick
- * a compatible config). A `catalog:` reference is not a semver range, so those
- * generators throw when they encounter it. Keep these as direct version ranges
- * in the manifest; their versions are still aligned by the workspace's single
- * pinned copy.
- */
-const CATALOG_EXCLUDED = new Set<string>(['vite', 'vitest']);
-
-const isCatalogExcluded = (packageName: string): boolean =>
-  CATALOG_EXCLUDED.has(packageName);
-
 const pick = (
   deps: Record<string, string>,
   predicate: (name: string) => boolean,
@@ -350,11 +337,7 @@ const convertDependenciesToCatalog = (
     for (const field of ['dependencies', 'devDependencies'] as const) {
       for (const packageName of packageNames) {
         const version = json[field]?.[packageName];
-        if (
-          !version ||
-          version.includes(':') ||
-          isCatalogExcluded(packageName)
-        ) {
+        if (!version || version.includes(':')) {
           continue;
         }
         catalogUpdates[packageName] = version;

@@ -117,10 +117,11 @@ const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
 
   // When catalogs are enabled, add new dependencies to the catalog by default
   // so `pnpm add` keeps the single-version policy without manual editing.
-  // `prefer` falls back to a direct range when no compatible catalog version
-  // exists (unlike `strict`, which errors). Preserve an explicit user choice.
+  // `strict` records every added dependency in the catalog; it only gates the
+  // `pnpm add` flow, so pre-declared direct-range deps (e.g. tslib from
+  // `@nx/js`) still install cleanly. Preserve an explicit user choice.
   const catalogMode = catalogs
-    ? (existing.catalogMode ?? 'prefer')
+    ? (existing.catalogMode ?? 'strict')
     : existing.catalogMode;
 
   tree.write(

@@ -255,6 +255,21 @@ describe('addDependenciesToPackageJson', () => {
     expect(workspaceYaml.catalog.zod).toBe('next');
   });
 
+  it('should catalog vite and vitest (nx#35453 resolves catalog: refs in version lookups)', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+
+    addDependenciesToPackageJson(tree, {}, { vite: '8.1.4', vitest: '4.1.10' });
+
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.devDependencies.vite).toBe('catalog:');
+    expect(packageJson.devDependencies.vitest).toBe('catalog:');
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog.vite).toBe('8.1.4');
+    expect(workspaceYaml.catalog.vitest).toBe('4.1.10');
+  });
+
   it('should write direct version ranges when catalogs are disabled via config', () => {
     mockPackageManager(tree, 'pnpm', '10.0.0');
     // Opt out of catalogs in the plugin config.

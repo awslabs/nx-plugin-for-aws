@@ -75,7 +75,7 @@ describe('preset generator', () => {
     expect(readJson(tree, 'package.json').type).toBe('commonjs');
   });
 
-  it('should enable catalogs by default and set pnpm catalogMode to prefer', async () => {
+  it('should enable catalogs by default and set pnpm catalogMode to strict', async () => {
     await presetGenerator(tree, {
       iac: 'cdk',
       containers: 'docker',
@@ -87,7 +87,7 @@ describe('preset generator', () => {
     const workspaceYaml = yaml.load(
       tree.read('pnpm-workspace.yaml', 'utf-8'),
     ) as any;
-    expect(workspaceYaml.catalogMode).toBe('prefer');
+    expect(workspaceYaml.catalogMode).toBe('strict');
   });
 
   it('should disable catalogs when catalog is false and not set catalogMode', async () => {
