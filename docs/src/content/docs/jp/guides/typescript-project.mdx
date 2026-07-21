@@ -139,7 +139,7 @@ No, run the tasks without syncing the changes
 
 各TypeScriptプロジェクトは、**ソースコードがインポートするサードパーティのランタイム依存関係**を独自の`package.json`で宣言します。これにより、すべてのプロジェクトが自己記述的になり（マニフェストに必要なものが正確にリストされる）、Biomeの[`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/)リントルールがプロジェクトが宣言していないパッケージをインポートしないことを強制できます。
 
-**ビルドおよびテストツール**（例：`vitest`、`tsx`、`rolldown`、`@nx/*`、`typescript`、`@biomejs/biome`）はワークスペース全体で共有されるため、各プロジェクトではなく**ルート**の`package.json`の`devDependencies`に配置されます。これらのツールは設定ファイル、ビルドスクリプト、テストからのみ参照され、リントルールはこれらを除外します。
+**ビルドおよびテストツール**（例：`vitest`、`tsx`、`rolldown`、Nxツールチェーン（`nx`、`@nx/js`、...）、`typescript`、`@biomejs/biome`）はワークスペース全体で共有されるため、各プロジェクトではなく**ルート**の`package.json`の`devDependencies`に配置されます。これらのツールは設定ファイル、ビルドスクリプト、テストからのみ参照され、リントルールはこれらを除外します。
 
 プロジェクトにランタイム依存関係を追加するには、そのプロジェクトの`package.json`に追加します。パッケージマネージャのフィルター/ワークスペースフラグを使用して適切なプロジェクトをターゲットにします。例えばpnpmの場合:
 
@@ -154,7 +154,11 @@ pnpm add some-npm-package --filter @my-scope/my-library
 これは[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)に従っており、すべてのプロジェクトが各依存関係の同じバージョンを使用します。これにより、型の競合やデプロイメントバンドル内のパッケージの複数コピーを回避できます。カタログをサポートするパッケージマネージャ（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs)、[bun](https://bun.com/docs/install/catalogs)）の場合、ジェネレータは各バージョンをカタログに記録し、`catalog:`プロトコル（例：`"zod": "catalog:"`）で参照するため、どのプロジェクトが依存関係を宣言しているかに関係なく、カタログがバージョンの唯一の信頼できる情報源となります。提供される`biome.json`はBiomeの[`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs)リゾルバを有効にするため、リントルールは`catalog:`参照を理解します。
 
 :::tip[npmでのバージョン調整]
-npmにはカタログ機能がないため、バージョンは各`package.json`に直接宣言されます。npmワークスペース内のプロジェクト間でバージョンの一貫性を保つには、[syncpack](https://github.com/JamieMason/syncpack)の使用をお勧めします。
+npm（およびyarn classic）にはカタログ機能がないため、バージョンは各`package.json`に直接宣言されます。プロジェクト間でバージョンの一貫性を保つには、[syncpack](https://github.com/JamieMason/syncpack)（`npx syncpack lint`）の使用をお勧めします。
+:::
+
+:::note[bun]
+bunでは、Nxジェネレータがルートマニフェストからバージョンを読み取るいくつかのパッケージ（`vite`、`react`、`react-dom`）は、`catalog:`参照の代わりに直接バージョン範囲を保持します — Nxはまだbunカタログを解決せず、`catalog:`参照はそれらのジェネレータを壊してしまいます。
 :::
 
 #### カタログのオプトアウト
@@ -178,6 +182,24 @@ export default {
 カタログを無効にすると、ジェネレータは依存関係のバージョンを各プロジェクトの`package.json`に直接書き込み、プロジェクト間でバージョンを揃えることはあなたの責任になります（例えば[syncpack](https://github.com/JamieMason/syncpack)を使用）。pnpmでカタログが有効な場合、ワークスペースは[`catalogMode: strict`](https://pnpm.io/settings#catalogmode)も設定するため、`pnpm add`は新しい依存関係をカタログに記録し、手動編集なしに単一バージョンポリシーを維持します。
 
 ワークスペース内のあるプロジェクトが別のプロジェクトをインポートする場合、手動で宣言する必要はありません。TypeScriptパスエイリアスがビルド用にインポートを解決し、`ts#sync`ジェネレータ（`compile`の前に実行されるか、`nx sync`経由でオンデマンドで実行）がインポートされたプロジェクトをワークスペース依存関係としてインポート元プロジェクトの`package.json`に宣言します（パッケージマネージャがワークスペースプロトコルをサポートする場合は`workspace:*`、npmとyarn classicでは`*`）。これにより、各プロジェクトのマニフェストが使用するものの正確な記録となり、手動での管理なしに`noUndeclaredDependencies`リントルールを満たします。
+
+#### すべての依存関係をルートで宣言する
+
+すべての依存関係をルートの`package.json`のみで宣言することを好む場合（プロジェクトごとの依存関係宣言なし）、ワークスペースの`biome.json`でリントルールをオフにします:
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+プロジェクトはビルド時にルートにインストールされたパッケージを解決するため、すべてが正常にビルドされます — ただし、各プロジェクトの依存関係の正確な記録としてのプロジェクトごとのマニフェストを放棄することになります（これは後でプロジェクトを公開したり、リポジトリを分割したりする場合に重要です）。
 
 #### ランタイムコード
 
@@ -230,7 +252,7 @@ AWS Lambda関数を構築する場合は、<Link path="/guides/ts-lambda-functio
 
 #### NPMへの公開
 
-TypeScriptプロジェクトをNPMに公開する場合、その`package.json`にはプロジェクトが参照する依存関係とエントリポイント（`main`/`exports`）を宣言する必要があります。ビルド時にはワークスペースルートの`package.json`経由でインストールされた依存関係が解決されるため、Biomeの`noUndeclaredDependencies`ルールは、プロジェクトが`package.json`にリストされていないパッケージをインポートした場合に警告します。
+TypeScriptプロジェクトをNPMに公開する場合、その`package.json`には依存関係に加えてエントリポイント（`main`/`exports`）を宣言する必要があります。依存関係はジェネレータが既に正確に保持しています（[依存関係](#dependencies)を参照）。
 
 ### ビルド
 

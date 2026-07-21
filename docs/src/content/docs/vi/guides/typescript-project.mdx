@@ -140,7 +140,7 @@ Nếu bạn thêm các entries `compilerOptions.paths` tùy chỉnh trong `tscon
 
 Mỗi dự án TypeScript khai báo các **runtime dependencies của bên thứ ba mà mã nguồn của nó import** trong `package.json` riêng của nó. Điều này giúp mọi dự án tự mô tả — manifest của nó liệt kê chính xác những gì nó cần — và cho phép quy tắc lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) của Biome đảm bảo rằng một dự án không bao giờ import một package mà nó chưa khai báo.
 
-**Các công cụ build và test** (ví dụ `vitest`, `tsx`, `rolldown`, `@nx/*`, `typescript`, `@biomejs/biome`) được chia sẻ trên toàn workspace, vì vậy chúng nằm trong `devDependencies` của `package.json` **root** thay vì trong mỗi dự án. Các công cụ này chỉ được tham chiếu từ các file cấu hình, build scripts và tests, mà quy tắc lint miễn trừ.
+**Các công cụ build và test** (ví dụ `vitest`, `tsx`, `rolldown`, Nx toolchain (`nx`, `@nx/js`, ...), `typescript`, `@biomejs/biome`) được chia sẻ trên toàn workspace, vì vậy chúng nằm trong `devDependencies` của `package.json` **root** thay vì trong mỗi dự án. Các công cụ này chỉ được tham chiếu từ các file cấu hình, build scripts và tests, mà quy tắc lint miễn trừ.
 
 Để thêm một runtime dependency vào một dự án, hãy thêm nó vào `package.json` của dự án đó. Sử dụng flag filter/workspace của package manager để nhắm đúng dự án, ví dụ với pnpm:
 
@@ -155,7 +155,11 @@ pnpm add some-npm-package --filter @my-scope/my-library
 Điều này tuân theo [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), có nghĩa là tất cả các dự án sử dụng cùng một phiên bản của mỗi dependency — tránh xung đột kiểu và nhiều bản sao của các packages trong deployment bundles. Đối với các package managers hỗ trợ catalogs ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) và [bun](https://bun.com/docs/install/catalogs)), các generators ghi lại mỗi phiên bản trong catalog và tham chiếu nó bằng protocol `catalog:` (ví dụ `"zod": "catalog:"`), vì vậy catalog là nguồn duy nhất về phiên bản bất kể dự án nào khai báo dependency. `biome.json` được cung cấp kích hoạt resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) của Biome để quy tắc lint hiểu các tham chiếu `catalog:`.
 
 :::tip[Căn chỉnh phiên bản trên npm]
-npm không có tính năng catalog, vì vậy các phiên bản được khai báo trực tiếp trong mỗi `package.json`. Để giữ chúng nhất quán giữa các dự án trong một npm workspace, chúng tôi khuyên dùng [syncpack](https://github.com/JamieMason/syncpack).
+npm (và yarn classic) không có tính năng catalog, vì vậy các phiên bản được khai báo trực tiếp trong mỗi `package.json`. Để giữ chúng nhất quán giữa các dự án, chúng tôi khuyên dùng [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+:::
+
+:::note[bun]
+Trên bun, một số packages mà các Nx generators đọc phiên bản từ manifest root (`vite`, `react`, `react-dom`) giữ các version ranges trực tiếp thay vì tham chiếu `catalog:` — Nx chưa resolve bun catalogs, và một tham chiếu `catalog:` sẽ làm hỏng các generators đó.
 :::
 
 #### Tắt catalogs
@@ -179,6 +183,24 @@ export default {
 Khi catalogs bị tắt, các generators ghi phiên bản dependency trực tiếp vào `package.json` của mỗi dự án, và việc giữ các phiên bản căn chỉnh giữa các dự án là trách nhiệm của bạn (ví dụ sử dụng [syncpack](https://github.com/JamieMason/syncpack)). Khi catalogs được bật trên pnpm, workspace cũng đặt [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) để `pnpm add` ghi lại các dependencies mới trong catalog, duy trì chính sách phiên bản đơn mà không cần chỉnh sửa thủ công.
 
 Khi một dự án import một dự án khác trong workspace của bạn, bạn không cần khai báo nó thủ công: các path aliases TypeScript resolve import để build, và generator `ts#sync` (chạy trước `compile`, hoặc theo yêu cầu qua `nx sync`) khai báo dự án được import làm workspace dependency trong `package.json` của dự án import (`workspace:*` khi package manager hỗ trợ workspace protocol, `*` trên npm và yarn classic). Điều này giữ cho manifest của mỗi dự án là một bản ghi chính xác về những gì nó sử dụng — thỏa mãn quy tắc lint `noUndeclaredDependencies` — mà không cần ghi chép thủ công.
+
+#### Khai báo tất cả dependencies ở root
+
+Nếu bạn muốn khai báo mọi dependency chỉ trong `package.json` root (không có khai báo dependency cho từng dự án), hãy tắt quy tắc lint trong `biome.json` của workspace:
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+Các dự án resolve các packages được cài đặt ở root tại thời điểm build, vì vậy mọi thứ vẫn build được — bạn từ bỏ việc các manifest của từng dự án là một bản ghi chính xác về các dependencies của mỗi dự án (điều này quan trọng nếu sau này bạn publish một dự án hoặc tách repo).
 
 #### Mã Runtime
 
@@ -231,7 +253,7 @@ Nếu bạn đang xây dựng một AWS Lambda function, hãy xem generator <Lin
 
 #### Publish lên NPM
 
-Nếu bạn đang publish dự án TypeScript của mình lên NPM, `package.json` của nó phải khai báo các dependencies mà dự án của bạn tham chiếu, cùng với các entry points (`main`/`exports`). Vì tại thời điểm build, dự án của bạn resolve các dependencies được cài đặt qua `package.json` ở workspace root, quy tắc `noUndeclaredDependencies` của Biome sẽ cảnh báo nếu dự án của bạn import một package không được liệt kê trong `package.json` của nó.
+Nếu bạn đang publish dự án TypeScript của mình lên NPM, `package.json` của nó phải khai báo các entry points (`main`/`exports`) ngoài các dependencies của nó, mà các generators đã giữ chính xác (xem [Dependencies](#dependencies)).
 
 ### Building
 

@@ -140,7 +140,7 @@ No, run the tasks without syncing the changes
 
 每个 TypeScript 项目在其自己的 `package.json` 中声明**其源代码导入的第三方运行时依赖**。这使每个项目都能自我描述——其清单准确列出了它需要的内容——并让 Biome 的 [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) lint 规则强制项目永远不会导入未声明的包。
 
-**构建和测试工具**（例如 `vitest`、`tsx`、`rolldown`、`@nx/*`、`typescript`、`@biomejs/biome`）在工作区中共享，因此它们位于**根目录** `package.json` 的 `devDependencies` 中，而不是在每个项目中。这些工具仅从配置文件、构建脚本和测试中引用，lint 规则会豁免这些文件。
+**构建和测试工具**（例如 `vitest`、`tsx`、`rolldown`、Nx 工具链（`nx`、`@nx/js`、...）、`typescript`、`@biomejs/biome`）在工作区中共享，因此它们位于**根目录** `package.json` 的 `devDependencies` 中，而不是在每个项目中。这些工具仅从配置文件、构建脚本和测试中引用，lint 规则会豁免这些文件。
 
 要向项目添加运行时依赖，请将其添加到该项目的 `package.json` 中。使用包管理器的过滤器/工作区标志来定位正确的项目，例如使用 pnpm：
 
@@ -155,7 +155,11 @@ pnpm add some-npm-package --filter @my-scope/my-library
 这遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)，意味着所有项目使用每个依赖的相同版本——避免类型冲突和部署包中的多个包副本。对于支持目录（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs) 和 [bun](https://bun.com/docs/install/catalogs)）的包管理器，生成器会在目录中记录每个版本，并使用 `catalog:` 协议引用它（例如 `"zod": "catalog:"`），因此无论哪个项目声明依赖，目录都是版本的唯一真实来源。提供的 `biome.json` 启用了 Biome 的 [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) 解析器，以便 lint 规则理解 `catalog:` 引用。
 
 :::tip[在 npm 上对齐版本]
-npm 没有目录功能，因此版本直接在每个 `package.json` 中声明。要在 npm 工作区的项目之间保持一致，我们推荐使用 [syncpack](https://github.com/JamieMason/syncpack)。
+npm（和 yarn classic）没有目录功能，因此版本直接在每个 `package.json` 中声明。要在项目之间保持一致，我们推荐使用 [syncpack](https://github.com/JamieMason/syncpack)（`npx syncpack lint`）。
+:::
+
+:::note[bun]
+在 bun 上，一些 Nx 生成器从根清单读取版本的包（`vite`、`react`、`react-dom`）保留直接版本范围而不是 `catalog:` 引用——Nx 尚未解析 bun 目录，`catalog:` 引用会破坏这些生成器。
 :::
 
 #### 选择退出目录
@@ -179,6 +183,24 @@ export default {
 禁用目录后，生成器会将依赖版本直接写入每个项目的 `package.json`，保持项目间版本一致是您的责任（例如使用 [syncpack](https://github.com/JamieMason/syncpack)）。在 pnpm 上启用目录时，工作区还会设置 [`catalogMode: strict`](https://pnpm.io/settings#catalogmode)，以便 `pnpm add` 在目录中记录新依赖，在无需手动编辑的情况下保持单一版本策略。
 
 当工作区中的一个项目导入另一个项目时，您无需手动声明：TypeScript 路径别名会解析构建时的导入，而 `ts#sync` 生成器（在 `compile` 之前运行，或通过 `nx sync` 按需运行）会在导入项目的 `package.json` 中将被导入的项目声明为工作区依赖（在包管理器支持工作区协议的情况下为 `workspace:*`，在 npm 和 yarn classic 上为 `*`）。这使每个项目的清单都能准确记录其使用的内容——满足 `noUndeclaredDependencies` lint 规则——而无需手动记账。
+
+#### 在根目录声明所有依赖
+
+如果您更喜欢仅在根目录 `package.json` 中声明所有依赖（不进行每个项目的依赖声明），请在工作区 `biome.json` 中关闭 lint 规则：
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+项目在构建时解析根目录安装的包，因此一切仍然可以构建——您放弃了每个项目清单作为每个项目依赖的准确记录（如果您以后发布项目或拆分仓库，这很重要）。
 
 #### 运行时代码
 
@@ -231,7 +253,7 @@ export default defineConfig([
 
 #### 发布到 NPM
 
-如果您要将 TypeScript 项目发布到 NPM，其 `package.json` 必须声明项目引用的依赖，以及入口点（`main`/`exports`）。由于在构建时您的项目会解析通过工作区根目录 `package.json` 安装的依赖，如果您的项目导入了未在其 `package.json` 中列出的包，Biome 的 `noUndeclaredDependencies` 规则会发出警告。
+如果您要将 TypeScript 项目发布到 NPM，其 `package.json` 必须声明入口点（`main`/`exports`）以及其依赖，生成器已经保持依赖的准确性（参见[依赖管理](#dependencies)）。
 
 ### 构建
 

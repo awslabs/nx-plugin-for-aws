@@ -140,7 +140,7 @@ Se você adicionar entradas personalizadas em `compilerOptions.paths` no `tsconf
 
 Cada projeto TypeScript declara as **dependências de runtime de terceiros que seu código-fonte importa** em seu próprio `package.json`. Isso mantém cada projeto autodescritivo — seu manifesto lista exatamente o que ele precisa — e permite que a regra de lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) do Biome garanta que um projeto nunca importe um pacote que não declarou.
 
-**Ferramentas de build e teste** (por exemplo `vitest`, `tsx`, `rolldown`, `@nx/*`, `typescript`, `@biomejs/biome`) são compartilhadas em todo o workspace, então ficam nas `devDependencies` do `package.json` **raiz** em vez de em cada projeto. Essas ferramentas são referenciadas apenas em arquivos de configuração, scripts de build e testes, que a regra de lint isenta.
+**Ferramentas de build e teste** (por exemplo `vitest`, `tsx`, `rolldown`, a cadeia de ferramentas Nx (`nx`, `@nx/js`, ...), `typescript`, `@biomejs/biome`) são compartilhadas em todo o workspace, então ficam nas `devDependencies` do `package.json` **raiz** em vez de em cada projeto. Essas ferramentas são referenciadas apenas em arquivos de configuração, scripts de build e testes, que a regra de lint isenta.
 
 Para adicionar uma dependência de runtime a um projeto, adicione-a ao `package.json` desse projeto. Usar a flag de filtro/workspace do seu gerenciador de pacotes direciona ao projeto correto, por exemplo com pnpm:
 
@@ -155,7 +155,11 @@ Para adicionar uma ferramenta de dev compartilhada, adicione-a à raiz do worksp
 Isso segue uma [política de versão única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), o que significa que todos os projetos usam a mesma versão de cada dependência — evitando conflitos de tipo e múltiplas cópias de pacotes em bundles de implantação. Para gerenciadores de pacotes que suportam catálogos ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) e [bun](https://bun.com/docs/install/catalogs)), os geradores registram cada versão no catálogo e a referenciam com o protocolo `catalog:` (ex. `"zod": "catalog:"`), então o catálogo é a única fonte de verdade para versões independentemente de qual projeto declara a dependência. O `biome.json` fornecido habilita o resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) do Biome para que a regra de lint entenda referências `catalog:`.
 
 :::tip[Alinhando versões no npm]
-npm não possui recurso de catálogo, então as versões são declaradas diretamente em cada `package.json`. Para mantê-las consistentes entre projetos em um workspace npm, recomendamos [syncpack](https://github.com/JamieMason/syncpack).
+npm (e yarn classic) não possui recurso de catálogo, então as versões são declaradas diretamente em cada `package.json`. Para mantê-las consistentes entre projetos, recomendamos [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+:::
+
+:::note[bun]
+No bun, alguns pacotes cujas versões os geradores Nx leem do manifesto raiz (`vite`, `react`, `react-dom`) mantêm intervalos de versão diretos em vez de referências `catalog:` — o Nx ainda não resolve catálogos do bun, e uma referência `catalog:` quebraria esses geradores.
 :::
 
 #### Desativando catálogos
@@ -179,6 +183,24 @@ export default {
 Com catálogos desabilitados, os geradores escrevem versões de dependências diretamente no `package.json` de cada projeto, e manter versões alinhadas entre projetos é sua responsabilidade (por exemplo usando [syncpack](https://github.com/JamieMason/syncpack)). Quando catálogos estão habilitados no pnpm, o workspace também define [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) para que `pnpm add` registre novas dependências no catálogo, mantendo a política de versão única sem edição manual.
 
 Quando um projeto importa outro projeto em seu workspace, você não precisa declará-lo manualmente: os aliases de path do TypeScript resolvem a importação para build, e o gerador `ts#sync` (que é executado antes de `compile`, ou sob demanda via `nx sync`) declara o projeto importado como uma dependência de workspace no `package.json` do projeto importador (`workspace:*` onde o gerenciador de pacotes suporta o protocolo de workspace, `*` no npm e yarn classic). Isso mantém o manifesto de cada projeto um registro preciso do que ele usa — satisfazendo a regra de lint `noUndeclaredDependencies` — sem contabilidade manual.
+
+#### Declarando todas as dependências na raiz
+
+Se você preferir declarar todas as dependências apenas no `package.json` raiz (sem declarações de dependências por projeto), desative a regra de lint no `biome.json` do workspace:
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+Projetos resolvem pacotes instalados na raiz em tempo de build, então tudo ainda compila — você abre mão de manifestos por projeto como um registro preciso das dependências de cada projeto (o que importa se você posteriormente publicar um projeto ou dividir o repositório).
 
 #### Código de Runtime
 
@@ -231,7 +253,7 @@ Se estiver construindo uma função AWS Lambda, confira o gerador <Link path="/g
 
 #### Publicação no NPM
 
-Se você está publicando seu projeto TypeScript no NPM, seu `package.json` deve declarar as dependências que seu projeto referencia, junto com pontos de entrada (`main`/`exports`). Como em tempo de build seu projeto resolve dependências instaladas via `package.json` da raiz do workspace, a regra `noUndeclaredDependencies` do Biome avisará se seu projeto importar um pacote que não está listado em seu `package.json`.
+Se você está publicando seu projeto TypeScript no NPM, seu `package.json` deve declarar pontos de entrada (`main`/`exports`) além de suas dependências, que os geradores já mantêm precisas (veja [Dependências](#dependências)).
 
 ### Build
 

@@ -140,7 +140,7 @@ Se aggiungi voci personalizzate `compilerOptions.paths` nel `tsconfig.json` di u
 
 Ogni progetto TypeScript dichiara le **dipendenze runtime di terze parti che il suo codice sorgente importa** nel proprio `package.json`. Questo mantiene ogni progetto auto-descrittivo — il suo manifesto elenca esattamente ciò di cui ha bisogno — e permette alla regola di lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) di Biome di garantire che un progetto non importi mai un pacchetto che non ha dichiarato.
 
-**Gli strumenti di build e test** (ad esempio `vitest`, `tsx`, `rolldown`, `@nx/*`, `typescript`, `@biomejs/biome`) sono condivisi nell'intero workspace, quindi risiedono nelle `devDependencies` del `package.json` **root** anziché in ogni progetto. Questi strumenti sono referenziati solo da file di configurazione, script di build e test, che la regola di lint esclude.
+**Gli strumenti di build e test** (ad esempio `vitest`, `tsx`, `rolldown`, la toolchain Nx (`nx`, `@nx/js`, ...), `typescript`, `@biomejs/biome`) sono condivisi nell'intero workspace, quindi risiedono nelle `devDependencies` del `package.json` **root** anziché in ogni progetto. Questi strumenti sono referenziati solo da file di configurazione, script di build e test, che la regola di lint esclude.
 
 Per aggiungere una dipendenza runtime a un progetto, aggiungila al `package.json` di quel progetto. Utilizzando il flag filter/workspace del tuo package manager si punta al progetto corretto, ad esempio con pnpm:
 
@@ -155,7 +155,11 @@ Per aggiungere uno strumento di sviluppo condiviso, aggiungilo alla root del wor
 Questo segue una [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), il che significa che tutti i progetti utilizzano la stessa versione di ogni dipendenza — evitando conflitti di tipo e copie multiple di pacchetti nei bundle di deployment. Per i package manager che supportano i catalog ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) e [bun](https://bun.com/docs/install/catalogs)), i generatori registrano ogni versione nel catalog e la referenziano con il protocollo `catalog:` (ad es. `"zod": "catalog:"`), quindi il catalog è l'unica fonte di verità per le versioni indipendentemente da quale progetto dichiara la dipendenza. Il `biome.json` fornito abilita il resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) di Biome in modo che la regola di lint comprenda i riferimenti `catalog:`.
 
 :::tip[Allineamento delle versioni su npm]
-npm non ha una funzionalità di catalog, quindi le versioni sono dichiarate direttamente in ogni `package.json`. Per mantenerle coerenti tra i progetti in un workspace npm, raccomandiamo [syncpack](https://github.com/JamieMason/syncpack).
+npm (e yarn classic) non ha una funzionalità di catalog, quindi le versioni sono dichiarate direttamente in ogni `package.json`. Per mantenerle coerenti tra i progetti, raccomandiamo [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+:::
+
+:::note[bun]
+Su bun, alcuni pacchetti le cui versioni i generatori Nx leggono dal manifesto root (`vite`, `react`, `react-dom`) mantengono intervalli di versione diretti invece di riferimenti `catalog:` — Nx non risolve ancora i catalog di bun, e un riferimento `catalog:` romperebbe quei generatori.
 :::
 
 #### Disattivare i catalog
@@ -179,6 +183,24 @@ export default {
 Con i catalog disabilitati, i generatori scrivono le versioni delle dipendenze direttamente nel `package.json` di ogni progetto, e mantenere le versioni allineate tra i progetti è tua responsabilità (ad esempio utilizzando [syncpack](https://github.com/JamieMason/syncpack)). Quando i catalog sono abilitati su pnpm, il workspace imposta anche [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) in modo che `pnpm add` registri le nuove dipendenze nel catalog, mantenendo la single version policy senza modifiche manuali.
 
 Quando un progetto importa un altro progetto nel tuo workspace, non è necessario dichiararlo manualmente: gli alias di percorso TypeScript risolvono l'import per la build, e il generatore `ts#sync` (che viene eseguito prima di `compile`, o su richiesta tramite `nx sync`) dichiara il progetto importato come dipendenza workspace nel `package.json` del progetto importatore (`workspace:*` dove il package manager supporta il protocollo workspace, `*` su npm e yarn classic). Questo mantiene il manifesto di ogni progetto un registro accurato di ciò che utilizza — soddisfacendo la regola di lint `noUndeclaredDependencies` — senza contabilità manuale.
+
+#### Dichiarare tutte le dipendenze nella root
+
+Se preferisci dichiarare ogni dipendenza solo nel `package.json` root (senza dichiarazioni di dipendenze per progetto), disattiva la regola di lint nel `biome.json` del workspace:
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+I progetti risolvono i pacchetti installati nella root al momento della build, quindi tutto continua a funzionare — rinunci ai manifesti per progetto come registro accurato delle dipendenze di ciascun progetto (il che è importante se successivamente pubblichi un progetto o dividi il repository).
 
 #### Codice runtime
 
@@ -231,7 +253,7 @@ Se stai costruendo una funzione AWS Lambda, consulta il generatore <Link path="/
 
 #### Pubblicazione su NPM
 
-Se pubblichi il tuo progetto TypeScript su NPM, il suo `package.json` deve dichiarare le dipendenze utilizzate dal progetto, insieme ai punti di ingresso (`main`/`exports`). Poiché al momento della build le dipendenze vengono risolte tramite il `package.json` della root del workspace, la regola `noUndeclaredDependencies` di Biome ti avviserà se il tuo progetto importa un pacchetto che non è elencato nel suo `package.json`.
+Se pubblichi il tuo progetto TypeScript su NPM, il suo `package.json` deve dichiarare i punti di ingresso (`main`/`exports`) oltre alle sue dipendenze, che i generatori mantengono già accurate (vedi [Dipendenze](#dependencies)).
 
 ### Build
 
