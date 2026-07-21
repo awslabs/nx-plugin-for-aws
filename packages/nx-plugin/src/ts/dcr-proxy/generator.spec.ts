@@ -197,16 +197,24 @@ describe('ts#dcr-proxy generator', () => {
     );
     expect(construct).toMatchSnapshot('dcr-proxy-construct.ts');
 
-    const tokenHandler = tree.read(
-      'snapshot-proxy/src/handlers/token.ts',
-      'utf-8',
-    );
-    expect(tokenHandler).toMatchSnapshot('dcr-proxy-token-handler.ts');
+    for (const handler of [
+      'authorization-server-metadata',
+      'authorize',
+      'mcp-proxy',
+      'protected-resource-metadata',
+      'register',
+      'token',
+    ]) {
+      const handlerContent = tree.read(
+        `snapshot-proxy/src/handlers/${handler}.ts`,
+        'utf-8',
+      );
+      expect(handlerContent).toMatchSnapshot(`dcr-proxy-${handler}-handler.ts`);
+    }
   });
 
   describe('terraform', () => {
-    const tfDir =
-      'packages/common/terraform/src/app/dcr-proxies/my-proxy';
+    const tfDir = 'packages/common/terraform/src/app/dcr-proxies/my-proxy';
 
     it('generates the terraform module instead of a cdk construct', async () => {
       await tsDcrProxyGenerator(tree, { name: 'my-proxy', iac: 'terraform' });
@@ -268,6 +276,18 @@ describe('ts#dcr-proxy generator', () => {
       expect(projectJson.targets.build.dependsOn).toContain(
         `${getNpmScopePrefix(tree)}my-proxy:build`,
       );
+    });
+
+    it('adds the lambda handler dependencies', async () => {
+      await tsDcrProxyGenerator(tree, { name: 'my-proxy', iac: 'terraform' });
+
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(
+        rootPackageJson.dependencies['@aws-sdk/client-secrets-manager'],
+      ).toBeDefined();
+      expect(
+        rootPackageJson.devDependencies['@types/aws-lambda'],
+      ).toBeDefined();
     });
 
     it('is idempotent when re-run with the same options', async () => {

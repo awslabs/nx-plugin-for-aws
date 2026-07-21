@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  generateFiles,
+  addDependenciesToPackageJson,
   type GeneratorCallback,
+  generateFiles,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
@@ -30,6 +31,7 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { withVersions } from '../../utils/versions';
 import type { TsDcrProxyGeneratorSchema } from './schema';
 
 export const TS_DCR_PROXY_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -90,6 +92,15 @@ export const tsDcrProxyGenerator = async (
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
+  );
+
+  // The token handler imports @aws-sdk/client-secrets-manager (provided by the
+  // Lambda runtime but needed for type-checking and local dev) and the handlers
+  // are typed against @types/aws-lambda.
+  addDependenciesToPackageJson(
+    tree,
+    withVersions(['@aws-sdk/client-secrets-manager']),
+    withVersions(['@types/aws-lambda']),
   );
 
   // Bundle each handler independently to dist/<root>/bundle/<handler>/index.js

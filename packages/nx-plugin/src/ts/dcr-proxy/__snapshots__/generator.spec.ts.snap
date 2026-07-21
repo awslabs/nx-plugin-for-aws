@@ -1,5 +1,80 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-authorization-server-metadata-handler.ts 1`] = `
+"import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
+
+const COGNITO_ISSUER = process.env.COGNITO_ISSUER!;
+
+let cached: Record<string, unknown> | undefined;
+
+async function fetchUpstream(): Promise<Record<string, unknown>> {
+  if (cached) return cached;
+  const res = await fetch(\`\${COGNITO_ISSUER}/.well-known/openid-configuration\`);
+  if (!res.ok) {
+    throw new Error(
+      \`Cognito discovery failed: \${res.status} \${res.statusText}\`,
+    );
+  }
+  cached = (await res.json()) as Record<string, unknown>;
+  return cached;
+}
+
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+  const proxyUrl = \`https://\${event.requestContext.domainName}\`;
+  const upstream = await fetchUpstream();
+
+  // Override the proxy-handled endpoints.
+  // jwks_uri is kept as Cognito's so JWT verification works directly against
+  // Cognito. issuer is kept as Cognito's so JWT.iss validation matches.
+  // authorization_endpoint points to the proxy so we can strip the RFC 8707
+  // \`resource\` parameter that some MCP clients send (Cognito rejects token
+  // exchange for unregistered resource server URLs).
+  const metadata = {
+    ...upstream,
+    authorization_endpoint: \`\${proxyUrl}/authorize\`,
+    token_endpoint: \`\${proxyUrl}/oauth/token\`,
+    registration_endpoint: \`\${proxyUrl}/register\`,
+  };
+
+  return {
+    statusCode: 200,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(metadata),
+  };
+};
+"
+`;
+
+exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-authorize-handler.ts 1`] = `
+"import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
+
+const COGNITO_HOSTED_UI_BASE = process.env.COGNITO_HOSTED_UI_BASE!;
+
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+  const params = new URLSearchParams(event.rawQueryString ?? '');
+
+  console.log('[authorize]', {
+    scope: params.get('scope'),
+    redirect_uri: params.get('redirect_uri'),
+    has_resource: params.has('resource'),
+  });
+
+  // RFC 8707 \`resource\` parameter binds the access token's \`aud\` claim to
+  // the given URL. Cognito accepts it at /authorize but rejects the token
+  // exchange with \`invalid_grant\` when the URL is not registered as a
+  // resource server. MCP clients send this unconditionally, so strip it.
+  params.delete('resource');
+
+  const target = \`\${COGNITO_HOSTED_UI_BASE}/oauth2/authorize?\${params.toString()}\`;
+  return {
+    statusCode: 302,
+    headers: { location: target },
+    body: '',
+  };
+};
+"
+`;
+
 exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-construct.ts 1`] = `
 "import * as url from 'node:url';
 import { Construct } from 'constructs';
@@ -54,8 +129,6 @@ export interface SnapshotProxyProps {
    * this proxy as the protected-resource metadata host.
    */
   readonly upstreamUrl: string;
-
-  readonly allowedRedirectPatterns?: RegExp[];
 
   readonly cors?: CorsOptions | false;
   readonly throttling?: ThrottlingOptions;
@@ -124,15 +197,11 @@ export class SnapshotProxy extends Construct {
     const cognitoIssuer = \`https://cognito-idp.\${region}.amazonaws.com/\${props.userPoolId}\`;
 
     const baseEnv: Record<string, string> = {
-      COGNITO_USER_POOL_ID: props.userPoolId,
       COGNITO_CLIENT_ID: props.userPoolClientId,
       COGNITO_CLIENT_SECRET_ARN: clientSecret.secretArn,
       COGNITO_ISSUER: cognitoIssuer,
       COGNITO_HOSTED_UI_BASE: props.cognitoHostedUiBase,
       COGNITO_REGION: region,
-      ALLOWED_REDIRECT_PATTERNS: JSON.stringify(
-        (props.allowedRedirectPatterns ?? []).map((r) => r.source),
-      ),
       ...(props.lambdaEnvironment ?? {}),
     };
 
@@ -149,7 +218,7 @@ export class SnapshotProxy extends Construct {
       return new lambda.Function(this, id_, {
         code: asset(bundlePathFromRoot),
         handler: 'index.handler',
-        runtime: lambda.Runtime.NODEJS_20_X,
+        runtime: lambda.Runtime.NODEJS_22_X,
         architecture: lambda.Architecture.ARM_64,
         timeout: Duration.seconds(10),
         memorySize: 256,
@@ -294,6 +363,191 @@ export class SnapshotProxy extends Construct {
 "
 `;
 
+exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-mcp-proxy-handler.ts 1`] = `
+"import type {
+  APIGatewayProxyHandlerV2,
+  APIGatewayProxyStructuredResultV2,
+} from 'aws-lambda';
+
+const UPSTREAM_URL = process.env.UPSTREAM_URL!;
+const PROXY_METADATA_URL = process.env.PROXY_METADATA_URL!;
+
+// Headers stripped when relaying requests/responses through the proxy:
+// RFC 7230 hop-by-hop headers (scoped to a single connection, not the next
+// hop), plus entity headers that fetch() re-derives from the actual body -
+// forwarding stale values would corrupt the response.
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+  'content-length',
+  'content-encoding',
+  'host',
+]);
+
+export const handler: APIGatewayProxyHandlerV2 = async (
+  event,
+): Promise<APIGatewayProxyStructuredResultV2> => {
+  const method = event.requestContext.http.method;
+  const qs = event.rawQueryString ? \`?\${event.rawQueryString}\` : '';
+  const url = \`\${UPSTREAM_URL}\${qs}\`;
+
+  const fwdHeaders = new Headers();
+  for (const [k, v] of Object.entries(event.headers ?? {})) {
+    if (!v) continue;
+    if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+    fwdHeaders.set(k, v);
+  }
+
+  const reqBody = event.body
+    ? event.isBase64Encoded
+      ? Buffer.from(event.body, 'base64')
+      : event.body
+    : undefined;
+
+  const upstream = await fetch(url, {
+    method,
+    headers: fwdHeaders,
+    body: reqBody as unknown as ArrayBuffer | string | undefined,
+  });
+
+  const respHeaders: Record<string, string> = {};
+  upstream.headers.forEach((v, k) => {
+    if (HOP_BY_HOP.has(k.toLowerCase())) return;
+    respHeaders[k] = v;
+  });
+
+  // Rewrite WWW-Authenticate so MCP clients discover this proxy
+  // as the protected-resource metadata host instead of the upstream.
+  const authKey = Object.keys(respHeaders).find(
+    (k) => k.toLowerCase() === 'www-authenticate',
+  );
+  if (authKey) {
+    respHeaders[authKey] = respHeaders[authKey].replace(
+      /resource_metadata="[^"]*"/i,
+      \`resource_metadata="\${PROXY_METADATA_URL}"\`,
+    );
+  }
+
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  const contentType = (
+    respHeaders['content-type'] ??
+    respHeaders['Content-Type'] ??
+    ''
+  ).toLowerCase();
+  const isText =
+    contentType.includes('json') ||
+    contentType.includes('text') ||
+    contentType.includes('xml') ||
+    contentType.includes('event-stream');
+
+  return {
+    statusCode: upstream.status,
+    headers: respHeaders,
+    body: isText ? buf.toString('utf-8') : buf.toString('base64'),
+    isBase64Encoded: !isText,
+  };
+};
+"
+`;
+
+exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-protected-resource-metadata-handler.ts 1`] = `
+"import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
+
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+  const proxyUrl = \`https://\${event.requestContext.domainName}\`;
+  return {
+    statusCode: 200,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resource: \`\${proxyUrl}/mcp\`,
+      authorization_servers: [proxyUrl],
+    }),
+  };
+};
+"
+`;
+
+exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-register-handler.ts 1`] = `
+"import type {
+  APIGatewayProxyHandlerV2,
+  APIGatewayProxyStructuredResultV2,
+} from 'aws-lambda';
+
+const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID!;
+
+interface RegisterRequest {
+  redirect_uris?: unknown;
+  [key: string]: unknown;
+}
+
+function jsonResponse(
+  statusCode: number,
+  body: unknown,
+): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+export const handler: APIGatewayProxyHandlerV2 = async (event) => {
+  if (!event.body) {
+    return jsonResponse(400, {
+      error: 'invalid_client_metadata',
+      error_description: 'request body is required',
+    });
+  }
+
+  let req: RegisterRequest;
+  try {
+    req = JSON.parse(event.body) as RegisterRequest;
+  } catch {
+    return jsonResponse(400, {
+      error: 'invalid_client_metadata',
+      error_description: 'request body must be valid JSON',
+    });
+  }
+
+  const redirectUris = req.redirect_uris;
+  if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+    return jsonResponse(400, {
+      error: 'invalid_redirect_uri',
+      error_description:
+        'redirect_uris is required and must be a non-empty array',
+    });
+  }
+
+  // The proxy fronts a single Cognito App Client, so Cognito performs the
+  // authoritative check: any redirect_uri forwarded to the Hosted UI must be
+  // registered as a callback URL on that App Client. The proxy only validates
+  // the request shape here and passes the URIs through unchanged.
+  for (const uri of redirectUris) {
+    if (typeof uri !== 'string') {
+      return jsonResponse(400, {
+        error: 'invalid_redirect_uri',
+        error_description: 'each redirect_uri must be a string',
+      });
+    }
+  }
+
+  return jsonResponse(201, {
+    client_id: COGNITO_CLIENT_ID,
+    redirect_uris: redirectUris,
+    token_endpoint_auth_method: 'none',
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+  });
+};
+"
+`;
+
 exports[`ts#dcr-proxy generator > matches snapshot for generated construct and a handler > dcr-proxy-token-handler.ts 1`] = `
 "import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import {
@@ -420,12 +674,6 @@ variable "upstream_url" {
   type        = string
 }
 
-variable "allowed_redirect_patterns" {
-  description = "List of regular expression patterns for redirect_uris allowed during Dynamic Client Registration"
-  type        = list(string)
-  default     = []
-}
-
 variable "env" {
   description = "Additional environment variables applied to all proxy Lambda functions"
   type        = map(string)
@@ -494,13 +742,11 @@ locals {
   aws_region     = data.aws_region.current.region
 
   base_env = merge({
-    COGNITO_USER_POOL_ID      = var.user_pool_id
     COGNITO_CLIENT_ID         = var.user_pool_client_id
     COGNITO_CLIENT_SECRET_ARN = var.cognito_client_secret_arn
     COGNITO_ISSUER            = "https://cognito-idp.\${local.aws_region}.amazonaws.com/\${var.user_pool_id}"
     COGNITO_HOSTED_UI_BASE    = var.cognito_hosted_ui_base
     COGNITO_REGION            = local.aws_region
-    ALLOWED_REDIRECT_PATTERNS = jsonencode(var.allowed_redirect_patterns)
   }, var.env)
 
   # Workspace-root-relative bundle output directory per handler
@@ -620,7 +866,7 @@ resource "aws_lambda_function" "standard" {
   function_name    = "snapshot-proxy-\${each.key}-\${random_string.suffix.result}"
   role             = each.key == "token" ? aws_iam_role.token.arn : aws_iam_role.proxy.arn
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   architectures    = ["arm64"]
   source_code_hash = data.archive_file.handler_zip[each.key].output_base64sha256
   timeout          = 10
@@ -649,7 +895,7 @@ resource "aws_lambda_function" "mcp_proxy" {
   function_name    = "snapshot-proxy-mcp-proxy-\${random_string.suffix.result}"
   role             = aws_iam_role.proxy.arn
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   architectures    = ["arm64"]
   source_code_hash = data.archive_file.handler_zip["mcp-proxy"].output_base64sha256
   timeout          = var.mcp_proxy_timeout

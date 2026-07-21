@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -20,7 +19,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { terraformProviderVersions, withVersions } from '../versions';
+import { terraformProviderVersions } from '../versions';
 
 /**
  * The DCR proxy Lambda handlers. Each is bundled independently and wired to a
@@ -106,7 +105,13 @@ const addDcrProxyCdkConstructs = async (
 ) => {
   generateFiles(
     tree,
-    joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app', 'dcr-proxies'),
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'app',
+      'dcr-proxies',
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
@@ -148,15 +153,6 @@ const addDcrProxyCdkConstructs = async (
       'index.ts',
     ),
     './dcr-proxies/index.js',
-  );
-
-  // The token handler imports @aws-sdk/client-secrets-manager (provided by the
-  // Lambda runtime but needed for type-checking and local dev) and the handlers
-  // are typed against @types/aws-lambda.
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(['@aws-sdk/client-secrets-manager']),
-    withVersions(['@types/aws-lambda']),
   );
 };
 

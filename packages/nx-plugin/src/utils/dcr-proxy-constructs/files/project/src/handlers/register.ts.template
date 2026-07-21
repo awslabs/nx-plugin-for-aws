@@ -4,9 +4,6 @@ import type {
 } from 'aws-lambda';
 
 const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID!;
-const ALLOWED_REDIRECT_PATTERNS = (
-  JSON.parse(process.env.ALLOWED_REDIRECT_PATTERNS ?? '[]') as string[]
-).map((s) => new RegExp(s));
 
 interface RegisterRequest {
   redirect_uris?: unknown;
@@ -50,18 +47,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     });
   }
 
+  // The proxy fronts a single Cognito App Client, so Cognito performs the
+  // authoritative check: any redirect_uri forwarded to the Hosted UI must be
+  // registered as a callback URL on that App Client. The proxy only validates
+  // the request shape here and passes the URIs through unchanged.
   for (const uri of redirectUris) {
     if (typeof uri !== 'string') {
       return jsonResponse(400, {
         error: 'invalid_redirect_uri',
         error_description: 'each redirect_uri must be a string',
-      });
-    }
-    const matched = ALLOWED_REDIRECT_PATTERNS.some((p) => p.test(uri));
-    if (!matched) {
-      return jsonResponse(400, {
-        error: 'invalid_redirect_uri',
-        error_description: `redirect_uri not allowed: ${uri}`,
       });
     }
   }

@@ -44,12 +44,6 @@ variable "upstream_url" {
   type        = string
 }
 
-variable "allowed_redirect_patterns" {
-  description = "List of regular expression patterns for redirect_uris allowed during Dynamic Client Registration"
-  type        = list(string)
-  default     = []
-}
-
 variable "env" {
   description = "Additional environment variables applied to all proxy Lambda functions"
   type        = map(string)
@@ -118,13 +112,11 @@ locals {
   aws_region     = data.aws_region.current.region
 
   base_env = merge({
-    COGNITO_USER_POOL_ID      = var.user_pool_id
     COGNITO_CLIENT_ID         = var.user_pool_client_id
     COGNITO_CLIENT_SECRET_ARN = var.cognito_client_secret_arn
     COGNITO_ISSUER            = "https://cognito-idp.${local.aws_region}.amazonaws.com/${var.user_pool_id}"
     COGNITO_HOSTED_UI_BASE    = var.cognito_hosted_ui_base
     COGNITO_REGION            = local.aws_region
-    ALLOWED_REDIRECT_PATTERNS = jsonencode(var.allowed_redirect_patterns)
   }, var.env)
 
   # Workspace-root-relative bundle output directory per handler
@@ -244,7 +236,7 @@ resource "aws_lambda_function" "standard" {
   function_name    = "<%- nameKebabCase %>-${each.key}-${random_string.suffix.result}"
   role             = each.key == "token" ? aws_iam_role.token.arn : aws_iam_role.proxy.arn
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   architectures    = ["arm64"]
   source_code_hash = data.archive_file.handler_zip[each.key].output_base64sha256
   timeout          = 10
@@ -273,7 +265,7 @@ resource "aws_lambda_function" "mcp_proxy" {
   function_name    = "<%- nameKebabCase %>-mcp-proxy-${random_string.suffix.result}"
   role             = aws_iam_role.proxy.arn
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   architectures    = ["arm64"]
   source_code_hash = data.archive_file.handler_zip["mcp-proxy"].output_base64sha256
   timeout          = var.mcp_proxy_timeout
