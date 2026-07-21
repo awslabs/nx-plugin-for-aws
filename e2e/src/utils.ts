@@ -114,15 +114,26 @@ export async function runCLI(
   }
 }
 
+/**
+ * Lockfiles written by each package manager. bun >= 1.2 writes the text-based
+ * bun.lock; bun.lockb is the legacy binary lockfile.
+ */
+const LOCKFILES: Record<PackageManager, string[]> = {
+  npm: ['package-lock.json'],
+  pnpm: ['pnpm-lock.yaml'],
+  yarn: ['yarn.lock'],
+  bun: ['bun.lock', 'bun.lockb'],
+};
+
+const hasLockfile = (dir: string, pkgMgr: PackageManager): boolean =>
+  LOCKFILES[pkgMgr].some((lockfile) => existsSync(join(dir, lockfile)));
+
 function detectPackageManager(dir = ''): PackageManager {
-  // bun >= 1.2 writes the text-based bun.lock; bun.lockb is the legacy
-  // binary lockfile.
-  return existsSync(join(dir, 'bun.lock')) || existsSync(join(dir, 'bun.lockb'))
+  return hasLockfile(dir, 'bun')
     ? 'bun'
-    : existsSync(join(dir, 'yarn.lock'))
+    : hasLockfile(dir, 'yarn')
       ? 'yarn'
-      : existsSync(join(dir, 'pnpm-lock.yaml')) ||
-          existsSync(join(dir, 'pnpm-workspace.yaml'))
+      : hasLockfile(dir, 'pnpm') || existsSync(join(dir, 'pnpm-workspace.yaml'))
         ? 'pnpm'
         : 'npm';
 }
@@ -261,7 +272,7 @@ export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
  * fail with an I/O error.
  */
 export const createTestWorkspace = async (
-  pkgMgr: string,
+  pkgMgr: PackageManager,
   targetDir: string,
   name: string,
   iac?: 'cdk' | 'terraform',
@@ -309,27 +320,16 @@ export const createTestWorkspace = async (
  * package manager (e.g. the pnpm the e2e suite itself runs under), leaving a
  * lane green while testing the wrong package manager.
  */
-const LOCKFILES: Record<string, string[]> = {
-  npm: ['package-lock.json'],
-  pnpm: ['pnpm-lock.yaml'],
-  yarn: ['yarn.lock'],
-  bun: ['bun.lock', 'bun.lockb'],
-};
-
 export const assertWorkspaceUsesPackageManager = (
   workspaceDir: string,
-  pkgMgr: string,
+  pkgMgr: PackageManager,
 ) => {
-  const expected = LOCKFILES[pkgMgr];
-  if (!expected) {
-    throw new Error(`Unknown package manager: ${pkgMgr}`);
-  }
-  if (!expected.some((f) => existsSync(join(workspaceDir, f)))) {
+  if (!hasLockfile(workspaceDir, pkgMgr)) {
     const found = Object.values(LOCKFILES)
       .flat()
       .filter((f) => existsSync(join(workspaceDir, f)));
     throw new Error(
-      `Expected a ${pkgMgr} workspace (one of: ${expected.join(', ')}) at ${workspaceDir}, ` +
+      `Expected a ${pkgMgr} workspace (one of: ${LOCKFILES[pkgMgr].join(', ')}) at ${workspaceDir}, ` +
         `but found lockfiles: ${found.length ? found.join(', ') : '(none)'} — ` +
         `the workspace was not created with ${pkgMgr}`,
     );
