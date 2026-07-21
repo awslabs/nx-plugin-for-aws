@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import yaml from 'js-yaml';
+import { load as loadYaml } from 'js-yaml';
 import type { Root, RootContent, Yaml } from 'mdast';
 import type {
   MdxJsxAttribute,
@@ -114,7 +114,7 @@ export const extractFrontmatter = (
   if (!node) return { data: {}, bodyOffset: 0 };
   let parsed: unknown;
   try {
-    parsed = yaml.load(node.value);
+    parsed = loadYaml(node.value);
   } catch {
     return { data: {}, bodyOffset: node.position?.end.offset ?? 0 };
   }

@@ -4,7 +4,7 @@
  */
 import { readJson, readNxJson, type Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import yaml from 'js-yaml';
+import { load as loadYaml } from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { readAwsNxPluginConfig } from '../utils/config/utils';
@@ -94,7 +94,7 @@ describe('init generator', () => {
   it('should allow-list pnpm build scripts', async () => {
     tree.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
     await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
-    const workspace = yaml.load(
+    const workspace = loadYaml(
       tree.read('pnpm-workspace.yaml', 'utf-8')!,
     ) as Record<string, any>;
     expect(workspace.allowBuilds.esbuild).toBe(true);
@@ -107,7 +107,7 @@ describe('init generator', () => {
       "packages:\n  - packages/*\nallowBuilds:\n  esbuild: 'set this to true or false'\n",
     );
     await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
-    const workspace = yaml.load(
+    const workspace = loadYaml(
       tree.read('pnpm-workspace.yaml', 'utf-8')!,
     ) as Record<string, any>;
     expect(workspace.allowBuilds.esbuild).toBe(true);

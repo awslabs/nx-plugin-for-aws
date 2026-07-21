@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { detectPackageManager, type Tree } from '@nx/devkit';
-import yaml from 'js-yaml';
+import { dump as dumpYaml, load as loadYaml } from 'js-yaml';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 
@@ -42,7 +42,7 @@ export const registerPnpmBuiltDependencies = (
   }
 
   const original = tree.read(WORKSPACE_FILE, 'utf-8') ?? '';
-  const parsed = (yaml.load(original) as PnpmWorkspaceYaml | null) ?? {};
+  const parsed = (loadYaml(original) as PnpmWorkspaceYaml | null) ?? {};
 
   const allowBuilds = { ...(parsed.allowBuilds ?? {}) };
   const onlyBuiltDependencies = new Set(parsed.onlyBuiltDependencies ?? []);
@@ -66,7 +66,7 @@ export const registerPnpmBuiltDependencies = (
   parsed.allowBuilds = allowBuilds;
   parsed.onlyBuiltDependencies = [...onlyBuiltDependencies];
 
-  tree.write(WORKSPACE_FILE, yaml.dump(parsed, { quotingType: "'" }));
+  tree.write(WORKSPACE_FILE, dumpYaml(parsed, { quoteStyle: 'single' }));
 };
 
 /**
@@ -88,13 +88,13 @@ export const ensurePnpmIgnoresWorkspaceRootCheck = (tree: Tree): boolean => {
   }
 
   const original = tree.read(WORKSPACE_FILE, 'utf-8') ?? '';
-  const parsed = (yaml.load(original) as PnpmWorkspaceYaml | null) ?? {};
+  const parsed = (loadYaml(original) as PnpmWorkspaceYaml | null) ?? {};
 
   if (parsed.ignoreWorkspaceRootCheck === true) {
     return false;
   }
 
   parsed.ignoreWorkspaceRootCheck = true;
-  tree.write(WORKSPACE_FILE, yaml.dump(parsed, { quotingType: "'" }));
+  tree.write(WORKSPACE_FILE, dumpYaml(parsed, { quoteStyle: 'single' }));
   return true;
 };

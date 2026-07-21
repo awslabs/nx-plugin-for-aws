@@ -15,7 +15,7 @@ import {
 } from '@nx/devkit';
 import { initGenerator } from '@nx/js';
 import { readFileSync } from 'fs';
-import yaml from 'js-yaml';
+import { dump as dumpYaml, load as loadYaml } from 'js-yaml';
 import { readModulePackageJson } from 'nx/src/utils/package-json';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
@@ -86,7 +86,7 @@ export interface ApplyWorkspaceInitOptions {
  */
 const setUpPnpmWorkspace = (tree: Tree) => {
   const existing = tree.exists('pnpm-workspace.yaml')
-    ? ((yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
+    ? ((loadYaml(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
         string,
         unknown
       >) ?? {})
@@ -108,14 +108,14 @@ const setUpPnpmWorkspace = (tree: Tree) => {
 
   tree.write(
     'pnpm-workspace.yaml',
-    yaml.dump(
+    dumpYaml(
       {
         ...existing,
         packages,
         allowBuilds,
         onlyBuiltDependencies: PNPM_BUILT_DEPENDENCIES,
       },
-      { quotingType: "'" },
+      { quoteStyle: 'single' },
     ),
   );
 };
