@@ -38,13 +38,16 @@ export const detectWorkspacePackageManager = (tree: Tree): PackageManager =>
 
 /**
  * Parse a version or simple range (an optional `^`/`~`/`>=` prefix followed by
- * x.y.z) into numeric parts. Returns undefined for anything else (tags,
- * protocols, complex ranges).
+ * x.y.z and an optional prerelease suffix) into numeric parts. Returns
+ * undefined for anything else (tags, protocols, compound ranges) — the whole
+ * string must match, so ranges like `>=3 <5` or `^1 || ^2` are treated as
+ * user-customised and never overwritten.
  */
 const parseVersionParts = (version: string): number[] | undefined => {
-  const match = /^(?:\^|~|>=)?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(
-    version.trim(),
-  );
+  const match =
+    /^(?:\^|~|>=)?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-[0-9A-Za-z.-]+)?$/.exec(
+      version.trim(),
+    );
   if (!match) {
     return undefined;
   }
@@ -319,12 +322,43 @@ export const addDependenciesToPackageJson = (
 };
 
 /**
+ * Packages whose declared version Nx generators read from the root manifest
+ * via devkit's `getDependencyVersionFromPackageJson` and then coerce without
+ * a null guard (`@nx/vitest`/`@nx/vite` read `vite`, `@nx/react` reads
+ * `react`). Devkit resolves `catalog:` references through its catalog
+ * managers, but Nx ships none for bun — the unresolved `catalog:` string
+ * crashes those generators with `Cannot read properties of null (reading
+ * 'version')`. On bun these packages keep direct version ranges until Nx
+ * ships a bun catalog manager (`react-dom` is kept alongside `react` so the
+ * pair can't drift apart).
+ */
+const BUN_INTROSPECTED_PACKAGES = new Set<string>([
+  'vite',
+  'react',
+  'react-dom',
+]);
+
+/**
+ * Whether a package must keep a direct version range (never `catalog:`) for
+ * the workspace's package manager.
+ */
+const isCatalogExcluded = (tree: Tree, packageName: string): boolean =>
+  detectWorkspacePackageManager(tree) === 'bun' &&
+  BUN_INTROSPECTED_PACKAGES.has(packageName);
+
+/**
  * Convert direct version ranges in the given package.json to `catalog:`
  * references, recording the range in the workspace's catalog. Entries already
  * using `catalog:`, `workspace:` or other protocol specifiers are left
  * untouched (devkit keeps their catalog versions up to date for pnpm/yarn;
  * for bun the catalog entry is backfilled when missing). The catalog itself is
  * always workspace-level regardless of which manifest declares the dependency.
+ *
+ * When a project manifest is targeted, any direct range for the same package
+ * in the root manifest is converted too — Nx generators (`@nx/js` init,
+ * `@nx/react`) write direct root entries like `@types/node: ^22.0.0` or
+ * `react: ^19.0.0`, which would otherwise resolve to a second copy alongside
+ * the catalog version, breaking the single version policy.
  */
 const convertDependenciesToCatalog = (
   tree: Tree,
@@ -337,7 +371,11 @@ const convertDependenciesToCatalog = (
     for (const field of ['dependencies', 'devDependencies'] as const) {
       for (const packageName of packageNames) {
         const version = json[field]?.[packageName];
-        if (!version || version.includes(':')) {
+        if (
+          !version ||
+          version.includes(':') ||
+          isCatalogExcluded(tree, packageName)
+        ) {
           continue;
         }
         catalogUpdates[packageName] = version;
@@ -349,6 +387,12 @@ const convertDependenciesToCatalog = (
 
   if (Object.keys(catalogUpdates).length > 0) {
     writeCatalogVersions(tree, catalogUpdates);
+  }
+
+  if (packageJsonPath !== 'package.json') {
+    // Upgrade-only catalog writes make this safe in any order: whichever
+    // manifest carries the higher version determines the catalog entry.
+    convertDependenciesToCatalog(tree, 'package.json', packageNames);
   }
 };
 

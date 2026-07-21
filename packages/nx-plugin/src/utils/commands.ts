@@ -64,12 +64,16 @@ export const buildPackageManagerShortCommand = (
  * When `project` is given the command targets that project's package.json
  * (runtime deps of a project belong in its own manifest); otherwise the
  * dependency is added to the workspace root (shared build/test tooling).
+ * bun's `add` has no project filter, so it needs the project's directory
+ * (`projectDir`) instead — falling back to the conventional
+ * `packages/<name>` when not provided.
  */
 export const buildInstallCommand = (
   pm: string,
   pkg: string,
   dev: boolean,
   project?: string,
+  projectDir?: string,
 ) => {
   if (project) {
     switch (pm) {
@@ -80,7 +84,7 @@ export const buildInstallCommand = (
       case 'npm':
         return `npm install --legacy-peer-deps ${dev ? '-D ' : ''}${pkg} -w ${project}`;
       case 'bun':
-        return `bun add ${dev ? '-D ' : ''}${pkg} --filter ${project}`;
+        return `bun add ${dev ? '-D ' : ''}${pkg} --cwd ${projectDir ?? `packages/${project.split('/').pop()}`}`;
       default:
         return `${pm} install ${dev ? '-D ' : ''}${pkg}`;
     }

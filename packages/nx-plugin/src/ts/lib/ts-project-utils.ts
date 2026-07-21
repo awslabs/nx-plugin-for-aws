@@ -2,9 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, type Tree, updateJson } from '@nx/devkit';
+import { joinPathFragments, logger, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
 import { isEsmWorkspace } from '../../utils/module-format';
 import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { configureBiomeLint } from './biome';
@@ -42,6 +43,20 @@ export const configureTsProject = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
+  // Without workspace initialisation there's no biome config (lint/format
+  // become no-ops) and no ts#sync registration (cross-project imports won't
+  // be declared as workspace dependencies) — point the user at init rather
+  // than leaving them to discover the gaps one failure at a time. Either
+  // init artefact counts as initialised (tests seed biome.json directly).
+  if (
+    !tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME) &&
+    !tree.exists('biome.json')
+  ) {
+    logger.warn(
+      `This workspace has no ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} — run 'nx g @aws/nx-plugin:init' (or 'nx add @aws/nx-plugin') to configure linting, formatting and workspace dependency sync.`,
+    );
+  }
+
   // When the caller doesn't specify a module format, infer it from the
   // workspace root package.json (defaulting to ESM for a fresh workspace).
   const esm = options.esm ?? isEsmWorkspace(tree);

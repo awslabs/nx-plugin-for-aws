@@ -33,6 +33,7 @@ import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
 import { mergeTargetDefault } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
+import { workspaceGlobs } from './project-package-json';
 import { withVersions } from './versions';
 
 const WORKSPACES = ['packages/*'];
@@ -76,8 +77,8 @@ export interface ApplyWorkspaceInitOptions {
   /**
    * Whether generators use the package manager's dependency catalog. Recorded
    * in the plugin config; when enabled on pnpm, the workspace is also set to
-   * add dependencies to the catalog by default (`catalogMode: prefer`) so
-   * `pnpm add` keeps using it. Defaults to true.
+   * `catalogMode: strict` so `pnpm add` records new dependencies in the
+   * catalog. Defaults to true.
    */
   readonly catalogs?: boolean;
 }
@@ -149,12 +150,20 @@ const setUpWorkspaces = (tree: Tree, catalogs: boolean) => {
   if (detectWorkspacePackageManager(tree) === 'pnpm') {
     setUpPnpmWorkspace(tree, catalogs);
   } else {
-    updateJson(tree, 'package.json', (json) => ({
-      ...json,
-      workspaces: Array.from(
-        new Set([...(json.workspaces ?? []), ...WORKSPACES]),
-      ),
-    }));
+    updateJson(tree, 'package.json', (json) => {
+      // The `workspaces` field may be the object form ({ "packages": [...] })
+      // accepted by yarn and bun — extend the globs while preserving the form.
+      const globs = Array.from(
+        new Set([...workspaceGlobs(json.workspaces), ...WORKSPACES]),
+      );
+      return {
+        ...json,
+        workspaces:
+          json.workspaces !== undefined && !Array.isArray(json.workspaces)
+            ? { ...json.workspaces, packages: globs }
+            : globs,
+      };
+    });
   }
 };
 

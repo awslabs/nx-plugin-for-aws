@@ -26,11 +26,20 @@ export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${TS_SYNC_GENERATOR_INFO
 
 export const tsSyncGeneratorGenerator = async (
   tree: Tree,
-): Promise<SyncGeneratorResult> => {
+  // The sync runner invokes with only the tree; `nx g` passes an options
+  // object and treats any truthy return value as a task callback — so when
+  // options are present, return nothing instead of a SyncGeneratorResult.
+  options?: unknown,
+): Promise<SyncGeneratorResult | undefined> => {
+  const asResult = (
+    result: SyncGeneratorResult,
+  ): SyncGeneratorResult | undefined =>
+    options === undefined ? result : undefined;
+
   const basePaths = readBaseTsConfigPaths(tree);
 
   if (!basePaths) {
-    return {};
+    return asResult({});
   }
 
   const changesByConfigFile: Record<string, PathChange[]> = {};
@@ -76,12 +85,12 @@ export const tsSyncGeneratorGenerator = async (
   }
 
   if (messages.length === 0) {
-    return {};
+    return asResult({});
   }
 
-  return {
+  return asResult({
     outOfSyncMessage: messages.join('\n\n'),
-  };
+  });
 };
 
 /**

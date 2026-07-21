@@ -69,6 +69,9 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/node_modules',
       '!**/.nx',
       '!**/.venv',
+      // GritQL codemod cache written by generators — its sample sources
+      // otherwise pollute a bare `biome check .` with parse errors.
+      '!**/.grit',
       '!**/*.css',
       '!**/*.gen.*',
       '!**/generated/**',

@@ -29,6 +29,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
+import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { uvxCommand } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
@@ -286,21 +287,34 @@ export async function terraformProjectGenerator(
     TERRAFORM_PROJECT_GENERATOR_INFO,
   ]);
 
+  // Build tooling is shared workspace-wide and routed to the root manifest.
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions([
-      '@nx-extend/terraform',
-      'make-dir-cli',
-      'tsx',
-      '@aws-sdk/client-s3',
-      '@aws-sdk/client-sts',
-      '@aws-sdk/credential-providers',
-      '@smithy/config-resolver',
-      '@smithy/node-config-provider',
-    ]),
-    joinPathFragments('packages', SHARED_TERRAFORM_DIR, 'package.json'),
+    withVersions(['@nx-extend/terraform', 'make-dir-cli', 'tsx']),
   );
+
+  if (schema.type === 'application') {
+    // The vended deploy-time scripts (`<project>/scripts/*.ts`) import the
+    // AWS SDK, so the application project declares those dependencies in its
+    // own manifest.
+    ensureProjectPackageJson(tree, {
+      dir: lib.dir,
+      fullyQualifiedName: lib.fullyQualifiedName,
+    });
+    addDependenciesToPackageJson(
+      tree,
+      withVersions([
+        '@aws-sdk/client-s3',
+        '@aws-sdk/client-sts',
+        '@aws-sdk/credential-providers',
+        '@smithy/config-resolver',
+        '@smithy/node-config-provider',
+      ]),
+      {},
+      joinPathFragments(lib.dir, 'package.json'),
+    );
+  }
 
   // @nx-extend/terraform has a peer dependency on @nx/devkit ^21.0.0 which causes
   // npm install to fail, so for NPM we add a resolution

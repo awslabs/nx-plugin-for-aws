@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { generateFiles, joinPathFragments, type Tree } from '@nx/devkit';
+import {
+  generateFiles,
+  joinPathFragments,
+  logger,
+  type Tree,
+} from '@nx/devkit';
 import { existsSync, readFileSync } from 'fs';
 import { createJiti } from 'jiti';
 import { join } from 'path';
@@ -75,8 +80,9 @@ export const readAwsNxPluginConfig = async (
  *
  * `jiti.evalModule` evaluates the TypeScript source in-memory synchronously, so
  * this suits synchronous callers (e.g. dependency helpers) that can't await.
- * Returns undefined when the config file is absent or fails to evaluate — the
- * caller is expected to fall back to defaults.
+ * Returns undefined when the config file is absent or fails to evaluate; an
+ * evaluation failure logs a warning so a broken config (which silently falls
+ * back to defaults, e.g. re-enabling catalogs) is visible.
  */
 export const readAwsNxPluginConfigSync = (
   tree: Tree,
@@ -92,7 +98,10 @@ export const readAwsNxPluginConfigSync = (
     });
     const mod = jiti.evalModule(source, { filename: configFilePath });
     return (mod as any).default ?? mod;
-  } catch {
+  } catch (e) {
+    logger.warn(
+      `Failed to evaluate ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} — falling back to default plugin configuration: ${e}`,
+    );
     return undefined;
   }
 };

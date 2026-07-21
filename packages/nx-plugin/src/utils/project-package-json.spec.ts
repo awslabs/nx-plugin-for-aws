@@ -189,4 +189,46 @@ describe('ensureWorkspaceGlobCovers', () => {
 
     expect(tree.read('pnpm-workspace.yaml', 'utf-8')).toEqual(before);
   });
+
+  it('should treat a directory excluded by a negated glob as uncovered regardless of glob order', () => {
+    tree.write(
+      'pnpm-workspace.yaml',
+      yaml.dump({ packages: ['!packages/excluded', 'packages/*'] }),
+    );
+
+    ensureWorkspaceGlobCovers(tree, 'packages/excluded');
+
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.packages).toContain('packages/excluded');
+  });
+
+  it('should extend an object-form workspaces field, preserving its form', () => {
+    tree.delete('pnpm-workspace.yaml');
+    updateJson(tree, 'package.json', (json) => ({
+      ...json,
+      workspaces: { packages: ['packages/*'] },
+    }));
+
+    ensureWorkspaceGlobCovers(tree, 'apps/my-app');
+
+    expect(readJson(tree, 'package.json').workspaces).toEqual({
+      packages: ['packages/*', 'apps/my-app'],
+    });
+  });
+
+  it('should be a no-op for a directory covered by object-form workspaces globs', () => {
+    tree.delete('pnpm-workspace.yaml');
+    updateJson(tree, 'package.json', (json) => ({
+      ...json,
+      workspaces: { packages: ['packages/*'] },
+    }));
+
+    ensureWorkspaceGlobCovers(tree, 'packages/my-lib');
+
+    expect(readJson(tree, 'package.json').workspaces).toEqual({
+      packages: ['packages/*'],
+    });
+  });
 });

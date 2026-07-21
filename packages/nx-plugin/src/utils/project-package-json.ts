@@ -70,7 +70,17 @@ export const ensureProjectPackageJson = (
       }
     }
     if (packageJson.exports?.['.']?.import?.startsWith('./dist/')) {
-      delete packageJson.exports;
+      // Drop only the stale default entry — user-added subpath exports are
+      // kept. The './package.json' companion @nx/js emits alongside it is
+      // dropped too: an exports map without '.' would block root imports.
+      delete packageJson.exports['.'];
+      const remaining = Object.keys(packageJson.exports);
+      if (
+        remaining.length === 0 ||
+        (remaining.length === 1 && remaining[0] === './package.json')
+      ) {
+        delete packageJson.exports;
+      }
     }
     return {
       ...packageJson,
@@ -119,14 +129,17 @@ export const ensureWorkspaceGlobCovers = (tree: Tree, dir: string): void => {
   }
 
   if (tree.exists('package.json')) {
-    const { workspaces } = readJson<{ workspaces?: string[] }>(
+    const { workspaces } = readJson<{ workspaces?: WorkspacesField }>(
       tree,
       'package.json',
     );
-    if (workspaces !== undefined && !globsCover(workspaces, dir)) {
+    if (
+      workspaces !== undefined &&
+      !globsCover(workspaceGlobs(workspaces), dir)
+    ) {
       updateJson(tree, 'package.json', (packageJson) => ({
         ...packageJson,
-        workspaces: [...(packageJson.workspaces ?? []), dir],
+        workspaces: appendWorkspaceGlob(packageJson.workspaces, dir),
       }));
     } else if (workspaces === undefined && !usePnpmWorkspace) {
       updateJson(tree, 'package.json', (packageJson) => ({
@@ -138,21 +151,32 @@ export const ensureWorkspaceGlobCovers = (tree: Tree, dir: string): void => {
 };
 
 /**
- * Whether the workspace globs match the directory. Negated globs (`!foo`)
- * exclude matches from preceding patterns, mirroring how package managers
- * interpret workspace globs — `some(minimatch)` would treat a lone negation
- * as matching nearly everything.
+ * The root package.json `workspaces` field: an array of globs, or the object
+ * form (`{ "packages": [...] }`) accepted by yarn and bun.
  */
-const globsCover = (globs: string[], dir: string): boolean => {
-  let covered = false;
-  for (const glob of globs) {
-    if (glob.startsWith('!')) {
-      if (minimatch(dir, glob.slice(1))) {
-        covered = false;
-      }
-    } else if (minimatch(dir, glob)) {
-      covered = true;
-    }
-  }
-  return covered;
-};
+export type WorkspacesField = string[] | { packages?: string[] };
+
+/** The workspace globs carried by either form of the `workspaces` field. */
+export const workspaceGlobs = (
+  workspaces: WorkspacesField | undefined,
+): string[] =>
+  Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? []);
+
+/** Append a glob to the `workspaces` field, preserving its existing form. */
+const appendWorkspaceGlob = (
+  workspaces: WorkspacesField | undefined,
+  glob: string,
+): WorkspacesField =>
+  Array.isArray(workspaces) || workspaces === undefined
+    ? [...(workspaces ?? []), glob]
+    : { ...workspaces, packages: [...(workspaces.packages ?? []), glob] };
+
+/**
+ * Whether the workspace globs match the directory. Negated globs (`!foo`)
+ * always exclude, regardless of where they appear in the list — package
+ * managers apply exclusions after expanding the positive patterns, so
+ * ordering is not significant.
+ */
+const globsCover = (globs: string[], dir: string): boolean =>
+  globs.some((glob) => !glob.startsWith('!') && minimatch(dir, glob)) &&
+  !globs.some((glob) => glob.startsWith('!') && minimatch(dir, glob.slice(1)));

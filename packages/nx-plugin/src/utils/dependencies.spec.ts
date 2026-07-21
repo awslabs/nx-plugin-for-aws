@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as devkit from '@nx/devkit';
-import { readJson, type Tree } from '@nx/devkit';
+import { readJson, type Tree, updateJson } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -77,6 +77,36 @@ describe('addDependenciesToPackageJson', () => {
     const packageJson = readJson(tree, 'package.json');
     expect(packageJson.dependencies.zod).toBe('catalog:');
     expect(packageJson.catalog.zod).toBe('4.4.3');
+  });
+
+  it('should keep direct ranges on bun for packages Nx generators introspect', () => {
+    mockPackageManager(tree, 'bun', '1.3.0');
+
+    addDependenciesToPackageJson(
+      tree,
+      { react: '19.2.7' },
+      { vite: '8.1.5', vitest: '4.1.10' },
+    );
+
+    const packageJson = readJson(tree, 'package.json');
+    // Nx 23 devkit has no bun catalog manager, so `catalog:` refs for
+    // packages generators read without a null guard (vite, react) crash them.
+    expect(packageJson.dependencies.react).toBe('19.2.7');
+    expect(packageJson.devDependencies.vite).toBe('8.1.5');
+    // Packages generators don't introspect are still catalogued.
+    expect(packageJson.devDependencies.vitest).toBe('catalog:');
+    expect(packageJson.catalog.vitest).toBe('4.1.10');
+    expect(packageJson.catalog.vite).toBeUndefined();
+  });
+
+  it('should catalogue introspected packages on pnpm, where devkit resolves catalog refs', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+
+    addDependenciesToPackageJson(tree, {}, { vite: '8.1.5' });
+
+    expect(readJson(tree, 'package.json').devDependencies.vite).toBe(
+      'catalog:',
+    );
   });
 
   it('should write direct version ranges for npm', () => {
@@ -253,6 +283,61 @@ describe('addDependenciesToPackageJson', () => {
       tree.read('pnpm-workspace.yaml', 'utf-8'),
     ) as any;
     expect(workspaceYaml.catalog.zod).toBe('next');
+  });
+
+  it('should convert a direct root range for the same package when a project declares it', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    // Nx generators (e.g. @nx/js init) write direct root entries.
+    updateJson(tree, 'package.json', (json) => ({
+      ...json,
+      devDependencies: {
+        ...(json.devDependencies ?? {}),
+        '@types/node': '^22.0.0',
+      },
+    }));
+    tree.write(
+      'packages/fresh/package.json',
+      JSON.stringify({ name: '@proj/fresh' }),
+    );
+
+    addDependenciesToPackageJson(
+      tree,
+      {},
+      { '@types/node': '26.1.1' },
+      'packages/fresh/package.json',
+    );
+
+    const rootPackageJson = readJson(tree, 'package.json');
+    // Root's direct range joins the catalog so only one copy resolves.
+    expect(rootPackageJson.devDependencies['@types/node']).toBe('catalog:');
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog['@types/node']).toBe('26.1.1');
+  });
+
+  it('should keep a user-customised compound range in the catalog', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    tree.write(
+      'pnpm-workspace.yaml',
+      yaml.dump({ packages: ['packages/*'], catalog: { zod: '>=3 <5' } }),
+    );
+    tree.write(
+      'packages/fresh/package.json',
+      JSON.stringify({ name: '@proj/fresh' }),
+    );
+
+    addDependenciesToPackageJson(
+      tree,
+      { zod: '4.4.3' },
+      {},
+      'packages/fresh/package.json',
+    );
+
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog.zod).toBe('>=3 <5');
   });
 
   it('should catalog vite and vitest (nx#35453 resolves catalog: refs in version lookups)', () => {

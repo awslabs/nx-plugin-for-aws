@@ -9,8 +9,10 @@ import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
 import '../utils/mock-project-graph';
 import { tsSmithyApiGenerator } from '../smithy/ts/api/generator';
+import { terraformProjectGenerator } from '../terraform/project/generator';
 import { tsTrpcApiGenerator } from '../trpc/backend/generator';
 import { tsAgentGenerator } from '../ts/agent/generator';
+import { tsAstroDocsGenerator } from '../ts/astro-docs/generator';
 import { tsLambdaFunctionGenerator } from '../ts/lambda-function/generator';
 import tsProjectGenerator from '../ts/lib/generator';
 import { tsMcpServerGenerator } from '../ts/mcp-server/generator';
@@ -81,7 +83,14 @@ const collectImportedPackages = (
   const byPackage = new Map<string, boolean>();
 
   const record = (specifier: string, typeOnly: boolean) => {
-    if (specifier.startsWith('.') || NODE_BUILTINS.has(specifier)) {
+    // Skip relative imports, node builtins and protocol-style virtual modules
+    // (`astro:content`, `bun:test`, ...) — none resolve to npm packages, and
+    // the vended lint rule ignores them too.
+    if (
+      specifier.startsWith('.') ||
+      NODE_BUILTINS.has(specifier) ||
+      /^[a-z-]+:/.test(specifier)
+    ) {
       return;
     }
     const packageName = toPackageName(specifier);
@@ -194,6 +203,15 @@ describe('vended projects declare the dependencies their source imports', () => 
       databaseName: 'databaseName',
       framework: 'prisma',
       iac: 'cdk',
+    });
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
+    await terraformProjectGenerator(tree, {
+      name: 'tf-app',
+      type: 'application',
+      directory: 'packages',
     });
   });
 
