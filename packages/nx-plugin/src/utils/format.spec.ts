@@ -340,7 +340,7 @@ describe('format utils', () => {
       writeFileSync(
         path.join(workspaceDir, 'biome.json'),
         JSON.stringify({
-          $schema: 'https://biomejs.dev/schemas/2.4.16/schema.json',
+          $schema: 'https://biomejs.dev/schemas/2.5.4/schema.json',
           root: true,
           formatter: { indentStyle: 'space', indentWidth: 2 },
           javascript: {
