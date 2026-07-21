@@ -962,18 +962,26 @@ locals {
   }
 }
 
+# OAuth discovery, registration and authorization endpoints are part of the
+# public DCR/OAuth flow and must be reachable without prior authorization.
 resource "aws_apigatewayv2_route" "standard" {
+  #checkov:skip=CKV_AWS_309:Public OAuth/DCR endpoints must be accessible without authorization
   for_each = local.routes
 
-  api_id    = module.http_api.api_id
-  route_key = each.key
-  target    = "integrations/\${aws_apigatewayv2_integration.standard[each.value].id}"
+  api_id             = module.http_api.api_id
+  route_key          = each.key
+  target             = "integrations/\${aws_apigatewayv2_integration.standard[each.value].id}"
+  authorization_type = "NONE"
 }
 
+# The /mcp route enforces authorization at the upstream MCP server, so the
+# proxy route itself is intentionally left open.
 resource "aws_apigatewayv2_route" "mcp_proxy" {
-  api_id    = module.http_api.api_id
-  route_key = "ANY /mcp"
-  target    = "integrations/\${aws_apigatewayv2_integration.mcp_proxy.id}"
+  #checkov:skip=CKV_AWS_309:Authorization is enforced by the upstream MCP server, not this proxy route
+  api_id             = module.http_api.api_id
+  route_key          = "ANY /mcp"
+  target             = "integrations/\${aws_apigatewayv2_integration.mcp_proxy.id}"
+  authorization_type = "NONE"
 }
 
 # Permissions for API Gateway to invoke each Lambda
