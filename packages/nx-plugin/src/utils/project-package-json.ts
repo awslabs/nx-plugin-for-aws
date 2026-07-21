@@ -166,10 +166,12 @@ export const workspaceGlobs = (
 const appendWorkspaceGlob = (
   workspaces: WorkspacesField | undefined,
   glob: string,
-): WorkspacesField =>
-  Array.isArray(workspaces) || workspaces === undefined
-    ? [...(workspaces ?? []), glob]
-    : { ...workspaces, packages: [...(workspaces.packages ?? []), glob] };
+): WorkspacesField => {
+  const globs = [...workspaceGlobs(workspaces), glob];
+  return workspaces !== undefined && !Array.isArray(workspaces)
+    ? { ...workspaces, packages: globs }
+    : globs;
+};
 
 /**
  * Whether the workspace globs match the directory. Negated globs (`!foo`)
