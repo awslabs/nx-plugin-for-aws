@@ -39,7 +39,7 @@ export async function runCLI(
   },
 ): Promise<string> {
   try {
-    const pm = getPackageManagerCommand();
+    const pm = getPackageManagerCommand({ path: opts.cwd || tmpProjPath() });
     const commandToRun = `${
       opts.prefixWithPackageManagerCmd !== false ? `${pm.runNxSilent} ` : ''
     }${command} ${opts.verbose ? ' --verbose' : ''}${
@@ -57,6 +57,14 @@ export async function runCLI(
           env: {
             PATH: process.env.PATH,
             ...process.env,
+            // The e2e suite itself runs under `pnpm nx`, which exports
+            // npm_config_user_agent=pnpm/... npm and bun treat an inherited
+            // user agent as config and pass it through to children, so
+            // user-agent-based package manager detection (e.g.
+            // @aws/create-nx-workspace resolving --pm) would see pnpm in
+            // every lane. Drop it so each spawned package manager sets its
+            // own.
+            npm_config_user_agent: undefined,
             ...opts.env,
           },
           shell: true,
@@ -107,7 +115,9 @@ export async function runCLI(
 }
 
 function detectPackageManager(dir = ''): PackageManager {
-  return existsSync(join(dir, 'bun.lockb'))
+  // bun >= 1.2 writes the text-based bun.lock; bun.lockb is the legacy
+  // binary lockfile.
+  return existsSync(join(dir, 'bun.lock')) || existsSync(join(dir, 'bun.lockb'))
     ? 'bun'
     : existsSync(join(dir, 'yarn.lock'))
       ? 'yarn'
@@ -288,7 +298,42 @@ export const createTestWorkspace = async (
       }
     }
   }
+  assertWorkspaceUsesPackageManager(workspaceDir, pkgMgr);
   return workspaceDir;
+};
+
+/**
+ * Assert the created workspace was installed with the package manager the test
+ * asked for, by checking its lockfile. Package manager detection is
+ * user-agent based and an environment leak can silently fall back to another
+ * package manager (e.g. the pnpm the e2e suite itself runs under), leaving a
+ * lane green while testing the wrong package manager.
+ */
+const LOCKFILES: Record<string, string[]> = {
+  npm: ['package-lock.json'],
+  pnpm: ['pnpm-lock.yaml'],
+  yarn: ['yarn.lock'],
+  bun: ['bun.lock', 'bun.lockb'],
+};
+
+export const assertWorkspaceUsesPackageManager = (
+  workspaceDir: string,
+  pkgMgr: string,
+) => {
+  const expected = LOCKFILES[pkgMgr];
+  if (!expected) {
+    throw new Error(`Unknown package manager: ${pkgMgr}`);
+  }
+  if (!expected.some((f) => existsSync(join(workspaceDir, f)))) {
+    const found = Object.values(LOCKFILES)
+      .flat()
+      .filter((f) => existsSync(join(workspaceDir, f)));
+    throw new Error(
+      `Expected a ${pkgMgr} workspace (one of: ${expected.join(', ')}) at ${workspaceDir}, ` +
+        `but found lockfiles: ${found.length ? found.join(', ') : '(none)'} — ` +
+        `the workspace was not created with ${pkgMgr}`,
+    );
+  }
 };
 
 // The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.

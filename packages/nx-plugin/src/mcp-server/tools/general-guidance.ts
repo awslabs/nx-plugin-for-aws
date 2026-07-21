@@ -59,7 +59,7 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
   - pnpm add -w -D <package>
   - yarn add -D <package>
   - npm install --legacy-peer-deps -D <package>
-  - bun install -D <package>
+  - bun add -D <package>
   - (Omit -D for production dependencies)
 - When specifying project names as arguments to generators, prefer the _fully qualified_ project name, for example \`@workspace-name/project-name\`. Check the \`project.json\` file for the specific package to find its fully qualified name
 - When no generator exists for a specific framework required, use the base \`ts#project\` and \`py#project\` generators and build on top.
