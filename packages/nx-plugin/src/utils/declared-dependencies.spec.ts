@@ -9,7 +9,6 @@ import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
 import '../utils/mock-project-graph';
 import { tsSmithyApiGenerator } from '../smithy/ts/api/generator';
-import { terraformProjectGenerator } from '../terraform/project/generator';
 import { tsTrpcApiGenerator } from '../trpc/backend/generator';
 import { tsAgentGenerator } from '../ts/agent/generator';
 import { tsAstroDocsGenerator } from '../ts/astro-docs/generator';
@@ -208,11 +207,9 @@ describe('vended projects declare the dependencies their source imports', () => 
       name: 'docs',
       preferInstallDependencies: false,
     });
-    await terraformProjectGenerator(tree, {
-      name: 'tf-app',
-      type: 'application',
-      directory: 'packages',
-    });
+    // terraform#project is intentionally omitted: terraform projects carry no
+    // package.json (their deps live at the workspace root), so there's no
+    // project manifest for this per-project sweep to check.
   });
 
   it('has no undeclared third-party imports in any vended project', () => {
