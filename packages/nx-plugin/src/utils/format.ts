@@ -11,11 +11,12 @@ import { createRequire } from 'module';
 import path from 'path';
 import { uvxCommand } from './py';
 import { readToml } from './toml';
+import { TS_VERSIONS } from './versions';
 
 const require = createRequire(import.meta.url);
 
 export const DEFAULT_BIOME_CONFIG = {
-  $schema: 'https://biomejs.dev/schemas/2.4.16/schema.json',
+  $schema: `https://biomejs.dev/schemas/${TS_VERSIONS['@biomejs/biome']}/schema.json`,
   root: true,
   formatter: {
     enabled: true,
@@ -40,7 +41,7 @@ export const DEFAULT_BIOME_CONFIG = {
   linter: {
     enabled: true,
     rules: {
-      recommended: false,
+      preset: 'none',
       correctness: {
         noUndeclaredDependencies: 'warn',
       },
