@@ -1068,22 +1068,21 @@ describe('ts#mcp-server generator', () => {
     ).toBe(rootPackageJson.dependencies.zod);
   });
 
-  it.each([
-    'pnpm',
-    'npm',
-    'bun',
-  ] as const)('should not add yarn resolutions for %s', async (pkgMgr) => {
-    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+  it.each(['pnpm', 'npm', 'bun'] as const)(
+    'should not add yarn resolutions for %s',
+    async (pkgMgr) => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
 
-    await tsMcpServerGenerator(tree, {
-      project: 'test-project',
-      infra: 'none',
-      iac: 'cdk',
-    });
+      await tsMcpServerGenerator(tree, {
+        project: 'test-project',
+        infra: 'none',
+        iac: 'cdk',
+      });
 
-    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.resolutions).toBeUndefined();
-  });
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(rootPackageJson.resolutions).toBeUndefined();
+    },
+  );
 
   it('should use default name when empty string is provided', async () => {
     await tsMcpServerGenerator(tree, {

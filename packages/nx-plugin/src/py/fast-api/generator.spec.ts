@@ -379,31 +379,29 @@ describe('fastapi project generator', () => {
     expectHasMetricTags(tree, FAST_API_GENERATOR_INFO.metric);
   });
 
-  it.each([
-    'rest-lambda',
-    'http-lambda',
-  ])('should include CORS middleware in init.py when using %s infra', async (infra:
-    | 'rest-lambda'
-    | 'http-lambda') => {
-    await pyFastApiProjectGenerator(tree, {
-      name: 'test-api',
-      directory: 'apps',
-      infra,
-      auth: 'iam',
-      iac: 'cdk',
-    });
+  it.each(['rest-lambda', 'http-lambda'])(
+    'should include CORS middleware in init.py when using %s infra',
+    async (infra: 'rest-lambda' | 'http-lambda') => {
+      await pyFastApiProjectGenerator(tree, {
+        name: 'test-api',
+        directory: 'apps',
+        infra,
+        auth: 'iam',
+        iac: 'cdk',
+      });
 
-    // Read the generated init.py file
-    const initPyContent = tree.read(
-      'apps/test_api/proj_test_api/init.py',
-      'utf-8',
-    );
+      // Read the generated init.py file
+      const initPyContent = tree.read(
+        'apps/test_api/proj_test_api/init.py',
+        'utf-8',
+      );
 
-    // Verify CORS origin is configured
-    expect(initPyContent).toContain(
-      'response.headers["Access-Control-Allow-Origin"] = cors_origin',
-    );
-  });
+      // Verify CORS origin is configured
+      expect(initPyContent).toContain(
+        'response.headers["Access-Control-Allow-Origin"] = cors_origin',
+      );
+    },
+  );
 
   it('should increment ports when running generator multiple times', async () => {
     // Generate first API

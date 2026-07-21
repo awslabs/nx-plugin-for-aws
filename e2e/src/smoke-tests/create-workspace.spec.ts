@@ -18,6 +18,7 @@ import { ensureDirSync } from 'fs-extra';
 import * as pty from 'node-pty';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  assertWorkspaceUsesPackageManager,
   buildCreateNxWorkspaceCommand,
   createTestWorkspace,
   runCLI,
@@ -166,6 +167,7 @@ describe('smoke test - create-workspace', () => {
         expect(existsSync(`${projectRoot}/aws-nx-plugin.config.mts`)).toBe(
           true,
         );
+        assertWorkspaceUsesPackageManager(projectRoot, pkgMgr);
       });
     });
   });

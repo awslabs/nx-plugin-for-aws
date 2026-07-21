@@ -767,23 +767,24 @@ describe('react-website generator ux tests', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it.each(
-    SUPPORTED_UX_PROVIDERS.map((p) => [p]),
-  )('should add ux metadata (ux=%s)', async (ux) => {
-    const options: TsReactWebsiteGeneratorSchema = {
-      name: 'test-app',
-      iac: 'cdk',
-      ux: ux,
-    };
+  it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
+    'should add ux metadata (ux=%s)',
+    async (ux) => {
+      const options: TsReactWebsiteGeneratorSchema = {
+        name: 'test-app',
+        iac: 'cdk',
+        ux: ux,
+      };
 
-    await tsReactWebsiteGenerator(tree, options);
+      await tsReactWebsiteGenerator(tree, options);
 
-    const projectConfig = JSON.parse(
-      tree.read(`test-app/project.json`, 'utf-8'),
-    );
+      const projectConfig = JSON.parse(
+        tree.read(`test-app/project.json`, 'utf-8'),
+      );
 
-    expect(projectConfig.metadata.ux).toEqual(ux);
-  });
+      expect(projectConfig.metadata.ux).toEqual(ux);
+    },
+  );
 
   describe('Cloudscape', () => {
     const options: TsReactWebsiteGeneratorSchema = {

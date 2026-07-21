@@ -70,7 +70,7 @@ export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
     case 'npm':
       return `npm install --legacy-peer-deps ${dev ? '-D ' : ''}${pkg}`;
     case 'bun':
-      return `bun install ${dev ? '-D ' : ''}${pkg}`;
+      return `bun add ${dev ? '-D ' : ''}${pkg}`;
     default:
       return `${pm} install ${dev ? '-D ' : ''}${pkg}`;
   }

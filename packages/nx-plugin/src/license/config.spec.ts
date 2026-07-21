@@ -53,13 +53,14 @@ describe('license config', () => {
   });
 
   describe('defaultLicenseConfig', () => {
-    it.each(
-      LICENSES,
-    )('should generate default license config for %s', (spdx) => {
-      expect(
-        defaultLicenseConfig(spdx, 'Test Inc. or its affiliates'),
-      ).toMatchSnapshot();
-    });
+    it.each(LICENSES)(
+      'should generate default license config for %s',
+      (spdx) => {
+        expect(
+          defaultLicenseConfig(spdx, 'Test Inc. or its affiliates'),
+        ).toMatchSnapshot();
+      },
+    );
   });
 
   describe('readLicenseConfig', () => {

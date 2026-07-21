@@ -1047,25 +1047,23 @@ describe('licenseSyncGenerator', () => {
       expected: '=begin\nTest Header\n=end\nputs "hello"',
       description: 'alternative block syntax (Ruby)',
     },
-  ])('should support popular languages: $description', async ({
-    ext,
-    content,
-    format,
-    expected,
-  }) => {
-    await addLicenseConfig({
-      header: {
-        content: {
-          lines: ['Test Header'],
+  ])(
+    'should support popular languages: $description',
+    async ({ ext, content, format, expected }) => {
+      await addLicenseConfig({
+        header: {
+          content: {
+            lines: ['Test Header'],
+          },
+          format: {
+            [`**/*.${ext}`]: format,
+          },
         },
-        format: {
-          [`**/*.${ext}`]: format,
-        },
-      },
-    });
+      });
 
-    tree.write(`test.${ext}`, content);
-    await licenseSyncGenerator(tree);
-    expect(tree.read(`test.${ext}`, 'utf-8')).toBe(expected);
-  });
+      tree.write(`test.${ext}`, content);
+      await licenseSyncGenerator(tree);
+      expect(tree.read(`test.${ext}`, 'utf-8')).toBe(expected);
+    },
+  );
 });
