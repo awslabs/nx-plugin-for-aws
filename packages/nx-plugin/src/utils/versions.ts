@@ -35,6 +35,7 @@ export const TS_VERSIONS = {
   '@swc/core': '1.15.43',
   '@modelcontextprotocol/sdk': '1.29.0',
   '@modelcontextprotocol/inspector': '0.22.0',
+  '@ag-ui/a2ui-toolkit': '0.0.4',
   '@ag-ui/aws-strands': '0.2.3',
   '@ag-ui/client': '0.0.57',
   '@ag-ui/core': '0.0.57',

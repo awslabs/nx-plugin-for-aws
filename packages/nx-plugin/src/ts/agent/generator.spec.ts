@@ -1045,6 +1045,8 @@ describe('ts#agent generator', () => {
 
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     expect(rootPackageJson.dependencies['@ag-ui/aws-strands']).toBeDefined();
+    expect(rootPackageJson.dependencies['@ag-ui/a2ui-toolkit']).toBeDefined();
+    expect(rootPackageJson.dependencies['@ag-ui/client']).toBeDefined();
     expect(rootPackageJson.dependencies['@ag-ui/core']).toBeDefined();
     expect(rootPackageJson.dependencies['@ag-ui/encoder']).toBeDefined();
     expect(rootPackageJson.dependencies['express']).toBeDefined();

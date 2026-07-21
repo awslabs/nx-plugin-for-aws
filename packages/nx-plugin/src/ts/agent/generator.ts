@@ -221,6 +221,11 @@ export const tsAgentGenerator = async (
         : protocol === 'ag-ui'
           ? ([
               '@ag-ui/aws-strands',
+              // @ag-ui/aws-strands declares these as peer dependencies but
+              // statically imports them, so they must be installed for the
+              // bundler to resolve and inline them into the runtime image.
+              '@ag-ui/a2ui-toolkit',
+              '@ag-ui/client',
               '@ag-ui/core',
               '@ag-ui/encoder',
               'express',
