@@ -5,6 +5,7 @@ description: "Nx Plugin for AWS ワークスペースで TypeScript および Py
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,25 @@ CMD ["python", "-m", "my_project.main"]
 
 ## Trivyによるイメージスキャン
 
-イメージに既知の脆弱性がないかスキャンすることは良い習慣です。このパターンに従うジェネレーターは、[Trivy](https://trivy.dev/)でビルドされたイメージをスキャンする`trivy`ターゲットを追加します。これは[ECRホストのTrivyイメージ](https://gallery.ecr.aws/aquasecurity/trivy)から実行され、`HIGH`または`CRITICAL`の検出結果があるとビルドを失敗させます。
+イメージに既知の脆弱性がないかスキャンすることは良い習慣です。このパターンに従うジェネレーターは、[Trivy](https://trivy.dev/)でビルドされたイメージをスキャンする`trivy`ターゲットを追加します。これは[ECRホストのTrivyイメージ](https://gallery.ecr.aws/aquasecurity/trivy)から実行され、`HIGH`または`CRITICAL`の検出結果があるとゼロ以外で終了します。
 
 `docker`ターゲットに`dependsOn`する`trivy`ターゲットを追加します。これはビルドされたイメージをtarballに保存し、ワークスペース相対のバインドマウントを介してスキャンするため、`docker`と`finch`の両方で同じコマンドが機能します:
 
 <Code lang="json" code={trivyTarget} />
 
-次に、`build`が`trivy`に依存するようにして、ビルドの一部としてスキャンが実行されるようにします:
+各プロジェクトのイメージごとのスキャンターゲットは、ワークスペース全体の`trivy`ターゲットの下に集約され、提供される`trivy`ルートスクリプトがそれを実行します(`nx run-many --target trivy`)。
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[Trivyは`build`の一部ではありません — CIで実行してください]
+スキャンは意図的に`build`に組み込まれて**いません**。Trivyの結果は脆弱性データベースに依存しており、これは常に更新されています。今日合格するスキャンが、変更していないベースイメージや依存関係に対して新しいCVEが公開されると、明日失敗する可能性があります。これを`build`に結合すると、ローカルおよびCIビルドが非決定的になり、無関係な作業がブロックされます。
+
+代わりに、CIパイプラインで専用のステップとして実行してください(およびリリース前にローカルで実行):
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+新しく公開されたCVEでスキャンが失敗し始めた場合は、`Dockerfile`内の影響を受けるパッケージまたはベースイメージをアップグレードするか、まだ修正がない場合は`.trivyignore`で抑制してください(以下を参照)。
+:::
 
 :::tip[キャッシュは変更されていないイメージをスキップします]
 イメージはプロジェクトソースによって完全に決定されるため、`inputs`を宣言する(ここでは`bundle`ターゲットに一致する`default`と`^production`)ことで、Nxはスキャンをキャッシュし、変更されていないイメージの再スキャンをスキップできます。Trivyイメージのバージョンをピン留めして(例: <code>trivy:<TrivyVersion /></code>)、スキャンを再現可能にします。

@@ -2,11 +2,19 @@
 title: Analyse des images de conteneur
 ---
 
-L'image Docker construite pour ce projet est analysée pour détecter les vulnérabilités dans le cadre de la construction en utilisant [Trivy](https://trivy.dev/), exécuté à partir de l'[image Trivy hébergée sur ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Une cible `trivy` est ajoutée à votre projet qui analyse l'image construite et **fait échouer la construction** si une vulnérabilité de gravité `HIGH` ou `CRITICAL` est trouvée. Le `Dockerfile` généré utilise une image de base sans vulnérabilité corrigeable connue de ces gravités au moment de la génération, et met à niveau les outils intégrés (tels que `npm`) pour le maintenir ainsi.
+L'image Docker construite pour ce projet peut être analysée pour détecter les vulnérabilités en utilisant [Trivy](https://trivy.dev/), exécuté à partir de l'[image Trivy hébergée sur ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+
+Une cible `trivy` est ajoutée à votre projet qui analyse l'image construite et **se termine avec un code non-zéro** si une vulnérabilité de gravité `HIGH` ou `CRITICAL` est trouvée. Le `Dockerfile` généré utilise une image de base sans vulnérabilité corrigeable connue de ces gravités au moment de la génération, et met à niveau les outils intégrés (tels que `npm`) pour le maintenir ainsi.
 
 L'analyse utilise le même moteur de conteneur que votre construction d'image (`docker` ou `finch`), donc aucun outillage supplémentaire n'est requis. Étant donné que l'analyse n'est réexécutée que lorsque l'image change, une image inchangée n'est pas réanalysée.
+
+:::tip[Trivy ne fait pas partie de `build` — exécutez-le en CI]
+L'analyse d'image n'est **pas** intégrée à `build`, car le résultat de Trivy dépend de sa base de données de vulnérabilités constamment mise à jour — une analyse qui réussit aujourd'hui peut échouer demain lorsqu'une nouvelle CVE est publiée contre une dépendance que vous n'avez pas modifiée, ce qui rendrait les constructions non déterministes. Exécutez-le explicitement (par exemple, comme une étape CI dédiée) via le script racine `trivy` fourni, qui analyse chaque image dans l'espace de travail :
+
+<PackageManagerShortCommand commands={['trivy']} />
+:::
 
 :::caution[Les vulnérabilités non corrigeables sont ignorées]
 L'analyse s'exécute avec `--ignore-unfixed`, donc les vulnérabilités sans correctif disponible ne font pas échouer la construction, car elles ne peuvent pas être corrigées en mettant à niveau les outils dans votre `Dockerfile` — elles ne sont pas signalées dans la sortie d'analyse de la construction. Au fur et à mesure que de nouvelles vulnérabilités sont divulguées, le résultat des analyses peut changer au fil du temps, donc examinez l'image périodiquement en exécutant `trivy image <your-image>` sans le flag, et reconstruisez avec une image de base plus récente (ou ajoutez des étapes de conteneur pour appliquer les correctifs disponibles) une fois qu'un correctif est publié.
@@ -16,7 +24,7 @@ L'analyse s'exécute avec `--ignore-unfixed`, donc les vulnérabilités sans cor
 
 Il peut y avoir des cas où vous souhaitez supprimer une vulnérabilité spécifique, par exemple lorsqu'aucun correctif n'est encore disponible et que vous avez évalué le risque comme acceptable.
 
-Ajoutez l'ID de vulnérabilité (un par ligne) au fichier `.trivyignore` à la racine de votre projet :
+Ajoutez l'ID de vulnérabilité (un par ligne) au fichier `.trivyignore` à la racine de votre projet (c'est-à-dire à côté de votre `project.json`) :
 
 ```gitignore
 # .trivyignore

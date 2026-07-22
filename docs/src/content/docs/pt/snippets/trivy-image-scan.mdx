@@ -2,11 +2,19 @@
 title: Verificação de Imagem de Contêiner
 ---
 
-A imagem Docker construída para este projeto é verificada em busca de vulnerabilidades como parte da construção usando [Trivy](https://trivy.dev/), executando a partir da [imagem Trivy hospedada no ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Um target `trivy` é adicionado ao seu projeto que verifica a imagem construída e **falha a construção** se qualquer vulnerabilidade de severidade `HIGH` ou `CRITICAL` for encontrada. O `Dockerfile` gerado usa uma imagem base sem vulnerabilidades corrigíveis conhecidas dessas severidades no momento da geração, e atualiza ferramentas incluídas (como `npm`) para mantê-la assim.
+A imagem Docker construída para este projeto pode ser verificada em busca de vulnerabilidades usando [Trivy](https://trivy.dev/), executando a partir da [imagem Trivy hospedada no ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+
+Um target `trivy` é adicionado ao seu projeto que verifica a imagem construída e **sai com código diferente de zero** se qualquer vulnerabilidade de severidade `HIGH` ou `CRITICAL` for encontrada. O `Dockerfile` gerado usa uma imagem base sem vulnerabilidades corrigíveis conhecidas dessas severidades no momento da geração, e atualiza ferramentas incluídas (como `npm`) para mantê-la assim.
 
 A verificação usa o mesmo mecanismo de contêiner que a construção da sua imagem (`docker` ou `finch`), portanto, nenhuma ferramenta adicional é necessária. Como a verificação só é executada novamente quando a imagem muda, uma imagem inalterada não é verificada novamente.
+
+:::tip[Trivy não faz parte do `build` — execute-o no CI]
+A verificação de imagem **não** está conectada ao `build`, porque o resultado do Trivy depende de seu banco de dados de vulnerabilidades constantemente atualizado — uma verificação que passa hoje pode falhar amanhã quando um novo CVE é publicado contra uma dependência que você não alterou, o que tornaria as construções não determinísticas. Execute-o explicitamente (por exemplo, como uma etapa dedicada de CI) através do script raiz `trivy` fornecido, que verifica todas as imagens no workspace:
+
+<PackageManagerShortCommand commands={['trivy']} />
+:::
 
 :::caution[Vulnerabilidades não corrigíveis são ignoradas]
 A verificação é executada com `--ignore-unfixed`, então vulnerabilidades sem uma correção disponível não falham a construção, já que não podem ser corrigidas atualizando ferramentas no seu `Dockerfile` — elas não são relatadas na saída de verificação da construção. À medida que novas vulnerabilidades são divulgadas, o resultado das verificações pode mudar ao longo do tempo, então revise a imagem periodicamente executando `trivy image <sua-imagem>` sem a flag, e reconstrua contra uma imagem base mais recente (ou adicione etapas de contêiner para aplicar patches disponíveis) assim que uma correção for publicada.

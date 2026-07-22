@@ -2,11 +2,19 @@
 title: Scansione delle Immagini Container
 ---
 
-L'immagine Docker creata per questo progetto viene scansionata alla ricerca di vulnerabilità come parte del processo di build utilizzando [Trivy](https://trivy.dev/), eseguito dall'[immagine Trivy ospitata su ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Un target `trivy` viene aggiunto al progetto che scansiona l'immagine creata e **fa fallire la build** se viene trovata qualsiasi vulnerabilità di gravità `HIGH` o `CRITICAL`. Il `Dockerfile` generato utilizza un'immagine base senza vulnerabilità risolvibili note di queste gravità al momento della generazione e aggiorna gli strumenti inclusi (come `npm`) per mantenerla tale.
+L'immagine Docker creata per questo progetto può essere scansionata alla ricerca di vulnerabilità utilizzando [Trivy](https://trivy.dev/), eseguito dall'[immagine Trivy ospitata su ECR](https://gallery.ecr.aws/aquasecurity/trivy).
+
+Un target `trivy` viene aggiunto al progetto che scansiona l'immagine creata e **termina con codice di uscita non-zero** se viene trovata qualsiasi vulnerabilità di gravità `HIGH` o `CRITICAL`. Il `Dockerfile` generato utilizza un'immagine base senza vulnerabilità risolvibili note di queste gravità al momento della generazione e aggiorna gli strumenti inclusi (come `npm`) per mantenerla tale.
 
 La scansione utilizza lo stesso motore di container della build dell'immagine (`docker` o `finch`), quindi non sono necessari strumenti aggiuntivi. Poiché la scansione viene rieseguita solo quando l'immagine cambia, un'immagine non modificata non viene scansionata nuovamente.
+
+:::tip[Trivy non fa parte di `build` — eseguilo in CI]
+La scansione delle immagini **non** è collegata a `build`, perché il risultato di Trivy dipende dal suo database di vulnerabilità in costante aggiornamento — una scansione che passa oggi può fallire domani quando viene pubblicato un nuovo CVE contro una dipendenza che non hai modificato, il che renderebbe le build non deterministiche. Eseguilo esplicitamente (ad esempio come passaggio CI dedicato) tramite lo script root `trivy` fornito, che scansiona ogni immagine nel workspace:
+
+<PackageManagerShortCommand commands={['trivy']} />
+:::
 
 :::caution[Le vulnerabilità non risolvibili vengono ignorate]
 La scansione viene eseguita con `--ignore-unfixed`, quindi le vulnerabilità senza una correzione disponibile non fanno fallire la build, poiché non possono essere risolte aggiornando gli strumenti nel `Dockerfile` — non vengono riportate nell'output della scansione della build. Man mano che vengono divulgate nuove vulnerabilità, il risultato delle scansioni può cambiare nel tempo, quindi rivedi periodicamente l'immagine eseguendo `trivy image <your-image>` senza il flag e ricostruisci contro un'immagine base più recente (o aggiungi passaggi al container per applicare le patch disponibili) una volta pubblicata una correzione.

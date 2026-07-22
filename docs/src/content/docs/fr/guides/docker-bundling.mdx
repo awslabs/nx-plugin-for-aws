@@ -5,6 +5,7 @@ description: "Créez et déployez des images Docker pour des projets TypeScript 
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,25 @@ Cela efface le répertoire de sortie, puis copie à la fois le contenu du bundle
 
 ## Analyse des Images avec Trivy
 
-C'est une bonne pratique d'analyser vos images pour détecter les vulnérabilités connues. Les générateurs qui suivent ce modèle ajoutent une cible `trivy` qui analyse l'image construite avec [Trivy](https://trivy.dev/), s'exécutant depuis l'[image Trivy hébergée sur ECR](https://gallery.ecr.aws/aquasecurity/trivy), et fait échouer le build sur les résultats `HIGH` ou `CRITICAL`.
+C'est une bonne pratique d'analyser vos images pour détecter les vulnérabilités connues. Les générateurs qui suivent ce modèle ajoutent une cible `trivy` qui analyse l'image construite avec [Trivy](https://trivy.dev/), s'exécutant depuis l'[image Trivy hébergée sur ECR](https://gallery.ecr.aws/aquasecurity/trivy), et se termine avec un code de sortie non-zéro sur les résultats `HIGH` ou `CRITICAL`.
 
 Ajoutez une cible `trivy` qui `dependsOn` votre cible `docker`. Elle sauvegarde l'image construite dans un tarball et l'analyse via un montage bind relatif au workspace, de sorte que la même commande fonctionne sous `docker` et `finch` :
 
 <Code lang="json" code={trivyTarget} />
 
-Ensuite, faites dépendre `build` de `trivy` pour que l'analyse s'exécute dans le cadre d'un build :
+Les cibles d'analyse par image de chaque projet sont agrégées sous une cible `trivy` à l'échelle du workspace, que le script racine `trivy` fourni exécute (`nx run-many --target trivy`).
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[Trivy ne fait pas partie de `build` — exécutez-le en CI]
+L'analyse n'est intentionnellement **pas** intégrée à `build`. Le résultat de Trivy dépend de sa base de données de vulnérabilités, qui se met à jour constamment : une analyse qui réussit aujourd'hui peut échouer demain lorsqu'une nouvelle CVE est publiée contre une image de base ou une dépendance que vous n'avez pas modifiée. Le coupler à `build` rendrait les builds locaux et CI non-déterministes et bloquerait des travaux non liés.
+
+Au lieu de cela, exécutez-le comme une étape dédiée dans votre pipeline CI (et localement avant une release) :
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+Lorsqu'une analyse commence à échouer sur une CVE nouvellement publiée, mettez à niveau le package affecté ou l'image de base dans votre `Dockerfile`, ou supprimez-la dans `.trivyignore` s'il n'y a pas encore de correctif (voir ci-dessous).
+:::
 
 :::tip[La mise en cache ignore les images inchangées]
 Parce que l'image est entièrement déterminée par la source de votre projet, déclarer des `inputs` (ici `default` et `^production`, correspondant à la cible `bundle`) permet à Nx de mettre en cache l'analyse et d'éviter de réanalyser une image qui n'a pas changé. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.

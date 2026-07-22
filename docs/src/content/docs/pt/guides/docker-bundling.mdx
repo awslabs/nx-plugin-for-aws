@@ -5,6 +5,7 @@ description: "Construa e implante imagens Docker para projetos TypeScript e Pyth
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -276,6 +277,36 @@ Adicione um target `docker` que copia o `Dockerfile` para o diretório de saída
 Isso limpa o diretório de saída, e então copia tanto o conteúdo do bundle quanto o `Dockerfile` para `dist/.../docker`, que se torna o contexto de build do Docker.
 
 <NxCommands commands={['docker my-project']} />
+
+## Escaneando Imagens com Trivy
+
+É uma boa prática escanear suas imagens em busca de vulnerabilidades conhecidas. Os geradores que seguem este padrão adicionam um target `trivy` que escaneia a imagem construída com [Trivy](https://trivy.dev/), executando a partir da [imagem Trivy hospedada no ECR](https://gallery.ecr.aws/aquasecurity/trivy), e sai com código diferente de zero em descobertas `HIGH` ou `CRITICAL`.
+
+Adicione um target `trivy` que `dependsOn` do seu target `docker`. Ele salva a imagem construída em um tarball e a escaneia através de um bind mount relativo ao workspace, para que o mesmo comando funcione tanto com `docker` quanto com `finch`:
+
+<Code lang="json" code={trivyTarget} />
+
+Os targets de escaneamento por imagem de cada projeto são agregados sob um target `trivy` em todo o workspace, que o script raiz `trivy` fornecido executa (`nx run-many --target trivy`).
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+:::tip[Trivy não faz parte do `build` — execute-o no CI]
+O escaneamento é intencionalmente **não** conectado ao `build`. O resultado do Trivy depende de seu banco de dados de vulnerabilidades, que é atualizado constantemente: um escaneamento que passa hoje pode falhar amanhã quando um novo CVE é publicado contra uma imagem base ou dependência que você não alterou. Acoplá-lo ao `build` tornaria os builds locais e de CI não-determinísticos e bloquearia trabalhos não relacionados.
+
+Em vez disso, execute-o como uma etapa dedicada em seu pipeline de CI (e localmente antes de um lançamento):
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+Quando um escaneamento começa a falhar em um CVE recém-publicado, atualize o pacote afetado ou a imagem base em seu `Dockerfile`, ou suprima-o em `.trivyignore` se ainda não houver correção (veja abaixo).
+:::
+
+:::tip[Cache pula imagens não alteradas]
+Como a imagem é totalmente determinada pelo código-fonte do seu projeto, declarar `inputs` (aqui `default` e `^production`, correspondendo ao target `bundle`) permite que o Nx faça cache do escaneamento e pule o re-escaneamento de uma imagem que não mudou. Fixe a versão da imagem Trivy (por exemplo, <code>trivy:<TrivyVersion /></code>) para que os escaneamentos sejam reproduzíveis.
+:::
+
+:::note[Suprimindo descobertas]
+O Trivy lê um arquivo `.trivyignore` (uma lista de IDs de vulnerabilidade, um por linha) da raiz do seu projeto. `--ignore-unfixed` pula vulnerabilidades sem correção disponível, então o escaneamento só falha em problemas que você pode resolver atualizando ferramentas em seu `Dockerfile`. Veja a [documentação de filtragem do Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) para detalhes.
+:::
 
 ## Infrastructure
 

@@ -5,6 +5,7 @@ description: "Xây dựng và triển khai Docker images cho các dự án TypeS
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,25 @@ Thêm target `docker` sao chép `Dockerfile` vào thư mục đầu ra bundle, s
 
 ## Quét Image với Trivy
 
-Việc quét image của bạn để tìm các lỗ hổng đã biết là một thực hành tốt. Các generator tuân theo mẫu này thêm target `trivy` để quét image đã build bằng [Trivy](https://trivy.dev/), chạy từ [Trivy image được host trên ECR](https://gallery.ecr.aws/aquasecurity/trivy), và làm thất bại build khi phát hiện các lỗ hổng `HIGH` hoặc `CRITICAL`.
+Việc quét image của bạn để tìm các lỗ hổng đã biết là một thực hành tốt. Các generator tuân theo mẫu này thêm target `trivy` để quét image đã build bằng [Trivy](https://trivy.dev/), chạy từ [Trivy image được host trên ECR](https://gallery.ecr.aws/aquasecurity/trivy), và thoát với mã khác không khi phát hiện các lỗ hổng `HIGH` hoặc `CRITICAL`.
 
 Thêm target `trivy` có `dependsOn` target `docker` của bạn. Nó lưu image đã build vào một tarball và quét nó thông qua bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
-Sau đó làm cho `build` phụ thuộc vào `trivy` để quá trình quét chạy như một phần của build:
+Target quét từng image của mỗi dự án được tổng hợp dưới một target `trivy` toàn workspace, mà script `trivy` gốc được cung cấp sẽ chạy (`nx run-many --target trivy`).
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[Trivy không phải là một phần của `build` — chạy nó trong CI]
+Quá trình quét được cố ý **không** kết nối vào `build`. Kết quả của Trivy phụ thuộc vào cơ sở dữ liệu lỗ hổng của nó, được cập nhật liên tục: một lần quét thành công hôm nay có thể thất bại vào ngày mai khi một CVE mới được công bố chống lại base image hoặc dependency mà bạn chưa thay đổi. Kết nối nó với `build` sẽ làm cho các lần build local và CI không xác định và chặn công việc không liên quan.
+
+Thay vào đó, hãy chạy nó như một bước riêng biệt trong CI pipeline của bạn (và locally trước khi release):
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+Khi một lần quét bắt đầu thất bại do CVE mới được công bố, hãy nâng cấp package hoặc base image bị ảnh hưởng trong `Dockerfile` của bạn, hoặc loại bỏ nó trong `.trivyignore` nếu chưa có bản sửa lỗi (xem bên dưới).
+:::
 
 :::tip[Caching bỏ qua các image không thay đổi]
 Vì image được xác định hoàn toàn bởi source code dự án của bạn, việc khai báo `inputs` (ở đây là `default` và `^production`, khớp với target `bundle`) cho phép Nx cache quá trình quét và bỏ qua việc quét lại một image không thay đổi. Cố định phiên bản Trivy image (ví dụ <code>trivy:<TrivyVersion /></code>) để các lần quét có thể tái tạo được.

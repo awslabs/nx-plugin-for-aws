@@ -5,6 +5,7 @@ description: "在 Nx Plugin for AWS 工作空间中为 TypeScript 和 Python 项
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,25 @@ CMD ["python", "-m", "my_project.main"]
 
 ## 使用 Trivy 扫描镜像
 
-扫描镜像以查找已知漏洞是一个好习惯。遵循此模式的生成器会添加一个 `trivy` 目标,该目标使用 [Trivy](https://trivy.dev/) 扫描构建的镜像,从 [ECR 托管的 Trivy 镜像](https://gallery.ecr.aws/aquasecurity/trivy)运行,并在发现 `HIGH` 或 `CRITICAL` 级别的问题时使构建失败。
+扫描镜像以查找已知漏洞是一个好习惯。遵循此模式的生成器会添加一个 `trivy` 目标,该目标使用 [Trivy](https://trivy.dev/) 扫描构建的镜像,从 [ECR 托管的 Trivy 镜像](https://gallery.ecr.aws/aquasecurity/trivy)运行,并在发现 `HIGH` 或 `CRITICAL` 级别的问题时以非零状态退出。
 
 添加一个 `dependsOn` 您的 `docker` 目标的 `trivy` 目标。它将构建的镜像保存为 tarball 并通过工作区相对绑定挂载进行扫描,因此相同的命令在 `docker` 和 `finch` 下都可以工作:
 
 <Code lang="json" code={trivyTarget} />
 
-然后让 `build` 依赖于 `trivy`,以便扫描作为构建的一部分运行:
+每个项目的单镜像扫描目标都聚合在工作区范围的 `trivy` 目标下,由提供的 `trivy` 根脚本运行(`nx run-many --target trivy`)。
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[Trivy 不是 `build` 的一部分——在 CI 中运行它]
+扫描故意**不**连接到 `build`。Trivy 的结果取决于其漏洞数据库,该数据库会不断更新:今天通过的扫描可能在明天新 CVE 针对您未更改的基础镜像或依赖项发布时失败。将其耦合到 `build` 会使本地和 CI 构建不确定,并阻塞无关的工作。
+
+相反,将其作为 CI 流水线中的专用步骤运行(并在发布前在本地运行):
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+当扫描因新发布的 CVE 而开始失败时,请升级 `Dockerfile` 中受影响的包或基础镜像,或者如果尚无修复,则在 `.trivyignore` 中抑制它(见下文)。
+:::
 
 :::tip[缓存跳过未更改的镜像]
 因为镜像完全由您的项目源代码决定,声明 `inputs`(这里是 `default` 和 `^production`,与 `bundle` 目标匹配)让 Nx 缓存扫描并跳过重新扫描未更改的镜像。固定 Trivy 镜像版本(例如 <code>trivy:<TrivyVersion /></code>),以便扫描是可重现的。
