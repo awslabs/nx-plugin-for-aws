@@ -102,14 +102,23 @@ const addIdentityTerraformModules = (
       'source = "../user-identity/add-callback-url"',
     )
   ) {
-    // Find the aws_cloudfront_distribution.website resource and add the callback URL module after it
+    // Find the aws_cloudfront_distribution.website resource and add the callback URL module after it.
+    // Includes the CloudFront domain plus any custom domain names (aliases) configured via var.custom_domain_names.
     const callbackUrlModule = `
 
-# Add CloudFront domain to user pool client callback URLs
+# Add CloudFront domain and any custom domain names to user pool client callback URLs
+locals {
+  callback_urls = toset(concat(
+    ["https://\${aws_cloudfront_distribution.website.domain_name}"],
+    [for domain in var.custom_domain_names : "https://\${domain}"],
+  ))
+}
+
 module "add_callback_url" {
   source = "../user-identity/add-callback-url"
+  for_each = local.callback_urls
 
-  callback_url = "https://\${aws_cloudfront_distribution.website.domain_name}"
+  callback_url = each.value
 
   depends_on = [aws_cloudfront_distribution.website]
 }`;

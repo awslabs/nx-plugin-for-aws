@@ -175,6 +175,10 @@ export const PY_VERSIONS = {
   alembic: '==1.18.5',
   aiomysql: '==0.3.2',
   asyncpg: '==0.31.0',
+  // Pinned explicitly: SQLAlchemy's async engine pulls greenlet transitively,
+  // and leaving it unpinned lets uv resolve to a just-released version whose
+  // platform wheels may not all be published yet (breaking aarch64 installs).
+  greenlet: '==3.5.4',
 } as const;
 export type IPyDepVersion = keyof typeof PY_VERSIONS;
 
