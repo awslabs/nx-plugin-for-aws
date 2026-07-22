@@ -1,11 +1,15 @@
 import * as url from 'node:url';
 import { Construct } from 'constructs';
-import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import { HttpApi } from '../../../core/api/http-api<% if (esm) { %>.js<% } %>';
+import {
+  HttpApiIntegration,
+  OperationDetails,
+} from '../../../core/api/utils<% if (esm) { %>.js<% } %>';
 
 export interface CorsOptions {
   readonly allowOrigins?: string[];
@@ -57,8 +61,6 @@ export interface <%- nameClassName %>Props {
   readonly reservedConcurrentExecutions?: number;
 
   readonly lambdaEnvironment?: Record<string, string>;
-  readonly logRetention?: logs.RetentionDays;
-  readonly removalPolicy?: RemovalPolicy;
 
   /**
    * Timeout applied to the MCP proxy Lambda. Defaults to 29 seconds (the
@@ -75,6 +77,36 @@ const DEFAULT_CORS_HEADERS = [
 ];
 const DEFAULT_RATE_LIMIT = 50;
 const DEFAULT_BURST_LIMIT = 100;
+
+// The proxy operations wired to the shared HttpApi construct. The
+// openid-configuration route reuses the authorization-server-metadata handler.
+type <%- nameClassName %>Operation =
+  | 'protectedResourceMetadata'
+  | 'authServerMetadata'
+  | 'openIdConfiguration'
+  | 'register'
+  | 'authorize'
+  | 'token'
+  | 'mcp';
+
+const OPERATIONS: Record<<%- nameClassName %>Operation, OperationDetails> = {
+  protectedResourceMetadata: {
+    path: '/.well-known/oauth-protected-resource',
+    method: 'GET',
+  },
+  authServerMetadata: {
+    path: '/.well-known/oauth-authorization-server',
+    method: 'GET',
+  },
+  openIdConfiguration: {
+    path: '/.well-known/openid-configuration',
+    method: 'GET',
+  },
+  register: { path: '/register', method: 'POST' },
+  authorize: { path: '/authorize', method: 'GET' },
+  token: { path: '/oauth/token', method: 'POST' },
+  mcp: { path: '/mcp', method: 'ANY' },
+};
 
 // Resolve a handler's rolldown bundle output directory, relative to this
 // compiled construct file, back to the workspace root.
@@ -97,7 +129,10 @@ const asset = (bundlePathFromRoot: string): lambda.Code =>
  * Cognito App Client secret to the client.
  */
 export class <%- nameClassName %> extends Construct {
-  readonly httpApi: apigwv2.HttpApi;
+  readonly httpApi: HttpApi<
+    <%- nameClassName %>Operation,
+    Record<<%- nameClassName %>Operation, HttpApiIntegration>
+  >;
   readonly proxyUrl: string;
   readonly mcpUrl: string;
   readonly metadataUrl: string;
@@ -109,9 +144,6 @@ export class <%- nameClassName %> extends Construct {
     super(scope, id);
 
     const region = Stack.of(this).region;
-    const logRetentionDefault =
-      props.logRetention ?? logs.RetentionDays.ONE_WEEK;
-    const removalPolicyDefault = props.removalPolicy ?? RemovalPolicy.DESTROY;
 
     const clientSecret = secretsmanager.Secret.fromSecretCompleteArn(
       this,
@@ -130,17 +162,14 @@ export class <%- nameClassName %> extends Construct {
       ...(props.lambdaEnvironment ?? {}),
     };
 
+    // Lambda functions use their auto-created log group; access logging for the
+    // API is handled by the shared HttpApi construct's KMS-encrypted log group.
     const makeFn = (
       id_: string,
       bundlePathFromRoot: string,
       overrides?: Partial<lambda.FunctionProps>,
-    ): lambda.Function => {
-      const logGroup = new logs.LogGroup(this, `${id_}LogGroup`, {
-        retention: logRetentionDefault,
-        removalPolicy: removalPolicyDefault,
-      });
-
-      return new lambda.Function(this, id_, {
+    ): lambda.Function =>
+      new lambda.Function(this, id_, {
         code: asset(bundlePathFromRoot),
         handler: 'index.handler',
         runtime: lambda.Runtime.NODEJS_22_X,
@@ -148,12 +177,10 @@ export class <%- nameClassName %> extends Construct {
         timeout: Duration.seconds(10),
         memorySize: 256,
         environment: baseEnv,
-        logGroup,
         tracing: lambda.Tracing.ACTIVE,
         reservedConcurrentExecutions: props.reservedConcurrentExecutions,
         ...overrides,
       });
-    };
 
     const protectedResourceFn = makeFn(
       'ProtectedResourceFn',
@@ -175,6 +202,19 @@ export class <%- nameClassName %> extends Construct {
 
     clientSecret.grantRead(tokenFn);
 
+    const mcpProxyFn = makeFn(
+      'McpProxyFn',
+      '<%- bundlePathsFromRoot['mcp-proxy'] %>',
+      {
+        timeout: props.mcpProxyTimeout ?? Duration.seconds(29),
+        memorySize: props.mcpProxyMemorySize ?? 512,
+      },
+    );
+
+    const int = (id_: string, fn: lambda.Function): HttpApiIntegration => ({
+      integration: new integrations.HttpLambdaIntegration(id_, fn),
+    });
+
     const corsPreflight =
       props.cors === false
         ? undefined
@@ -190,98 +230,39 @@ export class <%- nameClassName %> extends Construct {
             maxAge: props.cors?.maxAge ?? Duration.minutes(10),
           };
 
-    this.httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
+    this.httpApi = new HttpApi(this, 'HttpApi', {
       apiName: `${id}-mcp-auth-proxy`,
       description: 'MCP-compatible OAuth proxy for Amazon Cognito',
       corsPreflight,
+      throttle: {
+        rateLimit: props.throttling?.rateLimit ?? DEFAULT_RATE_LIMIT,
+        burstLimit: props.throttling?.burstLimit ?? DEFAULT_BURST_LIMIT,
+      },
+      operations: OPERATIONS,
+      integrations: {
+        protectedResourceMetadata: int(
+          'ProtectedResourceInt',
+          protectedResourceFn,
+        ),
+        authServerMetadata: int('AuthServerInt', authServerFn),
+        openIdConfiguration: int('OpenIdConfigInt', authServerFn),
+        register: int('RegisterInt', registerFn),
+        authorize: int('AuthorizeInt', authorizeFn),
+        token: int('TokenInt', tokenFn),
+        mcp: int('McpProxyInt', mcpProxyFn),
+      },
     });
 
-    const stage = this.httpApi.defaultStage!.node
-      .defaultChild as apigwv2.CfnStage;
-    stage.defaultRouteSettings = {
-      throttlingRateLimit: props.throttling?.rateLimit ?? DEFAULT_RATE_LIMIT,
-      throttlingBurstLimit: props.throttling?.burstLimit ?? DEFAULT_BURST_LIMIT,
-    };
-
-    this.proxyUrl = this.httpApi.apiEndpoint;
+    this.proxyUrl = this.httpApi.api.apiEndpoint;
     this.mcpUrl = `${this.proxyUrl}/mcp`;
     this.metadataUrl = `${this.proxyUrl}/.well-known/oauth-protected-resource`;
     this.authServerMetadataUrl = `${this.proxyUrl}/.well-known/oauth-authorization-server`;
     this.tokenEndpoint = `${this.proxyUrl}/oauth/token`;
     this.registrationEndpoint = `${this.proxyUrl}/register`;
 
-    this.httpApi.addRoutes({
-      path: '/.well-known/oauth-protected-resource',
-      methods: [apigwv2.HttpMethod.GET],
-      integration: new integrations.HttpLambdaIntegration(
-        'ProtectedResourceInt',
-        protectedResourceFn,
-      ),
-    });
-
-    this.httpApi.addRoutes({
-      path: '/.well-known/oauth-authorization-server',
-      methods: [apigwv2.HttpMethod.GET],
-      integration: new integrations.HttpLambdaIntegration(
-        'AuthServerInt',
-        authServerFn,
-      ),
-    });
-
-    this.httpApi.addRoutes({
-      path: '/.well-known/openid-configuration',
-      methods: [apigwv2.HttpMethod.GET],
-      integration: new integrations.HttpLambdaIntegration(
-        'OpenIdConfigInt',
-        authServerFn,
-      ),
-    });
-
-    this.httpApi.addRoutes({
-      path: '/register',
-      methods: [apigwv2.HttpMethod.POST],
-      integration: new integrations.HttpLambdaIntegration(
-        'RegisterInt',
-        registerFn,
-      ),
-    });
-
-    this.httpApi.addRoutes({
-      path: '/authorize',
-      methods: [apigwv2.HttpMethod.GET],
-      integration: new integrations.HttpLambdaIntegration(
-        'AuthorizeInt',
-        authorizeFn,
-      ),
-    });
-
-    this.httpApi.addRoutes({
-      path: '/oauth/token',
-      methods: [apigwv2.HttpMethod.POST],
-      integration: new integrations.HttpLambdaIntegration('TokenInt', tokenFn),
-    });
-
-    const mcpProxyFn = makeFn(
-      'McpProxyFn',
-      '<%- bundlePathsFromRoot['mcp-proxy'] %>',
-      {
-        timeout: props.mcpProxyTimeout ?? Duration.seconds(29),
-        memorySize: props.mcpProxyMemorySize ?? 512,
-        environment: {
-          ...baseEnv,
-          UPSTREAM_URL: props.upstreamUrl,
-          PROXY_METADATA_URL: this.metadataUrl,
-        },
-      },
-    );
-
-    this.httpApi.addRoutes({
-      path: '/mcp',
-      methods: [apigwv2.HttpMethod.ANY],
-      integration: new integrations.HttpLambdaIntegration(
-        'McpProxyInt',
-        mcpProxyFn,
-      ),
-    });
+    // Wire the MCP proxy handler's upstream + metadata URLs after the API is
+    // created so its endpoint is resolvable.
+    mcpProxyFn.addEnvironment('UPSTREAM_URL', props.upstreamUrl);
+    mcpProxyFn.addEnvironment('PROXY_METADATA_URL', this.metadataUrl);
   }
 }

@@ -103,6 +103,36 @@ const addDcrProxyCdkConstructs = async (
   tree: Tree,
   options: AddDcrProxyInfraProps,
 ) => {
+  // Ensure the core HTTP API construct + utils are available (the proxy reuses
+  // them). These are shared with the api generators and safe to (re)generate
+  // with KeepExisting.
+  for (const coreApiFile of ['http', 'utils']) {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        import.meta.dirname,
+        '..',
+        'api-constructs',
+        'files',
+        'cdk',
+        'core',
+        'api',
+        coreApiFile,
+      ),
+      joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'core',
+        'api',
+      ),
+      { ...esmVars(tree) },
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
+    );
+  }
+
   generateFiles(
     tree,
     joinPathFragments(

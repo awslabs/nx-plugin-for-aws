@@ -15,6 +15,9 @@ export type { TsApiGeneratorSchema } from '../ts/api/schema';
 // Documentation Site Generator
 export { tsDocsGenerator } from '../ts/docs/generator';
 export type { TsDocsGeneratorSchema } from '../ts/docs/schema';
+// TypeScript DCR Proxy Generator
+export { tsDcrProxyGenerator } from '../ts/dcr-proxy/generator';
+export type { TsDcrProxyGeneratorSchema } from '../ts/dcr-proxy/schema';
 // DynamoDB Generator
 export { tsDynamoDBGenerator } from '../ts/dynamodb/generator';
 export type { TsDynamoDBGeneratorSchema } from '../ts/dynamodb/schema';
