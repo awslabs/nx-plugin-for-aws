@@ -140,32 +140,89 @@ module "dcr_proxy" {
 `/mcp` 代理使用 API Gateway HTTP API 集成，其硬性超时时间为 29 秒。长时间运行的上游请求由代理缓冲而不是流式传输。
 :::
 
-### 作为 AgentCore Gateway 的前端
+:::tip[重用现有的 User Pool]
+如果您已经从 <Link path="guides/react-website-auth">`ts#website#auth`</Link> 生成器（`UserIdentity` 构造）获得了一个 User Pool，您可以为登录到您网站的**相同用户**提供 MCP 服务器前端。重用其 `userPool`，但为代理添加一个**单独的 App Client**：网站的客户端是没有密钥的公共客户端，而 DCR 代理需要一个机密客户端（`generateSecret: true`），其密钥由令牌处理程序在令牌交换期间注入。
 
-一个常见的上游是使用 Cognito 进行身份验证的 [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)。创建单个 User Pool 和 App Client，在网关上授权该 App Client，然后将**相同的**标识符传递给 DCR 代理。代理的 `upstreamUrl` 是网关的 URL。
-
-下面的网关是一个配置为 Cognito 入站身份验证的普通 `aws-cdk-lib/aws-bedrockagentcore` 构造 — 而不是由 `agentcore-gateway` 生成器生成的 IAM 身份验证网关，后者与代理的 OAuth 流程不兼容。
+`UserIdentity` 使用 [Managed Login (version 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html) 配置 User Pool 域。Managed Login 要求**每个 App Client 都有一个品牌样式**，因此您必须为新的代理客户端创建一个 — 否则其托管登录页面会返回 `403`。使用 `CfnManagedLoginBranding` 并设置 `useCognitoProvidedValues: true` 以使用默认样式。
 
 <Infrastructure>
 <Fragment slot="cdk">
 ```typescript
-import { DcrProxy } from ':my-scope/common-constructs';
-import { UserPool } from 'aws-cdk-lib/aws-cognito';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import {
-  Gateway,
-  GatewayAuthorizer,
-  McpProtocolConfiguration,
-  MCPProtocolVersion,
-} from 'aws-cdk-lib/aws-bedrockagentcore';
+import { UserIdentity } from ':my-scope/common-constructs';
+import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
 
-// 网关和代理共享的单个 User Pool 和 App Client。
-// 注册您的客户端使用的回调 URL（见下文）。
-const userPool = new UserPool(this, 'UserPool');
-const userPoolClient = userPool.addClient('DcrProxyClient', {
+const identity = new UserIdentity(this, 'Identity');
+
+// A confidential App Client on the SAME user pool for the DCR proxy
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   generateSecret: true,
   oAuth: {
     flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: ['http://localhost:41100/callback'],
+  },
+});
+
+// Managed Login needs a branding style for the new client
+new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
+  userPoolId: identity.userPool.userPoolId,
+  clientId: proxyClient.userPoolClientId,
+  useCognitoProvidedValues: true,
+});
+```
+
+传递 `identity.userPool.userPoolId`、`proxyClient.userPoolClientId` 和 `identity.userPoolDomain.baseUrl()` 给代理。`UserIdentity` 构造始终创建一个域，因此您不需要添加域。
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# A confidential App Client on the SAME user pool created by ts#website#auth
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls                        = ["http://localhost:41100/callback"]
+}
+
+# Managed Login needs a branding style for the new client
+resource "aws_cognito_managed_login_branding" "dcr_proxy" {
+  user_pool_id                = module.user_identity.user_pool_id
+  client_id                   = aws_cognito_user_pool_client.dcr_proxy.id
+  use_cognito_provided_values = true
+}
+```
+
+传递 user pool id、此客户端的 id 和现有的 user pool 域给代理模块。
+</Fragment>
+</Infrastructure>
+:::
+
+### 作为 MCP 服务器的前端
+
+要为使用 <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link>（或 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>）生成器并使用 `--auth cognito` 生成的 MCP 服务器提供前端，请将**相同的** User Pool 和 App Client 传递给 MCP 服务器和代理，并使用 MCP 服务器构造的 `invocationUrl` 作为代理的 `upstreamUrl`。
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyProjectMcpServer,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const identity = new UserIdentity(this, 'Identity');
+
+// 代理用于令牌交换的机密 App Client。注册
+// 您的客户端使用的回调 URL（见下文）。
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
     callbackUrls: [
       'http://localhost:41100/callback',
       // Claude Desktop 使用的回调
@@ -173,63 +230,46 @@ const userPoolClient = userPool.addClient('DcrProxyClient', {
     ],
   },
 });
-// Cognito Hosted UI 需要一个域 — 代理将 OAuth 流程重定向到这里。
-// 如果 User Pool 已经有域，请重用您现有的域。
-const userPoolDomain = userPool.addDomain('Domain', {
-  cognitoDomain: { domainPrefix: 'my-dcr-proxy' },
-});
 
 // 将 App Client 密钥存储在 Secrets Manager 中供令牌处理程序读取
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
-  secretStringValue: userPoolClient.userPoolClientSecret,
+  secretStringValue: proxyClient.userPoolClientSecret,
 });
 
-// 授权为 App Client 颁发的入站 JWT 的 AgentCore Gateway
-const gateway = new Gateway(this, 'Gateway', {
-  protocolConfiguration: new McpProtocolConfiguration({
-    supportedVersions: [MCPProtocolVersion.MCP_2025_06_18],
-  }),
-  authorizerConfiguration: GatewayAuthorizer.usingCognito({
-    userPool,
-    allowedClients: [userPoolClient],
-  }),
+// MCP 服务器，授权为相同 App Client 颁发的 JWT
+const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
 });
 
 new DcrProxy(this, 'DcrProxy', {
-  userPoolId: userPool.userPoolId,
-  userPoolClientId: userPoolClient.userPoolClientId,
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
   cognitoClientSecretArn: clientSecret.secretArn,
-  cognitoHostedUiBase: userPoolDomain.baseUrl(),
-  upstreamUrl: gateway.gatewayUrl ?? '',
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  // 使用 MCP 服务器构造的调用 URL 而不是硬编码
+  upstreamUrl: mcpServer.invocationUrl,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# 网关和代理共享的单个 User Pool 和 App Client。
-# 注册您的客户端使用的回调 URL（见下文）。
-resource "aws_cognito_user_pool" "main" {
-  name = "my-dcr-proxy"
-}
-
-resource "aws_cognito_user_pool_client" "main" {
+# 代理用于令牌交换的机密 App Client。注册
+# 您的客户端使用的回调 URL（见下文）。
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
   name                                 = "dcr-proxy-client"
-  user_pool_id                         = aws_cognito_user_pool.main.id
+  user_pool_id                         = module.user_identity.user_pool_id
   generate_secret                      = true
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls = [
     "http://localhost:41100/callback",
     # Claude Desktop 使用的回调
     "https://claude.ai/api/mcp/auth_callback",
   ]
-}
-
-# Cognito Hosted UI 需要一个域 — 代理将 OAuth 流程重定向到这里。
-# 如果 User Pool 已经有域，请重用您现有的域。
-resource "aws_cognito_user_pool_domain" "main" {
-  domain       = "my-dcr-proxy"
-  user_pool_id = aws_cognito_user_pool.main.id
 }
 
 # 将 App Client 密钥存储在 Secrets Manager 中供令牌处理程序读取
@@ -239,48 +279,138 @@ resource "aws_secretsmanager_secret" "client_secret" {
 
 resource "aws_secretsmanager_secret_version" "client_secret" {
   secret_id     = aws_secretsmanager_secret.client_secret.id
-  secret_string = aws_cognito_user_pool_client.main.client_secret
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
 }
 
-# 网关用于访问 AWS 服务的执行角色。
-resource "aws_iam_role" "gateway" {
-  name = "my-dcr-proxy-gateway-role"
+# MCP 服务器，授权为相同 App Client 颁发的 JWT
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "bedrock-agentcore.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-# 授权为 App Client 颁发的入站 JWT 的 AgentCore Gateway。
-# 这是一个配置为 Cognito 入站身份验证的普通网关资源 — 而不是
-# 由 `agentcore-gateway` 生成器生成的 IAM 身份验证网关。
-resource "aws_bedrockagentcore_gateway" "main" {
-  name          = "my-dcr-proxy-gateway"
-  role_arn      = aws_iam_role.gateway.arn
-  protocol_type = "MCP"
-
-  authorizer_type = "CUSTOM_JWT"
-  authorizer_configuration {
-    custom_jwt_authorizer {
-      discovery_url   = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/openid-configuration"
-      allowed_clients = [aws_cognito_user_pool_client.main.id]
-    }
-  }
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_ids      = [aws_cognito_user_pool_client.dcr_proxy.id]
+  appconfig_application_id  = module.runtime_config.application_id
+  appconfig_application_arn = module.runtime_config.application_arn
 }
 
 module "dcr_proxy" {
   source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
 
-  user_pool_id              = aws_cognito_user_pool.main.id
-  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
   cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
-  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
-  upstream_url              = aws_bedrockagentcore_gateway.main.gateway_url
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  # 使用 MCP 服务器模块的调用 URL 而不是硬编码
+  upstream_url              = module.my_project_mcp_server.invocation_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 作为 AgentCore Gateway 的前端
+
+要为使用 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 生成器并使用 `--auth cognito` 生成的 [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 提供前端，请将**相同的** User Pool 和 App Client 传递给网关和代理，并使用网关构造的 `gatewayUrl` 作为代理的 `upstreamUrl`。
+
+:::caution
+代理的 OAuth 流程需要 Cognito 身份验证的网关。使用 `--auth cognito` 生成网关；默认的 IAM 身份验证网关与代理不兼容。
+:::
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyGateway,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const identity = new UserIdentity(this, 'Identity');
+
+// 代理用于令牌交换的机密 App Client。注册
+// 您的客户端使用的回调 URL（见下文）。
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: [
+      'http://localhost:41100/callback',
+      // Claude Desktop 使用的回调
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+
+// 将 App Client 密钥存储在 Secrets Manager 中供令牌处理程序读取
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: proxyClient.userPoolClientSecret,
+});
+
+// 网关，授权为相同 App Client 颁发的 JWT
+const gateway = new MyGateway(this, 'MyGateway', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  // 使用网关构造的 URL 而不是硬编码
+  upstreamUrl: gateway.gateway.gatewayUrl,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# 代理用于令牌交换的机密 App Client。注册
+# 您的客户端使用的回调 URL（见下文）。
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls = [
+    "http://localhost:41100/callback",
+    # Claude Desktop 使用的回调
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+
+# 将 App Client 密钥存储在 Secrets Manager 中供令牌处理程序读取
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
+}
+
+# 网关，授权为相同 App Client 颁发的 JWT
+module "my_gateway" {
+  source = "../../common/terraform/src/app/agentcore-gateway/my-gateway"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [aws_cognito_user_pool_client.dcr_proxy.id]
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  # 使用网关模块的 URL 而不是硬编码
+  upstream_url              = module.my_gateway.gateway_url
   asset_bucket_name         = module.asset_bucket.bucket_name
 }
 ```

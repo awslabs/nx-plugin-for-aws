@@ -140,32 +140,89 @@ O módulo expõe os endpoints do proxy (`proxy_url`, `mcp_url`, `metadata_url`, 
 O proxy `/mcp` usa integrações API Gateway HTTP API, que têm um timeout fixo de 29 segundos. Requisições upstream de longa duração são armazenadas em buffer pelo proxy em vez de transmitidas em stream.
 :::
 
-### Fronteando um AgentCore Gateway
+:::tip[Reutilizando um User Pool existente]
+Se você já tem um User Pool do gerador <Link path="guides/react-website-auth">`ts#website#auth`</Link> (o construto `UserIdentity`), você pode frontar um servidor MCP para os **mesmos usuários** que fazem login no seu site. Reutilize seu `userPool`, mas adicione um **App Client separado** para o proxy: o cliente do site é um cliente público sem segredo, enquanto o proxy DCR requer um cliente confidencial (`generateSecret: true`) cujo segredo o handler de token injeta durante a troca de token.
 
-Um upstream comum é um [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) autenticado com Cognito. Crie um único User Pool e App Client, autorize esse App Client no gateway e, em seguida, passe os **mesmos** identificadores para o proxy DCR. O `upstreamUrl` do proxy é a URL do gateway.
-
-O gateway abaixo é um construto simples `aws-cdk-lib/aws-bedrockagentcore` configurado para autenticação de entrada Cognito — não o gateway autenticado por IAM emitido pelo gerador `agentcore-gateway`, que não é compatível com o fluxo OAuth do proxy.
+`UserIdentity` configura o domínio do User Pool com [Managed Login (versão 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html). Managed Login requer um **estilo de branding por App Client**, então você deve criar um para o novo cliente do proxy — caso contrário, sua página de login hospedada retorna `403`. Use `CfnManagedLoginBranding` com `useCognitoProvidedValues: true` para o estilo padrão.
 
 <Infrastructure>
 <Fragment slot="cdk">
 ```typescript
-import { DcrProxy } from ':my-scope/common-constructs';
-import { UserPool } from 'aws-cdk-lib/aws-cognito';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import {
-  Gateway,
-  GatewayAuthorizer,
-  McpProtocolConfiguration,
-  MCPProtocolVersion,
-} from 'aws-cdk-lib/aws-bedrockagentcore';
+import { UserIdentity } from ':my-scope/common-constructs';
+import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
 
-// User Pool e App Client únicos compartilhados pelo gateway e pelo proxy.
-// Registre as URLs de callback que seus clientes usam (veja abaixo).
-const userPool = new UserPool(this, 'UserPool');
-const userPoolClient = userPool.addClient('DcrProxyClient', {
+const identity = new UserIdentity(this, 'Identity');
+
+// Um App Client confidencial no MESMO user pool para o proxy DCR
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   generateSecret: true,
   oAuth: {
     flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: ['http://localhost:41100/callback'],
+  },
+});
+
+// Managed Login precisa de um estilo de branding para o novo cliente
+new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
+  userPoolId: identity.userPool.userPoolId,
+  clientId: proxyClient.userPoolClientId,
+  useCognitoProvidedValues: true,
+});
+```
+
+Passe `identity.userPool.userPoolId`, `proxyClient.userPoolClientId` e `identity.userPoolDomain.baseUrl()` para o proxy. O construto `UserIdentity` sempre cria um domínio, então você não precisa adicionar um.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Um App Client confidencial no MESMO user pool criado por ts#website#auth
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls                        = ["http://localhost:41100/callback"]
+}
+
+# Managed Login precisa de um estilo de branding para o novo cliente
+resource "aws_cognito_managed_login_branding" "dcr_proxy" {
+  user_pool_id                = module.user_identity.user_pool_id
+  client_id                   = aws_cognito_user_pool_client.dcr_proxy.id
+  use_cognito_provided_values = true
+}
+```
+
+Passe o id do user pool, o id deste cliente e o domínio do user pool existente para o módulo do proxy.
+</Fragment>
+</Infrastructure>
+:::
+
+### Fronteando um Servidor MCP
+
+Para frontar um servidor MCP gerado com o gerador <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> (ou <Link path="guides/py-mcp-server">`py#mcp-server`</Link>) usando `--auth cognito`, passe o **mesmo** User Pool e App Client tanto para o servidor MCP quanto para o proxy, e use o `invocationUrl` do construto do servidor MCP como o `upstreamUrl` do proxy.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyProjectMcpServer,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const identity = new UserIdentity(this, 'Identity');
+
+// Um App Client confidencial que o proxy usa para a troca de token. Registre as
+// URLs de callback que seus clientes usam (veja abaixo).
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
     callbackUrls: [
       'http://localhost:41100/callback',
       // Callback usado pelo Claude Desktop
@@ -173,63 +230,46 @@ const userPoolClient = userPool.addClient('DcrProxyClient', {
     ],
   },
 });
-// Cognito Hosted UI requer um domínio — o proxy redireciona fluxos OAuth aqui.
-// Reutilize seu domínio existente se o User Pool já tiver um.
-const userPoolDomain = userPool.addDomain('Domain', {
-  cognitoDomain: { domainPrefix: 'my-dcr-proxy' },
-});
 
 // Armazene o segredo do App Client no Secrets Manager para o handler de token ler
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
-  secretStringValue: userPoolClient.userPoolClientSecret,
+  secretStringValue: proxyClient.userPoolClientSecret,
 });
 
-// Um AgentCore Gateway que autoriza JWTs de entrada emitidos para o App Client
-const gateway = new Gateway(this, 'Gateway', {
-  protocolConfiguration: new McpProtocolConfiguration({
-    supportedVersions: [MCPProtocolVersion.MCP_2025_06_18],
-  }),
-  authorizerConfiguration: GatewayAuthorizer.usingCognito({
-    userPool,
-    allowedClients: [userPoolClient],
-  }),
+// O servidor MCP, autorizando JWTs emitidos para o mesmo App Client
+const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
 });
 
 new DcrProxy(this, 'DcrProxy', {
-  userPoolId: userPool.userPoolId,
-  userPoolClientId: userPoolClient.userPoolClientId,
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
   cognitoClientSecretArn: clientSecret.secretArn,
-  cognitoHostedUiBase: userPoolDomain.baseUrl(),
-  upstreamUrl: gateway.gatewayUrl ?? '',
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  // Use a URL de invocação do construto do servidor MCP em vez de codificá-la
+  upstreamUrl: mcpServer.invocationUrl,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# User Pool e App Client únicos compartilhados pelo gateway e pelo proxy.
-# Registre as URLs de callback que seus clientes usam (veja abaixo).
-resource "aws_cognito_user_pool" "main" {
-  name = "my-dcr-proxy"
-}
-
-resource "aws_cognito_user_pool_client" "main" {
+# Um App Client confidencial que o proxy usa para a troca de token. Registre as
+# URLs de callback que seus clientes usam (veja abaixo).
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
   name                                 = "dcr-proxy-client"
-  user_pool_id                         = aws_cognito_user_pool.main.id
+  user_pool_id                         = module.user_identity.user_pool_id
   generate_secret                      = true
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls = [
     "http://localhost:41100/callback",
     # Callback usado pelo Claude Desktop
     "https://claude.ai/api/mcp/auth_callback",
   ]
-}
-
-# Cognito Hosted UI requer um domínio — o proxy redireciona fluxos OAuth aqui.
-# Reutilize seu domínio existente se o User Pool já tiver um.
-resource "aws_cognito_user_pool_domain" "main" {
-  domain       = "my-dcr-proxy"
-  user_pool_id = aws_cognito_user_pool.main.id
 }
 
 # Armazene o segredo do App Client no Secrets Manager para o handler de token ler
@@ -239,48 +279,138 @@ resource "aws_secretsmanager_secret" "client_secret" {
 
 resource "aws_secretsmanager_secret_version" "client_secret" {
   secret_id     = aws_secretsmanager_secret.client_secret.id
-  secret_string = aws_cognito_user_pool_client.main.client_secret
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
 }
 
-# Role de execução assumida pelo gateway para acessar serviços AWS.
-resource "aws_iam_role" "gateway" {
-  name = "my-dcr-proxy-gateway-role"
+# O servidor MCP, autorizando JWTs emitidos para o mesmo App Client
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "bedrock-agentcore.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-# Um AgentCore Gateway que autoriza JWTs de entrada emitidos para o App Client.
-# Este é um recurso de gateway simples configurado para autenticação de entrada Cognito — não
-# o gateway autenticado por IAM emitido pelo gerador `agentcore-gateway`.
-resource "aws_bedrockagentcore_gateway" "main" {
-  name          = "my-dcr-proxy-gateway"
-  role_arn      = aws_iam_role.gateway.arn
-  protocol_type = "MCP"
-
-  authorizer_type = "CUSTOM_JWT"
-  authorizer_configuration {
-    custom_jwt_authorizer {
-      discovery_url   = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/openid-configuration"
-      allowed_clients = [aws_cognito_user_pool_client.main.id]
-    }
-  }
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_ids      = [aws_cognito_user_pool_client.dcr_proxy.id]
+  appconfig_application_id  = module.runtime_config.application_id
+  appconfig_application_arn = module.runtime_config.application_arn
 }
 
 module "dcr_proxy" {
   source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
 
-  user_pool_id              = aws_cognito_user_pool.main.id
-  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
   cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
-  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
-  upstream_url              = aws_bedrockagentcore_gateway.main.gateway_url
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  # Use a URL de invocação do módulo do servidor MCP em vez de codificá-la
+  upstream_url              = module.my_project_mcp_server.invocation_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Fronteando um AgentCore Gateway
+
+Para frontar um [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) gerado com o gerador <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> usando `--auth cognito`, passe o **mesmo** User Pool e App Client tanto para o gateway quanto para o proxy, e use o `gatewayUrl` do construto do gateway como o `upstreamUrl` do proxy.
+
+:::caution
+O fluxo OAuth do proxy requer um gateway autenticado com Cognito. Gere o gateway com `--auth cognito`; o gateway autenticado por IAM padrão não é compatível com o proxy.
+:::
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyGateway,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const identity = new UserIdentity(this, 'Identity');
+
+// Um App Client confidencial que o proxy usa para a troca de token. Registre as
+// URLs de callback que seus clientes usam (veja abaixo).
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: [
+      'http://localhost:41100/callback',
+      // Callback usado pelo Claude Desktop
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+
+// Armazene o segredo do App Client no Secrets Manager para o handler de token ler
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: proxyClient.userPoolClientSecret,
+});
+
+// O gateway, autorizando JWTs emitidos para o mesmo App Client
+const gateway = new MyGateway(this, 'MyGateway', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  // Use a URL do construto do gateway em vez de codificá-la
+  upstreamUrl: gateway.gateway.gatewayUrl,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Um App Client confidencial que o proxy usa para a troca de token. Registre as
+# URLs de callback que seus clientes usam (veja abaixo).
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls = [
+    "http://localhost:41100/callback",
+    # Callback usado pelo Claude Desktop
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+
+# Armazene o segredo do App Client no Secrets Manager para o handler de token ler
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
+}
+
+# O gateway, autorizando JWTs emitidos para o mesmo App Client
+module "my_gateway" {
+  source = "../../common/terraform/src/app/agentcore-gateway/my-gateway"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [aws_cognito_user_pool_client.dcr_proxy.id]
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  # Use a URL do módulo do gateway em vez de codificá-la
+  upstream_url              = module.my_gateway.gateway_url
   asset_bucket_name         = module.asset_bucket.bucket_name
 }
 ```

@@ -140,32 +140,89 @@ Module này hiển thị các proxy endpoint (`proxy_url`, `mcp_url`, `metadata_
 Proxy `/mcp` sử dụng API Gateway HTTP API integrations, có thời gian chờ cố định là 29 giây. Các yêu cầu upstream chạy lâu được đệm bởi proxy thay vì được stream.
 :::
 
-### Đặt trước một AgentCore Gateway
+:::tip[Tái sử dụng User Pool hiện có]
+Nếu bạn đã có User Pool từ trình tạo <Link path="guides/react-website-auth">`ts#website#auth`</Link> (construct `UserIdentity`), bạn có thể đặt proxy trước một máy chủ MCP cho **cùng những người dùng** đăng nhập vào trang web của bạn. Tái sử dụng `userPool` của nó, nhưng thêm một **App Client riêng biệt** cho proxy: client của trang web là một public client không có secret, trong khi DCR proxy yêu cầu một confidential client (`generateSecret: true`) mà secret của nó được token handler chèn vào trong quá trình trao đổi token.
 
-Một upstream phổ biến là một [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) được xác thực bằng Cognito. Tạo một User Pool và App Client duy nhất, ủy quyền App Client đó trên gateway, sau đó truyền các định danh **giống nhau** cho DCR proxy. `upstreamUrl` của proxy là URL của gateway.
-
-Gateway bên dưới là một construct `aws-cdk-lib/aws-bedrockagentcore` thuần túy được cấu hình cho xác thực inbound Cognito — không phải gateway được xác thực bằng IAM được phát ra bởi trình tạo `agentcore-gateway`, không tương thích với luồng OAuth của proxy.
+`UserIdentity` cấu hình User Pool domain với [Managed Login (phiên bản 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html). Managed Login yêu cầu một **branding style cho mỗi App Client**, vì vậy bạn phải tạo một cái cho proxy client mới — nếu không trang đăng nhập hosted của nó sẽ trả về `403`. Sử dụng `CfnManagedLoginBranding` với `useCognitoProvidedValues: true` cho style mặc định.
 
 <Infrastructure>
 <Fragment slot="cdk">
 ```typescript
-import { DcrProxy } from ':my-scope/common-constructs';
-import { UserPool } from 'aws-cdk-lib/aws-cognito';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import {
-  Gateway,
-  GatewayAuthorizer,
-  McpProtocolConfiguration,
-  MCPProtocolVersion,
-} from 'aws-cdk-lib/aws-bedrockagentcore';
+import { UserIdentity } from ':my-scope/common-constructs';
+import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
 
-// User Pool và App Client duy nhất được chia sẻ bởi gateway và proxy.
-// Đăng ký các callback URL mà client của bạn sử dụng (xem bên dưới).
-const userPool = new UserPool(this, 'UserPool');
-const userPoolClient = userPool.addClient('DcrProxyClient', {
+const identity = new UserIdentity(this, 'Identity');
+
+// Một confidential App Client trên CÙNG user pool cho DCR proxy
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   generateSecret: true,
   oAuth: {
     flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: ['http://localhost:41100/callback'],
+  },
+});
+
+// Managed Login cần một branding style cho client mới
+new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
+  userPoolId: identity.userPool.userPoolId,
+  clientId: proxyClient.userPoolClientId,
+  useCognitoProvidedValues: true,
+});
+```
+
+Truyền `identity.userPool.userPoolId`, `proxyClient.userPoolClientId` và `identity.userPoolDomain.baseUrl()` cho proxy. Construct `UserIdentity` luôn tạo một domain, vì vậy bạn không cần thêm một domain nào.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Một confidential App Client trên CÙNG user pool được tạo bởi ts#website#auth
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls                        = ["http://localhost:41100/callback"]
+}
+
+# Managed Login cần một branding style cho client mới
+resource "aws_cognito_managed_login_branding" "dcr_proxy" {
+  user_pool_id                = module.user_identity.user_pool_id
+  client_id                   = aws_cognito_user_pool_client.dcr_proxy.id
+  use_cognito_provided_values = true
+}
+```
+
+Truyền user pool id, id của client này và user pool domain hiện có cho proxy module.
+</Fragment>
+</Infrastructure>
+:::
+
+### Đặt trước một Máy chủ MCP
+
+Để đặt proxy trước một máy chủ MCP được tạo bằng trình tạo <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> (hoặc <Link path="guides/py-mcp-server">`py#mcp-server`</Link>) sử dụng `--auth cognito`, truyền **cùng** User Pool và App Client cho cả máy chủ MCP và proxy, và sử dụng `invocationUrl` của construct máy chủ MCP làm `upstreamUrl` của proxy.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyProjectMcpServer,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const identity = new UserIdentity(this, 'Identity');
+
+// Một confidential App Client mà proxy sử dụng cho trao đổi token. Đăng ký các
+// callback URL mà client của bạn sử dụng (xem bên dưới).
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
     callbackUrls: [
       'http://localhost:41100/callback',
       // Callback được sử dụng bởi Claude Desktop
@@ -173,63 +230,46 @@ const userPoolClient = userPool.addClient('DcrProxyClient', {
     ],
   },
 });
-// Cognito Hosted UI yêu cầu một domain — proxy chuyển hướng các luồng OAuth đến đây.
-// Sử dụng lại domain hiện có của bạn nếu User Pool đã có một domain.
-const userPoolDomain = userPool.addDomain('Domain', {
-  cognitoDomain: { domainPrefix: 'my-dcr-proxy' },
-});
 
 // Lưu trữ App Client secret trong Secrets Manager để token handler đọc
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
-  secretStringValue: userPoolClient.userPoolClientSecret,
+  secretStringValue: proxyClient.userPoolClientSecret,
 });
 
-// Một AgentCore Gateway ủy quyền các JWT inbound được phát hành cho App Client
-const gateway = new Gateway(this, 'Gateway', {
-  protocolConfiguration: new McpProtocolConfiguration({
-    supportedVersions: [MCPProtocolVersion.MCP_2025_06_18],
-  }),
-  authorizerConfiguration: GatewayAuthorizer.usingCognito({
-    userPool,
-    allowedClients: [userPoolClient],
-  }),
+// Máy chủ MCP, ủy quyền các JWT được phát hành cho cùng App Client
+const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
 });
 
 new DcrProxy(this, 'DcrProxy', {
-  userPoolId: userPool.userPoolId,
-  userPoolClientId: userPoolClient.userPoolClientId,
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
   cognitoClientSecretArn: clientSecret.secretArn,
-  cognitoHostedUiBase: userPoolDomain.baseUrl(),
-  upstreamUrl: gateway.gatewayUrl ?? '',
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  // Sử dụng invocation URL của construct máy chủ MCP thay vì hardcode nó
+  upstreamUrl: mcpServer.invocationUrl,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# User Pool và App Client duy nhất được chia sẻ bởi gateway và proxy.
-# Đăng ký các callback URL mà client của bạn sử dụng (xem bên dưới).
-resource "aws_cognito_user_pool" "main" {
-  name = "my-dcr-proxy"
-}
-
-resource "aws_cognito_user_pool_client" "main" {
+# Một confidential App Client mà proxy sử dụng cho trao đổi token. Đăng ký các
+# callback URL mà client của bạn sử dụng (xem bên dưới).
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
   name                                 = "dcr-proxy-client"
-  user_pool_id                         = aws_cognito_user_pool.main.id
+  user_pool_id                         = module.user_identity.user_pool_id
   generate_secret                      = true
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls = [
     "http://localhost:41100/callback",
     # Callback được sử dụng bởi Claude Desktop
     "https://claude.ai/api/mcp/auth_callback",
   ]
-}
-
-# Cognito Hosted UI yêu cầu một domain — proxy chuyển hướng các luồng OAuth đến đây.
-# Sử dụng lại domain hiện có của bạn nếu User Pool đã có một domain.
-resource "aws_cognito_user_pool_domain" "main" {
-  domain       = "my-dcr-proxy"
-  user_pool_id = aws_cognito_user_pool.main.id
 }
 
 # Lưu trữ App Client secret trong Secrets Manager để token handler đọc
@@ -239,48 +279,138 @@ resource "aws_secretsmanager_secret" "client_secret" {
 
 resource "aws_secretsmanager_secret_version" "client_secret" {
   secret_id     = aws_secretsmanager_secret.client_secret.id
-  secret_string = aws_cognito_user_pool_client.main.client_secret
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
 }
 
-# Execution role được gateway đảm nhận để truy cập các dịch vụ AWS.
-resource "aws_iam_role" "gateway" {
-  name = "my-dcr-proxy-gateway-role"
+# Máy chủ MCP, ủy quyền các JWT được phát hành cho cùng App Client
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "bedrock-agentcore.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-# Một AgentCore Gateway ủy quyền các JWT inbound được phát hành cho App Client.
-# Đây là một gateway resource thuần túy được cấu hình cho xác thực inbound Cognito — không phải
-# gateway được xác thực bằng IAM được phát ra bởi trình tạo `agentcore-gateway`.
-resource "aws_bedrockagentcore_gateway" "main" {
-  name          = "my-dcr-proxy-gateway"
-  role_arn      = aws_iam_role.gateway.arn
-  protocol_type = "MCP"
-
-  authorizer_type = "CUSTOM_JWT"
-  authorizer_configuration {
-    custom_jwt_authorizer {
-      discovery_url   = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/openid-configuration"
-      allowed_clients = [aws_cognito_user_pool_client.main.id]
-    }
-  }
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_ids      = [aws_cognito_user_pool_client.dcr_proxy.id]
+  appconfig_application_id  = module.runtime_config.application_id
+  appconfig_application_arn = module.runtime_config.application_arn
 }
 
 module "dcr_proxy" {
   source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
 
-  user_pool_id              = aws_cognito_user_pool.main.id
-  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
   cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
-  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
-  upstream_url              = aws_bedrockagentcore_gateway.main.gateway_url
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  # Sử dụng invocation URL của module máy chủ MCP thay vì hardcode nó
+  upstream_url              = module.my_project_mcp_server.invocation_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Đặt trước một AgentCore Gateway
+
+Để đặt proxy trước một [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) được tạo bằng trình tạo <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> sử dụng `--auth cognito`, truyền **cùng** User Pool và App Client cho cả gateway và proxy, và sử dụng `gatewayUrl` của construct gateway làm `upstreamUrl` của proxy.
+
+:::caution
+Luồng OAuth của proxy yêu cầu một gateway được xác thực bằng Cognito. Tạo gateway với `--auth cognito`; gateway được xác thực bằng IAM mặc định không tương thích với proxy.
+:::
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyGateway,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+const identity = new UserIdentity(this, 'Identity');
+
+// Một confidential App Client mà proxy sử dụng cho trao đổi token. Đăng ký các
+// callback URL mà client của bạn sử dụng (xem bên dưới).
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: [
+      'http://localhost:41100/callback',
+      // Callback được sử dụng bởi Claude Desktop
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+
+// Lưu trữ App Client secret trong Secrets Manager để token handler đọc
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: proxyClient.userPoolClientSecret,
+});
+
+// Gateway, ủy quyền các JWT được phát hành cho cùng App Client
+const gateway = new MyGateway(this, 'MyGateway', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  // Sử dụng URL của construct gateway thay vì hardcode nó
+  upstreamUrl: gateway.gateway.gatewayUrl,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Một confidential App Client mà proxy sử dụng cho trao đổi token. Đăng ký các
+# callback URL mà client của bạn sử dụng (xem bên dưới).
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls = [
+    "http://localhost:41100/callback",
+    # Callback được sử dụng bởi Claude Desktop
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+
+# Lưu trữ App Client secret trong Secrets Manager để token handler đọc
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
+}
+
+# Gateway, ủy quyền các JWT được phát hành cho cùng App Client
+module "my_gateway" {
+  source = "../../common/terraform/src/app/agentcore-gateway/my-gateway"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [aws_cognito_user_pool_client.dcr_proxy.id]
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  # Sử dụng URL của module gateway thay vì hardcode nó
+  upstream_url              = module.my_gateway.gateway_url
   asset_bucket_name         = module.asset_bucket.bucket_name
 }
 ```
