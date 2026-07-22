@@ -89,17 +89,6 @@ import {
   OperationDetails,
 } from '../../../core/api/utils.js';
 
-export interface CorsOptions {
-  readonly allowOrigins?: string[];
-  readonly allowHeaders?: string[];
-  readonly maxAge?: Duration;
-}
-
-export interface ThrottlingOptions {
-  readonly rateLimit?: number;
-  readonly burstLimit?: number;
-}
-
 export interface SnapshotProxyProps {
   /**
    * Cognito User Pool id (e.g. \`us-east-1_abc123\`).
@@ -133,28 +122,11 @@ export interface SnapshotProxyProps {
    * this proxy as the protected-resource metadata host.
    */
   readonly upstreamUrl: string;
-
-  readonly cors?: CorsOptions | false;
-  readonly throttling?: ThrottlingOptions;
-  readonly reservedConcurrentExecutions?: number;
-
-  readonly lambdaEnvironment?: Record<string, string>;
-
-  /**
-   * Timeout applied to the MCP proxy Lambda. Defaults to 29 seconds (the
-   * API Gateway HTTP API integration limit).
-   */
-  readonly mcpProxyTimeout?: Duration;
-  readonly mcpProxyMemorySize?: number;
 }
 
-const DEFAULT_CORS_HEADERS = [
-  'authorization',
-  'content-type',
-  'mcp-protocol-version',
-];
-const DEFAULT_RATE_LIMIT = 50;
-const DEFAULT_BURST_LIMIT = 100;
+const CORS_HEADERS = ['authorization', 'content-type', 'mcp-protocol-version'];
+const RATE_LIMIT = 50;
+const BURST_LIMIT = 100;
 
 // The proxy operations wired to the shared HttpApi construct. The
 // openid-configuration route reuses the authorization-server-metadata handler.
@@ -234,7 +206,6 @@ export class SnapshotProxy extends Construct {
       COGNITO_ISSUER: cognitoIssuer,
       COGNITO_HOSTED_UI_BASE: props.cognitoHostedUiBase,
       COGNITO_REGION: region,
-      ...(props.lambdaEnvironment ?? {}),
     };
 
     // Lambda functions use their auto-created log group; access logging for the
@@ -253,7 +224,6 @@ export class SnapshotProxy extends Construct {
         memorySize: 256,
         environment: baseEnv,
         tracing: lambda.Tracing.ACTIVE,
-        reservedConcurrentExecutions: props.reservedConcurrentExecutions,
         ...overrides,
       });
 
@@ -277,12 +247,14 @@ export class SnapshotProxy extends Construct {
 
     clientSecret.grantRead(tokenFn);
 
+    // The MCP proxy Lambda buffers upstream responses, so it is given more time
+    // (up to the API Gateway HTTP API integration limit) and memory.
     const mcpProxyFn = makeFn(
       'McpProxyFn',
       'dist/snapshot-proxy/bundle/mcp-proxy',
       {
-        timeout: props.mcpProxyTimeout ?? Duration.seconds(29),
-        memorySize: props.mcpProxyMemorySize ?? 512,
+        timeout: Duration.seconds(29),
+        memorySize: 512,
       },
     );
 
@@ -290,28 +262,23 @@ export class SnapshotProxy extends Construct {
       integration: new integrations.HttpLambdaIntegration(id_, fn),
     });
 
-    const corsPreflight =
-      props.cors === false
-        ? undefined
-        : {
-            allowOrigins: props.cors?.allowOrigins ?? ['*'],
-            allowMethods: [
-              apigwv2.CorsHttpMethod.GET,
-              apigwv2.CorsHttpMethod.POST,
-              apigwv2.CorsHttpMethod.DELETE,
-              apigwv2.CorsHttpMethod.OPTIONS,
-            ],
-            allowHeaders: props.cors?.allowHeaders ?? DEFAULT_CORS_HEADERS,
-            maxAge: props.cors?.maxAge ?? Duration.minutes(10),
-          };
-
     this.httpApi = new HttpApi(this, 'HttpApi', {
       apiName: \`\${id}-mcp-auth-proxy\`,
       description: 'MCP-compatible OAuth proxy for Amazon Cognito',
-      corsPreflight,
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [
+          apigwv2.CorsHttpMethod.GET,
+          apigwv2.CorsHttpMethod.POST,
+          apigwv2.CorsHttpMethod.DELETE,
+          apigwv2.CorsHttpMethod.OPTIONS,
+        ],
+        allowHeaders: CORS_HEADERS,
+        maxAge: Duration.minutes(10),
+      },
       throttle: {
-        rateLimit: props.throttling?.rateLimit ?? DEFAULT_RATE_LIMIT,
-        burstLimit: props.throttling?.burstLimit ?? DEFAULT_BURST_LIMIT,
+        rateLimit: RATE_LIMIT,
+        burstLimit: BURST_LIMIT,
       },
       operations: OPERATIONS,
       integrations: {
