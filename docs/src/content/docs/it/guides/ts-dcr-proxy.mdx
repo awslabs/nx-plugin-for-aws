@@ -1,0 +1,379 @@
+---
+title: DCR Proxy
+description: Genera un proxy OAuth Dynamic Client Registration per server MCP autenticati con Cognito
+generator: ts#dcr-proxy
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Il generatore DCR Proxy crea un proxy OAuth [Dynamic Client Registration (DCR)](https://datatracker.ietf.org/doc/html/rfc7591) davanti a un Amazon Cognito User Pool.
+
+I client MCP (come Claude Code, Kiro CLI o MCP Inspector) si aspettano di autenticarsi contro un server di autorizzazione OAuth che supporta Dynamic Client Registration e metadata discovery. Amazon Cognito non supporta DCR nativamente, e il suo App Client secret non deve mai essere esposto a un client pubblico. Questo proxy colma questa lacuna: mantiene intatto il flusso Cognito Hosted UI, implementa DCR, inietta l'App Client secret lato server durante lo scambio del token e inoltra il traffico MCP al tuo server MCP upstream.
+
+## Utilizzo
+
+### Generare un DCR proxy
+
+<RunGenerator generator="ts#dcr-proxy" />
+
+### Opzioni
+
+<GeneratorParameters generator="ts#dcr-proxy" />
+
+## Output del generatore
+
+Il generatore crea un <Link path="/guides/typescript-project">progetto TypeScript</Link> autonomo contenente i Lambda handler e l'infrastruttura per distribuirli in base al tuo `iacProvider` selezionato.
+
+<FileTree>
+
+- \<dcr-proxy-name>
+  - src/
+    - handlers/
+      - authorization-server-metadata.ts Serve `/.well-known/oauth-authorization-server` e `/.well-known/openid-configuration`
+      - protected-resource-metadata.ts Serve `/.well-known/oauth-protected-resource`
+      - register.ts RFC 7591 Dynamic Client Registration
+      - authorize.ts Reindirizza alla Cognito Hosted UI
+      - token.ts Inietta l'App Client secret e scambia il token
+      - mcp-proxy.ts Inoltra le richieste `/mcp` al server MCP upstream
+
+</FileTree>
+
+Gli handler sono raggruppati indipendentemente con [Rolldown](https://rolldown.rs/), e entrambi i provider IaC fanno riferimento all'output del bundle risultante.
+
+### Infrastruttura
+
+<Snippet name="shared-constructs" />
+
+Per distribuire il proxy, vengono generati i seguenti file:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - dcr-proxies
+        - \<dcr-proxy-name>
+          - \<dcr-proxy-name>.ts Costrutto CDK che distribuisce il proxy
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - dcr-proxies
+        - \<dcr-proxy-name>
+          - \<dcr-proxy-name>.tf Modulo Terraform che distribuisce il proxy
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+L'infrastruttura fornisce un'API Gateway HTTP API con sei funzioni Lambda collegate alle seguenti route:
+
+| Route | Descrizione |
+| --- | --- |
+| `GET /.well-known/oauth-protected-resource` | Metadati della risorsa protetta |
+| `GET /.well-known/oauth-authorization-server` | Metadati del server di autorizzazione |
+| `GET /.well-known/openid-configuration` | Configurazione OpenID (servita dall'handler dei metadati del server di autorizzazione) |
+| `POST /register` | Dynamic Client Registration |
+| `GET /authorize` | Autorizzazione (reindirizza alla Cognito Hosted UI) |
+| `POST /oauth/token` | Scambio del token (inietta l'App Client secret) |
+| `ANY /mcp` | Proxy al server MCP upstream |
+
+Solo il token handler ha accesso in lettura all'App Client secret di Cognito in Secrets Manager.
+
+## Distribuzione del DCR Proxy
+
+Il proxy non crea le tue risorse Cognito o il tuo server MCP. Invece, inietti gli identificatori delle risorse gestite altrove (sia generate da questo plugin che fornite separatamente), mantenendo il proxy disaccoppiato da come tali risorse vengono fornite.
+
+Fornisci:
+
+- L'id del Cognito User Pool e l'id dell'App Client
+- L'ARN di un secret di Secrets Manager che contiene l'App Client secret. Il token handler lo legge a runtime; il valore non viene mai esposto al client.
+- L'URL di base del dominio Cognito Hosted UI
+- L'URL completo del tuo server MCP upstream
+
+<Infrastructure>
+<Fragment slot="cdk">
+Istanzia il costrutto generato nel tuo stack, passando le proprietà richieste:
+
+```typescript
+import { DcrProxy } from ':my-scope/common-constructs';
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: userPool.userPoolId,
+  userPoolClientId: userPoolClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: userPoolDomain.baseUrl(),
+  upstreamUrl: 'https://my-agentcore-runtime-url/mcp',
+});
+```
+
+Il costrutto espone gli endpoint del proxy (`proxyUrl`, `mcpUrl`, `metadataUrl`, `tokenEndpoint`, `registrationEndpoint`) come proprietà readonly.
+</Fragment>
+<Fragment slot="terraform">
+Fai riferimento al modulo generato dalla tua configurazione Terraform, passando le variabili richieste:
+
+```hcl
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = aws_cognito_user_pool.main.id
+  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = "https://my-agentcore-runtime-url/mcp"
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+
+Il modulo espone gli endpoint del proxy (`proxy_url`, `mcp_url`, `metadata_url`, `token_endpoint`, `registration_endpoint`) come output.
+</Fragment>
+</Infrastructure>
+
+:::note
+Il proxy `/mcp` utilizza le integrazioni API Gateway HTTP API, che hanno un timeout fisso di 29 secondi. Le richieste upstream di lunga durata vengono bufferizzate dal proxy anziché trasmesse in streaming.
+:::
+
+### Fronting di un AgentCore Gateway
+
+Un upstream comune è un [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) autenticato con Cognito. Crea un singolo User Pool e App Client, autorizza quell'App Client sul gateway, quindi passa gli **stessi** identificatori al DCR proxy. L'`upstreamUrl` del proxy è l'URL del gateway.
+
+Il gateway qui sotto è un semplice costrutto `aws-cdk-lib/aws-bedrockagentcore` configurato per l'autenticazione inbound Cognito — non il gateway autenticato IAM emesso dal generatore `agentcore-gateway`, che non è compatibile con il flusso OAuth del proxy.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import { DcrProxy } from ':my-scope/common-constructs';
+import { UserPool } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import {
+  Gateway,
+  GatewayAuthorizer,
+  McpProtocolConfiguration,
+  MCPProtocolVersion,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+
+// Singolo User Pool e App Client condivisi dal gateway e dal proxy.
+// Registra gli URL di callback utilizzati dai tuoi client (vedi sotto).
+const userPool = new UserPool(this, 'UserPool');
+const userPoolClient = userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    callbackUrls: [
+      'http://localhost:41100/callback',
+      // Callback utilizzato da Claude Desktop
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+// Cognito Hosted UI richiede un dominio — il proxy reindirizza i flussi OAuth qui.
+// Riutilizza il tuo dominio esistente se il User Pool ne ha già uno.
+const userPoolDomain = userPool.addDomain('Domain', {
+  cognitoDomain: { domainPrefix: 'my-dcr-proxy' },
+});
+
+// Memorizza l'App Client secret in Secrets Manager per il token handler da leggere
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: userPoolClient.userPoolClientSecret,
+});
+
+// Un AgentCore Gateway che autorizza i JWT inbound emessi per l'App Client
+const gateway = new Gateway(this, 'Gateway', {
+  protocolConfiguration: new McpProtocolConfiguration({
+    supportedVersions: [MCPProtocolVersion.MCP_2025_06_18],
+  }),
+  authorizerConfiguration: GatewayAuthorizer.usingCognito({
+    userPool,
+    allowedClients: [userPoolClient],
+  }),
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: userPool.userPoolId,
+  userPoolClientId: userPoolClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: userPoolDomain.baseUrl(),
+  upstreamUrl: gateway.gatewayUrl ?? '',
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Singolo User Pool e App Client condivisi dal gateway e dal proxy.
+# Registra gli URL di callback utilizzati dai tuoi client (vedi sotto).
+resource "aws_cognito_user_pool" "main" {
+  name = "my-dcr-proxy"
+}
+
+resource "aws_cognito_user_pool_client" "main" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = aws_cognito_user_pool.main.id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  callback_urls = [
+    "http://localhost:41100/callback",
+    # Callback utilizzato da Claude Desktop
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+
+# Cognito Hosted UI richiede un dominio — il proxy reindirizza i flussi OAuth qui.
+# Riutilizza il tuo dominio esistente se il User Pool ne ha già uno.
+resource "aws_cognito_user_pool_domain" "main" {
+  domain       = "my-dcr-proxy"
+  user_pool_id = aws_cognito_user_pool.main.id
+}
+
+# Memorizza l'App Client secret in Secrets Manager per il token handler da leggere
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.main.client_secret
+}
+
+# Ruolo di esecuzione assunto dal gateway per raggiungere i servizi AWS.
+resource "aws_iam_role" "gateway" {
+  name = "my-dcr-proxy-gateway-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "bedrock-agentcore.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+# Un AgentCore Gateway che autorizza i JWT inbound emessi per l'App Client.
+# Questa è una semplice risorsa gateway configurata per l'autenticazione inbound Cognito — non
+# il gateway autenticato IAM emesso dal generatore `agentcore-gateway`.
+resource "aws_bedrockagentcore_gateway" "main" {
+  name          = "my-dcr-proxy-gateway"
+  role_arn      = aws_iam_role.gateway.arn
+  protocol_type = "MCP"
+
+  authorizer_type = "CUSTOM_JWT"
+  authorizer_configuration {
+    custom_jwt_authorizer {
+      discovery_url   = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/openid-configuration"
+      allowed_clients = [aws_cognito_user_pool_client.main.id]
+    }
+  }
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = aws_cognito_user_pool.main.id
+  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = aws_bedrockagentcore_gateway.main.gateway_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Consentire gli URI di reindirizzamento del client
+
+Poiché il proxy implementa Dynamic Client Registration virtualmente — non esiste un Cognito App Client per client — ogni client MCP si autentica attraverso il **singolo App Client** che passi al proxy. Durante il flusso OAuth il proxy inoltra il `redirect_uri` del client alla Cognito Hosted UI invariato, quindi Cognito esegue il controllo autorevole: il callback deve essere registrato come **URL di callback su quell'App Client**, altrimenti Cognito rifiuta il login.
+
+Questo è un effetto collaterale del design DCR virtuale. Un client può registrare qualsiasi `redirect_uri` con il proxy, ma il login ha successo solo se quell'URL esatto è uno degli URL di callback dell'App Client. Cognito confronta gli URL di callback esattamente, inclusa la porta, quindi i client che ascoltano su una porta effimera casuale non possono essere coperti da un wildcard — devi fissare ogni client a un URL di callback fisso e registrare quell'URL esatto sull'App Client.
+
+Aggiungi gli URL di callback utilizzati dai tuoi client quando crei l'App Client:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+const userPoolClient = userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    callbackUrls: [
+      // Client locali: fissa a una porta fissa e non comune piuttosto che a una predefinita
+      'http://localhost:41100/callback',
+      // Callback utilizzato da Claude Desktop
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  # ...
+  generate_secret                     = true
+  allowed_oauth_flows                 = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  callback_urls = [
+    # Client locali: fissa a una porta fissa e non comune piuttosto che a una predefinita
+    "http://localhost:41100/callback",
+    # Callback utilizzato da Claude Desktop
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+Registra solo gli URL di callback di cui ti fidi — qualsiasi client che può guidare un browser a uno di questi URL può completare un login contro il tuo User Pool.
+:::
+
+## Consumare un server MCP con proxy
+
+Il proxy consente ai client MCP di autenticarsi contro il tuo Cognito User Pool senza alcuna configurazione specifica del client oltre all'URL del proxy. Quando un client si connette all'endpoint `/mcp`, scopre i metadati OAuth (tramite `/.well-known/oauth-protected-resource` e `/.well-known/oauth-authorization-server`), si registra dinamicamente e guida l'utente attraverso il login Cognito Hosted UI. Il proxy inietta l'App Client secret durante lo scambio del token, quindi il client non ne ha mai bisogno.
+
+Per connettere un client, puntalo all'`mcpUrl` del proxy (cioè `<proxyUrl>/mcp`). Gli esempi seguenti presuppongono che il tuo proxy sia distribuito su `https://my-proxy.example.com`.
+
+:::note
+Ogni client utilizza un URL di callback durante il flusso OAuth. Quell'URL esatto — inclusa la sua porta — deve essere registrato come [URL di callback sul tuo Cognito App Client](#consentire-gli-uri-di-reindirizzamento-del-client), altrimenti il login fallisce. Dove un client altrimenti sceglierebbe una porta casuale, fissalo a un valore fisso e registra quel valore.
+:::
+
+### Claude Code
+
+Aggiungi il server con proxy con il comando [`claude mcp add`](https://code.claude.com/docs/en/mcp), utilizzando il trasporto HTTP. Per impostazione predefinita Claude Code ascolta su una porta di callback casuale; passa `--callback-port` per fissarla alla porta registrata sul tuo App Client (`41100` negli esempi sopra). Claude Code utilizza sempre il percorso `/callback`, quindi l'URI di reindirizzamento risultante è `http://localhost:41100/callback`:
+
+```bash
+claude mcp add --transport http --callback-port 41100 my-proxied-server https://my-proxy.example.com/mcp
+```
+
+Quando invochi per la prima volta uno strumento dal server, Claude Code apre la Cognito Hosted UI per autenticarsi prima che la richiesta venga inoltrata upstream.
+
+### Kiro CLI
+
+Aggiungi il server alla tua configurazione MCP di [Kiro CLI](https://kiro.dev/docs/cli/mcp/), utilizzando il trasporto HTTP. Senza un `oauth.redirectUri` esplicito Kiro sceglie una porta di callback casuale; impostalo sull'URL registrato sul tuo App Client in modo che la porta e il percorso corrispondano esattamente:
+
+```json
+{
+  "mcpServers": {
+    "my-proxied-server": {
+      "type": "http",
+      "url": "https://my-proxy.example.com/mcp",
+      "oauth": {
+        "redirectUri": "http://localhost:41100/callback"
+      }
+    }
+  }
+}
+```
+
+Kiro CLI attiva il login Cognito Hosted UI al primo utilizzo e gestisce i token risultanti per le richieste successive.
+
+:::tip
+Qualsiasi client MCP che supporta il trasporto HTTP Streamable insieme all'autorizzazione OAuth e Dynamic Client Registration può connettersi al proxy allo stesso modo — fornisci l'URL `/mcp` e il client gestisce discovery, registrazione e login per te.
+:::

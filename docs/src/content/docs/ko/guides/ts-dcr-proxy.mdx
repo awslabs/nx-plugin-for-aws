@@ -1,0 +1,379 @@
+---
+title: DCR Proxy
+description: Cognito 인증 MCP 서버를 위한 OAuth Dynamic Client Registration 프록시 생성
+generator: ts#dcr-proxy
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+DCR Proxy 생성기는 Amazon Cognito User Pool 앞에 OAuth [Dynamic Client Registration (DCR)](https://datatracker.ietf.org/doc/html/rfc7591) 프록시를 생성합니다.
+
+MCP 클라이언트(Claude Code, Kiro CLI 또는 MCP Inspector 등)는 Dynamic Client Registration 및 메타데이터 검색을 지원하는 OAuth 인증 서버에 대해 인증할 것으로 예상합니다. Amazon Cognito는 DCR을 기본적으로 지원하지 않으며, App Client 시크릿은 절대 공개 클라이언트에 노출되어서는 안 됩니다. 이 프록시는 그 격차를 메웁니다: Cognito Hosted UI 플로우를 그대로 유지하고, DCR을 구현하며, 토큰 교환 중 서버 측에서 App Client 시크릿을 주입하고, MCP 트래픽을 업스트림 MCP 서버로 전달합니다.
+
+## 사용법
+
+### DCR 프록시 생성
+
+<RunGenerator generator="ts#dcr-proxy" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#dcr-proxy" />
+
+## 생성기 출력
+
+생성기는 Lambda 핸들러를 포함하는 독립형 <Link path="/guides/typescript-project">TypeScript 프로젝트</Link>와 선택한 `iacProvider`를 기반으로 배포할 인프라를 생성합니다.
+
+<FileTree>
+
+- \<dcr-proxy-name>
+  - src/
+    - handlers/
+      - authorization-server-metadata.ts `/.well-known/oauth-authorization-server` 및 `/.well-known/openid-configuration` 제공
+      - protected-resource-metadata.ts `/.well-known/oauth-protected-resource` 제공
+      - register.ts RFC 7591 Dynamic Client Registration
+      - authorize.ts Cognito Hosted UI로 리디렉션
+      - token.ts App Client 시크릿을 주입하고 토큰 교환
+      - mcp-proxy.ts `/mcp` 요청을 업스트림 MCP 서버로 프록시
+
+</FileTree>
+
+핸들러는 [Rolldown](https://rolldown.rs/)으로 독립적으로 번들링되며, 두 IaC 제공자 모두 결과 번들 출력을 참조합니다.
+
+### 인프라
+
+<Snippet name="shared-constructs" />
+
+프록시 배포를 위해 다음 파일이 생성됩니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - dcr-proxies
+        - \<dcr-proxy-name>
+          - \<dcr-proxy-name>.ts 프록시를 배포하는 CDK 구성
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - dcr-proxies
+        - \<dcr-proxy-name>
+          - \<dcr-proxy-name>.tf 프록시를 배포하는 Terraform 모듈
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+인프라는 다음 라우트에 연결된 6개의 Lambda 함수가 있는 API Gateway HTTP API를 프로비저닝합니다:
+
+| 라우트 | 설명 |
+| --- | --- |
+| `GET /.well-known/oauth-protected-resource` | 보호된 리소스 메타데이터 |
+| `GET /.well-known/oauth-authorization-server` | 인증 서버 메타데이터 |
+| `GET /.well-known/openid-configuration` | OpenID 구성 (인증 서버 메타데이터 핸들러에서 제공) |
+| `POST /register` | Dynamic Client Registration |
+| `GET /authorize` | 인증 (Cognito Hosted UI로 리디렉션) |
+| `POST /oauth/token` | 토큰 교환 (App Client 시크릿 주입) |
+| `ANY /mcp` | 업스트림 MCP 서버로 프록시 |
+
+토큰 핸들러만 Secrets Manager의 Cognito App Client 시크릿에 대한 읽기 액세스 권한이 부여됩니다.
+
+## DCR Proxy 배포
+
+프록시는 Cognito 리소스나 MCP 서버를 생성하지 않습니다. 대신, 다른 곳에서 관리되는 리소스의 식별자를 주입합니다(이 플러그인에서 생성되었든 별도로 프로비저닝되었든). 이를 통해 프록시가 해당 리소스가 프로비저닝되는 방식과 분리됩니다.
+
+다음을 제공해야 합니다:
+
+- Cognito User Pool id 및 App Client id
+- App Client 시크릿을 보유하는 Secrets Manager 시크릿의 ARN. 토큰 핸들러는 런타임에 이를 읽으며, 값은 클라이언트에 절대 노출되지 않습니다.
+- Cognito Hosted UI 도메인의 기본 URL
+- 업스트림 MCP 서버의 전체 URL
+
+<Infrastructure>
+<Fragment slot="cdk">
+스택에서 생성된 구성을 인스턴스화하고 필요한 속성을 전달합니다:
+
+```typescript
+import { DcrProxy } from ':my-scope/common-constructs';
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: userPool.userPoolId,
+  userPoolClientId: userPoolClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: userPoolDomain.baseUrl(),
+  upstreamUrl: 'https://my-agentcore-runtime-url/mcp',
+});
+```
+
+구성은 프록시 엔드포인트(`proxyUrl`, `mcpUrl`, `metadataUrl`, `tokenEndpoint`, `registrationEndpoint`)를 읽기 전용 속성으로 노출합니다.
+</Fragment>
+<Fragment slot="terraform">
+Terraform 구성에서 생성된 모듈을 참조하고 필요한 변수를 전달합니다:
+
+```hcl
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = aws_cognito_user_pool.main.id
+  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = "https://my-agentcore-runtime-url/mcp"
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+
+모듈은 프록시 엔드포인트(`proxy_url`, `mcp_url`, `metadata_url`, `token_endpoint`, `registration_endpoint`)를 출력으로 노출합니다.
+</Fragment>
+</Infrastructure>
+
+:::note
+`/mcp` 프록시는 API Gateway HTTP API 통합을 사용하며, 하드 29초 타임아웃이 있습니다. 장기 실행 업스트림 요청은 스트리밍되지 않고 프록시에 의해 버퍼링됩니다.
+:::
+
+### AgentCore Gateway 앞에 배치
+
+일반적인 업스트림은 Cognito로 인증된 [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)입니다. 단일 User Pool 및 App Client를 생성하고, 게이트웨이에서 해당 App Client를 승인한 다음, **동일한** 식별자를 DCR 프록시에 전달합니다. 프록시의 `upstreamUrl`은 게이트웨이의 URL입니다.
+
+아래 게이트웨이는 Cognito 인바운드 인증으로 구성된 일반 `aws-cdk-lib/aws-bedrockagentcore` 구성입니다 — 프록시의 OAuth 플로우와 호환되지 않는 `agentcore-gateway` 생성기에서 생성된 IAM 인증 게이트웨이가 아닙니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import { DcrProxy } from ':my-scope/common-constructs';
+import { UserPool } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import {
+  Gateway,
+  GatewayAuthorizer,
+  McpProtocolConfiguration,
+  MCPProtocolVersion,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+
+// 게이트웨이와 프록시가 공유하는 단일 User Pool 및 App Client.
+// 클라이언트가 사용하는 콜백 URL을 등록합니다 (아래 참조).
+const userPool = new UserPool(this, 'UserPool');
+const userPoolClient = userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    callbackUrls: [
+      'http://localhost:41100/callback',
+      // Claude Desktop에서 사용하는 콜백
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+// Cognito Hosted UI에는 도메인이 필요합니다 — 프록시는 OAuth 플로우를 여기로 리디렉션합니다.
+// User Pool에 이미 도메인이 있는 경우 기존 도메인을 재사용합니다.
+const userPoolDomain = userPool.addDomain('Domain', {
+  cognitoDomain: { domainPrefix: 'my-dcr-proxy' },
+});
+
+// 토큰 핸들러가 읽을 수 있도록 Secrets Manager에 App Client 시크릿 저장
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: userPoolClient.userPoolClientSecret,
+});
+
+// App Client에 대해 발급된 인바운드 JWT를 승인하는 AgentCore Gateway
+const gateway = new Gateway(this, 'Gateway', {
+  protocolConfiguration: new McpProtocolConfiguration({
+    supportedVersions: [MCPProtocolVersion.MCP_2025_06_18],
+  }),
+  authorizerConfiguration: GatewayAuthorizer.usingCognito({
+    userPool,
+    allowedClients: [userPoolClient],
+  }),
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: userPool.userPoolId,
+  userPoolClientId: userPoolClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: userPoolDomain.baseUrl(),
+  upstreamUrl: gateway.gatewayUrl ?? '',
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# 게이트웨이와 프록시가 공유하는 단일 User Pool 및 App Client.
+# 클라이언트가 사용하는 콜백 URL을 등록합니다 (아래 참조).
+resource "aws_cognito_user_pool" "main" {
+  name = "my-dcr-proxy"
+}
+
+resource "aws_cognito_user_pool_client" "main" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = aws_cognito_user_pool.main.id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  callback_urls = [
+    "http://localhost:41100/callback",
+    # Claude Desktop에서 사용하는 콜백
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+
+# Cognito Hosted UI에는 도메인이 필요합니다 — 프록시는 OAuth 플로우를 여기로 리디렉션합니다.
+# User Pool에 이미 도메인이 있는 경우 기존 도메인을 재사용합니다.
+resource "aws_cognito_user_pool_domain" "main" {
+  domain       = "my-dcr-proxy"
+  user_pool_id = aws_cognito_user_pool.main.id
+}
+
+# 토큰 핸들러가 읽을 수 있도록 Secrets Manager에 App Client 시크릿 저장
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.main.client_secret
+}
+
+# 게이트웨이가 AWS 서비스에 도달하기 위해 가정하는 실행 역할.
+resource "aws_iam_role" "gateway" {
+  name = "my-dcr-proxy-gateway-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "bedrock-agentcore.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+# App Client에 대해 발급된 인바운드 JWT를 승인하는 AgentCore Gateway.
+# 이것은 Cognito 인바운드 인증으로 구성된 일반 게이트웨이 리소스입니다 —
+# `agentcore-gateway` 생성기에서 생성된 IAM 인증 게이트웨이가 아닙니다.
+resource "aws_bedrockagentcore_gateway" "main" {
+  name          = "my-dcr-proxy-gateway"
+  role_arn      = aws_iam_role.gateway.arn
+  protocol_type = "MCP"
+
+  authorizer_type = "CUSTOM_JWT"
+  authorizer_configuration {
+    custom_jwt_authorizer {
+      discovery_url   = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/openid-configuration"
+      allowed_clients = [aws_cognito_user_pool_client.main.id]
+    }
+  }
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = aws_cognito_user_pool.main.id
+  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = aws_bedrockagentcore_gateway.main.gateway_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 클라이언트 리디렉션 URI 허용
+
+프록시는 Dynamic Client Registration을 가상으로 구현하기 때문에 — 클라이언트별 Cognito App Client가 없습니다 — 모든 MCP 클라이언트는 프록시에 전달하는 **단일 App Client**를 통해 인증합니다. OAuth 플로우 중에 프록시는 클라이언트의 `redirect_uri`를 변경하지 않고 Cognito Hosted UI로 전달하므로 Cognito가 권한 있는 검사를 수행합니다: 콜백은 **해당 App Client의 콜백 URL**로 등록되어야 하며, 그렇지 않으면 Cognito가 로그인을 거부합니다.
+
+이것은 가상 DCR 설계의 부작용입니다. 클라이언트는 프록시에 모든 `redirect_uri`를 등록할 수 있지만, 해당 정확한 URL이 App Client의 콜백 URL 중 하나인 경우에만 로그인이 성공합니다. Cognito는 포트를 포함하여 콜백 URL을 정확히 일치시키므로 임의의 임시 포트에서 수신 대기하는 클라이언트는 와일드카드로 처리할 수 없습니다 — 각 클라이언트를 고정 콜백 URL에 고정하고 해당 정확한 URL을 App Client에 등록해야 합니다.
+
+App Client를 생성할 때 클라이언트가 사용하는 콜백 URL을 추가합니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+const userPoolClient = userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    callbackUrls: [
+      // 로컬 클라이언트: 기본 포트가 아닌 고정된 일반적이지 않은 포트에 고정
+      'http://localhost:41100/callback',
+      // Claude Desktop에서 사용하는 콜백
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  # ...
+  generate_secret                     = true
+  allowed_oauth_flows                 = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  callback_urls = [
+    # 로컬 클라이언트: 기본 포트가 아닌 고정된 일반적이지 않은 포트에 고정
+    "http://localhost:41100/callback",
+    # Claude Desktop에서 사용하는 콜백
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+신뢰할 수 있는 콜백 URL만 등록하십시오 — 이러한 URL 중 하나로 브라우저를 유도할 수 있는 모든 클라이언트는 User Pool에 대한 로그인을 완료할 수 있습니다.
+:::
+
+## 프록시된 MCP 서버 사용
+
+프록시를 사용하면 MCP 클라이언트가 프록시 URL 외에 클라이언트별 구성 없이 Cognito User Pool에 대해 인증할 수 있습니다. 클라이언트가 `/mcp` 엔드포인트에 연결하면 OAuth 메타데이터를 검색하고(`/.well-known/oauth-protected-resource` 및 `/.well-known/oauth-authorization-server`를 통해), 동적으로 자신을 등록하고, 사용자를 Cognito Hosted UI 로그인으로 안내합니다. 프록시는 토큰 교환 중에 App Client 시크릿을 주입하므로 클라이언트는 이를 필요로 하지 않습니다.
+
+클라이언트를 연결하려면 프록시의 `mcpUrl`(즉, `<proxyUrl>/mcp`)을 가리킵니다. 아래 예제는 프록시가 `https://my-proxy.example.com`에 배포되었다고 가정합니다.
+
+:::note
+각 클라이언트는 OAuth 플로우 중에 콜백 URL을 사용합니다. 포트를 포함한 정확한 URL은 [Cognito App Client의 콜백 URL](#allowing-client-redirect-uris)로 등록되어야 하며, 그렇지 않으면 로그인이 실패합니다. 클라이언트가 임의의 포트를 선택하는 경우 고정 값에 고정하고 해당 값을 등록합니다.
+:::
+
+### Claude Code
+
+[`claude mcp add`](https://code.claude.com/docs/en/mcp) 명령을 사용하여 HTTP 전송을 사용하는 프록시된 서버를 추가합니다. 기본적으로 Claude Code는 임의의 콜백 포트에서 수신 대기합니다. `--callback-port`를 전달하여 App Client에 등록된 포트(`41100`, 위 예제)에 고정합니다. Claude Code는 항상 `/callback` 경로를 사용하므로 결과 리디렉션 URI는 `http://localhost:41100/callback`입니다:
+
+```bash
+claude mcp add --transport http --callback-port 41100 my-proxied-server https://my-proxy.example.com/mcp
+```
+
+서버에서 도구를 처음 호출하면 Claude Code는 요청이 업스트림으로 프록시되기 전에 인증하기 위해 Cognito Hosted UI를 엽니다.
+
+### Kiro CLI
+
+HTTP 전송을 사용하여 [Kiro CLI](https://kiro.dev/docs/cli/mcp/) MCP 구성에 서버를 추가합니다. 명시적인 `oauth.redirectUri` 없이 Kiro는 임의의 콜백 포트를 선택합니다. 포트와 경로가 정확히 일치하도록 App Client에 등록된 URL로 설정합니다:
+
+```json
+{
+  "mcpServers": {
+    "my-proxied-server": {
+      "type": "http",
+      "url": "https://my-proxy.example.com/mcp",
+      "oauth": {
+        "redirectUri": "http://localhost:41100/callback"
+      }
+    }
+  }
+}
+```
+
+Kiro CLI는 처음 사용할 때 Cognito Hosted UI 로그인을 트리거하고 후속 요청을 위해 결과 토큰을 관리합니다.
+
+:::tip
+OAuth 인증 및 Dynamic Client Registration과 함께 Streamable HTTP 전송을 지원하는 모든 MCP 클라이언트는 동일한 방식으로 프록시에 연결할 수 있습니다 — `/mcp` URL을 제공하면 클라이언트가 검색, 등록 및 로그인을 처리합니다.
+:::
