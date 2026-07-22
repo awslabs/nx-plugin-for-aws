@@ -186,7 +186,14 @@ module "static_website" {
       'source = "../user-identity/add-callback-url"',
     );
     expect(coreStaticWebsiteContent).toContain(
-      'callback_url = "https://${aws_cloudfront_distribution.website.domain_name}"',
+      'for_each = local.callback_urls',
+    );
+    expect(coreStaticWebsiteContent).toContain('callback_url = each.value');
+    expect(coreStaticWebsiteContent).toContain(
+      '"https://${aws_cloudfront_distribution.website.domain_name}"',
+    );
+    expect(coreStaticWebsiteContent).toContain(
+      'for domain in var.custom_domain_names',
     );
 
     // Read the project-specific static website terraform file
