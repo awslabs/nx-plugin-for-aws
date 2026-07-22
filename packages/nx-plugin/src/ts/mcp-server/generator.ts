@@ -106,6 +106,7 @@ export const tsMcpServerGenerator = async (
       distDir,
       adotVersion:
         TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+      jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
       nodeBaseImage: BASE_IMAGES.node,
       npmVersion: TS_VERSIONS.npm,
     },
