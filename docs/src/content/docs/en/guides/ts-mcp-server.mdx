@@ -79,40 +79,57 @@ If you selected `none` for `infra`, no CDK constructs or Terraform modules are g
 
 ### Adding Tools
 
-Tools are functions that the AI assistant can call to perform actions. You can add new tools in the `server.ts` file:
+Tools are functions that the AI assistant can call to perform actions. Each tool lives in its own file under `tools/` that exports a `register<Name>Tool` function, which you then call from `server.ts`. For example, add `tools/my-tool.ts`:
 
-```typescript
-server.registerTool("toolName", {
-  description: "tool description",
-  inputSchema: { param1: z.string(), param2: z.number() } // Input schema using Zod
-},
-  async ({ param1, param2 }) => {
-    // Tool implementation
-    return {
-      content: [{ type: "text", text: "Result" }]
-    };
-  }
-);
+```typescript title="tools/my-tool.ts"
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+
+export const registerMyTool = (server: McpServer) => {
+  server.registerTool("toolName", {
+    description: "tool description",
+    inputSchema: { param1: z.string(), param2: z.number() } // Input schema using Zod
+  },
+    async ({ param1, param2 }) => {
+      // Tool implementation
+      return {
+        content: [{ type: "text", text: "Result" }]
+      };
+    }
+  );
+};
+```
+
+Then register it in `server.ts`:
+
+```typescript title="server.ts"
+import { registerMyTool } from './tools/my-tool.js';
+
+registerMyTool(server);
 ```
 
 ### Adding Resources
 
-Resources provide context to the AI assistant. You can add static resources from files or dynamic resources:
+Resources provide context to the AI assistant. Like tools, each resource lives in its own file under `resources/` that exports a `register<Name>Resource` function called from `server.ts`. You can add static resources from files or dynamic resources:
 
-```typescript
-const exampleContext = 'some context to return';
+```typescript title="resources/my-resource.ts"
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-server.registerResource('resource-name', 'example://resource', {}, async (uri) => ({
-  contents: [{ uri: uri.href, text: exampleContext }],
-}));
+export const registerMyResource = (server: McpServer) => {
+  const exampleContext = 'some context to return';
 
-// Dynamic resource
-server.registerResource('dynamic-resource', 'dynamic://resource', {}, async (uri) => {
-  const data = await fetchSomeData();
-  return {
-    contents: [{ uri: uri.href, text: data }],
-  };
-});
+  server.registerResource('resource-name', 'example://resource', {}, async (uri) => ({
+    contents: [{ uri: uri.href, text: exampleContext }],
+  }));
+
+  // Dynamic resource
+  server.registerResource('dynamic-resource', 'dynamic://resource', {}, async (uri) => {
+    const data = await fetchSomeData();
+    return {
+      contents: [{ uri: uri.href, text: data }],
+    };
+  });
+};
 ```
 
 ## Configuring with AI Assistants
