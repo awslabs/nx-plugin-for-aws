@@ -362,6 +362,7 @@ export default defineConfig({
                   label: 'agentcore-gateway',
                   link: '/guides/agentcore-gateway',
                 },
+                { label: 'ts#dcr-proxy', link: '/guides/ts-dcr-proxy' },
               ],
             },
             {

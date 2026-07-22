@@ -1,0 +1,379 @@
+---
+title: DCR 代理
+description: 为 Cognito 身份验证的 MCP 服务器生成 OAuth 动态客户端注册代理
+generator: ts#dcr-proxy
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+DCR Proxy 生成器在 Amazon Cognito User Pool 前创建一个 OAuth [动态客户端注册 (DCR)](https://datatracker.ietf.org/doc/html/rfc7591) 代理。
+
+MCP 客户端（如 Claude Code、Kiro CLI 或 MCP Inspector）期望针对支持动态客户端注册和元数据发现的 OAuth 授权服务器进行身份验证。Amazon Cognito 本身不支持 DCR，并且其 App Client 密钥绝不能暴露给公共客户端。此代理弥补了这一差距：它保持 Cognito Hosted UI 流程完整，实现 DCR，在令牌交换期间在服务器端注入 App Client 密钥，并将 MCP 流量转发到您的上游 MCP 服务器。
+
+## 使用方法
+
+### 生成 DCR 代理
+
+<RunGenerator generator="ts#dcr-proxy" />
+
+### 选项
+
+<GeneratorParameters generator="ts#dcr-proxy" />
+
+## 生成器输出
+
+生成器创建一个独立的 <Link path="/guides/typescript-project">TypeScript 项目</Link>，其中包含 Lambda 处理程序，以及基于您选择的 `iacProvider` 部署它们的基础设施。
+
+<FileTree>
+
+- \<dcr-proxy-name>
+  - src/
+    - handlers/
+      - authorization-server-metadata.ts 提供 `/.well-known/oauth-authorization-server` 和 `/.well-known/openid-configuration`
+      - protected-resource-metadata.ts 提供 `/.well-known/oauth-protected-resource`
+      - register.ts RFC 7591 动态客户端注册
+      - authorize.ts 重定向到 Cognito Hosted UI
+      - token.ts 注入 App Client 密钥并交换令牌
+      - mcp-proxy.ts 将 `/mcp` 请求代理到上游 MCP 服务器
+
+</FileTree>
+
+处理程序使用 [Rolldown](https://rolldown.rs/) 独立打包，两个 IaC 提供程序都引用生成的打包输出。
+
+### 基础设施
+
+<Snippet name="shared-constructs" />
+
+为了部署代理，会生成以下文件：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - dcr-proxies
+        - \<dcr-proxy-name>
+          - \<dcr-proxy-name>.ts 部署代理的 CDK 构造
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - dcr-proxies
+        - \<dcr-proxy-name>
+          - \<dcr-proxy-name>.tf 部署代理的 Terraform 模块
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+基础设施配置一个 API Gateway HTTP API，其中包含连接到以下路由的六个 Lambda 函数：
+
+| 路由 | 描述 |
+| --- | --- |
+| `GET /.well-known/oauth-protected-resource` | 受保护资源元数据 |
+| `GET /.well-known/oauth-authorization-server` | 授权服务器元数据 |
+| `GET /.well-known/openid-configuration` | OpenID 配置（由授权服务器元数据处理程序提供） |
+| `POST /register` | 动态客户端注册 |
+| `GET /authorize` | 授权（重定向到 Cognito Hosted UI） |
+| `POST /oauth/token` | 令牌交换（注入 App Client 密钥） |
+| `ANY /mcp` | 代理到上游 MCP 服务器 |
+
+只有令牌处理程序被授予对 Secrets Manager 中 Cognito App Client 密钥的读取访问权限。
+
+## 部署 DCR 代理
+
+代理不会创建您的 Cognito 资源或 MCP 服务器。相反，您注入在其他地方管理的资源标识符（无论是由此插件生成还是单独配置），使代理与这些资源的配置方式解耦。
+
+您需要提供：
+
+- Cognito User Pool id 和 App Client id
+- 保存 App Client 密钥的 Secrets Manager 密钥的 ARN。令牌处理程序在运行时读取此密钥；该值永远不会暴露给客户端。
+- Cognito Hosted UI 域的基础 URL
+- 上游 MCP 服务器的完整 URL
+
+<Infrastructure>
+<Fragment slot="cdk">
+在您的堆栈中实例化生成的构造，传递所需的属性：
+
+```typescript
+import { DcrProxy } from ':my-scope/common-constructs';
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: userPool.userPoolId,
+  userPoolClientId: userPoolClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: userPoolDomain.baseUrl(),
+  upstreamUrl: 'https://my-agentcore-runtime-url/mcp',
+});
+```
+
+该构造将代理端点（`proxyUrl`、`mcpUrl`、`metadataUrl`、`tokenEndpoint`、`registrationEndpoint`）作为只读属性公开。
+</Fragment>
+<Fragment slot="terraform">
+从您的 Terraform 配置中引用生成的模块，传递所需的变量：
+
+```hcl
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = aws_cognito_user_pool.main.id
+  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = "https://my-agentcore-runtime-url/mcp"
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+
+该模块将代理端点（`proxy_url`、`mcp_url`、`metadata_url`、`token_endpoint`、`registration_endpoint`）作为输出公开。
+</Fragment>
+</Infrastructure>
+
+:::note
+`/mcp` 代理使用 API Gateway HTTP API 集成，其硬性超时时间为 29 秒。长时间运行的上游请求由代理缓冲而不是流式传输。
+:::
+
+### 作为 AgentCore Gateway 的前端
+
+一个常见的上游是使用 Cognito 进行身份验证的 [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)。创建单个 User Pool 和 App Client，在网关上授权该 App Client，然后将**相同的**标识符传递给 DCR 代理。代理的 `upstreamUrl` 是网关的 URL。
+
+下面的网关是一个配置为 Cognito 入站身份验证的普通 `aws-cdk-lib/aws-bedrockagentcore` 构造 — 而不是由 `agentcore-gateway` 生成器生成的 IAM 身份验证网关，后者与代理的 OAuth 流程不兼容。
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import { DcrProxy } from ':my-scope/common-constructs';
+import { UserPool } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import {
+  Gateway,
+  GatewayAuthorizer,
+  McpProtocolConfiguration,
+  MCPProtocolVersion,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+
+// 网关和代理共享的单个 User Pool 和 App Client。
+// 注册您的客户端使用的回调 URL（见下文）。
+const userPool = new UserPool(this, 'UserPool');
+const userPoolClient = userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    callbackUrls: [
+      'http://localhost:41100/callback',
+      // Claude Desktop 使用的回调
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+// Cognito Hosted UI 需要一个域 — 代理将 OAuth 流程重定向到这里。
+// 如果 User Pool 已经有域，请重用您现有的域。
+const userPoolDomain = userPool.addDomain('Domain', {
+  cognitoDomain: { domainPrefix: 'my-dcr-proxy' },
+});
+
+// 将 App Client 密钥存储在 Secrets Manager 中供令牌处理程序读取
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: userPoolClient.userPoolClientSecret,
+});
+
+// 授权为 App Client 颁发的入站 JWT 的 AgentCore Gateway
+const gateway = new Gateway(this, 'Gateway', {
+  protocolConfiguration: new McpProtocolConfiguration({
+    supportedVersions: [MCPProtocolVersion.MCP_2025_06_18],
+  }),
+  authorizerConfiguration: GatewayAuthorizer.usingCognito({
+    userPool,
+    allowedClients: [userPoolClient],
+  }),
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: userPool.userPoolId,
+  userPoolClientId: userPoolClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  cognitoHostedUiBase: userPoolDomain.baseUrl(),
+  upstreamUrl: gateway.gatewayUrl ?? '',
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# 网关和代理共享的单个 User Pool 和 App Client。
+# 注册您的客户端使用的回调 URL（见下文）。
+resource "aws_cognito_user_pool" "main" {
+  name = "my-dcr-proxy"
+}
+
+resource "aws_cognito_user_pool_client" "main" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = aws_cognito_user_pool.main.id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  callback_urls = [
+    "http://localhost:41100/callback",
+    # Claude Desktop 使用的回调
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+
+# Cognito Hosted UI 需要一个域 — 代理将 OAuth 流程重定向到这里。
+# 如果 User Pool 已经有域，请重用您现有的域。
+resource "aws_cognito_user_pool_domain" "main" {
+  domain       = "my-dcr-proxy"
+  user_pool_id = aws_cognito_user_pool.main.id
+}
+
+# 将 App Client 密钥存储在 Secrets Manager 中供令牌处理程序读取
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.main.client_secret
+}
+
+# 网关用于访问 AWS 服务的执行角色。
+resource "aws_iam_role" "gateway" {
+  name = "my-dcr-proxy-gateway-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "bedrock-agentcore.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+# 授权为 App Client 颁发的入站 JWT 的 AgentCore Gateway。
+# 这是一个配置为 Cognito 入站身份验证的普通网关资源 — 而不是
+# 由 `agentcore-gateway` 生成器生成的 IAM 身份验证网关。
+resource "aws_bedrockagentcore_gateway" "main" {
+  name          = "my-dcr-proxy-gateway"
+  role_arn      = aws_iam_role.gateway.arn
+  protocol_type = "MCP"
+
+  authorizer_type = "CUSTOM_JWT"
+  authorizer_configuration {
+    custom_jwt_authorizer {
+      discovery_url   = "https://cognito-idp.${data.aws_region.current.region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/openid-configuration"
+      allowed_clients = [aws_cognito_user_pool_client.main.id]
+    }
+  }
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = aws_cognito_user_pool.main.id
+  user_pool_client_id       = aws_cognito_user_pool_client.main.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = aws_bedrockagentcore_gateway.main.gateway_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 允许客户端重定向 URI
+
+因为代理虚拟地实现动态客户端注册 — 没有每个客户端的 Cognito App Client — 每个 MCP 客户端都通过您传递给代理的**单个 App Client** 进行身份验证。在 OAuth 流程期间，代理将客户端的 `redirect_uri` 原封不动地转发到 Cognito Hosted UI，因此 Cognito 执行权威检查：回调必须注册为**该 App Client 上的回调 URL**，否则 Cognito 会拒绝登录。
+
+这是虚拟 DCR 设计的副作用。客户端可以向代理注册任何 `redirect_uri`，但只有当该确切 URL 是 App Client 的回调 URL 之一时，登录才会成功。Cognito 精确匹配回调 URL，包括端口，因此监听随机临时端口的客户端无法被通配符覆盖 — 您必须将每个客户端固定到固定的回调 URL，并在 App Client 上注册该确切 URL。
+
+在创建 App Client 时添加您的客户端使用的回调 URL：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+const userPoolClient = userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    callbackUrls: [
+      // 本地客户端：固定到一个不常见的固定端口，而不是默认端口
+      'http://localhost:41100/callback',
+      // Claude Desktop 使用的回调
+      'https://claude.ai/api/mcp/auth_callback',
+    ],
+  },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  # ...
+  generate_secret                     = true
+  allowed_oauth_flows                 = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  callback_urls = [
+    # 本地客户端：固定到一个不常见的固定端口，而不是默认端口
+    "http://localhost:41100/callback",
+    # Claude Desktop 使用的回调
+    "https://claude.ai/api/mcp/auth_callback",
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+只注册您信任的回调 URL — 任何可以将浏览器驱动到这些 URL 之一的客户端都可以完成对您的 User Pool 的登录。
+:::
+
+## 使用代理的 MCP 服务器
+
+代理允许 MCP 客户端针对您的 Cognito User Pool 进行身份验证，除了代理 URL 之外无需任何客户端特定的配置。当客户端连接到 `/mcp` 端点时，它会发现 OAuth 元数据（通过 `/.well-known/oauth-protected-resource` 和 `/.well-known/oauth-authorization-server`），动态注册自己，并引导用户通过 Cognito Hosted UI 登录。代理在令牌交换期间注入 App Client 密钥，因此客户端永远不需要它。
+
+要连接客户端，将其指向代理的 `mcpUrl`（即 `<proxyUrl>/mcp`）。下面的示例假设您的代理部署在 `https://my-proxy.example.com`。
+
+:::note
+每个客户端在 OAuth 流程期间使用一个回调 URL。该确切 URL — 包括其端口 — 必须注册为[您的 Cognito App Client 上的回调 URL](#允许客户端重定向-uri)，否则登录失败。如果客户端会选择随机端口，请将其固定到固定值并注册该值。
+:::
+
+### Claude Code
+
+使用 [`claude mcp add`](https://code.claude.com/docs/en/mcp) 命令添加代理服务器，使用 HTTP 传输。默认情况下，Claude Code 监听随机回调端口；传递 `--callback-port` 将其固定到在您的 App Client 上注册的端口（上面示例中的 `41100`）。Claude Code 始终使用 `/callback` 路径，因此生成的重定向 URI 是 `http://localhost:41100/callback`：
+
+```bash
+claude mcp add --transport http --callback-port 41100 my-proxied-server https://my-proxy.example.com/mcp
+```
+
+当您首次从服务器调用工具时，Claude Code 会打开 Cognito Hosted UI 进行身份验证，然后请求才会被代理到上游。
+
+### Kiro CLI
+
+将服务器添加到您的 [Kiro CLI](https://kiro.dev/docs/cli/mcp/) MCP 配置中，使用 HTTP 传输。如果没有显式的 `oauth.redirectUri`，Kiro 会选择随机回调端口；将其设置为在您的 App Client 上注册的 URL，以便端口和路径完全匹配：
+
+```json
+{
+  "mcpServers": {
+    "my-proxied-server": {
+      "type": "http",
+      "url": "https://my-proxy.example.com/mcp",
+      "oauth": {
+        "redirectUri": "http://localhost:41100/callback"
+      }
+    }
+  }
+}
+```
+
+Kiro CLI 在首次使用时触发 Cognito Hosted UI 登录，并为后续请求管理生成的令牌。
+
+:::tip
+任何支持 Streamable HTTP 传输以及 OAuth 授权和动态客户端注册的 MCP 客户端都可以以相同的方式连接到代理 — 提供 `/mcp` URL，客户端会为您处理发现、注册和登录。
+:::

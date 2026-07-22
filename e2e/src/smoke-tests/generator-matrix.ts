@@ -147,6 +147,12 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // OAuth DCR proxy for Cognito-authenticated MCP servers — iacProvider inherited.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#dcr-proxy --name=my-dcr-proxy --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // TypeScript Strands agents — uninfra'd (None) and hosted (HTTP + A2A).
   await runCLI(
     `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agent --infra=none --no-interactive${deferFlag}`,
