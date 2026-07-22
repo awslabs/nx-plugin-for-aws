@@ -241,6 +241,7 @@ export interface AddAgentCoreGatewayInfraProps {
   projectName: string;
   projectDirectory: string;
   cedarPolicy: boolean;
+  auth: AgentCoreAuth;
 }
 
 export const addAgentCoreGatewayInfra = async (
@@ -323,6 +324,7 @@ const addAgentCoreGatewayCDKInfra = async (
       nameKebabCase: options.gatewayNameKebabCase,
       projectDirectory: options.projectDirectory,
       cedarPolicy: options.cedarPolicy,
+      auth: options.auth,
       ...esmVars(tree),
     },
     {
@@ -413,6 +415,7 @@ const addAgentCoreGatewayTerraformInfra = (
       nameKebabCase: options.gatewayNameKebabCase,
       projectDirectory: options.projectDirectory,
       cedarPolicy: options.cedarPolicy,
+      auth: options.auth,
       boto3Version: PY_VERSIONS.boto3,
       httpxVersion: PY_VERSIONS.httpx,
       mcpVersion: PY_VERSIONS.mcp,

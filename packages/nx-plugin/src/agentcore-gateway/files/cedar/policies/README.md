@@ -7,10 +7,19 @@ runtime.
 
 ## Default policy
 
+<%_ if (auth === 'cognito') { _%>
+`permit-all.cedar` permits any Cognito-authenticated caller
+(`principal is AgentCore::OAuthUser`). The gateway's JWT authorizer already
+validates the token's user pool and client before policies are evaluated, so
+any principal that reaches the engine is an authenticated OAuth user. Tighten
+this by matching JWT claims (e.g. `principal.scope`) — see the
+[AgentCore common policy patterns](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html).
+<%_ } else { _%>
 `permit-all.cedar` permits any IAM caller from the deploying AWS account.
 It is scoped to your account because AgentCore's policy validator rejects
 truly unrestricted permits (`permit (principal, action, resource)`) as
 "Overly Permissive".
+<%_ } _%>
 
 **If you delete this file without adding replacement `permit` policies, the
 gateway will deny every request** — Cedar uses a default-deny evaluation
