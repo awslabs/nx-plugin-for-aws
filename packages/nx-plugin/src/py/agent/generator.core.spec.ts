@@ -323,7 +323,8 @@ dev-dependencies = []
       dependsOn: ['agent-docker'],
     });
     expect(projectConfig.targets['trivy'].dependsOn).toContain('agent-trivy');
-    expect(projectConfig.targets.build.dependsOn).toContain('trivy');
+    // Trivy is not wired into build (its result depends on the vulnerability DB).
+    expect(projectConfig.targets.build.dependsOn ?? []).not.toContain('trivy');
   });
 
   it('should generate strands agent with BedrockAgentCoreRuntime and custom name', async () => {

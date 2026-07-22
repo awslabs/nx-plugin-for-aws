@@ -218,7 +218,8 @@ describe('py#rdb generator', () => {
       },
       dependsOn: ['docker'],
     });
-    expect(projectConfig.targets.build.dependsOn).toContain('trivy');
+    // Trivy is not wired into build (its result depends on the vulnerability DB).
+    expect(projectConfig.targets.build.dependsOn ?? []).not.toContain('trivy');
   });
 
   it('should generate local database support without infrastructure', async () => {

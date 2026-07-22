@@ -5,6 +5,7 @@ description: Build and deploy Docker images for TypeScript and Python projects i
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,25 @@ This clears the output directory, then copies both the bundle contents and the `
 
 ## Scanning Images with Trivy
 
-It's good practice to scan your images for known vulnerabilities. The generators that follow this pattern add a `trivy` target which scans the built image with [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), and fails the build on `HIGH` or `CRITICAL` findings.
+It's good practice to scan your images for known vulnerabilities. The generators that follow this pattern add a `trivy` target which scans the built image with [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), and exits non-zero on `HIGH` or `CRITICAL` findings.
 
 Add a `trivy` target which `dependsOn` your `docker` target. It saves the built image to a tarball and scans it via a workspace-relative bind mount, so the same command works under both `docker` and `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
-Then make `build` depend on `trivy` so the scan runs as part of a build:
+Each project's per-image scan targets are aggregated under a workspace-wide `trivy` target, which the vended `trivy` root script runs (`nx run-many --target trivy`).
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[Trivy is not part of `build` — run it in CI]
+The scan is intentionally **not** wired into `build`. Trivy's result depends on its vulnerability database, which updates constantly: a scan that passes today can fail tomorrow when a new CVE is published against a base image or dependency you haven't changed. Coupling it to `build` would make local and CI builds non-deterministic and block unrelated work.
+
+Instead, run it as a dedicated step in your CI pipeline (and locally before a release):
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+When a scan starts failing on a newly-published CVE, upgrade the affected package or base image in your `Dockerfile`, or suppress it in `.trivyignore` if there is no fix yet (see below).
+:::
 
 :::tip[Caching skips unchanged images]
 Because the image is fully determined by your project source, declaring `inputs` (here `default` and `^production`, matching the `bundle` target) lets Nx cache the scan and skip re-scanning an image that hasn't changed. Pin the Trivy image version (e.g. <code>trivy:<TrivyVersion /></code>) so scans are reproducible.

@@ -14,7 +14,7 @@ import { CONTAINER_VERSIONS } from './versions';
 const TRIVY_IGNORE_FILE = '.trivyignore';
 
 const TRIVY_IGNORE_CONTENTS = `# Trivy ignore file. Add one vulnerability ID (e.g. CVE-2021-12345) per line to
-# suppress it during the image scan run on build.
+# suppress it during the image scan (\`nx run-many --target trivy\`).
 # https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids
 `;
 
@@ -43,8 +43,9 @@ export interface DockerScanTargetOptions {
 }
 
 /**
- * Add a cacheable Trivy scan target for the images built by a docker target,
- * wire it under the aggregate \`trivy\` target, and make \`build\` depend on it.
+ * Add a cacheable Trivy scan target for the images built by a docker target
+ * and wire it under the aggregate \`trivy\` target. The scan is not part of
+ * \`build\` — run \`nx run-many --target trivy\` (the root \`trivy\` script) in CI.
  *
  * The scan target depends on the docker target and declares the project source
  * as its inputs, so an unchanged image is never re-scanned (a cache hit skips
@@ -52,7 +53,7 @@ export interface DockerScanTargetOptions {
  * \`dist/<projectRoot>/trivy/<scan-key>\` (kept out of any Docker build context)
  * and scanned with the pinned ECR-hosted Trivy image via a workspace-relative
  * bind mount, so the same commands work under both docker and finch. The scan
- * fails the build (exit code 1) on HIGH/CRITICAL vulnerabilities.
+ * exits non-zero (exit code 1) on HIGH/CRITICAL vulnerabilities.
  *
  * A \`.trivyignore\` is vended at the project root (kept if it already exists)
  * for suppressing findings.
@@ -109,10 +110,13 @@ export const addDockerScanTarget = (
     dependsOn: [dockerTargetName],
   };
 
-  // Aggregate per-component scan targets under a single `trivy` target, and
-  // make `build` run the scan.
+  // Aggregate per-component scan targets under a single `trivy` target. The
+  // scan is intentionally NOT wired into `build`: image scanning is slow and
+  // its result depends on the ever-changing vulnerability database (a scan
+  // that passes today can fail tomorrow when a new CVE is published), so
+  // coupling it to `build` would make local and CI builds non-deterministic.
+  // Run `nx run-many --target trivy` (the root `trivy` script) in CI instead.
   if (trivyTargetName !== 'trivy') {
     addDependencyToTargetIfNotPresent(project, 'trivy', trivyTargetName);
   }
-  addDependencyToTargetIfNotPresent(project, 'build', 'trivy');
 };

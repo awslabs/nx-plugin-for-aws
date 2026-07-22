@@ -2,11 +2,19 @@
 title: Container Image Scanning
 ---
 
-The Docker image built for this project is scanned for vulnerabilities as part of the build using [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy).
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-A `trivy` target is added to your project which scans the built image and **fails the build** if any `HIGH` or `CRITICAL` severity vulnerability is found. The generated `Dockerfile` uses a base image with no known fixable vulnerabilities of these severities at time of generation, and upgrades bundled tooling (such as `npm`) to keep it that way.
+The Docker image built for this project can be scanned for vulnerabilities using [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy).
+
+A `trivy` target is added to your project which scans the built image and **exits non-zero** if any `HIGH` or `CRITICAL` severity vulnerability is found. The generated `Dockerfile` uses a base image with no known fixable vulnerabilities of these severities at time of generation, and upgrades bundled tooling (such as `npm`) to keep it that way.
 
 The scan uses the same container engine as your image build (`docker` or `finch`), so no additional tooling is required. Since the scan is only re-run when the image changes, an unchanged image is not re-scanned.
+
+:::tip[Trivy is not part of `build` — run it in CI]
+Image scanning is **not** wired into `build`, because Trivy's result depends on its constantly-updating vulnerability database — a scan that passes today can fail tomorrow when a new CVE is published against a dependency you haven't changed, which would make builds non-deterministic. Run it explicitly (e.g. as a dedicated CI step) via the vended `trivy` root script, which scans every image in the workspace:
+
+<PackageManagerShortCommand commands={['trivy']} />
+:::
 
 :::caution[Unfixable vulnerabilities are ignored]
 The scan runs with `--ignore-unfixed`, so vulnerabilities without an available fix do not fail the build, since they cannot be actioned by upgrading tooling in your `Dockerfile` — they are not reported in the build's scan output. As new vulnerabilities are disclosed the result of scans may change over time, so review the image periodically by running `trivy image <your-image>` without the flag, and rebuild against a newer base image (or add container steps to apply available patches) once a fix is published.

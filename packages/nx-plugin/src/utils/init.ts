@@ -271,6 +271,10 @@ export const applyWorkspaceInit = async (
     build: 'nx run-many --target build',
     lint: 'nx run-many --target lint --configuration=fix',
     test: 'nx run-many --target test --all',
+    // Trivy container image scanning is not part of `build` (its result
+    // depends on the ever-changing vulnerability database); run it explicitly,
+    // e.g. in CI.
+    trivy: 'nx run-many --target trivy --all',
     'build:skip-lint': 'nx run-many --target build --configuration=skip-lint',
     'build:all': 'nx run-many --target build --all',
     'affected:all': 'nx affected --target build',

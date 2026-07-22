@@ -97,7 +97,7 @@ describe('docker utils', () => {
       expect(joined).toContain('--ignorefile /scan/.trivyignore');
     });
 
-    it('should aggregate the scan target under trivy and wire build', () => {
+    it('should aggregate the scan target under trivy without wiring build', () => {
       const project = makeProject();
       addDockerScanTarget(tree, {
         project,
@@ -108,7 +108,9 @@ describe('docker utils', () => {
       });
 
       expect(project.targets['trivy'].dependsOn).toContain('my-agent-trivy');
-      expect(project.targets['build'].dependsOn).toContain('trivy');
+      // Trivy is intentionally decoupled from build (its result depends on the
+      // ever-changing vulnerability DB), so build must not depend on it.
+      expect(project.targets['build']?.dependsOn ?? []).not.toContain('trivy');
     });
 
     it('should use the provided container engine', () => {
