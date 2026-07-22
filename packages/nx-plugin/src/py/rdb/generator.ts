@@ -323,6 +323,11 @@ export const pyRdbGenerator = async (
   addDependenciesToPyProjectToml(tree, dir, [
     'sqlmodel',
     'alembic',
+    // SQLAlchemy's async engine (used by connection.py for both engines)
+    // requires greenlet at runtime. Vend it explicitly at a pinned version so
+    // the dependency graph is fully determined and doesn't float to an
+    // unpublished-wheel release at install time.
+    'greenlet',
     ...(engine === 'mysql'
       ? (['aiomysql', 'boto3', 'aws-lambda-powertools'] as const)
       : (['asyncpg', 'boto3', 'aws-lambda-powertools'] as const)),
