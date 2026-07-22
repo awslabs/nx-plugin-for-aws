@@ -141,62 +141,7 @@ Le proxy `/mcp` utilise les intégrations API Gateway HTTP API, qui ont un déla
 :::
 
 :::tip[Réutiliser un User Pool existant]
-Si vous avez déjà un User Pool provenant du générateur <Link path="guides/react-website-auth">`ts#website#auth`</Link> (le construct `UserIdentity`), vous pouvez fronter un serveur MCP pour les **mêmes utilisateurs** qui se connectent à votre site web. Réutilisez son `userPool`, mais ajoutez un **App Client séparé** pour le proxy : le client du site web est un client public sans secret, tandis que le proxy DCR nécessite un client confidentiel (`generateSecret: true`) dont le secret est injecté par le gestionnaire de jeton lors de l'échange de jeton.
-
-`UserIdentity` configure le domaine User Pool avec [Managed Login (version 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html). Managed Login nécessite un **style de branding par App Client**, vous devez donc en créer un pour le nouveau client proxy — sinon sa page de connexion hébergée renvoie `403`. Utilisez `CfnManagedLoginBranding` avec `useCognitoProvidedValues: true` pour le style par défaut.
-
-<Infrastructure>
-<Fragment slot="cdk">
-```typescript
-import { UserIdentity } from ':my-scope/common-constructs';
-import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
-
-const identity = new UserIdentity(this, 'Identity');
-
-// Un App Client confidentiel sur le MÊME user pool pour le proxy DCR
-const proxyClient = identity.userPool.addClient('DcrProxyClient', {
-  generateSecret: true,
-  oAuth: {
-    flows: { authorizationCodeGrant: true },
-    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-    callbackUrls: ['http://localhost:41100/callback'],
-  },
-});
-
-// Managed Login nécessite un style de branding pour le nouveau client
-new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
-  userPoolId: identity.userPool.userPoolId,
-  clientId: proxyClient.userPoolClientId,
-  useCognitoProvidedValues: true,
-});
-```
-
-Passez `identity.userPool.userPoolId`, `proxyClient.userPoolClientId` et `identity.userPoolDomain.baseUrl()` au proxy. Le construct `UserIdentity` crée toujours un domaine, vous n'avez donc pas besoin d'en ajouter un.
-</Fragment>
-<Fragment slot="terraform">
-```hcl
-# Un App Client confidentiel sur le MÊME user pool créé par ts#website#auth
-resource "aws_cognito_user_pool_client" "dcr_proxy" {
-  name                                 = "dcr-proxy-client"
-  user_pool_id                         = module.user_identity.user_pool_id
-  generate_secret                      = true
-  allowed_oauth_flows                  = ["code"]
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_scopes                 = ["openid", "email", "profile"]
-  callback_urls                        = ["http://localhost:41100/callback"]
-}
-
-# Managed Login nécessite un style de branding pour le nouveau client
-resource "aws_cognito_managed_login_branding" "dcr_proxy" {
-  user_pool_id                = module.user_identity.user_pool_id
-  client_id                   = aws_cognito_user_pool_client.dcr_proxy.id
-  use_cognito_provided_values = true
-}
-```
-
-Passez l'id du user pool, l'id de ce client et le domaine user pool existant au module proxy.
-</Fragment>
-</Infrastructure>
+Si vous avez déjà un User Pool provenant du générateur <Link path="guides/react-website-auth">`ts#website#auth`</Link>, vous pouvez fronter un serveur MCP pour les mêmes utilisateurs du site web. Voir <Link path="guides/ts-dcr-proxy#réutiliser-un-user-pool-useridentity">Réutiliser un User Pool UserIdentity</Link> ci-dessous.
 :::
 
 ### Fronter un serveur MCP
@@ -507,3 +452,118 @@ Kiro CLI déclenche la connexion Cognito Hosted UI lors de la première utilisat
 :::tip
 Tout client MCP qui prend en charge le transport HTTP Streamable ainsi que l'autorisation OAuth et Dynamic Client Registration peut se connecter au proxy de la même manière — fournissez l'URL `/mcp` et le client gère la découverte, l'enregistrement et la connexion pour vous.
 :::
+
+## Réutiliser un User Pool UserIdentity
+
+Si vous avez déjà un User Pool provenant du générateur <Link path="guides/react-website-auth">`ts#website#auth`</Link> (le construct `UserIdentity`), vous pouvez fronter un serveur MCP pour les **mêmes utilisateurs** qui se connectent à votre site web. Réutilisez son `userPool`, mais ajoutez un **App Client séparé** pour le proxy : le client du site web est un client public sans secret, tandis que le proxy DCR nécessite un client confidentiel (`generateSecret: true`) dont le secret est injecté par le gestionnaire de jeton lors de l'échange de jeton.
+
+`UserIdentity` configure le domaine User Pool avec [Managed Login (version 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html). Managed Login nécessite un **style de branding par App Client**, vous devez donc en créer un pour le nouveau client proxy — sinon sa page de connexion hébergée renvoie `403`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```typescript
+import {
+  DcrProxy,
+  MyProjectMcpServer,
+  UserIdentity,
+} from ':my-scope/common-constructs';
+import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+
+// Le user pool créé par ts#website#auth pour les utilisateurs de votre site web
+const identity = new UserIdentity(this, 'Identity');
+
+// Un App Client confidentiel sur le MÊME user pool pour le proxy DCR
+const proxyClient = identity.userPool.addClient('DcrProxyClient', {
+  generateSecret: true,
+  oAuth: {
+    flows: { authorizationCodeGrant: true },
+    scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+    callbackUrls: ['http://localhost:41100/callback'],
+  },
+});
+
+// Managed Login nécessite un style de branding pour le nouveau client
+new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
+  userPoolId: identity.userPool.userPoolId,
+  clientId: proxyClient.userPoolClientId,
+  useCognitoProvidedValues: true,
+});
+
+const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
+  secretStringValue: proxyClient.userPoolClientSecret,
+});
+
+const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: proxyClient,
+  },
+});
+
+new DcrProxy(this, 'DcrProxy', {
+  userPoolId: identity.userPool.userPoolId,
+  userPoolClientId: proxyClient.userPoolClientId,
+  cognitoClientSecretArn: clientSecret.secretArn,
+  // Le construct UserIdentity crée toujours un domaine
+  cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
+  upstreamUrl: mcpServer.invocationUrl,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Le module user pool créé par ts#website#auth pour les utilisateurs de votre site web
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Un App Client confidentiel sur le MÊME user pool pour le proxy DCR
+resource "aws_cognito_user_pool_client" "dcr_proxy" {
+  name                                 = "dcr-proxy-client"
+  user_pool_id                         = module.user_identity.user_pool_id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls                        = ["http://localhost:41100/callback"]
+}
+
+# Managed Login nécessite un style de branding pour le nouveau client
+resource "aws_cognito_managed_login_branding" "dcr_proxy" {
+  user_pool_id                = module.user_identity.user_pool_id
+  client_id                   = aws_cognito_user_pool_client.dcr_proxy.id
+  use_cognito_provided_values = true
+}
+
+resource "aws_secretsmanager_secret" "client_secret" {
+  name = "my-dcr-proxy-client-secret"
+}
+
+resource "aws_secretsmanager_secret_version" "client_secret" {
+  secret_id     = aws_secretsmanager_secret.client_secret.id
+  secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
+}
+
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_ids      = [aws_cognito_user_pool_client.dcr_proxy.id]
+  appconfig_application_id  = module.runtime_config.application_id
+  appconfig_application_arn = module.runtime_config.application_arn
+}
+
+module "dcr_proxy" {
+  source = "../../common/terraform/src/app/dcr-proxies/dcr-proxy"
+
+  user_pool_id              = module.user_identity.user_pool_id
+  user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
+  cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
+  cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
+  upstream_url              = module.my_project_mcp_server.invocation_url
+  asset_bucket_name         = module.asset_bucket.bucket_name
+}
+```
+</Fragment>
+</Infrastructure>
