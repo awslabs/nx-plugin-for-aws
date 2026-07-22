@@ -131,6 +131,27 @@ describe('ts#dcr-proxy generator', () => {
     expect(construct).toContain('clientSecret.grantRead(tokenFn)');
   });
 
+  it('reuses the shared core http-api construct', async () => {
+    await tsDcrProxyGenerator(tree, { name: 'my-proxy', iac: 'cdk' });
+
+    // The core HTTP API construct and its utils are generated into shared
+    // constructs so the proxy inherits KMS-encrypted access logging.
+    expect(
+      tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
+    ).toBe(true);
+    expect(
+      tree.exists('packages/common/constructs/src/core/api/utils.ts'),
+    ).toBe(true);
+
+    const construct = tree.read(`${constructDir}/my-proxy.ts`, 'utf-8');
+    expect(construct).toContain(
+      "import { HttpApi } from '../../../core/api/http-api",
+    );
+    expect(construct).toContain('new HttpApi(this, ');
+    // Lambda log groups are auto-created (no explicit LogGroup for functions)
+    expect(construct).not.toContain('new logs.LogGroup');
+  });
+
   it('resolves iac from config when set to inherit', async () => {
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, { iac: { provider: 'cdk' } });
