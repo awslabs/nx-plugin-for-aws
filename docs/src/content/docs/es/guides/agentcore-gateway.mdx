@@ -15,7 +15,7 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Genera un proyecto [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Un AgentCore Gateway es un punto de entrada administrado que agrega uno o más destinos de servidor MCP detrás de un único endpoint MCP, evalúa cada llamada de herramienta contra un [motor de políticas Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), y firma el tráfico saliente a servidores MCP con IAM SigV4.
+Genera un proyecto [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Un AgentCore Gateway es un punto de entrada administrado que agrega uno o más destinos de servidor MCP detrás de un único endpoint MCP, autentica solicitudes entrantes (IAM o Cognito), evalúa cada llamada de herramienta contra un [motor de políticas Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), y firma el tráfico saliente a servidores MCP con IAM SigV4.
 
 ## Uso
 
@@ -34,7 +34,7 @@ El generador crea un nuevo proyecto en `packages/<name>/`, además de un constru
 <FileTree>
   - packages/\<name>/
     - policies/ Archivos fuente de políticas Cedar (omitidos cuando `cedarPolicy: false`)
-      - permit-all.cedar Política Cedar predeterminada que permite llamadores autenticados desde dentro de la misma cuenta de AWS
+      - permit-all.cedar Política Cedar predeterminada que permite llamadores autenticados
       - README.md Referencia para escribir políticas Cedar
     - local-dev.ts Gateway local que agrega servidores MCP adjuntos para desarrollo local
     - project.json Agrega los destinos `serve` y `dev`
@@ -71,7 +71,7 @@ La infraestructura se genera cuando `infra` es `agentcore` (el valor predetermin
 
 El constructo generado crea los siguientes recursos de AWS:
 
-- Un `AgentCore::Gateway` configurado para el protocolo MCP con `GatewayAuthorizer.usingAwsIam()` (autenticación IAM entrante)
+- Un `AgentCore::Gateway` configurado para el protocolo MCP con autenticación IAM entrante (predeterminada) o autenticación JWT de Cognito (consulta <a href="#authentication">Authentication</a>)
 - Un `AgentCore::PolicyEngine` ejecutándose en modo `ENFORCE`, adjunto al Gateway (omitido cuando `cedarPolicy: false`)
 - Una `AgentCore::Policy` por cada archivo `.cedar` en `policies/`
 - Un Web ACL de AWS WAFv2 asociado con el Gateway, con registro de solicitudes en CloudWatch (habilitado por defecto — consulta <a href="#aws-waf">AWS WAF</a>)
@@ -95,7 +95,7 @@ waf: WAF {
   icon: /nx-plugin-for-aws/icons/aws/waf.svg
 }
 
-gateway: AgentCore Gateway\n(MCP, IAM auth) {
+gateway: AgentCore Gateway\n(MCP, IAM or Cognito auth) {
   shape: image
   icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore-gateway.svg
 }
@@ -108,6 +108,61 @@ client -> waf
 waf -> gateway
 gateway -> targets
 ```
+
+## Authentication
+
+La opción `auth` configura cómo el Gateway autentica las solicitudes entrantes. Elige entre `iam` (predeterminado) y `cognito`.
+
+### IAM
+
+Por defecto, el Gateway está configurado con `GatewayAuthorizer.usingAwsIam()`. Los llamadores firman solicitudes con SigV4, y la identidad IAM del llamador está disponible para las políticas Cedar como un principal `AgentCore::IamEntity`. Esta es la opción recomendada cuando tus llamadores son agentes o servicios que se ejecutan en AWS — por ejemplo, un <Link path="/guides/ts-agent">agente</Link> conectado a través del <Link path="guides/connection/ts-agent-gateway">generador de conexión de agente a Gateway</Link>, que firma sus llamadas con su propio rol de ejecución.
+
+### Cognito
+
+Cuando seleccionas `Cognito`, el Gateway se configura con un autorizador JWT personalizado que apunta a un grupo de usuarios de Cognito. Los llamadores se autentican presentando un token bearer JWT, y el claim `sub` del token está disponible para las políticas Cedar como un principal `AgentCore::OAuthUser`. Usa esto cuando tus llamadores son usuarios finales que se autentican a través de Cognito (por ejemplo, un sitio web o un cliente que no es de AWS).
+
+La infraestructura generada consume un grupo de usuarios y cliente de Cognito existentes — no los crea. Puedes generar un `UserIdentity` usando el <Link path="/guides/react-website-auth">generador `ts#website#auth`</Link>, o proporcionar el tuyo propio.
+
+<Infrastructure>
+<Fragment slot="cdk">
+El constructo generado requiere una prop `identity` que proporcione el grupo de usuarios y el cliente:
+
+```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyGateway(this, 'MyGateway', {
+      identity,
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+El módulo generado requiere las variables `user_pool_id` y `user_pool_client_ids`:
+
+```hcl {6-7} title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_gateway" {
+  source               = "../../common/terraform/src/app/gateways/my-gateway"
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note[Proveedores OIDC personalizados]
+Para autenticarte con un proveedor OIDC que no sea Cognito, modifica directamente el constructo Gateway o el módulo Terraform generado — intercambia la URL de descubrimiento del autorizador y los clientes permitidos por los de tu proveedor. Los generadores de conexión de agente a Gateway solo admiten gateways autenticados con `IAM`, ya que los agentes firman sus llamadas con SigV4.
+:::
 
 ## Escribir Políticas
 
@@ -190,7 +245,9 @@ Además, el Gateway filtra la respuesta de `tools/list` para que los llamadores 
 
 ### `permit-all.cedar` predeterminado
 
-El generador incluye una política predeterminada que permite cualquier llamador IAM de la cuenta de AWS en la que se despliega el Gateway:
+El generador incluye una política predeterminada con alcance al tipo de autenticación del Gateway.
+
+Para un Gateway **IAM**, permite cualquier llamador IAM de la cuenta de AWS en la que se despliega el Gateway:
 
 ```cedar title="packages/<name>/policies/permit-all.cedar"
 permit (
@@ -202,11 +259,23 @@ permit (
 };
 ```
 
+Para un Gateway **Cognito**, permite cualquier usuario OAuth autenticado (el autorizador JWT ya ha validado el grupo de usuarios y el cliente del token antes de que se evalúen las políticas):
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+);
+```
+
 Para restringir las cosas aún más, agrega políticas más estrictas junto a ella. Siempre conserva al menos un `permit` coincidente en el conjunto de políticas, de lo contrario la denegación predeterminada bloqueará cada llamada.
 
 ### Referencia de alcance de políticas
 
-Para los Gateways generados por este plugin, todos los llamadores son principales IAM (el Gateway está configurado con `GatewayAuthorizer.usingAwsIam()`):
+El tipo de principal depende de cómo el Gateway autentica a los llamadores (consulta <a href="#authentication">Authentication</a>).
+
+Para un Gateway **IAM**, los llamadores son principales IAM:
 
 ```
 principal is AgentCore::IamEntity
@@ -219,6 +288,24 @@ principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<
 ```
 
 El mismo valor está disponible como `principal.id` para cláusulas `when`. Reserva `like` para patrones genuinos, como la coincidencia a nivel de cuenta en el `permit-all.cedar` predeterminado.
+
+Para un Gateway **Cognito**, los llamadores son usuarios OAuth construidos a partir del claim `sub` del token JWT, y los claims JWT (nombre de usuario, scope, etc.) están disponibles como etiquetas de principal:
+
+```
+principal is AgentCore::OAuthUser
+```
+
+Coincide con claims individuales en cláusulas `when` — por ejemplo, para requerir un scope:
+
+```cedar
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.scope == "gateway/invoke"
+};
+```
 
 Las invocaciones de herramientas llegan al motor de políticas como acciones con la forma:
 

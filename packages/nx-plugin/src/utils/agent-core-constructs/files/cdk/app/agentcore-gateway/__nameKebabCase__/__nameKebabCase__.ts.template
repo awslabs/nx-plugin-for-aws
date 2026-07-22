@@ -3,6 +3,10 @@ import { Construct } from 'constructs';
 import * as path from 'node:path';
 import * as url from 'node:url';
 <%_ } _%>
+<%_ if (auth === 'cognito') { _%>
+import { GatewayAuthorizer } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
 import {
   AgentCoreGateway,
   AgentCoreGatewayProps,
@@ -12,14 +16,28 @@ import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<%
 import { findWorkspaceRoot } from '../../../core/workspace<% if (esm) { %>.js<% } %>';
 <%_ } _%>
 
-<%_ if (cedarPolicy) { _%>
+<%_ if (auth === 'cognito') { _%>
+export type <%- nameClassName %>Props = Omit<
+  AgentCoreGatewayProps,
+  <%_ if (cedarPolicy) { _%>'cedarPolicyPath' | <%_ } _%>'authorizer'
+> & {
+  /**
+   * Identity details for Cognito authentication. Callers authenticate with a
+   * JWT bearer token issued by this user pool.
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+};
+<%_ } else if (cedarPolicy) { _%>
 export type <%- nameClassName %>Props = Omit<AgentCoreGatewayProps, 'cedarPolicyPath'>;
 <%_ } else { _%>
 export type <%- nameClassName %>Props = AgentCoreGatewayProps;
 <%_ } _%>
 
 /**
- * AgentCore Gateway wired for MCP protocol with IAM inbound auth.
+ * AgentCore Gateway wired for MCP protocol with <%- auth === 'cognito' ? 'Cognito (JWT)' : 'IAM' %> inbound auth.
 <%_ if (cedarPolicy) { _%>
  *
  * Cedar policies are loaded from the gateway project's policies/ directory
@@ -30,7 +48,23 @@ export class <%- nameClassName %> extends AgentCoreGateway {
   /** Default Gateway target name when added to another Gateway. */
   public readonly gatewayName = '<%- nameKebabCase %>';
 
-  constructor(scope: Construct, id: string, props?: <%- nameClassName %>Props) {
+  constructor(scope: Construct, id: string, props<%_ if (auth !== 'cognito') { _%>?<%_ } _%>: <%- nameClassName %>Props) {
+<%_ if (auth === 'cognito') { _%>
+    const { identity, ...restProps } = props;
+    super(scope, id, {
+<%_ if (cedarPolicy) { _%>
+      cedarPolicyPath: path.join(
+        findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
+        '<%- projectDirectory %>/policies',
+      ),
+<%_ } _%>
+      authorizer: GatewayAuthorizer.usingCognito({
+        userPool: identity.userPool,
+        allowedClients: [identity.userPoolClient],
+      }),
+      ...restProps,
+    });
+<%_ } else { _%>
     super(scope, id, {
 <%_ if (cedarPolicy) { _%>
       cedarPolicyPath: path.join(
@@ -40,6 +74,7 @@ export class <%- nameClassName %> extends AgentCoreGateway {
 <%_ } _%>
       ...props,
     });
+<%_ } _%>
 
     const rc = RuntimeConfig.ensure(this);
     rc.set('agentcore', 'gateways', {

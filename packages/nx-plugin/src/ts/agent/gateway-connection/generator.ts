@@ -65,7 +65,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   }
   if (gateway.auth !== 'iam') {
     throw new Error(
-      `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Only IAM-authenticated gateways are supported in v1.`,
+      `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Agent connections currently require the gateway to use IAM authentication.`,
     );
   }
   if (agentComponent.auth && agentComponent.auth !== 'iam') {

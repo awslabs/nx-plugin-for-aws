@@ -214,8 +214,10 @@ describe('agentcore-gateway generator', () => {
       expect(construct).toContain(
         'protocolConfiguration: new agentcore.McpProtocolConfiguration',
       );
+      // The core construct defaults to IAM but accepts an `authorizer` prop so
+      // per-gateway auth (e.g. Cognito) is chosen by the app-level subclass.
       expect(construct).toContain(
-        'authorizerConfiguration: agentcore.GatewayAuthorizer.usingAwsIam()',
+        'props?.authorizer ?? agentcore.GatewayAuthorizer.usingAwsIam()',
       );
       expect(construct).toContain("mode: 'ENFORCE'");
       const app = tree
@@ -475,6 +477,90 @@ describe('agentcore-gateway generator', () => {
     });
   });
 
+  describe('auth: cognito', () => {
+    it('records auth=cognito in project metadata', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+      const config = readProjectConfiguration(tree, '@proj/my-gateway');
+      expect((config.metadata as any).auth).toBe('cognito');
+    });
+
+    it('wires the CDK gateway with a Cognito JWT authorizer and identity prop', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+      const app = tree
+        .read(
+          'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        )!
+        .toString();
+      // Cognito makes props (and its required `identity`) mandatory.
+      expect(app).toContain(
+        'constructor(scope: Construct, id: string, props: MyGatewayProps)',
+      );
+      expect(app).toContain('userPool: IUserPool');
+      expect(app).toContain('userPoolClient: IUserPoolClient');
+      expect(app).toContain('const { identity, ...restProps } = props;');
+      expect(app).toContain('authorizer: GatewayAuthorizer.usingCognito({');
+      expect(app).toContain('userPool: identity.userPool');
+      expect(app).toContain('allowedClients: [identity.userPoolClient]');
+    });
+
+    it('leaves the shared core construct auth-agnostic (IAM default) so gateways can mix auth types', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      expect(construct).toContain(
+        'props?.authorizer ?? agentcore.GatewayAuthorizer.usingAwsIam()',
+      );
+    });
+
+    it('configures the Terraform gateway with a CUSTOM_JWT authorizer + Cognito discovery URL', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        auth: 'cognito',
+        iac: 'terraform',
+      });
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      expect(module).toContain('authorizer_type = "CUSTOM_JWT"');
+      expect(module).toContain('custom_jwt_authorizer {');
+      expect(module).toContain('.well-known/openid-configuration');
+      expect(module).toContain('allowed_clients = var.user_pool_client_ids');
+      expect(module).toContain('variable "user_pool_id"');
+      expect(module).toContain('variable "user_pool_client_ids"');
+    });
+
+    it('ships an OAuthUser permit-all Cedar policy for cognito gateways', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+      const permitAll = tree
+        .read('packages/my-gateway/policies/permit-all.cedar')!
+        .toString();
+      expect(permitAll).toContain('AgentCore::OAuthUser');
+      expect(permitAll).not.toContain('AgentCore::IamEntity');
+      expect(permitAll).toContain('<%= gatewayArn %>');
+    });
+  });
+
   describe('Cedar policy templates', () => {
     beforeEach(async () => {
       await agentcoreGatewayGenerator(tree, {
@@ -490,6 +576,8 @@ describe('agentcore-gateway generator', () => {
       expect(permitAll).toMatch(/permit\s*\(/);
       expect(permitAll).toContain('<%= gatewayArn %>');
       expect(permitAll).toContain('AgentCore::Gateway');
+      // IAM is the default, so the default policy matches IAM principals.
+      expect(permitAll).toContain('AgentCore::IamEntity');
     });
 
     it('includes a policies README describing conventions and ENFORCE mode', () => {

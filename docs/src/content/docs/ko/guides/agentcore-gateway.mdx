@@ -15,7 +15,7 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 모든 도구 호출을 평가하며, MCP 서버로의 아웃바운드 트래픽에 IAM SigV4로 서명하는 관리형 진입점입니다.
+[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, 인바운드 요청을 인증하며(IAM 또는 Cognito), [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 모든 도구 호출을 평가하고, MCP 서버로의 아웃바운드 트래픽에 IAM SigV4로 서명하는 관리형 진입점입니다.
 
 ## 사용법
 
@@ -34,7 +34,7 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - packages/\<name>/
     - policies/ Cedar 정책 소스 파일 (`cedarPolicy: false`일 때 생략됨)
-      - permit-all.cedar 동일한 AWS 계정 내에서 인증된 호출자를 허용하는 기본 Cedar 정책
+      - permit-all.cedar 인증된 호출자를 허용하는 기본 Cedar 정책
       - README.md Cedar 정책 작성 참조
     - local-dev.ts 로컬 개발을 위해 연결된 MCP 서버를 집계하는 로컬 게이트웨이
     - project.json `serve` 및 `dev` 대상 추가
@@ -71,7 +71,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 생성된 구성 요소는 다음 AWS 리소스를 생성합니다:
 
-- `GatewayAuthorizer.usingAwsIam()`(인바운드 IAM 인증)을 사용하여 MCP 프로토콜용으로 구성된 `AgentCore::Gateway`
+- MCP 프로토콜용으로 구성된 `AgentCore::Gateway`로 인바운드 IAM 인증(기본값) 또는 Cognito JWT 인증 사용 (<a href="#authentication">인증</a> 참조)
 - Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine` (`cedarPolicy: false`일 때 생략됨)
 - `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy`
 - Gateway와 연결된 AWS WAFv2 Web ACL, CloudWatch로의 요청 로깅 포함 (기본적으로 활성화됨 — <a href="#aws-waf">AWS WAF</a> 참조)
@@ -95,30 +95,74 @@ waf: WAF {
   icon: /nx-plugin-for-aws/icons/aws/waf.svg
 }
 
-gateway: AgentCore Gateway\n(MCP, IAM auth) {
+gateway: AgentCore Gateway\n(MCP, IAM or Cognito auth) {
   shape: image
   icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore-gateway.svg
-}
-
-policy: Policy Engine\n(Cedar, ENFORCE) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore.svg
 }
 
 targets: Downstream MCP Servers\n(Gateway targets) {
   shape: rectangle
 }
 
-cw: CloudWatch\n(WAF Logs) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
-  near: bottom-right
-}
-
 client -> waf
 waf -> gateway
 gateway -> targets
 ```
+
+## 인증
+
+`auth` 옵션은 Gateway가 인바운드 요청을 인증하는 방법을 구성합니다. `iam`(기본값)과 `cognito` 중에서 선택할 수 있습니다.
+
+### IAM
+
+기본적으로 Gateway는 `GatewayAuthorizer.usingAwsIam()`으로 구성됩니다. 호출자는 SigV4로 요청에 서명하며, 호출자의 IAM ID는 Cedar 정책에서 `AgentCore::IamEntity` 주체로 사용할 수 있습니다. 이는 호출자가 AWS에서 실행되는 에이전트 또는 서비스인 경우 권장되는 옵션입니다 — 예를 들어 <Link path="guides/connection/ts-agent-gateway">에이전트와 Gateway 연결 생성기</Link>를 통해 연결된 <Link path="/guides/ts-agent">에이전트</Link>는 자체 실행 역할로 호출에 서명합니다.
+
+### Cognito
+
+`cognito`를 선택하면 Gateway는 Cognito 사용자 풀을 가리키는 Custom JWT 권한 부여자로 구성됩니다. 호출자는 JWT 베어러 토큰을 제시하여 인증하며, 토큰의 `sub` 클레임은 Cedar 정책에서 `AgentCore::OAuthUser` 주체로 사용할 수 있습니다. 호출자가 Cognito를 통해 인증하는 경우 이 옵션을 사용하세요 — 예를 들어 웹사이트 또는 <Link path="guides/ts-dcr-proxy">`ts#dcr-proxy` 생성기</Link>를 통해 연결되는 코딩 에이전트.
+
+생성된 인프라는 기존 Cognito 사용자 풀과 클라이언트를 사용합니다 — 생성하지 않습니다. <Link path="/guides/react-website-auth">`ts#website#auth` 생성기</Link>를 사용하여 `UserIdentity`를 생성하거나 직접 제공할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+생성된 구성 요소는 사용자 풀과 클라이언트를 제공하는 `identity` prop이 필요합니다:
+
+```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyGateway(this, 'MyGateway', {
+      identity,
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+생성된 모듈은 `user_pool_id` 및 `user_pool_client_ids` 변수가 필요합니다:
+
+```hcl {6-7} title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_gateway" {
+  source               = "../../common/terraform/src/app/gateways/my-gateway"
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note[사용자 정의 OIDC 제공자]
+Cognito가 아닌 OIDC 제공자로 인증하려면 생성된 Gateway 구성 요소 또는 Terraform 모듈을 직접 수정하세요 — 권한 부여자의 검색 URL과 허용된 클라이언트를 제공자의 것으로 교체하세요. 에이전트와 Gateway 연결 생성기는 에이전트가 SigV4로 호출에 서명하므로 `IAM` 인증 게이트웨이만 지원합니다.
+:::
 
 ## 정책 작성
 
@@ -201,7 +245,9 @@ Tool Execution Denied: Tool call not allowed due to policy enforcement
 
 ### 기본 `permit-all.cedar`
 
-생성기는 Gateway가 배포된 AWS 계정의 모든 IAM 호출자를 허용하는 기본 정책을 제공합니다:
+생성기는 Gateway의 인증 유형에 맞춰진 기본 정책을 제공합니다.
+
+**IAM** Gateway의 경우, Gateway가 배포된 AWS 계정의 모든 IAM 호출자를 허용합니다:
 
 ```cedar title="packages/<name>/policies/permit-all.cedar"
 permit (
@@ -213,11 +259,23 @@ permit (
 };
 ```
 
+**Cognito** Gateway의 경우, 인증된 모든 OAuth 사용자를 허용합니다(JWT 권한 부여자가 정책이 평가되기 전에 이미 토큰의 사용자 풀과 클라이언트를 검증했습니다):
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+);
+```
+
 더 엄격하게 제한하려면 그 옆에 더 좁은 정책을 추가하세요. 정책 세트에 최소한 하나의 일치하는 `permit`을 항상 유지하세요. 그렇지 않으면 기본 거부가 모든 호출을 차단합니다.
 
 ### 정책 범위 참조
 
-이 플러그인으로 생성된 Gateway의 경우 모든 호출자는 IAM 주체입니다(Gateway는 `GatewayAuthorizer.usingAwsIam()`으로 구성됨):
+주체 유형은 Gateway가 호출자를 인증하는 방법에 따라 다릅니다(<a href="#authentication">인증</a> 참조).
+
+**IAM** Gateway의 경우, 호출자는 IAM 주체입니다:
 
 ```
 principal is AgentCore::IamEntity
@@ -230,6 +288,24 @@ principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<
 ```
 
 동일한 값이 `when` 절에서 `principal.id`로 사용 가능합니다. 기본 `permit-all.cedar`의 계정 전체 일치와 같은 실제 패턴에 대해서는 `like`를 예약하세요.
+
+**Cognito** Gateway의 경우, 호출자는 JWT 토큰의 `sub` 클레임에서 생성된 OAuth 사용자이며, JWT 클레임(사용자 이름, 범위 등)은 주체 태그로 사용할 수 있습니다:
+
+```
+principal is AgentCore::OAuthUser
+```
+
+`when` 절에서 개별 클레임을 일치시키세요 — 예를 들어 범위를 요구하려면:
+
+```cedar
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.scope == "gateway/invoke"
+};
+```
 
 도구 호출은 다음 형식의 작업으로 정책 엔진에 도달합니다:
 

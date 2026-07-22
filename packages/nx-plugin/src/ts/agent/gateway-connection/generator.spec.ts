@@ -285,7 +285,9 @@ export const getAgent = async (sessionId: string) =>
     );
     await expect(
       tsAgentGatewayConnectionGenerator(tree, fullOptions()),
-    ).rejects.toThrow(/Only IAM-authenticated gateways/);
+    ).rejects.toThrow(
+      /Agent connections currently require the gateway to use IAM authentication/,
+    );
   });
 
   it('rejects non-IAM agent', async () => {
