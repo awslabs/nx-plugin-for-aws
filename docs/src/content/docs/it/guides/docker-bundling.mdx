@@ -5,6 +5,7 @@ description: "Costruisci e distribuisci immagini Docker per progetti TypeScript 
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,21 @@ Questo cancella la directory di output, quindi copia sia i contenuti del bundle 
 
 ## Scansione delle Immagini con Trivy
 
-È buona pratica scansionare le tue immagini per vulnerabilità note. I generatori che seguono questo pattern aggiungono un target `trivy` che scansiona l'immagine costruita con [Trivy](https://trivy.dev/), eseguito dall'[immagine Trivy ospitata su ECR](https://gallery.ecr.aws/aquasecurity/trivy), e fa fallire la build in caso di risultati `HIGH` o `CRITICAL`.
+È buona pratica scansionare le tue immagini per vulnerabilità note. I generatori che seguono questo pattern aggiungono un target `trivy` che scansiona l'immagine costruita con [Trivy](https://trivy.dev/), eseguito dall'[immagine Trivy ospitata su ECR](https://gallery.ecr.aws/aquasecurity/trivy), ed esce con codice non-zero in caso di risultati `HIGH` o `CRITICAL`.
 
 Aggiungi un target `trivy` che `dependsOn` il tuo target `docker`. Salva l'immagine costruita in un tarball e la scansiona tramite un bind mount relativo al workspace, quindi lo stesso comando funziona sia con `docker` che con `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
-Quindi fai dipendere `build` da `trivy` in modo che la scansione venga eseguita come parte di una build:
+I target di scansione per-immagine di ciascun progetto sono aggregati sotto un target `trivy` a livello di workspace, che lo script root `trivy` fornito esegue (`nx run-many --target trivy`).
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[Esegui Trivy in CI]
+La scansione è intenzionalmente non collegata a `build` poiché questo può introdurre attriti non necessari durante l'iterazione in fase di sviluppo, dato che il database di vulnerabilità di Trivy viene continuamente aggiornato con nuove CVE.
+
+Invece raccomandiamo di eseguire il comando sopra come step dedicato nella tua pipeline CI prima del deployment agli stage di produzione.
+:::
 
 :::tip[La cache salta le immagini non modificate]
 Poiché l'immagine è completamente determinata dal sorgente del tuo progetto, dichiarare gli `inputs` (qui `default` e `^production`, corrispondenti al target `bundle`) permette a Nx di cachare la scansione e saltare la ri-scansione di un'immagine che non è cambiata. Fissa la versione dell'immagine Trivy (ad es. <code>trivy:<TrivyVersion /></code>) in modo che le scansioni siano riproducibili.

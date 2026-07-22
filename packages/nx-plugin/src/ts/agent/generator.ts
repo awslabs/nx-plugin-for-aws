@@ -140,6 +140,7 @@ export const tsAgentGenerator = async (
         protocol,
         adotVersion:
           TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+        jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
         nodeBaseImage: BASE_IMAGES.node,
         npmVersion: TS_VERSIONS.npm,
         ...esmVars(tree),

@@ -5,6 +5,7 @@ description: "Nx Plugin for AWS ワークスペースで TypeScript および Py
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import TrivyVersion from '@components/trivy-version.astro';
@@ -279,25 +280,21 @@ CMD ["python", "-m", "my_project.main"]
 
 ## Trivyによるイメージスキャン
 
-イメージに既知の脆弱性がないかスキャンすることは良い習慣です。このパターンに従うジェネレーターは、[Trivy](https://trivy.dev/)でビルドされたイメージをスキャンする`trivy`ターゲットを追加します。これは[ECRホストのTrivyイメージ](https://gallery.ecr.aws/aquasecurity/trivy)から実行され、`HIGH`または`CRITICAL`の検出結果があるとビルドを失敗させます。
+イメージに既知の脆弱性がないかスキャンすることは良い習慣です。このパターンに従うジェネレーターは、[Trivy](https://trivy.dev/)でビルドされたイメージをスキャンする`trivy`ターゲットを追加します。これは[ECRホストのTrivyイメージ](https://gallery.ecr.aws/aquasecurity/trivy)から実行され、`HIGH`または`CRITICAL`の検出結果があるとゼロ以外で終了します。
 
 `docker`ターゲットに`dependsOn`する`trivy`ターゲットを追加します。これはビルドされたイメージをtarballに保存し、ワークスペース相対のバインドマウントを介してスキャンするため、`docker`と`finch`の両方で同じコマンドが機能します:
 
 <Code lang="json" code={trivyTarget} />
 
-次に、`build`が`trivy`に依存するようにして、ビルドの一部としてスキャンが実行されるようにします:
+各プロジェクトのイメージごとのスキャンターゲットは、ワークスペース全体の`trivy`ターゲットの下に集約され、提供される`trivy`ルートスクリプトがそれを実行します(`nx run-many --target trivy`)。
 
-```json
-{
-  "targets": {
-    "build": {
-      "dependsOn": ["trivy"]
-    }
-  }
-}
-```
+<PackageManagerShortCommand commands={['trivy']} />
 
-<NxCommands commands={['trivy my-project']} />
+:::tip[CIでTrivyを実行してください]
+スキャンは意図的に`build`に組み込まれていません。これは、Trivyの脆弱性データベースが新しいCVEで継続的に更新されるため、開発中の反復作業時に不要な摩擦を引き起こす可能性があるためです。
+
+代わりに、本番ステージへのデプロイ前に、CIパイプラインの専用ステップとして上記のコマンドを実行することをお勧めします。
+:::
 
 :::tip[キャッシュは変更されていないイメージをスキップします]
 イメージはプロジェクトソースによって完全に決定されるため、`inputs`を宣言する(ここでは`bundle`ターゲットに一致する`default`と`^production`)ことで、Nxはスキャンをキャッシュし、変更されていないイメージの再スキャンをスキップできます。Trivyイメージのバージョンをピン留めして(例: <code>trivy:<TrivyVersion /></code>)、スキャンを再現可能にします。

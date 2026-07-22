@@ -9,6 +9,9 @@
 export const TS_VERSIONS = {
   '@a2a-js/sdk': '0.3.14',
   '@aws/aws-distro-opentelemetry-node-autoinstrumentation': '0.12.0',
+  // Pinned above the version the ADOT autoinstrumentation package resolves
+  // transitively (2.8.0) to clear CVE-2026-59892 (HIGH).
+  '@opentelemetry/propagator-jaeger': '2.9.0',
   '@aws-sdk/client-dynamodb': '3.1090.0',
   '@aws-sdk/client-bedrock-runtime': '3.1090.0',
   '@aws-sdk/client-s3': '3.1090.0',
