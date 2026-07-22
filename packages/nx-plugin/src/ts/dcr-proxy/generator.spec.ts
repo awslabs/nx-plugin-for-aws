@@ -80,11 +80,16 @@ describe('ts#dcr-proxy generator', () => {
   it('adds the lambda handler dependencies', async () => {
     await tsDcrProxyGenerator(tree, { name: 'my-proxy', iac: 'cdk' });
 
-    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Runtime/type dependencies live in the handler project's own package.json
+    const projectPackageJson = JSON.parse(
+      tree.read(`${handlerProjectDir}/package.json`, 'utf-8'),
+    );
     expect(
-      rootPackageJson.dependencies['@aws-sdk/client-secrets-manager'],
+      projectPackageJson.dependencies['@aws-sdk/client-secrets-manager'],
     ).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/aws-lambda']).toBeDefined();
+    expect(
+      projectPackageJson.devDependencies['@types/aws-lambda'],
+    ).toBeDefined();
   });
 
   it('names the construct class from the given name', async () => {
@@ -302,12 +307,15 @@ describe('ts#dcr-proxy generator', () => {
     it('adds the lambda handler dependencies', async () => {
       await tsDcrProxyGenerator(tree, { name: 'my-proxy', iac: 'terraform' });
 
-      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      // Runtime/type dependencies live in the handler project's own package.json
+      const projectPackageJson = JSON.parse(
+        tree.read(`${handlerProjectDir}/package.json`, 'utf-8'),
+      );
       expect(
-        rootPackageJson.dependencies['@aws-sdk/client-secrets-manager'],
+        projectPackageJson.dependencies['@aws-sdk/client-secrets-manager'],
       ).toBeDefined();
       expect(
-        rootPackageJson.devDependencies['@types/aws-lambda'],
+        projectPackageJson.devDependencies['@types/aws-lambda'],
       ).toBeDefined();
     });
 

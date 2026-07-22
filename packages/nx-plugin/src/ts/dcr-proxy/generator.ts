@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -18,6 +17,7 @@ import {
   DCR_PROXY_HANDLERS,
   type DcrProxyHandler,
 } from '../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -101,6 +101,7 @@ export const tsDcrProxyGenerator = async (
     tree,
     withVersions(['@aws-sdk/client-secrets-manager']),
     withVersions(['@types/aws-lambda']),
+    joinPathFragments(proxyRoot, 'package.json'),
   );
 
   // Bundle each handler independently to dist/<root>/bundle/<handler>/index.js
