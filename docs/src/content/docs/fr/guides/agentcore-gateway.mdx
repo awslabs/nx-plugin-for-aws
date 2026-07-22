@@ -15,7 +15,7 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Générez un projet [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Une AgentCore Gateway est un point d'entrée géré qui agrège un ou plusieurs serveurs MCP cibles derrière un seul point de terminaison MCP, évalue chaque appel d'outil par rapport à un [moteur de politiques Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), et signe le trafic sortant vers les serveurs MCP avec IAM SigV4.
+Générez un projet [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Une AgentCore Gateway est un point d'entrée géré qui agrège un ou plusieurs serveurs MCP cibles derrière un seul point de terminaison MCP, authentifie les requêtes entrantes (IAM ou Cognito), évalue chaque appel d'outil par rapport à un [moteur de politiques Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), et signe le trafic sortant vers les serveurs MCP avec IAM SigV4.
 
 ## Utilisation
 
@@ -34,7 +34,7 @@ Le générateur crée un nouveau projet dans `packages/<name>/` contenant les fi
 <FileTree>
   - packages/\<name>/
     - policies/ Fichiers source de politiques Cedar (omis lorsque `cedarPolicy: false`)
-      - permit-all.cedar Politique Cedar par défaut qui autorise les appelants authentifiés du même compte AWS
+      - permit-all.cedar Politique Cedar par défaut qui autorise les appelants authentifiés (appelants IAM du même compte AWS, ou tout utilisateur Cognito — voir [Authentification](#authentication))
       - README.md Référence pour écrire des politiques Cedar
     - local-dev.ts Gateway locale agrégeant les serveurs MCP attachés pour le développement local
     - project.json Ajoute les cibles `serve` et `dev`
@@ -71,7 +71,7 @@ L'infrastructure est générée lorsque `infra` est `agentcore` (la valeur par d
 
 Le construct généré crée les ressources AWS suivantes :
 
-- Une `AgentCore::Gateway` configurée pour le protocole MCP avec `GatewayAuthorizer.usingAwsIam()` (authentification IAM entrante)
+- Une `AgentCore::Gateway` configurée pour le protocole MCP avec authentification IAM entrante (par défaut) ou authentification JWT Cognito (voir <a href="#authentication">Authentification</a>)
 - Un `AgentCore::PolicyEngine` fonctionnant en mode `ENFORCE`, attaché à la Gateway (omis lorsque `cedarPolicy: false`)
 - Une `AgentCore::Policy` par fichier `.cedar` dans `policies/`
 - Une Web ACL AWS WAFv2 associée à la Gateway, avec journalisation des requêtes vers CloudWatch (activée par défaut — voir <a href="#aws-waf">AWS WAF</a>)
@@ -95,7 +95,7 @@ waf: WAF {
   icon: /nx-plugin-for-aws/icons/aws/waf.svg
 }
 
-gateway: AgentCore Gateway\n(MCP, IAM auth) {
+gateway: AgentCore Gateway\n(MCP, IAM or Cognito auth) {
   shape: image
   icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore-gateway.svg
 }
@@ -108,6 +108,64 @@ client -> waf
 waf -> gateway
 gateway -> targets
 ```
+
+## Authentification
+
+L'option `auth` configure la manière dont la Gateway authentifie les requêtes entrantes. Choisissez entre `IAM` (par défaut) et `Cognito`.
+
+### IAM
+
+Par défaut, la Gateway est configurée avec `GatewayAuthorizer.usingAwsIam()`. Les appelants signent les requêtes avec SigV4, et l'identité IAM de l'appelant est disponible pour les politiques Cedar en tant que principal `AgentCore::IamEntity`. C'est l'option recommandée lorsque vos appelants sont des agents ou des services s'exécutant dans AWS — par exemple un <Link path="/guides/ts-agent">agent</Link> connecté via le <Link path="guides/connection/ts-agent-gateway">générateur de connexion agent vers Gateway</Link>, qui signe ses appels avec son propre rôle d'exécution.
+
+### Cognito
+
+Lorsque vous sélectionnez `Cognito`, la Gateway est configurée avec un autorisateur JWT personnalisé pointant vers un pool d'utilisateurs Cognito. Les appelants s'authentifient en présentant un jeton bearer JWT, et la revendication `sub` du jeton est disponible pour les politiques Cedar en tant que principal `AgentCore::OAuthUser`. Utilisez ceci lorsque vos appelants sont des utilisateurs finaux s'authentifiant via Cognito (par exemple un site web ou un client non-AWS).
+
+L'infrastructure générée consomme un pool d'utilisateurs Cognito et un client existants — elle ne les crée pas. Vous pouvez générer une `UserIdentity` en utilisant le <Link path="/guides/react-website-auth">générateur `ts#website#auth`</Link>, ou fournir le vôtre.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Le construct généré nécessite une prop `identity` fournissant le pool d'utilisateurs et le client :
+
+```ts {6-9} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyGateway(this, 'MyGateway', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Le module généré nécessite les variables `user_pool_id` et `user_pool_client_ids` :
+
+```hcl {6-7} title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_gateway" {
+  source               = "../../common/terraform/src/app/gateways/my-gateway"
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note[Fournisseurs OIDC personnalisés]
+Pour s'authentifier avec un fournisseur OIDC non-Cognito, modifiez directement le construct Gateway ou le module Terraform généré — remplacez l'URL de découverte de l'autorisateur et les clients autorisés par ceux de votre fournisseur. Les générateurs de connexion agent vers Gateway ne prennent en charge que les gateways authentifiées par `IAM`, car les agents signent leurs appels avec SigV4.
+:::
 
 ## Écriture de politiques
 
@@ -190,7 +248,9 @@ De plus, la Gateway filtre la réponse de `tools/list` de sorte que les appelant
 
 ### `permit-all.cedar` par défaut
 
-Le générateur fournit une politique par défaut qui autorise tout appelant IAM du compte AWS dans lequel la Gateway est déployée :
+Le générateur fournit une politique par défaut adaptée au type d'authentification de la Gateway.
+
+Pour une Gateway **IAM**, elle autorise tout appelant IAM du compte AWS dans lequel la Gateway est déployée :
 
 ```cedar title="packages/<name>/policies/permit-all.cedar"
 permit (
@@ -202,11 +262,23 @@ permit (
 };
 ```
 
+Pour une Gateway **Cognito**, elle autorise tout utilisateur OAuth authentifié (l'autorisateur JWT a déjà validé le pool d'utilisateurs et le client du jeton avant que les politiques ne soient évaluées) :
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+);
+```
+
 Pour verrouiller davantage les choses, ajoutez des politiques plus restrictives à côté. Conservez toujours au moins un `permit` correspondant dans l'ensemble de politiques, sinon le refus par défaut bloquera chaque appel.
 
 ### Référence de portée de politique
 
-Pour les Gateways générées par ce plugin, tous les appelants sont des principaux IAM (la Gateway est configurée avec `GatewayAuthorizer.usingAwsIam()`) :
+Le type de principal dépend de la manière dont la Gateway authentifie les appelants (voir <a href="#authentication">Authentification</a>).
+
+Pour une Gateway **IAM**, les appelants sont des principaux IAM :
 
 ```
 principal is AgentCore::IamEntity
@@ -219,6 +291,24 @@ principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<
 ```
 
 La même valeur est disponible en tant que `principal.id` pour les clauses `when`. Réservez `like` pour les véritables motifs, tels que la correspondance à l'échelle du compte dans le `permit-all.cedar` par défaut.
+
+Pour une Gateway **Cognito**, les appelants sont des utilisateurs OAuth construits à partir de la revendication `sub` du jeton JWT, et les revendications JWT (nom d'utilisateur, portée, etc.) sont disponibles en tant que balises de principal :
+
+```
+principal is AgentCore::OAuthUser
+```
+
+Faites correspondre les revendications individuelles dans les clauses `when` — par exemple pour exiger une portée :
+
+```cedar
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.scope == "gateway/invoke"
+};
+```
 
 Les invocations d'outils atteignent le moteur de politiques sous forme d'actions avec la forme :
 
