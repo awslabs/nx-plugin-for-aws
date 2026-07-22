@@ -12,21 +12,21 @@ import InstallCommand from '@components/install-command.astro';
 
 购物清单应用中使用的`CloudscapeReactTsWebsiteProject`配置了一个内置CloudScape和Cognito身份验证的React网站。
 
-该项目类型基于现已弃用的[`create-react-app`](https://github.com/facebook/create-react-app)。在本迁移指南中，我们将使用<Link path="/guides/react-website">`ts#react-website`生成器</Link>，它采用了更现代且受支持的技术栈——[Vite](https://vite.dev/)。
+该项目类型基于现已弃用的[`create-react-app`](https://github.com/facebook/create-react-app)。在本迁移指南中，我们将使用<Link path="/guides/react-website">`ts#website`生成器</Link>，它采用了更现代且受支持的技术栈——[Vite](https://vite.dev/)。
 
 作为迁移的一部分，我们还将从PDK配置的React Router迁移到[TanStack Router](https://tanstack.com/router)，这将为网站路由增加额外的类型安全性。
 
 #### 生成React网站
 
-运行<Link path="/guides/react-website">`ts#react-website`生成器</Link>在`packages/website`目录下创建网站项目：
+运行<Link path="/guides/react-website">`ts#website`生成器</Link>，将`framework`设置为`react`，在`packages/website`目录下创建网站项目。由于购物清单应用使用CloudScape组件构建，我们还将`ux`设置为`cloudscape`（默认值为`shadcn`）：
 
-<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} />
 
 #### 添加Cognito身份验证
 
-上述React网站生成器默认不包含Cognito身份验证（与`CloudscapeReactTsWebsiteProject`不同），需要通过<Link path="/guides/react-website-auth">`ts#react-website#auth`生成器</Link>显式添加：
+上述React网站生成器默认不包含Cognito身份验证（与`CloudscapeReactTsWebsiteProject`不同），需要通过<Link path="/guides/react-website-auth">`ts#website#auth`生成器</Link>显式添加：
 
-<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
 
 这会添加管理重定向逻辑的React组件以确保用户通过Cognito托管UI登录，同时在`packages/common/constructs`目录下添加名为`UserIdentity`的CDK构造用于部署Cognito资源。
 
@@ -56,9 +56,26 @@ RuntimeConfig.ensure(this).config = {
 
 #### 添加AWS Northstar依赖
 
-由于`CloudscapeReactTsWebsiteProject`自动包含`@aws-northstar/ui`依赖，需手动添加：
+`CloudscapeReactTsWebsiteProject`自动包含购物清单应用中使用的`@aws-northstar/ui`依赖，因此我们将其添加到`@shopping-list/website`项目：
 
-<InstallCommand pkg="@aws-northstar/ui" />
+<InstallCommand pkg="@aws-northstar/ui" project="@shopping-list/website" />
+
+`@aws-northstar/ui`捆绑了一个依赖于`ace-builds`的代码编辑器组件，它使用了Vite无法解析的webpack特定导入。由于我们的购物清单应用不使用此组件，我们通过将其添加到`packages/website/vite.config.mts`中现有`build`选项内的`external`配置来将其从捆绑包中排除：
+
+```diff lang="ts"
+// packages/website/vite.config.mts
+  build: {
+    outDir: '../../dist/packages/website/bundle',
+    emptyOutDir: true,
+    reportCompressedSize: true,
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
++    rollupOptions: {
++      external: ['ace-builds/webpack-resolver'],
++    },
+  },
+```
 
 #### 迁移组件与页面
 
@@ -78,12 +95,14 @@ RuntimeConfig.ensure(this).config = {
 
 #### 从React Router迁移到TanStack Router
 
-使用[文件路由](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing)时，可通过本地开发服务器自动生成路由配置。启动本地网站服务：
+使用[文件路由](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing)时，可通过本地开发服务器自动生成路由配置。
 
-<NxCommands commands={["serve-local website"]} />
+启动本地网站服务：
+
+<NxCommands commands={["dev website"]} />
 
 :::tip
-`serve-local`目标会同时启动通过`connection`连接的API本地服务，并在网站、模型或后端变更时热重载！这使得我们无需编写CDK代码即可本地测试API与网站。
+我们在这里使用`dev`目标，它会同时启动通过`connection`连接的API本地服务，并在网站、模型或后端变更时热重载！这使得我们无需编写CDK代码即可本地测试API与网站。
 :::
 
 服务启动后（网站端口`4200`，Smithy API端口`3001`），按以下步骤迁移路由：
@@ -896,6 +915,55 @@ const ShoppingList: React.FC = () => {
             }}
             empty={<></>}
           />
+        )}
+      </Container>
+    </ContentLayout>
+  );
+};
+
+export const Route = createFileRoute('/$shoppingListId')({
+  component: ShoppingList,
+});
+```
+</TabItem>
+</Tabs>
+
+</Drawer>    </Container>
+    </ContentLayout>
+  );
+};
+
+export const Route = createFileRoute('/$shoppingListId')({
+  component: ShoppingList,
+});
+```
+</TabItem>
+</Tabs>
+
+</Drawer>tDndItemInserted: () => "",
+              liveAnnouncementDndItemReordered: () => "",
+              liveAnnouncementDndItemResized: () => "",
+              liveAnnouncementDndStarted: () => "",
+              liveAnnouncementItemRemoved: () => "",
+              navigationAriaLabel: "",
+              navigationItemAriaLabel: () => "",
+            }}
+            empty={<></>}
+          />
+        )}
+      </Container>
+    </ContentLayout>
+  );
+};
+
+export const Route = createFileRoute('/$shoppingListId')({
+  component: ShoppingList,
+});
+```
+</TabItem>
+</Tabs>
+
+</Drawer>         />
         )}
       </Container>
     </ContentLayout>
