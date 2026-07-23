@@ -75,9 +75,8 @@ export interface ApplyWorkspaceInitOptions {
    */
   readonly overwriteScripts?: boolean;
   /**
-   * Whether generators use the package manager's dependency catalog. Recorded
-   * in the plugin config; when enabled on pnpm, the workspace is also set to
-   * `catalogMode: strict` so `pnpm add` records new dependencies in the
+   * Whether generators use the package manager's dependency catalog. On pnpm
+   * this also sets `catalogMode: strict` so `pnpm add` records new deps in the
    * catalog. Defaults to true.
    */
   readonly catalogs?: boolean;
@@ -116,11 +115,9 @@ const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
     ...Object.fromEntries(PNPM_BUILT_DEPENDENCIES.map((dep) => [dep, true])),
   };
 
-  // When catalogs are enabled, add new dependencies to the catalog by default
-  // so `pnpm add` keeps the single-version policy without manual editing.
-  // `strict` records every added dependency in the catalog; it only gates the
-  // `pnpm add` flow, so pre-declared direct-range deps (e.g. tslib from
-  // `@nx/js`) still install cleanly. Preserve an explicit user choice.
+  // `strict` makes `pnpm add` record new deps in the catalog; it only gates
+  // that flow, so pre-declared direct ranges (e.g. tslib) still install.
+  // Preserve an explicit user choice.
   const catalogMode = catalogs
     ? (existing.catalogMode ?? 'strict')
     : existing.catalogMode;
@@ -252,9 +249,8 @@ export const applyWorkspaceInit = async (
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
 
-  // Write IaC provider, container engine and package-manager settings to the
-  // plugin config. The catalogs flag is written explicitly (even when true) so
-  // the workspace records its dependency-management choice.
+  // The catalogs flag is written explicitly (even when true) so the workspace
+  // records its dependency-management choice.
   await ensureAwsNxPluginConfig(tree);
   await updateAwsNxPluginConfig(tree, {
     iac: { provider: iac },

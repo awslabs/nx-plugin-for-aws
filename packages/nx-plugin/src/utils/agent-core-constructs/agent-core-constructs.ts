@@ -372,9 +372,8 @@ const addAgentCoreGatewayCDKInfra = async (
     './gateways/index.js',
   );
 
-  // The gateway construct renders Cedar policies with ejs, and its readiness
-  // probe Lambda uses the AgentCore SDK client — declare both in the shared
-  // constructs project so noUndeclaredDependencies passes.
+  // The gateway construct renders Cedar policies with ejs and its readiness
+  // probe uses the AgentCore SDK client; declare both so the lint passes.
   addDependenciesToPackageJson(
     tree,
     withVersions(['ejs', '@aws-sdk/client-bedrock-agentcore']),

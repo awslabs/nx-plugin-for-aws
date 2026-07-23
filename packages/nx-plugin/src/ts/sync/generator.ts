@@ -26,10 +26,9 @@ export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${TS_SYNC_GENERATOR_INFO
 
 export const tsSyncGeneratorGenerator = async (
   tree: Tree,
-  // The sync runner (`nx sync` / pre-compile) invokes with only the tree.
-  // Running directly via `nx g @aws/nx-plugin:ts#sync` passes an options
-  // object, and `nx g` treats a truthy return value as a task callback — so
-  // when options are present, return nothing.
+  // The sync runner passes only the tree; `nx g @aws/nx-plugin:ts#sync` passes
+  // options, and `nx g` treats a truthy return as a task callback — so return
+  // nothing when options are present.
   options?: unknown,
 ): Promise<SyncGeneratorResult | undefined> => {
   const asResult = (
@@ -94,35 +93,23 @@ export const tsSyncGeneratorGenerator = async (
   });
 };
 
-/**
- * Ensure every project declares the workspace projects it depends on in its
- * own package.json, using the package manager's local-dependency specifier
- * (`workspace:*` where the workspace protocol is supported, `*` otherwise).
- *
- * Cross-project imports resolve through the tsconfig path aliases, but the
- * `noUndeclaredDependencies` lint rule (and standard tooling) expects a project
- * to declare the local packages it uses. The dependency edges come from the Nx
- * project graph — the same import analysis Nx's own `@nx/js:typescript-sync`
- * uses to wire tsconfig references — so users get these maintained
- * automatically rather than declaring each by hand. Returns the packages added
- * per project manifest.
- */
+// Declare each project's local workspace dependencies in its own package.json
+// so `noUndeclaredDependencies` passes. Edges come from the Nx project graph
+// (the same import analysis `@nx/js:typescript-sync` uses). Returns the
+// packages added per project manifest.
 const syncLocalProjectDependencies = async (
   tree: Tree,
   localSpecifier: string,
 ): Promise<Record<string, string[]>> => {
   const projectGraph = await createProjectGraphAsync();
 
-  // Map each workspace project to the package.json name + path derived from its
-  // graph node root, so graph edges (keyed by project name) resolve to the
-  // manifest we declare the dependency in.
   const projectInfoByName = collectProjectInfo(tree, projectGraph);
 
   const addedByManifest: Record<string, string[]> = {};
 
   for (const [projectName, info] of projectInfoByName) {
-    // Local workspace projects this one depends on (excludes external npm
-    // packages, which have no graph node, and implicit edges).
+    // Local workspace projects this one depends on (excludes external packages
+    // and implicit edges).
     const dependencyNames = (projectGraph.dependencies[projectName] ?? [])
       .filter(
         (dep) =>
@@ -141,7 +128,7 @@ const syncLocalProjectDependencies = async (
       const dependencies = { ...(json.dependencies ?? {}) };
       const devDependencies = json.devDependencies ?? {};
       for (const name of [...new Set(dependencyNames)].sort()) {
-        // Already declared (in either dependency list) — leave as-is.
+        // Already declared in either list — leave as-is.
         if (dependencies[name] || devDependencies[name]) {
           continue;
         }
@@ -164,10 +151,8 @@ interface ProjectInfo {
   packageJsonPath: string;
 }
 
-/**
- * Index every graph node that is a workspace project with a named package.json
- * by its project name, resolving the manifest from the node's root.
- */
+// Index workspace projects with a named package.json by project name, so graph
+// edges (keyed by project name) resolve to the manifest to declare the dep in.
 const collectProjectInfo = (
   tree: Tree,
   projectGraph: ProjectGraph,

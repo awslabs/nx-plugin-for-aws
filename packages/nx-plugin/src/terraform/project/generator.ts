@@ -286,10 +286,8 @@ export async function terraformProjectGenerator(
     TERRAFORM_PROJECT_GENERATOR_INFO,
   ]);
 
-  // Terraform projects don't carry a package.json (only Node projects do), so
-  // their build tooling and the AWS SDK the vended deploy scripts
-  // (`<project>/scripts/*.ts`) import are declared at the workspace root, where
-  // the scripts resolve them.
+  // Terraform projects carry no package.json, so their build tooling and the
+  // AWS SDK the vended deploy scripts import are declared at the workspace root.
   addDependenciesToPackageJson(
     tree,
     {},

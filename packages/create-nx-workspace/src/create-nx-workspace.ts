@@ -50,12 +50,9 @@ export const isGitRepo = (dir: string): boolean => {
 };
 
 export const buildArgs = (args: string[]): string[] => {
-  // Split into the leading positional args (the workspace name) and the rest,
-  // preserving order within the rest. A bare token after a flag is that flag's
-  // space-separated value (e.g. `--catalog false`), so only the positionals
-  // that appear before the first flag are treated as positional; everything
-  // from the first flag onward stays in order so flag/value pairs are kept
-  // together.
+  // Treat only tokens before the first flag as positional (the workspace name);
+  // everything from the first flag on keeps its order so flag/value pairs like
+  // `--catalog false` stay together.
   const firstFlagIndex = args.findIndex((a) => a.startsWith('-'));
   const positionalArgs =
     firstFlagIndex === -1 ? args : args.slice(0, firstFlagIndex);

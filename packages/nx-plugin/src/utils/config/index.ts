@@ -15,16 +15,9 @@ export type { Iac, IacConfig } from '../iac';
  */
 export interface PackageManagerConfig {
   /**
-   * Whether generators record third-party dependency versions in the package
-   * manager's dependency catalog (pnpm/yarn/bun), referencing them as
-   * `catalog:` in each project's package.json — keeping a single source of
-   * truth for versions across the workspace.
-   *
-   * When `false`, generators write direct version ranges to each project's
-   * package.json instead, and keeping versions aligned across projects is the
-   * user's responsibility.
-   *
-   * Defaults to `true`. Has no effect on npm, which has no catalog feature.
+   * Whether generators record dependency versions in the package manager's
+   * catalog (pnpm/yarn/bun) via `catalog:` refs. When `false`, direct version
+   * ranges are written to each project. Defaults to `true`; no effect on npm.
    */
   catalogs?: boolean;
 }

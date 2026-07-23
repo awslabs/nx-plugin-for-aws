@@ -58,17 +58,9 @@ export const buildPackageManagerShortCommand = (
   return `${prefix} ${command}`;
 };
 
-/**
- * Build an install command for a given package manager.
- *
- * When `project` is given the command targets that project's package.json
- * (runtime deps of a project belong in its own manifest); otherwise the
- * dependency is added to the workspace root (shared build/test tooling).
- * The scopeless shorthand is used where supported: pnpm's `--filter` matches
- * the unscoped project name, and npm/bun target the project directory
- * (`projectDir`, defaulting to `packages/<name>`). yarn requires the
- * fully-qualified workspace name.
- */
+// Build an install command. With `project`, targets that project's manifest
+// (pnpm `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
+// `packages/<name>`, yarn by fully-qualified name); otherwise the root.
 export const buildInstallCommand = (
   pm: string,
   pkg: string,

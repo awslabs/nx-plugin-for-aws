@@ -129,12 +129,10 @@ const addApiGatewayCdkConstructs = async (
     generateCoreApiFile('trpc');
   }
 
-  // Declare the third-party dependencies the generated core construct files
-  // import, in the shared constructs project's own package.json.
+  // Declare the deps the generated core construct files import.
   const constructDeps: ITsDepVersion[] = [];
   if (options.constructType === 'rest') {
-    // The REST API Gateway account construct configures the account via the
-    // AWS SDK.
+    // REST account construct configures the account via the AWS SDK.
     constructDeps.push('@aws-sdk/client-api-gateway', '@aws-sdk/client-iam');
   }
   if (options.backend.type === 'trpc') {

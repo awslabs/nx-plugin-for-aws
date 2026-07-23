@@ -78,10 +78,8 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/tsconfig*.json',
     ],
   },
-  // Config files, build scripts and tests import shared build/test tooling
-  // from the workspace root rather than declaring it per-project, so the
-  // undeclared-dependency rule is disabled for them (source code stays
-  // enforced).
+  // Config files, build scripts and tests use root tooling rather than
+  // declaring it per-project, so the undeclared-dependency rule is off for them.
   overrides: [
     {
       includes: [

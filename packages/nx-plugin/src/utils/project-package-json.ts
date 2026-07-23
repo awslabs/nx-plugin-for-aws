@@ -19,29 +19,15 @@ export interface EnsureProjectPackageJsonOptions {
   readonly dir: string;
   /** Full package name including scope (eg @foo/bar) */
   readonly fullyQualifiedName: string;
-  /**
-   * Module format for the project. Defaults to the workspace format. Written
-   * explicitly so Node's nearest-package.json `type` resolution matches the
-   * workspace format regardless of intermediate manifests.
-   */
+  /** Module format. Defaults to the workspace format, written explicitly. */
   readonly esm?: boolean;
 }
 
 /**
- * Ensure the project has its own package.json.
- *
- * Projects carry a minimal private manifest so the workspace follows the
- * standard npm package layout: package managers link workspace projects,
- * `pnpm add --filter <project>` works, and tooling that resolves the nearest
- * package.json (eg Node's `type` lookup) sees the right module format.
- *
- * Cross-project imports resolve through the `paths` aliases in
- * tsconfig.base.json rather than the manifest, so projects don't need to
- * declare local dependencies or an `exports` map — deployable projects are
- * always bundled. Third-party runtime dependencies a project's source imports
- * are declared in its own manifest as `catalog:` references (build/test
- * tooling stays in the root package.json); the catalog keeps versions aligned
- * across the workspace (single-version policy).
+ * Ensure the project has its own minimal private package.json, so the workspace
+ * follows the standard npm package layout (package managers link projects,
+ * filtered installs work, nearest-package.json `type` lookup resolves).
+ * Cross-project imports resolve via tsconfig `paths` aliases, not the manifest.
  */
 export const ensureProjectPackageJson = (
   tree: Tree,
@@ -59,20 +45,18 @@ export const ensureProjectPackageJson = (
   }
 
   updateJson(tree, packageJsonPath, (packageJson) => {
-    // Strip @nx/js's default entry points: they reference a per-project
-    // `./dist` directory which doesn't exist in this layout (tsc outputs to
-    // `dist/<project>/tsc` at the workspace root), and imports resolve via
-    // tsconfig path aliases instead. Entry points the user has customised
-    // (any value not referencing ./dist) are kept.
+    // Strip @nx/js's default `./dist` entry points: that path doesn't exist in
+    // this layout (tsc outputs to `dist/<project>/tsc` at the root) and imports
+    // resolve via tsconfig aliases. User-customised entry points are kept.
     for (const field of ['main', 'module', 'types'] as const) {
       if (packageJson[field]?.startsWith('./dist/')) {
         delete packageJson[field];
       }
     }
     if (packageJson.exports?.['.']?.import?.startsWith('./dist/')) {
-      // Drop only the stale default entry — user-added subpath exports are
-      // kept. The './package.json' companion @nx/js emits alongside it is
-      // dropped too: an exports map without '.' would block root imports.
+      // Drop only the stale default entry; user-added subpath exports are kept.
+      // Its './package.json' companion is dropped too, since an exports map
+      // without '.' would block root imports.
       delete packageJson.exports['.'];
       const remaining = Object.keys(packageJson.exports);
       if (
@@ -86,8 +70,7 @@ export const ensureProjectPackageJson = (
       ...packageJson,
       name: options.fullyQualifiedName,
       private: packageJson.private ?? true,
-      // Written explicitly (not inherited from the root) so the project's
-      // module format is stable however the file is consumed.
+      // Written explicitly so the module format is stable however consumed.
       type: esm ? 'module' : 'commonjs',
     };
   });
@@ -105,9 +88,8 @@ export const ensureProjectPackageJson = (
  * existing glob is added as an exact entry.
  */
 export const ensureWorkspaceGlobCovers = (tree: Tree, dir: string): void => {
-  // pnpm reads globs from pnpm-workspace.yaml; every other package manager
-  // reads the root package.json `workspaces` field. Update whichever the
-  // workspace carries (both when both are present, e.g. the test helper).
+  // Update whichever markers the workspace carries (both when both are
+  // present, e.g. the test helper).
   const usePnpmWorkspace = detectWorkspacePackageManager(tree) === 'pnpm';
 
   if (usePnpmWorkspace) {

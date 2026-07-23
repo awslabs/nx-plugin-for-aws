@@ -75,15 +75,9 @@ export const readAwsNxPluginConfig = async (
   return (mod as any).default ?? mod;
 };
 
-/**
- * Read config from the tree synchronously.
- *
- * `jiti.evalModule` evaluates the TypeScript source in-memory synchronously, so
- * this suits synchronous callers (e.g. dependency helpers) that can't await.
- * Returns undefined when the config file is absent or fails to evaluate; an
- * evaluation failure logs a warning so a broken config (which silently falls
- * back to defaults, e.g. re-enabling catalogs) is visible.
- */
+// Read config from the tree synchronously (jiti.evalModule runs in-memory), for
+// callers that can't await. Returns undefined when absent or on failure, warning
+// on the latter so a broken config silently falling back to defaults is visible.
 export const readAwsNxPluginConfigSync = (
   tree: Tree,
 ): AwsNxPluginConfig | undefined => {
