@@ -241,12 +241,14 @@ resource "aws_cloudfront_distribution" "website" {
   }
 }
 
-# Add CloudFront domain and any custom domain names to user pool client callback URLs
+# Add CloudFront domain and any custom domain names to user pool client callback URLs.
+# Keyed by statically-known values so for_each keys are resolvable at plan time; the
+# CloudFront domain is only known at apply time, so it appears in the value, not the key.
 locals {
-  callback_urls = toset(concat(
-    ["https://\${aws_cloudfront_distribution.website.domain_name}"],
-    [for domain in var.custom_domain_names : "https://\${domain}"],
-  ))
+  callback_urls = merge(
+    { cloudfront = "https://\${aws_cloudfront_distribution.website.domain_name}" },
+    { for domain in var.custom_domain_names : domain => "https://\${domain}" },
+  )
 }
 
 module "add_callback_url" {
