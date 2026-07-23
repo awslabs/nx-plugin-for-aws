@@ -53,6 +53,10 @@ export function Main() {
           },
         }),
       );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+      );
 
       // Setup a Smithy model project
       tree.write(
@@ -471,6 +475,10 @@ export function Main() {
             bundle: {},
           },
         }),
+      );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({ name: '@proj/frontend', type: 'module' }),
       );
 
       // Setup a Smithy backend project

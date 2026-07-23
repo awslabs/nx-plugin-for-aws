@@ -45,10 +45,8 @@ export async function sharedDynamoDBScriptsGenerator(
   addDependenciesToPackageJson(
     tree,
     withVersions(['@aws-sdk/client-dynamodb']),
-    withVersions(['tsx']),
-    joinPathFragments(
-      joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR),
-      'package.json',
-    ),
+    {},
+    joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 }

@@ -29,8 +29,8 @@ export const DEFAULT_BIOME_CONFIG = {
       quoteStyle: 'single',
       trailingCommas: 'all',
     },
-    // Resolve dependencies declared via the package manager's catalog so
-    // `noUndeclaredDependencies` understands `catalog:` references.
+    // Resolve `catalog:` versions from pnpm-workspace.yaml. Only pnpm
+    // catalogs are supported by Biome; a no-op for other package managers.
     resolver: {
       experimentalPnpmCatalogs: true,
     },

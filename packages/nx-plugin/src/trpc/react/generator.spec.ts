@@ -24,6 +24,10 @@ describe('trpc react generator', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
     // Mock backend project configuration
     tree.write(
       'apps/backend/project.json',
@@ -36,6 +40,10 @@ describe('trpc react generator', () => {
           auth: 'custom',
         },
       }),
+    );
+    tree.write(
+      'apps/backend/package.json',
+      JSON.stringify({ name: '@proj/backend', type: 'module' }),
     );
     // Mock main.tsx file
     tree.write(

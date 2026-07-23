@@ -36,6 +36,10 @@ describe('cognito-auth generator', () => {
         },
       }),
     );
+    tree.write(
+      'packages/test-project/package.json',
+      JSON.stringify({ name: '@proj/test-project', type: 'module' }),
+    );
   });
 
   it('should generate files', async () => {

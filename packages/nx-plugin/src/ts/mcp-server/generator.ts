@@ -88,9 +88,8 @@ export const tsMcpServerGenerator = async (
     'package.json',
   );
 
-  // Generate esm if the module system is esm, otherwise commonjs. Projects
-  // don't typically have their own package.json (dependencies are declared in
-  // the workspace root), so fall back to the workspace format when absent.
+  // Generate esm if the project's package.json is `type: module`, falling
+  // back to the workspace format when the project has no manifest.
   const esm = tree.exists(projectPackageJsonPath)
     ? readJson(tree, projectPackageJsonPath).type === 'module'
     : isEsmWorkspace(tree);
@@ -121,11 +120,9 @@ export const tsMcpServerGenerator = async (
     '@aws-lambda-powertools/parameters',
     '@aws-sdk/client-appconfigdata',
   ]);
-  const devDeps = withVersions([
-    'tsx',
-    '@types/express',
-    '@modelcontextprotocol/inspector',
-  ]);
+  const devDeps = withVersions(['@types/express']);
+  // tsx (local dev) and the MCP inspector are shared tooling.
+  const rootDevDeps = withVersions(['tsx', '@modelcontextprotocol/inspector']);
 
   // Add hosting based on infra
   if (infra === 'agentcore') {
@@ -196,9 +193,9 @@ export const tsMcpServerGenerator = async (
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
-  // The MCP server's runtime dependencies belong to its own project manifest;
-  // the wrapper redirects any build/test tooling to the workspace root.
+  // Runtime deps go in the project manifest; shared tooling goes to the root.
   addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
+  addDependenciesToPackageJson(tree, {}, rootDevDeps);
 
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
   // (^3.25 || ^4.0). Yarn does not dedupe the peer to the workspace's pinned zod, so

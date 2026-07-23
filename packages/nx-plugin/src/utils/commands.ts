@@ -64,9 +64,10 @@ export const buildPackageManagerShortCommand = (
  * When `project` is given the command targets that project's package.json
  * (runtime deps of a project belong in its own manifest); otherwise the
  * dependency is added to the workspace root (shared build/test tooling).
- * bun's `add` has no project filter, so it needs the project's directory
- * (`projectDir`) instead — falling back to the conventional
- * `packages/<name>` when not provided.
+ * The scopeless shorthand is used where supported: pnpm's `--filter` matches
+ * the unscoped project name, and npm/bun target the project directory
+ * (`projectDir`, defaulting to `packages/<name>`). yarn requires the
+ * fully-qualified workspace name.
  */
 export const buildInstallCommand = (
   pm: string,
@@ -76,15 +77,17 @@ export const buildInstallCommand = (
   projectDir?: string,
 ) => {
   if (project) {
+    const shortName = project.split('/').pop();
+    const dir = projectDir ?? `packages/${shortName}`;
     switch (pm) {
       case 'pnpm':
-        return `pnpm add ${dev ? '-D ' : ''}${pkg} --filter ${project}`;
+        return `pnpm add ${dev ? '-D ' : ''}${pkg} --filter ${shortName}`;
       case 'yarn':
         return `yarn workspace ${project} add ${dev ? '-D ' : ''}${pkg}`;
       case 'npm':
-        return `npm install --legacy-peer-deps ${dev ? '-D ' : ''}${pkg} -w ${project}`;
+        return `npm install --legacy-peer-deps ${dev ? '-D ' : ''}${pkg} -w ${dir}`;
       case 'bun':
-        return `bun add ${dev ? '-D ' : ''}${pkg} --cwd ${projectDir ?? `packages/${project.split('/').pop()}`}`;
+        return `bun add ${dev ? '-D ' : ''}${pkg} --cwd ${dir}`;
       default:
         return `${pm} install ${dev ? '-D ' : ''}${pkg}`;
     }
@@ -132,6 +135,7 @@ export const buildCreateNxWorkspaceCommand = (
   iac?: 'cdk' | 'terraform',
   tag?: string,
   module?: 'esm' | 'cjs',
+  extraArgs?: string,
 ) => {
   const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;
   const pkgName = tag ? `@aws/nx-workspace@${tag}` : '@aws/nx-workspace';
@@ -143,6 +147,7 @@ export const buildCreateNxWorkspaceCommand = (
     workspace,
     ...(iac ? [`--iac=${iac}`] : []),
     ...(module ? [`--module=${module}`] : []),
+    ...(extraArgs ? [extraArgs] : []),
   ];
   return parts.join(' ');
 };

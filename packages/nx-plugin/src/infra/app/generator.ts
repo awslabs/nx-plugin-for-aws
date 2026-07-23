@@ -218,15 +218,15 @@ export async function tsInfraGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
-      'aws-cdk-lib',
-      'aws-cdk',
-      'esbuild',
-      'constructs',
-      'source-map-support',
-    ]),
-    withVersions(['tsx']),
+    withVersions(['aws-cdk-lib', 'constructs', 'source-map-support']),
+    {},
     joinPathFragments(libraryRoot, 'package.json'),
+  );
+  // The `aws-cdk` CLI, esbuild (CDK bundling) and tsx are shared tooling.
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(['aws-cdk', 'esbuild', 'tsx']),
   );
 
   updateJson(tree, `${libraryRoot}/tsconfig.lib.json`, (tsConfig) => ({

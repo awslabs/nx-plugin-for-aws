@@ -169,12 +169,10 @@ export const tsAstroDocsGenerator = async (
       'fs-extra',
       'simple-git',
     );
-    devDependencies.push('tsx', '@types/fs-extra');
+    devDependencies.push('@types/fs-extra');
+    addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
   }
 
-  // Runtime dependencies imported by the docs project's own source (astro
-  // config, translation scripts) belong in its manifest; shared tooling (tsx)
-  // is routed to the root automatically.
   addDependenciesToPackageJson(
     tree,
     withVersions(dependencies),

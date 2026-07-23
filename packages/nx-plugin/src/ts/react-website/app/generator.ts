@@ -478,9 +478,9 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
-
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
+  // Build/test tooling imported only from vite.config.mts stays at the root.
+  const rootDevDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
 
   if (ux === 'cloudscape') {
     dependencies.push(
@@ -497,14 +497,13 @@ export async function tsReactWebsiteGenerator(
     }
   }
 
-  // Add TailwindCSS dependencies if enabled
   if (tailwind) {
     dependencies.push('tailwindcss');
-    devDependencies.push('@tailwindcss/vite');
+    rootDevDependencies.push('@tailwindcss/vite');
   }
   if (tanstackRouter) {
     dependencies.push('@tanstack/react-router');
-    devDependencies.push(
+    rootDevDependencies.push(
       '@tanstack/router-plugin',
       '@tanstack/router-generator',
       '@tanstack/virtual-file-routes',
@@ -515,9 +514,10 @@ export async function tsReactWebsiteGenerator(
   addDependenciesToPackageJson(
     tree,
     withVersions(dependencies),
-    withVersions(devDependencies),
+    {},
     joinPathFragments(libraryRoot, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(rootDevDependencies));
 
   await addGeneratorMetricsIfApplicable(tree, [
     REACT_WEBSITE_APP_GENERATOR_INFO,

@@ -302,8 +302,6 @@ export const tsRdbGenerator = async (
         : (['@prisma/adapter-pg', 'pg'] as const)),
     ]),
     withVersions([
-      'prisma',
-      'tsx',
       '@types/aws-lambda',
       ...(options.engine === 'mysql'
         ? ([] as const)
@@ -311,6 +309,8 @@ export const tsRdbGenerator = async (
     ]),
     joinPathFragments(projectConfig.root, 'package.json'),
   );
+  // The prisma CLI and tsx run migration/seed scripts from the root.
+  addDependenciesToPackageJson(tree, {}, withVersions(['prisma', 'tsx']));
 
   registerPnpmBuiltDependencies(tree, {
     '@prisma/engines': false,

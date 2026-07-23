@@ -41,6 +41,9 @@ describe('ts#agent generator', () => {
       name: 'test-project',
       version: '1.0.0',
     });
+
+    // An initialised workspace has the plugin config file
+    tree.write('aws-nx-plugin.config.mts', 'export default {};\n');
   });
 
   it('should add strands agent to existing TypeScript project with default name', async () => {

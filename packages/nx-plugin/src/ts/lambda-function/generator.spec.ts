@@ -57,6 +57,12 @@ describe('ts-lambda-function generator', () => {
     // Create tsconfig.json for the project
     tree.write('packages/test-project/tsconfig.json', '{}');
 
+    // Every ts#project has its own manifest
+    tree.write(
+      'packages/test-project/package.json',
+      JSON.stringify({ name: '@proj/test-project', type: 'module' }),
+    );
+
     // Create source directory
     tree.write('packages/test-project/src/index.ts', 'export {};');
   });

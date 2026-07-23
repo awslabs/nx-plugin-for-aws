@@ -147,9 +147,10 @@ export const agentcoreGatewayGenerator = async (
   addDependenciesToPackageJson(
     tree,
     withVersions(['@modelcontextprotocol/sdk', 'express']),
-    withVersions(['tsx', '@types/express', 'ejs', '@types/ejs']),
+    withVersions(['@types/express', 'ejs', '@types/ejs']),
     joinPathFragments(projectRoot, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
   // the infrastructure to a previously infra-less gateway.

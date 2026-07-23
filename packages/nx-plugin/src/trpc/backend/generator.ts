@@ -241,9 +241,10 @@ export async function tsTrpcApiGenerator(
         ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
-    withVersions(['@types/aws-lambda', 'tsx', 'cors', '@types/cors']),
+    withVersions(['@types/aws-lambda', 'cors', '@types/cors']),
     joinPathFragments(backendRoot, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
   addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);

@@ -29,6 +29,10 @@ describe('fastapi react generator', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
     // Mock FastAPI project configuration
     tree.write(
       'apps/backend/project.json',
@@ -363,6 +367,10 @@ describe('fastapi react generator with unqualified names', () => {
         root: 'apps/frontend',
         sourceRoot: 'apps/frontend/src',
       }),
+    );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@my-scope/frontend', type: 'module' }),
     );
 
     // Mock FastAPI project configuration with Python fully qualified name

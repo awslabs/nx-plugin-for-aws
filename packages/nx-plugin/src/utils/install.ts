@@ -78,11 +78,8 @@ export const installDependencies = async (
     return;
   }
   if (languages.includes('typescript')) {
-    // Force the install (ensureInstall=true). Devkit's default only installs
-    // when the *root* package.json changed, but in this layout a generator's
-    // runtime deps land in the owning project's package.json (and versions in
-    // the catalog) — the root often doesn't change, so the default would skip
-    // the install and leave those deps unresolvable.
+    // Force the install: devkit's default only installs when the root
+    // package.json changed, but deps land in per-project manifests.
     installPackagesTask(tree, true);
   }
   if (languages.includes('python')) {

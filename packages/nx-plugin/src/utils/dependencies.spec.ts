@@ -150,7 +150,7 @@ describe('addDependenciesToPackageJson', () => {
     expect(workspaceYaml.catalog.zod).toBe('4.4.3');
   });
 
-  it('should route build/test tooling to the root while runtime deps stay in the project manifest', () => {
+  it('should write dependencies to the manifest the caller targets', () => {
     mockPackageManager(tree, 'pnpm', '10.0.0');
     tree.write(
       'packages/lib/package.json',
@@ -160,19 +160,30 @@ describe('addDependenciesToPackageJson', () => {
     addDependenciesToPackageJson(
       tree,
       { zod: '4.4.3' },
-      { tsx: '4.20.0', '@types/aws-lambda': '8.10.0' },
+      { '@types/aws-lambda': '8.10.0' },
       'packages/lib/package.json',
     );
 
     const projectPkg = readJson(tree, 'packages/lib/package.json');
-    // Runtime dep and its type stub stay in the project.
     expect(projectPkg.dependencies.zod).toBe('catalog:');
     expect(projectPkg.devDependencies['@types/aws-lambda']).toBe('catalog:');
-    expect(projectPkg.devDependencies?.tsx).toBeUndefined();
-    // Pure tooling is redirected to the workspace root.
     const rootPkg = readJson(tree, 'package.json');
-    expect(rootPkg.devDependencies.tsx).toBe('catalog:');
     expect(rootPkg.dependencies?.zod).toBeUndefined();
+  });
+
+  it('should fall back to the root manifest when the project has no package.json', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+
+    addDependenciesToPackageJson(
+      tree,
+      { zod: '4.4.3' },
+      {},
+      'packages/no-manifest/package.json',
+    );
+
+    expect(tree.exists('packages/no-manifest/package.json')).toBe(false);
+    const rootPkg = readJson(tree, 'package.json');
+    expect(rootPkg.dependencies.zod).toBe('catalog:');
   });
 
   it('should write direct version ranges to non-root package.json files on npm', () => {

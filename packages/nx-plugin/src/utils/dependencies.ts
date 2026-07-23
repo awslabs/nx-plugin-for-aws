@@ -11,9 +11,9 @@ import {
   readJson,
   type Tree,
   updateJson,
-  writeJson,
 } from '@nx/devkit';
 import yaml from 'js-yaml';
+import { coerce, gt, gte } from 'semver';
 import { readAwsNxPluginConfigSync } from './config/utils';
 
 /**
@@ -37,61 +37,37 @@ export const detectWorkspacePackageManager = (tree: Tree): PackageManager =>
   tree.exists('pnpm-workspace.yaml') ? 'pnpm' : detectPackageManager(tree.root);
 
 /**
- * Parse a version or simple range (an optional `^`/`~`/`>=` prefix followed by
- * x.y.z and an optional prerelease suffix) into numeric parts. Returns
- * undefined for anything else (tags, protocols, compound ranges) — the whole
- * string must match, so ranges like `>=3 <5` or `^1 || ^2` are treated as
- * user-customised and never overwritten.
+ * Parse a version or simple range (an optional `^`/`~`/`>=` prefix followed
+ * by a version) for comparison. Returns undefined for anything else (tags,
+ * protocols, compound ranges), which callers treat as user-customised and
+ * never overwrite.
  */
-const parseVersionParts = (version: string): number[] | undefined => {
-  const match =
-    /^(?:\^|~|>=)?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-[0-9A-Za-z.-]+)?$/.exec(
-      version.trim(),
-    );
-  if (!match) {
-    return undefined;
-  }
-  return [
-    Number.parseInt(match[1], 10),
-    match[2] ? Number.parseInt(match[2], 10) : 0,
-    match[3] ? Number.parseInt(match[3], 10) : 0,
-  ];
+const parseSimpleRange = (version: string) => {
+  const match = /^(?:\^|~|>=)?(\d[0-9A-Za-z.-]*)$/.exec(version.trim());
+  return match
+    ? (coerce(match[1], { includePrerelease: true }) ?? undefined)
+    : undefined;
 };
 
-const compareVersions = (left: number[], right: number[]): number => {
-  for (let i = 0; i < 3; i++) {
-    if (left[i] !== right[i]) {
-      return left[i] - right[i];
-    }
-  }
-  return 0;
-};
-
-const versionAtLeast = (version: string, minimum: string): boolean => {
-  const parsed = parseVersionParts(version) ?? [0, 0, 0];
-  const minimumParsed = parseVersionParts(minimum) ?? [0, 0, 0];
-  return compareVersions(parsed, minimumParsed) >= 0;
-};
+const versionAtLeast = (version: string, minimum: string): boolean =>
+  gte(
+    parseSimpleRange(version) ?? '0.0.0',
+    parseSimpleRange(minimum) ?? '0.0.0',
+  );
 
 /**
- * Whether `incoming` should replace `existing` as a catalog version. Mirrors
- * devkit's incumbent-wins semantics for manifest ranges: only a strictly
- * greater version replaces the existing entry, so generating a new project
- * never downgrades a version the user has upgraded in the catalog (which
- * would silently apply to every project referencing it). An existing entry
- * that can't be compared (a tag or complex range, i.e. user-customised) is
- * always kept.
+ * Whether `incoming` should replace `existing` as a catalog version. Only a
+ * strictly greater version replaces the existing entry, so generating a new
+ * project never downgrades a version the user has upgraded in the catalog.
+ * An entry that can't be compared (a tag or complex range) is always kept.
  */
 const isVersionUpgrade = (incoming: string, existing: string): boolean => {
-  const existingParsed = parseVersionParts(existing);
-  if (!existingParsed) {
+  const existingParsed = parseSimpleRange(existing);
+  const incomingParsed = parseSimpleRange(incoming);
+  if (!existingParsed || !incomingParsed) {
     return false;
   }
-  const incomingParsed = parseVersionParts(incoming);
-  if (!incomingParsed) {
-    return false;
-  }
-  return compareVersions(incomingParsed, existingParsed) > 0;
+  return gt(incomingParsed, existingParsed);
 };
 
 // Memoised per workspace root and package manager: detecting catalog support
@@ -179,86 +155,21 @@ export const catalogsEnabled = (tree: Tree): boolean => {
 };
 
 /**
- * Build/test tooling that is only ever imported from config files, build
- * scripts, or the Nx toolchain — never from a project's runtime `src` code.
- * These always belong in the workspace root `package.json` devDependencies,
- * even when a generator adds them alongside a project's runtime dependencies.
- *
- * Everything not listed here (including `@types/*`, which back runtime
- * `import type` statements, and libraries like `aws-cdk-lib`, `constructs`,
- * `@prisma/client`, `@nx/devkit`) is treated as a project dependency and lands
- * in the owning project's manifest so that Biome's `noUndeclaredDependencies`
- * rule passes for the project's source.
- */
-const ROOT_DEV_TOOLING = new Set<string>([
-  // Test / coverage
-  'vitest',
-  '@vitest/coverage-v8',
-  '@vitest/ui',
-  'jsdom',
-  // Bundlers / build
-  'vite',
-  '@tailwindcss/vite',
-  'rolldown',
-  'esbuild',
-  'tsx',
-  // TanStack build-time plugins
-  '@tanstack/router-plugin',
-  '@tanstack/router-generator',
-  '@tanstack/virtual-file-routes',
-  '@tanstack/router-utils',
-  // Nx toolchain
-  'nx',
-  '@nx/js',
-  '@nx/workspace',
-  '@nx/react',
-  '@nxlv/python',
-  '@nx-extend/terraform',
-  // Language / format / ORM CLIs
-  'typescript',
-  '@biomejs/biome',
-  'prisma',
-  // CDK CLI (the `aws-cdk` CLI, not the `aws-cdk-lib` library)
-  'aws-cdk',
-  // Filesystem / shell build helpers
-  'ncp',
-  'rimraf',
-  'make-dir-cli',
-  'husky',
-  // Inspectors / dev harnesses
-  '@modelcontextprotocol/inspector',
-]);
-
-const isRootDevTooling = (packageName: string): boolean =>
-  ROOT_DEV_TOOLING.has(packageName);
-
-const pick = (
-  deps: Record<string, string>,
-  predicate: (name: string) => boolean,
-): Record<string, string> =>
-  Object.fromEntries(Object.entries(deps).filter(([name]) => predicate(name)));
-
-/**
  * Add dependencies to a package.json, routing version ranges through the
  * package manager's dependency catalog when supported.
  *
- * This is a drop-in replacement for `addDependenciesToPackageJson` from
- * `@nx/devkit` and generators use it for all dependency additions. When
- * catalogs are enabled (see `catalogsEnabled`) on pnpm/yarn/bun, each entry is
- * written as a `catalog:` reference with the version range recorded in the
- * package manager's catalog (pnpm-workspace.yaml, .yarnrc.yml, or the root
- * package.json `catalog` field respectively), so the catalog remains the
- * single source of truth for dependency versions across the workspace. On
- * npm — which has no catalog feature — or when the workspace opts out via
- * `packageManager.catalogs: false`, direct version ranges are written as-is
- * and keeping them aligned is the user's responsibility.
+ * Drop-in replacement for devkit's `addDependenciesToPackageJson`. When
+ * catalogs are enabled (see `catalogsEnabled`) on pnpm/yarn/bun, each entry
+ * is written as a `catalog:` reference with the version range recorded in
+ * the workspace catalog (pnpm-workspace.yaml, .yarnrc.yml, or the root
+ * package.json `catalog` field). On npm, or when catalogs are disabled,
+ * direct version ranges are written as-is.
  *
- * When `packageJsonPath` targets a project's own manifest (not the workspace
- * root), the project's runtime dependencies are written there while pure
- * build/test tooling (see `ROOT_DEV_TOOLING`) is redirected to the workspace
- * root devDependencies. This keeps every project declaring the dependencies
- * its source imports — so `noUndeclaredDependencies` passes — while shared
- * tooling stays installed once at the root.
+ * Generators declare a project's runtime dependencies against the project's
+ * manifest (so `noUndeclaredDependencies` passes) and shared build/test
+ * tooling against the root in a separate call. When `packageJsonPath` points
+ * at a project without its own package.json, the dependencies fall back to
+ * the workspace root.
  */
 export const addDependenciesToPackageJson = (
   tree: Tree,
@@ -266,56 +177,26 @@ export const addDependenciesToPackageJson = (
   devDependencies: Record<string, string>,
   packageJsonPath = 'package.json',
 ): GeneratorCallback => {
-  const targetsProject = packageJsonPath !== 'package.json';
-
-  // Devkit's `addDependenciesToPackageJson` reads the manifest and throws if
-  // it's missing. A generator may add dependencies before the project's
-  // package.json has been vended, so ensure a minimal one exists first.
-  if (targetsProject && !tree.exists(packageJsonPath)) {
-    writeJson(tree, packageJsonPath, {});
-  }
-
-  // For a project manifest, split off pure tooling to the root; everything
-  // else (runtime deps, and the `@types/*` that back runtime type imports)
-  // stays with the project. For the root manifest, write everything as-is.
-  const rootDevDependencies = targetsProject
-    ? {
-        ...pick(dependencies, isRootDevTooling),
-        ...pick(devDependencies, isRootDevTooling),
-      }
-    : {};
-  const projectDependencies = targetsProject
-    ? pick(dependencies, (n) => !isRootDevTooling(n))
-    : dependencies;
-  const projectDevDependencies = targetsProject
-    ? pick(devDependencies, (n) => !isRootDevTooling(n))
-    : devDependencies;
+  // A project without its own manifest declares dependencies at the root.
+  const targetPath = tree.exists(packageJsonPath)
+    ? packageJsonPath
+    : 'package.json';
 
   // Devkit owns the update semantics (existing-version comparison, dev/prod
   // precedence, and routing entries that already use `catalog:` refs through
   // its own pnpm/yarn catalog managers).
   const callback = devkitAddDependenciesToPackageJson(
     tree,
-    projectDependencies,
-    projectDevDependencies,
-    packageJsonPath,
+    dependencies,
+    devDependencies,
+    targetPath,
   );
-  if (Object.keys(rootDevDependencies).length > 0) {
-    devkitAddDependenciesToPackageJson(tree, {}, rootDevDependencies);
-  }
 
   if (catalogsEnabled(tree)) {
-    convertDependenciesToCatalog(tree, packageJsonPath, [
-      ...Object.keys(projectDependencies),
-      ...Object.keys(projectDevDependencies),
+    convertDependenciesToCatalog(tree, targetPath, [
+      ...Object.keys(dependencies),
+      ...Object.keys(devDependencies),
     ]);
-    if (Object.keys(rootDevDependencies).length > 0) {
-      convertDependenciesToCatalog(
-        tree,
-        'package.json',
-        Object.keys(rootDevDependencies),
-      );
-    }
   }
 
   return callback;

@@ -28,6 +28,10 @@ describe('ts strands agent react connection generator', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
     // Mock agent project configuration
     tree.write(
       'apps/agent-project/project.json',

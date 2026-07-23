@@ -193,12 +193,8 @@ export const tsNxGeneratorGenerator = async (
 
   await formatFilesInSubtree(tree);
 
-  // The generated `generator.ts` imports `@nx/devkit`, which Nx loads (via
-  // native type stripping) when the generator runs. `@nx/devkit` is only a
-  // transitive dependency of `@nx/js`, which hoisting package managers surface
-  // at the workspace root but bun's isolated layout does not — so it must
-  // resolve from the plugin's own install even if the caller would otherwise
-  // prefer to defer.
+  // The generated generator.ts imports @nx/devkit, which must resolve for
+  // Nx to run it (bun's isolated layout doesn't hoist it from @nx/js).
   return () =>
     installDependencies(tree, options.preferInstallDependencies, {
       languages: ['typescript'],

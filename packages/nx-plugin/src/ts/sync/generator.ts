@@ -26,9 +26,10 @@ export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${TS_SYNC_GENERATOR_INFO
 
 export const tsSyncGeneratorGenerator = async (
   tree: Tree,
-  // The sync runner invokes with only the tree; `nx g` passes an options
-  // object and treats any truthy return value as a task callback — so when
-  // options are present, return nothing instead of a SyncGeneratorResult.
+  // The sync runner (`nx sync` / pre-compile) invokes with only the tree.
+  // Running directly via `nx g @aws/nx-plugin:ts#sync` passes an options
+  // object, and `nx g` treats a truthy return value as a task callback — so
+  // when options are present, return nothing.
   options?: unknown,
 ): Promise<SyncGeneratorResult | undefined> => {
   const asResult = (

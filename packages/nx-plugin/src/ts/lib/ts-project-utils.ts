@@ -43,15 +43,9 @@ export const configureTsProject = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
-  // Without workspace initialisation there's no biome config (lint/format
-  // become no-ops) and no ts#sync registration (cross-project imports won't
-  // be declared as workspace dependencies) — point the user at init rather
-  // than leaving them to discover the gaps one failure at a time. Either
-  // init artefact counts as initialised (tests seed biome.json directly).
-  if (
-    !tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME) &&
-    !tree.exists('biome.json')
-  ) {
+  // Point users at init when the workspace hasn't been configured, since
+  // lint/format targets and workspace dependency sync depend on it.
+  if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
     logger.warn(
       `This workspace has no ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} — run 'nx g @aws/nx-plugin:init' (or 'nx add @aws/nx-plugin') to configure linting, formatting and workspace dependency sync.`,
     );
@@ -105,12 +99,7 @@ export const configureTsProject = async (
       baseUrl: undefined,
       rootDir: '.',
       paths: {
-        // Remove any legacy colon-form alias for this project (eg :foo/bar)
-        ...Object.fromEntries(
-          Object.entries(tsConfig.compilerOptions?.paths ?? {}).filter(
-            ([k]) => k !== `:${options.fullyQualifiedName.slice(1)}`,
-          ),
-        ),
+        ...tsConfig.compilerOptions?.paths,
         [options.fullyQualifiedName]: [
           `./${joinPathFragments(options.dir, 'src', 'index.ts')}`,
         ],

@@ -241,10 +241,9 @@ export const tsAgentGenerator = async (
             ] as const)),
     ]),
     withVersions([
-      // The chat CLI runs standalone via tsx for every protocol, and resolves
-      // the deployed agent from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
-      'tsx',
       '@types/node',
+      // The chat CLI runs standalone via tsx and resolves the deployed agent
+      // from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
       'agent-chat-cli',
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
@@ -259,6 +258,7 @@ export const tsAgentGenerator = async (
     ]),
     joinPathFragments(project.root, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.

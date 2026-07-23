@@ -151,9 +151,10 @@ export const tsDynamoDBGenerator = async (
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
     ]),
-    withVersions(['tsx', '@types/aws-lambda', '@types/node']),
+    withVersions(['@types/aws-lambda', '@types/node']),
     joinPathFragments(dir, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
 

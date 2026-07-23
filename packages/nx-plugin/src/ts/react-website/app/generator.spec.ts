@@ -862,28 +862,19 @@ describe('react-website generator ux tests', () => {
       expect(
         tree.exists('packages/common/shadcn/src/components/ui/button.tsx'),
       ).toBeTruthy();
-      expect(tree.exists('components.json')).toBeTruthy();
+      // components.json lives in the package so `shadcn add` installs
+      // component dependencies into the package's own manifest
+      expect(
+        tree.exists('packages/common/shadcn/components.json'),
+      ).toBeTruthy();
+      expect(tree.exists('components.json')).toBeFalsy();
     });
 
-    it('should ensure pnpm-workspace.yaml ignores workspace root check when using Shadcn', async () => {
+    it('should not relax the pnpm workspace root check', async () => {
       await tsReactWebsiteGenerator(tree, options);
 
       const workspaceYaml = tree.read('pnpm-workspace.yaml', 'utf-8') ?? '';
-      expect(workspaceYaml).toMatch(/ignoreWorkspaceRootCheck:\s*true/);
-    });
-
-    it('should preserve existing pnpm-workspace.yaml entries when enabling ignoreWorkspaceRootCheck', async () => {
-      tree.write(
-        'pnpm-workspace.yaml',
-        "packages:\n  - packages/*\nallowBuilds:\n  '@swc/core': true\n",
-      );
-
-      await tsReactWebsiteGenerator(tree, options);
-
-      const workspaceYaml = tree.read('pnpm-workspace.yaml', 'utf-8') ?? '';
-      expect(workspaceYaml).toMatch(/ignoreWorkspaceRootCheck:\s*true/);
-      expect(workspaceYaml).toMatch(/packages:/);
-      expect(workspaceYaml).toMatch(/@swc\/core/);
+      expect(workspaceYaml).not.toMatch(/ignoreWorkspaceRootCheck/);
     });
 
     it('should use shared Shadcn components when ux is Shadcn', async () => {

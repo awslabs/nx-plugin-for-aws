@@ -29,6 +29,10 @@ describe('py strands agent react connection generator', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
     // Mock agent project configuration
     tree.write(
       'apps/agent-project/project.json',
@@ -570,6 +574,10 @@ describe('py strands agent react connection generator - AG-UI protocol', () => {
       }),
     );
     tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
+    tree.write(
       'apps/agent-project/project.json',
       JSON.stringify({
         name: 'agent-project',
@@ -862,6 +870,10 @@ describe('py strands agent react connection generator - AG-UI themed CopilotKit'
         sourceRoot: 'apps/frontend/src',
         ...(ux ? { metadata: { ux } } : {}),
       }),
+    );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
     );
     tree.write(
       'apps/agent-project/project.json',

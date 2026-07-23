@@ -15,7 +15,6 @@ import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import { esmVars } from './module-format';
 import { getNpmScopePrefix } from './npm-scope';
-import { ensurePnpmIgnoresWorkspaceRootCheck } from './pnpm-workspace';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
@@ -41,7 +40,6 @@ export async function sharedShadcnGenerator(tree: Tree) {
   const fullyQualifiedName = `${npmScopePrefix}${SHARED_SHADCN_NAME}`;
   const libraryRoot = joinPathFragments(PACKAGES_DIR, SHARED_SHADCN_DIR);
   const shadcnSrcRoot = joinPathFragments(libraryRoot, 'src');
-  ensurePnpmIgnoresWorkspaceRootCheck(tree);
 
   if (!tree.exists(joinPathFragments(libraryRoot, 'project.json'))) {
     await tsProjectGenerator(tree, {
@@ -127,11 +125,13 @@ export async function sharedShadcnGenerator(tree: Tree) {
     },
   }));
 
-  if (!tree.exists('components.json')) {
+  // components.json lives in the package so `shadcn add` runs there and
+  // installs component dependencies into the package's own manifest.
+  if (!tree.exists(joinPathFragments(libraryRoot, 'components.json'))) {
     generateFiles(
       tree,
       joinPathFragments(import.meta.dirname, 'files', 'shadcn'),
-      '.',
+      libraryRoot,
       {
         sharedShadcnAlias,
       },

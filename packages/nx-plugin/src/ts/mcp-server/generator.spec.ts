@@ -44,8 +44,13 @@ describe('ts#mcp-server generator', () => {
       },
     });
 
-    // Create tsconfig.json for the project
+    // Create tsconfig.json and package.json for the project (every ts#project
+    // has its own manifest; ESM matches the default workspace)
     writeJson(tree, 'apps/test-project/tsconfig.json', {});
+    writeJson(tree, 'apps/test-project/package.json', {
+      name: '@proj/test-project',
+      type: 'module',
+    });
   });
 
   it('should add MCP server to existing TypeScript project with default name', async () => {
@@ -175,9 +180,8 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should handle ESM projects correctly', async () => {
-    // The module system is derived from the workspace root package.json
-    updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'module' }));
-
+    // The module system is derived from the project's own package.json
+    // (seeded as `type: module` in beforeEach)
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'esm-server',
@@ -199,8 +203,11 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should handle CommonJS projects correctly', async () => {
-    // A CommonJS workspace is marked with an explicit type: 'commonjs'
-    updateJson(tree, 'package.json', (pkg) => ({ ...pkg, type: 'commonjs' }));
+    // A CommonJS project is marked with an explicit type: 'commonjs'
+    updateJson(tree, 'apps/test-project/package.json', (pkg) => ({
+      ...pkg,
+      type: 'commonjs',
+    }));
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
