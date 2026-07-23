@@ -37,16 +37,18 @@ export const detectWorkspacePackageManager = (tree: Tree): PackageManager =>
   tree.exists('pnpm-workspace.yaml') ? 'pnpm' : detectPackageManager(tree.root);
 
 /**
- * Parse a version or simple range (an optional `^`/`~`/`>=` prefix followed
- * by a version) for comparison. Returns undefined for anything else (tags,
- * protocols, compound ranges), which callers treat as user-customised and
- * never overwrite.
+ * Coerce a single simple range (an optional `^`/`~`/`>=` prefix followed by a
+ * version) to a comparable version. Returns undefined for anything with
+ * whitespace or `||` — `semver.coerce` would happily reduce a compound range
+ * like `>=3 <5` to `3.0.0`, but callers treat such user-customised ranges as
+ * opaque and never overwrite them — as well as for tags and protocols.
  */
 const parseSimpleRange = (version: string) => {
-  const match = /^(?:\^|~|>=)?(\d[0-9A-Za-z.-]*)$/.exec(version.trim());
-  return match
-    ? (coerce(match[1], { includePrerelease: true }) ?? undefined)
-    : undefined;
+  const trimmed = version.trim();
+  if (/\s|\|\|/.test(trimmed)) {
+    return undefined;
+  }
+  return coerce(trimmed, { includePrerelease: true }) ?? undefined;
 };
 
 const versionAtLeast = (version: string, minimum: string): boolean =>
