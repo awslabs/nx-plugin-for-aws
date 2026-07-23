@@ -10,6 +10,7 @@ import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 TypeScript项目生成器可用于创建配置了最佳实践的现代化[TypeScript](https://www.typescriptlang.org/)库或应用，包括[ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html)、TypeScript[项目引用](https://www.typescriptlang.org/docs/handbook/project-references.html)、用于运行测试的[Vitest](https://vitest.dev/)以及用于代码检查和格式化的[Biome](https://biomejs.dev/)。
@@ -34,7 +35,7 @@ TypeScript项目生成器可用于创建配置了最佳实践的现代化[TypeSc
 
   - src TypeScript 源代码
     - index.ts
-  - package.json 定义项目包名的最小项目清单
+  - package.json 定义项目包名和依赖的项目清单
   - project.json 项目配置和构建目标
   - tsconfig.json 此项目的基础 TypeScript 配置（继承工作区根目录的 tsconfig.base.json）
   - tsconfig.lib.json 库的 TypeScript 配置（运行时或打包源码）
@@ -90,10 +91,6 @@ export * from './algorithms/index.js';
 import { sayHello } from '@my-scope/my-library';
 ```
 
-:::note[项目别名]
-别名与您的项目包名匹配，因此工作区中的任何项目都可以通过其 `package.json` 中声明的名称导入——无需将本地项目声明为依赖。
-:::
-
 首次在工作区中导入新项目时，IDE可能会显示类似以下错误：
 
 <details>
@@ -108,28 +105,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-这是因为尚未设置[项目引用](https://www.typescriptlang.org/docs/handbook/project-references.html)。
+这是因为尚未设置[项目引用](https://www.typescriptlang.org/docs/handbook/project-references.html)，并且导入的项目尚未在您项目的 `package.json` 中声明为工作区依赖。
 
-TypeScript项目默认配置了Nx TypeScript同步生成器，您无需手动配置项目引用。只需运行以下命令，Nx将自动添加所需配置：
+您的工作区配置了同步生成器，可以为您管理这两者，因此您无需手动配置它们。只需运行以下命令，Nx 将添加所需的配置：
 
 <NxCommands commands={['sync']} />
 
-此后IDE错误应消失，即可正常使用库。
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+Nx 的 TypeScript 同步生成器添加项目引用，而插件的 `ts#sync` 生成器在您项目的 `package.json` 中声明导入的项目（在包管理器支持工作区协议的情况下为 `workspace:*`，在 npm 和 yarn classic 上为 `*`），以便包管理器在安装时链接本地项目。此后 IDE 错误应消失，即可正常使用库。
 
 :::tip[构建快捷方式]
-构建项目时也会提示类似信息：
+您也可以直接构建项目——同步生成器会先运行，并提示您应用任何未完成的更改：
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-选择`Yes`允许Nx更新项目引用。
+选择 `Yes` 允许 Nx 同步您的工作区。
 :::
 
 ### 保持路径别名同步
@@ -138,37 +147,37 @@ No, run the tasks without syncing the changes
 
 ### 依赖管理
 
-每个 TypeScript 项目在其自己的 `package.json` 中声明**其源代码导入的第三方运行时依赖**。这使每个项目都能自我描述——其清单准确列出了它需要的内容——并让 Biome 的 [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) lint 规则强制项目永远不会导入未声明的包。
+每个 TypeScript 项目在其自己的 `package.json` 中声明其第三方运行时依赖。跨项目共享的构建和测试工具在根 `package.json` 中定义。
 
-**构建和测试工具**（例如 `vitest`、`tsx`、`rolldown`、Nx 工具链（`nx`、`@nx/js`、...）、`typescript`、`@biomejs/biome`）在工作区中共享，因此它们位于**根目录** `package.json` 的 `devDependencies` 中，而不是在每个项目中。这些工具仅从配置文件、构建脚本和测试中引用，lint 规则会豁免这些文件。
+要向项目添加运行时依赖，请将其安装到该项目中：
 
-要向项目添加运行时依赖，请将其添加到该项目的 `package.json` 中。使用包管理器的过滤器/工作区标志来定位正确的项目，例如使用 pnpm：
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-```bash
-pnpm add some-npm-package --filter @my-scope/my-library
-```
+您也可以在项目目录中运行包管理器的普通 `add`/`install` 命令。
 
-要添加共享的开发工具，请将其添加到工作区根目录：
+要添加共享的开发工具，请将其安装到工作区根目录：
 
-<InstallCommand pkg="-D some-dev-tool" />
+<InstallCommand pkg="some-dev-tool" dev />
 
-这遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)，意味着所有项目使用每个依赖的相同版本——避免类型冲突和部署包中的多个包副本。对于支持目录（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs) 和 [bun](https://bun.com/docs/install/catalogs)）的包管理器，生成器会在目录中记录每个版本，并使用 `catalog:` 协议引用它（例如 `"zod": "catalog:"`），因此无论哪个项目声明依赖，目录都是版本的唯一真实来源。提供的 `biome.json` 启用了 Biome 的 [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) 解析器，以便 lint 规则理解 `catalog:` 引用。
+:::note
+Biome 的 [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) lint 规则强制项目的源代码只能导入在其自己的 `package.json` 中声明的包。配置文件、构建脚本和测试被豁免，因此共享工具可以保留在根目录。
+:::
+
+#### 目录
+
+对于支持目录的包管理器（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs) 和 [bun](https://bun.com/docs/install/catalogs)），生成器会在目录中记录每个版本，并使用 `catalog:` 协议引用它（例如 `"zod": "catalog:"`），因此无论哪个项目声明依赖，目录都是版本的唯一真实来源。这有助于您遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)，避免类型冲突和部署包中的多个包副本。
+
+在 pnpm 上，工作区还设置了 [`catalogMode: strict`](https://pnpm.io/settings#catalogmode)，以便 `pnpm add` 自动在目录中记录新依赖。yarn 和 bun 没有等效设置，因此使用 `catalog:` 协议添加新依赖以将它们记录在目录中，例如 `yarn workspace @my-scope/my-library add some-npm-package@catalog:` 或 `bun add some-npm-package@catalog: --cwd packages/my-library`。
 
 :::tip[在 npm 上对齐版本]
-npm（和 yarn classic）没有目录功能，因此版本直接在每个 `package.json` 中声明。要在项目之间保持一致，我们推荐使用 [syncpack](https://github.com/JamieMason/syncpack)（`npx syncpack lint`）。
+npm 没有目录功能，因此版本直接在每个 `package.json` 中声明。要在项目之间保持一致，我们推荐使用 [syncpack](https://github.com/JamieMason/syncpack)（`npx syncpack lint`）。
 :::
 
-:::note[bun]
-在 bun 上，一些 Nx 生成器从根清单读取版本的包（`vite`、`react`、`react-dom`）保留直接版本范围而不是 `catalog:` 引用——Nx 尚未解析 bun 目录，`catalog:` 引用会破坏这些生成器。
-:::
-
-#### 选择退出目录
+##### 选择退出目录
 
 目录默认启用。要关闭它们，请使用 `--catalog false` 创建工作区：
 
-```bash
-pnpm create @aws/nx-workspace my-project --catalog false
-```
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
 
 或随时在 `aws-nx-plugin.config.mts` 中设置：
 
@@ -180,9 +189,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-禁用目录后，生成器会将依赖版本直接写入每个项目的 `package.json`，保持项目间版本一致是您的责任（例如使用 [syncpack](https://github.com/JamieMason/syncpack)）。在 pnpm 上启用目录时，工作区还会设置 [`catalogMode: strict`](https://pnpm.io/settings#catalogmode)，以便 `pnpm add` 在目录中记录新依赖，在无需手动编辑的情况下保持单一版本策略。
-
-当工作区中的一个项目导入另一个项目时，您无需手动声明：TypeScript 路径别名会解析构建时的导入，而 `ts#sync` 生成器（在 `compile` 之前运行，或通过 `nx sync` 按需运行）会在导入项目的 `package.json` 中将被导入的项目声明为工作区依赖（在包管理器支持工作区协议的情况下为 `workspace:*`，在 npm 和 yarn classic 上为 `*`）。这使每个项目的清单都能准确记录其使用的内容——满足 `noUndeclaredDependencies` lint 规则——而无需手动记账。
+禁用目录后，生成器会将依赖版本直接写入每个项目的 `package.json`，保持项目间版本一致是您的责任。
 
 #### 在根目录声明所有依赖
 

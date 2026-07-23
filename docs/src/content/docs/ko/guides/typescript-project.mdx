@@ -9,6 +9,7 @@ import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 TypeScript 프로젝트 생성기는 최신 [TypeScript](https://www.typescriptlang.org/) 라이브러리나 애플리케이션을 생성하는 데 사용할 수 있으며, [ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), TypeScript [프로젝트 참조](https://www.typescriptlang.org/docs/handbook/project-references.html), 테스트 실행을 위한 [Vitest](https://vitest.dev/), 린팅 및 포맷팅을 위한 [Biome](https://biomejs.dev/) 등 모범 사례가 구성된 상태로 설정됩니다.
@@ -33,7 +34,7 @@ TypeScript 프로젝트 생성기는 최신 [TypeScript](https://www.typescriptl
 
   - src TypeScript 소스 코드
     - index.ts
-  - package.json 프로젝트의 패키지 이름을 정의하는 최소한의 프로젝트 매니페스트
+  - package.json 프로젝트의 패키지 이름과 의존성을 정의하는 프로젝트 매니페스트
   - project.json 프로젝트 구성 및 빌드 대상
   - tsconfig.json 이 프로젝트의 기본 TypeScript 구성 (워크스페이스 루트 tsconfig.base.json 확장)
   - tsconfig.lib.json 라이브러리를 위한 TypeScript 구성 (런타임 또는 패키지된 소스)
@@ -89,10 +90,6 @@ export * from './algorithms/index.js';
 import { sayHello } from '@my-scope/my-library';
 ```
 
-:::note[프로젝트 별칭]
-별칭은 프로젝트의 패키지 이름과 일치하므로, 워크스페이스의 모든 프로젝트는 `package.json`에 선언된 이름으로 임포트할 수 있습니다 — 로컬 프로젝트를 의존성으로 선언할 필요가 없습니다.
-:::
-
 워크스페이스에서 새 프로젝트에 대한 임포트 문을 처음 추가하면 아래와 같은 IDE 오류가 표시될 수 있습니다:
 
 <details>
@@ -107,28 +104,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-이는 [프로젝트 참조](https://www.typescriptlang.org/docs/handbook/project-references.html)가 아직 설정되지 않았기 때문입니다.
+이는 [프로젝트 참조](https://www.typescriptlang.org/docs/handbook/project-references.html)가 아직 설정되지 않았고, 임포트된 프로젝트가 아직 프로젝트의 `package.json`에 워크스페이스 의존성으로 선언되지 않았기 때문입니다.
 
-TypeScript 프로젝트는 Nx TypeScript Sync 생성기를 통해 기본적으로 구성되므로 수동으로 프로젝트 참조를 구성할 필요가 없습니다. 다음 명령어를 실행하면 Nx가 필요한 구성을 추가합니다:
+워크스페이스는 두 가지를 모두 관리하는 동기화 생성기로 구성되어 있으므로 수동으로 구성할 필요가 없습니다. 다음 명령어를 실행하면 Nx가 필요한 구성을 추가합니다:
 
 <NxCommands commands={['sync']} />
 
-이후 IDE의 오류가 사라지고 라이브러리를 사용할 수 있게 됩니다.
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+Nx의 TypeScript 동기화 생성기는 프로젝트 참조를 추가하고, 플러그인의 `ts#sync` 생성기는 임포트된 프로젝트를 프로젝트의 `package.json`에 선언합니다(패키지 관리자가 워크스페이스 프로토콜을 지원하는 경우 `workspace:*`, npm과 yarn classic에서는 `*`). 이렇게 하면 패키지 관리자가 설치 시 로컬 프로젝트를 링크합니다. 이후 IDE의 오류가 사라지고 라이브러리를 사용할 수 있게 됩니다.
 
 :::tip[빌드 단축키]
-프로젝트를 빌드하면 다음과 같은 메시지가 표시될 수도 있습니다:
+프로젝트를 빌드하기만 해도 됩니다 — 동기화 생성기가 먼저 실행되고 미처리된 변경 사항을 적용하라는 메시지가 표시됩니다:
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-`Yes`를 선택하면 Nx가 프로젝트 참조를 업데이트합니다.
+`Yes`를 선택하면 Nx가 워크스페이스를 동기화합니다.
 :::
 
 ### 경로 별칭 동기화 유지
@@ -137,37 +146,37 @@ No, run the tasks without syncing the changes
 
 ### 의존성
 
-각 TypeScript 프로젝트는 **소스 코드가 임포트하는 서드파티 런타임 의존성**을 자체 `package.json`에 선언합니다. 이를 통해 모든 프로젝트가 자체 설명적이 되며 — 매니페스트에 필요한 것이 정확히 나열됩니다 — Biome의 [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) 린트 규칙이 프로젝트가 선언하지 않은 패키지를 임포트하지 않도록 강제합니다.
+각 TypeScript 프로젝트는 서드파티 런타임 의존성을 자체 `package.json`에 선언합니다. 프로젝트 간 공유되는 빌드 및 테스트 도구는 루트 `package.json`에 정의됩니다.
 
-**빌드 및 테스트 도구**(예: `vitest`, `tsx`, `rolldown`, Nx 툴체인(`nx`, `@nx/js`, ...), `typescript`, `@biomejs/biome`)는 워크스페이스 전체에서 공유되므로 각 프로젝트가 아닌 **루트** `package.json` `devDependencies`에 위치합니다. 이러한 도구는 구성 파일, 빌드 스크립트 및 테스트에서만 참조되며, 린트 규칙은 이를 제외합니다.
+프로젝트에 런타임 의존성을 추가하려면 해당 프로젝트에 설치하세요:
 
-프로젝트에 런타임 의존성을 추가하려면 해당 프로젝트의 `package.json`에 추가하세요. 패키지 관리자의 필터/워크스페이스 플래그를 사용하면 올바른 프로젝트를 대상으로 지정할 수 있습니다. 예를 들어 pnpm의 경우:
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-```bash
-pnpm add some-npm-package --filter @my-scope/my-library
-```
+프로젝트 디렉토리 내에서 패키지 관리자의 일반 `add`/`install` 명령어를 실행할 수도 있습니다.
 
-공유 개발 도구를 추가하려면 워크스페이스 루트에 추가하세요:
+공유 개발 도구를 추가하려면 워크스페이스 루트에 설치하세요:
 
-<InstallCommand pkg="-D some-dev-tool" />
+<InstallCommand pkg="some-dev-tool" dev />
 
-이는 [단일 버전 정책](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)을 따르며, 모든 프로젝트가 각 의존성의 동일한 버전을 사용하여 타입 충돌과 배포 번들의 중복 패키지를 방지합니다. 카탈로그를 지원하는 패키지 관리자([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs), [bun](https://bun.com/docs/install/catalogs))의 경우, 생성기는 각 버전을 카탈로그에 기록하고 `catalog:` 프로토콜로 참조하므로(예: `"zod": "catalog:"`), 어떤 프로젝트가 의존성을 선언하든 카탈로그가 버전에 대한 단일 진실 공급원이 됩니다. 제공된 `biome.json`은 Biome의 [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) 리졸버를 활성화하여 린트 규칙이 `catalog:` 참조를 이해할 수 있도록 합니다.
+:::note
+Biome의 [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) 린트 규칙은 프로젝트의 소스가 자체 `package.json`에 선언된 패키지만 임포트하도록 강제합니다. 구성 파일, 빌드 스크립트 및 테스트는 제외되므로 공유 도구는 루트에 유지할 수 있습니다.
+:::
+
+#### 카탈로그
+
+카탈로그를 지원하는 패키지 관리자([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs), [bun](https://bun.com/docs/install/catalogs))의 경우, 생성기는 각 버전을 카탈로그에 기록하고 `catalog:` 프로토콜로 참조하므로(예: `"zod": "catalog:"`), 어떤 프로젝트가 의존성을 선언하든 카탈로그가 버전에 대한 단일 진실 공급원이 됩니다. 이는 [단일 버전 정책](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)을 따르는 데 도움이 되며, 타입 충돌과 배포 번들의 중복 패키지를 방지합니다.
+
+pnpm에서는 워크스페이스가 [`catalogMode: strict`](https://pnpm.io/settings#catalogmode)도 설정하여 `pnpm add`가 새 의존성을 카탈로그에 자동으로 기록합니다. yarn과 bun에는 동등한 설정이 없으므로, 카탈로그에 기록하려면 `catalog:` 프로토콜로 새 의존성을 추가하세요. 예: `yarn workspace @my-scope/my-library add some-npm-package@catalog:` 또는 `bun add some-npm-package@catalog: --cwd packages/my-library`.
 
 :::tip[npm에서 버전 일치시키기]
-npm(및 yarn classic)에는 카탈로그 기능이 없으므로 버전이 각 `package.json`에 직접 선언됩니다. 프로젝트 간 일관성을 유지하려면 [syncpack](https://github.com/JamieMason/syncpack)(`npx syncpack lint`)을 사용하는 것을 권장합니다.
+npm에는 카탈로그 기능이 없으므로 버전이 각 `package.json`에 직접 선언됩니다. 프로젝트 간 일관성을 유지하려면 [syncpack](https://github.com/JamieMason/syncpack)(`npx syncpack lint`)을 사용하는 것을 권장합니다.
 :::
 
-:::note[bun]
-bun에서는 Nx 생성기가 루트 매니페스트에서 버전을 읽는 몇 가지 패키지(`vite`, `react`, `react-dom`)가 `catalog:` 참조 대신 직접 버전 범위를 유지합니다 — Nx는 아직 bun 카탈로그를 해석하지 못하며, `catalog:` 참조는 해당 생성기를 손상시킬 수 있습니다.
-:::
-
-#### 카탈로그 비활성화
+##### 카탈로그 비활성화
 
 카탈로그는 기본적으로 활성화되어 있습니다. 비활성화하려면 `--catalog false` 옵션으로 워크스페이스를 생성하세요:
 
-```bash
-pnpm create @aws/nx-workspace my-project --catalog false
-```
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
 
 또는 언제든지 `aws-nx-plugin.config.mts`에서 설정할 수 있습니다:
 
@@ -179,9 +188,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-카탈로그가 비활성화되면 생성기는 각 프로젝트의 `package.json`에 의존성 버전을 직접 작성하며, 프로젝트 간 버전 일치는 사용자의 책임입니다(예: [syncpack](https://github.com/JamieMason/syncpack) 사용). pnpm에서 카탈로그가 활성화되면 워크스페이스는 [`catalogMode: strict`](https://pnpm.io/settings#catalogmode)도 설정하여 `pnpm add`가 새 의존성을 카탈로그에 기록하고, 수동 편집 없이 단일 버전 정책을 유지하도록 합니다.
-
-워크스페이스의 한 프로젝트가 다른 프로젝트를 임포트할 때 수동으로 선언할 필요가 없습니다: TypeScript 경로 별칭이 빌드를 위한 임포트를 해결하고, `ts#sync` 생성기(`compile` 전에 실행되거나 `nx sync`를 통해 요청 시 실행)가 임포트된 프로젝트를 임포트하는 프로젝트의 `package.json`에 워크스페이스 의존성으로 선언합니다(패키지 관리자가 워크스페이스 프로토콜을 지원하는 경우 `workspace:*`, npm과 yarn classic에서는 `*`). 이를 통해 각 프로젝트의 매니페스트가 사용하는 것을 정확히 기록하여 — `noUndeclaredDependencies` 린트 규칙을 충족하면서 — 수동 관리 없이 유지됩니다.
+카탈로그가 비활성화되면 생성기는 각 프로젝트의 `package.json`에 의존성 버전을 직접 작성하며, 프로젝트 간 버전 일치는 사용자의 책임입니다.
 
 #### 루트에 모든 의존성 선언하기
 

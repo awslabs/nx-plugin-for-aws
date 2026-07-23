@@ -10,6 +10,7 @@ import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 O gerador de projetos TypeScript pode ser usado para criar bibliotecas ou aplicações modernas em [TypeScript](https://www.typescriptlang.org/) configuradas com melhores práticas como [ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) do TypeScript, [Vitest](https://vitest.dev/) para execução de testes e [Biome](https://biomejs.dev/) para linting e formatação.
@@ -34,7 +35,7 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<na
 
   - src Código-fonte TypeScript
     - index.ts
-  - package.json Manifesto mínimo do projeto definindo o nome do pacote do projeto
+  - package.json Manifesto do projeto definindo o nome do pacote e dependências do projeto
   - project.json Configuração do projeto e targets de build
   - tsconfig.json Configuração base do TypeScript para este projeto (estende o tsconfig.base.json da raiz do workspace)
   - tsconfig.lib.json Configuração do TypeScript para sua biblioteca (código de runtime ou empacotado)
@@ -90,10 +91,6 @@ export * from './algorithms/index.js';
 import { sayHello } from '@my-scope/my-library';
 ```
 
-:::note[Aliases de projeto]
-Aliases correspondem aos nomes de pacote dos seus projetos, então qualquer projeto no seu workspace pode ser importado pelo nome declarado em seu `package.json` — não é necessário declarar projetos locais como dependências.
-:::
-
 Quando você adiciona uma instrução de importação para um novo projeto em seu workspace pela primeira vez, provavelmente verá um erro em seu IDE similar ao abaixo:
 
 <details>
@@ -108,28 +105,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-Isso ocorre porque uma [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) ainda não foi configurada.
+Isso ocorre porque uma [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) ainda não foi configurada, e o projeto importado ainda não foi declarado como uma dependência de workspace no `package.json` do seu projeto.
 
-Projetos TypeScript são configurados com o gerador Nx TypeScript Sync por padrão, dispensando a necessidade de configurar manualmente as referências de projeto. Basta executar o seguinte comando e o Nx adicionará a configuração necessária:
+Seu workspace está configurado com geradores de sincronização que gerenciam ambos para você, então você não precisa configurá-los manualmente. Basta executar o seguinte comando e o Nx adicionará a configuração necessária:
 
 <NxCommands commands={['sync']} />
 
-Após isso, o erro em seu IDE deve desaparecer e você estará pronto para usar sua biblioteca.
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+O gerador TypeScript sync do Nx adiciona a referência de projeto, e o gerador `ts#sync` do plugin declara o projeto importado no `package.json` do seu projeto (`workspace:*` onde o gerenciador de pacotes suporta o protocolo de workspace, `*` no npm e yarn classic), para que o gerenciador de pacotes vincule o projeto local na instalação. Após isso, o erro em seu IDE deve desaparecer e você estará pronto para usar sua biblioteca.
 
 :::tip[Atalho de compilação]
-Você também pode simplesmente construir seu projeto e será apresentado a uma mensagem como:
+Você também pode simplesmente construir seu projeto — os geradores de sincronização são executados primeiro e você será solicitado a aplicar quaisquer alterações pendentes:
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Selecione `Yes` para permitir que o Nx atualize suas referências de projeto.
+Selecione `Yes` para permitir que o Nx sincronize seu workspace.
 :::
 
 ### Mantendo Aliases de Path Sincronizados
@@ -138,37 +147,37 @@ Se você adicionar entradas personalizadas em `compilerOptions.paths` no `tsconf
 
 ### Dependências
 
-Cada projeto TypeScript declara as **dependências de runtime de terceiros que seu código-fonte importa** em seu próprio `package.json`. Isso mantém cada projeto autodescritivo — seu manifesto lista exatamente o que ele precisa — e permite que a regra de lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) do Biome garanta que um projeto nunca importe um pacote que não declarou.
+Cada projeto TypeScript declara suas dependências de runtime de terceiros em seu próprio `package.json`. Ferramentas de build e teste compartilhadas entre projetos são definidas no `package.json` raiz.
 
-**Ferramentas de build e teste** (por exemplo `vitest`, `tsx`, `rolldown`, a cadeia de ferramentas Nx (`nx`, `@nx/js`, ...), `typescript`, `@biomejs/biome`) são compartilhadas em todo o workspace, então ficam nas `devDependencies` do `package.json` **raiz** em vez de em cada projeto. Essas ferramentas são referenciadas apenas em arquivos de configuração, scripts de build e testes, que a regra de lint isenta.
+Para adicionar uma dependência de runtime a um projeto, instale-a nesse projeto:
 
-Para adicionar uma dependência de runtime a um projeto, adicione-a ao `package.json` desse projeto. Usar a flag de filtro/workspace do seu gerenciador de pacotes direciona ao projeto correto, por exemplo com pnpm:
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-```bash
-pnpm add some-npm-package --filter @my-scope/my-library
-```
+Você também pode executar o comando `add`/`install` simples do seu gerenciador de pacotes de dentro do diretório do projeto.
 
-Para adicionar uma ferramenta de dev compartilhada, adicione-a à raiz do workspace:
+Para adicionar uma ferramenta de dev compartilhada, instale-a na raiz do workspace:
 
-<InstallCommand pkg="-D some-dev-tool" />
+<InstallCommand pkg="some-dev-tool" dev />
 
-Isso segue uma [política de versão única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), o que significa que todos os projetos usam a mesma versão de cada dependência — evitando conflitos de tipo e múltiplas cópias de pacotes em bundles de implantação. Para gerenciadores de pacotes que suportam catálogos ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) e [bun](https://bun.com/docs/install/catalogs)), os geradores registram cada versão no catálogo e a referenciam com o protocolo `catalog:` (ex. `"zod": "catalog:"`), então o catálogo é a única fonte de verdade para versões independentemente de qual projeto declara a dependência. O `biome.json` fornecido habilita o resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) do Biome para que a regra de lint entenda referências `catalog:`.
+:::note
+A regra de lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) do Biome garante que o código-fonte de um projeto importe apenas pacotes declarados em seu próprio `package.json`. Arquivos de configuração, scripts de build e testes são isentos, então ferramentas compartilhadas podem permanecer na raiz.
+:::
+
+#### Catálogos
+
+Para gerenciadores de pacotes que suportam catálogos ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) e [bun](https://bun.com/docs/install/catalogs)), os geradores registram cada versão no catálogo e a referenciam com o protocolo `catalog:` (ex. `"zod": "catalog:"`), então o catálogo é a única fonte de verdade para versões independentemente de qual projeto declara a dependência. Isso ajuda você a seguir uma [política de versão única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), evitando conflitos de tipo e múltiplas cópias de pacotes em bundles de implantação.
+
+No pnpm, o workspace também define [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) para que `pnpm add` registre novas dependências no catálogo automaticamente. yarn e bun não possuem configuração equivalente, então adicione novas dependências com o protocolo `catalog:` para registrá-las no catálogo, por exemplo `yarn workspace @my-scope/my-library add some-npm-package@catalog:` ou `bun add some-npm-package@catalog: --cwd packages/my-library`.
 
 :::tip[Alinhando versões no npm]
-npm (e yarn classic) não possui recurso de catálogo, então as versões são declaradas diretamente em cada `package.json`. Para mantê-las consistentes entre projetos, recomendamos [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+npm não possui recurso de catálogo, então as versões são declaradas diretamente em cada `package.json`. Para mantê-las consistentes entre projetos, recomendamos [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
 :::
 
-:::note[bun]
-No bun, alguns pacotes cujas versões os geradores Nx leem do manifesto raiz (`vite`, `react`, `react-dom`) mantêm intervalos de versão diretos em vez de referências `catalog:` — o Nx ainda não resolve catálogos do bun, e uma referência `catalog:` quebraria esses geradores.
-:::
-
-#### Desativando catálogos
+##### Desativando catálogos
 
 Catálogos são habilitados por padrão. Para desativá-los, crie seu workspace com `--catalog false`:
 
-```bash
-pnpm create @aws/nx-workspace my-project --catalog false
-```
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
 
 Ou configure em `aws-nx-plugin.config.mts` a qualquer momento:
 
@@ -180,9 +189,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-Com catálogos desabilitados, os geradores escrevem versões de dependências diretamente no `package.json` de cada projeto, e manter versões alinhadas entre projetos é sua responsabilidade (por exemplo usando [syncpack](https://github.com/JamieMason/syncpack)). Quando catálogos estão habilitados no pnpm, o workspace também define [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) para que `pnpm add` registre novas dependências no catálogo, mantendo a política de versão única sem edição manual.
-
-Quando um projeto importa outro projeto em seu workspace, você não precisa declará-lo manualmente: os aliases de path do TypeScript resolvem a importação para build, e o gerador `ts#sync` (que é executado antes de `compile`, ou sob demanda via `nx sync`) declara o projeto importado como uma dependência de workspace no `package.json` do projeto importador (`workspace:*` onde o gerenciador de pacotes suporta o protocolo de workspace, `*` no npm e yarn classic). Isso mantém o manifesto de cada projeto um registro preciso do que ele usa — satisfazendo a regra de lint `noUndeclaredDependencies` — sem contabilidade manual.
+Com catálogos desabilitados, os geradores escrevem versões de dependências diretamente no `package.json` de cada projeto, e manter versões alinhadas entre projetos é sua responsabilidade.
 
 #### Declarando todas as dependências na raiz
 

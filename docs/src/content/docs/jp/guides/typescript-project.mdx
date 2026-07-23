@@ -9,6 +9,7 @@ import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 TypeScriptプロジェクトジェネレータは、[ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html)、TypeScriptの[プロジェクト参照](https://www.typescriptlang.org/docs/handbook/project-references.html)、テスト実行用の[Vitest](https://vitest.dev/)、リンティングとフォーマット用の[Biome](https://biomejs.dev/)など、ベストプラクティスで構成されたモダンな[TypeScript](https://www.typescriptlang.org/)ライブラリまたはアプリケーションを作成するために使用できます。
@@ -33,7 +34,7 @@ TypeScriptプロジェクトジェネレータは、[ECMAScript Modules (ESM)](h
 
   - src TypeScriptソースコード
     - index.ts
-  - package.json プロジェクトのパッケージ名を定義する最小限のプロジェクトマニフェスト
+  - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - tsconfig.json このプロジェクトの基本TypeScript設定（ワークスペースルートのtsconfig.base.jsonを継承）
   - tsconfig.lib.json ライブラリ用TypeScript設定（ランタイムまたはパッケージ化ソース用）
@@ -89,10 +90,6 @@ export * from './algorithms/index.js';
 import { sayHello } from '@my-scope/my-library';
 ```
 
-:::note[プロジェクトエイリアス]
-エイリアスはプロジェクトのパッケージ名と一致するため、ワークスペース内のどのプロジェクトも`package.json`で宣言された名前でインポートできます — ローカルプロジェクトを依存関係として宣言する必要はありません。
-:::
-
 ワークスペース内の新しいプロジェクトを初めてインポートする場合、以下のようなエラーがIDEに表示される可能性があります:
 
 <details>
@@ -107,28 +104,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-これは[プロジェクト参照](https://www.typescriptlang.org/docs/handbook/project-references.html)が設定されていないためです。
+これは[プロジェクト参照](https://www.typescriptlang.org/docs/handbook/project-references.html)が設定されておらず、インポートされたプロジェクトがまだプロジェクトの`package.json`にワークスペース依存関係として宣言されていないためです。
 
-TypeScriptプロジェクトはNx TypeScript Syncジェネレータで事前設定されているため、手動での設定は不要です。以下のコマンドを実行するとNxが必要な設定を追加します:
+ワークスペースは両方を管理する同期ジェネレータで構成されているため、手動で設定する必要はありません。以下のコマンドを実行するだけで、Nxが必要な設定を追加します:
 
 <NxCommands commands={['sync']} />
 
-これによりIDEのエラーが解消され、ライブラリを使用できるようになります。
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+NxのTypeScript同期ジェネレータがプロジェクト参照を追加し、プラグインの`ts#sync`ジェネレータがインポートされたプロジェクトをプロジェクトの`package.json`に宣言します（パッケージマネージャがワークスペースプロトコルをサポートする場合は`workspace:*`、npmとyarn classicでは`*`）。これにより、パッケージマネージャがインストール時にローカルプロジェクトをリンクします。この後、IDEのエラーが解消され、ライブラリを使用できるようになります。
 
 :::tip[ビルドショートカット]
-プロジェクトをビルドするだけで、以下のようなメッセージが表示される場合もあります:
+プロジェクトをビルドするだけでも可能です — 同期ジェネレータが最初に実行され、未処理の変更を適用するよう促されます:
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-`Yes`を選択するとNxがプロジェクト参照を更新します。
+`Yes`を選択するとNxがワークスペースを同期します。
 :::
 
 ### パスエイリアスの同期維持
@@ -137,37 +146,37 @@ No, run the tasks without syncing the changes
 
 ### 依存関係
 
-各TypeScriptプロジェクトは、**ソースコードがインポートするサードパーティのランタイム依存関係**を独自の`package.json`で宣言します。これにより、すべてのプロジェクトが自己記述的になり（マニフェストに必要なものが正確にリストされる）、Biomeの[`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/)リントルールがプロジェクトが宣言していないパッケージをインポートしないことを強制できます。
+各TypeScriptプロジェクトは、サードパーティのランタイム依存関係を独自の`package.json`で宣言します。プロジェクト間で共有されるビルドおよびテストツールは、ルートの`package.json`で定義されます。
 
-**ビルドおよびテストツール**（例：`vitest`、`tsx`、`rolldown`、Nxツールチェーン（`nx`、`@nx/js`、...）、`typescript`、`@biomejs/biome`）はワークスペース全体で共有されるため、各プロジェクトではなく**ルート**の`package.json`の`devDependencies`に配置されます。これらのツールは設定ファイル、ビルドスクリプト、テストからのみ参照され、リントルールはこれらを除外します。
+プロジェクトにランタイム依存関係を追加するには、そのプロジェクトにインストールします:
 
-プロジェクトにランタイム依存関係を追加するには、そのプロジェクトの`package.json`に追加します。パッケージマネージャのフィルター/ワークスペースフラグを使用して適切なプロジェクトをターゲットにします。例えばpnpmの場合:
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-```bash
-pnpm add some-npm-package --filter @my-scope/my-library
-```
+プロジェクトのディレクトリ内からパッケージマネージャの通常の`add`/`install`コマンドを実行することもできます。
 
-共有開発ツールを追加するには、ワークスペースルートに追加します:
+共有開発ツールを追加するには、ワークスペースルートにインストールします:
 
-<InstallCommand pkg="-D some-dev-tool" />
+<InstallCommand pkg="some-dev-tool" dev />
 
-これは[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)に従っており、すべてのプロジェクトが各依存関係の同じバージョンを使用します。これにより、型の競合やデプロイメントバンドル内のパッケージの複数コピーを回避できます。カタログをサポートするパッケージマネージャ（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs)、[bun](https://bun.com/docs/install/catalogs)）の場合、ジェネレータは各バージョンをカタログに記録し、`catalog:`プロトコル（例：`"zod": "catalog:"`）で参照するため、どのプロジェクトが依存関係を宣言しているかに関係なく、カタログがバージョンの唯一の信頼できる情報源となります。提供される`biome.json`はBiomeの[`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs)リゾルバを有効にするため、リントルールは`catalog:`参照を理解します。
+:::note
+Biomeの[`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/)リントルールは、プロジェクトのソースが独自の`package.json`で宣言されたパッケージのみをインポートすることを強制します。設定ファイル、ビルドスクリプト、テストは除外されるため、共有ツールはルートに配置できます。
+:::
+
+#### カタログ
+
+カタログをサポートするパッケージマネージャ（[pnpm](https://pnpm.io/catalogs)、[yarn](https://yarnpkg.com/features/catalogs)、[bun](https://bun.com/docs/install/catalogs)）の場合、ジェネレータは各バージョンをカタログに記録し、`catalog:`プロトコル（例：`"zod": "catalog:"`）で参照します。これにより、どのプロジェクトが依存関係を宣言しているかに関係なく、カタログがバージョンの唯一の信頼できる情報源となります。これは[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)に従うのに役立ち、型の競合やデプロイメントバンドル内のパッケージの複数コピーを回避できます。
+
+pnpmでは、ワークスペースは[`catalogMode: strict`](https://pnpm.io/settings#catalogmode)も設定するため、`pnpm add`が新しい依存関係を自動的にカタログに記録します。yarnとbunには同等の設定がないため、新しい依存関係を`catalog:`プロトコルで追加してカタログに記録します。例：`yarn workspace @my-scope/my-library add some-npm-package@catalog:`または`bun add some-npm-package@catalog: --cwd packages/my-library`。
 
 :::tip[npmでのバージョン調整]
-npm（およびyarn classic）にはカタログ機能がないため、バージョンは各`package.json`に直接宣言されます。プロジェクト間でバージョンの一貫性を保つには、[syncpack](https://github.com/JamieMason/syncpack)（`npx syncpack lint`）の使用をお勧めします。
+npmにはカタログ機能がないため、バージョンは各`package.json`に直接宣言されます。プロジェクト間でバージョンの一貫性を保つには、[syncpack](https://github.com/JamieMason/syncpack)（`npx syncpack lint`）の使用をお勧めします。
 :::
 
-:::note[bun]
-bunでは、Nxジェネレータがルートマニフェストからバージョンを読み取るいくつかのパッケージ（`vite`、`react`、`react-dom`）は、`catalog:`参照の代わりに直接バージョン範囲を保持します — Nxはまだbunカタログを解決せず、`catalog:`参照はそれらのジェネレータを壊してしまいます。
-:::
-
-#### カタログのオプトアウト
+##### カタログのオプトアウト
 
 カタログはデフォルトで有効になっています。無効にするには、`--catalog false`を指定してワークスペースを作成します:
 
-```bash
-pnpm create @aws/nx-workspace my-project --catalog false
-```
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
 
 または、いつでも`aws-nx-plugin.config.mts`で設定できます:
 
@@ -179,9 +188,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-カタログを無効にすると、ジェネレータは依存関係のバージョンを各プロジェクトの`package.json`に直接書き込み、プロジェクト間でバージョンを揃えることはあなたの責任になります（例えば[syncpack](https://github.com/JamieMason/syncpack)を使用）。pnpmでカタログが有効な場合、ワークスペースは[`catalogMode: strict`](https://pnpm.io/settings#catalogmode)も設定するため、`pnpm add`は新しい依存関係をカタログに記録し、手動編集なしに単一バージョンポリシーを維持します。
-
-ワークスペース内のあるプロジェクトが別のプロジェクトをインポートする場合、手動で宣言する必要はありません。TypeScriptパスエイリアスがビルド用にインポートを解決し、`ts#sync`ジェネレータ（`compile`の前に実行されるか、`nx sync`経由でオンデマンドで実行）がインポートされたプロジェクトをワークスペース依存関係としてインポート元プロジェクトの`package.json`に宣言します（パッケージマネージャがワークスペースプロトコルをサポートする場合は`workspace:*`、npmとyarn classicでは`*`）。これにより、各プロジェクトのマニフェストが使用するものの正確な記録となり、手動での管理なしに`noUndeclaredDependencies`リントルールを満たします。
+カタログを無効にすると、ジェネレータは依存関係のバージョンを各プロジェクトの`package.json`に直接書き込み、プロジェクト間でバージョンを揃えることはあなたの責任になります。
 
 #### すべての依存関係をルートで宣言する
 

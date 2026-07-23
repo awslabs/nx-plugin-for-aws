@@ -10,6 +10,7 @@ import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 Generator dự án TypeScript có thể được sử dụng để tạo một thư viện hoặc ứng dụng [TypeScript](https://www.typescriptlang.org/) hiện đại được cấu hình với các phương pháp hay nhất như [ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) của TypeScript, [Vitest](https://vitest.dev/) để chạy tests và [Biome](https://biomejs.dev/) để linting và định dạng.
@@ -34,7 +35,7 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<nam
 
   - src Mã nguồn TypeScript
     - index.ts
-  - package.json Manifest dự án tối thiểu định nghĩa tên package của dự án
+  - package.json Manifest dự án định nghĩa tên package và dependencies của dự án
   - project.json Cấu hình dự án và các build targets
   - tsconfig.json Cấu hình TypeScript cơ bản cho dự án này (kế thừa từ tsconfig.base.json ở workspace root)
   - tsconfig.lib.json Cấu hình TypeScript cho thư viện của bạn (mã nguồn runtime hoặc đóng gói)
@@ -90,10 +91,6 @@ export * from './algorithms/index.js';
 import { sayHello } from '@my-scope/my-library';
 ```
 
-:::note[Bí danh dự án]
-Aliases khớp với tên package của các dự án, vì vậy bất kỳ dự án nào trong workspace của bạn đều có thể được import bằng tên được khai báo trong `package.json` của nó — không cần khai báo các dự án cục bộ làm dependencies.
-:::
-
 Khi bạn thêm một câu lệnh import cho một dự án mới trong workspace lần đầu tiên, bạn có thể sẽ thấy lỗi trong IDE tương tự như bên dưới:
 
 <details>
@@ -108,28 +105,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-Điều này là do một [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) chưa được thiết lập.
+Điều này là do một [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) chưa được thiết lập, và dự án được import chưa được khai báo làm workspace dependency trong `package.json` của dự án của bạn.
 
-Các dự án TypeScript được cấu hình với Nx TypeScript Sync generator ngay từ đầu, giúp bạn không cần phải cấu hình project reference thủ công. Chỉ cần chạy lệnh sau và Nx sẽ thêm cấu hình cần thiết:
+Workspace của bạn được cấu hình với các sync generators quản lý cả hai cho bạn, vì vậy bạn không cần cấu hình chúng thủ công. Chỉ cần chạy lệnh sau và Nx sẽ thêm cấu hình cần thiết:
 
 <NxCommands commands={['sync']} />
 
-Sau đó, lỗi trong IDE của bạn sẽ biến mất và bạn đã sẵn sàng sử dụng thư viện của mình.
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+TypeScript sync generator của Nx thêm project reference, và generator `ts#sync` của plugin khai báo dự án được import trong `package.json` của dự án của bạn (`workspace:*` khi package manager hỗ trợ workspace protocol, `*` trên npm và yarn classic), vì vậy package manager liên kết dự án cục bộ khi cài đặt. Sau đó, lỗi trong IDE của bạn sẽ biến mất và bạn đã sẵn sàng sử dụng thư viện của mình.
 
 :::tip[Phím tắt build]
-Bạn cũng có thể chỉ cần build dự án và bạn sẽ được nhắc với thông báo như:
+Bạn cũng có thể chỉ cần build dự án — các sync generators chạy trước và bạn sẽ được nhắc áp dụng bất kỳ thay đổi nào còn tồn đọng:
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Chọn `Yes` để cho phép Nx cập nhật các project references của bạn.
+Chọn `Yes` để cho phép Nx đồng bộ workspace của bạn.
 :::
 
 ### Giữ Đồng Bộ Path Aliases
@@ -138,37 +147,37 @@ Nếu bạn thêm các entries `compilerOptions.paths` tùy chỉnh trong `tscon
 
 ### Dependencies
 
-Mỗi dự án TypeScript khai báo các **runtime dependencies của bên thứ ba mà mã nguồn của nó import** trong `package.json` riêng của nó. Điều này giúp mọi dự án tự mô tả — manifest của nó liệt kê chính xác những gì nó cần — và cho phép quy tắc lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) của Biome đảm bảo rằng một dự án không bao giờ import một package mà nó chưa khai báo.
+Mỗi dự án TypeScript khai báo các runtime dependencies của bên thứ ba trong `package.json` riêng của nó. Các công cụ build và test dùng chung giữa các dự án được định nghĩa trong `package.json` root.
 
-**Các công cụ build và test** (ví dụ `vitest`, `tsx`, `rolldown`, Nx toolchain (`nx`, `@nx/js`, ...), `typescript`, `@biomejs/biome`) được chia sẻ trên toàn workspace, vì vậy chúng nằm trong `devDependencies` của `package.json` **root** thay vì trong mỗi dự án. Các công cụ này chỉ được tham chiếu từ các file cấu hình, build scripts và tests, mà quy tắc lint miễn trừ.
+Để thêm một runtime dependency vào một dự án, hãy cài đặt nó vào dự án đó:
 
-Để thêm một runtime dependency vào một dự án, hãy thêm nó vào `package.json` của dự án đó. Sử dụng flag filter/workspace của package manager để nhắm đúng dự án, ví dụ với pnpm:
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-```bash
-pnpm add some-npm-package --filter @my-scope/my-library
-```
+Bạn cũng có thể chạy lệnh `add`/`install` thông thường của package manager từ trong thư mục của dự án.
 
-Để thêm một công cụ dev dùng chung, hãy thêm nó vào workspace root:
+Để thêm một công cụ dev dùng chung, hãy cài đặt nó ở workspace root:
 
-<InstallCommand pkg="-D some-dev-tool" />
+<InstallCommand pkg="some-dev-tool" dev />
 
-Điều này tuân theo [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), có nghĩa là tất cả các dự án sử dụng cùng một phiên bản của mỗi dependency — tránh xung đột kiểu và nhiều bản sao của các packages trong deployment bundles. Đối với các package managers hỗ trợ catalogs ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) và [bun](https://bun.com/docs/install/catalogs)), các generators ghi lại mỗi phiên bản trong catalog và tham chiếu nó bằng protocol `catalog:` (ví dụ `"zod": "catalog:"`), vì vậy catalog là nguồn duy nhất về phiên bản bất kể dự án nào khai báo dependency. `biome.json` được cung cấp kích hoạt resolver [`experimentalPnpmCatalogs`](https://biomejs.dev/reference/configuration/#javascriptresolverexperimentalpnpmcatalogs) của Biome để quy tắc lint hiểu các tham chiếu `catalog:`.
+:::note
+Quy tắc lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) của Biome đảm bảo rằng mã nguồn của một dự án chỉ import các packages được khai báo trong `package.json` riêng của nó. Các file cấu hình, build scripts và tests được miễn trừ, vì vậy các công cụ dùng chung có thể ở lại root.
+:::
+
+#### Catalogs
+
+Đối với các package managers hỗ trợ catalogs ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) và [bun](https://bun.com/docs/install/catalogs)), các generators ghi lại mỗi phiên bản trong catalog và tham chiếu nó bằng protocol `catalog:` (ví dụ `"zod": "catalog:"`), vì vậy catalog là nguồn duy nhất về phiên bản bất kể dự án nào khai báo dependency. Điều này giúp bạn tuân theo [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), tránh xung đột kiểu và nhiều bản sao của các packages trong deployment bundles.
+
+Trên pnpm, workspace cũng đặt [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) để `pnpm add` ghi lại các dependencies mới trong catalog tự động. yarn và bun không có cài đặt tương đương, vì vậy hãy thêm các dependencies mới với protocol `catalog:` để ghi lại chúng trong catalog, ví dụ `yarn workspace @my-scope/my-library add some-npm-package@catalog:` hoặc `bun add some-npm-package@catalog: --cwd packages/my-library`.
 
 :::tip[Căn chỉnh phiên bản trên npm]
-npm (và yarn classic) không có tính năng catalog, vì vậy các phiên bản được khai báo trực tiếp trong mỗi `package.json`. Để giữ chúng nhất quán giữa các dự án, chúng tôi khuyên dùng [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+npm không có tính năng catalog, vì vậy các phiên bản được khai báo trực tiếp trong mỗi `package.json`. Để giữ chúng nhất quán giữa các dự án, chúng tôi khuyên dùng [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
 :::
 
-:::note[bun]
-Trên bun, một số packages mà các Nx generators đọc phiên bản từ manifest root (`vite`, `react`, `react-dom`) giữ các version ranges trực tiếp thay vì tham chiếu `catalog:` — Nx chưa resolve bun catalogs, và một tham chiếu `catalog:` sẽ làm hỏng các generators đó.
-:::
-
-#### Tắt catalogs
+##### Tắt catalogs
 
 Catalogs được bật theo mặc định. Để tắt chúng, hãy tạo workspace của bạn với `--catalog false`:
 
-```bash
-pnpm create @aws/nx-workspace my-project --catalog false
-```
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
 
 Hoặc đặt nó trong `aws-nx-plugin.config.mts` bất cứ lúc nào:
 
@@ -180,9 +189,7 @@ export default {
 } satisfies AwsNxPluginConfig;
 ```
 
-Khi catalogs bị tắt, các generators ghi phiên bản dependency trực tiếp vào `package.json` của mỗi dự án, và việc giữ các phiên bản căn chỉnh giữa các dự án là trách nhiệm của bạn (ví dụ sử dụng [syncpack](https://github.com/JamieMason/syncpack)). Khi catalogs được bật trên pnpm, workspace cũng đặt [`catalogMode: strict`](https://pnpm.io/settings#catalogmode) để `pnpm add` ghi lại các dependencies mới trong catalog, duy trì chính sách phiên bản đơn mà không cần chỉnh sửa thủ công.
-
-Khi một dự án import một dự án khác trong workspace của bạn, bạn không cần khai báo nó thủ công: các path aliases TypeScript resolve import để build, và generator `ts#sync` (chạy trước `compile`, hoặc theo yêu cầu qua `nx sync`) khai báo dự án được import làm workspace dependency trong `package.json` của dự án import (`workspace:*` khi package manager hỗ trợ workspace protocol, `*` trên npm và yarn classic). Điều này giữ cho manifest của mỗi dự án là một bản ghi chính xác về những gì nó sử dụng — thỏa mãn quy tắc lint `noUndeclaredDependencies` — mà không cần ghi chép thủ công.
+Khi catalogs bị tắt, các generators ghi phiên bản dependency trực tiếp vào `package.json` của mỗi dự án, và việc giữ các phiên bản căn chỉnh giữa các dự án là trách nhiệm của bạn.
 
 #### Khai báo tất cả dependencies ở root
 
