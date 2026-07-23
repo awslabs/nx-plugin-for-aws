@@ -16,33 +16,20 @@ import yaml from 'js-yaml';
 import { coerce, gt, gte } from 'semver';
 import { readAwsNxPluginConfigSync } from './config/utils';
 
-/**
- * Package managers with catalog support, and the version that introduced it.
- * npm has no catalog feature; workspaces using npm receive direct version
- * ranges instead (the docs recommend syncpack for aligning those).
- */
+// Minimum version that introduced catalog support per package manager (npm has none).
 const CATALOG_SUPPORT: Partial<Record<PackageManager, string>> = {
   pnpm: '9.5.0',
   yarn: '4.10.0',
   bun: '1.2.14',
 };
 
-/**
- * Detect the workspace's package manager, preferring markers in the tree over
- * `detectPackageManager` (which reads the real filesystem and falls back to
- * the invoking package manager's user agent — nondeterministic for virtual
- * trees in tests).
- */
+// Prefer tree markers over devkit's `detectPackageManager`, which reads the
+// real filesystem and is nondeterministic for virtual trees in tests.
 export const detectWorkspacePackageManager = (tree: Tree): PackageManager =>
   tree.exists('pnpm-workspace.yaml') ? 'pnpm' : detectPackageManager(tree.root);
 
-/**
- * Coerce a single simple range (an optional `^`/`~`/`>=` prefix followed by a
- * version) to a comparable version. Returns undefined for anything with
- * whitespace or `||` — `semver.coerce` would happily reduce a compound range
- * like `>=3 <5` to `3.0.0`, but callers treat such user-customised ranges as
- * opaque and never overwrite them — as well as for tags and protocols.
- */
+// Coerce a single simple range to a version. Rejects compound ranges
+// (whitespace / `||`), which coerce would silently reduce, plus tags/protocols.
 const parseSimpleRange = (version: string) => {
   const trimmed = version.trim();
   if (/\s|\|\|/.test(trimmed)) {
@@ -57,12 +44,9 @@ const versionAtLeast = (version: string, minimum: string): boolean =>
     parseSimpleRange(minimum) ?? '0.0.0',
   );
 
-/**
- * Whether `incoming` should replace `existing` as a catalog version. Only a
- * strictly greater version replaces the existing entry, so generating a new
- * project never downgrades a version the user has upgraded in the catalog.
- * An entry that can't be compared (a tag or complex range) is always kept.
- */
+// Only a strict upgrade replaces an existing catalog entry, so generating a
+// project never downgrades a version the user raised. Uncomparable entries
+// (tags, complex ranges) are kept.
 const isVersionUpgrade = (incoming: string, existing: string): boolean => {
   const existingParsed = parseSimpleRange(existing);
   const incomingParsed = parseSimpleRange(incoming);
@@ -72,9 +56,7 @@ const isVersionUpgrade = (incoming: string, existing: string): boolean => {
   return gt(incomingParsed, existingParsed);
 };
 
-// Memoised per workspace root and package manager: detecting catalog support
-// shells out to the package manager for its version, which is too slow to
-// repeat per call.
+// Keyed by root + package manager; detecting support shells out for a version.
 const catalogSupportCache = new Map<string, boolean>();
 
 /** Clears the catalog support cache. Only needed by tests. */
@@ -82,13 +64,8 @@ export const resetCatalogSupportCache = (): void => {
   catalogSupportCache.clear();
 };
 
-/**
- * The version specifier for declaring a local workspace project as a
- * dependency. pnpm, bun and yarn berry support the `workspace:` protocol;
- * npm and yarn classic do not (npm fails the install with
- * EUNSUPPORTEDPROTOCOL, yarn classic tries the registry), so they receive
- * `*`, which both resolve to the workspace-local package.
- */
+// Local-project specifier: the `workspace:` protocol where supported (pnpm,
+// bun, yarn berry), `*` on npm and yarn classic which reject it.
 export const getLocalDependencySpecifier = (tree: Tree): string => {
   const packageManager = detectWorkspacePackageManager(tree);
   if (packageManager === 'npm') {
@@ -102,8 +79,7 @@ export const getLocalDependencySpecifier = (tree: Tree): string => {
         10,
       );
     } catch {
-      // Yarn not installed (e.g. in tests) — assume berry, matching the
-      // modern-version assumption for catalog support.
+      // Not installed (e.g. tests) — assume berry.
     }
     if (major < 2) {
       return '*';
@@ -112,9 +88,6 @@ export const getLocalDependencySpecifier = (tree: Tree): string => {
   return 'workspace:*';
 };
 
-/**
- * Whether the workspace's package manager supports dependency catalogs.
- */
 export const supportsCatalogs = (tree: Tree): boolean => {
   const packageManager = detectWorkspacePackageManager(tree);
   const cacheKey = `${tree.root}|${packageManager}`;
@@ -131,8 +104,7 @@ export const supportsCatalogs = (tree: Tree): boolean => {
         minimumVersion,
       );
     } catch {
-      // Package manager not installed (e.g. in tests) — assume a modern
-      // version since the workspace was created with it.
+      // Not installed (e.g. tests) — assume a modern version.
       supported = true;
     }
   }
@@ -140,14 +112,8 @@ export const supportsCatalogs = (tree: Tree): boolean => {
   return supported;
 };
 
-/**
- * Whether generators should record dependency versions in the package
- * manager's catalog. True when the package manager supports catalogs (see
- * `supportsCatalogs`) and the workspace hasn't opted out via
- * `packageManager.catalogs: false` in `aws-nx-plugin.config.mts`. When
- * disabled, generators write direct version ranges to each project's
- * package.json and keeping versions aligned is the user's responsibility.
- */
+// True when the package manager supports catalogs and the workspace hasn't
+// opted out via `packageManager.catalogs: false` in aws-nx-plugin.config.mts.
 export const catalogsEnabled = (tree: Tree): boolean => {
   if (!supportsCatalogs(tree)) {
     return false;
@@ -157,21 +123,11 @@ export const catalogsEnabled = (tree: Tree): boolean => {
 };
 
 /**
- * Add dependencies to a package.json, routing version ranges through the
- * package manager's dependency catalog when supported.
- *
- * Drop-in replacement for devkit's `addDependenciesToPackageJson`. When
- * catalogs are enabled (see `catalogsEnabled`) on pnpm/yarn/bun, each entry
- * is written as a `catalog:` reference with the version range recorded in
- * the workspace catalog (pnpm-workspace.yaml, .yarnrc.yml, or the root
- * package.json `catalog` field). On npm, or when catalogs are disabled,
- * direct version ranges are written as-is.
- *
- * Generators declare a project's runtime dependencies against the project's
- * manifest (so `noUndeclaredDependencies` passes) and shared build/test
- * tooling against the root in a separate call. When `packageJsonPath` points
- * at a project without its own package.json, the dependencies fall back to
- * the workspace root.
+ * Drop-in replacement for devkit's `addDependenciesToPackageJson` that records
+ * versions in the package manager's catalog when enabled. Callers pass a
+ * project manifest path for runtime deps (so `noUndeclaredDependencies` passes)
+ * and the root for shared tooling; a missing project manifest falls back to the
+ * root.
  */
 export const addDependenciesToPackageJson = (
   tree: Tree,
@@ -179,14 +135,10 @@ export const addDependenciesToPackageJson = (
   devDependencies: Record<string, string>,
   packageJsonPath = 'package.json',
 ): GeneratorCallback => {
-  // A project without its own manifest declares dependencies at the root.
   const targetPath = tree.exists(packageJsonPath)
     ? packageJsonPath
     : 'package.json';
 
-  // Devkit owns the update semantics (existing-version comparison, dev/prod
-  // precedence, and routing entries that already use `catalog:` refs through
-  // its own pnpm/yarn catalog managers).
   const callback = devkitAddDependenciesToPackageJson(
     tree,
     dependencies,
@@ -204,45 +156,24 @@ export const addDependenciesToPackageJson = (
   return callback;
 };
 
-/**
- * Packages whose declared version Nx generators read from the root manifest
- * via devkit's `getDependencyVersionFromPackageJson` and then coerce without
- * a null guard (`@nx/vitest`/`@nx/vite` read `vite`, `@nx/react` reads
- * `react`). Devkit resolves `catalog:` references through its catalog
- * managers, but Nx ships none for bun — the unresolved `catalog:` string
- * crashes those generators with `Cannot read properties of null (reading
- * 'version')`. On bun these packages keep direct version ranges until Nx
- * ships a bun catalog manager (`react-dom` is kept alongside `react` so the
- * pair can't drift apart).
- */
+// Nx generators read these versions from the root manifest and coerce without
+// a null guard; Nx ships no bun catalog manager, so an unresolved `catalog:`
+// crashes them. Keep direct ranges on bun (react-dom pinned with react).
 const BUN_INTROSPECTED_PACKAGES = new Set<string>([
   'vite',
   'react',
   'react-dom',
 ]);
 
-/**
- * Whether a package must keep a direct version range (never `catalog:`) for
- * the workspace's package manager.
- */
 const isCatalogExcluded = (tree: Tree, packageName: string): boolean =>
   detectWorkspacePackageManager(tree) === 'bun' &&
   BUN_INTROSPECTED_PACKAGES.has(packageName);
 
-/**
- * Convert direct version ranges in the given package.json to `catalog:`
- * references, recording the range in the workspace's catalog. Entries already
- * using `catalog:`, `workspace:` or other protocol specifiers are left
- * untouched (devkit keeps their catalog versions up to date for pnpm/yarn;
- * for bun the catalog entry is backfilled when missing). The catalog itself is
- * always workspace-level regardless of which manifest declares the dependency.
- *
- * When a project manifest is targeted, any direct range for the same package
- * in the root manifest is converted too — Nx generators (`@nx/js` init,
- * `@nx/react`) write direct root entries like `@types/node: ^22.0.0` or
- * `react: ^19.0.0`, which would otherwise resolve to a second copy alongside
- * the catalog version, breaking the single version policy.
- */
+// Convert direct version ranges to `catalog:` references and record the range
+// in the workspace catalog. Protocol specifiers (catalog:/workspace:/...) are
+// left alone. When a project manifest is targeted, the root is converted too,
+// so Nx-written root ranges (e.g. `@types/node`, `react`) don't resolve to a
+// second copy alongside the catalog version.
 const convertDependenciesToCatalog = (
   tree: Tree,
   packageJsonPath: string,
@@ -273,19 +204,12 @@ const convertDependenciesToCatalog = (
   }
 
   if (packageJsonPath !== 'package.json') {
-    // Upgrade-only catalog writes make this safe in any order: whichever
-    // manifest carries the higher version determines the catalog entry.
     convertDependenciesToCatalog(tree, 'package.json', packageNames);
   }
 };
 
-/**
- * Record version ranges in the default catalog, creating the catalog
- * definition when absent. An existing catalog entry is only replaced when the
- * incoming version is a strict upgrade (see `isVersionUpgrade`) — a version
- * the user has raised in the catalog is never downgraded by generating
- * another project.
- */
+// Record ranges in the default catalog, creating it if absent. Only strict
+// upgrades replace existing entries (see `isVersionUpgrade`).
 const writeCatalogVersions = (
   tree: Tree,
   updates: Record<string, string>,
