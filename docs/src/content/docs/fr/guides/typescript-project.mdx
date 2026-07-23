@@ -4,7 +4,7 @@ description: "Documentation de référence pour les projets TypeScript"
 generator: ts#project
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -167,12 +167,56 @@ La règle de lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/
 
 Pour les gestionnaires de packages qui prennent en charge les catalogues ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) et [bun](https://bun.com/docs/install/catalogs)), les générateurs enregistrent chaque version dans le catalogue et la référencent avec le protocole `catalog:` (par exemple `"zod": "catalog:"`), de sorte que le catalogue est la source unique de vérité pour les versions, quel que soit le projet qui déclare la dépendance. Cela vous aide à suivre une [politique de version unique](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), évitant ainsi les conflits de types et les copies multiples de packages dans les bundles de déploiement.
 
-Sur pnpm, le workspace définit également [`catalogMode: strict`](https://pnpm.io/settings#catalogmode), de sorte que `pnpm add` enregistre la version dans le catalogue et la référence automatiquement.
+Lorsque vous ajoutez vous-même une nouvelle dépendance, conservez-la également dans le catalogue :
 
-yarn et bun n'ont pas d'équivalent, et leur protocole `catalog:` ne fait que *référencer* une entrée de catalogue existante — il ne peut pas en créer une. Pour ajouter une nouvelle dépendance sur yarn ou bun, enregistrez d'abord sa version dans le catalogue, puis référencez-la depuis le projet :
+<Tabs syncKey="package-manager">
+  <TabItem label="pnpm">
+    Le workspace définit [`catalogMode: strict`](https://pnpm.io/settings#catalogmode), de sorte que `pnpm add` enregistre la version dans le catalogue et la référence automatiquement — aucune étape supplémentaire.
 
-- **yarn** — ajoutez la version sous `catalog` dans `.yarnrc.yml`, puis `yarn workspace @my-scope/my-library add some-npm-package@catalog:`
-- **bun** — ajoutez la version sous `catalog` dans le `package.json` racine, puis `bun add some-npm-package@catalog: --cwd packages/my-library`
+    ```bash
+    pnpm add some-npm-package --filter my-library
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    Le protocole `catalog:` de yarn ne fait que *référencer* une entrée de catalogue existante — il ne peut pas en créer une — donc enregistrez d'abord la version.
+
+    <Steps>
+    1. Ajoutez la version sous `catalog` dans `.yarnrc.yml` :
+
+       ```yaml title=".yarnrc.yml"
+       catalog:
+         some-npm-package: ^1.0.0
+       ```
+
+    2. Référencez-la depuis le projet :
+
+       ```bash
+       yarn workspace @my-scope/my-library add some-npm-package@catalog:
+       ```
+    </Steps>
+  </TabItem>
+  <TabItem label="bun">
+    Le protocole `catalog:` de bun ne fait que *référencer* une entrée de catalogue existante — il ne peut pas en créer une — donc enregistrez d'abord la version.
+
+    <Steps>
+    1. Ajoutez la version sous `catalog` dans le `package.json` racine :
+
+       ```json title="package.json"
+       {
+         "catalog": {
+           "some-npm-package": "^1.0.0"
+         }
+       }
+       ```
+
+    2. Référencez-la depuis le projet :
+
+       ```bash
+       bun add some-npm-package@catalog: --cwd packages/my-library
+       ```
+    </Steps>
+  </TabItem>
+</Tabs>
 
 :::tip[Aligner les versions sur npm]
 npm n'a pas de fonctionnalité de catalogue, donc les versions sont déclarées directement dans chaque `package.json`. Pour les maintenir cohérentes entre les projets, nous recommandons [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
