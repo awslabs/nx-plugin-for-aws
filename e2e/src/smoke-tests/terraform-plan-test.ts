@@ -47,8 +47,7 @@ export const runTerraformPlanTest = async (opts: {
 
   // Mock exactly the providers this configuration requires — mocking a
   // provider the config doesn't require is an error, so read the set Terraform
-  // resolved into the lock file rather than hardcoding it. The website module
-  // additionally needs the us-east-1 aws alias (CloudFront WAF).
+  // resolved into the lock file rather than hardcoding it.
   const lock = readFileSync(join(infraSrc, '.terraform.lock.hcl'), 'utf-8');
   const providers = [
     ...new Set(
@@ -57,9 +56,37 @@ export const runTerraformPlanTest = async (opts: {
       ].map((m) => m[1]),
     ),
   ];
+
+  // The aws mock is defined explicitly (both the default and the us-east-1
+  // alias the website module needs for the CloudFront WAF). Pin the region,
+  // account id and partition data sources to realistic values — an unmocked
+  // provider returns random strings for these, which makes the ARNs built from
+  // them (e.g. Lambda layer ARNs `arn:<partition>:lambda:<region>:...`) fail
+  // plan-time ARN validation.
+  const awsMockBody = `  mock_data "aws_region" {
+    defaults = {
+      id     = "us-east-1"
+      region = "us-east-1"
+    }
+  }
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "123456789012"
+    }
+  }
+  mock_data "aws_partition" {
+    defaults = {
+      partition      = "aws"
+      dns_suffix     = "amazonaws.com"
+      reverse_dns_prefix = "com.amazonaws"
+    }
+  }`;
   const mocks = [
-    ...providers.map((p) => `mock_provider "${p}" {}`),
-    'mock_provider "aws" {\n  alias = "us_east_1"\n}',
+    `mock_provider "aws" {\n${awsMockBody}\n}`,
+    `mock_provider "aws" {\n  alias = "us_east_1"\n${awsMockBody}\n}`,
+    ...providers
+      .filter((p) => p !== 'aws')
+      .map((p) => `mock_provider "${p}" {}`),
   ].join('\n');
   writeFileSync(
     join(infraSrc, 'plan.tftest.hcl'),
