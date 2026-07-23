@@ -58,9 +58,11 @@ export const buildPackageManagerShortCommand = (
   return `${prefix} ${command}`;
 };
 
-// Build an install command. With `project`, targets that project's manifest
-// (pnpm `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
-// `packages/<name>`, yarn by fully-qualified name); otherwise the root.
+/**
+ * Build an install command. With `project`, targets that project's manifest
+ * (pnpm `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
+ * `packages/<name>`, yarn by fully-qualified name); otherwise the root.
+ */
 export const buildInstallCommand = (
   pm: string,
   pkg: string,

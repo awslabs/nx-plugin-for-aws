@@ -93,10 +93,12 @@ export const tsSyncGeneratorGenerator = async (
   });
 };
 
-// Declare each project's local workspace dependencies in its own package.json
-// so `noUndeclaredDependencies` passes. Edges come from the Nx project graph
-// (the same import analysis `@nx/js:typescript-sync` uses). Returns the
-// packages added per project manifest.
+/**
+ * Declare each project's local workspace dependencies in its own package.json
+ * so `noUndeclaredDependencies` passes. Edges come from the Nx project graph
+ * (the same import analysis `@nx/js:typescript-sync` uses). Returns the
+ * packages added per project manifest.
+ */
 const syncLocalProjectDependencies = async (
   tree: Tree,
   localSpecifier: string,
@@ -151,8 +153,10 @@ interface ProjectInfo {
   packageJsonPath: string;
 }
 
-// Index workspace projects with a named package.json by project name, so graph
-// edges (keyed by project name) resolve to the manifest to declare the dep in.
+/**
+ * Index workspace projects with a named package.json by project name, so graph
+ * edges (keyed by project name) resolve to the manifest to declare the dep in.
+ */
 const collectProjectInfo = (
   tree: Tree,
   projectGraph: ProjectGraph,

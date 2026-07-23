@@ -75,9 +75,11 @@ export const readAwsNxPluginConfig = async (
   return (mod as any).default ?? mod;
 };
 
-// Read config from the tree synchronously (jiti.evalModule runs in-memory), for
-// callers that can't await. Returns undefined when absent or on failure, warning
-// on the latter so a broken config silently falling back to defaults is visible.
+/**
+ * Read config from the tree synchronously (jiti.evalModule runs in-memory), for
+ * callers that can't await. Returns undefined when absent or on failure, warning
+ * on the latter so a broken config silently falling back to defaults is visible.
+ */
 export const readAwsNxPluginConfigSync = (
   tree: Tree,
 ): AwsNxPluginConfig | undefined => {

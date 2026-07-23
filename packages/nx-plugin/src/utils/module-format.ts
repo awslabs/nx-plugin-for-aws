@@ -14,11 +14,13 @@ import {
  */
 export type ModuleFormat = 'esm' | 'cjs';
 
-// Whether the workspace targets ES modules, read from the tree so shared
-// helpers needn't thread it through call sites. An explicit root `type` wins
-// (`module`/`commonjs`); when absent (e.g. an adopted Nx workspace) infer ESM
-// from any sibling project declaring `type: "module"`, else CJS. No root
-// package.json defaults to ESM.
+/**
+ * Whether the workspace targets ES modules, read from the tree so shared
+ * helpers needn't thread it through call sites. An explicit root `type` wins
+ * (`module`/`commonjs`); when absent (e.g. an adopted Nx workspace) infer ESM
+ * from any sibling project declaring `type: "module"`, else CJS. No root
+ * package.json defaults to ESM.
+ */
 export const isEsmWorkspace = (tree: Tree): boolean => {
   if (!tree.exists('package.json')) {
     return true;
@@ -34,7 +36,7 @@ export const isEsmWorkspace = (tree: Tree): boolean => {
   return hasEsmProject(tree);
 };
 
-// Whether any non-root project declares `type: "module"` in its own manifest.
+/** Whether any non-root project declares `type: "module"` in its own manifest. */
 const hasEsmProject = (tree: Tree): boolean => {
   for (const project of getProjects(tree).values()) {
     if (project.root === '.' || project.root === '') {
