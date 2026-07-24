@@ -112,7 +112,30 @@ Nx 23 migrations come in three forms, discriminated by which fields the `migrati
 
 - **Deterministic** (`implementation`): a generator function with an exact before/after. Runs unattended, including in CI and non-interactive terminals. This is the required upgrade path — deterministic migrations alone must take an uncustomised generated workspace from one version to the next with build, lint and test green.
 - **Agentic** (`prompt`): a markdown instruction file applied by the user's local coding agent (Claude Code, Codex or OpenCode) via Nx's agentic migrate flow. Use for changes to user-owned code where the correct edit depends on what the user has built. When no agent runs (CI, no agent installed, consent declined), Nx writes the prompt to `tools/ai-migrations/` in the user's workspace as manual instructions — so prompts must read as standalone, self-contained instructions.
-- **Hybrid** (`implementation` + `prompt`): one breaking change with a mechanical half and a judgment half. The generator fixes everything we own and returns `agentContext` describing what it changed or skipped; the prompt directs the agent at the user-owned call sites.
+- **Hybrid** (`implementation` + `prompt`): one breaking change with a mechanical half and a judgment half. The `implementation` does everything we own deterministically and returns `agentContext` (a `MigrationReturnObject` field) describing what it changed or skipped; Nx passes that context to the paired `prompt`, which directs the agent at the user-owned call sites.
+
+#### Scaffolding a migration
+
+Use the internal `nx-migration` generator to scaffold a new migration — it creates the right files for the chosen kind and registers it in `migrations.json` (with no `version`; see [Versioning](#versioning) below). Pass `--kind` to choose deterministic (default), agentic, or hybrid:
+
+```bash
+# Deterministic (default): a codemod
+pnpm nx g @aws/nx-plugin:nx-migration --name=rename-foo-target --description="Rename the foo target to bar"
+
+# Agentic: a prompt applied by the user's agent
+pnpm nx g @aws/nx-plugin:nx-migration --name=migrate-custom-handlers --description="Update custom handlers for the new API" --kind=agentic
+
+# Hybrid: a codemod that hands off to an agent
+pnpm nx g @aws/nx-plugin:nx-migration --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid
+```
+
+Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migrations/<name>/`:
+
+- **deterministic** — `migration.ts` (implementation skeleton with the guardrails baked in) + `migration.spec.ts`.
+- **agentic** — `prompt.md` (self-contained agent/human instructions).
+- **hybrid** — `migration.ts` (returning `agentContext`) + `migration.spec.ts` + `prompt.md`.
+
+`nx-migration` is internal to this repo — it is stripped from the published package and never runs in users' workspaces.
 
 #### What should be a migration
 
