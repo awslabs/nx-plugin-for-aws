@@ -14,7 +14,7 @@ import {
 } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { coerce, gt, gte } from 'semver';
-import { readAwsNxPluginConfigSync } from './config/utils';
+import { readAwsNxPluginConfig } from './config/utils';
 
 // Minimum version that introduced catalog support per package manager (npm has none).
 const CATALOG_SUPPORT: Partial<Record<PackageManager, string>> = {
@@ -118,7 +118,7 @@ export const catalogsEnabled = (tree: Tree): boolean => {
   if (!supportsCatalogs(tree)) {
     return false;
   }
-  const config = readAwsNxPluginConfigSync(tree);
+  const config = readAwsNxPluginConfig(tree);
   return config?.packageManager?.catalogs !== false;
 };
 

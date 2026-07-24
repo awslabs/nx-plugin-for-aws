@@ -47,7 +47,7 @@ describe('config utils', () => {
 
     expect(
       (
-        (await readAwsNxPluginConfig(tree)).license.header
+        (readAwsNxPluginConfig(tree)).license.header
           .content as LicenseLinesContent
       ).lines[0],
     ).toBe('Test Copyright Header');
@@ -69,7 +69,7 @@ describe('config utils', () => {
 
     expect(
       (
-        (await readAwsNxPluginConfig(tree)).license.header
+        (readAwsNxPluginConfig(tree)).license.header
           .content as LicenseLinesContent
       ).lines[0],
     ).toBe('Test Copyright Header 2');
@@ -95,7 +95,7 @@ describe('config utils', () => {
 
     expect(
       (
-        (await readAwsNxPluginConfig(tree)).license.header
+        (readAwsNxPluginConfig(tree)).license.header
           .content as LicenseLinesContent
       ).lines[0],
     ).toBe('Test Copyright Header');
@@ -133,7 +133,7 @@ describe('config utils', () => {
       tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
     ).toMatchSnapshot();
 
-    const config = await readAwsNxPluginConfig(tree);
+    const config = readAwsNxPluginConfig(tree);
     expect(config.iac.provider).toBe('cdk');
     expect(config.tags).toEqual(['tag1']);
   });
@@ -158,7 +158,7 @@ describe('config utils', () => {
       tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
     ).toMatchSnapshot();
 
-    const config = await readAwsNxPluginConfig(tree);
+    const config = readAwsNxPluginConfig(tree);
     expect(
       (config.license.header.content as LicenseLinesContent).lines[0],
     ).toBe('Copyright "Foo" Inc.');
@@ -175,7 +175,7 @@ describe('config utils', () => {
       tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
     ).toMatchSnapshot();
 
-    const config = await readAwsNxPluginConfig(tree);
+    const config = readAwsNxPluginConfig(tree);
     expect(config.iac.provider).toBe('cdk');
   });
 
@@ -278,7 +278,7 @@ export default {
       tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
     ).toMatchSnapshot();
 
-    const config = await readAwsNxPluginConfig(tree);
+    const config = readAwsNxPluginConfig(tree);
     expect(config.iac.provider).toBe('cdk');
     expect(config.tags).toEqual(['a', 'b']);
   });

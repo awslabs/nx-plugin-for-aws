@@ -66,7 +66,7 @@ export async function sharedConstructsGenerator(
         {
           npmScopePrefix,
           scopeAlias: npmScopePrefix,
-          tags: (await readAwsNxPluginConfig(tree))?.tags ?? [],
+          tags: readAwsNxPluginConfig(tree)?.tags ?? [],
           ...esmVars(tree),
         },
         {

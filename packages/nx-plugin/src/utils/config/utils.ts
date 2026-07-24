@@ -2,12 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  generateFiles,
-  joinPathFragments,
-  logger,
-  type Tree,
-} from '@nx/devkit';
+import { generateFiles, joinPathFragments, type Tree } from '@nx/devkit';
 import { existsSync, readFileSync } from 'fs';
 import { createJiti } from 'jiti';
 import { join } from 'path';
@@ -48,7 +43,7 @@ export const ensureAwsNxPluginConfig = async (
     );
   }
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  return await readAwsNxPluginConfig(tree)!;
+  return readAwsNxPluginConfig(tree)!;
 };
 
 /**
@@ -56,11 +51,12 @@ export const ensureAwsNxPluginConfig = async (
  *
  * Uses jiti to evaluate the TypeScript source in-memory with proper module
  * resolution — imports from @aws/nx-plugin/* resolve via alias, and any
- * third-party imports resolve from the workspace's node_modules.
+ * third-party imports resolve from the workspace's node_modules. Synchronous,
+ * since `jiti.evalModule` runs in-memory.
  */
-export const readAwsNxPluginConfig = async (
+export const readAwsNxPluginConfig = (
   tree: Tree,
-): Promise<AwsNxPluginConfig | undefined> => {
+): AwsNxPluginConfig | undefined => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
     return undefined;
   }
@@ -73,33 +69,6 @@ export const readAwsNxPluginConfig = async (
 
   const mod = jiti.evalModule(source, { filename: configFilePath });
   return (mod as any).default ?? mod;
-};
-
-/**
- * Read config from the tree synchronously (jiti.evalModule runs in-memory), for
- * callers that can't await. Returns undefined when absent or on failure, warning
- * on the latter so a broken config silently falling back to defaults is visible.
- */
-export const readAwsNxPluginConfigSync = (
-  tree: Tree,
-): AwsNxPluginConfig | undefined => {
-  if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
-    return undefined;
-  }
-  try {
-    const source = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-    const configFilePath = join(tree.root, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
-    const jiti = createJiti(import.meta.filename, {
-      alias: AWS_NX_PLUGIN_JITI_ALIASES,
-    });
-    const mod = jiti.evalModule(source, { filename: configFilePath });
-    return (mod as any).default ?? mod;
-  } catch (e) {
-    logger.warn(
-      `Failed to evaluate ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} — falling back to default plugin configuration: ${e}`,
-    );
-    return undefined;
-  }
 };
 
 /**

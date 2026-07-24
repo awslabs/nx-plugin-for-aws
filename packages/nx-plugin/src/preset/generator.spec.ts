@@ -53,7 +53,7 @@ describe('preset generator', () => {
       containers: 'docker',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('terraform');
+    expect((readAwsNxPluginConfig(tree)).iac.provider).toBe('terraform');
   });
 
   it('should write type module for the default (esm) module format', async () => {
@@ -81,7 +81,7 @@ describe('preset generator', () => {
       containers: 'docker',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).packageManager?.catalogs).toBe(
+    expect((readAwsNxPluginConfig(tree)).packageManager?.catalogs).toBe(
       true,
     );
     const workspaceYaml = yaml.load(
@@ -97,7 +97,7 @@ describe('preset generator', () => {
       catalog: false,
     });
 
-    expect((await readAwsNxPluginConfig(tree)).packageManager?.catalogs).toBe(
+    expect((readAwsNxPluginConfig(tree)).packageManager?.catalogs).toBe(
       false,
     );
     const workspaceYaml = yaml.load(
@@ -112,7 +112,7 @@ describe('preset generator', () => {
       containers: 'finch',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).containers.engine).toBe('finch');
+    expect((readAwsNxPluginConfig(tree)).containers.engine).toBe('finch');
   });
 
   it('should store Terraform iac provider in config', async () => {
@@ -121,7 +121,7 @@ describe('preset generator', () => {
       containers: 'docker',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('cdk');
+    expect((readAwsNxPluginConfig(tree)).iac.provider).toBe('cdk');
   });
 
   it('should not generate git-secrets files when gitSecrets is false', async () => {

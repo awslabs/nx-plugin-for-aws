@@ -23,12 +23,12 @@ describe('init generator', () => {
 
   it('should record the iac provider in the plugin config', async () => {
     await initGenerator(tree, { iac: 'terraform', containers: 'docker' });
-    expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('terraform');
+    expect((readAwsNxPluginConfig(tree)).iac.provider).toBe('terraform');
   });
 
   it('should record the container engine in the plugin config', async () => {
     await initGenerator(tree, { iac: 'cdk', containers: 'finch' });
-    expect((await readAwsNxPluginConfig(tree)).containers.engine).toBe('finch');
+    expect((readAwsNxPluginConfig(tree)).containers.engine).toBe('finch');
   });
 
   it('should register the sync generators on the compile target', async () => {

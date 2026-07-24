@@ -51,11 +51,11 @@ describe('license generator', () => {
       copyrightHolder: 'Foo',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
+    expect((readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
       'MIT',
     );
     expect(
-      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
+      (readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
     ).toBe('Foo');
 
     await licenseGenerator(tree, {
@@ -64,7 +64,7 @@ describe('license generator', () => {
     });
 
     expect(
-      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
+      (readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
     ).toBe('Bar');
 
     await licenseGenerator(tree, {
@@ -72,11 +72,11 @@ describe('license generator', () => {
       copyrightHolder: 'Baz',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
+    expect((readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
       'ASL',
     );
     expect(
-      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
+      (readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
     ).toBe('Baz');
   });
 
