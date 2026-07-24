@@ -291,6 +291,12 @@ describe('ts#mcp-server generator', () => {
         module: 'commonjs',
       },
     });
+    writeJson(tree, 'apps/no-source-root/package.json', {
+      name: '@proj/no-source-root',
+      version: '0.0.0',
+      private: true,
+      type: 'module',
+    });
 
     await tsMcpServerGenerator(tree, {
       project: 'no-source-root',
@@ -355,6 +361,12 @@ describe('ts#mcp-server generator', () => {
         target: 'ES2020',
         module: 'commonjs',
       },
+    });
+    writeJson(tree, 'libs/nested-project/package.json', {
+      name: '@org/nested-project',
+      version: '0.0.0',
+      private: true,
+      type: 'module',
     });
 
     await tsMcpServerGenerator(tree, {

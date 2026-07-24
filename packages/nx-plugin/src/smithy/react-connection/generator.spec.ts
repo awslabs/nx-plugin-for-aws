@@ -840,6 +840,15 @@ export function Main() {
           },
         }),
       );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({
+          name: '@my-scope/frontend',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+        }),
+      );
     });
 
     it('should handle qualified project names', async () => {
@@ -927,6 +936,15 @@ export function Main() {
           name: 'frontend',
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
+        }),
+      );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({
+          name: '@proj/frontend',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
         }),
       );
 

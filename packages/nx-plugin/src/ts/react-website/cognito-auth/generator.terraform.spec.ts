@@ -39,6 +39,15 @@ describe('cognito-auth generator terraform iac', () => {
         },
       }),
     );
+    tree.write(
+      'packages/test-project/package.json',
+      JSON.stringify({
+        name: '@proj/test-project',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
 
     // Setup main.tsx with RuntimeConfigProvider for terraform tests
     tree.write(
@@ -381,6 +390,15 @@ resource "aws_cloudfront_distribution" "website" {
         name: 'nested-test-website',
         sourceRoot: 'apps/nested/test-website/src',
         ux,
+      }),
+    );
+    tree.write(
+      'apps/nested/test-website/package.json',
+      JSON.stringify({
+        name: '@proj/nested-test-website',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
       }),
     );
 

@@ -384,6 +384,15 @@ describe('ts-lambda-function generator', () => {
     });
 
     tree.write('packages/scoped-project/tsconfig.json', '{}');
+    tree.write(
+      'packages/scoped-project/package.json',
+      JSON.stringify({
+        name: '@myorg/scoped-project',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
 
     const scopedOptions = { ...options, project: '@myorg/scoped-project' };
     await tsLambdaFunctionGenerator(tree, scopedOptions);
@@ -604,6 +613,15 @@ describe('ts-lambda-function generator', () => {
       });
 
       tree.write('packages/scoped-project/tsconfig.json', '{}');
+      tree.write(
+        'packages/scoped-project/package.json',
+        JSON.stringify({
+          name: '@myorg/scoped-project',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+        }),
+      );
 
       const scopedTerraformOptions = {
         ...options,

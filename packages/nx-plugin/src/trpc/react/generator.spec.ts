@@ -353,6 +353,15 @@ describe('trpc react generator with unqualified names', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({
+        name: '@my-scope/frontend',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
 
     // Mock backend project configuration with TypeScript fully qualified name
     tree.write(

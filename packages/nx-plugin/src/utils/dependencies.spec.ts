@@ -171,21 +171,6 @@ describe('addDependenciesToPackageJson', () => {
     expect(rootPkg.dependencies?.zod).toBeUndefined();
   });
 
-  it('should fall back to the root manifest when the project has no package.json', () => {
-    mockPackageManager(tree, 'pnpm', '10.0.0');
-
-    addDependenciesToPackageJson(
-      tree,
-      { zod: '4.4.3' },
-      {},
-      'packages/no-manifest/package.json',
-    );
-
-    expect(tree.exists('packages/no-manifest/package.json')).toBe(false);
-    const rootPkg = readJson(tree, 'package.json');
-    expect(rootPkg.dependencies.zod).toBe('catalog:');
-  });
-
   it('should write direct version ranges to non-root package.json files on npm', () => {
     mockPackageManager(tree, 'npm', '11.0.0');
     tree.write(

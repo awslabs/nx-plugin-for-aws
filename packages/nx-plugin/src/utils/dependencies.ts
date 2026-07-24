@@ -126,8 +126,7 @@ export const catalogsEnabled = (tree: Tree): boolean => {
  * Drop-in replacement for devkit's `addDependenciesToPackageJson` that records
  * versions in the package manager's catalog when enabled. Callers pass a
  * project manifest path for runtime deps (so `noUndeclaredDependencies` passes)
- * and the root for shared tooling; a missing project manifest falls back to the
- * root.
+ * and the root for shared tooling.
  */
 export const addDependenciesToPackageJson = (
   tree: Tree,
@@ -135,19 +134,15 @@ export const addDependenciesToPackageJson = (
   devDependencies: Record<string, string>,
   packageJsonPath = 'package.json',
 ): GeneratorCallback => {
-  const targetPath = tree.exists(packageJsonPath)
-    ? packageJsonPath
-    : 'package.json';
-
   const callback = devkitAddDependenciesToPackageJson(
     tree,
     dependencies,
     devDependencies,
-    targetPath,
+    packageJsonPath,
   );
 
   if (catalogsEnabled(tree)) {
-    convertDependenciesToCatalog(tree, targetPath, [
+    convertDependenciesToCatalog(tree, packageJsonPath, [
       ...Object.keys(dependencies),
       ...Object.keys(devDependencies),
     ]);
@@ -186,14 +181,13 @@ const convertDependenciesToCatalog = (
       for (const packageName of packageNames) {
         const version = json[field]?.[packageName];
         if (
-          !version ||
-          version.includes(':') ||
-          isCatalogExcluded(tree, packageName)
+          version &&
+          !version.includes(':') &&
+          !isCatalogExcluded(tree, packageName)
         ) {
-          continue;
+          catalogUpdates[packageName] = version;
+          json[field][packageName] = 'catalog:';
         }
-        catalogUpdates[packageName] = version;
-        json[field][packageName] = 'catalog:';
       }
     }
     return json;

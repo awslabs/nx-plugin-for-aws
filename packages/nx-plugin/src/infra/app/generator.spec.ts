@@ -375,6 +375,15 @@ describe('infra generator', () => {
       // Pre-create scripts with project.json to trigger early return
       tree.write('packages/common/scripts/project.json', '{}');
       tree.write(
+        'packages/common/scripts/package.json',
+        JSON.stringify({
+          name: '@proj/scripts',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+        }),
+      );
+      tree.write(
         'packages/common/scripts/src/infra/infra-deploy.ts',
         '// custom deploy\n',
       );

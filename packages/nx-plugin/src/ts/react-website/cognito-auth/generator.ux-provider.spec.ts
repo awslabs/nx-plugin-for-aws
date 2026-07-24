@@ -32,6 +32,15 @@ describe('cognito-auth generator ux tests', () => {
         },
       }),
     );
+    tree.write(
+      'packages/test-project/package.json',
+      JSON.stringify({
+        name: '@proj/test-project',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
 
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(

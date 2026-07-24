@@ -52,6 +52,16 @@ describe('ts#agent#mcp-connection generator', () => {
       }),
     );
 
+    tree.write(
+      'packages/my-api/package.json',
+      JSON.stringify({
+        name: '@test/my-api',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
+
     // Create agent.ts
     tree.write(
       'packages/my-api/src/my-agent/agent.ts',
