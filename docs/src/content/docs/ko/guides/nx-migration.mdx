@@ -1,0 +1,119 @@
+---
+title: Nx Migration Generator
+description: Nx 플러그인을 위한 Nx Migration을 생성합니다
+generator: ts#nx-migration
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+
+Nx 플러그인에 [Nx Migration](https://nx.dev/docs/kb/migration-generators)을 추가합니다. Migration을 사용하면 `nx migrate`가 플러그인의 이전 버전으로 생성된 프로젝트를 자동으로 업데이트할 수 있습니다. 이는 타겟 이름 변경, 제공된 설정 변경 또는 코드 변경이 필요한 종속성 업데이트와 같은 주요 변경 사항이 있을 때 유용합니다.
+
+이 제너레이터는 마이그레이션을 스캐폴딩하고, 플러그인의 `migrations.json`에 등록하며, 플러그인의 `package.json`에 `nx-migrations` 필드를 연결합니다(존재하지 않는 경우 둘 다 생성).
+
+:::tip[권장 설정]
+마이그레이션의 기본 프로젝트로 <Link path="/ko/guides/ts-nx-plugin">`ts#nx-plugin`</Link> 제너레이터를 사용하는 것을 권장합니다. 이 제너레이터는 제너레이터와 마이그레이션을 게시하도록 설정된 플러그인 프로젝트를 구성합니다.
+:::
+
+## 사용법
+
+### Migration 생성
+
+<RunGenerator generator="ts#nx-migration" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#nx-migration" />
+
+## 세 가지 종류의 마이그레이션
+
+Nx 23 마이그레이션은 세 가지 형태로 제공되며, `migrations.json` 항목이 가지는 필드에 따라 구분됩니다. `--kind`를 전달하여 선택하세요(기본값 `deterministic`):
+
+- **Deterministic** (`implementation`) — 정확한 이전/이후가 있는 코드모드입니다. CI 및 비대화형 터미널을 포함하여 무인으로 실행됩니다. 이것이 선호되는 종류입니다: 대상 파일이 제너레이터가 완전히 소유하고 편집을 기계적으로 표현할 수 있는 경우 이를 선호하세요.
+- **Agentic** (`prompt`) — Nx의 에이전트 기반 `nx migrate` 흐름을 통해 사용자의 로컬 코딩 에이전트가 적용하는 마크다운 지침 파일입니다. 사용자가 소유한 코드에 대한 변경 사항이며 올바른 편집이 사용자가 구축한 내용에 따라 달라지는 경우에 사용하세요. 에이전트가 실행되지 않는 경우(CI, 에이전트 미설치, 동의 거부), Nx는 프롬프트를 수동 지침으로 표시합니다. 따라서 프롬프트를 독립적이고 사람이 실행 가능한 단계로 작성하세요.
+- **Hybrid** (`implementation` + `prompt`) — 기계적 부분과 판단 부분이 있는 하나의 주요 변경 사항입니다. `implementation`은 소유한 모든 것을 결정론적으로 수행하고 변경하거나 건너뛴 내용을 설명하는 `agentContext`를 반환합니다. Nx는 해당 컨텍스트를 쌍을 이루는 `prompt`에 전달하여 에이전트가 사용자 소유 호출 사이트에 집중하도록 합니다.
+
+## 제너레이터 출력
+
+제너레이터는 선택한 `kind`에 따라 플러그인 프로젝트의 소스 폴더 아래에 다음 파일을 생성합니다:
+
+<FileTree>
+  - src/migrations/\<name>/
+    - migration.ts 코드모드 구현 (deterministic 및 hybrid)
+    - migration.spec.ts 마이그레이션 테스트 (deterministic 및 hybrid)
+    - prompt.md 에이전트/사람 지침 (agentic 및 hybrid)
+  - migrations.json 마이그레이션을 등록하기 위해 생성 또는 업데이트됨
+  - package.json "nx-migrations" 항목을 추가하기 위해 생성 또는 업데이트됨
+</FileTree>
+
+이는 해당 종류에 대한 필드와 `version` 없이 `migrations.json`에 마이그레이션을 등록합니다 — 아래 [버전 관리](#versioning)를 참조하세요.
+
+## Migration 구현
+
+결정론적(또는 하이브리드) 마이그레이션은 가상 파일시스템(`Tree`)을 변경하고 [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject)를 반환하는 함수입니다:
+
+```ts
+import { type MigrationReturnObject, type Tree } from '@nx/devkit';
+
+export default async function migration(
+  tree: Tree,
+): Promise<MigrationReturnObject> {
+  const nextSteps: string[] = [];
+
+  // Read and update the files your generators produce here.
+
+  return { nextSteps };
+}
+```
+
+- **`nextSteps`** — `nx migrate` 실행 후 사용자에게 표시되는 워크스페이스 전체 메모입니다. 건너뛴 파일(아래 가드레일 참조) 또는 마이그레이션이 수행할 수 없는 수동 후속 조치를 보고하는 데 사용하세요.
+- **`agentContext`** (hybrid만 해당) — 코드모드가 변경한 내용의 요약으로, Nx의 에이전트 기반 흐름에서 실행될 때 쌍을 이루는 `prompt`에 전달되어 에이전트가 사용자 소유 부분에 집중할 수 있도록 합니다.
+
+제너레이터에서 사용하는 것과 동일한 작업(`generateFiles`, GritQL 변환, JSON 읽기 및 업데이트)에 대해서는 <Link path="/ko/guides/nx-generator">Nx Generator 가이드</Link>를 참조하세요.
+
+### 가드레일
+
+마이그레이션은 제어할 수 없는 워크스페이스에 대해 실행되므로 스캐폴딩된 스켈레톤에 포함된 것과 동일한 규칙을 따르세요:
+
+- **쓰기 전에 패턴 매칭.** 대상 파일이 제너레이터가 생성하는 형태에서 벗어난 경우, 사용자의 변경 사항을 덮어쓰는 대신 건너뛰고 `nextSteps`를 통해 보고하세요.
+- **멱등성.** 마이그레이션을 다시 실행하면 아무 작업도 수행하지 않아야 합니다.
+- **포맷팅만 변경하지 마세요.**
+
+### Migration 테스트
+
+스캐폴딩된 `migration.spec.ts`는 `createTreeWithEmptyWorkspace()`를 사용하여 가상 워크스페이스를 구축합니다. 마이그레이션이 제너레이터가 생성하는 형태에 적용되고, 사용자 정의된 파일을 건너뛰고(보고하고), 멱등성이 있는지 확인하세요:
+
+```ts
+import type { Tree } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import migration from './migration';
+
+describe('my migration', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+  });
+
+  it('should update the generated shape', async () => {
+    // Arrange the vended shape, run the migration, assert the changes
+    const result = await migration(tree);
+    expect(result.nextSteps).toBeDefined();
+  });
+});
+```
+
+## 버전 관리
+
+Nx는 사용자가 설치한 플러그인 버전이 마이그레이션의 `version`보다 낮을 때 마이그레이션을 실행합니다. 이 제너레이터는 `version` 필드를 작성하지 **않습니다** — 마이그레이션을 제공하는 릴리스를 출시할 때 할당하거나(또는 릴리스 프로세스에서 스탬프) 이전 버전에서 업그레이드하는 모든 사용자에게 실행되도록 하세요.
+
+## Migration 실행
+
+사용자는 플러그인을 업그레이드하여 플러그인의 마이그레이션을 적용합니다:
+
+<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+
+에이전트 기반 및 하이브리드 마이그레이션은 사용 가능한 경우 `nx migrate --run-migrations` 중에 사용자의 로컬 코딩 에이전트에 의해 적용됩니다.
