@@ -439,3 +439,210 @@ const addAgentCoreGatewayTerraformInfra = (
     }
   }
 };
+
+export interface AddAgentCoreHarnessInfraProps {
+  harnessNameClassName: string;
+  harnessNameKebabCase: string;
+  modelId: string;
+  systemPrompt: string;
+  allowedTools: string[];
+  maxIterations?: number;
+  maxTokens?: number;
+  timeoutSeconds?: number;
+}
+
+/**
+ * Render a string as a quoted Terraform (HCL) string literal.
+ *
+ * JSON serialisation alone is not safe for HCL: `${` and `%{` introduce
+ * template interpolation/directives inside HCL quoted strings, and HCL does
+ * not support JSON's `\b`/`\f` escapes. Backslashes and quotes are escaped
+ * first, interpolation introducers are neutralised (`$${`, `%%{`), and any
+ * remaining control characters use HCL `\n`/`\r`/`\t` or `\uNNNN` escapes.
+ */
+const hclStringLiteral = (value: string): string => {
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    // split/join avoids String.replace's `$`-pattern replacement semantics
+    .split('${')
+    .join('$${')
+    .split('%{')
+    .join('%%{')
+    .replace(/[\u0000-\u001f\u2028\u2029]/g, (character) => {
+      switch (character) {
+        case '\n':
+          return '\\n';
+        case '\r':
+          return '\\r';
+        case '\t':
+          return '\\t';
+        default:
+          return `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      }
+    });
+  return `"${escaped}"`;
+};
+
+/**
+ * Render a string array as a Terraform list literal in the canonical
+ * `terraform fmt` style (`", "` separators).
+ */
+const hclStringListLiteral = (values: string[]): string =>
+  `[${values.map(hclStringLiteral).join(', ')}]`;
+
+/**
+ * Template substitution context shared by the CDK and Terraform harness
+ * branches so both providers render the same semantic defaults. String and
+ * list values are serialised for the destination language rather than
+ * manually quoted so prompts and tool patterns containing quotes, newlines,
+ * backslashes or interpolation-like text (`${`) cannot break the generated
+ * source: `*Json` fields are embedded in the TypeScript CDK template and
+ * `*Hcl` fields in the Terraform template. Optional execution limits stay
+ * `undefined` when omitted; templates omit the corresponding resource
+ * property for provider-default semantics.
+ */
+interface HarnessTemplateContext {
+  nameClassName: string;
+  nameKebabCase: string;
+  modelIdJson: string;
+  systemPromptJson: string;
+  allowedToolsJson: string;
+  modelIdHcl: string;
+  systemPromptHcl: string;
+  allowedToolsHcl: string;
+  maxIterations?: number;
+  maxTokens?: number;
+  timeoutSeconds?: number;
+}
+
+/**
+ * Add AgentCore Harness infrastructure for the selected IaC provider.
+ *
+ * Renders the provider-specific Harness infrastructure (a CDK construct or
+ * a Terraform module) into the Shared Infrastructure Project with
+ * `KeepExisting`, so existing files become user-owned and are never
+ * rewritten by reruns.
+ *
+ * Unlike agents, MCP servers and gateways, no build dependency is added
+ * from the shared infrastructure project to the Harness Project: generated
+ * Harness infrastructure does not import Harness Project source, so a
+ * dependency would only create false rebuild coupling.
+ */
+export const addAgentCoreHarnessInfra = async (
+  tree: Tree,
+  options: AddAgentCoreHarnessInfraProps & IACProvider,
+): Promise<void> => {
+  // One resolved template context, built once and passed to both provider
+  // branches. Execution limits are assigned explicitly (possibly to
+  // `undefined`) so the keys always exist and template conditionals can
+  // test them without a ReferenceError.
+  const templateContext: HarnessTemplateContext = {
+    nameClassName: options.harnessNameClassName,
+    nameKebabCase: options.harnessNameKebabCase,
+    modelIdJson: JSON.stringify(options.modelId),
+    systemPromptJson: JSON.stringify(options.systemPrompt),
+    allowedToolsJson: JSON.stringify(options.allowedTools),
+    modelIdHcl: hclStringLiteral(options.modelId),
+    systemPromptHcl: hclStringLiteral(options.systemPrompt),
+    allowedToolsHcl: hclStringListLiteral(options.allowedTools),
+    maxIterations: options.maxIterations,
+    maxTokens: options.maxTokens,
+    timeoutSeconds: options.timeoutSeconds,
+  };
+
+  switch (options.iac) {
+    case 'cdk':
+      await addAgentCoreHarnessCDKInfra(tree, templateContext);
+      break;
+    case 'terraform':
+      addAgentCoreHarnessTerraformInfra(tree, templateContext);
+      break;
+  }
+};
+
+const addAgentCoreHarnessCDKInfra = async (
+  tree: Tree,
+  templateContext: HarnessTemplateContext,
+) => {
+  // Generate the app specific CDK construct under
+  // src/app/harnesses/<kebab-case-name>/
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'app',
+      'agentcore-harness',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'harnesses',
+    ),
+    { ...templateContext, ...esmVars(tree) },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  // Export the construct through the harnesses app index and the shared
+  // app index. addStarExport creates a missing index file and semantically
+  // deduplicates equivalent exports on reruns.
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'harnesses',
+      'index.ts',
+    ),
+    `./${templateContext.nameKebabCase}/${templateContext.nameKebabCase}.js`,
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'index.ts',
+    ),
+    './harnesses/index.js',
+  );
+};
+
+const addAgentCoreHarnessTerraformInfra = (
+  tree: Tree,
+  templateContext: HarnessTemplateContext,
+) => {
+  // Generate the app specific Terraform module under
+  // src/app/harnesses/<kebab-case-name>/. No CDK files or exports are
+  // created on this path.
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'app',
+      'agentcore-harness',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'app',
+      'harnesses',
+    ),
+    { ...templateContext, ...terraformProviderVersions() },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+};

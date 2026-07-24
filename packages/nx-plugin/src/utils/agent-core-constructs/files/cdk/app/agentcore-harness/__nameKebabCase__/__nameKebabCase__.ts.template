@@ -1,0 +1,249 @@
+import { Names, Stack } from 'aws-cdk-lib';
+import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<% } %>';
+
+/**
+ * Properties for the <%- nameClassName %> Harness.
+ *
+ * Every native Harness Configuration field of the pinned
+ * `aws-cdk-lib/aws-bedrockagentcore` module (alternate model providers,
+ * tools, memory, skills, environment configuration, truncation,
+ * authorization and execution limits) can be supplied here and takes
+ * precedence over the generated defaults. The execution role ARN is always
+ * derived from the supplied or generated role, so it cannot be overridden
+ * as a raw string.
+ */
+export interface <%- nameClassName %>Props
+  extends Partial<Omit<agentcore.CfnHarnessProps, 'executionRoleArn'>> {
+  /** Existing execution role to use instead of the generated role. */
+  executionRole?: iam.IRole;
+  /** Model resources the generated execution role may invoke. */
+  modelResourceArns?: string[];
+}
+
+/**
+ * A managed Amazon Bedrock AgentCore Harness.
+ *
+ * Omitting `authorizerConfiguration` (the default) means the Harness uses
+ * IAM inbound authorization; supply a custom JWT authorizer through the
+ * native property to change that.
+ */
+export class <%- nameClassName %> extends Construct implements iam.IGrantable {
+  public readonly harness: agentcore.CfnHarness;
+  public readonly executionRole: iam.IRole;
+
+  constructor(scope: Construct, id: string, props?: <%- nameClassName %>Props) {
+    super(scope, id);
+
+    const stack = Stack.of(this);
+    const {
+      executionRole,
+      modelResourceArns = [
+        `arn:${stack.partition}:bedrock:*::foundation-model/*`,
+        `arn:${stack.partition}:bedrock:${stack.region}:${stack.account}:*`,
+      ],
+      ...harnessProps
+    } = props ?? {};
+
+    // Harness names must start with an ASCII letter, contain only ASCII
+    // letters, digits or underscores, and be at most 40 characters long.
+    // One character is reserved for the leading 'H' applied when the
+    // path-derived unique name would not start with a letter.
+    const uniqueName = Names.uniqueResourceName(this, {
+      maxLength: 39,
+      separator: '_',
+      allowedSpecialCharacters: '_',
+    });
+    const harnessName =
+      harnessProps.harnessName ??
+      (/^[A-Za-z]/.test(uniqueName) ? uniqueName : `H${uniqueName}`);
+
+    this.executionRole =
+      executionRole ??
+      new iam.Role(this, 'ExecutionRole', {
+        assumedBy: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com', {
+          conditions: {
+            StringEquals: { 'aws:SourceAccount': stack.account },
+            ArnLike: {
+              'aws:SourceArn': `arn:${stack.partition}:bedrock-agentcore:${stack.region}:${stack.account}:*`,
+            },
+          },
+        }),
+      });
+
+    if (!executionRole) {
+      // Baseline permissions from the AgentCore Harness security guidance:
+      // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
+      // Access to customer-owned resources (Gateways, memory, custom
+      // browsers/code interpreters, skills, secrets, VPCs) is an explicit
+      // extension via addToRolePolicy.
+      [
+        new iam.PolicyStatement({
+          sid: 'BedrockModelInvocation',
+          actions: [
+            'bedrock:InvokeModel',
+            'bedrock:InvokeModelWithResponseStream',
+          ],
+          resources: modelResourceArns,
+        }),
+        new iam.PolicyStatement({
+          sid: 'EcrPublicTokenAccess',
+          actions: ['ecr-public:GetAuthorizationToken'],
+          resources: ['*'],
+        }),
+        new iam.PolicyStatement({
+          sid: 'StsForEcrPublicPull',
+          actions: ['sts:GetServiceBearerToken'],
+          resources: ['*'],
+        }),
+        new iam.PolicyStatement({
+          sid: 'XRayTracingAccess',
+          actions: [
+            'xray:PutTraceSegments',
+            'xray:PutTelemetryRecords',
+            'xray:GetSamplingRules',
+            'xray:GetSamplingTargets',
+          ],
+          resources: ['*'],
+        }),
+        new iam.PolicyStatement({
+          sid: 'CloudWatchLogsGroup',
+          actions: ['logs:CreateLogGroup', 'logs:DescribeLogStreams'],
+          resources: [
+            `arn:${stack.partition}:logs:${stack.region}:${stack.account}:log-group:/aws/bedrock-agentcore/runtimes/*`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: 'CloudWatchLogsDescribeGroups',
+          actions: ['logs:DescribeLogGroups'],
+          resources: [
+            `arn:${stack.partition}:logs:${stack.region}:${stack.account}:log-group:*`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: 'CloudWatchLogsStream',
+          actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+          resources: [
+            `arn:${stack.partition}:logs:${stack.region}:${stack.account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: 'CloudWatchMetricsPublish',
+          actions: ['cloudwatch:PutMetricData'],
+          resources: ['*'],
+          conditions: {
+            StringEquals: { 'cloudwatch:namespace': 'bedrock-agentcore' },
+          },
+        }),
+        new iam.PolicyStatement({
+          sid: 'AgentCoreWorkloadIdentity',
+          actions: [
+            'bedrock-agentcore:GetWorkloadAccessToken',
+            'bedrock-agentcore:GetWorkloadAccessTokenForJWT',
+          ],
+          resources: [
+            `arn:${stack.partition}:bedrock-agentcore:${stack.region}:${stack.account}:workload-identity-directory/default`,
+            `arn:${stack.partition}:bedrock-agentcore:${stack.region}:${stack.account}:workload-identity-directory/default/workload-identity/harness_${harnessName}-*`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: 'AgentCoreBrowserDefault',
+          actions: [
+            'bedrock-agentcore:StartBrowserSession',
+            'bedrock-agentcore:StopBrowserSession',
+            'bedrock-agentcore:GetBrowserSession',
+            'bedrock-agentcore:ListBrowserSessions',
+            'bedrock-agentcore:UpdateBrowserStream',
+            'bedrock-agentcore:ConnectBrowserAutomationStream',
+            'bedrock-agentcore:ConnectBrowserLiveViewStream',
+          ],
+          resources: [
+            `arn:${stack.partition}:bedrock-agentcore:${stack.region}:aws:browser/*`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: 'AgentCoreCodeInterpreterDefault',
+          actions: [
+            'bedrock-agentcore:StartCodeInterpreterSession',
+            'bedrock-agentcore:StopCodeInterpreterSession',
+            'bedrock-agentcore:GetCodeInterpreterSession',
+            'bedrock-agentcore:ListCodeInterpreterSessions',
+            'bedrock-agentcore:InvokeCodeInterpreter',
+          ],
+          resources: [
+            `arn:${stack.partition}:bedrock-agentcore:${stack.region}:aws:code-interpreter/*`,
+          ],
+        }),
+      ].forEach((statement) =>
+        this.executionRole.addToPrincipalPolicy(statement),
+      );
+    }
+
+    this.harness = new agentcore.CfnHarness(this, 'Harness', {
+      // Generated defaults from the generator run.
+      model: {
+        bedrockModelConfig: {
+          modelId: <%- modelIdJson %>,
+        },
+      },
+      systemPrompt: [{ text: <%- systemPromptJson %> }],
+      allowedTools: <%- allowedToolsJson %>,
+<%_ if (maxIterations !== undefined) { _%>
+      maxIterations: <%- maxIterations %>,
+<%_ } _%>
+<%_ if (maxTokens !== undefined) { _%>
+      maxTokens: <%- maxTokens %>,
+<%_ } _%>
+<%_ if (timeoutSeconds !== undefined) { _%>
+      timeoutSeconds: <%- timeoutSeconds %>,
+<%_ } _%>
+      // Caller-supplied native properties take precedence over the
+      // generated defaults above.
+      ...harnessProps,
+      // The deployed name always equals the effective harnessName above so
+      // the execution role's workload-identity resource pattern
+      // (harness_<name>-*) cannot diverge from the deployed Harness. A
+      // caller-supplied harnessName still wins because it feeds the
+      // effective name.
+      harnessName,
+      // The execution role ARN always tracks the exposed executionRole.
+      executionRoleArn: this.executionRole.roleArn,
+    });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'harnesses', {
+      ...rc.get('agentcore').harnesses,
+      <%- nameClassName %>: this.harness.attrArn,
+    });
+  }
+
+  public get grantPrincipal(): iam.IPrincipal {
+    return this.executionRole.grantPrincipal;
+  }
+
+  /** The deployed Harness ARN. */
+  public get harnessArn(): string {
+    return this.harness.attrArn;
+  }
+
+  /** Add permissions required by tools, skills, memory, or custom models. */
+  public addToRolePolicy(
+    statement: iam.PolicyStatement,
+  ): iam.AddToPrincipalPolicyResult {
+    return this.executionRole.addToPrincipalPolicy(statement);
+  }
+
+  /** Grant an IAM principal permission to invoke this Harness. */
+  public grantInvokeAccess(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: [
+        'bedrock-agentcore:InvokeHarness',
+        'bedrock-agentcore:InvokeAgentRuntime',
+      ],
+      resourceArns: [this.harness.attrArn],
+    });
+  }
+}

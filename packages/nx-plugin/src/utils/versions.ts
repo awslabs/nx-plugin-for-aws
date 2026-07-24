@@ -10,6 +10,7 @@ export const TS_VERSIONS = {
   '@a2a-js/sdk': '0.3.14',
   '@aws/aws-distro-opentelemetry-node-autoinstrumentation': '0.12.0',
   '@aws-sdk/client-dynamodb': '3.1085.0',
+  '@aws-sdk/client-bedrock-agentcore': '3.1085.0',
   '@aws-sdk/client-bedrock-runtime': '3.1085.0',
   '@aws-sdk/client-s3': '3.1085.0',
   '@aws-sdk/client-sts': '3.1085.0',
@@ -130,9 +131,22 @@ export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
 /**
  * Add versions to the given dependencies
+ *
+ * @throws if a requested dependency has no centralized version entry, so
+ * generators fail rather than silently wiring an undefined version.
  */
 export const withVersions = (deps: ITsDepVersion[]) =>
-  Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+  Object.fromEntries(
+    deps.map((dep) => {
+      const version = TS_VERSIONS[dep];
+      if (!version) {
+        throw new Error(
+          `No centralized version registered in TS_VERSIONS for dependency '${dep}'`,
+        );
+      }
+      return [dep, version];
+    }),
+  );
 
 /**
  * Versions for Python dependencies added by generators

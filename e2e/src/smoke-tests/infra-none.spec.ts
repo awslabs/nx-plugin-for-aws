@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
@@ -79,6 +79,12 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
+    // AgentCore Harness (standalone project) with infra=none
+    await runCLI(
+      `generate @aws/nx-plugin:agentcore-harness --name=my-harness --infra=none --no-interactive`,
+      opts,
+    );
+
     // RDB with infra=none
     await runCLI(
       `generate @aws/nx-plugin:ts#rdb --name=my-db --infra=none --engine=postgres --framework=prisma --no-interactive`,
@@ -89,6 +95,15 @@ describe('smoke test - infra-none', () => {
     await runCLI(
       `run-many --target build --all --output-style=stream --verbose`,
       opts,
+    );
+
+    // Representative user edit to a generated harness file — must be
+    // preserved when the harness is re-run with infrastructure below
+    const invokePath = `${projectRoot}/packages/my-harness/invoke.ts`;
+    const userEditMarker = '// user-edit: preserved through infra upgrade';
+    writeFileSync(
+      invokePath,
+      `${readFileSync(invokePath, 'utf-8')}\n${userEditMarker}\n`,
     );
 
     // --- Phase 2: Re-run with infra to add infrastructure ---
@@ -123,6 +138,12 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
+    // Re-run harness with infra=agentcore (iac inherited from the cdk workspace)
+    await runCLI(
+      `generate @aws/nx-plugin:agentcore-harness --name=my-harness --infra=agentcore --no-interactive`,
+      opts,
+    );
+
     // Re-run RDB with infra=aurora
     await runCLI(
       `generate @aws/nx-plugin:ts#rdb --name=my-db --infra=aurora --engine=postgres --framework=prisma --no-interactive`,
@@ -134,5 +155,14 @@ describe('smoke test - infra-none', () => {
       `run-many --target build --all --output-style=stream --verbose`,
       opts,
     );
+
+    // The infra upgrade must preserve the user edit to the harness project
+    // and add the CDK construct for the inherited provider
+    expect(readFileSync(invokePath, 'utf-8')).toContain(userEditMarker);
+    expect(
+      existsSync(
+        `${projectRoot}/packages/common/constructs/src/app/harnesses/my-harness/my-harness.ts`,
+      ),
+    ).toBe(true);
   });
 });

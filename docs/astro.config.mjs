@@ -362,6 +362,10 @@ export default defineConfig({
                   label: 'agentcore-gateway',
                   link: '/guides/agentcore-gateway',
                 },
+                {
+                  label: 'agentcore-harness',
+                  link: '/guides/agentcore-harness',
+                },
               ],
             },
             {
