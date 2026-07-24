@@ -27,7 +27,7 @@ import {
   addDependenciesToPackageJson,
   detectWorkspacePackageManager,
 } from './dependencies';
-import { DEFAULT_BIOME_CONFIG } from './format';
+import { getDefaultBiomeConfig } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
@@ -340,7 +340,10 @@ export const applyWorkspaceInit = async (
 
   // Write biome.json for formatting and linting
   if (!tree.exists('biome.json')) {
-    tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
+    tree.write(
+      'biome.json',
+      JSON.stringify(getDefaultBiomeConfig(tree), null, 2),
+    );
   }
 
   generateFiles(

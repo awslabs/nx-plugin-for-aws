@@ -12,7 +12,7 @@ import {
 } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { expect } from 'vitest';
-import { DEFAULT_BIOME_CONFIG } from './format';
+import { getDefaultBiomeConfig } from './format';
 
 /**
  * Create a workspace tree configured so that nx's `isUsingTsSolutionSetup`
@@ -51,7 +51,7 @@ export const createTreeUsingTsSolutionSetup = (): Tree => {
 
   // The preset always writes biome.json at the workspace root, so mirror that
   // here for realistic lint-target configuration.
-  tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
+  tree.write('biome.json', JSON.stringify(getDefaultBiomeConfig(tree), null, 2));
   return tree;
 };
 

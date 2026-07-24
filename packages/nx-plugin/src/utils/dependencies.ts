@@ -142,10 +142,17 @@ export const addDependenciesToPackageJson = (
   );
 
   if (catalogsEnabled(tree)) {
-    convertDependenciesToCatalog(tree, packageJsonPath, [
+    const packageNames = [
       ...Object.keys(dependencies),
       ...Object.keys(devDependencies),
-    ]);
+    ];
+    convertDependenciesToCatalog(tree, packageJsonPath, packageNames);
+    // Convert any matching root ranges Nx wrote behind our back (e.g.
+    // `@types/node`, `react`) so they don't resolve to a second copy alongside
+    // the catalog version. Skipped when the caller already targeted the root.
+    if (packageJsonPath !== 'package.json') {
+      convertDependenciesToCatalog(tree, 'package.json', packageNames);
+    }
   }
 
   return callback;
@@ -164,11 +171,9 @@ const isCatalogExcluded = (tree: Tree, packageName: string): boolean =>
   detectWorkspacePackageManager(tree) === 'bun' &&
   BUN_INTROSPECTED_PACKAGES.has(packageName);
 
-// Convert direct version ranges to `catalog:` references and record the range
-// in the workspace catalog. Protocol specifiers (catalog:/workspace:/...) are
-// left alone. When a project manifest is targeted, the root is converted too,
-// so Nx-written root ranges (e.g. `@types/node`, `react`) don't resolve to a
-// second copy alongside the catalog version.
+// Convert direct version ranges to `catalog:` references in a single manifest
+// and record the range in the workspace catalog. Protocol specifiers
+// (catalog:/workspace:/...) are left alone.
 const convertDependenciesToCatalog = (
   tree: Tree,
   packageJsonPath: string,
@@ -195,10 +200,6 @@ const convertDependenciesToCatalog = (
 
   if (Object.keys(catalogUpdates).length > 0) {
     writeCatalogVersions(tree, catalogUpdates);
-  }
-
-  if (packageJsonPath !== 'package.json') {
-    convertDependenciesToCatalog(tree, 'package.json', packageNames);
   }
 };
 

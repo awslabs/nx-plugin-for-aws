@@ -15,7 +15,13 @@ import { TS_VERSIONS } from './versions';
 
 const require = createRequire(import.meta.url);
 
-export const DEFAULT_BIOME_CONFIG = {
+/**
+ * The biome.json vended into a new workspace. The pnpm catalog resolver is only
+ * included on pnpm workspaces, since `experimentalPnpmCatalogs` is Biome's only
+ * catalog resolver and reads `pnpm-workspace.yaml` exclusively — it does nothing
+ * for yarn or bun catalogs, so vending it there would be misleading.
+ */
+export const getDefaultBiomeConfig = (tree: Tree) => ({
   $schema: `https://biomejs.dev/schemas/${TS_VERSIONS['@biomejs/biome']}/schema.json`,
   root: true,
   formatter: {
@@ -29,11 +35,10 @@ export const DEFAULT_BIOME_CONFIG = {
       quoteStyle: 'single',
       trailingCommas: 'all',
     },
-    // Resolve `catalog:` versions from pnpm-workspace.yaml. Only pnpm
-    // catalogs are supported by Biome; a no-op for other package managers.
-    resolver: {
-      experimentalPnpmCatalogs: true,
-    },
+    // Resolve `catalog:` versions from pnpm-workspace.yaml (pnpm workspaces only).
+    ...(tree.exists('pnpm-workspace.yaml')
+      ? { resolver: { experimentalPnpmCatalogs: true } }
+      : {}),
   },
   css: {
     formatter: {
@@ -96,7 +101,7 @@ export const DEFAULT_BIOME_CONFIG = {
       },
     },
   ],
-};
+});
 
 const BIOME_FORMATTABLE_EXTENSIONS = new Set([
   '.ts',
@@ -224,7 +229,7 @@ function formatWithBiomeApi(
     const treeConfig = tree.read('biome.json', 'utf-8');
     biome.applyConfiguration(
       projectKey,
-      treeConfig ? JSON.parse(treeConfig) : DEFAULT_BIOME_CONFIG,
+      treeConfig ? JSON.parse(treeConfig) : getDefaultBiomeConfig(tree),
     );
 
     for (const file of files) {
