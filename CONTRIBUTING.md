@@ -116,17 +116,17 @@ Nx 23 migrations come in three forms, discriminated by which fields the `migrati
 
 #### Scaffolding a migration
 
-Use the internal `nx-migration` generator to scaffold a new migration — it creates the right files for the chosen kind and registers it in `migrations.json` (with no `version`; see [Versioning](#versioning) below). Pass `--kind` to choose deterministic (default), agentic, or hybrid:
+Use the `ts#nx-migration` generator to scaffold a new migration — it creates the right files for the chosen kind and registers it in `migrations.json` (with no `version`; see [Versioning](#versioning) below). Pass `--kind` to choose deterministic (default), agentic, or hybrid:
 
 ```bash
 # Deterministic (default): a codemod
-pnpm nx g @aws/nx-plugin:nx-migration --name=rename-foo-target --description="Rename the foo target to bar"
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=rename-foo-target --description="Rename the foo target to bar"
 
 # Agentic: a prompt applied by the user's agent
-pnpm nx g @aws/nx-plugin:nx-migration --name=migrate-custom-handlers --description="Update custom handlers for the new API" --kind=agentic
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=migrate-custom-handlers --description="Update custom handlers for the new API" --kind=agentic
 
 # Hybrid: a codemod that hands off to an agent
-pnpm nx g @aws/nx-plugin:nx-migration --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid
 ```
 
 Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migrations/<name>/`:
@@ -135,7 +135,7 @@ Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migratio
 - **agentic** — `prompt.md` (self-contained agent/human instructions).
 - **hybrid** — `migration.ts` (returning `agentContext`) + `migration.spec.ts` + `prompt.md`.
 
-`nx-migration` is internal to this repo — it is stripped from the published package and never runs in users' workspaces.
+`ts#nx-migration` is a public generator, so it works on any Nx Plugin project (it creates `migrations.json` and wires the `nx-migrations` field into the plugin's `package.json` if absent). See its [guide](./docs/src/content/docs/en/guides/nx-migration.mdx) for the full reference. Within this repo, always pass `--project=@aws/nx-plugin`.
 
 #### What should be a migration
 

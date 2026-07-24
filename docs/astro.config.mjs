@@ -536,6 +536,7 @@ export default defineConfig({
                 { label: 'license', link: '/guides/license' },
                 { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
                 { label: 'ts#nx-generator', link: '/guides/nx-generator' },
+                { label: 'ts#nx-migration', link: '/guides/nx-migration' },
               ],
             },
             {
