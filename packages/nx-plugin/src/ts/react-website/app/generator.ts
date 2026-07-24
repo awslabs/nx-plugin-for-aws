@@ -8,6 +8,7 @@ import {
   names,
   OverwriteStrategy,
   readProjectConfiguration,
+  removeDependenciesFromPackageJson,
   type Tree,
   updateJson,
   updateProjectConfiguration,
@@ -416,11 +417,15 @@ export async function tsReactWebsiteGenerator(
       );
     }
 
-    // Use Vite's native tsconfig paths resolution (replaces vite-tsconfig-paths)
+    // Use Vite's native tsconfig paths resolution (replaces vite-tsconfig-paths).
+    // `dedupe` forces a single copy of react/react-dom into the bundle: each
+    // project declares its own react dependency, so without this a workspace
+    // library's hoisted copy can produce a second React instance and the
+    // "Invalid hook call" runtime crash.
     await applyGritQL(
       tree,
       viteConfigPath,
-      'or { `defineConfig(() => ({ $props }))` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true }` }, `defineConfig({ $props })` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true }` } }',
+      "or { `defineConfig(() => ({ $props }))` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] }` }, `defineConfig({ $props })` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] }` } }",
     );
 
     // Add define: { global: {} } to the config (handles both callback and direct forms)
@@ -518,6 +523,13 @@ export async function tsReactWebsiteGenerator(
     joinPathFragments(libraryRoot, 'package.json'),
   );
   addDependenciesToPackageJson(tree, {}, withVersions(rootDevDependencies));
+
+  // @nx/react's applicationGenerator seeds react/react-dom into the root
+  // manifest. The website now declares its own pinned versions, so drop the
+  // root copies: without catalogs (npm) the root's floating range resolves to
+  // a different version than the website's pin, installing a second React and
+  // producing the "Invalid hook call" runtime crash.
+  removeDependenciesFromPackageJson(tree, ['react', 'react-dom'], []);
 
   await addGeneratorMetricsIfApplicable(tree, [
     REACT_WEBSITE_APP_GENERATOR_INFO,

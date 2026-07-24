@@ -74,6 +74,29 @@ describe('react-website generator', () => {
     expect(viteConfig).toMatchSnapshot('vite.config.mts');
   });
 
+  it('keeps a single react copy: declared only on the website and deduped', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+
+    // The website declares its own react/react-dom.
+    const websitePackageJson = readJson(tree, 'test-app/package.json');
+    expect(websitePackageJson.dependencies?.react).toBeDefined();
+    expect(websitePackageJson.dependencies?.['react-dom']).toBeDefined();
+
+    // @nx/react seeds react/react-dom into the root manifest; without catalogs
+    // (npm) its floating range resolves to a different version than the
+    // website's pin and installs a second React. The generator removes them.
+    const rootPackageJson = readJson(tree, 'package.json');
+    expect(rootPackageJson.dependencies?.react).toBeUndefined();
+    expect(rootPackageJson.dependencies?.['react-dom']).toBeUndefined();
+    expect(rootPackageJson.devDependencies?.react).toBeUndefined();
+    expect(rootPackageJson.devDependencies?.['react-dom']).toBeUndefined();
+
+    // The bundle also dedupes react so a hoisted workspace-library copy can't
+    // become a second React instance at build time.
+    const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
+    expect(viteConfig).toContain("dedupe: ['react', 'react-dom']");
+  });
+
   it('should generate shared constructs', async () => {
     await tsReactWebsiteGenerator(tree, options);
     // Check shared constructs files
