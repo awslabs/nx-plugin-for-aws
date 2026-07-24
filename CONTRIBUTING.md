@@ -139,25 +139,38 @@ Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migratio
 
 #### What should be a migration
 
-Decide with two questions: **is the change deterministic?** and **do we own the target file?**
-
-Deterministic migrations should cover:
-
-- Vended dependency version bumps that require accompanying changes (JS bumps alone use Nx's declarative `packageJsonUpdates`; `pyproject.toml` bumps need a generator migration)
-- Config the plugin fully owns: `project.json` targets and options, `nx.json` plugin/sync-generator entries, `aws-nx-plugin.config.mts`
-- Generated files users aren't expected to edit: shared constructs following the vended pattern, generated clients, runtime-config wiring
-- Mechanical AST edits with an exact before/after: import paths, renamed exports, renamed generator ID references
-
-Agentic (prompt) migrations should cover:
-
-- User-authored code built on scaffolding that changed: agent implementations, custom CDK stacks, custom routers and components
-- Framework major upgrades whose required edits land in user code
+First, **is a migration needed at all?** A migration exists to keep an *already-generated* workspace working across a breaking change. If existing workspaces keep building without any change, there is no migration to write.
 
 Not a migration at all:
 
 - Formatting or stylistic changes
 - New optional features — users adopt them by re-running the (idempotent) generator
 - Generator changes that only affect newly generated output and leave existing workspaces working (e.g. a file the generator no longer vends, where the leftover copy is harmless)
+
+#### Choosing the kind: deterministic, agentic, or hybrid
+
+Once a change *is* a migration, pick the kind with two questions, in order:
+
+1. **Do we own the target file?** — i.e. is it a file the generator fully owns and users aren't expected to hand-edit (`project.json`, `nx.json`, `aws-nx-plugin.config.mts`, shared constructs following the vended pattern, generated clients, runtime-config wiring)? Or is it user-authored code built *on top of* our scaffolding (`agent.py`, custom CDK stacks, custom routers and components)?
+2. **Is the edit deterministic?** — can we express it as an exact before/after that holds for every workspace, or does the correct edit depend on what the user has built?
+
+**Always prefer deterministic.** Deterministic migrations are the required unattended upgrade path: they alone must take an uncustomised generated workspace from one version to the next with build, lint and test green, including in CI and non-interactive terminals where no agent runs. Only reach for a prompt when the edit genuinely cannot be expressed mechanically.
+
+**Deterministic** (`implementation`) — we own the file *and* the edit is mechanical:
+
+- Vended dependency version bumps that require accompanying changes (JS bumps alone use Nx's declarative `packageJsonUpdates`; `pyproject.toml` bumps need a generator migration)
+- Config the plugin fully owns: `project.json` targets and options, `nx.json` plugin/sync-generator entries, `aws-nx-plugin.config.mts`
+- Generated files users aren't expected to edit: shared constructs following the vended pattern, generated clients, runtime-config wiring
+- Mechanical AST edits with an exact before/after: import paths, renamed exports, renamed generator ID references
+
+**Agentic** (`prompt`) — the target is user-owned code, or the correct edit depends on the user's stack so no exact before/after exists:
+
+- User-authored code built on scaffolding that changed: agent implementations, custom CDK stacks, custom routers and components
+- Framework major upgrades whose required edits land in user code
+
+**Hybrid** (`implementation` + `prompt`) — one breaking change with a mechanical half *and* a judgment half. Do everything we own deterministically in the `implementation`, have it return `agentContext` describing what it changed or skipped, and let the paired `prompt` direct the agent at the user-owned call sites. A framework major upgrade is the canonical case: bump the vended config and patch the files we own deterministically, then prompt the agent to reconcile the user's code against the new API.
+
+When a deterministic migration meets a file that has diverged from the vended shape, it skips and reports (see [Guardrails](#guardrails-for-deterministic-migrations)) rather than clobbering — it does **not** silently upgrade to agentic. If those diverged, user-owned edits are common and expected for the change, that is the signal to make it hybrid and cover them in the prompt.
 
 #### Guardrails for deterministic migrations
 
