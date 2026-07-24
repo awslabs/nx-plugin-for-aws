@@ -23,15 +23,10 @@ export type NxGeneratorInfo = GeneratorInfo;
 
 /**
  * Build the list of generator info, resolving schema/factory paths relative to the given base directory.
- *
- * Internal generators (contributor tooling stripped from the published
- * package) are excluded — they carry no metric and are never surfaced to
- * users via the MCP server or docs.
  */
 export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>
-  Object.entries((GeneratorsJson as Record<string, any>).generators)
-    .filter(([, info]: [string, any]) => !info.internal)
-    .map(([id, info]: [string, any]) => ({
+  Object.entries((GeneratorsJson as Record<string, any>).generators).map(
+    ([id, info]: [string, any]) => ({
       id,
       metric: info.metric,
       resolvedFactoryPath: path.resolve(baseDir, info.factory),
@@ -41,4 +36,5 @@ export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>
       ...('guidePages' in info && info.guidePages
         ? { guidePages: info.guidePages }
         : {}),
-    }));
+    }),
+  );
