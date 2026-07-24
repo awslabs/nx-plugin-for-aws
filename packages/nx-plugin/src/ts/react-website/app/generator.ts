@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   names,
@@ -20,12 +19,13 @@ import {
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -66,7 +66,7 @@ export async function tsReactWebsiteGenerator(
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const scopeAlias = npmScopePrefix;
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
   const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
@@ -478,9 +478,9 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
-
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
+  // Build/test tooling imported only from vite.config.mts stays at the root.
+  const rootDevDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
 
   if (ux === 'cloudscape') {
     dependencies.push(
@@ -489,17 +489,21 @@ export async function tsReactWebsiteGenerator(
       '@cloudscape-design/global-styles',
     );
   } else if (ux === 'shadcn') {
-    // not required to add any dependencies because dependencies are added by the common/shadcn package.
+    // Shared shadcn components live in the common/shadcn package, but the
+    // website's own generated components (e.g. the tanstack-router sidebar)
+    // import lucide-react directly, so the website must declare it.
+    if (tanstackRouter) {
+      dependencies.push('lucide-react');
+    }
   }
 
-  // Add TailwindCSS dependencies if enabled
   if (tailwind) {
     dependencies.push('tailwindcss');
-    devDependencies.push('@tailwindcss/vite');
+    rootDevDependencies.push('@tailwindcss/vite');
   }
   if (tanstackRouter) {
     dependencies.push('@tanstack/react-router');
-    devDependencies.push(
+    rootDevDependencies.push(
       '@tanstack/router-plugin',
       '@tanstack/router-generator',
       '@tanstack/virtual-file-routes',
@@ -510,8 +514,10 @@ export async function tsReactWebsiteGenerator(
   addDependenciesToPackageJson(
     tree,
     withVersions(dependencies),
-    withVersions(devDependencies),
+    {},
+    joinPathFragments(libraryRoot, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(rootDevDependencies));
 
   await addGeneratorMetricsIfApplicable(tree, [
     REACT_WEBSITE_APP_GENERATOR_INFO,

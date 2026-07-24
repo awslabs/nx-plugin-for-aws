@@ -15,7 +15,13 @@ import { TS_VERSIONS } from './versions';
 
 const require = createRequire(import.meta.url);
 
-export const DEFAULT_BIOME_CONFIG = {
+/**
+ * The biome.json vended into a new workspace. The pnpm catalog resolver is only
+ * included on pnpm workspaces, since `experimentalPnpmCatalogs` is Biome's only
+ * catalog resolver and reads `pnpm-workspace.yaml` exclusively — it does nothing
+ * for yarn or bun catalogs, so vending it there would be misleading.
+ */
+export const getDefaultBiomeConfig = (tree: Tree) => ({
   $schema: `https://biomejs.dev/schemas/${TS_VERSIONS['@biomejs/biome']}/schema.json`,
   root: true,
   formatter: {
@@ -29,6 +35,10 @@ export const DEFAULT_BIOME_CONFIG = {
       quoteStyle: 'single',
       trailingCommas: 'all',
     },
+    // Resolve `catalog:` versions from pnpm-workspace.yaml (pnpm workspaces only).
+    ...(tree.exists('pnpm-workspace.yaml')
+      ? { resolver: { experimentalPnpmCatalogs: true } }
+      : {}),
   },
   css: {
     formatter: {
@@ -43,7 +53,9 @@ export const DEFAULT_BIOME_CONFIG = {
     rules: {
       preset: 'none',
       correctness: {
-        noUndeclaredDependencies: 'warn',
+        // Every project must declare the third-party dependencies its source
+        // code imports in its own package.json.
+        noUndeclaredDependencies: 'error',
       },
     },
   },
@@ -62,13 +74,34 @@ export const DEFAULT_BIOME_CONFIG = {
       '!**/node_modules',
       '!**/.nx',
       '!**/.venv',
+      // GritQL codemod cache written by generators — its sample sources
+      // otherwise pollute a bare `biome check .` with parse errors.
+      '!**/.grit',
       '!**/*.css',
       '!**/*.gen.*',
       '!**/generated/**',
       '!**/tsconfig*.json',
     ],
   },
-};
+  // Config files, build scripts and tests use root tooling rather than
+  // declaring it per-project, so the undeclared-dependency rule is off for them.
+  overrides: [
+    {
+      includes: [
+        '**/*.config.{ts,mts,cts,js,mjs,cjs}',
+        '**/*.{spec,test}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}',
+        '**/*.stories.{ts,tsx}',
+      ],
+      linter: {
+        rules: {
+          correctness: {
+            noUndeclaredDependencies: 'off',
+          },
+        },
+      },
+    },
+  ],
+});
 
 const BIOME_FORMATTABLE_EXTENSIONS = new Set([
   '.ts',
@@ -196,7 +229,7 @@ function formatWithBiomeApi(
     const treeConfig = tree.read('biome.json', 'utf-8');
     biome.applyConfiguration(
       projectKey,
-      treeConfig ? JSON.parse(treeConfig) : DEFAULT_BIOME_CONFIG,
+      treeConfig ? JSON.parse(treeConfig) : getDefaultBiomeConfig(tree),
     );
 
     for (const file of files) {

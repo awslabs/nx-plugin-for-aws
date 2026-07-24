@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -13,13 +12,14 @@ import {
 import tsProjectGenerator from '../../ts/lib/generator';
 import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { esmVars } from '../../utils/module-format';
 import { kebabCase, toClassName } from '../../utils/names';
-import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
@@ -89,7 +89,7 @@ export async function tsTrpcApiGenerator(
 
   const enhancedOptions = {
     backendProjectName,
-    backendProjectAlias: toScopeAlias(backendProjectName),
+    backendProjectAlias: backendProjectName,
     apiNameKebabCase,
     apiNameClassName,
     backendRoot,
@@ -241,10 +241,10 @@ export async function tsTrpcApiGenerator(
         ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
-    withVersions(['@types/aws-lambda', 'tsx', 'cors', '@types/cors']),
+    withVersions(['@types/aws-lambda', 'cors', '@types/cors']),
+    joinPathFragments(backendRoot, 'package.json'),
   );
-  tree.delete(joinPathFragments(backendRoot, 'package.json'));
-
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
   addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);

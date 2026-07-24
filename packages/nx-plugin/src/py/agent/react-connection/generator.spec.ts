@@ -29,6 +29,10 @@ describe('py strands agent react connection generator', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
     // Mock agent project configuration
     tree.write(
       'apps/agent-project/project.json',
@@ -248,13 +252,15 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['oidc-client-ts']).toBe('catalog:');
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
     expect(
       packageJson.dependencies['@aws-sdk/credential-provider-cognito-identity'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+    ).toBe('catalog:');
+    expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
 
     expect(
       tree.read('apps/frontend/src/components/TestAgentProvider.tsx', 'utf-8'),
@@ -277,8 +283,10 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
 
     expect(
       tree.read('apps/frontend/src/components/TestAgentProvider.tsx', 'utf-8'),
@@ -301,7 +309,9 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
     expect(packageJson.dependencies['react-oidc-context']).toBeUndefined();
     expect(packageJson.dependencies['aws4fetch']).toBeUndefined();
   });
@@ -342,8 +352,10 @@ export function Main() {
     // Should default to IAM
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -529,12 +541,12 @@ describe('py strands agent react connection with real projects', {
     ) as string;
     expect(providerSrc).toContain(`useAgui${agentNameClassName}`);
 
-    // CopilotKit + AG-UI client deps should be added to the root package.json.
-    // @copilotkit/react-core v2 ships both the provider and the chat
+    // CopilotKit + AG-UI client deps should be added to the frontend project
+    // manifest. @copilotkit/react-core v2 ships both the provider and the chat
     // components, so we don't need @copilotkit/react-ui.
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
-    expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
+    const packageJson = JSON.parse(tree.read('frontend/package.json', 'utf-8'));
+    expect(packageJson.dependencies['@copilotkit/react-core']).toBe('catalog:');
+    expect(packageJson.dependencies['@ag-ui/client']).toBe('catalog:');
     expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
 
     // dev should be wired up for the agent's continuous target
@@ -560,6 +572,10 @@ describe('py strands agent react connection generator - AG-UI protocol', () => {
         root: 'apps/frontend',
         sourceRoot: 'apps/frontend/src',
       }),
+    );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
     );
     tree.write(
       'apps/agent-project/project.json',
@@ -682,10 +698,12 @@ export function Main() {
       },
     });
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
-    expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['@copilotkit/react-core']).toBe('catalog:');
+    expect(packageJson.dependencies['@ag-ui/client']).toBe('catalog:');
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
     expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
   });
 
@@ -852,6 +870,10 @@ describe('py strands agent react connection generator - AG-UI themed CopilotKit'
         sourceRoot: 'apps/frontend/src',
         ...(ux ? { metadata: { ux } } : {}),
       }),
+    );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
     );
     tree.write(
       'apps/agent-project/project.json',
@@ -1027,7 +1049,9 @@ export function Main() {
     expect(css).toContain(`.copilotKitChat > .cpk\\:pointer-events-none > * {`);
     expect(css).toContain('pointer-events: auto;');
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['lucide-react']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['lucide-react']).toBe('catalog:');
   });
 });

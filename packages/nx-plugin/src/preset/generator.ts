@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   joinPathFragments,
   OverwriteStrategy,
@@ -17,6 +16,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
+import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { applyWorkspaceInit } from '../utils/init';
 import { installDependencies } from '../utils/install';
@@ -121,6 +121,7 @@ export const presetGenerator = async (
     mcp,
     containers,
     module,
+    catalog,
     preferInstallDependencies,
   }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
@@ -161,6 +162,7 @@ export const presetGenerator = async (
     iac,
     containers,
     mcp,
+    catalogs: catalog ?? true,
     readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
     overwriteScripts: true,
   });

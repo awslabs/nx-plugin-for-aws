@@ -4,12 +4,13 @@ description: "Documentation de référence pour les projets TypeScript"
 generator: ts#project
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 Le générateur de projet TypeScript permet de créer une bibliothèque ou une application moderne [TypeScript](https://www.typescriptlang.org/) configurée avec les meilleures pratiques telles que les [modules ECMAScript (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), les [références de projet TypeScript](https://www.typescriptlang.org/docs/handbook/project-references.html), [Vitest](https://vitest.dev/) pour exécuter les tests et [Biome](https://biomejs.dev/) pour le linting et le formatage.
@@ -34,6 +35,7 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
 
   - src Code source TypeScript
     - index.ts
+  - package.json Manifeste de projet définissant le nom du package du projet et les dépendances
   - project.json Configuration du projet et cibles de build
   - tsconfig.json Configuration TypeScript de base pour ce projet (étend le tsconfig.base.json racine du workspace)
   - tsconfig.lib.json Configuration TypeScript pour votre bibliothèque (code d'exécution ou source empaquetée)
@@ -42,8 +44,8 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
 
 </FileTree>
 
-:::tip[Pas de package.json nécessaire]
-Notez qu'aucun fichier `package.json` n'est créé pour ce projet ! Vous pouvez comprendre pourquoi [ci-dessous](#dependencies).
+:::tip[package.json du projet]
+Le `package.json` du projet commence minimal. Au fur et à mesure que vous ajoutez des dépendances d'exécution, elles sont déclarées ici (les outils de build/test partagés restent à la racine du workspace) — vous pouvez en savoir plus [ci-dessous](#dependencies).
 :::
 
 Vous remarquerez également des modifications dans les fichiers suivants à la racine de votre workspace :
@@ -86,12 +88,8 @@ export * from './algorithms/index.js';
 Les [alias TypeScript](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) pour votre projet sont configurés dans le `tsconfig.base.json` de votre workspace, ce qui permet de référencer votre projet TypeScript depuis d'autres projets TypeScript :
 
 ```ts title="packages/my-other-project/src/index.ts"
-import { sayHello } from ':my-scope/my-library';
+import { sayHello } from '@my-scope/my-library';
 ```
-
-:::note[Alias de projet]
-Les alias pour vos projets TypeScript commencent par `:` plutôt que le `@` traditionnel, évitant ainsi les conflits de noms entre les packages locaux de votre workspace et les packages distants sur [NPM](https://www.npmjs.com/).
-:::
 
 Lorsque vous ajoutez une instruction d'import pour un nouveau projet dans votre workspace pour la première fois, vous verrez probablement une erreur dans votre IDE similaire à celle-ci :
 
@@ -107,28 +105,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-Cela est dû à l'absence de configuration d'une [référence de projet](https://www.typescriptlang.org/docs/handbook/project-references.html).
+Cela est dû à l'absence de configuration d'une [référence de projet](https://www.typescriptlang.org/docs/handbook/project-references.html), et le projet importé n'a pas encore été déclaré comme dépendance de workspace dans le `package.json` de votre projet.
 
-Les projets TypeScript sont configurés avec le générateur Nx TypeScript Sync par défaut, vous évitant de configurer manuellement les références de projet. Exécutez simplement la commande suivante et Nx ajoutera la configuration nécessaire :
+Votre workspace est configuré avec des générateurs de synchronisation qui gèrent les deux pour vous, vous n'avez donc pas besoin de les configurer manuellement. Exécutez simplement la commande suivante et Nx ajoutera la configuration nécessaire :
 
 <NxCommands commands={['sync']} />
 
-Après cela, l'erreur dans votre IDE devrait disparaître et vous pourrez utiliser votre bibliothèque.
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+Le générateur de synchronisation TypeScript de Nx ajoute la référence de projet, et le générateur `ts#sync` du plugin déclare le projet importé dans le `package.json` de votre projet (`workspace:*` lorsque le gestionnaire de packages prend en charge le protocole workspace, `*` sur npm et yarn classic), de sorte que le gestionnaire de packages lie le projet local lors de l'installation. Après cela, l'erreur dans votre IDE devrait disparaître et vous pourrez utiliser votre bibliothèque.
 
 :::tip[Raccourci de compilation]
-Vous pouvez aussi simplement builder votre projet et vous verrez un message tel que :
+Vous pouvez aussi simplement builder votre projet — les générateurs de synchronisation s'exécutent en premier et vous serez invité à appliquer les modifications en attente :
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Sélectionnez `Yes` pour permettre à Nx de mettre à jour vos références de projet.
+Sélectionnez `Yes` pour permettre à Nx de synchroniser votre workspace.
 :::
 
 ### Maintenir les alias de chemins synchronisés
@@ -137,17 +147,120 @@ Si vous ajoutez des entrées `compilerOptions.paths` personnalisées dans le `ts
 
 ### Dépendances
 
-Vous remarquerez que votre projet TypeScript n'a pas de fichier `package.json`, ce qui peut être surprenant si vous avez l'habitude des monorepos TypeScript traditionnels.
+Chaque projet TypeScript déclare ses dépendances d'exécution tierces dans son propre `package.json`. Les outils de build et de test partagés entre les projets sont définis dans le `package.json` racine.
 
-Pour ajouter une dépendance à un package TypeScript dans votre monorepo, ajoutez-la simplement au `package.json` à la racine de votre workspace. Vous pouvez le faire via la ligne de commande de votre gestionnaire de packages :
+Pour ajouter une dépendance d'exécution à un projet, installez-la dans ce projet :
 
-<InstallCommand pkg="some-npm-package" />
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-La dépendance est alors disponible pour tous les projets TypeScript de votre workspace.
+Vous pouvez également exécuter la commande `add`/`install` simple de votre gestionnaire de packages depuis le répertoire du projet.
+
+Pour ajouter un outil de développement partagé, installez-le à la racine du workspace :
+
+<InstallCommand pkg="some-dev-tool" dev />
+
+:::note
+La règle de lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) de Biome garantit que le code source d'un projet n'importe que des packages déclarés dans son propre `package.json`. Les fichiers de configuration, les scripts de build et les tests sont exemptés, de sorte que les outils partagés peuvent rester à la racine.
+:::
+
+#### Catalogues
+
+Pour les gestionnaires de packages qui prennent en charge les catalogues ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) et [bun](https://bun.com/docs/install/catalogs)), les générateurs enregistrent chaque version dans le catalogue et la référencent avec le protocole `catalog:` (par exemple `"zod": "catalog:"`), de sorte que le catalogue est la source unique de vérité pour les versions, quel que soit le projet qui déclare la dépendance. Cela vous aide à suivre une [politique de version unique](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), évitant ainsi les conflits de types et les copies multiples de packages dans les bundles de déploiement.
+
+Lorsque vous ajoutez vous-même une nouvelle dépendance, conservez-la également dans le catalogue :
+
+<Tabs syncKey="package-manager">
+  <TabItem label="pnpm">
+    Le workspace définit [`catalogMode: strict`](https://pnpm.io/settings#catalogmode), de sorte que `pnpm add` enregistre la version dans le catalogue et la référence automatiquement — aucune étape supplémentaire.
+
+    ```bash
+    pnpm add some-npm-package --filter my-library
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    Le protocole `catalog:` de yarn ne fait que *référencer* une entrée de catalogue existante — il ne peut pas en créer une — donc enregistrez d'abord la version.
+
+    <Steps>
+    1. Ajoutez la version sous `catalog` dans `.yarnrc.yml` :
+
+       ```yaml title=".yarnrc.yml"
+       catalog:
+         some-npm-package: ^1.0.0
+       ```
+
+    2. Référencez-la depuis le projet :
+
+       ```bash
+       yarn workspace @my-scope/my-library add some-npm-package@catalog:
+       ```
+    </Steps>
+  </TabItem>
+  <TabItem label="bun">
+    Le protocole `catalog:` de bun ne fait que *référencer* une entrée de catalogue existante — il ne peut pas en créer une — donc enregistrez d'abord la version.
+
+    <Steps>
+    1. Ajoutez la version sous `catalog` dans le `package.json` racine :
+
+       ```json title="package.json"
+       {
+         "catalog": {
+           "some-npm-package": "^1.0.0"
+         }
+       }
+       ```
+
+    2. Référencez-la depuis le projet :
+
+       ```bash
+       bun add some-npm-package@catalog: --cwd packages/my-library
+       ```
+    </Steps>
+  </TabItem>
+</Tabs>
+
+:::tip[Aligner les versions sur npm]
+npm n'a pas de fonctionnalité de catalogue, donc les versions sont déclarées directement dans chaque `package.json`. Pour les maintenir cohérentes entre les projets, nous recommandons [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+:::
+
+##### Désactivation des catalogues
+
+Les catalogues sont activés par défaut. Pour les désactiver, créez votre workspace avec `--catalog false` :
+
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
+
+Ou configurez-le dans `aws-nx-plugin.config.mts` à tout moment :
+
+```ts title="aws-nx-plugin.config.mts"
+export default {
+  packageManager: {
+    catalogs: false,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+Avec les catalogues désactivés, les générateurs écrivent les versions de dépendances directement dans le `package.json` de chaque projet, et il est de votre responsabilité de maintenir les versions alignées entre les projets.
+
+#### Déclarer toutes les dépendances à la racine
+
+Si vous préférez déclarer chaque dépendance uniquement dans le `package.json` racine (sans déclarations de dépendances par projet), désactivez la règle de lint dans le `biome.json` du workspace :
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+Les projets résolvent les packages installés à la racine au moment du build, donc tout se compile toujours — vous renoncez aux manifestes par projet comme enregistrement précis des dépendances de chaque projet (ce qui importe si vous publiez ultérieurement un projet ou divisez le dépôt).
 
 #### Code d'exécution
 
-Lorsque vous utilisez votre projet TypeScript comme code d'exécution (par exemple comme gestionnaire pour une fonction AWS Lambda), il est recommandé d'utiliser un outil comme [Rolldown](https://rolldown.rs/) pour empaqueter votre projet, car cela permet un [tree-shaking](https://rolldown.rs/guide/in-depth/why-bundlers) pour n'inclure que les dépendances réellement utilisées.
+Lorsque vous utilisez votre projet TypeScript comme code d'exécution (par exemple comme gestionnaire pour une fonction AWS Lambda), il est recommandé d'utiliser un outil comme [Rolldown](https://rolldown.rs/) pour empaqueter votre projet, car cela permet un [tree-shaking](https://rolldown.rs/in-depth/why-bundlers) pour n'inclure que les dépendances réellement référencées par votre projet.
 
 Vous pouvez y parvenir en ajoutant une cible comme celle-ci dans votre fichier `project.json` :
 
@@ -191,14 +304,8 @@ Notez que dans la cible ci-dessus, nous avons choisi `src/index.ts` comme point 
 :::
 
 :::tip[Fonctions Lambda]
-Si vous développez une fonction AWS Lambda, consultez le générateur <Link path="/guides/ts-lambda-function">`ts#lambda-function`</Link> qui configure l'empaquetage pour vous, ainsi que la génération d'infrastructure et l'ajout d'observabilité et de type-safety.
+Si vous développez une fonction AWS Lambda, consultez le générateur <Link path="/fr/guides/ts-lambda-function">`ts#lambda-function`</Link> qui configure l'empaquetage pour vous, ainsi que la génération d'infrastructure et l'ajout d'observabilité et de type-safety.
 :::
-
-#### Publication sur NPM
-
-Si vous publiez votre projet TypeScript sur NPM, vous devez créer un fichier `package.json` pour celui-ci.
-
-Celui-ci doit déclarer les dépendances utilisées par votre projet. Comme au moment du build votre projet résoudra les dépendances installées via le `package.json` racine du workspace, la règle `noUndeclaredDependencies` de Biome vous avertira si votre projet importe un paquet qui n'est pas listé dans son `package.json`.
 
 ### Build
 

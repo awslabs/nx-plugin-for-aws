@@ -11,6 +11,7 @@ import {
   updateJson,
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
+import { addDependenciesToPackageJson } from '../dependencies';
 import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
@@ -19,7 +20,12 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { PY_VERSIONS, terraformProviderVersions } from '../versions';
+import {
+  type ITsDepVersion,
+  PY_VERSIONS,
+  terraformProviderVersions,
+  withVersions,
+} from '../versions';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
@@ -121,6 +127,25 @@ const addApiGatewayCdkConstructs = async (
   generateCoreApiFile('utils');
   if (options.backend.type === 'trpc') {
     generateCoreApiFile('trpc');
+  }
+
+  // Declare the deps the generated core construct files import.
+  const constructDeps: ITsDepVersion[] = [];
+  if (options.constructType === 'rest') {
+    // REST account construct configures the account via the AWS SDK.
+    constructDeps.push('@aws-sdk/client-api-gateway', '@aws-sdk/client-iam');
+  }
+  if (options.backend.type === 'trpc') {
+    // trpc-utils.ts types the router with @trpc/server.
+    constructDeps.push('@trpc/server');
+  }
+  if (constructDeps.length > 0) {
+    addDependenciesToPackageJson(
+      tree,
+      withVersions(constructDeps),
+      {},
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'package.json'),
+    );
   }
 
   // Generate app specific CDK construct

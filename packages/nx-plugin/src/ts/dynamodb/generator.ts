@@ -5,7 +5,6 @@
 
 import { relative } from 'node:path';
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -14,6 +13,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
@@ -151,8 +151,10 @@ export const tsDynamoDBGenerator = async (
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
     ]),
-    withVersions(['tsx', '@types/aws-lambda', '@types/node']),
+    withVersions(['@types/aws-lambda', '@types/node']),
+    joinPathFragments(dir, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
 

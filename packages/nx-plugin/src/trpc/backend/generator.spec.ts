@@ -77,23 +77,34 @@ describe('trpc backend generator', () => {
       integrationPattern: 'isolated',
       iac: 'cdk',
     });
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    // Verify dependencies were added
-    expect(packageJson.dependencies['@trpc/server']).toBeDefined();
-    expect(packageJson.dependencies['zod']).toBeDefined();
-    expect(packageJson.dependencies['aws-xray-sdk-core']).toBeDefined();
-    expect(packageJson.dependencies['aws-cdk-lib']).toBeDefined();
-    expect(packageJson.dependencies['constructs']).toBeDefined();
+    // The backend project declares its own runtime dependencies (and the
+    // @types stub backing its type imports) as catalog references.
+    const backendPackageJson = JSON.parse(
+      tree.read('apps/test-api/package.json', 'utf-8'),
+    );
+    expect(backendPackageJson.dependencies['@trpc/server']).toBe('catalog:');
+    expect(backendPackageJson.dependencies['zod']).toBe('catalog:');
+    expect(backendPackageJson.dependencies['aws-xray-sdk-core']).toBe(
+      'catalog:',
+    );
     expect(
-      packageJson.dependencies['@aws-lambda-powertools/logger'],
-    ).toBeDefined();
+      backendPackageJson.dependencies['@aws-lambda-powertools/logger'],
+    ).toBe('catalog:');
     expect(
-      packageJson.dependencies['@aws-lambda-powertools/metrics'],
-    ).toBeDefined();
+      backendPackageJson.dependencies['@aws-lambda-powertools/metrics'],
+    ).toBe('catalog:');
     expect(
-      packageJson.dependencies['@aws-lambda-powertools/tracer'],
-    ).toBeDefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
+      backendPackageJson.dependencies['@aws-lambda-powertools/tracer'],
+    ).toBe('catalog:');
+    expect(backendPackageJson.devDependencies['@types/aws-lambda']).toBe(
+      'catalog:',
+    );
+    // CDK libraries are declared by the shared constructs project.
+    const constructsPackageJson = JSON.parse(
+      tree.read('packages/common/constructs/package.json', 'utf-8'),
+    );
+    expect(constructsPackageJson.dependencies['aws-cdk-lib']).toBe('catalog:');
+    expect(constructsPackageJson.dependencies['constructs']).toBe('catalog:');
   });
 
   it('should set up shared constructs for http', async () => {
@@ -347,7 +358,10 @@ describe('trpc backend generator', () => {
       iac: 'cdk',
     });
 
-    const devDeps = readJson(tree, 'package.json').devDependencies;
+    const devDeps = readJson(
+      tree,
+      'apps/test-api/package.json',
+    ).devDependencies;
     expect(devDeps).toHaveProperty('cors');
     expect(devDeps).toHaveProperty('@types/cors');
 

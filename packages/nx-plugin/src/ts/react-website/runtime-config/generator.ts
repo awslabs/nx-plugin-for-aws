@@ -12,7 +12,7 @@ import { addSingleImport, applyGritQL, matchGritQL } from '../../../utils/ast';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
@@ -61,7 +61,7 @@ export async function runtimeConfigGenerator(
     {
       ...options,
       npmScopePrefix,
-      scopeAlias: toScopeAlias(npmScopePrefix),
+      scopeAlias: npmScopePrefix,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

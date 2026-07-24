@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -12,10 +11,10 @@ import {
 } from '@nx/devkit';
 import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
+import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import { esmVars } from './module-format';
-import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import { ensurePnpmIgnoresWorkspaceRootCheck } from './pnpm-workspace';
+import { getNpmScopePrefix } from './npm-scope';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
@@ -24,6 +23,8 @@ import {
 import { type ITsDepVersion, withVersions } from './versions';
 
 const SHADCN_DEPS = [
+  'react',
+  'react-dom',
   'class-variance-authority',
   'clsx',
   'tailwind-merge',
@@ -34,12 +35,11 @@ const SHADCN_DEPS = [
 
 export async function sharedShadcnGenerator(tree: Tree) {
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const scopeAlias = npmScopePrefix;
   const sharedShadcnAlias = `${scopeAlias}${SHARED_SHADCN_NAME}`;
   const fullyQualifiedName = `${npmScopePrefix}${SHARED_SHADCN_NAME}`;
   const libraryRoot = joinPathFragments(PACKAGES_DIR, SHARED_SHADCN_DIR);
   const shadcnSrcRoot = joinPathFragments(libraryRoot, 'src');
-  ensurePnpmIgnoresWorkspaceRootCheck(tree);
 
   if (!tree.exists(joinPathFragments(libraryRoot, 'project.json'))) {
     await tsProjectGenerator(tree, {
@@ -104,7 +104,12 @@ export async function sharedShadcnGenerator(tree: Tree) {
       }),
     );
 
-    addDependenciesToPackageJson(tree, withVersions([...SHADCN_DEPS]), {});
+    addDependenciesToPackageJson(
+      tree,
+      withVersions([...SHADCN_DEPS]),
+      {},
+      joinPathFragments(libraryRoot, 'package.json'),
+    );
   }
 
   updateJson(tree, 'tsconfig.base.json', (json) => ({
@@ -120,11 +125,13 @@ export async function sharedShadcnGenerator(tree: Tree) {
     },
   }));
 
-  if (!tree.exists('components.json')) {
+  // components.json lives in the package so `shadcn add` runs there and
+  // installs component dependencies into the package's own manifest.
+  if (!tree.exists(joinPathFragments(libraryRoot, 'components.json'))) {
     generateFiles(
       tree,
       joinPathFragments(import.meta.dirname, 'files', 'shadcn'),
-      '.',
+      libraryRoot,
       {
         sharedShadcnAlias,
       },

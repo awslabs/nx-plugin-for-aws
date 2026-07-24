@@ -11,6 +11,18 @@ export type { Containers, ContainersConfig } from '../containers';
 export type { Iac, IacConfig } from '../iac';
 
 /**
+ * Configuration for how generators manage dependencies via the package manager
+ */
+export interface PackageManagerConfig {
+  /**
+   * Whether generators record dependency versions in the package manager's
+   * catalog (pnpm/yarn/bun) via `catalog:` refs. When `false`, direct version
+   * ranges are written to each project. Defaults to `true`; no effect on npm.
+   */
+  catalogs?: boolean;
+}
+
+/**
  * Configuration for the nx plugin
  */
 export interface AwsNxPluginConfig {
@@ -28,6 +40,12 @@ export interface AwsNxPluginConfig {
    * Configuration for container tooling (build/push/login)
    */
   containers?: ContainersConfig;
+
+  /**
+   * Configuration for how generators manage dependencies via the package
+   * manager (e.g. whether to use dependency catalogs)
+   */
+  packageManager?: PackageManagerConfig;
 
   /**
    * List of tags

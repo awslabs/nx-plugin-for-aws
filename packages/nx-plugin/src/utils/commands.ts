@@ -59,9 +59,33 @@ export const buildPackageManagerShortCommand = (
 };
 
 /**
- * Build an install command for a given package manager
+ * Build an install command. With `project`, targets that project's manifest
+ * (pnpm `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
+ * `packages/<name>`, yarn by fully-qualified name); otherwise the root.
  */
-export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
+export const buildInstallCommand = (
+  pm: string,
+  pkg: string,
+  dev: boolean,
+  project?: string,
+  projectDir?: string,
+) => {
+  if (project) {
+    const shortName = project.split('/').pop();
+    const dir = projectDir ?? `packages/${shortName}`;
+    switch (pm) {
+      case 'pnpm':
+        return `pnpm add ${dev ? '-D ' : ''}${pkg} --filter ${shortName}`;
+      case 'yarn':
+        return `yarn workspace ${project} add ${dev ? '-D ' : ''}${pkg}`;
+      case 'npm':
+        return `npm install --legacy-peer-deps ${dev ? '-D ' : ''}${pkg} -w ${dir}`;
+      case 'bun':
+        return `bun add ${dev ? '-D ' : ''}${pkg} --cwd ${dir}`;
+      default:
+        return `${pm} install ${dev ? '-D ' : ''}${pkg}`;
+    }
+  }
   switch (pm) {
     case 'pnpm':
       return `pnpm add ${dev ? '-D' : '-'}w ${pkg}`;
@@ -105,6 +129,7 @@ export const buildCreateNxWorkspaceCommand = (
   iac?: 'cdk' | 'terraform',
   tag?: string,
   module?: 'esm' | 'cjs',
+  extraArgs?: string,
 ) => {
   const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;
   const pkgName = tag ? `@aws/nx-workspace@${tag}` : '@aws/nx-workspace';
@@ -116,6 +141,7 @@ export const buildCreateNxWorkspaceCommand = (
     workspace,
     ...(iac ? [`--iac=${iac}`] : []),
     ...(module ? [`--module=${module}`] : []),
+    ...(extraArgs ? [extraArgs] : []),
   ];
   return parts.join(' ');
 };

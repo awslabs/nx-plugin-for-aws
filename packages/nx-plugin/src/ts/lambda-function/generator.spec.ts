@@ -57,6 +57,12 @@ describe('ts-lambda-function generator', () => {
     // Create tsconfig.json for the project
     tree.write('packages/test-project/tsconfig.json', '{}');
 
+    // Every ts#project has its own manifest
+    tree.write(
+      'packages/test-project/package.json',
+      JSON.stringify({ name: '@proj/test-project', type: 'module' }),
+    );
+
     // Create source directory
     tree.write('packages/test-project/src/index.ts', 'export {};');
   });
@@ -197,12 +203,14 @@ describe('ts-lambda-function generator', () => {
     expect(buildTarget.dependsOn).toEqual(['other-target', 'bundle']);
   });
 
-  it('should add required dependencies to root package.json', async () => {
+  it('should add required dependencies to the project package.json', async () => {
     await tsLambdaFunctionGenerator(tree, options);
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Runtime dependencies live in the project's own package.json
+    const packageJson = JSON.parse(
+      tree.read('packages/test-project/package.json', 'utf-8'),
+    );
 
-    // Check dependencies were added to root package.json
     expect(
       packageJson.dependencies['@aws-lambda-powertools/tracer'],
     ).toBeDefined();
@@ -217,8 +225,9 @@ describe('ts-lambda-function generator', () => {
     ).toBeDefined();
     expect(packageJson.dependencies['@middy/core']).toBeDefined();
 
-    // Check dev dependencies
-    expect(packageJson.devDependencies['rolldown']).toBeDefined();
+    // Build tooling stays in the root package.json
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
   });
 
   it('should handle function path', async () => {
@@ -375,6 +384,15 @@ describe('ts-lambda-function generator', () => {
     });
 
     tree.write('packages/scoped-project/tsconfig.json', '{}');
+    tree.write(
+      'packages/scoped-project/package.json',
+      JSON.stringify({
+        name: '@myorg/scoped-project',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
 
     const scopedOptions = { ...options, project: '@myorg/scoped-project' };
     await tsLambdaFunctionGenerator(tree, scopedOptions);
@@ -595,6 +613,15 @@ describe('ts-lambda-function generator', () => {
       });
 
       tree.write('packages/scoped-project/tsconfig.json', '{}');
+      tree.write(
+        'packages/scoped-project/package.json',
+        JSON.stringify({
+          name: '@myorg/scoped-project',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+        }),
+      );
 
       const scopedTerraformOptions = {
         ...options,

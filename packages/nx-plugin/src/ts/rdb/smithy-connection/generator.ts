@@ -16,7 +16,6 @@ import {
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { pascalCase } from '../../../utils/names';
-import { toScopeAlias } from '../../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
@@ -52,7 +51,7 @@ export const tsRdbSmithyConnectionGenerator = async (
   const rdbBaseName = targetProject.name.split('/').pop();
   const rdbNameCamel = camelCase(rdbBaseName);
   const rdbNamePascal = pascalCase(rdbBaseName);
-  const rdbPackageAlias = toScopeAlias(targetProject.name);
+  const rdbPackageAlias = targetProject.name;
   const getterAlias = `getPrisma as get${rdbNamePascal}`;
 
   const contextPath = joinPathFragments(sourceProject.root, 'src/context.ts');

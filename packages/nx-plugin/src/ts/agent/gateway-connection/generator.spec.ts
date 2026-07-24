@@ -32,6 +32,15 @@ describe('ts#agent#gateway-connection generator', () => {
       }),
     );
     tree.write(
+      'packages/my-api/package.json',
+      JSON.stringify({
+        name: '@test/my-api',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
+    tree.write(
       'packages/my-api/src/my-agent/agent.ts',
       `import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';

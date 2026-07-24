@@ -4,8 +4,10 @@
  */
 
 import {
+  createProjectGraphAsync,
   getProjects,
   joinPathFragments,
+  type ProjectGraph,
   readJson,
   type Tree,
   updateJson,
@@ -13,6 +15,7 @@ import {
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { relative } from 'path';
 import PackageJson from '../../../package.json' with { type: 'json' };
+import { getLocalDependencySpecifier } from '../../utils/dependencies';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 
 export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -56,14 +59,131 @@ export const tsSyncGeneratorGenerator = async (
     }
   }
 
-  if (Object.keys(changesByConfigFile).length === 0) {
+  const localSpecifier = getLocalDependencySpecifier(tree);
+  const localDepChanges = await syncLocalProjectDependencies(
+    tree,
+    localSpecifier,
+  );
+
+  const messages: string[] = [];
+  if (Object.keys(changesByConfigFile).length > 0) {
+    messages.push(buildOutOfSyncMessage(changesByConfigFile));
+  }
+  if (Object.keys(localDepChanges).length > 0) {
+    messages.push(
+      buildLocalDepOutOfSyncMessage(localDepChanges, localSpecifier),
+    );
+  }
+
+  if (messages.length === 0) {
     return {};
   }
 
   return {
-    outOfSyncMessage: buildOutOfSyncMessage(changesByConfigFile),
+    outOfSyncMessage: messages.join('\n\n'),
   };
 };
+
+/**
+ * Declare each project's local workspace dependencies in its own package.json
+ * so `noUndeclaredDependencies` passes. Edges come from the Nx project graph
+ * (the same import analysis `@nx/js:typescript-sync` uses). Returns the
+ * packages added per project manifest.
+ */
+const syncLocalProjectDependencies = async (
+  tree: Tree,
+  localSpecifier: string,
+): Promise<Record<string, string[]>> => {
+  const projectGraph = await createProjectGraphAsync();
+
+  const projectInfoByName = collectProjectInfo(tree, projectGraph);
+
+  const addedByManifest: Record<string, string[]> = {};
+
+  for (const [projectName, info] of projectInfoByName) {
+    // Local workspace projects this one depends on (excludes external packages
+    // and implicit edges).
+    const dependencyNames = (projectGraph.dependencies[projectName] ?? [])
+      .filter(
+        (dep) =>
+          dep.type !== 'implicit' &&
+          projectInfoByName.has(dep.target) &&
+          dep.target !== projectName,
+      )
+      .map((dep) => projectInfoByName.get(dep.target)!.packageName);
+
+    if (dependencyNames.length === 0) {
+      continue;
+    }
+
+    const added: string[] = [];
+    updateJson(tree, info.packageJsonPath, (json) => {
+      const dependencies = { ...(json.dependencies ?? {}) };
+      const devDependencies = json.devDependencies ?? {};
+      for (const name of [...new Set(dependencyNames)].sort()) {
+        // Already declared in either list — leave as-is.
+        if (dependencies[name] || devDependencies[name]) {
+          continue;
+        }
+        dependencies[name] = localSpecifier;
+        added.push(name);
+      }
+      return added.length > 0 ? { ...json, dependencies } : json;
+    });
+
+    if (added.length > 0) {
+      addedByManifest[info.packageJsonPath] = added;
+    }
+  }
+
+  return addedByManifest;
+};
+
+interface ProjectInfo {
+  packageName: string;
+  packageJsonPath: string;
+}
+
+/**
+ * Index workspace projects with a named package.json by project name, so graph
+ * edges (keyed by project name) resolve to the manifest to declare the dep in.
+ */
+const collectProjectInfo = (
+  tree: Tree,
+  projectGraph: ProjectGraph,
+): Map<string, ProjectInfo> => {
+  const infoByName = new Map<string, ProjectInfo>();
+  for (const [name, node] of Object.entries(projectGraph.nodes)) {
+    const root = node.data.root;
+    if (!root) {
+      continue;
+    }
+    const packageJsonPath = joinPathFragments(root, 'package.json');
+    if (!tree.exists(packageJsonPath)) {
+      continue;
+    }
+    const packageName = readJson<{ name?: string }>(tree, packageJsonPath).name;
+    if (packageName) {
+      infoByName.set(name, { packageName, packageJsonPath });
+    }
+  }
+  return infoByName;
+};
+
+const buildLocalDepOutOfSyncMessage = (
+  addedByManifest: Record<string, string[]>,
+  localSpecifier: string,
+): string =>
+  `Local project dependencies are out of sync. The following workspace dependencies will be declared:\n${Object.entries(
+    addedByManifest,
+  )
+    .map(
+      ([manifest, names]) =>
+        `${manifest}:\n${names
+          .map((name) => `- ${name}: ${localSpecifier}`)
+          .join('\n')}`,
+    )
+    .join('\n\n')}`;
 
 export default tsSyncGeneratorGenerator;
 

@@ -50,30 +50,35 @@ export const isGitRepo = (dir: string): boolean => {
 };
 
 export const buildArgs = (args: string[]): string[] => {
-  const positionalArgs = args.filter((a) => !a.startsWith('-'));
-  const flagArgs = args.filter((a) => a.startsWith('-'));
+  // Treat only tokens before the first flag as positional (the workspace name);
+  // everything from the first flag on keeps its order so flag/value pairs like
+  // `--catalog false` stay together.
+  const firstFlagIndex = args.findIndex((a) => a.startsWith('-'));
+  const positionalArgs =
+    firstFlagIndex === -1 ? args : args.slice(0, firstFlagIndex);
+  const restArgs = firstFlagIndex === -1 ? [] : args.slice(firstFlagIndex);
 
   const defaultFlags = [...DEFAULT_FLAGS, '--skipGit'];
 
-  if (!flagArgs.some((a) => a.startsWith('--pm'))) {
+  if (!restArgs.some((a) => a.startsWith('--pm'))) {
     const pm = detectPackageManager();
     if (pm) defaultFlags.push(`--pm=${pm}`);
   }
 
-  const userFlagsWithoutSkipGit = flagArgs.filter(
+  const userArgsWithoutSkipGit = restArgs.filter(
     (a) => !a.startsWith('--skipGit'),
   );
 
   const flagsToAdd = defaultFlags.filter(
     (flag) =>
-      !userFlagsWithoutSkipGit.some((a) => a.startsWith(flag.split('=')[0])),
+      !userArgsWithoutSkipGit.some((a) => a.startsWith(flag.split('=')[0])),
   );
 
   return [
     ...positionalArgs,
     `--preset=${PRESET}`,
     ...flagsToAdd,
-    ...userFlagsWithoutSkipGit,
+    ...userArgsWithoutSkipGit,
   ];
 };
 

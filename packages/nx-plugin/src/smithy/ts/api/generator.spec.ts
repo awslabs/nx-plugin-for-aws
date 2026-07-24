@@ -365,7 +365,9 @@ describe('tsSmithyApiGenerator', () => {
       iac: 'cdk',
     });
 
-    const packageJson = readJson(tree, 'package.json');
+    // Runtime dependencies and the @types stub live in the backend project's
+    // own package.json; tsx (build tooling) stays at the workspace root.
+    const packageJson = readJson(tree, 'test-api/backend/package.json');
 
     // Verify runtime dependencies
     expect(packageJson.dependencies).toHaveProperty(
@@ -385,10 +387,12 @@ describe('tsSmithyApiGenerator', () => {
       '@aws-lambda-powertools/logger',
     );
 
-    // Verify dev dependencies
+    // The @types stub backs the backend's type imports.
     expect(packageJson.devDependencies).toHaveProperty('@types/aws-lambda');
     // tsx is used by the serve and dev targets to run the local server
-    expect(packageJson.devDependencies).toHaveProperty('tsx');
+    expect(readJson(tree, 'package.json').devDependencies).toHaveProperty(
+      'tsx',
+    );
   });
 
   it('should configure git ignores for generated code', async () => {

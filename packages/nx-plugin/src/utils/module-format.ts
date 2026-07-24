@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, type Tree } from '@nx/devkit';
+import {
+  getProjects,
+  joinPathFragments,
+  readJson,
+  type Tree,
+} from '@nx/devkit';
 
 /**
  * The module format for generated TypeScript code and configuration.
@@ -10,20 +15,42 @@ import { readJson, type Tree } from '@nx/devkit';
 export type ModuleFormat = 'esm' | 'cjs';
 
 /**
- * Whether the workspace is configured for ES modules, inferred from the root
- * package.json. The module format is a workspace-wide property established when
- * the workspace is created, so shared infrastructure/construct helpers can read
- * it from the tree rather than having it threaded through every call site.
- *
- * ESM requires an explicit `type: "module"`, matching Node: an absent `type` (or
- * `type: "commonjs"`) means CommonJS. A workspace with no root package.json
- * defaults to ESM.
+ * Whether the workspace targets ES modules, read from the tree so shared
+ * helpers needn't thread it through call sites. An explicit root `type` wins
+ * (`module`/`commonjs`); when absent (e.g. an adopted Nx workspace) infer ESM
+ * from any sibling project declaring `type: "module"`, else CJS. No root
+ * package.json defaults to ESM.
  */
 export const isEsmWorkspace = (tree: Tree): boolean => {
-  if (tree.exists('package.json')) {
-    return readJson(tree, 'package.json').type === 'module';
+  if (!tree.exists('package.json')) {
+    return true;
   }
-  return true;
+  const rootType = readJson(tree, 'package.json').type;
+  if (rootType === 'module') {
+    return true;
+  }
+  if (rootType === 'commonjs') {
+    return false;
+  }
+  // Root `type` is absent: infer from sibling projects' own manifests.
+  return hasEsmProject(tree);
+};
+
+/** Whether any non-root project declares `type: "module"` in its own manifest. */
+const hasEsmProject = (tree: Tree): boolean => {
+  for (const project of getProjects(tree).values()) {
+    if (project.root === '.' || project.root === '') {
+      continue;
+    }
+    const packageJsonPath = joinPathFragments(project.root, 'package.json');
+    if (
+      tree.exists(packageJsonPath) &&
+      readJson(tree, packageJsonPath).type === 'module'
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 /**

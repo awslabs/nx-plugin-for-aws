@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -13,11 +12,11 @@ import {
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName } from '../../../utils/names';
-import { toScopeAlias } from '../../../utils/npm-scope';
 import {
   type ComponentMetadata,
   getGeneratorInfo,
@@ -57,7 +56,7 @@ export async function tsAgentReactConnectionGenerator(
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
   const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
-  const agentProjectAlias = toScopeAlias(agentProjectConfig.name);
+  const agentProjectAlias = agentProjectConfig.name;
   const agentPath = targetComponent?.path ?? 'src/agent';
 
   if ((targetComponent?.protocol ?? '').toLowerCase() === 'a2a') {
@@ -228,6 +227,7 @@ export async function tsAgentReactConnectionGenerator(
       ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
     withVersions(['@smithy/types']),
+    joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [
@@ -244,8 +244,7 @@ export default tsAgentReactConnectionGenerator;
 
 /**
  * Ensures a wildcard path entry exists in tsconfig.base.json for the given project,
- * allowing deep imports (e.g., `:scope/project/src/agent/router.js`).
- * Both the scope alias and npm package name forms are added.
+ * allowing deep imports (e.g., `@scope/project/src/agent/router.js`).
  */
 function ensureWildcardPathEntry(
   tree: Tree,
@@ -257,20 +256,11 @@ function ensureWildcardPathEntry(
   );
   if (!tsconfigPath) return;
 
-  const wildcardValue = [`./${projectRoot}/*`];
-  const scopeAlias = toScopeAlias(projectName);
-
   updateJson(tree, tsconfigPath, (json) => {
     const paths = json.compilerOptions?.paths ?? {};
-    // Add wildcard for the scope alias (used by generated templates)
-    const scopeWildcardKey = `${scopeAlias}/*`;
-    if (!paths[scopeWildcardKey]) {
-      paths[scopeWildcardKey] = wildcardValue;
-    }
-    // Also add wildcard for the npm package name
-    const npmWildcardKey = `${projectName}/*`;
-    if (!paths[npmWildcardKey]) {
-      paths[npmWildcardKey] = wildcardValue;
+    const wildcardKey = `${projectName}/*`;
+    if (!paths[wildcardKey]) {
+      paths[wildcardKey] = [`./${projectRoot}/*`];
     }
     json.compilerOptions = {
       ...json.compilerOptions,

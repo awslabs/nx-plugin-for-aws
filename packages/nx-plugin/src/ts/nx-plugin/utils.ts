@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   joinPathFragments,
   readJson,
   type Tree,
@@ -11,6 +10,7 @@ import {
   writeJson,
 } from '@nx/devkit';
 import PackageJson from '../../../package.json' with { type: 'json' };
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { isEsmWorkspace } from '../../utils/module-format';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { withVersions } from '../../utils/versions';

@@ -91,17 +91,28 @@ describe('ts#dynamodb generator', () => {
 
     expect(tree.exists('packages/my-table/config.json')).toBe(true);
 
-    expect(packageJson.dependencies['@aws-sdk/client-dynamodb']).toBeDefined();
-    expect(packageJson.dependencies['electrodb']).toBeDefined();
+    // Runtime dependencies (and the @types/* backing type imports) land in the
+    // project's own manifest as catalog references
+    const projectPackageJson = JSON.parse(
+      tree.read('packages/my-table/package.json', 'utf-8') ?? '{}',
+    );
+    expect(projectPackageJson.dependencies['@aws-sdk/client-dynamodb']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['electrodb']).toBe('catalog:');
     expect(
-      packageJson.dependencies['@aws-lambda-powertools/parameters'],
-    ).toBeDefined();
+      projectPackageJson.dependencies['@aws-lambda-powertools/parameters'],
+    ).toBe('catalog:');
     expect(
-      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
-    ).toBeDefined();
+      projectPackageJson.dependencies['@aws-sdk/client-appconfigdata'],
+    ).toBe('catalog:');
+    expect(projectPackageJson.devDependencies['@types/aws-lambda']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.devDependencies['@types/node']).toBe('catalog:');
+
+    // Pure build/test tooling stays in the workspace root devDependencies
     expect(packageJson.devDependencies['tsx']).toBeDefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
-    expect(packageJson.devDependencies['@types/node']).toBeDefined();
   });
 
   it('should generate scripts for finch engine', async () => {

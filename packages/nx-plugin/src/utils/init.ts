@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
-  detectPackageManager,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -25,12 +23,17 @@ import {
   updateAwsNxPluginConfig,
 } from './config/utils';
 import { type Containers, inferContainers } from './containers';
-import { DEFAULT_BIOME_CONFIG } from './format';
+import {
+  addDependenciesToPackageJson,
+  detectWorkspacePackageManager,
+} from './dependencies';
+import { getDefaultBiomeConfig } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
 import { mergeTargetDefault } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
+import { workspaceGlobs } from './project-package-json';
 import { withVersions } from './versions';
 
 const WORKSPACES = ['packages/*'];
@@ -71,6 +74,12 @@ export interface ApplyWorkspaceInitOptions {
    * the default) — it only adds the convenience scripts that are absent.
    */
   readonly overwriteScripts?: boolean;
+  /**
+   * Whether generators use the package manager's dependency catalog. On pnpm
+   * this also sets `catalogMode: strict` so `pnpm add` records new deps in the
+   * catalog. Defaults to true.
+   */
+  readonly catalogs?: boolean;
 }
 
 /**
@@ -84,7 +93,7 @@ export interface ApplyWorkspaceInitOptions {
  * build script. This makes the file self-consistent so the first generator's
  * install doesn't fail with `ERR_PNPM_IGNORED_BUILDS`.
  */
-const setUpPnpmWorkspace = (tree: Tree) => {
+const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
   const existing = tree.exists('pnpm-workspace.yaml')
     ? ((yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
         string,
@@ -106,6 +115,13 @@ const setUpPnpmWorkspace = (tree: Tree) => {
     ...Object.fromEntries(PNPM_BUILT_DEPENDENCIES.map((dep) => [dep, true])),
   };
 
+  // `strict` makes `pnpm add` record new deps in the catalog; it only gates
+  // that flow, so pre-declared direct ranges (e.g. tslib) still install.
+  // Preserve an explicit user choice.
+  const catalogMode = catalogs
+    ? (existing.catalogMode ?? 'strict')
+    : existing.catalogMode;
+
   tree.write(
     'pnpm-workspace.yaml',
     yaml.dump(
@@ -114,6 +130,7 @@ const setUpPnpmWorkspace = (tree: Tree) => {
         packages,
         allowBuilds,
         onlyBuiltDependencies: PNPM_BUILT_DEPENDENCIES,
+        ...(catalogMode ? { catalogMode } : {}),
       },
       { quotingType: "'" },
     ),
@@ -126,16 +143,24 @@ const setUpPnpmWorkspace = (tree: Tree) => {
  * pnpm workspaces are declared in `pnpm-workspace.yaml`; every other package
  * manager reads the `workspaces` field of the root `package.json`.
  */
-const setUpWorkspaces = (tree: Tree) => {
-  if (detectPackageManager() === 'pnpm') {
-    setUpPnpmWorkspace(tree);
+const setUpWorkspaces = (tree: Tree, catalogs: boolean) => {
+  if (detectWorkspacePackageManager(tree) === 'pnpm') {
+    setUpPnpmWorkspace(tree, catalogs);
   } else {
-    updateJson(tree, 'package.json', (json) => ({
-      ...json,
-      workspaces: Array.from(
-        new Set([...(json.workspaces ?? []), ...WORKSPACES]),
-      ),
-    }));
+    updateJson(tree, 'package.json', (json) => {
+      // The `workspaces` field may be the object form ({ "packages": [...] })
+      // accepted by yarn and bun — extend the globs while preserving the form.
+      const globs = Array.from(
+        new Set([...workspaceGlobs(json.workspaces), ...WORKSPACES]),
+      );
+      return {
+        ...json,
+        workspaces:
+          json.workspaces !== undefined && !Array.isArray(json.workspaces)
+            ? { ...json.workspaces, packages: globs }
+            : globs,
+      };
+    });
   }
 };
 
@@ -218,16 +243,19 @@ export const applyWorkspaceInit = async (
     mcp,
     readmeOverwriteStrategy = OverwriteStrategy.KeepExisting,
     overwriteScripts = false,
+    catalogs = true,
   }: ApplyWorkspaceInitOptions,
 ) => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
 
-  // Write IaC provider and container engine to plugin config
+  // The catalogs flag is written explicitly (even when true) so the workspace
+  // records its dependency-management choice.
   await ensureAwsNxPluginConfig(tree);
   await updateAwsNxPluginConfig(tree, {
     iac: { provider: iac },
     containers: { engine: resolvedContainers },
+    packageManager: { catalogs },
   });
 
   // Set up the TypeScript plugin, base tsconfig, formatter etc. `@nx/js`
@@ -241,7 +269,7 @@ export const applyWorkspaceInit = async (
   ensureBaseTsConfig(tree);
   ensureRootTsConfig(tree);
 
-  setUpWorkspaces(tree);
+  setUpWorkspaces(tree, catalogs);
 
   const nxJson = readNxJson(tree);
   updateNxJson(tree, {
@@ -312,7 +340,10 @@ export const applyWorkspaceInit = async (
 
   // Write biome.json for formatting and linting
   if (!tree.exists('biome.json')) {
-    tree.write('biome.json', JSON.stringify(DEFAULT_BIOME_CONFIG, null, 2));
+    tree.write(
+      'biome.json',
+      JSON.stringify(getDefaultBiomeConfig(tree), null, 2),
+    );
   }
 
   generateFiles(

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -16,6 +15,7 @@ import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
