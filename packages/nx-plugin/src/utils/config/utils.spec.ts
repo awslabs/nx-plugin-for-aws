@@ -47,7 +47,7 @@ describe('config utils', () => {
 
     expect(
       (
-        (readAwsNxPluginConfig(tree)).license.header
+        readAwsNxPluginConfig(tree).license.header
           .content as LicenseLinesContent
       ).lines[0],
     ).toBe('Test Copyright Header');
@@ -69,7 +69,7 @@ describe('config utils', () => {
 
     expect(
       (
-        (readAwsNxPluginConfig(tree)).license.header
+        readAwsNxPluginConfig(tree).license.header
           .content as LicenseLinesContent
       ).lines[0],
     ).toBe('Test Copyright Header 2');
@@ -95,7 +95,7 @@ describe('config utils', () => {
 
     expect(
       (
-        (readAwsNxPluginConfig(tree)).license.header
+        readAwsNxPluginConfig(tree).license.header
           .content as LicenseLinesContent
       ).lines[0],
     ).toBe('Test Copyright Header');
