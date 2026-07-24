@@ -1,0 +1,119 @@
+---
+title: Nx Migration 生成器
+description: 为 Nx 插件生成 Nx Migration
+generator: ts#nx-migration
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+
+为 Nx 插件添加 [Nx Migration](https://nx.dev/docs/kb/migration-generators)。当你进行破坏性更改时（重命名目标、更改提供的配置或需要伴随代码更改的依赖项升级），迁移可以让 `nx migrate` 自动更新由插件先前版本生成的项目。
+
+该生成器会搭建迁移脚手架，在插件的 `migrations.json` 中注册它，并将 `nx-migrations` 字段连接到插件的 `package.json`（如果它们不存在则创建）。
+
+:::tip[推荐设置]
+我们建议使用 <Link path="/zh/guides/ts-nx-plugin">`ts#nx-plugin`</Link> 生成器作为迁移的基础项目，因为它配置了一个用于发布生成器和迁移的插件项目。
+:::
+
+## 用法
+
+### 生成迁移
+
+<RunGenerator generator="ts#nx-migration" />
+
+### 选项
+
+<GeneratorParameters generator="ts#nx-migration" />
+
+## 三种迁移类型
+
+Nx 23 迁移有三种形式，由 `migrations.json` 条目携带的字段区分。传递 `--kind` 来选择（默认为 `deterministic`）：
+
+- **确定性（Deterministic）**（`implementation`）— 具有精确前后状态的代码修改。无人值守运行，包括在 CI 和非交互式终端中。这是首选类型：只要目标文件是你的生成器完全拥有的，并且编辑可以机械地表达，就优先使用它。
+- **代理式（Agentic）**（`prompt`）— 通过 Nx 的代理式 `nx migrate` 流程由用户的本地编码代理应用的 markdown 指令文件。用于对用户拥有的代码进行更改，其中正确的编辑取决于用户构建的内容。当没有代理运行时（CI、未安装代理、拒绝同意），Nx 将提示显示为手动说明 — 因此将提示编写为独立的、人类可操作的步骤。
+- **混合式（Hybrid）**（`implementation` + `prompt`）— 一个破坏性更改，包含机械部分和判断部分。`implementation` 确定性地完成你拥有的所有内容，并返回描述它更改或跳过内容的 `agentContext`；Nx 将该上下文传递给配对的 `prompt`，后者将代理引导到用户拥有的调用站点。
+
+## 生成器输出
+
+根据选择的 `kind`，生成器在插件项目的源文件夹下创建以下文件：
+
+<FileTree>
+  - src/migrations/\<name>/
+    - migration.ts 代码修改实现（确定性和混合式）
+    - migration.spec.ts 迁移测试（确定性和混合式）
+    - prompt.md 代理/人工指令（代理式和混合式）
+  - migrations.json 创建或更新以注册你的迁移
+  - package.json 创建或更新以添加 "nx-migrations" 条目
+</FileTree>
+
+它在 `migrations.json` 中注册迁移，包含其类型的字段但没有 `version` — 请参阅下面的[版本控制](#versioning)。
+
+## 实现迁移
+
+确定性（或混合式）迁移是一个修改虚拟文件系统（`Tree`）的函数，返回 [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject)：
+
+```ts
+import { type MigrationReturnObject, type Tree } from '@nx/devkit';
+
+export default async function migration(
+  tree: Tree,
+): Promise<MigrationReturnObject> {
+  const nextSteps: string[] = [];
+
+  // Read and update the files your generators produce here.
+
+  return { nextSteps };
+}
+```
+
+- **`nextSteps`** — 在 `nx migrate` 运行后向用户显示的工作区范围的注释。使用这些来报告你跳过的文件（参见下面的防护栏）或迁移无法执行的手动后续操作。
+- **`agentContext`**（仅混合式）— 代码修改更改内容的摘要，当它在 Nx 的代理式流程下运行时传递给配对的 `prompt`，以便代理可以专注于用户拥有的部分。
+
+对于你在生成器中使用的相同操作（`generateFiles`、GritQL 转换、读取和更新 JSON），请参阅 <Link path="/zh/guides/nx-generator">Nx Generator 指南</Link>。
+
+### 防护栏
+
+迁移针对你无法控制的工作区运行，因此请遵循脚手架骨架中包含的相同规则：
+
+- **写入前进行模式匹配。** 如果目标文件偏离了你的生成器产生的形状，请跳过它并通过 `nextSteps` 报告它，而不是覆盖用户的更改。
+- **幂等性。** 重新运行迁移必须是无操作的。
+- **永远不要进行仅格式化的更改。**
+
+### 测试你的迁移
+
+脚手架的 `migration.spec.ts` 使用 `createTreeWithEmptyWorkspace()` 来构建虚拟工作区。覆盖迁移应用于你的生成器产生的形状、跳过（并报告）自定义文件以及是幂等的：
+
+```ts
+import type { Tree } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import migration from './migration';
+
+describe('my migration', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+  });
+
+  it('should update the generated shape', async () => {
+    // Arrange the vended shape, run the migration, assert the changes
+    const result = await migration(tree);
+    expect(result.nextSteps).toBeDefined();
+  });
+});
+```
+
+## 版本控制
+
+当用户安装的插件版本低于迁移的 `version` 时，Nx 会运行迁移。此生成器**不**写入 `version` 字段 — 当你发布包含迁移的版本时分配它（或从发布流程中标记它），以便它为从早期版本升级的每个人运行。
+
+## 运行迁移
+
+用户通过升级插件来应用插件的迁移：
+
+<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+
+当有可用的本地编码代理时，代理式和混合式迁移会在 `nx migrate --run-migrations` 期间由用户的本地编码代理应用。
