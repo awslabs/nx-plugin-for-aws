@@ -105,6 +105,7 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
@@ -122,7 +123,8 @@ const buildDatabaseUrl = async (): Promise<string> => {
 export const handler = async () => {
   await withConnectionRetry(async () => {
     const databaseUrl = await buildDatabaseUrl();
-    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+    const prisma = join(__dirname, 'node_modules', '.bin', 'prisma');
+    await promisify(execFile)(prisma, ['migrate', 'deploy'], {
       cwd: __dirname,
       env: {
         ...process.env,
@@ -3882,6 +3884,7 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
@@ -3899,7 +3902,8 @@ const buildDatabaseUrl = async (): Promise<string> => {
 export const handler = async () => {
   await withConnectionRetry(async () => {
     const databaseUrl = await buildDatabaseUrl();
-    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+    const prisma = join(__dirname, 'node_modules', '.bin', 'prisma');
+    await promisify(execFile)(prisma, ['migrate', 'deploy'], {
       cwd: __dirname,
       env: {
         ...process.env,
@@ -4666,13 +4670,8 @@ export default defineConfig({
 exports[`ts#rdb generator > should generate the aurora shared construct 4`] = `
 "FROM public.ecr.aws/lambda/nodejs:24
 
-# Upgrade npm and its bundled brace-expansion to versions free of known
-# HIGH/CRITICAL vulnerabilities
-RUN npm install -g npm@12.0.1 \\
-    && npm install --no-save --prefix /tmp/patch brace-expansion@5.0.8 \\
-    && rm -rf "$(npm root -g)/npm/node_modules/brace-expansion" \\
-    && mv /tmp/patch/node_modules/brace-expansion "$(npm root -g)/npm/node_modules/" \\
-    && rm -rf /tmp/patch
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
+RUN npm install -g npm@12.0.1
 
 # Patch OS packages beyond the base image's pinned release, and drop the
 # runtime's convenience copy of the AWS SDK (the handler bundle inlines its
@@ -4685,9 +4684,13 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 
 # npm blocks dependency install scripts by default; allow prisma's so its
 # postinstall downloads the schema-engine binary needed to run migrations.
+# npm is removed once prisma is installed — the handler runs prisma's own
+# binary directly, and npm's bundled dependencies would otherwise carry known
+# HIGH/CRITICAL vulnerabilities into the image.
 RUN printf 'allow-scripts[]=prisma\\nallow-scripts[]=@prisma/engines\\n' > .npmrc \\
     && npm install prisma@7.8.0 \\
-    && rm .npmrc
+    && rm .npmrc \\
+    && npm uninstall -g npm
 
 COPY index.js ./index.js
 COPY prisma ./prisma

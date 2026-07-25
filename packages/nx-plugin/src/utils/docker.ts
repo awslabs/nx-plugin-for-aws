@@ -19,13 +19,11 @@ const TRIVY_IGNORE_CONTENTS = `# Trivy ignore file. Add one vulnerability ID (e.
 `;
 
 /**
- * Substitution variables for the vended Node `Dockerfile` templates, exposing
- * the npm version to install globally along with the versions its bundled
- * dependency patch step pins.
+ * Substitution variables for the vended Node `Dockerfile` templates: the npm
+ * version to install globally, and the versions its dependency overrides pin.
  */
 export const nodeImageVersions = () => ({
   npmVersion: TS_VERSIONS.npm,
-  braceExpansionVersion: TS_VERSIONS['brace-expansion'],
   minimatchVersion: TS_VERSIONS.minimatch,
 });
 
