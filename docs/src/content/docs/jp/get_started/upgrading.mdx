@@ -1,0 +1,148 @@
+---
+title: ワークスペースのアップグレード
+description: nx migrate を使用して Nx と @aws/nx-plugin をアップグレードする方法。
+---
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Nx と `@aws/nx-plugin` の両方は、[`nx migrate`](https://nx.dev/docs/features/automate-updating-dependencies) を使用してアップグレード時にワークスペースを自動的に更新するマイグレーションを提供しています。このガイドでは、それぞれのアップグレード方法を説明します。
+
+`nx migrate <package>@<version>` は指定したパッケージをターゲットにします。つまり、Nx 自体のアップグレードと `@aws/nx-plugin` のアップグレードは別々のアップグレードであり、それぞれ同じサイクルに従います：
+
+<Steps>
+
+1. **生成** — `nx migrate <package>@latest` は `package.json` 内のパッケージのバージョンを更新し、実行するマイグレーションをリストした `migrations.json` を書き込みます。まだ何もインストールされず、他のファイルも変更されないため、最初にバージョンの変更を確認できます。
+
+2. **インストール** — パッケージマネージャーで新しいバージョンをインストールします（例：`pnpm install --no-frozen-lockfile`）。
+
+3. **実行** — `nx migrate --run-migrations` は保留中の各マイグレーションをワークスペースに一つずつ適用します。
+
+4. **コミット** — ワークスペースがビルドできることを確認し、`migrations.json` を削除してコミットします。
+
+</Steps>
+
+<Aside type="caution" title="一度に一つのパッケージ">
+次のパッケージを開始する前に、一つのパッケージの完全なサイクルを完了してください：各 `nx migrate <package>` は `migrations.json` を**上書き**するため、`nx migrate @aws/nx-plugin@latest` の直後に `nx migrate latest` を実行すると、プラグインの保留中のマイグレーションが実行される前に破棄されます。
+</Aside>
+
+## @aws/nx-plugin のアップグレード
+
+プラグインをターゲットにしてサイクルを開始します：
+
+<NxCommands commands={['migrate @aws/nx-plugin@latest']} />
+
+```
+ NX   The migrate command has run successfully.
+
+- package.json has been updated.
+- migrations.json has been generated.
+- 1 AI migration prompt(s) have been written to tools/ai-migrations/.
+
+ NX   Next steps:
+
+- Make sure package.json changes make sense and then run 'pnpm install --no-frozen-lockfile',
+- Review and tweak the AI migration prompts in tools/ai-migrations/ as needed.
+- Run 'pnpm exec nx migrate --run-migrations'
+- To learn more go to https://nx.dev/features/automate-updating-dependencies
+```
+
+`package.json` の変更を確認し、インストールしてから、マイグレーションを実行します：
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+### 決定論的マイグレーション
+
+ほとんどのマイグレーションは決定論的なコードモッドです。これらは無人で実行され、意図的にスキップしたものを報告します：
+
+```
+ NX   Running migrations from 'migrations.json'
+
+Running the following migrations:
+- @aws/nx-plugin: update-vitest-workspace-config — Add a coverage reporter to vitest configs
+- @aws/nx-plugin: update-custom-api-handlers — Update custom API handlers for the new middleware signature
+
+── Migration 1 of 2 · @aws/nx-plugin:update-vitest-workspace-config ─────
+→ Running generator…
+Changes:
+  UPDATE packages/api/vite.config.mts
+
+...
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+2 migrations applied, 0 commits created.
+
+ NX   Some migrations have additional information, see below.
+
+- packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+```
+
+最後の**追加情報**に注意してください：マイグレーションが安全に更新できる範囲を超えてカスタマイズされたファイルを見つけた場合、変更をそのままにして、代わりに手動でのフォローアップをそこに報告します。
+
+### エージェント型マイグレーション
+
+一部のマイグレーションは、あなたが所有するコードをターゲットにしており、正しい編集は構築した内容に依存します。これらは、ローカルの AI コーディングエージェント（Claude Code、Codex、または OpenCode）によって適用されるプロンプトとして提供されます。保留中のものがある場合、Nx はエージェントを関与させる前に同意を求めます：
+
+```
+? Enable the agentic flow? …
+❯ Yes, just this time      Apply 1 prompt migration and validate generator output with an AI agent
+  Yes, always              Saved to nx.json so Nx won't ask again
+  No, just this time       Skip prompts and run generators without AI validation
+  No, never                Saved to nx.json so Nx won't ask again
+```
+
+承諾すると、エージェントは各プロンプトマイグレーションをその場で適用し、変更内容を要約します：
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+→ Running prompt with Claude Code…
+✓ update-custom-api-handlers: Updated 3 API handlers to the new middleware signature.
+```
+
+拒否した場合、またはエージェントがインストールされていない場合、または実行が非対話型（例：CI）の場合、プロンプトマイグレーションはスキップされ、手動で適用するために保存されます：
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — agentic flow disabled. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration skipped.
+
+ NX   Some migrations have additional information, see below.
+
+- Some prompt migrations were skipped. Review and apply each of the following
+  prompt files to the workspace, in the listed order:
+  - tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+```
+
+スキップされた各プロンプトは、`tools/ai-migrations/` 内の自己完結型のマークダウン命令ファイルです。コーディングエージェントに貼り付けるか、手動でその手順に従ってください。
+
+最後に、すべてがまだビルドできることを確認してから、`migrations.json` を削除してコミットします：
+
+<NxCommands commands={['run-many --target build --all']} />
+
+## Nx のアップグレード
+
+Nx 自体（およびその `@nx/*` プラグイン）のアップグレードは同じサイクルで、`nx` をターゲットにします：
+
+<NxCommands commands={['migrate latest']} />
+
+次に、以前と同様にインストール、マイグレーションの実行、確認、コミットを行います：
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+<Aside type="tip">
+複数の Nx メジャーバージョンをまたぐ場合は、一度に一つのメジャーバージョンずつアップグレードしてください。詳細については、[Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) を参照してください。
+</Aside>
+
+<Aside type="note" title="pnpm build scripts">
+`nx migrate latest` が `ERR_PNPM_IGNORED_BUILDS` で失敗する場合、pnpm が `nx` パッケージのポストインストールスクリプトをブロックしています。`pnpm-workspace.yaml` で許可して再実行してください：
+
+```yaml
+# pnpm-workspace.yaml
+allowBuilds:
+  nx: true
+```
+</Aside>

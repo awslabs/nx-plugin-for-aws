@@ -1,0 +1,148 @@
+---
+title: Nâng cấp Workspace của bạn
+description: Cách nâng cấp Nx và @aws/nx-plugin với nx migrate.
+---
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Cả Nx và `@aws/nx-plugin` đều cung cấp các migration tự động cập nhật workspace của bạn khi bạn nâng cấp chúng, sử dụng [`nx migrate`](https://nx.dev/docs/features/automate-updating-dependencies). Hướng dẫn này sẽ hướng dẫn bạn nâng cấp từng thành phần.
+
+`nx migrate <package>@<version>` nhắm đến bất kỳ package nào bạn chỉ định — vì vậy việc nâng cấp Nx và nâng cấp `@aws/nx-plugin` là các quá trình nâng cấp riêng biệt, mỗi quá trình tuân theo cùng một chu trình:
+
+<Steps>
+
+1. **Tạo** — `nx migrate <package>@latest` cập nhật các phiên bản của package trong `package.json` và ghi một file `migrations.json` liệt kê các migration cần chạy. Chưa có gì được cài đặt và chưa có file nào khác được chạm vào, vì vậy bạn có thể xem xét các thay đổi phiên bản trước.
+
+2. **Cài đặt** — cài đặt các phiên bản mới với package manager của bạn (ví dụ: `pnpm install --no-frozen-lockfile`).
+
+3. **Chạy** — `nx migrate --run-migrations` áp dụng từng migration đang chờ xử lý vào workspace của bạn, từng cái một.
+
+4. **Commit** — xác minh workspace của bạn build được, sau đó xóa `migrations.json` và commit.
+
+</Steps>
+
+<Aside type="caution" title="Từng package một">
+Hoàn thành toàn bộ chu trình cho một package trước khi bắt đầu package tiếp theo: mỗi lần `nx migrate <package>` sẽ **ghi đè** `migrations.json`, vì vậy chạy `nx migrate @aws/nx-plugin@latest` theo sau ngay bởi `nx migrate latest` sẽ loại bỏ các migration đang chờ của plugin trước khi chúng chạy.
+</Aside>
+
+## Nâng cấp @aws/nx-plugin
+
+Bắt đầu chu trình bằng cách nhắm đến plugin:
+
+<NxCommands commands={['migrate @aws/nx-plugin@latest']} />
+
+```
+ NX   The migrate command has run successfully.
+
+- package.json has been updated.
+- migrations.json has been generated.
+- 1 AI migration prompt(s) have been written to tools/ai-migrations/.
+
+ NX   Next steps:
+
+- Make sure package.json changes make sense and then run 'pnpm install --no-frozen-lockfile',
+- Review and tweak the AI migration prompts in tools/ai-migrations/ as needed.
+- Run 'pnpm exec nx migrate --run-migrations'
+- To learn more go to https://nx.dev/features/automate-updating-dependencies
+```
+
+Xem xét các thay đổi trong `package.json`, cài đặt, sau đó chạy các migration:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+### Migration xác định (Deterministic migrations)
+
+Hầu hết các migration là các codemod xác định — chúng chạy tự động và báo cáo bất kỳ điều gì chúng cố ý bỏ qua:
+
+```
+ NX   Running migrations from 'migrations.json'
+
+Running the following migrations:
+- @aws/nx-plugin: update-vitest-workspace-config — Add a coverage reporter to vitest configs
+- @aws/nx-plugin: update-custom-api-handlers — Update custom API handlers for the new middleware signature
+
+── Migration 1 of 2 · @aws/nx-plugin:update-vitest-workspace-config ─────
+→ Running generator…
+Changes:
+  UPDATE packages/api/vite.config.mts
+
+...
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+2 migrations applied, 0 commits created.
+
+ NX   Some migrations have additional information, see below.
+
+- packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+```
+
+Chú ý đến **thông tin bổ sung** ở cuối: khi một migration tìm thấy một file mà bạn đã tùy chỉnh vượt quá những gì nó có thể cập nhật an toàn, nó sẽ giữ nguyên các thay đổi của bạn và báo cáo các bước tiếp theo cần thực hiện thủ công ở đó.
+
+### Migration tác nhân (Agentic migrations)
+
+Một số migration nhắm đến code mà bạn sở hữu, nơi mà việc chỉnh sửa đúng phụ thuộc vào những gì bạn đã xây dựng — những migration này được cung cấp dưới dạng các prompt được áp dụng bởi AI coding agent cục bộ của bạn (Claude Code, Codex hoặc OpenCode). Khi có bất kỳ migration nào đang chờ xử lý, Nx sẽ yêu cầu sự đồng ý trước khi sử dụng agent:
+
+```
+? Enable the agentic flow? …
+❯ Yes, just this time      Apply 1 prompt migration and validate generator output with an AI agent
+  Yes, always              Saved to nx.json so Nx won't ask again
+  No, just this time       Skip prompts and run generators without AI validation
+  No, never                Saved to nx.json so Nx won't ask again
+```
+
+Nếu bạn chấp nhận, agent sẽ áp dụng từng prompt migration tại chỗ và tóm tắt những gì nó đã thay đổi:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+→ Running prompt with Claude Code…
+✓ update-custom-api-handlers: Updated 3 API handlers to the new middleware signature.
+```
+
+Nếu bạn từ chối — hoặc không có agent nào được cài đặt, hoặc quá trình chạy không tương tác (ví dụ: CI) — các prompt migration sẽ bị bỏ qua và được lưu lại để bạn áp dụng thủ công:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — agentic flow disabled. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration skipped.
+
+ NX   Some migrations have additional information, see below.
+
+- Some prompt migrations were skipped. Review and apply each of the following
+  prompt files to the workspace, in the listed order:
+  - tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+```
+
+Mỗi prompt bị bỏ qua là một file hướng dẫn markdown độc lập trong `tools/ai-migrations/` — dán nó vào coding agent của bạn, hoặc làm theo các bước của nó một cách thủ công.
+
+Cuối cùng, xác minh mọi thứ vẫn build được, sau đó xóa `migrations.json` và commit:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+## Nâng cấp Nx
+
+Việc nâng cấp Nx (và các plugin `@nx/*` của nó) cũng là cùng một chu trình, nhắm đến `nx`:
+
+<NxCommands commands={['migrate latest']} />
+
+Sau đó cài đặt, chạy các migration, xác minh và commit như trước:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+<Aside type="tip">
+Khi nhảy qua nhiều phiên bản chính của Nx, hãy nâng cấp từng phiên bản chính một — xem [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) để biết chi tiết.
+</Aside>
+
+<Aside type="note" title="pnpm build scripts">
+Nếu `nx migrate latest` thất bại với lỗi `ERR_PNPM_IGNORED_BUILDS`, pnpm đã chặn post-install script của package `nx`. Cho phép nó trong `pnpm-workspace.yaml` và chạy lại:
+
+```yaml
+# pnpm-workspace.yaml
+allowBuilds:
+  nx: true
+```
+</Aside>

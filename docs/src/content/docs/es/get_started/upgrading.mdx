@@ -1,0 +1,148 @@
+---
+title: Actualización de tu Workspace
+description: Cómo actualizar Nx y @aws/nx-plugin con nx migrate.
+---
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Tanto Nx como `@aws/nx-plugin` incluyen migraciones que actualizan tu workspace automáticamente cuando los actualizas, usando [`nx migrate`](https://nx.dev/docs/features/automate-updating-dependencies). Esta guía explica cómo actualizar cada uno.
+
+`nx migrate <package>@<version>` apunta al paquete que especifiques — por lo que actualizar Nx en sí mismo y actualizar `@aws/nx-plugin` son actualizaciones separadas, cada una siguiendo el mismo ciclo:
+
+<Steps>
+
+1. **Generar** — `nx migrate <package>@latest` actualiza las versiones del paquete en `package.json` y escribe un `migrations.json` listando las migraciones a ejecutar. Nada se instala y ningún otro archivo se toca todavía, así que puedes revisar los cambios de versión primero.
+
+2. **Instalar** — instala las nuevas versiones con tu gestor de paquetes (ej. `pnpm install --no-frozen-lockfile`).
+
+3. **Ejecutar** — `nx migrate --run-migrations` aplica cada migración pendiente a tu workspace, una a la vez.
+
+4. **Confirmar** — verifica que tu workspace compile, luego elimina `migrations.json` y confirma.
+
+</Steps>
+
+<Aside type="caution" title="Un paquete a la vez">
+Completa el ciclo completo para un paquete antes de comenzar el siguiente: cada `nx migrate <package>` **sobrescribe** `migrations.json`, por lo que ejecutar `nx migrate @aws/nx-plugin@latest` seguido inmediatamente por `nx migrate latest` descarta las migraciones pendientes del plugin antes de que se ejecuten.
+</Aside>
+
+## Actualización de @aws/nx-plugin
+
+Comienza el ciclo apuntando al plugin:
+
+<NxCommands commands={['migrate @aws/nx-plugin@latest']} />
+
+```
+ NX   The migrate command has run successfully.
+
+- package.json has been updated.
+- migrations.json has been generated.
+- 1 AI migration prompt(s) have been written to tools/ai-migrations/.
+
+ NX   Next steps:
+
+- Make sure package.json changes make sense and then run 'pnpm install --no-frozen-lockfile',
+- Review and tweak the AI migration prompts in tools/ai-migrations/ as needed.
+- Run 'pnpm exec nx migrate --run-migrations'
+- To learn more go to https://nx.dev/features/automate-updating-dependencies
+```
+
+Revisa los cambios en `package.json`, instala y luego ejecuta las migraciones:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+### Migraciones determinísticas
+
+La mayoría de las migraciones son codemods determinísticos — se ejecutan sin supervisión y reportan cualquier cosa que deliberadamente omitieron:
+
+```
+ NX   Running migrations from 'migrations.json'
+
+Running the following migrations:
+- @aws/nx-plugin: update-vitest-workspace-config — Add a coverage reporter to vitest configs
+- @aws/nx-plugin: update-custom-api-handlers — Update custom API handlers for the new middleware signature
+
+── Migration 1 of 2 · @aws/nx-plugin:update-vitest-workspace-config ─────
+→ Running generator…
+Changes:
+  UPDATE packages/api/vite.config.mts
+
+...
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+2 migrations applied, 0 commits created.
+
+ NX   Some migrations have additional information, see below.
+
+- packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+```
+
+Presta atención a la **información adicional** al final: cuando una migración encuentra un archivo que has personalizado más allá de lo que puede actualizar de forma segura, deja tus cambios intactos y reporta el seguimiento manual allí en su lugar.
+
+### Migraciones agénticas
+
+Algunas migraciones apuntan a código que te pertenece, donde la edición correcta depende de lo que hayas construido — estas se envían como prompts aplicados por tu agente de codificación AI local (Claude Code, Codex u OpenCode). Cuando hay alguna pendiente, Nx solicita consentimiento antes de involucrar a un agente:
+
+```
+? Enable the agentic flow? …
+❯ Yes, just this time      Apply 1 prompt migration and validate generator output with an AI agent
+  Yes, always              Saved to nx.json so Nx won't ask again
+  No, just this time       Skip prompts and run generators without AI validation
+  No, never                Saved to nx.json so Nx won't ask again
+```
+
+Si aceptas, el agente aplica cada migración de prompt en su lugar y resume lo que cambió:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+→ Running prompt with Claude Code…
+✓ update-custom-api-handlers: Updated 3 API handlers to the new middleware signature.
+```
+
+Si rechazas — o no hay ningún agente instalado, o la ejecución no es interactiva (ej. CI) — las migraciones de prompt se omiten y se guardan para que las apliques manualmente:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — agentic flow disabled. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration skipped.
+
+ NX   Some migrations have additional information, see below.
+
+- Some prompt migrations were skipped. Review and apply each of the following
+  prompt files to the workspace, in the listed order:
+  - tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+```
+
+Cada prompt omitido es un archivo de instrucciones markdown autocontenido en `tools/ai-migrations/` — pégalo en tu agente de codificación, o sigue sus pasos manualmente.
+
+Finalmente, verifica que todo aún compile, luego elimina `migrations.json` y confirma:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+## Actualización de Nx
+
+Actualizar Nx en sí mismo (y sus plugins `@nx/*`) es el mismo ciclo, apuntando a `nx`:
+
+<NxCommands commands={['migrate latest']} />
+
+Luego instala, ejecuta las migraciones, verifica y confirma como antes:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+<Aside type="tip">
+Al saltar a través de múltiples versiones principales de Nx, actualiza una versión principal a la vez — consulta [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) para más detalles.
+</Aside>
+
+<Aside type="note" title="pnpm build scripts">
+Si `nx migrate latest` falla con `ERR_PNPM_IGNORED_BUILDS`, pnpm ha bloqueado el script post-install del paquete `nx`. Permítelo en `pnpm-workspace.yaml` y vuelve a ejecutar:
+
+```yaml
+# pnpm-workspace.yaml
+allowBuilds:
+  nx: true
+```
+</Aside>

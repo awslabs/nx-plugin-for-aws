@@ -84,7 +84,7 @@ export default async function migration(
 
 ### Migration 테스트
 
-스캐폴딩된 `migration.spec.ts`는 `createTreeWithEmptyWorkspace()`를 사용하여 가상 워크스페이스를 구축합니다. 마이그레이션이 제너레이터가 생성하는 형태에 적용되고, 사용자 정의된 파일을 건너뛰고(보고하고), 멱등성이 있는지 확인하세요:
+스캐폴딩된 `migration.spec.ts`는 `createTreeWithEmptyWorkspace()`를 사용하여 가상 워크스페이스를 구축합니다. 마이그레이션이 워크스페이스를 "이전" 상태에서 대상 상태로 가져오고, 사용자 정의된 파일을 건너뛰고(보고하고), 멱등성이 있는지 테스트하세요:
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -99,9 +99,16 @@ describe('my migration', () => {
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```
@@ -110,17 +117,43 @@ describe('my migration', () => {
 
 Nx는 사용자가 설치한 플러그인 버전이 마이그레이션의 `version`보다 낮을 때 마이그레이션을 실행합니다. 이 제너레이터는 `version` 필드를 작성하지 **않습니다** — 마이그레이션을 제공하는 릴리스를 출시할 때 할당하거나(또는 릴리스 프로세스에서 스탬프) 이전 버전에서 업그레이드하는 모든 사용자에게 실행되도록 하세요.
 
+버전을 할당하면 각 종류의 마이그레이션을 하나씩 등록하는 `migrations.json`은 다음과 같습니다:
+
+```json
+{
+  "$schema": "http://json-schema.org/schema",
+  "name": "my-plugin",
+  "generators": {
+    "rename-foo-target": {
+      "version": "2.0.0",
+      "description": "Rename the foo target to bar",
+      "implementation": "./src/migrations/rename-foo-target/migration"
+    },
+    "migrate-custom-handlers": {
+      "version": "3.0.0",
+      "description": "Update custom handlers for the new API",
+      "prompt": "./src/migrations/migrate-custom-handlers/prompt.md"
+    },
+    "upgrade-framework": {
+      "version": "4.0.0",
+      "description": "Upgrade the framework and reconcile call sites",
+      "implementation": "./src/migrations/upgrade-framework/migration",
+      "prompt": "./src/migrations/upgrade-framework/prompt.md"
+    }
+  }
+}
+```
+
 ## Migration 실행
 
-사용자는 플러그인을 업그레이드하여 플러그인의 마이그레이션을 적용합니다:
+사용자는 2단계 `nx migrate` 흐름으로 플러그인의 마이그레이션을 적용합니다 — 보류 중인 마이그레이션을 생성하고, 설치한 다음, 실행합니다:
 
 <NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
 
 에이전트 기반 및 하이브리드 마이그레이션은 사용 가능한 경우 `nx migrate --run-migrations` 중에 사용자의 로컬 코딩 에이전트에 의해 적용됩니다.
-@latest', 'migrate --run-migrations']} />
 
-에이전트 기반 및 하이브리드 마이그레이션은 사용 가능한 경우 `nx migrate --run-migrations` 중에 사용자의 로컬 코딩 에이전트에 의해 적용됩니다.
-": "Upgrade the framework and reconcile call sites",
+업그레이드하는 사용자의 관점에서 전체 흐름(결정론적 및 에이전트 기반 마이그레이션의 예제 출력 포함)은 <Link path="get_started/upgrading">워크스페이스 업그레이드</Link>를 참조하세요.
+
       "implementation": "./src/migrations/upgrade-framework/migration",
       "prompt": "./src/migrations/upgrade-framework/prompt.md"
     }
