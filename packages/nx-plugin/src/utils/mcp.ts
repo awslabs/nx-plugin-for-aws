@@ -17,8 +17,14 @@ export const NX_PLUGIN_MCP_SERVER_COMMAND = 'npx';
 
 /**
  * Arguments used to launch the Nx Plugin for AWS MCP server.
+ *
+ * `aws-nx-mcp` is the bin `@aws/nx-plugin` ships, so this resolves the server
+ * from the workspace's own installed plugin — upgrading the plugin upgrades the
+ * MCP server with it. `--no` keeps npx from reaching for the registry when the
+ * bin is missing, failing with a clear error instead of running a different
+ * package.
  */
-export const NX_PLUGIN_MCP_SERVER_ARGS = ['-y', '@aws/nx-plugin-mcp'];
+export const NX_PLUGIN_MCP_SERVER_ARGS = ['--no', 'aws-nx-mcp'];
 
 /**
  * A single stdio MCP server entry, shared by agents that use the `mcpServers` config shape.

@@ -31,7 +31,7 @@ import { getDefaultBiomeConfig } from './format';
 import type { Iac } from './iac';
 import { configureMcpServers } from './mcp';
 import { getNpmScope } from './npm-scope';
-import { mergeTargetDefault } from './nx';
+import { mergeTargetDefault, nxPluginSelfDependency } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { workspaceGlobs } from './project-package-json';
 import { withVersions } from './versions';
@@ -335,6 +335,11 @@ export const applyWorkspaceInit = async (
       '@nx/js': nxVersion,
       '@nx/workspace': nxVersion,
       ...withVersions(['typescript', '@biomejs/biome']),
+      // Declare the plugin the generators are running from so it is pinned in
+      // the workspace's lockfile. This keeps the vended MCP server config (which
+      // runs the plugin's own `aws-nx-mcp` bin) on the same version as the
+      // generators, so upgrading one upgrades the other.
+      ...nxPluginSelfDependency(tree),
     },
   );
 

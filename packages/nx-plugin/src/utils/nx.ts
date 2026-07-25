@@ -5,6 +5,7 @@
 import {
   getProjects,
   type ProjectConfiguration,
+  readJson,
   readProjectConfiguration,
   type TargetConfiguration,
   type TargetDefaultValue,
@@ -46,6 +47,23 @@ export const getGeneratorInfo = (generatorFileName: string): GeneratorInfo => {
 
 export const getPackageVersion = () => {
   return PackageJson.version;
+};
+
+/**
+ * The `@aws/nx-plugin` devDependency entry for a workspace the plugin generates
+ * into, keyed to the version the running generators come from.
+ *
+ * Empty inside the plugin's own monorepo, where the plugin is the source rather
+ * than a dependency.
+ */
+export const nxPluginSelfDependency = (tree: Tree): Record<string, string> => {
+  const rootPackageJson = tree.exists('package.json')
+    ? readJson(tree, 'package.json')
+    : undefined;
+  if (rootPackageJson?.name === '@aws/nx-plugin-source') {
+    return {};
+  }
+  return { [PackageJson.name]: `^${PackageJson.version}` };
 };
 
 /**

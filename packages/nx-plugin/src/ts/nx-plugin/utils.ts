@@ -4,15 +4,16 @@
  */
 import {
   joinPathFragments,
-  readJson,
   type Tree,
   updateJson,
   writeJson,
 } from '@nx/devkit';
-import PackageJson from '../../../package.json' with { type: 'json' };
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { isEsmWorkspace } from '../../utils/module-format';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import {
+  nxPluginSelfDependency,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
 import { withVersions } from '../../utils/versions';
 
 /**
@@ -58,17 +59,15 @@ export const configureTsProjectAsNxPlugin = (
     return pkg;
   });
 
-  const rootPackageJson = tree.exists('package.json')
-    ? readJson(tree, 'package.json')
-    : undefined;
-  const isNxPluginForAws = rootPackageJson?.name === '@aws/nx-plugin-source';
+  const selfDependency = nxPluginSelfDependency(tree);
 
-  if (!isNxPluginForAws) {
+  // Empty inside the plugin's own monorepo, where the plugin is the source
+  // rather than a dependency.
+  if (Object.keys(selfDependency).length > 0) {
     // Add the required dependencies to the root package.json, and project's package.json
     const deps = {
       ...withVersions(['@nx/devkit']),
-      // Include dependency on @aws/nx-plugin
-      [PackageJson.name]: `^${PackageJson.version}`,
+      ...selfDependency,
     };
     // Generated workspaces are `"type": "module"`, so Nx loads the plugin's
     // `.ts` generators as ESM via Node's native type stripping — no swc/ts-node
