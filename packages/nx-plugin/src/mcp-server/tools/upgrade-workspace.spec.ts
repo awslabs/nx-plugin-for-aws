@@ -48,6 +48,13 @@ describe('upgrade-workspace tool', () => {
     expect(text).toContain('npx nx migrate @aws/nx-plugin@latest');
   });
 
+  it('should render the install step for the requested package manager', async () => {
+    expect(await callText({ packageManager: 'pnpm' })).toContain(
+      'pnpm install',
+    );
+    expect(await callText({ packageManager: 'yarn' })).toMatch(/^yarn$/m);
+  });
+
   it('should instruct agents to apply deferred prompts themselves', async () => {
     const text = await callText();
     expect(text).toContain('Upgrading with an AI agent');

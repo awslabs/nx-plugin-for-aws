@@ -59,30 +59,21 @@ export const buildPackageManagerShortCommand = (
 };
 
 /**
- * Build the command which installs the workspace's dependencies, matching what
- * Nx itself runs for each package manager (pnpm disables the frozen lockfile so
- * the install works after a manifest change, e.g. during `nx migrate`).
- */
-export const buildInstallDependenciesCommand = (pm: string) =>
-  ({
-    pnpm: 'pnpm install --no-frozen-lockfile',
-    yarn: 'yarn',
-    npm: 'npm install',
-    bun: 'bun install',
-  })[pm] ?? `${pm} install`;
-
-/**
- * Build an install command. With `project`, targets that project's manifest
- * (pnpm `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
+ * Build an install command. Without `pkg`, installs the workspace's existing
+ * dependencies. With `project`, targets that project's manifest (pnpm
+ * `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
  * `packages/<name>`, yarn by fully-qualified name); otherwise the root.
  */
 export const buildInstallCommand = (
   pm: string,
-  pkg: string,
-  dev: boolean,
+  pkg?: string,
+  dev?: boolean,
   project?: string,
   projectDir?: string,
 ) => {
+  if (!pkg) {
+    return pm === 'yarn' ? 'yarn' : `${pm} install`;
+  }
   if (project) {
     const shortName = project.split('/').pop();
     const dir = projectDir ?? `packages/${shortName}`;
