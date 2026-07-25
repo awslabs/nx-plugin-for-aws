@@ -14,7 +14,19 @@ Nx と `@aws/nx-plugin` の両方は、[`nx migrate`](https://nx.dev/docs/featur
 > Upgrade Nx and the Nx Plugin for AWS in this workspace.
 </Aside>
 
-`nx migrate <package>@<version>` は指定したパッケージをターゲットにします。つまり、Nx 自体のアップグレードと `@aws/nx-plugin` のアップグレードは別々のアップグレードであり、それぞれ同じサイクルに従います。
+`nx migrate <package>@<version>` は指定したパッケージをターゲットにします。つまり、Nx 自体のアップグレードと `@aws/nx-plugin` のアップグレードは別々のアップグレードであり、それぞれ同じサイクルに従います：
+
+<Steps>
+
+1. **生成** — `nx migrate <package>@latest` は `package.json` 内のパッケージのバージョンを更新し、実行するマイグレーションをリストした `migrations.json` を書き込みます。まだ何もインストールされず、他のファイルも変更されないため、最初にバージョンの変更を確認できます。
+
+2. **インストール** — パッケージマネージャーで新しいバージョンをインストールします（例：`pnpm install --no-frozen-lockfile`）。
+
+3. **実行** — `nx migrate --run-migrations` は保留中の各マイグレーションをワークスペースに一つずつ適用します。
+
+4. **コミット** — ワークスペースがビルドできることを確認し、`migrations.json` を削除してコミットします。
+
+</Steps>
 
 <Aside type="caution" title="一度に一つのパッケージ">
 次のパッケージを開始する前に、一つのパッケージの完全なサイクルを完了してください：各 `nx migrate <package>` は `migrations.json` を**上書き**するため、`nx migrate @aws/nx-plugin@latest` の直後に `nx migrate latest` を実行すると、プラグインの保留中のマイグレーションが実行される前に破棄されます。
@@ -140,46 +152,3 @@ allowBuilds:
   nx: true
 ```
 </Aside>
-�トール、マイグレーションの実行、確認、コミットを行います：
-
-<NxCommands commands={['migrate --run-migrations']} />
-
-<Aside type="tip">
-複数の Nx メジャーバージョンをまたぐ場合は、一度に一つのメジャーバージョンずつアップグレードしてください。詳細については、[Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) を参照してください。
-</Aside>
-
-<Aside type="note" title="pnpm build scripts">
-`nx migrate latest` が `ERR_PNPM_IGNORED_BUILDS` で失敗する場合、pnpm が `nx` パッケージのポストインストールスクリプトをブロックしています。`pnpm-workspace.yaml` で許可して再実行してください：
-
-```yaml
-# pnpm-workspace.yaml
-allowBuilds:
-  nx: true
-```
-</Aside>
-話型ターミナルでブロックされることはありません。`nx migrate --run-migrations` がエージェント内から実行されると、Nx はこれを検出し、エージェント型同意プロンプトをスキップし、ネストされたエージェントを生成する代わりに、各プロンプトマイグレーションを実行を駆動しているエージェントに**延期**します：
-
-```
-── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
-↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
-
- NX   Successfully finished running migrations from 'migrations.json'.
-
-1 migration applied, 0 commits created, 1 prompt migration deferred.
-
- NX   Next steps for the AI agent driving this run
-
-Apply the deferred prompts below, in order:
-  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
-       (update-custom-api-handlers — prompt-only migration)
-Then relay these migration-emitted notes to the user:
-  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
-Finally, summarize what was done across the run and commit the changes per workspace conventions.
-```
-
-アップグレードを実施するエージェントは次のことを行う必要があります：
-
-1. 一度に一つのパッケージに対して上記のサイクルを実行します（`nx migrate <package>@latest`、インストール、`nx migrate --run-migrations`）。残りのプロンプトを抑制するために `--no-interactive` を渡します。
-2. 実行後、**Next steps** の下にリストされた各延期されたプロンプトファイルを、リストされた順序で読み取り、その手順をワークスペースに直接適用します。
-3. マイグレーションが発行したメモ（スキップされたカスタマイズされたファイル、手動フォローアップ）をユーザーに中継します。
-4. ワークスペースがビルドできることを確認し、次のパッケージのアップグレードを開始する前に `migrations.json` を削除してコミットします。
