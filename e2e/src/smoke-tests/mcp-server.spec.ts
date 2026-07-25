@@ -110,9 +110,9 @@ describe('smoke test - mcp-server', () => {
     }
   });
 
-  // The vended config runs the `aws-nx-mcp` bin from the workspace's own
-  // `@aws/nx-plugin`, so the server tracks the installed plugin version rather
-  // than whatever is latest on the registry.
+  // The vended config runs the workspace's own `@aws/nx-plugin`, so the server
+  // tracks the installed plugin version rather than whatever is latest on the
+  // registry.
   it('should start the server from the config vended into a workspace', async () => {
     const pkgMgr = 'pnpm';
     const targetDir = `${tmpProjPath()}/mcp-vended-${pkgMgr}`;
@@ -128,7 +128,7 @@ describe('smoke test - mcp-server', () => {
       .mcpServers['nx-plugin-for-aws'];
     expect({ command, args }).toEqual({
       command: 'npx',
-      args: ['--no', 'aws-nx-mcp'],
+      args: ['--no', '@aws/nx-plugin'],
     });
 
     const installedVersion = readJsonFile(
