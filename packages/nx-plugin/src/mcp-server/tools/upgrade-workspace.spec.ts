@@ -47,4 +47,11 @@ describe('upgrade-workspace tool', () => {
     const text = await callText({ packageManager: 'npm' });
     expect(text).toContain('npx nx migrate @aws/nx-plugin@latest');
   });
+
+  it('should instruct agents to apply deferred prompts themselves', async () => {
+    const text = await callText();
+    expect(text).toContain('Upgrading with an AI agent');
+    expect(text).toContain('--no-interactive');
+    expect(text).toContain('deferred');
+  });
 });

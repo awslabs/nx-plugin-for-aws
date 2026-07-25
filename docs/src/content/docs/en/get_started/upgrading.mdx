@@ -2,9 +2,10 @@
 title: Upgrading Your Workspace
 description: How to upgrade Nx and @aws/nx-plugin with nx migrate.
 ---
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 Both Nx and `@aws/nx-plugin` ship migrations that update your workspace automatically when you upgrade them, using [`nx migrate`](https://nx.dev/docs/features/automate-updating-dependencies). This guide walks through upgrading each.
 
@@ -14,19 +15,7 @@ You can use your agentic coding tool of choice to upgrade your workspace for you
 > Upgrade Nx and the Nx Plugin for AWS in this workspace.
 </Aside>
 
-`nx migrate <package>@<version>` targets whichever package you name — so upgrading Nx itself and upgrading `@aws/nx-plugin` are separate upgrades, each following the same cycle:
-
-<Steps>
-
-1. **Generate** — `nx migrate <package>@latest` updates the package's versions in `package.json` and writes a `migrations.json` listing the migrations to run. Nothing is installed and no other files are touched yet, so you can review the version changes first.
-
-2. **Install** — install the new versions with your package manager (e.g. `pnpm install --no-frozen-lockfile`).
-
-3. **Run** — `nx migrate --run-migrations` applies each pending migration to your workspace, one at a time.
-
-4. **Commit** — verify your workspace builds, then delete `migrations.json` and commit.
-
-</Steps>
+`nx migrate <package>@<version>` targets whichever package you name — so upgrading Nx itself and upgrading `@aws/nx-plugin` are separate upgrades, each following the same cycle.
 
 <Aside type="caution" title="One package at a time">
 Complete the full cycle for one package before starting the next: each `nx migrate <package>` **overwrites** `migrations.json`, so running `nx migrate @aws/nx-plugin@latest` followed immediately by `nx migrate latest` discards the plugin's pending migrations before they run.
@@ -127,7 +116,7 @@ Each skipped prompt is a self-contained markdown instruction file in `tools/ai-m
 
 Finally, verify everything still builds, then delete `migrations.json` and commit:
 
-<NxCommands commands={['run-many --target build --all']} />
+<PackageManagerShortCommand commands={['build']} />
 
 ## Upgrading Nx
 
@@ -140,15 +129,34 @@ Then install, run the migrations, verify, and commit as before:
 <NxCommands commands={['migrate --run-migrations']} />
 
 <Aside type="tip">
-When jumping across multiple Nx major versions, upgrade one major version at a time — see [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) for details.
+Upgrading `@aws/nx-plugin` does not upgrade Nx (or vice versa) — `nx migrate` only ever updates the package you name. When jumping across multiple Nx major versions, upgrade one major version at a time — see [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) for details.
 </Aside>
 
-<Aside type="note" title="pnpm build scripts">
-If `nx migrate latest` fails with `ERR_PNPM_IGNORED_BUILDS`, pnpm has blocked the `nx` package's post-install script. Allow it in `pnpm-workspace.yaml` and re-run:
+## Upgrading with an AI agent
 
-```yaml
-# pnpm-workspace.yaml
-allowBuilds:
-  nx: true
+The whole flow can be driven by an AI coding agent end to end — nothing blocks on an interactive terminal. When `nx migrate --run-migrations` runs from inside an agent, Nx detects this, skips the agentic consent prompt, and instead of spawning a nested agent it **defers** each prompt migration back to the agent driving the run:
+
 ```
-</Aside>
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration deferred.
+
+ NX   Next steps for the AI agent driving this run
+
+Apply the deferred prompts below, in order:
+  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+       (update-custom-api-handlers — prompt-only migration)
+Then relay these migration-emitted notes to the user:
+  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+Finally, summarize what was done across the run and commit the changes per workspace conventions.
+```
+
+An agent conducting an upgrade should:
+
+1. Run the cycle above for one package at a time (`nx migrate <package>@latest`, install, `nx migrate --run-migrations`), passing `--no-interactive` to suppress any remaining prompts.
+2. After the run, read each deferred prompt file listed under **Next steps**, in the listed order, and apply its steps directly to the workspace.
+3. Relay any migration-emitted notes (skipped customised files, manual follow-ups) to the user.
+4. Verify the workspace builds, then delete `migrations.json` and commit before starting the next package's upgrade.
