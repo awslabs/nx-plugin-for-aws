@@ -22,10 +22,6 @@ export const NX_PLUGIN_MCP_SERVER_COMMAND = 'npx';
  * only bin is the MCP server), so upgrading the plugin upgrades the server with
  * it. `--no` keeps npx from reaching for the registry when the package is
  * missing, failing with a clear error instead of installing anything.
- *
- * The scoped package name is deliberate: npx accepts either a package or a bin
- * name, and the unscoped bin name is unclaimed on npm. Naming the package keeps
- * any fallback within the `@aws` scope even if `--no` is dropped.
  */
 export const NX_PLUGIN_MCP_SERVER_ARGS = ['--no', '@aws/nx-plugin'];
 
