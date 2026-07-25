@@ -15,7 +15,7 @@ import {
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget } from '../../utils/docker';
+import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
@@ -106,7 +106,7 @@ export const tsRdbGenerator = async (
     databasePackageAlias: fullyQualifiedName,
     databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
-    npmVersion: TS_VERSIONS.npm,
+    ...nodeImageVersions(),
     prismaAdapterPackage:
       options.engine === 'mysql'
         ? '@prisma/adapter-mariadb'
