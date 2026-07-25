@@ -183,6 +183,20 @@ export default defineConfig({
               },
             },
             {
+              label: 'Upgrading your workspace',
+              link: '/get_started/upgrading',
+              translations: {
+                jp: 'ワークスペースのアップグレード',
+                ko: '워크스페이스 업그레이드',
+                fr: 'Mettre à niveau votre espace de travail',
+                it: 'Aggiornare il workspace',
+                es: 'Actualizar tu espacio de trabajo',
+                pt: 'Atualizando seu espaço de trabalho',
+                zh: '升级您的工作区',
+                vi: 'Nâng cấp không gian làm việc',
+              },
+            },
+            {
               label: 'Workspaces',
               link: '/guides/workspace',
               translations: {
