@@ -12,6 +12,12 @@ export const TS_VERSIONS = {
   // Pinned above the version the ADOT autoinstrumentation package resolves
   // transitively (2.8.0) to clear CVE-2026-59892 (HIGH).
   '@opentelemetry/propagator-jaeger': '2.9.0',
+  // Overridden in the vended agent/MCP image builds to clear CVE-2026-14257
+  // (HIGH) in brace-expansion: minimatch 10 is the lowest major depending on
+  // brace-expansion 5.x, the only line Trivy's `< 5.0.8` advisory range treats
+  // as fixed. Overriding brace-expansion directly is not viable — 5.x drops the
+  // CommonJS default export that minimatch 9 calls.
+  minimatch: '10.2.5',
   '@aws-sdk/client-dynamodb': '3.1090.0',
   '@aws-sdk/client-api-gateway': '3.1090.0',
   '@aws-sdk/client-iam': '3.1090.0',

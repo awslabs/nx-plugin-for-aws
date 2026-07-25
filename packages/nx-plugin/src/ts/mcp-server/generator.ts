@@ -19,7 +19,7 @@ import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget } from '../../utils/docker';
+import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -107,7 +107,7 @@ export const tsMcpServerGenerator = async (
         TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
       jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
       nodeBaseImage: BASE_IMAGES.node,
-      npmVersion: TS_VERSIONS.npm,
+      ...nodeImageVersions(),
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
