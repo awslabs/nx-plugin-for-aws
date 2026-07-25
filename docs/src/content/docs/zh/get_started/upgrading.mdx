@@ -140,15 +140,34 @@ Changes:
 <NxCommands commands={['migrate --run-migrations']} />
 
 <Aside type="tip">
-当跨越多个 Nx 主要版本时，一次升级一个主要版本 — 详情请参阅 [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies)。
+升级 `@aws/nx-plugin` 不会升级 Nx（反之亦然）— `nx migrate` 只会更新您指定的包。当跨越多个 Nx 主要版本时，一次升级一个主要版本 — 详情请参阅 [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies)。
 </Aside>
 
-<Aside type="note" title="pnpm 构建脚本">
-如果 `nx migrate latest` 失败并显示 `ERR_PNPM_IGNORED_BUILDS`，pnpm 已阻止 `nx` 包的安装后脚本。在 `pnpm-workspace.yaml` 中允许它并重新运行：
+## 使用 AI 代理升级
 
-```yaml
-# pnpm-workspace.yaml
-allowBuilds:
-  nx: true
+整个流程可以由 AI 编码代理端到端驱动 — 不会在交互式终端上阻塞。当 `nx migrate --run-migrations` 从代理内部运行时，Nx 会检测到这一点，跳过代理同意提示，并且不会生成嵌套代理，而是将每个提示迁移**延迟**回驱动运行的代理：
+
 ```
-</Aside>
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration deferred.
+
+ NX   Next steps for the AI agent driving this run
+
+Apply the deferred prompts below, in order:
+  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+       (update-custom-api-handlers — prompt-only migration)
+Then relay these migration-emitted notes to the user:
+  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+Finally, summarize what was done across the run and commit the changes per workspace conventions.
+```
+
+执行升级的代理应该：
+
+1. 一次为一个包运行上述周期（`nx migrate <package>@latest`、安装、`nx migrate --run-migrations`），传递 `--no-interactive` 以抑制任何剩余的提示。
+2. 运行后，按列出的顺序读取 **Next steps** 下列出的每个延迟提示文件，并将其步骤直接应用到工作空间。
+3. 将任何迁移发出的注释（跳过的自定义文件、手动后续操作）转达给用户。
+4. 验证工作空间构建成功，然后删除 `migrations.json` 并提交，然后再开始下一个包的升级。

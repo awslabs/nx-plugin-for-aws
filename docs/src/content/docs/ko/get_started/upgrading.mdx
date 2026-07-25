@@ -140,15 +140,34 @@ Nx 자체(및 `@nx/*` 플러그인)를 업그레이드하는 것은 `nx`를 대�
 <NxCommands commands={['migrate --run-migrations']} />
 
 <Aside type="tip">
-여러 Nx 주요 버전을 건너뛸 때는 한 번에 하나의 주요 버전씩 업그레이드하세요 — 자세한 내용은 [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies)를 참조하세요.
+`@aws/nx-plugin`을 업그레이드해도 Nx가 업그레이드되지 않으며(또는 그 반대), `nx migrate`는 지정한 패키지만 업데이트합니다. 여러 Nx 주요 버전을 건너뛸 때는 한 번에 하나의 주요 버전씩 업그레이드하세요 — 자세한 내용은 [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies)를 참조하세요.
 </Aside>
 
-<Aside type="note" title="pnpm 빌드 스크립트">
-`nx migrate latest`가 `ERR_PNPM_IGNORED_BUILDS`로 실패하면 pnpm이 `nx` 패키지의 post-install 스크립트를 차단한 것입니다. `pnpm-workspace.yaml`에서 허용하고 다시 실행하세요:
+## AI 에이전트로 업그레이드
 
-```yaml
-# pnpm-workspace.yaml
-allowBuilds:
-  nx: true
+전체 흐름은 AI 코딩 에이전트가 처음부터 끝까지 주도할 수 있습니다 — 대화형 터미널에서 차단되는 것이 없습니다. `nx migrate --run-migrations`가 에이전트 내부에서 실행되면 Nx가 이를 감지하고 에이전트 동의 프롬프트를 건너뛰며, 중첩된 에이전트를 생성하는 대신 각 프롬프트 마이그레이션을 실행을 주도하는 에이전트로 **연기**합니다:
+
 ```
-</Aside>
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration deferred.
+
+ NX   Next steps for the AI agent driving this run
+
+Apply the deferred prompts below, in order:
+  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+       (update-custom-api-handlers — prompt-only migration)
+Then relay these migration-emitted notes to the user:
+  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+Finally, summarize what was done across the run and commit the changes per workspace conventions.
+```
+
+업그레이드를 수행하는 에이전트는 다음을 수행해야 합니다:
+
+1. 한 번에 하나의 패키지에 대해 위의 주기를 실행합니다(`nx migrate <package>@latest`, 설치, `nx migrate --run-migrations`), `--no-interactive`를 전달하여 나머지 프롬프트를 억제합니다.
+2. 실행 후 **Next steps** 아래에 나열된 각 연기된 프롬프트 파일을 나열된 순서대로 읽고 해당 단계를 워크스페이스에 직접 적용합니다.
+3. 마이그레이션에서 발생한 모든 노트(건너뛴 사용자 정의 파일, 수동 후속 조치)를 사용자에게 전달합니다.
+4. 워크스페이스가 빌드되는지 확인한 다음 `migrations.json`을 삭제하고 다음 패키지의 업그레이드를 시작하기 전에 커밋합니다.

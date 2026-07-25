@@ -140,15 +140,34 @@ Ensuite, installez, exécutez les migrations, vérifiez et validez comme précé
 <NxCommands commands={['migrate --run-migrations']} />
 
 <Aside type="tip">
-Lorsque vous sautez plusieurs versions majeures de Nx, mettez à niveau une version majeure à la fois — consultez [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) pour plus de détails.
+La mise à niveau de `@aws/nx-plugin` ne met pas à niveau Nx (ou vice versa) — `nx migrate` ne met à jour que le package que vous nommez. Lorsque vous sautez plusieurs versions majeures de Nx, mettez à niveau une version majeure à la fois — consultez [Automate Updating Dependencies](https://nx.dev/docs/features/automate-updating-dependencies) pour plus de détails.
 </Aside>
 
-<Aside type="note" title="Scripts de build pnpm">
-Si `nx migrate latest` échoue avec `ERR_PNPM_IGNORED_BUILDS`, pnpm a bloqué le script post-install du package `nx`. Autorisez-le dans `pnpm-workspace.yaml` et réexécutez :
+## Mise à niveau avec un agent IA
 
-```yaml
-# pnpm-workspace.yaml
-allowBuilds:
-  nx: true
+L'ensemble du flux peut être piloté par un agent de codage IA de bout en bout — rien ne bloque sur un terminal interactif. Lorsque `nx migrate --run-migrations` s'exécute depuis l'intérieur d'un agent, Nx le détecte, ignore le prompt de consentement agentique, et au lieu de générer un agent imbriqué, il **reporte** chaque migration de prompt à l'agent qui pilote l'exécution :
+
 ```
-</Aside>
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration deferred.
+
+ NX   Next steps for the AI agent driving this run
+
+Apply the deferred prompts below, in order:
+  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+       (update-custom-api-handlers — prompt-only migration)
+Then relay these migration-emitted notes to the user:
+  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+Finally, summarize what was done across the run and commit the changes per workspace conventions.
+```
+
+Un agent effectuant une mise à niveau devrait :
+
+1. Exécuter le cycle ci-dessus pour un package à la fois (`nx migrate <package>@latest`, installer, `nx migrate --run-migrations`), en passant `--no-interactive` pour supprimer les prompts restants.
+2. Après l'exécution, lire chaque fichier de prompt reporté listé sous **Next steps**, dans l'ordre indiqué, et appliquer ses étapes directement à l'espace de travail.
+3. Relayer toutes les notes émises par les migrations (fichiers personnalisés ignorés, suivis manuels) à l'utilisateur.
+4. Vérifier que l'espace de travail se construit, puis supprimer `migrations.json` et valider avant de commencer la mise à niveau du package suivant.
