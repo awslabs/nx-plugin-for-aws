@@ -110,10 +110,51 @@ describe('my migration', () => {
 
 Nx exécute une migration lorsque la version du plugin installée par l'utilisateur est inférieure à la `version` de la migration. Ce générateur n'écrit **aucun** champ `version` — attribuez-le (ou tamponnez-le depuis votre processus de publication) lorsque vous publiez la version qui livre la migration, afin qu'elle s'exécute pour tous ceux qui mettent à niveau depuis une version antérieure.
 
+Une fois que vous avez attribué des versions, un `migrations.json` enregistrant une migration de chaque type ressemble à ceci :
+
+```json
+{
+  "$schema": "http://json-schema.org/schema",
+  "name": "my-plugin",
+  "generators": {
+    "rename-foo-target": {
+      "version": "2.0.0",
+      "description": "Rename the foo target to bar",
+      "implementation": "./src/migrations/rename-foo-target/migration"
+    },
+    "migrate-custom-handlers": {
+      "version": "3.0.0",
+      "description": "Update custom handlers for the new API",
+      "prompt": "./src/migrations/migrate-custom-handlers/prompt.md"
+    },
+    "upgrade-framework": {
+      "version": "4.0.0",
+      "description": "Upgrade the framework and reconcile call sites",
+      "implementation": "./src/migrations/upgrade-framework/migration",
+      "prompt": "./src/migrations/upgrade-framework/prompt.md"
+    }
+  }
+}
+```
+
 ## Exécuter les Migrations
 
-Les utilisateurs appliquent les migrations de votre plugin en le mettant à niveau :
+`nx migrate` est un flux en deux étapes — les deux commandes font des choses différentes et doivent s'exécuter dans l'ordre, avec une installation entre les deux :
 
-<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+<NxCommands commands={['migrate my-plugin@latest']} />
+
+Cette première étape met uniquement à jour la version de votre plugin (et tous les packages dont il dépend) dans `package.json` et écrit un `migrations.json` listant les migrations à exécuter. Aucun package n'est installé et aucun autre fichier n'est touché pour le moment, afin que l'utilisateur puisse d'abord examiner les modifications.
+
+L'utilisateur installe ensuite les nouvelles versions avec son gestionnaire de packages (`pnpm install`, `npm install`, `yarn`, ou `bun install`), puis applique les migrations :
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+Cette deuxième étape exécute chaque migration en attente pour mettre à jour la configuration et le code source, une à la fois. Ensuite, l'utilisateur supprime `migrations.json` et effectue un commit.
+
+:::note[Nx et votre plugin se mettent à niveau indépendamment]
+`nx migrate <package>@<version>` cible le package que vous nommez. `nx migrate my-plugin@latest` met à jour votre plugin et exécute ses migrations ; `nx migrate latest` (ou `nx migrate nx@latest`) met à jour Nx lui-même. Ce sont des mises à niveau séparées — exécutez chacune lorsque vous choisissez de déplacer ce package.
+
+`nx migrate` cible une seule étape de version de package à la fois, donc les deux étapes ci-dessus ne sont pas entrelacées : terminez l'étape run-migrations pour une mise à niveau (et effectuez un commit) avant de commencer la suivante. Lors d'un saut sur plusieurs versions majeures, mettez à niveau une version majeure à la fois.
+:::
 
 Les migrations agentiques et hybrides sont appliquées par l'agent de codage local de l'utilisateur pendant `nx migrate --run-migrations` lorsqu'un agent est disponible.

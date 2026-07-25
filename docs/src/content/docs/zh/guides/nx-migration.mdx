@@ -110,10 +110,51 @@ describe('my migration', () => {
 
 当用户安装的插件版本低于迁移的 `version` 时，Nx 会运行迁移。此生成器**不**写入 `version` 字段 — 当你发布包含迁移的版本时分配它（或从发布流程中标记它），以便它为从早期版本升级的每个人运行。
 
+一旦你分配了版本，注册每种类型的一个迁移的 `migrations.json` 如下所示：
+
+```json
+{
+  "$schema": "http://json-schema.org/schema",
+  "name": "my-plugin",
+  "generators": {
+    "rename-foo-target": {
+      "version": "2.0.0",
+      "description": "Rename the foo target to bar",
+      "implementation": "./src/migrations/rename-foo-target/migration"
+    },
+    "migrate-custom-handlers": {
+      "version": "3.0.0",
+      "description": "Update custom handlers for the new API",
+      "prompt": "./src/migrations/migrate-custom-handlers/prompt.md"
+    },
+    "upgrade-framework": {
+      "version": "4.0.0",
+      "description": "Upgrade the framework and reconcile call sites",
+      "implementation": "./src/migrations/upgrade-framework/migration",
+      "prompt": "./src/migrations/upgrade-framework/prompt.md"
+    }
+  }
+}
+```
+
 ## 运行迁移
 
-用户通过升级插件来应用插件的迁移：
+`nx migrate` 是一个两步流程 — 这两个命令执行不同的操作，必须按顺序运行，中间需要安装：
 
-<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+<NxCommands commands={['migrate my-plugin@latest']} />
+
+第一步仅更新 `package.json` 中插件（及其依赖的任何包）的版本，并写入列出要运行的迁移的 `migrations.json`。不会安装包，也不会触及其他文件，因此用户可以先查看更改。
+
+然后用户使用其包管理器（`pnpm install`、`npm install`、`yarn` 或 `bun install`）安装新版本，然后应用迁移：
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+第二步逐个运行每个待处理的迁移以更新配置和源代码。之后用户删除 `migrations.json` 并提交。
+
+:::note[Nx 和你的插件独立升级]
+`nx migrate <package>@<version>` 针对你命名的任何包。`nx migrate my-plugin@latest` 更新你的插件并运行其迁移；`nx migrate latest`（或 `nx migrate nx@latest`）更新 Nx 本身。它们是独立的升级 — 当你选择移动该包时运行每个升级。
+
+`nx migrate` 一次针对单个包版本步骤，因此上述两个步骤不会交错：在开始下一个升级之前完成一个升级的 run-migrations 步骤（并提交）。当跨越多个主要版本时，一次升级一个主要版本。
+:::
 
 当有可用的本地编码代理时，代理式和混合式迁移会在 `nx migrate --run-migrations` 期间由用户的本地编码代理应用。

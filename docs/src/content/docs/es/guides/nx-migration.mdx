@@ -76,7 +76,7 @@ Para las mismas operaciones que usas en generadores (`generateFiles`, transforma
 
 ### Barreras de Protección
 
-Las migraciones se ejecutan contra workspaces que no controlas, así que sigue las mismas reglas que el esqueleto generado incorpora:
+Las migraciones se ejecutan contra workspaces que no controlas, por lo que se recomienda adherirse a lo siguiente (el esqueleto generado incorpora estas reglas):
 
 - **Coincidencia de patrones antes de escribir.** Si un archivo objetivo ha divergido de la forma que tus generadores producen, omítelo y repórtalo vía `nextSteps` en lugar de sobrescribir los cambios del usuario.
 - **Idempotente.** Re-ejecutar la migración debe ser una operación sin efecto.
@@ -84,7 +84,7 @@ Las migraciones se ejecutan contra workspaces que no controlas, así que sigue l
 
 ### Probar Tu Migración
 
-El `migration.spec.ts` generado usa `createTreeWithEmptyWorkspace()` para construir un workspace virtual. Cubre que la migración se aplica a la forma que tus generadores producen, omite (y reporta) archivos personalizados, y es idempotente:
+El `migration.spec.ts` generado usa `createTreeWithEmptyWorkspace()` para construir un workspace virtual. Prueba que la migración lleva un workspace del estado "antes" al estado objetivo, omite (y reporta) archivos personalizados, y es idempotente:
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -99,9 +99,16 @@ describe('my migration', () => {
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```
@@ -110,10 +117,51 @@ describe('my migration', () => {
 
 Nx ejecuta una migración cuando la versión del plugin instalado del usuario es menor que la `version` de la migración. Este generador **no** escribe ningún campo `version` — asígnalo (o estámpalo desde tu proceso de lanzamiento) cuando cortes el lanzamiento que envía la migración, para que se ejecute para todos los que actualicen desde una versión anterior.
 
+Una vez que asignes versiones, un `migrations.json` que registra una migración de cada tipo se ve así:
+
+```json
+{
+  "$schema": "http://json-schema.org/schema",
+  "name": "my-plugin",
+  "generators": {
+    "rename-foo-target": {
+      "version": "2.0.0",
+      "description": "Rename the foo target to bar",
+      "implementation": "./src/migrations/rename-foo-target/migration"
+    },
+    "migrate-custom-handlers": {
+      "version": "3.0.0",
+      "description": "Update custom handlers for the new API",
+      "prompt": "./src/migrations/migrate-custom-handlers/prompt.md"
+    },
+    "upgrade-framework": {
+      "version": "4.0.0",
+      "description": "Upgrade the framework and reconcile call sites",
+      "implementation": "./src/migrations/upgrade-framework/migration",
+      "prompt": "./src/migrations/upgrade-framework/prompt.md"
+    }
+  }
+}
+```
+
 ## Ejecutar Migraciones
 
-Los usuarios aplican las migraciones de tu plugin actualizándolo:
+`nx migrate` es un flujo de dos pasos — los dos comandos hacen cosas diferentes y deben ejecutarse en orden, con una instalación en el medio:
 
-<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+<NxCommands commands={['migrate my-plugin@latest']} />
+
+Este primer paso solo actualiza la versión de tu plugin (y cualquier paquete del que dependa) en `package.json` y escribe un `migrations.json` listando las migraciones a ejecutar. No se instalan paquetes y no se tocan otros archivos todavía, por lo que el usuario puede revisar los cambios primero.
+
+El usuario luego instala las nuevas versiones con su gestor de paquetes (`pnpm install`, `npm install`, `yarn`, o `bun install`), luego aplica las migraciones:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+Este segundo paso ejecuta cada migración pendiente para actualizar la configuración y el código fuente, una a la vez. Después, el usuario elimina `migrations.json` y hace commit.
+
+:::note[Nx y tu plugin se actualizan independientemente]
+`nx migrate <package>@<version>` apunta a cualquier paquete que nombres. `nx migrate my-plugin@latest` actualiza tu plugin y ejecuta sus migraciones; `nx migrate latest` (o `nx migrate nx@latest`) actualiza Nx mismo. Son actualizaciones separadas — ejecuta cada una cuando elijas mover ese paquete.
+
+`nx migrate` apunta a un solo paso de versión de paquete a la vez, por lo que los dos pasos anteriores no están intercalados: completa el paso run-migrations para una actualización (y haz commit) antes de comenzar la siguiente. Al saltar a través de múltiples versiones principales, actualiza una versión principal a la vez.
+:::
 
 Las migraciones agénticas e híbridas son aplicadas por el agente de codificación local del usuario durante `nx migrate --run-migrations` cuando uno está disponible.
