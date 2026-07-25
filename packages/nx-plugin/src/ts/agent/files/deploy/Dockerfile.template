@@ -1,16 +1,24 @@
 FROM <%- nodeBaseImage %>
 
-# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
-RUN npm install -g npm@<%- npmVersion %>
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities, and
+# replace the brace-expansion it bundles with a release clearing CVE-2026-14257
+RUN npm install -g npm@<%- npmVersion %> \
+  && npm install --no-save --prefix /tmp/patch brace-expansion@<%- braceExpansionVersion %> \
+  && rm -rf "$(npm root -g)/npm/node_modules/brace-expansion" \
+  && mv /tmp/patch/node_modules/brace-expansion "$(npm root -g)/npm/node_modules/" \
+  && rm -rf /tmp/patch
 
 WORKDIR /app
 
 # Add AWS Distro for OpenTelemetry for observability
 # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
-# The override pins @opentelemetry/propagator-jaeger above the version the
-# autoinstrumentation package resolves transitively, clearing CVE-2026-59892.
+# The overrides pin @opentelemetry/propagator-jaeger above the version the
+# autoinstrumentation package resolves transitively, clearing CVE-2026-59892,
+# and minimatch to the lowest major depending on a brace-expansion release
+# clearing CVE-2026-14257.
 RUN npm init -y \
   && npm pkg set "overrides.@opentelemetry/propagator-jaeger=<%- jaegerVersion %>" \
+  && npm pkg set "overrides.minimatch=<%- minimatchVersion %>" \
   && npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@<%- adotVersion %>
 
 # Copy bundled agent

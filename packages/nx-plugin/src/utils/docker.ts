@@ -9,7 +9,7 @@ import {
 } from '@nx/devkit';
 import { FsCommands } from './fs';
 import { addDependencyToTargetIfNotPresent } from './nx';
-import { CONTAINER_VERSIONS } from './versions';
+import { CONTAINER_VERSIONS, TS_VERSIONS } from './versions';
 
 const TRIVY_IGNORE_FILE = '.trivyignore';
 
@@ -17,6 +17,17 @@ const TRIVY_IGNORE_CONTENTS = `# Trivy ignore file. Add one vulnerability ID (e.
 # suppress it during the image scan (\`nx run-many --target trivy\`).
 # https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids
 `;
+
+/**
+ * Substitution variables for the vended Node `Dockerfile` templates, exposing
+ * the npm version to install globally along with the versions its bundled
+ * dependency patch step pins.
+ */
+export const nodeImageVersions = () => ({
+  npmVersion: TS_VERSIONS.npm,
+  braceExpansionVersion: TS_VERSIONS['brace-expansion'],
+  minimatchVersion: TS_VERSIONS.minimatch,
+});
 
 export interface DockerScanTargetOptions {
   /**
