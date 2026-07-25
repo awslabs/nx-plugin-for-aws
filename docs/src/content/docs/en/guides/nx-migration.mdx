@@ -76,7 +76,7 @@ For the same operations you use in generators (`generateFiles`, GritQL transform
 
 ### Guardrails
 
-Migrations run against workspaces you don't control, so follow the same rules the scaffolded skeleton bakes in:
+Migrations run against workspaces you don't control, so it is recommended to adhere to the following (the scaffolded skeleton bakes these in):
 
 - **Pattern-match before writing.** If a target file has diverged from the shape your generators produce, skip it and report it via `nextSteps` rather than clobbering the user's changes.
 - **Idempotent.** Re-running the migration must be a no-op.
@@ -84,7 +84,7 @@ Migrations run against workspaces you don't control, so follow the same rules th
 
 ### Testing Your Migration
 
-The scaffolded `migration.spec.ts` uses `createTreeWithEmptyWorkspace()` to build a virtual workspace. Cover that the migration applies to the shape your generators produce, skips (and reports) customised files, and is idempotent:
+The scaffolded `migration.spec.ts` uses `createTreeWithEmptyWorkspace()` to build a virtual workspace. Test that the migration takes a workspace from the "before" state to the target state, skips (and reports) customised files, and is idempotent:
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -99,9 +99,16 @@ describe('my migration', () => {
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```
@@ -110,10 +117,51 @@ describe('my migration', () => {
 
 Nx runs a migration when the user's installed plugin version is less than the migration's `version`. This generator writes **no** `version` field — assign it (or stamp it from your release process) when you cut the release that ships the migration, so it runs for everyone upgrading from an earlier version.
 
+Once you assign versions, a `migrations.json` registering one migration of each kind looks like this:
+
+```json
+{
+  "$schema": "http://json-schema.org/schema",
+  "name": "my-plugin",
+  "generators": {
+    "rename-foo-target": {
+      "version": "2.0.0",
+      "description": "Rename the foo target to bar",
+      "implementation": "./src/migrations/rename-foo-target/migration"
+    },
+    "migrate-custom-handlers": {
+      "version": "3.0.0",
+      "description": "Update custom handlers for the new API",
+      "prompt": "./src/migrations/migrate-custom-handlers/prompt.md"
+    },
+    "upgrade-framework": {
+      "version": "4.0.0",
+      "description": "Upgrade the framework and reconcile call sites",
+      "implementation": "./src/migrations/upgrade-framework/migration",
+      "prompt": "./src/migrations/upgrade-framework/prompt.md"
+    }
+  }
+}
+```
+
 ## Running Migrations
 
-Users apply your plugin's migrations by upgrading it:
+`nx migrate` is a two-step flow — the two commands do different things and must run in order, with an install in between:
 
-<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+<NxCommands commands={['migrate my-plugin@latest']} />
+
+This first step only updates the version of your plugin (and any packages it depends on) in `package.json` and writes a `migrations.json` listing the migrations to run. No packages are installed and no other files are touched yet, so the user can review the changes first.
+
+The user then installs the new versions with their package manager (`pnpm install`, `npm install`, `yarn`, or `bun install`), then applies the migrations:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+This second step runs each pending migration to update config and source, one at a time. Afterwards the user deletes `migrations.json` and commits.
+
+:::note[Nx and your plugin upgrade independently]
+`nx migrate <package>@<version>` targets whichever package you name. `nx migrate my-plugin@latest` updates your plugin and runs its migrations; `nx migrate latest` (or `nx migrate nx@latest`) updates Nx itself. They are separate upgrades — run each when you choose to move that package.
+
+`nx migrate` targets a single package version step at a time, so the two steps above are not interleaved: complete the run-migrations step for one upgrade (and commit) before starting the next. When jumping across multiple major versions, upgrade one major at a time.
+:::
 
 Agentic and hybrid migrations are applied by the user's local coding agent during `nx migrate --run-migrations` when one is available.
