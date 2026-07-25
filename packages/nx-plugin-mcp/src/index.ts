@@ -1,21 +1,22 @@
 #!/usr/bin/env node
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 /**
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { buildGeneratorInfoList } from '../../nx-plugin/src/utils/generators';
+import * as path from 'path';
+import PackageJson from '../../nx-plugin/package.json';
 import { addToExistingProjectTool } from '../../nx-plugin/src/mcp-server/tools/add-to-existing-project';
 import { addCreateWorkspaceCommandTool } from '../../nx-plugin/src/mcp-server/tools/create-workspace-command';
-import { addListGeneratorsTool } from '../../nx-plugin/src/mcp-server/tools/list-generators';
-import { addGeneratorGuideTool } from '../../nx-plugin/src/mcp-server/tools/generator-guide';
 import {
   addGeneralGuidanceTool,
   TOOL_SELECTION_GUIDE,
 } from '../../nx-plugin/src/mcp-server/tools/general-guidance';
-import PackageJson from '../../nx-plugin/package.json';
-import * as path from 'path';
+import { addGeneratorGuideTool } from '../../nx-plugin/src/mcp-server/tools/generator-guide';
+import { addListGeneratorsTool } from '../../nx-plugin/src/mcp-server/tools/list-generators';
+import { addUpgradeWorkspaceTool } from '../../nx-plugin/src/mcp-server/tools/upgrade-workspace';
+import { buildGeneratorInfoList } from '../../nx-plugin/src/utils/generators';
 
 /**
  * Build the generator list using a base directory resolved relative to this
@@ -51,6 +52,7 @@ ${TOOL_SELECTION_GUIDE}
   addListGeneratorsTool(server, generators);
   addGeneratorGuideTool(server, generators);
   addToExistingProjectTool(server, generators);
+  addUpgradeWorkspaceTool(server, generators);
 
   return server;
 };
