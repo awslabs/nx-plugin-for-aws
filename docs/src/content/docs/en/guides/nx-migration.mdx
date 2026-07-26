@@ -57,6 +57,7 @@ A deterministic (or hybrid) migration is a function which mutates the virtual fi
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
+import { formatFilesInSubtree } from '@aws/nx-plugin/sdk/utils/format';
 
 export default async function migration(
   tree: Tree,
@@ -64,6 +65,8 @@ export default async function migration(
   const nextSteps: string[] = [];
 
   // Read and update the files your generators produce here.
+
+  await formatFilesInSubtree(tree);
 
   return { nextSteps };
 }
@@ -81,21 +84,22 @@ Migrations run against workspaces you don't control, so it is recommended to adh
 - **Pattern-match before writing.** If a target file has diverged from the shape your generators produce, skip it and report it via `nextSteps` rather than clobbering the user's changes.
 - **Idempotent.** Re-running the migration must be a no-op.
 - **Never make formatting-only changes.**
+- **Format what you write.** `updateJson` and `writeJson` re-serialise a whole file, expanding inline arrays into a shape the vended `format` target rejects — leaving the user with a failing build after an otherwise clean upgrade. Finish with `formatFilesInSubtree(tree)` so the diff stays limited to the lines you meant to change.
 
 ### Testing Your Migration
 
-The scaffolded `migration.spec.ts` uses `createTreeWithEmptyWorkspace()` to build a virtual workspace. Test that the migration takes a workspace from the "before" state to the target state, skips (and reports) customised files, and is idempotent:
+The scaffolded `migration.spec.ts` uses `createTreeUsingTsSolutionSetup()` to build a virtual workspace matching the shape our preset generates. Test that the migration takes a workspace from the "before" state to the target state, skips (and reports) customised files, and is idempotent:
 
 ```ts
 import type { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
 import migration from './migration';
 
 describe('my migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
 
   it('should update the generated shape', async () => {

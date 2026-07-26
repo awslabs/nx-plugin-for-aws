@@ -177,6 +177,7 @@ When a deterministic migration meets a file that has diverged from the vended sh
 - **Pattern-match before writing.** If the target file has diverged from the vended shape, skip it and report via `nextSteps` (see `MigrationReturnObject` in `@nx/devkit`) rather than clobbering user changes.
 - **Idempotent.** Re-running the migration must be a no-op, mirroring the generator idempotency principle above.
 - **Never destroy user intent.** The same rule as generators: user-owned files are reported on, not rewritten.
+- **Format what you write.** Finish with `await formatFilesInSubtree(tree)`. `updateJson` / `writeJson` re-serialise the whole file and expand inline arrays, which the vended `format` target rejects — without this a clean migration run leaves the user's `build` failing.
 
 #### Versioning
 

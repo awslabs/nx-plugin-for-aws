@@ -62,6 +62,35 @@ describe('nx-migration generator', () => {
       expect(tree.exists(dir('prompt.md'))).toBeFalsy();
     });
 
+    it('should format the files it writes so the format target still passes', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      const migration = tree.read(dir('migration.ts'), 'utf-8');
+      expect(migration).toContain(
+        "import { formatFilesInSubtree } from '../../utils/format';",
+      );
+      expect(migration).toContain('await formatFilesInSubtree(tree);');
+    });
+
+    it('should scaffold the test using the ts solution setup tree', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      const spec = tree.read(dir('migration.spec.ts'), 'utf-8');
+      expect(spec).toContain(
+        "import { createTreeUsingTsSolutionSetup } from '../../utils/test';",
+      );
+      expect(spec).toContain('createTreeUsingTsSolutionSetup()');
+      expect(spec).not.toContain('createTreeWithEmptyWorkspace');
+    });
+
     it('should register a deterministic migration with implementation only, no version', async () => {
       await tsNxMigrationGenerator(tree, {
         project: PROJECT,
@@ -358,6 +387,34 @@ describe('nx-migration generator', () => {
 
       const pkg = JSON.parse(tree.read(PLUGIN_PKG, 'utf-8'));
       expect(pkg.dependencies?.['@nx/devkit']).toBeDefined();
+    });
+
+    it('should import the format and test utils from the SDK', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+        preferInstallDependencies: false,
+      });
+
+      expect(tree.read(dir('migration.ts'), 'utf-8')).toContain(
+        "import { formatFilesInSubtree } from '@aws/nx-plugin/sdk/utils/format';",
+      );
+      expect(tree.read(dir('migration.spec.ts'), 'utf-8')).toContain(
+        "import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';",
+      );
+    });
+
+    it('should add @aws/nx-plugin so the SDK format util resolves', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+        preferInstallDependencies: false,
+      });
+
+      const pkg = JSON.parse(tree.read(PLUGIN_PKG, 'utf-8'));
+      expect(pkg.dependencies?.['@aws/nx-plugin']).toBeDefined();
     });
 
     it('should not add @nx/devkit for an agentic (prompt-only) migration', async () => {

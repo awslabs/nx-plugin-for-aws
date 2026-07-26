@@ -12,6 +12,7 @@ import {
   updateJson,
   writeJson,
 } from '@nx/devkit';
+import PackageJson from '../../../package.json' with { type: 'json' };
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
@@ -91,6 +92,15 @@ export const tsNxMigrationGenerator = async (
     return pkg;
   });
 
+  // Migrations live at <sourceRoot>/migrations/<name>, so within this repo the
+  // shared utils are two levels up. Elsewhere they come from the published SDK.
+  const formatImportPath = isNxPluginForAws
+    ? '../../utils/format'
+    : `${PackageJson.name}/sdk/utils/format`;
+  const testImportPath = isNxPluginForAws
+    ? '../../utils/test'
+    : `${PackageJson.name}/sdk/utils/test`;
+
   // Scaffold the migration files, then prune the ones this kind doesn't use.
   // A single template set covers all kinds; `isHybrid` toggles the parts that
   // deviate (the codemod's `agentContext`, the prompt's phrasing).
@@ -98,7 +108,7 @@ export const tsNxMigrationGenerator = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     migrationDir,
-    { name, description, isHybrid },
+    { name, description, isHybrid, formatImportPath, testImportPath },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (!hasImplementation) {
@@ -137,10 +147,14 @@ export const tsNxMigrationGenerator = async (
     }),
   });
 
-  // Deterministic and hybrid migrations import @nx/devkit, which must resolve
-  // for nx to run them. Add it to a user's workspace (already present in ours).
+  // Deterministic and hybrid migrations import @nx/devkit and, outside this
+  // repo, `formatFilesInSubtree` from the @aws/nx-plugin SDK. Both must resolve
+  // for nx to run them (already present in ours).
   if (hasImplementation && !isNxPluginForAws) {
-    const deps = withVersions(['@nx/devkit']);
+    const deps = {
+      ...withVersions(['@nx/devkit']),
+      [PackageJson.name]: `^${PackageJson.version}`,
+    };
     addDependenciesToPackageJson(tree, {}, deps);
     addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
   }
