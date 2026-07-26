@@ -84,24 +84,31 @@ Migrations chạy trên các workspace mà bạn không kiểm soát, vì vậy 
 
 ### Kiểm Thử Migration Của Bạn
 
-`migration.spec.ts` được tạo sẵn sử dụng `createTreeWithEmptyWorkspace()` để xây dựng một workspace ảo. Bao phủ rằng migration áp dụng cho hình dạng mà generators của bạn tạo ra, bỏ qua (và báo cáo) các tệp tùy chỉnh, và là idempotent:
+`migration.spec.ts` được tạo sẵn sử dụng `createTreeUsingTsSolutionSetup()` để xây dựng một workspace ảo khớp với hình dạng mà preset của chúng tôi tạo ra. Kiểm tra rằng migration đưa một workspace từ trạng thái "trước" đến trạng thái đích, bỏ qua (và báo cáo) các tệp tùy chỉnh, và là idempotent:
 
 ```ts
 import type { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
 import migration from './migration';
 
 describe('my migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```
@@ -146,3 +153,4 @@ Người dùng áp dụng các migrations của plugin của bạn với luồng
 Các migrations agentic và hybrid được áp dụng bởi coding agent cục bộ của người dùng trong quá trình `nx migrate --run-migrations` khi có sẵn.
 
 Để biết luồng đầy đủ từ góc độ người dùng đang nâng cấp — bao gồm đầu ra ví dụ cho các migrations deterministic và agentic — xem <Link path="get_started/upgrading">Nâng Cấp Workspace Của Bạn</Link>.
+ic và agentic — xem <Link path="get_started/upgrading">Nâng Cấp Workspace Của Bạn</Link>.

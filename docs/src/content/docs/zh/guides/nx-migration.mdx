@@ -84,24 +84,31 @@ export default async function migration(
 
 ### 测试你的迁移
 
-脚手架的 `migration.spec.ts` 使用 `createTreeWithEmptyWorkspace()` 来构建虚拟工作区。覆盖迁移应用于你的生成器产生的形状、跳过（并报告）自定义文件以及是幂等的：
+脚手架的 `migration.spec.ts` 使用 `createTreeUsingTsSolutionSetup()` 来构建与我们的预设生成的形状匹配的虚拟工作区。测试迁移将工作区从"之前"状态转换到目标状态、跳过（并报告）自定义文件以及是幂等的：
 
 ```ts
 import type { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
 import migration from './migration';
 
 describe('my migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```

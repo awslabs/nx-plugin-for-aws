@@ -57,6 +57,7 @@ Una migración determinista (o híbrida) es una función que muta el sistema de 
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
+import { formatFilesInSubtree } from '@aws/nx-plugin/sdk/utils/format';
 
 export default async function migration(
   tree: Tree,
@@ -64,6 +65,8 @@ export default async function migration(
   const nextSteps: string[] = [];
 
   // Read and update the files your generators produce here.
+
+  await formatFilesInSubtree(tree);
 
   return { nextSteps };
 }
@@ -81,21 +84,22 @@ Las migraciones se ejecutan contra workspaces que no controlas, por lo que se re
 - **Coincidencia de patrones antes de escribir.** Si un archivo objetivo ha divergido de la forma que tus generadores producen, omítelo y repórtalo vía `nextSteps` en lugar de sobrescribir los cambios del usuario.
 - **Idempotente.** Re-ejecutar la migración debe ser una operación sin efecto.
 - **Nunca hagas cambios solo de formato.**
+- **Formatea lo que escribes.** `updateJson` y `writeJson` re-serializan un archivo completo, expandiendo arrays en línea en una forma que el objetivo `format` vendido rechaza — dejando al usuario con una compilación fallida después de una actualización por lo demás limpia. Termina con `formatFilesInSubtree(tree)` para que el diff permanezca limitado a las líneas que pretendías cambiar.
 
 ### Probar Tu Migración
 
-El `migration.spec.ts` generado usa `createTreeWithEmptyWorkspace()` para construir un workspace virtual. Prueba que la migración lleva un workspace del estado "antes" al estado objetivo, omite (y reporta) archivos personalizados, y es idempotente:
+El `migration.spec.ts` generado usa `createTreeUsingTsSolutionSetup()` para construir un workspace virtual que coincide con la forma que nuestro preset genera. Prueba que la migración lleva un workspace del estado "antes" al estado objetivo, omite (y reporta) archivos personalizados, y es idempotente:
 
 ```ts
 import type { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
 import migration from './migration';
 
 describe('my migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
 
   it('should update the generated shape', async () => {

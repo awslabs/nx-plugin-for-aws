@@ -84,24 +84,31 @@ Les migrations s'exécutent sur des espaces de travail que vous ne contrôlez pa
 
 ### Tester Votre Migration
 
-Le fichier `migration.spec.ts` généré utilise `createTreeWithEmptyWorkspace()` pour construire un espace de travail virtuel. Couvrez le fait que la migration s'applique à la forme que vos générateurs produisent, ignore (et signale) les fichiers personnalisés, et est idempotente :
+Le fichier `migration.spec.ts` généré utilise `createTreeUsingTsSolutionSetup()` pour construire un espace de travail virtuel correspondant à la forme que notre preset génère. Testez que la migration fait passer un espace de travail de l'état "avant" à l'état cible, ignore (et signale) les fichiers personnalisés, et est idempotente :
 
 ```ts
 import type { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
 import migration from './migration';
 
 describe('my migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```
