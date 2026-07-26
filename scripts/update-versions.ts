@@ -21,12 +21,15 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
+import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
+import { registerSyncVersionsMigration } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
   parsePipRequirementsLine,
   ProjectNameRequirement,
   VersionOperator,
 } from 'pip-requirements-js';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
+
 
 interface VersionChange {
   name: string;
@@ -409,6 +412,12 @@ const main = async () => {
 
     const updatedShadcnTemplateFiles = refreshShadcnTemplates(tree, tmpDir);
 
+    // Ship the bumps to existing workspaces.
+    const migrationFiles = registerSyncVersionsMigration(
+      tree,
+      tsChanges.some((change) => isNxPackage(change.name)),
+    );
+
     // Only apply changes if not a dry run
     if (!isDryRun) {
       flushChanges(tree.root, tree.listChanges());
@@ -430,6 +439,10 @@ const main = async () => {
             },
           ]
         : []),
+      {
+        title: 'Migration',
+        changes: migrationFiles.map((path) => ({ path })),
+      },
     ]);
   } catch (error) {
     console.error('Error updating versions:', error);

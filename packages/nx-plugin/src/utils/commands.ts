@@ -2,14 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { TS_VERSIONS } from './versions';
+import { NX_VERSION } from './versions';
 
-/**
- * The nx version the plugin is built against. Commands that download nx
- * (e.g. `nx init`) pin to this version so the workspace's nx matches the
- * plugin's `@nx/*` packages — a mismatch deadlocks `nx sync`.
- */
-export const NX_VERSION = TS_VERSIONS['@nx/devkit'];
+/** Re-exported for callers that already import it from here. */
+export { NX_VERSION };
 
 /**
  * Display-friendly command prefixes for each package manager.

@@ -192,6 +192,29 @@ Do not add a `version` field to `migrations.json` entries — versions arrive on
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
 
+#### Vended dependency versions
+
+Version bumps ship themselves, and everything that makes that work lives in `utils/version-upgrade-migration/`. The weekly `update-versions` PR rewrites the vended versions in `utils/versions.ts`, then registers a `migrations.json` entry (`register.ts`) pointing at the single committed `migration.ts`, so there is nothing to author — or generate — per bump. That migration delegates to `syncVendedVersions` (`sync-vended-versions.ts`), which syncs TypeScript dependencies (catalogs and direct ranges), Python `pyproject.toml` pins and Terraform provider versions.
+
+The plugin version the metrics files report has its own migration (`metrics-migration.ts`), registered `everyRelease: true`: never backfilled or pinned, re-stamped with each pending version so it runs on *every* upgrade. A release that bumps no dependencies registers no version sync, so the reported version would otherwise drift. The flag is source-only and stripped from the published manifest.
+
+A version only ever moves upwards. TypeScript dependencies in a `package.json` are written by devkit's `addDependenciesToPackageJson`, which already moves a version wherever the workspace keeps it — through a `catalog:` reference or directly — resolving the reference before comparing against what is installed. Reusing it leaves this migration owning no dependency-resolution logic.
+
+Devkit is called directly rather than through this plugin's wrapper, which *migrates* declarations into the catalog: right when generating a project, wrong for a version bump.
+
+Three things are decided before handing anything to devkit:
+
+- **Only packages the manifest already declares.** Devkit adds what it is given, so the full vended list would inject all of it into every `package.json` — the duplicate-dependency class behind the `react` dedupe regression.
+- **Reference protocols** (`workspace:`, `file:`, `npm:`, …) are skipped; their version is synced where it points.
+- **A range that already permits the vended version** is left alone, since devkit would narrow it to an exact pin without changing what resolves.
+
+Two cases devkit can't reach are handled in `syncOrphanCatalogEntries`, comparing with `isVendedUpgrade` (`vended-upgrade.ts`): a catalog entry **no manifest references**, which devkit only reaches through those references; and **bun catalogs**, since `getCatalogManager` covers pnpm and yarn only, and with no manager devkit rewrites a `catalog:` reference to a literal, severing the catalog. Python pins and Terraform providers use `isVendedUpgrade` too.
+
+**The nx packages are the exception**, listed in `NX_PACKAGES`:
+
+- `TS_VERSIONS.nx` (`NX_VERSION`) is the single source of truth. All of them must hold that value and match the plugin's own `@nx/*` dependencies (guarded in `versions.spec.ts`) — a workspace nx even a patch apart hoists a second nested nx and the two deadlock `nx sync`.
+- They are bumped via `packageJsonUpdates`, **not** the sync migration: `nx migrate` collects a package's migrations only for packages it is bumping, so bumping nx from a migration would skip Nx's own migrations for that hop. `update-versions` writes the block whenever an nx package moved.
+
 #### Testing
 
 Every migration needs a `migration.spec.ts` alongside it using `createTreeUsingTsSolutionSetup()`, covering: the migration applies to the vended shape, skips (and reports) code it doesn't recognise, and is idempotent.

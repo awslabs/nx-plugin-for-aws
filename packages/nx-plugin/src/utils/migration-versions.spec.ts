@@ -151,6 +151,47 @@ describe('migration versions', () => {
       });
     });
 
+    it('should re-stamp an every-release migration with the pending version', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'sync-metrics-version': {
+              description: 'runs every release',
+              everyRelease: true,
+            },
+          },
+        },
+        // Already shipped, and carrying a source version — an every-release
+        // entry must ignore both, or it would never run again.
+        { 'sync-metrics-version': '1.1.0' },
+        '1.3.0',
+      );
+      expect(stamped.generators?.['sync-metrics-version'].version).toBe(
+        '1.3.0',
+      );
+    });
+
+    it('should strip the source-only everyRelease flag', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'sync-metrics-version': {
+              description: 'runs every release',
+              implementation: './x',
+              everyRelease: true,
+            },
+          },
+        },
+        {},
+        '1.3.0',
+      );
+      expect(stamped.generators?.['sync-metrics-version']).toEqual({
+        version: '1.3.0',
+        description: 'runs every release',
+        implementation: './x',
+      });
+    });
+
     it('should keep a version already backfilled into source', () => {
       const stamped = stampMigrationVersions(
         {
@@ -270,6 +311,63 @@ describe('migration versions', () => {
       );
       expect(migrations.generators?.['latest-net-new'].version).toBeUndefined();
       expect(backfilled).toEqual([]);
+    });
+
+    it('should re-key packageJsonUpdates to the release that shipped it', () => {
+      const { migrations } = backfillMigrationVersions(
+        {
+          generators: { 'latest-shipped': { description: 'shipped' } },
+          packageJsonUpdates: {
+            'latest-nx-packages': { version: 'latest', packages: { nx: {} } },
+          },
+        },
+        { 'latest-shipped': '1.1.0' },
+      );
+      // The nx bump ships with the migration it accompanied, re-keyed with it.
+      expect(migrations.packageJsonUpdates).toEqual({
+        'v1.1.0-nx-packages': { version: '1.1.0', packages: { nx: {} } },
+      });
+    });
+
+    it('should leave packageJsonUpdates under latest until a release ships it', () => {
+      const { migrations } = backfillMigrationVersions(
+        {
+          generators: { 'latest-net-new': { description: 'not released yet' } },
+          packageJsonUpdates: {
+            'latest-nx-packages': { version: 'latest', packages: { nx: {} } },
+          },
+        },
+        {},
+      );
+      expect(migrations.packageJsonUpdates).toEqual({
+        'latest-nx-packages': { version: 'latest', packages: { nx: {} } },
+      });
+    });
+
+    it('should never claim an every-release migration for a release', () => {
+      const { migrations, backfilled, moves } = backfillMigrationVersions(
+        {
+          generators: {
+            'sync-metrics-version': {
+              description: 'runs every release',
+              implementation:
+                './src/utils/version-upgrade-migration/metrics-migration',
+              everyRelease: true,
+            },
+          },
+        },
+        // Shipped in an earlier release, but pinning it and moving it out of
+        // latest would stop it running on later upgrades.
+        { 'sync-metrics-version': '1.1.0' },
+      );
+      expect(migrations.generators?.['sync-metrics-version']).toEqual({
+        description: 'runs every release',
+        implementation:
+          './src/utils/version-upgrade-migration/metrics-migration',
+        everyRelease: true,
+      });
+      expect(backfilled).toEqual([]);
+      expect(moves).toEqual([]);
     });
 
     it('should not change a migration that already has a version', () => {

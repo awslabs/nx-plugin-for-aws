@@ -40,8 +40,14 @@ export const TS_VERSIONS = {
   '@middy/core': '7.7.0',
   '@nxlv/python': '22.2.2',
   '@nx-extend/terraform': '10.3.0',
+  // These must all hold the same version — see NX_PACKAGES.
+  nx: '23.1.0',
   '@nx/devkit': '23.1.0',
+  '@nx/js': '23.1.0',
   '@nx/react': '23.1.0',
+  '@nx/vite': '23.1.0',
+  '@nx/vitest': '23.1.0',
+  '@nx/workspace': '23.1.0',
   'create-nx-workspace': '23.1.0',
   '@swc-node/register': '1.12.1',
   '@swc/core': '1.15.43',
@@ -147,6 +153,30 @@ export type ITsDepVersion = keyof typeof TS_VERSIONS;
  */
 export const withVersions = (deps: ITsDepVersion[]) =>
   Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+
+/**
+ * The `nx` and `@nx/*` packages a generated workspace pins, all of which must
+ * hold the same version: a workspace nx even a patch apart hoists a second
+ * nested nx, and the two deadlock `nx sync`.
+ *
+ * Bumping them in a user's workspace requires `packageJsonUpdates` rather than a
+ * migration — see `version-upgrade-migration/nx-package-updates.ts`.
+ */
+export const NX_PACKAGES = [
+  'nx',
+  '@nx/devkit',
+  '@nx/js',
+  '@nx/react',
+  '@nx/vite',
+  '@nx/vitest',
+  '@nx/workspace',
+] as const satisfies readonly ITsDepVersion[];
+
+/**
+ * The nx version the plugin is built against, and the single source of truth
+ * for every place a workspace's nx is pinned.
+ */
+export const NX_VERSION = TS_VERSIONS.nx;
 
 /**
  * Versions for Python dependencies added by generators

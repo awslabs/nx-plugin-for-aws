@@ -14,7 +14,6 @@ import {
 import { initGenerator } from '@nx/js';
 import { readFileSync } from 'fs';
 import yaml from 'js-yaml';
-import { readModulePackageJson } from 'nx/src/utils/package-json';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { BASE_TSCONFIG_COMPILER_OPTIONS } from './base-tsconfig';
@@ -330,14 +329,11 @@ export const applyWorkspaceInit = async (
   // `@nx/js` must be a root dependency for the `@nx/js:typescript-sync`
   // generator registered in nx.json to resolve (npm doesn't hoist the
   // plugin's own copy reliably).
-  const nxVersion = readModulePackageJson('@nx/js').packageJson.version;
   addDependenciesToPackageJson(
     tree,
     {},
     {
-      nx: nxVersion,
-      '@nx/js': nxVersion,
-      '@nx/workspace': nxVersion,
+      ...withVersions(['nx', '@nx/js', '@nx/workspace']),
       ...withVersions(['typescript', '@biomejs/biome']),
       // Declare the plugin the generators are running from, plus the MCP server
       // package the vended config runs, so both are pinned in the workspace's
