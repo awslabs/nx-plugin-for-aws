@@ -3,40 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { execSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { FsTree, flushChanges, type Tree } from 'nx/src/generators/tree';
 import * as os from 'os';
 import * as path from 'path';
 import { getGitIncludedFiles, isWithinGitRepo, updateGitIgnore } from './git';
 import { createTreeUsingTsSolutionSetup } from './test';
-
-/**
- * Remove inherited GIT_* environment variables (eg GIT_DIR, GIT_INDEX_FILE)
- * before each test and restore them afterwards. When these tests run inside a
- * git hook (eg pre-commit), git exports these variables pointing at the
- * surrounding repository. Since they take precedence over `cwd`, the git
- * commands run here would otherwise operate on that repository - committing
- * test fixtures and deleting real files - instead of the isolated temp repo.
- */
-const useIsolatedGitEnv = () => {
-  const savedGitEnv: Record<string, string | undefined> = {};
-
-  beforeEach(() => {
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('GIT_')) {
-        savedGitEnv[key] = process.env[key];
-        delete process.env[key];
-      }
-    }
-  });
-
-  afterEach(() => {
-    for (const [key, value] of Object.entries(savedGitEnv)) {
-      process.env[key] = value;
-    }
-  });
-};
+import { initTestGitRepo, runGit, useIsolatedGitEnv } from './test-git';
 
 describe('git utils', () => {
   describe('getGitIncludedFiles', () => {
@@ -48,9 +21,7 @@ describe('git utils', () => {
     beforeEach(() => {
       tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-dir'));
       tree = new FsTree(tmpDir, false);
-      execSync('git init', { cwd: tmpDir });
-      execSync('git config user.email test@example.com', { cwd: tmpDir });
-      execSync('git config user.name test', { cwd: tmpDir });
+      initTestGitRepo(tmpDir);
     });
 
     afterEach(() => {
@@ -64,8 +35,8 @@ describe('git utils', () => {
 
       flushChanges(tree.root, tree.listChanges());
 
-      execSync('git add .', { cwd: tmpDir });
-      execSync("git commit -m 'test' --no-verify", { cwd: tmpDir });
+      runGit(['add', '.'], tmpDir);
+      runGit(['commit', '-m', 'test', '--no-verify'], tmpDir);
 
       tree.write('new-and-not-committed.ts', "const bar = 'baz';");
       tree.write('ignored.txt', 'should not be included');
@@ -160,9 +131,7 @@ describe('git utils', () => {
 
     it('should return true when inside a git repository (without .git in root)', () => {
       // Initialize git repo
-      execSync('git init', { cwd: tmpDir });
-      execSync('git config user.email test@example.com', { cwd: tmpDir });
-      execSync('git config user.name test', { cwd: tmpDir });
+      initTestGitRepo(tmpDir);
 
       // Create a subdirectory tree that doesn't have .git but is within the repo
       const subDir = path.join(tmpDir, 'subdir');
