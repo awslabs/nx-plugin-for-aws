@@ -110,9 +110,9 @@ describe('smoke test - mcp-server', () => {
     }
   });
 
-  // The vended config runs the workspace's own `@aws/nx-plugin`, so the server
-  // tracks the installed plugin version rather than whatever is latest on the
-  // registry.
+  // The vended config runs the workspace's own `@aws/nx-plugin-mcp`, so the
+  // server tracks the version installed in the workspace rather than whatever is
+  // latest on the registry.
   it('should start the server from the config vended into a workspace', async () => {
     const pkgMgr = 'pnpm';
     const targetDir = `${tmpProjPath()}/mcp-vended-${pkgMgr}`;
@@ -128,19 +128,31 @@ describe('smoke test - mcp-server', () => {
       .mcpServers['nx-plugin-for-aws'];
     expect({ command, args }).toEqual({
       command: 'npx',
-      args: ['--no', '@aws/nx-plugin'],
+      args: ['--no', '@aws/nx-plugin-mcp'],
     });
 
-    const installedVersion = readJsonFile(
-      join(projectRoot, 'node_modules', '@aws', 'nx-plugin', 'package.json'),
-    ).version;
+    // The package the config names is installed, so npx resolves it from the
+    // workspace instead of the registry
+    expect(
+      existsSync(
+        join(
+          projectRoot,
+          'node_modules',
+          '@aws',
+          'nx-plugin-mcp',
+          'package.json',
+        ),
+      ),
+    ).toBe(true);
 
-    // Launch exactly what the config specifies, from the workspace directory
+    // Launch exactly what the config specifies, from the workspace directory.
+    // A dead registry proves the resolution is local: `--no` never fetches, so
+    // the server can only start from the installed package.
     const transport = new StdioClientTransport({
       command,
       args,
       cwd: projectRoot,
-      env: { ...process.env },
+      env: { ...process.env, npm_config_registry: 'http://127.0.0.1:9/' },
     });
     const client = new Client({ name: 'e2e-test-client', version: '1.0.0' });
 
@@ -148,7 +160,6 @@ describe('smoke test - mcp-server', () => {
     try {
       expect(client.getServerVersion()).toMatchObject({
         name: 'nx-plugin-for-aws',
-        version: installedVersion,
       });
 
       const { tools } = await client.listTools();
