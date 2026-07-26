@@ -25,11 +25,10 @@ export const NX_PLUGIN_MCP_PACKAGE_NAME = '@aws/nx-plugin-mcp';
  *
  * npx prefers a locally installed package over the registry, and generators
  * declare this package as a workspace devDependency, so the server tracks the
- * version in the workspace's lockfile. `--no` keeps npx from reaching for the
- * registry when the package is missing, failing with a clear error instead of
- * installing anything.
+ * version in the workspace's lockfile. `-y` falls back to fetching from the
+ * registry for a workspace where it isn't installed.
  */
-export const NX_PLUGIN_MCP_SERVER_ARGS = ['--no', NX_PLUGIN_MCP_PACKAGE_NAME];
+export const NX_PLUGIN_MCP_SERVER_ARGS = ['-y', NX_PLUGIN_MCP_PACKAGE_NAME];
 
 /**
  * A single stdio MCP server entry, shared by agents that use the `mcpServers` config shape.

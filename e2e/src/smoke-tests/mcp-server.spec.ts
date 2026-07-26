@@ -128,7 +128,7 @@ describe('smoke test - mcp-server', () => {
       .mcpServers['nx-plugin-for-aws'];
     expect({ command, args }).toEqual({
       command: 'npx',
-      args: ['--no', '@aws/nx-plugin-mcp'],
+      args: ['-y', '@aws/nx-plugin-mcp'],
     });
 
     // The package the config names is installed, so npx resolves it from the
@@ -146,7 +146,7 @@ describe('smoke test - mcp-server', () => {
     ).toBe(true);
 
     // Launch exactly what the config specifies, from the workspace directory.
-    // A dead registry proves the resolution is local: `--no` never fetches, so
+    // A dead registry proves the resolution is local: nothing can be fetched, so
     // the server can only start from the installed package.
     const transport = new StdioClientTransport({
       command,
