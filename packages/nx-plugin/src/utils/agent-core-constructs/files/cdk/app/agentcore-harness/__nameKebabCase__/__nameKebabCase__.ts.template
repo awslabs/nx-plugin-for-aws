@@ -1,4 +1,4 @@
-import { Names, Stack } from 'aws-cdk-lib';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
 import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
@@ -76,9 +76,10 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
     if (!executionRole) {
       // Baseline permissions from the AgentCore Harness security guidance:
       // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
-      // Access to customer-owned resources (Gateways, memory, custom
-      // browsers/code interpreters, skills, secrets, VPCs) is an explicit
-      // extension via addToRolePolicy.
+      // The managed memory grant is added after the Harness below, since it
+      // scopes to a service-generated ARN. Access to other customer-owned
+      // resources (Gateways, BYO memory, custom browsers/code interpreters,
+      // skills, secrets, VPCs) is an explicit extension via addToRolePolicy.
       [
         new iam.PolicyStatement({
           sid: 'BedrockModelInvocation',
@@ -212,11 +213,46 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       executionRoleArn: this.executionRole.roleArn,
     });
 
+    // The Harness provisions a managed AgentCore Memory instance unless the
+    // caller overrides `memory` with a BYO instance or disables it, and the
+    // agent loop reads and writes that memory on every invocation. The
+    // service names the managed memory itself, so its ARN is only available
+    // as a Harness attribute — scope the grant to that ARN rather than a
+    // name pattern derived from harnessName. A caller-supplied `memory`
+    // owns its own permissions via addToRolePolicy.
+    if (!executionRole && harnessProps.memory === undefined) {
+      this.executionRole.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          sid: 'AgentCoreManagedMemory',
+          actions: [
+            'bedrock-agentcore:CreateEvent',
+            'bedrock-agentcore:DeleteEvent',
+            'bedrock-agentcore:GetEvent',
+            'bedrock-agentcore:ListEvents',
+            'bedrock-agentcore:RetrieveMemoryRecords',
+          ],
+          resources: [
+            this.harness.attrMemoryManagedMemoryConfigurationArn,
+          ],
+        }),
+      );
+    }
+
     const rc = RuntimeConfig.ensure(this);
     rc.set('agentcore', 'harnesses', {
       ...rc.get('agentcore').harnesses,
       <%- nameClassName %>: this.harness.attrArn,
     });
+
+    // Reading appConfigApplicationId materialises the Runtime Configuration
+    // AppConfig resources, which also emits the stack's
+    // RuntimeConfigApplicationId output. A Harness has no compute of its own
+    // that reads configuration, so without this read the entry set above is
+    // never deployed and the Invocation Client's RUNTIME_CONFIG_APP_ID
+    // lookup has nothing to resolve.
+    void rc.appConfigApplicationId;
+
+    new CfnOutput(this, 'HarnessArn', { value: this.harness.attrArn });
   }
 
   public get grantPrincipal(): iam.IPrincipal {

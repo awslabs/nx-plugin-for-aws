@@ -142,6 +142,9 @@ pnpm nx g @aws/nx-plugin:ts#api --framework=trpc
 # Add a Strands AI agent (Python)
 pnpm nx g @aws/nx-plugin:py#agent
 
+# Add a managed AgentCore Harness agent loop
+pnpm nx g @aws/nx-plugin:agentcore-harness
+
 # Add a React website
 pnpm nx g @aws/nx-plugin:ts#website --framework=react
 
@@ -176,6 +179,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |
 | `py#mcp-server`         | MCP server (Python)                                                                                               |
 | `py#agent`              | [Strands Agent](https://strandsagents.com/) (Python)                                                              |
+| `agentcore-harness`     | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop        |
 | `connection`            | Connect projects together (e.g. frontend to API)                                                                  |
 | `terraform#project`     | Terraform project                                                                                                 |
 | `license`               | Manage LICENSE files and source headers                                                                           |
