@@ -2,16 +2,30 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { compare, inc } from 'semver';
 
 /**
  * Version stamping for migrations.
  *
  * A new migration is committed with no `version` field — contributors never
- * hand-write one. At release time the pending release version is resolved (from
- * `nx release version --dry-run`) and stamped onto every entry still missing
- * one, then committed back to source. Entries that already carry a version were
- * stamped by an earlier release and are left untouched, so a migration never
- * re-runs for users already past the release that shipped it.
+ * hand-write one, and the release model never writes one to source (releases
+ * are calculated from conventional commits and written only to `dist/` and a
+ * git tag). Versions reach the published `migrations.json` two ways:
+ *
+ * - The weekly `update-versions` PR backfills the version of the release that
+ *   shipped each migration, so over time source carries the versions of
+ *   everything already released (see `scripts/backfill-migration-versions.ts`).
+ * - At package time, entries still missing a version are stamped into the
+ *   compiled `migrations.json` (see `scripts/stamp-migrations.ts`): one that has
+ *   already shipped (but isn't backfilled yet) gets the version of the earliest
+ *   release tag registering it, and a net-new one gets a version strictly
+ *   greater than the latest tag and strictly less than any possible next
+ *   release. `nx migrate` runs a migration when `installed < migration.version`,
+ *   so any version in that open interval is correct regardless of what the next
+ *   release number turns out to be.
+ *
+ * A version already present in source always wins, so backfilled entries are
+ * stable and never recomputed.
  */
 
 export interface MigrationsJson {
@@ -19,30 +33,89 @@ export interface MigrationsJson {
 }
 
 /**
- * Return a copy of the migrations collection with `releaseVersion` stamped onto
- * every entry that has no version yet, and a flag indicating whether anything
- * changed (so the caller can skip an empty commit).
+ * Semver comparator suitable for `Array.prototype.sort`, ordering ascending.
+ * Re-exported so callers order release tags without importing `semver`
+ * directly.
+ */
+export const compareVersions = compare;
+
+/**
+ * Version stamped onto migrations that are not present in any release tag.
+ *
+ * `semver.inc(latest, 'prerelease')` yields a version that sorts strictly
+ * between the latest release and every possible next release:
+ * - `1.2.3`       -> `1.2.4-0`      (> 1.2.3, < 1.2.4 / 1.3.0 / 2.0.0)
+ * - `1.0.0-rc.32` -> `1.0.0-rc.33`  (> rc.32, < 1.0.0)
+ */
+export const unshippedMigrationVersion = (latestVersion: string): string => {
+  const version = inc(latestVersion, 'prerelease');
+  if (!version) {
+    throw new Error(`Invalid latest release version: ${latestVersion}`);
+  }
+  return version;
+};
+
+/**
+ * Return a copy of the migrations collection with a `version` stamped onto
+ * every generator entry. A version already on an entry (backfilled into source
+ * by a previous `update-versions` run) is preserved.
  *
  * @param migrations parsed migrations.json to stamp
- * @param releaseVersion the version about to be released (without a `v` prefix)
+ * @param shippedVersions migration name -> version of the earliest release
+ *   tag that registers it (absent for migrations that haven't shipped)
+ * @param latestVersion version of the latest release tag (without the `v`
+ *   prefix), used to derive versions for unshipped migrations
  */
 export const stampMigrationVersions = (
   migrations: MigrationsJson,
-  releaseVersion: string,
-): { migrations: MigrationsJson; stamped: string[] } => {
-  const stamped = Object.entries(migrations.generators ?? {})
-    .filter(([, entry]) => !entry.version)
+  shippedVersions: Record<string, string>,
+  latestVersion: string,
+): MigrationsJson => {
+  const unshippedVersion = unshippedMigrationVersion(latestVersion);
+  return {
+    ...migrations,
+    generators: Object.fromEntries(
+      Object.entries(migrations.generators ?? {}).map(([name, entry]) => [
+        name,
+        { version: shippedVersions[name] ?? unshippedVersion, ...entry },
+      ]),
+    ),
+  };
+};
+
+/**
+ * Return a copy of the migrations collection with the version of the release
+ * that shipped each migration written onto entries that don't have one yet, and
+ * the names of the entries that changed.
+ *
+ * Unlike `stampMigrationVersions` this only records versions that are already
+ * released — a migration not present in any release tag is left without a
+ * version, so the release keeps deciding what a net-new migration gets.
+ *
+ * @param migrations parsed migrations.json to backfill
+ * @param shippedVersions migration name -> version of the earliest release tag
+ *   that registers it (absent for migrations that haven't shipped)
+ */
+export const backfillMigrationVersions = (
+  migrations: MigrationsJson,
+  shippedVersions: Record<string, string>,
+): { migrations: MigrationsJson; backfilled: string[] } => {
+  const entries = Object.entries(migrations.generators ?? {});
+  const backfilled = entries
+    .filter(([name, entry]) => !entry.version && shippedVersions[name])
     .map(([name]) => name);
   return {
     migrations: {
       ...migrations,
       generators: Object.fromEntries(
-        Object.entries(migrations.generators ?? {}).map(([name, entry]) => [
+        entries.map(([name, entry]) => [
           name,
-          entry.version ? entry : { version: releaseVersion, ...entry },
+          entry.version || !shippedVersions[name]
+            ? entry
+            : { version: shippedVersions[name], ...entry },
         ]),
       ),
     },
-    stamped,
+    backfilled,
   };
 };

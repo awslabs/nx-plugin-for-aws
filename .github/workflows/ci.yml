@@ -25,10 +25,6 @@ permissions:
 jobs:
   package:
     name: Package
-    # The release job pushes a `chore(migrations)` commit back to main to record
-    # stamped migration versions. It contains no releasable change, so skip the
-    # run it triggers — jobs that `needs` these are skipped automatically.
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(migrations)') }}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -48,10 +44,6 @@ jobs:
           path: dist
   build:
     name: Build
-    # The release job pushes a `chore(migrations)` commit back to main to record
-    # stamped migration versions. It contains no releasable change, so skip the
-    # run it triggers — jobs that `needs` these are skipped automatically.
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(migrations)') }}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -76,10 +68,6 @@ jobs:
           path: docs/dist
   unit_tests:
     name: Unit Tests - ${{ matrix.shard }}
-    # The release job pushes a `chore(migrations)` commit back to main to record
-    # stamped migration versions. It contains no releasable change, so skip the
-    # run it triggers — jobs that `needs` these are skipped automatically.
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(migrations)') }}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
     strategy:
       fail-fast: false
@@ -294,33 +282,6 @@ jobs:
       - name: Should skip release
         id: should_skip_release
         run: echo "skip_release=$(git log $(git describe --tags --abbrev=0)..HEAD --oneline | grep -qE 'feat\(?.*\)?:|fix\(?.*\)?:|revert\(?.*\)?:|perf\(?.*\)?:' && echo false || echo true)" >> $GITHUB_OUTPUT
-      # Migrations are authored with no `version`. Stamp them with the version
-      # about to be released and commit it, so the published migrations.json
-      # carries versions and the next release leaves those entries alone. The
-      # commit is scoped `chore(migrations)`, which every job in this workflow
-      # skips, so it can't trigger another release. It is committed but not
-      # pushed here — `nx release` pushes it along with its own release commit.
-      - name: Stamp migration versions
-        if: ${{ steps.should_skip_release.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
-        env:
-          HUSKY: "0"
-        run: |
-          CURRENT_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
-          if ! echo "$CURRENT_VERSION" | grep -q "rc"; then
-            export NX_RELEASE_SPECIFIER=premajor
-          fi
-          # The script writes the stamped version to this file, and leaves it
-          # absent when every migration already has a version. Clear it first so
-          # a re-run of this job can't read a previous attempt's value.
-          export MIGRATION_VERSION_FILE="$RUNNER_TEMP/stamped-migration-version"
-          rm -f "$MIGRATION_VERSION_FILE"
-          pnpm tsx scripts/stamp-migrations.ts
-          if [ -f "$MIGRATION_VERSION_FILE" ]; then
-            git add packages/nx-plugin/migrations.json
-            git commit -m "chore(migrations): stamp migration versions to $(cat "$MIGRATION_VERSION_FILE")" --no-verify
-            # The packaged output was built before stamping, so refresh its copy.
-            cp packages/nx-plugin/migrations.json dist/packages/nx-plugin/migrations.json
-          fi
       - name: Release
         if: ${{ steps.should_skip_release.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
         env:
