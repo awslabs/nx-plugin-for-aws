@@ -75,8 +75,7 @@ export const tsNxMigrationGenerator = async (
 
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
   const srcDir = sourceRoot.split('/').filter(Boolean).pop();
-  // Migrations are grouped by the release that ships them, so their order is
-  // visible at a glance as the collection grows. A new migration lands in
+  // Migrations are grouped by the release that ships them. A new one lands in
   // `latest` — the release that picks it up moves it into its version folder.
   const migrationPath = `${srcDir}/migrations/${LATEST_MIGRATIONS_DIR}/${name}`;
   const migrationDir = joinPathFragments(
@@ -85,8 +84,6 @@ export const tsNxMigrationGenerator = async (
     LATEST_MIGRATIONS_DIR,
     name,
   );
-  // The registered key carries the folder, so reusing a name in a later release
-  // can't silently overwrite an entry that has already shipped.
   const key = migrationKey(LATEST_MIGRATIONS_DIR, name);
 
   const rootPackageJson = tree.exists('package.json')
@@ -110,8 +107,8 @@ export const tsNxMigrationGenerator = async (
     return pkg;
   });
 
-  // Migrations live at <sourceRoot>/migrations/<version>/<name>, so within this
-  // repo the shared utils are three levels up. Elsewhere they come from the SDK.
+  // Migrations sit three levels below the source root, so in this repo the
+  // shared utils are relative. Elsewhere they come from the SDK.
   const formatImportPath = isNxPluginForAws
     ? '../../../utils/format'
     : `${PackageJson.name}/sdk/utils/format`;
@@ -119,9 +116,8 @@ export const tsNxMigrationGenerator = async (
     ? '../../../utils/test'
     : `${PackageJson.name}/sdk/utils/test`;
 
-  // Scaffold the migration files, then prune the ones this kind doesn't use.
-  // A single template set covers all kinds; `isHybrid` toggles the parts that
-  // deviate (the codemod's `agentContext`, the prompt's phrasing).
+  // One template set covers all kinds — scaffold it, then prune what this kind
+  // doesn't use.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
@@ -137,11 +133,9 @@ export const tsNxMigrationGenerator = async (
     tree.delete(joinPathFragments(migrationDir, 'prompt.md'));
   }
 
-  // Register the migration in migrations.json under its folder-prefixed key (no
-  // version of our own — the plugin author stamps versions at release time, and
-  // an already-stamped one is preserved). The fields present discriminate the
-  // kind for nx. Paths are relative to the migrations.json directory (plugin
-  // root).
+  // Register the migration under its folder-prefixed key. The fields present
+  // discriminate the kind for nx, and paths are relative to migrations.json.
+  // No version is written, but an already-stamped one is preserved.
   const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
   const migrationsJson = tree.exists(migrationsJsonPath)
     ? readJson(tree, migrationsJsonPath)
@@ -167,9 +161,8 @@ export const tsNxMigrationGenerator = async (
     }),
   });
 
-  // Deterministic and hybrid migrations import @nx/devkit and, outside this
-  // repo, `formatFilesInSubtree` from the @aws/nx-plugin SDK. Both must resolve
-  // for nx to run them (already present in ours).
+  // Codemods import @nx/devkit and the @aws/nx-plugin SDK, both of which must
+  // resolve for nx to run them (already present in this repo).
   if (hasImplementation && !isNxPluginForAws) {
     const deps = {
       ...withVersions(['@nx/devkit']),

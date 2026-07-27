@@ -7,38 +7,29 @@ import { compare, inc } from 'semver';
 /**
  * Version stamping for migrations.
  *
- * A new migration is committed with no `version` field — contributors never
- * hand-write one, and the release model never writes one to source (releases
- * are calculated from conventional commits and written only to `dist/` and a
- * git tag). Versions reach the published `migrations.json` two ways:
+ * A new migration is committed with no `version` — releases are calculated from
+ * conventional commits and written only to `dist/` and a git tag, so versions
+ * reach the published `migrations.json` two ways:
  *
  * - The weekly `update-versions` PR backfills the version of the release that
- *   shipped each migration, moves it out of `latest/` into that release's
- *   `v<version>/` folder and re-keys it to match, so over time source carries
- *   the versions of everything already released (see
- *   `scripts/backfill-migration-versions.ts`).
- * - At package time, entries still missing a version are stamped into the
- *   compiled `migrations.json` (see `scripts/stamp-migrations.ts`): one that has
- *   already shipped (but isn't backfilled yet) gets the version of the earliest
- *   release tag registering it, and a net-new one gets a version strictly
- *   greater than the latest tag and strictly less than any possible next
- *   release. `nx migrate` runs a migration when `installed < migration.version`,
- *   so any version in that open interval is correct regardless of what the next
- *   release number turns out to be.
+ *   shipped each migration, moving and re-keying it accordingly
+ *   (`scripts/backfill-migration-versions.ts`).
+ * - At package time (`scripts/stamp-migrations.ts`) entries still missing a
+ *   version are stamped into the compiled `migrations.json`: an already shipped
+ *   one gets the earliest release tag registering it, a net-new one gets a
+ *   version strictly between the latest tag and any possible next release.
+ *   `nx migrate` runs a migration when `installed < migration.version`, so any
+ *   version in that interval is correct whatever the next release turns out
+ *   to be.
  *
- * A version already present in source always wins, so backfilled entries are
- * stable and never recomputed.
+ * A version already in source always wins, so backfilled entries are stable.
  */
 
 export interface MigrationsJson {
   generators?: Record<string, { version?: string } & Record<string, unknown>>;
 }
 
-/**
- * Semver comparator suitable for `Array.prototype.sort`, ordering ascending.
- * Re-exported so callers order release tags without importing `semver`
- * directly.
- */
+/** Ascending semver comparator for `Array.prototype.sort`. */
 export const compareVersions = compare;
 
 /**
@@ -59,11 +50,10 @@ export const unshippedMigrationVersion = (latestVersion: string): string => {
 
 /**
  * Return a copy of the migrations collection with a `version` stamped onto
- * every generator entry. A version already on an entry (backfilled into source
- * by a previous `update-versions` run) is preserved.
+ * every generator entry, preserving any already present.
  *
  * @param migrations parsed migrations.json to stamp
- * @param shippedVersions migration name -> version of the earliest release
+ * @param shippedVersions migration key -> version of the earliest release
  *   tag that registers it (absent for migrations that haven't shipped)
  * @param latestVersion version of the latest release tag (without the `v`
  *   prefix), used to derive versions for unshipped migrations
@@ -92,13 +82,12 @@ export const LATEST_MIGRATIONS_DIR = 'latest';
 export const versionMigrationsDir = (version: string) => `v${version}`;
 
 /**
- * Key a migration is registered under in `migrations.json`. Prefixed with the
- * directory the migration lives in so reusing a name in a later release can't
- * silently overwrite the entry (or the files) of the one that already shipped.
+ * Key a migration is registered under in `migrations.json`. Prefixed with its
+ * directory so reusing a name in a later release can't silently overwrite the
+ * one that already shipped.
  */
 export const migrationKey = (dir: string, name: string) => `${dir}-${name}`;
 
-/** Prefix of the key of a migration that no release has claimed yet. */
 const LATEST_KEY_PREFIX = `${LATEST_MIGRATIONS_DIR}-`;
 
 /** A migration directory move the caller needs to make on disk. */
@@ -110,15 +99,13 @@ export interface MigrationDirMove {
 }
 
 /**
- * Return a copy of the migrations collection with the version of the release
- * that shipped each migration written onto entries that don't have one yet, the
- * keys of the entries that changed, and the directory moves that go with them
- * (out of `latest` and into the release's version folder). Entries are re-keyed
- * and their paths re-pointed to match the new folder.
+ * Record the release that shipped each migration on entries without a version,
+ * re-keying them and re-pointing their paths at that release's folder, and
+ * return the collection alongside the keys that changed and the directory moves
+ * to make on disk.
  *
- * Unlike `stampMigrationVersions` this only records versions that are already
- * released — a migration not present in any release tag is left without a
- * version, so the release keeps deciding what a net-new migration gets.
+ * Unlike `stampMigrationVersions` this only records already-released versions,
+ * leaving the release to decide what a net-new migration gets.
  *
  * @param migrations parsed migrations.json to backfill
  * @param shippedVersions migration key -> version of the earliest release tag
@@ -140,8 +127,6 @@ export const backfillMigrationVersions = (
     if (entry.version || !version) {
       return [key, entry] as const;
     }
-    // Re-key and re-point the entry at the release's version folder, and record
-    // the matching directory move for the caller to make.
     const name = key.startsWith(LATEST_KEY_PREFIX)
       ? key.slice(LATEST_KEY_PREFIX.length)
       : key;

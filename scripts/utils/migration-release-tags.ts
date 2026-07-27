@@ -37,7 +37,7 @@ const readMigrationsAtTag = (tag: string): MigrationsJson | undefined => {
 };
 
 /**
- * Map of migration name -> version of the earliest release tag registering it.
+ * Map of migration key -> version of the earliest release tag registering it.
  * A migration that hasn't been released is absent.
  */
 export const readShippedMigrationVersions = (

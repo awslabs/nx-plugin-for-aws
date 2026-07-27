@@ -18,8 +18,8 @@ import {
  * `utils/migration-versions.ts` for the versioning model). Runs as part of
  * the nx-plugin `package` target, after `compile` populates dist.
  *
- * Entries whose version was backfilled into source by the weekly
- * `update-versions` PR keep it; the rest are resolved from release tags here.
+ * Entries backfilled into source by the weekly `update-versions` PR keep their
+ * version; the rest are resolved from release tags here.
  */
 
 const DIST_MIGRATIONS_PATH = 'dist/packages/nx-plugin/migrations.json';

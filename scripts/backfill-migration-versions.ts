@@ -23,23 +23,19 @@ import {
 
 /**
  * Records the release that shipped each migration in the source
- * `migrations.json`, moves the migration out of `latest/` into that release's
- * `v<version>/` folder and re-keys its entry to match (see
- * `utils/migration-versions.ts` for the versioning model). Runs in the weekly
- * `update-versions` workflow, whose PR
- * commits the result, so source converges on the versions of everything already
- * released and the release only has to reason about what's still in `latest`.
+ * `migrations.json`, moving it out of `latest/` into that release's `v<version>/`
+ * folder and re-keying its entry to match (see `utils/migration-versions.ts`
+ * for the versioning model). Runs in the weekly `update-versions` workflow,
+ * whose PR commits the result, so the release only has to reason about what's
+ * still in `latest`.
  *
- * Only already-released migrations are touched. A net-new migration stays in
- * `latest` without a version for the release to stamp.
+ * Only already-released migrations are touched — a net-new one stays in `latest`
+ * without a version for the release to stamp.
  */
 
 const MIGRATIONS_ROOT = dirname(SOURCE_MIGRATIONS_PATH);
 
-/**
- * Move a migration's directory, preferring `git mv` so the change is staged and
- * shows up as a rename rather than a delete plus an add.
- */
+/** Move a directory, preferring `git mv` so the diff shows a rename. */
 const moveDir = (from: string, to: string) => {
   mkdirSync(dirname(to), { recursive: true });
   try {

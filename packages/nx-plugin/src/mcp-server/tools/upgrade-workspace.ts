@@ -7,16 +7,12 @@ import type { NxGeneratorInfo } from '../../utils/generators';
 import { fetchGuidePages } from '../generator-info';
 import { PackageManagerSchema } from '../schema';
 
-/**
- * The guide page (under `get_started/`) that backs this tool, so the tool and
- * the published docs never drift.
- */
+/** The guide page backing this tool, so it never drifts from the docs. */
 const UPGRADING_GUIDE = 'upgrading';
 
 /**
- * Add a tool which guides an agent through upgrading Nx and @aws/nx-plugin in
- * a workspace. Returns the `upgrading` docs page, which covers the nx migrate
- * flow for both packages, including deterministic and agentic migrations.
+ * Add a tool which guides an agent through upgrading Nx and @aws/nx-plugin in a
+ * workspace, returning the `upgrading` docs page.
  */
 export const addUpgradeWorkspaceTool = (
   server: McpServer,
