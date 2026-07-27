@@ -69,22 +69,12 @@ export const tsNxMigrationGenerator = async (
 
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
   const srcDir = sourceRoot.split('/').filter(Boolean).pop();
-  const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
-
   // Group migrations by the day they were scaffolded, so their rough order is
   // visible at a glance as the collection grows. Only a directory name, so an
-  // approximate date is fine. A re-run reuses the day the migration was first
-  // scaffolded under, rather than scaffolding a duplicate under today's.
-  const existingPath = tree.exists(migrationsJsonPath)
-    ? (readJson(tree, migrationsJsonPath).generators?.[name] as
-        | Record<string, string>
-        | undefined)
-    : undefined;
-  const migrationPath =
-    existingPath?.implementation?.replace(/^\.\/(.*)\/migration$/, '$1') ??
-    existingPath?.prompt?.replace(/^\.\/(.*)\/prompt\.md$/, '$1') ??
-    `${srcDir}/migrations/${new Date().toISOString().slice(0, 10)}/${name}`;
-  const migrationDir = joinPathFragments(plugin.root, migrationPath);
+  // approximate date is fine.
+  const day = new Date().toISOString().slice(0, 10);
+  const migrationPath = `${srcDir}/migrations/${day}/${name}`;
+  const migrationDir = joinPathFragments(sourceRoot, 'migrations', day, name);
 
   const rootPackageJson = tree.exists('package.json')
     ? readJson(tree, 'package.json')
@@ -134,9 +124,11 @@ export const tsNxMigrationGenerator = async (
     tree.delete(joinPathFragments(migrationDir, 'prompt.md'));
   }
 
-  // Register the migration in migrations.json (no version — the plugin author
-  // stamps versions at release time). The fields present discriminate the kind
-  // for nx. Paths are relative to the migrations.json directory (plugin root).
+  // Register the migration in migrations.json (no version of our own — the
+  // plugin author stamps versions at release time, and an already-stamped one
+  // is preserved). The fields present discriminate the kind for nx. Paths are
+  // relative to the migrations.json directory (plugin root).
+  const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
   const migrationsJson = tree.exists(migrationsJsonPath)
     ? readJson(tree, migrationsJsonPath)
     : {
@@ -149,12 +141,14 @@ export const tsNxMigrationGenerator = async (
     generators: sortObjectKeys({
       ...migrationsJson.generators,
       [name]: {
+        ...(migrationsJson.generators?.[name]?.version
+          ? { version: migrationsJson.generators[name].version }
+          : {}),
         description,
         ...(hasImplementation
           ? { implementation: `./${migrationPath}/migration` }
           : {}),
         ...(hasPrompt ? { prompt: `./${migrationPath}/prompt.md` } : {}),
-        ...migrationsJson.generators?.[name],
       },
     }),
   });

@@ -239,7 +239,7 @@ describe('nx-migration generator', () => {
       ).toBeTruthy();
     });
 
-    it('should reuse the original day when re-run later', async () => {
+    it('should re-register under today when re-run on a later day', async () => {
       // A migration scaffolded on an earlier day, as migrations.json records it
       writeJson(tree, MIGRATIONS_JSON, {
         $schema: 'http://json-schema.org/schema',
@@ -259,20 +259,37 @@ describe('nx-migration generator', () => {
         description: 'Rename the foo target to bar',
       });
 
-      // Scaffolds into the original day, not today's, so there's no duplicate
-      expect(
-        tree.exists(
-          'packages/nx-plugin/src/migrations/2020-01-02/rename-foo-target/migration.ts',
-        ),
-      ).toBeTruthy();
-      expect(
-        tree.exists(
-          `packages/nx-plugin/src/migrations/${DAY}/rename-foo-target/migration.ts`,
-        ),
-      ).toBeFalsy();
+      // Scaffolds under today, and the registered path follows it
+      expect(tree.exists(dir('migration.ts'))).toBeTruthy();
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['rename-foo-target'].implementation).toBe(
-        './src/migrations/2020-01-02/rename-foo-target/migration',
+        `./src/migrations/${DAY}/rename-foo-target/migration`,
+      );
+    });
+
+    it('should preserve a version already stamped onto the entry', async () => {
+      writeJson(tree, MIGRATIONS_JSON, {
+        $schema: 'http://json-schema.org/schema',
+        name: '@aws/nx-plugin',
+        generators: {
+          'rename-foo-target': {
+            version: '1.0.0-rc.20',
+            description: 'Rename the foo target to bar',
+            implementation:
+              './src/migrations/2020-01-02/rename-foo-target/migration',
+          },
+        },
+      });
+
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
+      expect(migrations.generators['rename-foo-target'].version).toBe(
+        '1.0.0-rc.20',
       );
     });
 
