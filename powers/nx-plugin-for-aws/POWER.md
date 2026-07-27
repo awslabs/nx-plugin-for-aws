@@ -34,7 +34,7 @@ Key capabilities:
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
   1. install Python 3.14 by running: `uv python install 3.14.0`
   2. verify with `uv python list --only-installed`
-- [AWS Credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) configured to your target AWS account (where your application will be deployed)
+- [AWS Credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) configured to your target AWS account are required to deploy, and for some local development workflows
 
 ### Getting Started
 
