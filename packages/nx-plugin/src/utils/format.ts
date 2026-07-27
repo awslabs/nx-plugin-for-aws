@@ -5,7 +5,11 @@
 
 import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
-import { execFileSync, execSync } from 'child_process';
+import {
+  type ExecSyncOptionsWithStringEncoding,
+  execFileSync,
+  execSync,
+} from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
@@ -153,6 +157,12 @@ export async function formatFilesInSubtree(
     ? getPythonProjectRuffConfigs(tree)
     : [];
 
+  // Run ruff from the workspace root so it resolves the same on-disk config
+  // hasRuffConfigOnDisk probed for. An in-memory tree has no root on disk, in
+  // which case there is no config to find and the process cwd is left alone.
+  const ruffCwd =
+    pyFiles.length && existsSync(tree.root) ? tree.root : undefined;
+
   // Format Python files with ruff (lint fixes + formatting)
   for (const file of pyFiles) {
     try {
@@ -160,6 +170,7 @@ export async function formatFilesInSubtree(
         file.content.toString('utf-8'),
         file.path,
         hasRuffConfigOnDisk(tree, file.path),
+        ruffCwd,
         getOwningProjectRuffConfig(file.path, pythonProjectConfigs),
       );
       tree.write(file.path, content);
@@ -357,6 +368,14 @@ function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
   }
 }
 
+/**
+ * The `[tool.ruff.lint].select` generated Python projects vend. Generation
+ * formats before that config lands on disk, so it is pinned here to keep
+ * generated files clean under the project's own `lint` target rather than under
+ * whatever ruff's defaults happen to be for the pinned release.
+ */
+const DEFAULT_RUFF_SELECT = ['E', 'F', 'UP', 'B', 'SIM', 'I'];
+
 interface PythonProjectRuffConfig {
   /** Project root, normalised to use forward slashes. */
   readonly root: string;
@@ -370,6 +389,8 @@ interface PythonProjectRuffConfig {
    * explicitly — ruff's formatting differs by target.
    */
   readonly targetVersion?: string;
+  /** The project's `[tool.ruff.lint].select`, if set. */
+  readonly select?: string[];
 }
 
 /**
@@ -401,7 +422,8 @@ export const requiresPythonToRuffTarget = (
 /**
  * Map each Nx project with a `pyproject.toml` to the ruff settings the on-disk
  * build enforces for it: its top-level module names (from
- * `[tool.hatch.build.targets.wheel].packages`) and its `[tool.ruff].line-length`.
+ * `[tool.hatch.build.targets.wheel].packages`), its `[tool.ruff].line-length`
+ * and its `[tool.ruff.lint].select`.
  */
 function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
   const configs: PythonProjectRuffConfig[] = [];
@@ -424,12 +446,24 @@ function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
         const targetVersion = requiresPythonToRuffTarget(
           pyproject?.project?.['requires-python'],
         );
-        if (modules.length || typeof lineLength === 'number' || targetVersion) {
+        const selected: unknown = pyproject?.tool?.ruff?.lint?.select;
+        const select = Array.isArray(selected)
+          ? selected.filter(
+              (rule): rule is string => typeof rule === 'string' && !!rule,
+            )
+          : undefined;
+        if (
+          modules.length ||
+          typeof lineLength === 'number' ||
+          targetVersion ||
+          select?.length
+        ) {
           configs.push({
             root: project.root.split(path.sep).join('/'),
             modules,
             lineLength: typeof lineLength === 'number' ? lineLength : undefined,
             targetVersion,
+            select: select?.length ? select : undefined,
           });
         }
       } catch {
@@ -469,11 +503,16 @@ function getOwningProjectRuffConfig(
  * Run ruff check --fix and ruff format on Python file content via stdin.
  * Applies all configured lint fixes (including import sorting) and formatting.
  *
- * When no ruff config exists on disk (`hasConfig` false) ruff falls back to its
- * defaults, which omit isort — but generated projects enable rule `I` and their
- * build fails on unsorted imports (I001). In that case we add `--extend-select
- * I` so import sorting matches what the build enforces. When a config does
- * exist we defer to it entirely, honouring the user's rule selection.
+ * When no ruff config exists on disk (`hasConfig` false) ruff would fall back to
+ * its own defaults, which change between releases — 0.16 widened them from `E`
+ * and `F` to 36 rule prefixes — so generation would apply fixes the project's
+ * build never asks for (eg `RUF022` reordering `__all__`). Instead run
+ * `--isolated` with the project's own `lint.select` pinned, so generation
+ * enforces exactly what `lint` does and nothing more. `--isolated` also stops
+ * ruff walking above the workspace to a stray config on the host.
+ *
+ * When a config does exist we defer to it entirely, honouring the user's rule
+ * selection, and run from `tree.root` so ruff discovers it.
  *
  * `projectConfig` carries the owning project's ruff settings, which ruff cannot
  * detect from the filesystem during generation because the project lives only
@@ -487,13 +526,21 @@ function ruffFixAndFormat(
   content: string,
   filePath: string,
   hasConfig: boolean,
+  cwd: string | undefined,
   projectConfig?: PythonProjectRuffConfig,
 ): string {
   const ruff = getRuffCommand();
   if (!ruff) return content;
 
-  const extendSelect = hasConfig ? '' : ' --extend-select I';
   const configArgs: string[] = [];
+  // Pin the rule selection only when deferring to ruff's defaults would
+  // otherwise apply rules the project's build does not enforce.
+  const isolated = !hasConfig;
+  if (isolated) {
+    configArgs.push(
+      `lint.select = ${JSON.stringify(projectConfig?.select ?? DEFAULT_RUFF_SELECT)}`,
+    );
+  }
   if (projectConfig?.modules.length) {
     configArgs.push(
       `lint.isort.known-first-party = ${JSON.stringify(projectConfig.modules)}`,
@@ -508,12 +555,20 @@ function ruffFixAndFormat(
   const config = configArgs
     .map((arg) => ` --config ${JSON.stringify(arg)}`)
     .join('');
+  const flags = `${isolated ? ' --isolated' : ''}${config}`;
+  // Built per invocation: `input` carries the content the previous step emitted.
+  const options = (input: string): ExecSyncOptionsWithStringEncoding => ({
+    input,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...(cwd ? { cwd } : {}),
+  });
 
   // First apply lint fixes (import sorting, unused imports, etc.)
   try {
     const result = execSync(
-      `${ruff} check --fix${extendSelect}${config} --stdin-filename ${filePath} -`,
-      { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+      `${ruff} check --fix${flags} --stdin-filename ${filePath} -`,
+      options(content),
     );
     content = result;
   } catch (e: any) {
@@ -527,12 +582,8 @@ function ruffFixAndFormat(
   // Then apply formatting
   try {
     content = execSync(
-      `${ruff} format${config} --stdin-filename ${filePath} -`,
-      {
-        input: content,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
+      `${ruff} format${flags} --stdin-filename ${filePath} -`,
+      options(content),
     );
   } catch {
     // Fall through with whatever content we have
