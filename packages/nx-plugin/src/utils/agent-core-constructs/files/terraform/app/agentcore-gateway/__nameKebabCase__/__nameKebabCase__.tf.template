@@ -11,6 +11,10 @@ terraform {
       source  = "hashicorp/external"
       version = "<%- externalProviderVersion %>"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "<%- timeProviderVersion %>"
+    }
 <%_ } _%>
     random = {
       source  = "hashicorp/random"
@@ -135,6 +139,20 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
     ], var.additional_iam_policy_statements)
   })
 }
+
+# IAM is eventually consistent, and CreateGateway assumes the gateway role to
+# call AuthorizeAction as part of its policy engine check. Without this wait
+# the check intermittently runs before the policy above has propagated and
+# CreateGateway fails with AccessDeniedException.
+resource "time_sleep" "gateway_role_policy_propagation" {
+  depends_on = [aws_iam_role_policy.gateway_role_policy]
+
+  create_duration = "30s"
+
+  triggers = {
+    policy = aws_iam_role_policy.gateway_role_policy.policy
+  }
+}
 <%_ } else { _%>
 # Inline policy for statements appended by connection generators
 # (e.g. InvokeAgentRuntime*)
@@ -190,7 +208,7 @@ resource "aws_bedrockagentcore_gateway" "this" {
     mode = "ENFORCE"
   }
 
-  depends_on = [aws_iam_role_policy.gateway_role_policy]
+  depends_on = [time_sleep.gateway_role_policy_propagation]
 <%_ } _%>
 }
 

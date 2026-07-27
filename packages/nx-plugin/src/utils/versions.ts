@@ -234,6 +234,7 @@ export const TERRAFORM_VERSIONS = {
   archive: '2.8.0',
   external: '2.4.0',
   local: '2.9.0',
+  time: '0.14.0',
 } as const;
 export type ITerraformProviderVersion = keyof typeof TERRAFORM_VERSIONS;
 
@@ -248,4 +249,5 @@ export const terraformProviderVersions = () => ({
   archiveProviderVersion: TERRAFORM_VERSIONS.archive,
   externalProviderVersion: TERRAFORM_VERSIONS.external,
   localProviderVersion: TERRAFORM_VERSIONS.local,
+  timeProviderVersion: TERRAFORM_VERSIONS.time,
 });
