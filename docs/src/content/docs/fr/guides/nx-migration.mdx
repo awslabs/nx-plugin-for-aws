@@ -59,6 +59,7 @@ Une migration déterministe (ou hybride) est une fonction qui modifie le systèm
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
+import { formatFilesInSubtree } from '@aws/nx-plugin/sdk/utils/format';
 
 export default async function migration(
   tree: Tree,
@@ -66,6 +67,8 @@ export default async function migration(
   const nextSteps: string[] = [];
 
   // Read and update the files your generators produce here.
+
+  await formatFilesInSubtree(tree);
 
   return { nextSteps };
 }
@@ -78,11 +81,12 @@ Pour les mêmes opérations que vous utilisez dans les générateurs (`generateF
 
 ### Garde-fous
 
-Les migrations s'exécutent sur des espaces de travail que vous ne contrôlez pas, suivez donc les mêmes règles que le squelette généré intègre :
+Les migrations s'exécutent sur des espaces de travail que vous ne contrôlez pas, il est donc recommandé de respecter les règles suivantes (le squelette généré les intègre) :
 
 - **Vérifier le motif avant d'écrire.** Si un fichier cible a divergé de la forme que vos générateurs produisent, ignorez-le et signalez-le via `nextSteps` plutôt que d'écraser les modifications de l'utilisateur.
 - **Idempotent.** Réexécuter la migration doit être une opération sans effet.
 - **Ne jamais faire de modifications uniquement de formatage.**
+- **Formater ce que vous écrivez.** `updateJson` et `writeJson` re-sérialisent un fichier entier, développant les tableaux en ligne dans une forme que la cible `format` fournie rejette — laissant l'utilisateur avec une construction échouée après une mise à niveau par ailleurs propre. Terminez avec `formatFilesInSubtree(tree)` afin que le diff reste limité aux lignes que vous vouliez modifier.
 
 ### Tester Votre Migration
 
@@ -126,21 +130,21 @@ Une fois que vous avez attribué des versions, un `migrations.json` enregistrant
   "$schema": "http://json-schema.org/schema",
   "name": "my-plugin",
   "generators": {
-    "rename-foo-target": {
+    "v2.0.0-rename-foo-target": {
       "version": "2.0.0",
       "description": "Rename the foo target to bar",
-      "implementation": "./src/migrations/2026-01-15/rename-foo-target/migration"
+      "implementation": "./src/migrations/v2.0.0/rename-foo-target/migration"
     },
-    "migrate-custom-handlers": {
+    "v3.0.0-migrate-custom-handlers": {
       "version": "3.0.0",
       "description": "Update custom handlers for the new API",
-      "prompt": "./src/migrations/2026-02-03/migrate-custom-handlers/prompt.md"
+      "prompt": "./src/migrations/v3.0.0/migrate-custom-handlers/prompt.md"
     },
-    "upgrade-framework": {
+    "v4.0.0-upgrade-framework": {
       "version": "4.0.0",
       "description": "Upgrade the framework and reconcile call sites",
-      "implementation": "./src/migrations/2026-03-20/upgrade-framework/migration",
-      "prompt": "./src/migrations/2026-03-20/upgrade-framework/prompt.md"
+      "implementation": "./src/migrations/v4.0.0/upgrade-framework/migration",
+      "prompt": "./src/migrations/v4.0.0/upgrade-framework/prompt.md"
     }
   }
 }
@@ -153,5 +157,8 @@ Les utilisateurs appliquent les migrations de votre plugin avec le flux `nx migr
 <NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
 
 Les migrations agentiques et hybrides sont appliquées par l'agent de codage local de l'utilisateur pendant `nx migrate --run-migrations` lorsqu'un agent est disponible.
+
+Pour le flux complet du point de vue de l'utilisateur effectuant la mise à niveau — y compris des exemples de sortie pour les migrations déterministes et agentiques — voir <Link path="get_started/upgrading">Mise à Niveau de Votre Espace de Travail</Link>.
+iques et hybrides sont appliquées par l'agent de codage local de l'utilisateur pendant `nx migrate --run-migrations` lorsqu'un agent est disponible.
 
 Pour le flux complet du point de vue de l'utilisateur effectuant la mise à niveau — y compris des exemples de sortie pour les migrations déterministes et agentiques — voir <Link path="get_started/upgrading">Mise à Niveau de Votre Espace de Travail</Link>.
