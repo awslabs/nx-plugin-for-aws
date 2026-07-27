@@ -2,7 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   backfillMigrationVersions,
   type MigrationsJson,
@@ -15,14 +23,30 @@ import {
 
 /**
  * Records the release that shipped each migration in the source
- * `migrations.json` (see `utils/migration-versions.ts` for the versioning
- * model). Runs in the weekly `update-versions` workflow, whose PR commits the
- * result, so source converges on the versions of everything already released
- * and the release only has to reason about entries that are still unversioned.
+ * `migrations.json` and moves the migration out of `latest/` into that
+ * release's `v<version>/` folder (see `utils/migration-versions.ts` for the
+ * versioning model). Runs in the weekly `update-versions` workflow, whose PR
+ * commits the result, so source converges on the versions of everything already
+ * released and the release only has to reason about what's still in `latest`.
  *
- * Only already-released migrations are written. A net-new migration is left
- * without a version for the release to stamp.
+ * Only already-released migrations are touched. A net-new migration stays in
+ * `latest` without a version for the release to stamp.
  */
+
+const MIGRATIONS_ROOT = dirname(SOURCE_MIGRATIONS_PATH);
+
+/**
+ * Move a migration's directory, preferring `git mv` so the change is staged and
+ * shows up as a rename rather than a delete plus an add.
+ */
+const moveDir = (from: string, to: string) => {
+  mkdirSync(dirname(to), { recursive: true });
+  try {
+    execFileSync('git', ['mv', from, to], { stdio: 'ignore' });
+  } catch {
+    renameSync(from, to);
+  }
+};
 
 const main = () => {
   const migrations: MigrationsJson = JSON.parse(
@@ -36,14 +60,30 @@ const main = () => {
     );
   }
 
-  const { migrations: backfilledMigrations, backfilled } =
-    backfillMigrationVersions(migrations, readShippedMigrationVersions(tags));
+  const {
+    migrations: backfilledMigrations,
+    backfilled,
+    moves,
+  } = backfillMigrationVersions(migrations, readShippedMigrationVersions(tags));
 
   if (backfilled.length === 0) {
     console.log(
       `No released migrations missing a version in ${SOURCE_MIGRATIONS_PATH} — nothing to backfill.`,
     );
     return;
+  }
+
+  for (const move of moves) {
+    const from = join(MIGRATIONS_ROOT, move.from);
+    const to = join(MIGRATIONS_ROOT, move.to);
+    if (!existsSync(from)) {
+      console.warn(
+        `Skipping move for ${move.name}: ${from} not found (already moved?).`,
+      );
+      continue;
+    }
+    moveDir(from, to);
+    console.log(`Moved ${move.name} to ${move.to}`);
   }
 
   writeFileSync(

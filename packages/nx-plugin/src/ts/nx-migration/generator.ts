@@ -71,12 +71,16 @@ export const tsNxMigrationGenerator = async (
 
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
   const srcDir = sourceRoot.split('/').filter(Boolean).pop();
-  // Group migrations by the day they were scaffolded, so their rough order is
-  // visible at a glance as the collection grows. Only a directory name, so an
-  // approximate date is fine.
-  const day = new Date().toISOString().slice(0, 10);
-  const migrationPath = `${srcDir}/migrations/${day}/${name}`;
-  const migrationDir = joinPathFragments(sourceRoot, 'migrations', day, name);
+  // Migrations are grouped by the release that ships them, so their order is
+  // visible at a glance as the collection grows. A new migration lands in
+  // `latest` — the release that picks it up moves it into its version folder.
+  const migrationPath = `${srcDir}/migrations/latest/${name}`;
+  const migrationDir = joinPathFragments(
+    sourceRoot,
+    'migrations',
+    'latest',
+    name,
+  );
 
   const rootPackageJson = tree.exists('package.json')
     ? readJson(tree, 'package.json')
@@ -99,8 +103,8 @@ export const tsNxMigrationGenerator = async (
     return pkg;
   });
 
-  // Migrations live at <sourceRoot>/migrations/<day>/<name>, so within this repo
-  // the shared utils are three levels up. Elsewhere they come from the SDK.
+  // Migrations live at <sourceRoot>/migrations/<version>/<name>, so within this
+  // repo the shared utils are three levels up. Elsewhere they come from the SDK.
   const formatImportPath = isNxPluginForAws
     ? '../../../utils/format'
     : `${PackageJson.name}/sdk/utils/format`;

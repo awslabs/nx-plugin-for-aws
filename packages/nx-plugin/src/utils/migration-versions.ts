@@ -13,7 +13,8 @@ import { compare, inc } from 'semver';
  * git tag). Versions reach the published `migrations.json` two ways:
  *
  * - The weekly `update-versions` PR backfills the version of the release that
- *   shipped each migration, so over time source carries the versions of
+ *   shipped each migration and moves it out of `latest/` into that release's
+ *   `v<version>/` folder, so over time source carries the versions of
  *   everything already released (see `scripts/backfill-migration-versions.ts`).
  * - At package time, entries still missing a version are stamped into the
  *   compiled `migrations.json` (see `scripts/stamp-migrations.ts`): one that has
@@ -83,10 +84,25 @@ export const stampMigrationVersions = (
   };
 };
 
+/** Directory a newly scaffolded migration lands in, before a release claims it. */
+export const LATEST_MIGRATIONS_DIR = 'latest';
+
+/** Directory holding the migrations shipped by a given release. */
+export const versionMigrationsDir = (version: string) => `v${version}`;
+
+/** A migration directory move the caller needs to make on disk. */
+export interface MigrationDirMove {
+  name: string;
+  version: string;
+  from: string;
+  to: string;
+}
+
 /**
  * Return a copy of the migrations collection with the version of the release
- * that shipped each migration written onto entries that don't have one yet, and
- * the names of the entries that changed.
+ * that shipped each migration written onto entries that don't have one yet, the
+ * names of the entries that changed, and the directory moves that go with them
+ * (out of `latest` and into the release's version folder).
  *
  * Unlike `stampMigrationVersions` this only records versions that are already
  * released — a migration not present in any release tag is left without a
@@ -99,23 +115,55 @@ export const stampMigrationVersions = (
 export const backfillMigrationVersions = (
   migrations: MigrationsJson,
   shippedVersions: Record<string, string>,
-): { migrations: MigrationsJson; backfilled: string[] } => {
+): {
+  migrations: MigrationsJson;
+  backfilled: string[];
+  moves: MigrationDirMove[];
+} => {
   const entries = Object.entries(migrations.generators ?? {});
-  const backfilled = entries
-    .filter(([name, entry]) => !entry.version && shippedVersions[name])
-    .map(([name]) => name);
+  const moves: MigrationDirMove[] = [];
+
+  const backfilledEntries = entries.map(([name, entry]) => {
+    const version = shippedVersions[name];
+    if (entry.version || !version) {
+      return [name, entry] as const;
+    }
+    // Re-point the entry's paths at the release's version folder, and record the
+    // matching directory move for the caller to make.
+    const latestSegment = `/${LATEST_MIGRATIONS_DIR}/${name}/`;
+    const versionSegment = `/${versionMigrationsDir(version)}/${name}/`;
+    const repointed = Object.fromEntries(
+      Object.entries(entry).map(([key, value]) => [
+        key,
+        typeof value === 'string' && value.includes(latestSegment)
+          ? value.replace(latestSegment, versionSegment)
+          : value,
+      ]),
+    );
+    const movedPath = Object.values(entry).find(
+      (value): value is string =>
+        typeof value === 'string' && value.includes(latestSegment),
+    );
+    if (movedPath) {
+      const dir = movedPath.slice(0, movedPath.indexOf(latestSegment));
+      moves.push({
+        name,
+        version,
+        from: `${dir}${latestSegment}`.replace(/^\.\/|\/$/g, ''),
+        to: `${dir}${versionSegment}`.replace(/^\.\/|\/$/g, ''),
+      });
+    }
+    return [name, { version, ...repointed }] as const;
+  });
+
   return {
     migrations: {
       ...migrations,
-      generators: Object.fromEntries(
-        entries.map(([name, entry]) => [
-          name,
-          entry.version || !shippedVersions[name]
-            ? entry
-            : { version: shippedVersions[name], ...entry },
-        ]),
-      ),
+      generators: Object.fromEntries(backfilledEntries),
     },
-    backfilled,
+    backfilled: entries
+      .filter(([name, entry]) => !entry.version && shippedVersions[name])
+      .map(([name]) => name),
+    moves,
   };
 };

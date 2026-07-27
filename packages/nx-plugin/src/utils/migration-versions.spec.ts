@@ -110,6 +110,53 @@ describe('migration versions', () => {
       expect(backfilled).toEqual(['shipped']);
     });
 
+    it('should move a released migration out of latest into its version folder', () => {
+      const { migrations, moves } = backfillMigrationVersions(
+        {
+          generators: {
+            shipped: {
+              description: 'shipped',
+              implementation: './src/migrations/latest/shipped/migration',
+              prompt: './src/migrations/latest/shipped/prompt.md',
+            },
+          },
+        },
+        { shipped: '1.1.0' },
+      );
+      expect(migrations.generators?.shipped).toEqual({
+        version: '1.1.0',
+        description: 'shipped',
+        implementation: './src/migrations/v1.1.0/shipped/migration',
+        prompt: './src/migrations/v1.1.0/shipped/prompt.md',
+      });
+      expect(moves).toEqual([
+        {
+          name: 'shipped',
+          version: '1.1.0',
+          from: 'src/migrations/latest/shipped',
+          to: 'src/migrations/v1.1.0/shipped',
+        },
+      ]);
+    });
+
+    it('should not move an unreleased migration out of latest', () => {
+      const { migrations, moves } = backfillMigrationVersions(
+        {
+          generators: {
+            'net-new': {
+              description: 'not released yet',
+              implementation: './src/migrations/latest/net-new/migration',
+            },
+          },
+        },
+        {},
+      );
+      expect(migrations.generators?.['net-new'].implementation).toBe(
+        './src/migrations/latest/net-new/migration',
+      );
+      expect(moves).toEqual([]);
+    });
+
     it('should leave an unreleased migration without a version', () => {
       const { migrations, backfilled } = backfillMigrationVersions(
         { generators: { 'net-new': { description: 'not released yet' } } },
