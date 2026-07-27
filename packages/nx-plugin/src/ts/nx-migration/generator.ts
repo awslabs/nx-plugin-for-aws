@@ -9,11 +9,9 @@ import {
   OverwriteStrategy,
   readJson,
   type Tree,
-  updateJson,
   writeJson,
 } from '@nx/devkit';
 import PackageJson from '../../../package.json' with { type: 'json' };
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -21,15 +19,18 @@ import {
   LATEST_MIGRATIONS_DIR,
   migrationKey,
 } from '../../utils/migration-versions';
-import { isEsmWorkspace } from '../../utils/module-format';
 import { kebabCase } from '../../utils/names';
 import {
   getGeneratorInfo,
+  isNxPluginForAwsWorkspace,
   type NxGeneratorInfo,
-  readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
-import { withVersions } from '../../utils/versions';
+import {
+  addNxPluginDependencies,
+  configureNxPluginPackageJson,
+  readNxPluginProject,
+} from '../nx-plugin/utils';
 import type { TsNxMigrationGeneratorSchema } from './schema';
 
 export const NX_MIGRATION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -64,14 +65,7 @@ export const tsNxMigrationGenerator = async (
   const hasPrompt = kind === 'agentic' || kind === 'hybrid';
   const isHybrid = kind === 'hybrid';
 
-  const plugin = readProjectConfigurationUnqualified(tree, options.project);
-
-  const tsConfigPath = joinPathFragments(plugin.root, 'tsconfig.json');
-  if (!tree.exists(tsConfigPath)) {
-    throw new Error(
-      `Selected plugin project ${options.project} is not a TypeScript project`,
-    );
-  }
+  const plugin = readNxPluginProject(tree, options.project);
 
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
   const srcDir = sourceRoot.split('/').filter(Boolean).pop();
@@ -86,26 +80,15 @@ export const tsNxMigrationGenerator = async (
   );
   const key = migrationKey(LATEST_MIGRATIONS_DIR, name);
 
-  const rootPackageJson = tree.exists('package.json')
-    ? readJson(tree, 'package.json')
-    : undefined;
-  const isNxPluginForAws = rootPackageJson?.name === '@aws/nx-plugin-source';
+  const isNxPluginForAws = isNxPluginForAwsWorkspace(tree);
 
-  // Ensure the project is a migrations-capable Nx Plugin: create package.json
-  // and wire the `nx-migrations` field if absent.
-  const esm = isEsmWorkspace(tree);
-  const pluginPackageJsonPath = joinPathFragments(plugin.root, 'package.json');
-  if (!tree.exists(pluginPackageJsonPath)) {
-    writeJson(tree, pluginPackageJsonPath, { name: plugin.name });
-  }
-  updateJson(tree, pluginPackageJsonPath, (pkg) => {
-    // Match the plugin's module system to the workspace. Nx loads `.ts`
-    // migrations via Node's native type stripping, ESM or CommonJS accordingly.
-    pkg.type ??= esm ? 'module' : 'commonjs';
-    pkg.main ??= esm ? './src/index.js' : './src/index';
-    pkg['nx-migrations'] ??= { migrations: './migrations.json' };
-    return pkg;
-  });
+  // Point the plugin at its migrations manifest so `nx migrate` finds them
+  const pluginPackageJsonPath = configureNxPluginPackageJson(
+    tree,
+    plugin,
+    'nx-migrations',
+    { migrations: './migrations.json' },
+  );
 
   // Migrations sit three levels below the source root, so in this repo the
   // shared utils are relative. Elsewhere they come from the SDK.
@@ -162,14 +145,9 @@ export const tsNxMigrationGenerator = async (
   });
 
   // Codemods import @nx/devkit and the @aws/nx-plugin SDK, both of which must
-  // resolve for nx to run them (already present in this repo).
-  if (hasImplementation && !isNxPluginForAws) {
-    const deps = {
-      ...withVersions(['@nx/devkit']),
-      [PackageJson.name]: `^${PackageJson.version}`,
-    };
-    addDependenciesToPackageJson(tree, {}, deps);
-    addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
+  // resolve for nx to run them
+  if (hasImplementation) {
+    addNxPluginDependencies(tree, pluginPackageJsonPath);
   }
 
   await addGeneratorMetricsIfApplicable(tree, [NX_MIGRATION_GENERATOR_INFO]);

@@ -4,6 +4,7 @@
  */
 import {
   joinPathFragments,
+  type ProjectConfiguration,
   type Tree,
   updateJson,
   writeJson,
@@ -17,12 +18,13 @@ import {
 import { withVersions } from '../../utils/versions';
 
 /**
- * Configures a TypeScript project as an Nx Plugin
+ * Read the configuration of a project which can host Nx Plugin generators or
+ * migrations, ie a TypeScript project.
  */
-export const configureTsProjectAsNxPlugin = (
+export const readNxPluginProject = (
   tree: Tree,
   projectName: string,
-) => {
+): ProjectConfiguration => {
   const project = readProjectConfigurationUnqualified(tree, projectName);
 
   const tsConfigPath = joinPathFragments(project.root, 'tsconfig.json');
@@ -32,16 +34,19 @@ export const configureTsProjectAsNxPlugin = (
     );
   }
 
-  // Create an empty generators.json if one dosn't exist
-  const generatorsJsonPath = joinPathFragments(project.root, 'generators.json');
-  if (!tree.exists(generatorsJsonPath)) {
-    writeJson(tree, generatorsJsonPath, {
-      generators: {},
-    });
-  }
+  return project;
+};
 
-  // Create a package.json if one doesn't exist, and configure "type", "main"
-  // and "generators"
+/**
+ * Create the plugin project's package.json if absent and point it at the given
+ * manifest (eg `generators`, `nx-migrations`), returning its path.
+ */
+export const configureNxPluginPackageJson = (
+  tree: Tree,
+  project: ProjectConfiguration,
+  manifestField: string,
+  manifestValue: unknown,
+): string => {
   const pluginPackageJsonPath = joinPathFragments(project.root, 'package.json');
   if (!tree.exists(pluginPackageJsonPath)) {
     writeJson(tree, pluginPackageJsonPath, {
@@ -50,29 +55,61 @@ export const configureTsProjectAsNxPlugin = (
   }
   const esm = isEsmWorkspace(tree);
   updateJson(tree, pluginPackageJsonPath, (pkg) => {
-    // Match the plugin's module system to the workspace. Nx loads `.ts`
-    // generators via Node's native type stripping, as ESM (workspace root is
+    // Match the plugin's module system to the workspace. Nx loads `.ts` files
+    // via Node's native type stripping, as ESM (workspace root is
     // `type: module`) or CommonJS accordingly.
     pkg.type ??= esm ? 'module' : 'commonjs';
     pkg.main ??= esm ? './src/index.js' : './src/index';
-    pkg.generators ??= './generators.json';
+    pkg[manifestField] ??= manifestValue;
     return pkg;
   });
+  return pluginPackageJsonPath;
+};
 
+/**
+ * Declare the dependencies the plugin's `.ts` files import on both the
+ * workspace and the plugin, since both must resolve for Nx to load them. A
+ * no-op inside the plugin's own monorepo, where they are already present.
+ */
+export const addNxPluginDependencies = (
+  tree: Tree,
+  pluginPackageJsonPath: string,
+): void => {
   const selfDependency = nxPluginSelfDependency(tree);
-
-  // Empty inside the plugin's own monorepo, where the plugin is the source
-  // rather than a dependency.
-  if (Object.keys(selfDependency).length > 0) {
-    // Add the required dependencies to the root package.json, and project's package.json
-    const deps = {
-      ...withVersions(['@nx/devkit']),
-      ...selfDependency,
-    };
-    // Generated workspaces are `"type": "module"`, so Nx loads the plugin's
-    // `.ts` generators as ESM via Node's native type stripping — no swc/ts-node
-    // transpiler is required.
-    addDependenciesToPackageJson(tree, {}, deps);
-    addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
+  if (Object.keys(selfDependency).length === 0) {
+    return;
   }
+  const deps = {
+    ...withVersions(['@nx/devkit']),
+    ...selfDependency,
+  };
+  addDependenciesToPackageJson(tree, {}, deps);
+  addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
+};
+
+/**
+ * Configures a TypeScript project as an Nx Plugin
+ */
+export const configureTsProjectAsNxPlugin = (
+  tree: Tree,
+  projectName: string,
+) => {
+  const project = readNxPluginProject(tree, projectName);
+
+  // Create an empty generators.json if one dosn't exist
+  const generatorsJsonPath = joinPathFragments(project.root, 'generators.json');
+  if (!tree.exists(generatorsJsonPath)) {
+    writeJson(tree, generatorsJsonPath, {
+      generators: {},
+    });
+  }
+
+  const pluginPackageJsonPath = configureNxPluginPackageJson(
+    tree,
+    project,
+    'generators',
+    './generators.json',
+  );
+
+  addNxPluginDependencies(tree, pluginPackageJsonPath);
 };
