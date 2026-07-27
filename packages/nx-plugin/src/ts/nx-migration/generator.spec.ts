@@ -17,12 +17,15 @@ import {
 } from './generator';
 
 describe('nx-migration generator', () => {
+  // Migrations are grouped by the day they were scaffolded
+  const DAY = new Date().toISOString().slice(0, 10);
+
   describe('within @aws/nx-plugin', () => {
     let tree: Tree;
     const PROJECT = '@aws/nx-plugin';
     const MIGRATIONS_JSON = 'packages/nx-plugin/migrations.json';
     const dir = (file: string) =>
-      `packages/nx-plugin/src/migrations/rename-foo-target/${file}`;
+      `packages/nx-plugin/src/migrations/${DAY}/rename-foo-target/${file}`;
 
     beforeEach(() => {
       tree = createTreeUsingTsSolutionSetup();
@@ -71,7 +74,7 @@ describe('nx-migration generator', () => {
 
       const migration = tree.read(dir('migration.ts'), 'utf-8');
       expect(migration).toContain(
-        "import { formatFilesInSubtree } from '../../utils/format';",
+        "import { formatFilesInSubtree } from '../../../utils/format';",
       );
       expect(migration).toContain('await formatFilesInSubtree(tree);');
     });
@@ -85,7 +88,7 @@ describe('nx-migration generator', () => {
 
       const spec = tree.read(dir('migration.spec.ts'), 'utf-8');
       expect(spec).toContain(
-        "import { createTreeUsingTsSolutionSetup } from '../../utils/test';",
+        "import { createTreeUsingTsSolutionSetup } from '../../../utils/test';",
       );
       expect(spec).toContain('createTreeUsingTsSolutionSetup()');
       expect(spec).not.toContain('createTreeWithEmptyWorkspace');
@@ -101,7 +104,7 @@ describe('nx-migration generator', () => {
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
-        implementation: './src/migrations/rename-foo-target/migration',
+        implementation: `./src/migrations/${DAY}/rename-foo-target/migration`,
       });
       expect(
         migrations.generators['rename-foo-target'].version,
@@ -123,7 +126,7 @@ describe('nx-migration generator', () => {
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
-        prompt: './src/migrations/rename-foo-target/prompt.md',
+        prompt: `./src/migrations/${DAY}/rename-foo-target/prompt.md`,
       });
     });
 
@@ -142,8 +145,8 @@ describe('nx-migration generator', () => {
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
-        implementation: './src/migrations/rename-foo-target/migration',
-        prompt: './src/migrations/rename-foo-target/prompt.md',
+        implementation: `./src/migrations/${DAY}/rename-foo-target/migration`,
+        prompt: `./src/migrations/${DAY}/rename-foo-target/prompt.md`,
       });
     });
 
@@ -222,6 +225,57 @@ describe('nx-migration generator', () => {
       );
     });
 
+    it('should group the migration under the day it was scaffolded', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      expect(
+        tree.exists(
+          `packages/nx-plugin/src/migrations/${DAY}/rename-foo-target/migration.ts`,
+        ),
+      ).toBeTruthy();
+    });
+
+    it('should reuse the original day when re-run later', async () => {
+      // A migration scaffolded on an earlier day, as migrations.json records it
+      writeJson(tree, MIGRATIONS_JSON, {
+        $schema: 'http://json-schema.org/schema',
+        name: '@aws/nx-plugin',
+        generators: {
+          'rename-foo-target': {
+            description: 'Rename the foo target to bar',
+            implementation:
+              './src/migrations/2020-01-02/rename-foo-target/migration',
+          },
+        },
+      });
+
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      // Scaffolds into the original day, not today's, so there's no duplicate
+      expect(
+        tree.exists(
+          'packages/nx-plugin/src/migrations/2020-01-02/rename-foo-target/migration.ts',
+        ),
+      ).toBeTruthy();
+      expect(
+        tree.exists(
+          `packages/nx-plugin/src/migrations/${DAY}/rename-foo-target/migration.ts`,
+        ),
+      ).toBeFalsy();
+      const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
+      expect(migrations.generators['rename-foo-target'].implementation).toBe(
+        './src/migrations/2020-01-02/rename-foo-target/migration',
+      );
+    });
+
     it('should preserve existing migrations.json entries', async () => {
       writeJson(tree, MIGRATIONS_JSON, {
         $schema: 'http://json-schema.org/schema',
@@ -277,7 +331,7 @@ describe('nx-migration generator', () => {
     const MIGRATIONS_JSON = 'tools/plugin/migrations.json';
     const PLUGIN_PKG = 'tools/plugin/package.json';
     const dir = (file: string) =>
-      `tools/plugin/src/migrations/rename-foo-target/${file}`;
+      `tools/plugin/src/migrations/${DAY}/rename-foo-target/${file}`;
 
     beforeEach(() => {
       tree = createTreeUsingTsSolutionSetup();
@@ -324,7 +378,7 @@ describe('nx-migration generator', () => {
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
-        implementation: './src/migrations/rename-foo-target/migration',
+        implementation: `./src/migrations/${DAY}/rename-foo-target/migration`,
       });
     });
 
@@ -444,8 +498,8 @@ describe('nx-migration generator', () => {
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
-        implementation: './src/migrations/rename-foo-target/migration',
-        prompt: './src/migrations/rename-foo-target/prompt.md',
+        implementation: `./src/migrations/${DAY}/rename-foo-target/migration`,
+        prompt: `./src/migrations/${DAY}/rename-foo-target/prompt.md`,
       });
     });
 

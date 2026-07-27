@@ -136,8 +136,10 @@ describe('smoke test - nx-plugin', () => {
     async () => {
       const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
       const project = '@nx-plugin-test/plugin';
+      // Migrations are grouped by the day they were scaffolded
+      const day = new Date().toISOString().slice(0, 10);
       const migration = (name: string, file: string) =>
-        join(projectRoot, 'tools/plugin/src/migrations', name, file);
+        join(projectRoot, 'tools/plugin/src/migrations', day, name, file);
 
       // Deterministic (default) — the plugin has no migrations.json yet, so
       // this run must create it and wire up the nx-migrations field.
@@ -184,16 +186,16 @@ describe('smoke test - nx-plugin', () => {
       );
       expect(migrationsJson.generators['rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
-        implementation: './src/migrations/rename-foo-target/migration',
+        implementation: `./src/migrations/${day}/rename-foo-target/migration`,
       });
       expect(migrationsJson.generators['migrate-custom-handlers']).toEqual({
         description: 'Update custom handlers',
-        prompt: './src/migrations/migrate-custom-handlers/prompt.md',
+        prompt: `./src/migrations/${day}/migrate-custom-handlers/prompt.md`,
       });
       expect(migrationsJson.generators['upgrade-framework']).toEqual({
         description: 'Upgrade the framework',
-        implementation: './src/migrations/upgrade-framework/migration',
-        prompt: './src/migrations/upgrade-framework/prompt.md',
+        implementation: `./src/migrations/${day}/upgrade-framework/migration`,
+        prompt: `./src/migrations/${day}/upgrade-framework/prompt.md`,
       });
 
       // The plugin's package.json points nx migrate at the manifest

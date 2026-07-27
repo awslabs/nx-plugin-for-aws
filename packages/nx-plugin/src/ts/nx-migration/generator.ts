@@ -69,7 +69,22 @@ export const tsNxMigrationGenerator = async (
 
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
   const srcDir = sourceRoot.split('/').filter(Boolean).pop();
-  const migrationDir = joinPathFragments(sourceRoot, 'migrations', name);
+  const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
+
+  // Group migrations by the day they were scaffolded, so their rough order is
+  // visible at a glance as the collection grows. Only a directory name, so an
+  // approximate date is fine. A re-run reuses the day the migration was first
+  // scaffolded under, rather than scaffolding a duplicate under today's.
+  const existingPath = tree.exists(migrationsJsonPath)
+    ? (readJson(tree, migrationsJsonPath).generators?.[name] as
+        | Record<string, string>
+        | undefined)
+    : undefined;
+  const migrationPath =
+    existingPath?.implementation?.replace(/^\.\/(.*)\/migration$/, '$1') ??
+    existingPath?.prompt?.replace(/^\.\/(.*)\/prompt\.md$/, '$1') ??
+    `${srcDir}/migrations/${new Date().toISOString().slice(0, 10)}/${name}`;
+  const migrationDir = joinPathFragments(plugin.root, migrationPath);
 
   const rootPackageJson = tree.exists('package.json')
     ? readJson(tree, 'package.json')
@@ -92,13 +107,13 @@ export const tsNxMigrationGenerator = async (
     return pkg;
   });
 
-  // Migrations live at <sourceRoot>/migrations/<name>, so within this repo the
-  // shared utils are two levels up. Elsewhere they come from the published SDK.
+  // Migrations live at <sourceRoot>/migrations/<day>/<name>, so within this repo
+  // the shared utils are three levels up. Elsewhere they come from the SDK.
   const formatImportPath = isNxPluginForAws
-    ? '../../utils/format'
+    ? '../../../utils/format'
     : `${PackageJson.name}/sdk/utils/format`;
   const testImportPath = isNxPluginForAws
-    ? '../../utils/test'
+    ? '../../../utils/test'
     : `${PackageJson.name}/sdk/utils/test`;
 
   // Scaffold the migration files, then prune the ones this kind doesn't use.
@@ -122,7 +137,6 @@ export const tsNxMigrationGenerator = async (
   // Register the migration in migrations.json (no version — the plugin author
   // stamps versions at release time). The fields present discriminate the kind
   // for nx. Paths are relative to the migrations.json directory (plugin root).
-  const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
   const migrationsJson = tree.exists(migrationsJsonPath)
     ? readJson(tree, migrationsJsonPath)
     : {
@@ -137,11 +151,9 @@ export const tsNxMigrationGenerator = async (
       [name]: {
         description,
         ...(hasImplementation
-          ? { implementation: `./${srcDir}/migrations/${name}/migration` }
+          ? { implementation: `./${migrationPath}/migration` }
           : {}),
-        ...(hasPrompt
-          ? { prompt: `./${srcDir}/migrations/${name}/prompt.md` }
-          : {}),
+        ...(hasPrompt ? { prompt: `./${migrationPath}/prompt.md` } : {}),
         ...migrationsJson.generators?.[name],
       },
     }),
