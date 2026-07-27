@@ -433,6 +433,28 @@ describe('agentcore-gateway generator', () => {
       expect(module).toContain('render-cedar.cjs');
     });
 
+    it('waits for the gateway role policy to propagate before creating the gateway', () => {
+      const module = tree
+        .read(
+          'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        )!
+        .toString();
+      // CreateGateway assumes the gateway role to call AuthorizeAction, so the
+      // policy must have propagated first or creation fails with AccessDenied.
+      expect(module).toContain('source  = "hashicorp/time"');
+      expect(module).toContain(
+        'resource "time_sleep" "gateway_role_policy_propagation"',
+      );
+      expect(module).toContain(
+        'depends_on = [time_sleep.gateway_role_policy_propagation]',
+      );
+      // Re-waits when the policy changes, e.g. a connection generator appends
+      // statements the check depends on.
+      expect(module).toContain(
+        'policy = aws_iam_role_policy.gateway_role_policy.policy',
+      );
+    });
+
     it('protects the gateway with a regional WAF web ACL by default', () => {
       const module = tree
         .read(
