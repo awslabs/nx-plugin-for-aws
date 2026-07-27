@@ -94,13 +94,27 @@ describe('connection generator', () => {
   };
 
   // Helper to set up a Smithy project
-  const setupSmithyProject = (name = 'api-model') => {
+  // Helper to set up the model project of a ts#smithy-api, which ts#smithy-api
+  // always links to its backend
+  const setupSmithyProject = (name = 'api-model', backendProject = 'api') => {
     tree.write(
       `apps/${name}/project.json`,
       JSON.stringify({
         name,
         root: `apps/${name}`,
-        metadata: { generator: 'smithy#project' },
+        metadata: { generator: 'smithy#project', backendProject },
+      }),
+    );
+  };
+
+  // Helper to set up a standalone smithy#project shape library
+  const setupSmithyShapeLibrary = (name = 'shapes') => {
+    tree.write(
+      `packages/${name}/project.json`,
+      JSON.stringify({
+        name,
+        root: `packages/${name}`,
+        metadata: { generator: 'smithy#project', smithyType: 'shapes' },
       }),
     );
   };
@@ -274,6 +288,32 @@ describe('connection generator', () => {
         expect(result.connection).toEqual({
           source: 'ts#react-website',
           target: 'ts#smithy-api',
+        });
+      });
+
+      it('should resolve smithy api -> smithy shape library', async () => {
+        setupSmithyProject();
+        setupSmithyShapeLibrary();
+        const result = await resolveConnection(tree, {
+          sourceProject: 'api-model',
+          targetProject: 'shapes',
+        });
+        expect(result.connection).toEqual({
+          source: 'ts#smithy-api',
+          target: 'smithy#project',
+        });
+      });
+
+      it('should resolve smithy shape library -> smithy shape library', async () => {
+        setupSmithyShapeLibrary('shapes-a');
+        setupSmithyShapeLibrary('shapes-b');
+        const result = await resolveConnection(tree, {
+          sourceProject: 'shapes-a',
+          targetProject: 'shapes-b',
+        });
+        expect(result.connection).toEqual({
+          source: 'smithy#project',
+          target: 'smithy#project',
         });
       });
 
@@ -884,6 +924,12 @@ describe('connection generator', () => {
       expect(await determineProjectType(tree, 'api-model')).toBe(
         'ts#smithy-api',
       );
+    });
+
+    it('should identify a standalone smithy project', async () => {
+      // Without a backend, a smithy project is not an API
+      setupSmithyShapeLibrary();
+      expect(await determineProjectType(tree, 'shapes')).toBe('smithy#project');
     });
 
     it('should identify smithy (backend project)', async () => {

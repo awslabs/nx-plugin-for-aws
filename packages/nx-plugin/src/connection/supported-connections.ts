@@ -17,6 +17,7 @@ export const SUPPORTED_PROJECT_TYPES = [
   'ts#dynamodb',
   'py#dynamodb',
   'agentcore-gateway',
+  'smithy#project',
 ] as const;
 
 // The single source of truth for supported connections, in a dependency-free
@@ -55,6 +56,8 @@ export const SUPPORTED_CONNECTIONS = [
   { source: 'py#fast-api', target: 'py#rdb' },
   { source: 'py#agent', target: 'py#rdb' },
   { source: 'py#mcp-server', target: 'py#rdb' },
+  { source: 'ts#smithy-api', target: 'smithy#project' },
+  { source: 'smithy#project', target: 'smithy#project' },
 ] as const satisfies readonly Connection[];
 
 // `<source> -> <target>` string union of every supported connection. Used to

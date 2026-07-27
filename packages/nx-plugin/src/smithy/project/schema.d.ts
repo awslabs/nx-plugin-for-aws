@@ -4,6 +4,7 @@
  */
 export interface SmithyProjectGeneratorSchema {
   name: string;
+  type?: 'service' | 'shapes';
   serviceName?: string;
   namespace?: string;
   directory?: string;

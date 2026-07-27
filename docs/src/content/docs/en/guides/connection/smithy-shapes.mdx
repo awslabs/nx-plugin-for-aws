@@ -1,0 +1,108 @@
+---
+title: Smithy Project to Shape Library
+description: Share Smithy shapes between Smithy projects
+when:
+  sourceType:
+    - smithy
+    - smithy#project
+  targetType: smithy#project
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+The `connection` generator can connect a Smithy project to a <Link path="guides/smithy-project">Smithy shape library</Link>, so that several Smithy projects can share the same shape definitions rather than each defining their own copy.
+
+Both a <Link path="guides/ts-smithy-api">Smithy API</Link> and another shape library can consume a shape library, so libraries can be layered.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A shape library, generated with <Link path="guides/smithy-project">`smithy#project --type=shapes`</Link>
+2. A Smithy project to consume it — either a <Link path="guides/ts-smithy-api">`ts#api --framework=smithy`</Link> project, or another <Link path="guides/smithy-project">`smithy#project`</Link>
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select the consuming project as the source and the shape library as the target. When the source is a Smithy API, the connection is made against its model project, since that is where the shapes are used.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator configures the consuming model project to load the shape library's shapes:
+
+<FileTree>
+
+- packages/my-api/model
+  - .smithy-deps Shapes copied in from connected libraries (git ignored)
+    - my-shapes
+      - main.smithy
+  - src
+    - main.smithy Your own model
+  - smithy-build.json `.smithy-deps/` added to `sources`
+  - build.Dockerfile `.smithy-deps` copied into the build
+
+</FileTree>
+
+Additionally, it:
+
+- Adds a `copy-model-deps` target which copies each connected library's sources into `.smithy-deps`
+- Makes the model's `compile` target depend on `copy-model-deps`, so the shapes are in place before the model is built
+- Records the connected libraries in the model project's `metadata.smithyDependencies`
+
+:::note[Why the shapes are copied]
+Smithy models are compiled by the Smithy CLI running inside a Docker build whose context is the project directory. Files outside that directory aren't visible to the build, so a library's shapes are copied into the consuming project before it is built.
+:::
+
+## Using the Shared Shapes
+
+Once connected, reference the library's shapes from your own model with `use`:
+
+```smithy
+$version: "2.0"
+
+namespace com.example.api
+
+use com.example.shared#Customer
+
+@http(method: "GET", uri: "/customer/{id}")
+@readonly
+operation GetCustomer {
+    input := {
+        @httpLabel
+        @required
+        id: String
+    }
+    output := {
+        @required
+        customer: Customer
+    }
+}
+```
+
+Build your project as usual — the shapes are copied in automatically:
+
+<NxCommands commands={['build my-api']} />
+
+## Transitive Dependencies
+
+A shape library may itself depend on another shape library. When you connect to a library, the libraries it depends on come along too, so you only need to connect to the libraries you reference directly.
+
+A library reached by more than one path is copied in only once, so its shapes are never defined twice.
+
+:::caution
+Dependencies are resolved when the generator runs. If you connect a new library to an existing library _after_ connecting that library to a consumer, re-run the generator on the consumer to pick up the addition.
+:::
+
+## Circular Dependencies
+
+Shape libraries cannot depend on each other circularly. The generator fails with an error if a connection would introduce a cycle.

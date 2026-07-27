@@ -171,6 +171,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `ts#mcp-server`         | MCP server (TypeScript)                                                                                           |
 | `ts#agent`              | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
 | `ts#nx-generator`       | Nx generator scaffold                                                                                             |
+| `smithy#project`        | Smithy model project — a service model, or a shape library shared between Smithy projects                          |
 | `py#project`            | Python project (uv)                                                                                               |
 | `py#api`                | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
 | `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |

@@ -231,6 +231,24 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // Smithy shape libraries, layered so the API picks up my-shapes transitively
+  await runCLI(
+    `generate @aws/nx-plugin:smithy#project --name=my-shared-shapes --type=shapes --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:smithy#project --name=my-shapes --type=shapes --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-shapes --targetProject=my-shared-shapes --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-smithy-api --targetProject=my-shapes --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // Agent <-> MCP server connections.
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive${deferFlag}`,

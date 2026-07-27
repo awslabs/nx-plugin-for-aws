@@ -393,6 +393,10 @@ export default defineConfig({
                       label: 'Smithy',
                       link: '/guides/ts-smithy-api',
                     },
+                    {
+                      label: 'smithy#project',
+                      link: '/guides/smithy-project',
+                    },
                   ],
                 },
                 {

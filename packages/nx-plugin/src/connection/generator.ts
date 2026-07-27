@@ -23,6 +23,7 @@ import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator'
 import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator';
 import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator';
 import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator';
+import smithyModelConnectionGenerator from '../smithy/model-connection/generator';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
@@ -166,6 +167,10 @@ const CONNECTION_GENERATORS = {
     pyRdbAgentConnectionGenerator(tree, options),
   'py#mcp-server -> py#rdb': (tree, options) =>
     pyRdbMcpServerConnectionGenerator(tree, options),
+  'ts#smithy-api -> smithy#project': (tree, options) =>
+    smithyModelConnectionGenerator(tree, options),
+  'smithy#project -> smithy#project': (tree, options) =>
+    smithyModelConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>
@@ -421,6 +426,10 @@ const determineProjectTypeFromConfig = async (
     return 'ts#smithy-api';
   }
 
+  if (isSmithyProject(projectConfiguration)) {
+    return 'smithy#project';
+  }
+
   if (isReact(tree, projectConfiguration)) {
     return 'ts#react-website';
   }
@@ -538,12 +547,25 @@ const isSmithyApi = (
   _tree: Tree,
   projectConfiguration: ProjectConfiguration,
 ): boolean => {
-  // Support selecting either the smithy model or backend project
-  return [
-    SMITHY_PROJECT_GENERATOR_INFO.id,
-    TS_SMITHY_API_GENERATOR_INFO.id,
-  ].includes(((projectConfiguration.metadata as any) ?? {}).generator);
+  const metadata = (projectConfiguration.metadata as any) ?? {};
+
+  // Support selecting either the smithy model or backend project. A model
+  // project only belongs to an API when it has an associated backend —
+  // without one it's a standalone Smithy project.
+  return (
+    metadata.generator === TS_SMITHY_API_GENERATOR_INFO.id ||
+    (metadata.generator === SMITHY_PROJECT_GENERATOR_INFO.id &&
+      !!metadata.backendProject)
+  );
 };
+
+/**
+ * A Smithy project which isn't the model for an API - either a shape library,
+ * or a service model which has no implementation yet.
+ */
+const isSmithyProject = (projectConfiguration: ProjectConfiguration): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  SMITHY_PROJECT_GENERATOR_INFO.id;
 
 const isRdb = (projectConfiguration: ProjectConfiguration): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===

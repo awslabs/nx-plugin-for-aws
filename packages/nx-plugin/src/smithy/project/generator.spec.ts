@@ -282,4 +282,126 @@ describe('smithyProjectGenerator', () => {
       '@proj/other-api',
     );
   });
+
+  it('should preserve user edits to smithy models when re-run', async () => {
+    await smithyProjectGenerator(tree, { name: 'test-api' });
+
+    tree.write(
+      'test-api/src/main.smithy',
+      '$version: "2.0"\n\nnamespace com.custom\n\nstructure Edited {}\n',
+    );
+
+    await smithyProjectGenerator(tree, { name: 'test-api' });
+
+    expect(tree.read('test-api/src/main.smithy', 'utf-8')).toContain(
+      'structure Edited',
+    );
+  });
+
+  describe('shape libraries', () => {
+    it('should generate a shape library without a service', async () => {
+      await smithyProjectGenerator(tree, {
+        name: 'test-shapes',
+        type: 'shapes',
+      });
+
+      expect(tree.exists('test-shapes/src/main.smithy')).toBeTruthy();
+      expect(tree.exists('test-shapes/smithy-build.json')).toBeTruthy();
+      expect(tree.exists('test-shapes/build.Dockerfile')).toBeTruthy();
+
+      // A shape library defines no service and no operations
+      expect(tree.exists('test-shapes/src/operations/echo.smithy')).toBeFalsy();
+      const mainSmithy = tree.read('test-shapes/src/main.smithy', 'utf-8');
+      expect(mainSmithy).not.toContain('service ');
+      expect(mainSmithy).toContain('structure ExampleShape');
+
+      expect(mainSmithy).toMatchSnapshot('shapes-main.smithy');
+      expect(
+        tree.read('test-shapes/smithy-build.json', 'utf-8'),
+      ).toMatchSnapshot('shapes-smithy-build.json');
+      expect(
+        tree.read('test-shapes/build.Dockerfile', 'utf-8'),
+      ).toMatchSnapshot('shapes-build.Dockerfile');
+      expect(tree.read('test-shapes/project.json', 'utf-8')).toMatchSnapshot(
+        'shapes-project.json',
+      );
+    });
+
+    it('should not configure service-only codegen plugins for a shape library', async () => {
+      await smithyProjectGenerator(tree, {
+        name: 'test-shapes',
+        type: 'shapes',
+      });
+
+      // The openapi and ssdk codegen plugins both require a service shape
+      const smithyBuild = readJson(tree, 'test-shapes/smithy-build.json');
+      expect(smithyBuild.plugins).toBeUndefined();
+      expect(smithyBuild.sources).toEqual(['src/']);
+    });
+
+    it('should record the shape library type and namespace in metadata', async () => {
+      await smithyProjectGenerator(tree, {
+        name: 'test-shapes',
+        type: 'shapes',
+        namespace: 'com.example.shared',
+      });
+
+      const { metadata } = readJson(tree, 'test-shapes/project.json');
+      expect(metadata).toHaveProperty(
+        'generator',
+        SMITHY_PROJECT_GENERATOR_INFO.id,
+      );
+      expect(metadata).toHaveProperty('smithyType', 'shapes');
+      expect(metadata).toHaveProperty('namespace', 'com.example.shared');
+      // A shape library is not an API
+      expect(metadata).not.toHaveProperty('apiName');
+    });
+
+    it('should use the given namespace for the shape library', async () => {
+      await smithyProjectGenerator(tree, {
+        name: 'test-shapes',
+        type: 'shapes',
+        namespace: 'com.example.shared',
+      });
+
+      expect(tree.read('test-shapes/src/main.smithy', 'utf-8')).toContain(
+        'namespace com.example.shared',
+      );
+    });
+
+    it('should build the shape library with the same docker target as a service', async () => {
+      await smithyProjectGenerator(tree, {
+        name: 'test-shapes',
+        type: 'shapes',
+      });
+
+      const projectConfig = readJson(tree, 'test-shapes/project.json');
+      expect(projectConfig.targets.build.dependsOn).toEqual(['compile']);
+      expect(projectConfig.targets.compile.options.commands[2]).toBe(
+        'docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
+      );
+    });
+
+    it('should be idempotent when re-run with same options', async () => {
+      await smithyProjectGenerator(tree, {
+        name: 'test-shapes',
+        type: 'shapes',
+      });
+
+      const projectCountAfterFirstRun = getProjects(tree).size;
+      const mainSmithyAfterFirstRun = tree.read(
+        'test-shapes/src/main.smithy',
+        'utf-8',
+      );
+
+      await expect(
+        smithyProjectGenerator(tree, { name: 'test-shapes', type: 'shapes' }),
+      ).resolves.toBeDefined();
+
+      expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
+      expect(tree.read('test-shapes/src/main.smithy', 'utf-8')).toEqual(
+        mainSmithyAfterFirstRun,
+      );
+    });
+  });
 });

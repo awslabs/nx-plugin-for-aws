@@ -7,6 +7,7 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
 import { getTsLibDetails } from '../../ts/lib/generator';
@@ -35,6 +36,7 @@ export const smithyProjectGenerator = async (
 ): Promise<GeneratorCallback> => {
   const cmd = new FsCommands(tree);
   const containers = await resolveContainers(tree, 'inherit');
+  const type = options.type ?? 'service';
 
   // Create project.json
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);
@@ -73,19 +75,30 @@ export const smithyProjectGenerator = async (
   const scope = getNpmScope(tree);
   const namespace = options.namespace ?? toKebabCase(scope).replace(/-/g, '.');
 
-  generateFiles(tree, joinPathFragments(import.meta.dirname, 'files'), dir, {
-    namespace,
-    serviceNameClassName,
-    serviceNameKebabCase,
-    scope,
-  });
+  generateFiles(
+    tree,
+    joinPathFragments(import.meta.dirname, 'files', type),
+    dir,
+    {
+      namespace,
+      serviceNameClassName,
+      serviceNameKebabCase,
+      scope,
+    },
+    {
+      // Smithy models are user-owned — a re-run must not discard edits
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
 
   addGeneratorMetadata(
     tree,
     fullyQualifiedName,
     SMITHY_PROJECT_GENERATOR_INFO,
     {
-      apiName: options.name,
+      smithyType: type,
+      namespace,
+      ...(type === 'service' ? { apiName: options.name } : {}),
     },
   );
 
