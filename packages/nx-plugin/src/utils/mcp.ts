@@ -16,9 +16,19 @@ export const NX_PLUGIN_MCP_SERVER_NAME = 'nx-plugin-for-aws';
 export const NX_PLUGIN_MCP_SERVER_COMMAND = 'npx';
 
 /**
- * Arguments used to launch the Nx Plugin for AWS MCP server.
+ * Package providing the Nx Plugin for AWS MCP server.
  */
-export const NX_PLUGIN_MCP_SERVER_ARGS = ['-y', '@aws/nx-plugin-mcp'];
+export const NX_PLUGIN_MCP_PACKAGE_NAME = '@aws/nx-plugin-mcp';
+
+/**
+ * Arguments used to launch the Nx Plugin for AWS MCP server.
+ *
+ * npx prefers a locally installed package over the registry, and generators
+ * declare this package as a workspace devDependency, so the server tracks the
+ * version in the workspace's lockfile. `-y` falls back to fetching from the
+ * registry for a workspace where it isn't installed.
+ */
+export const NX_PLUGIN_MCP_SERVER_ARGS = ['-y', NX_PLUGIN_MCP_PACKAGE_NAME];
 
 /**
  * A single stdio MCP server entry, shared by agents that use the `mcpServers` config shape.
