@@ -3,64 +3,55 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import {
-  compareVersions,
-  stampMigrationVersions,
-  unshippedMigrationVersion,
-} from './migration-versions';
+import { stampMigrationVersions } from './migration-versions';
 
 describe('migration versions', () => {
-  describe('unshippedMigrationVersion', () => {
-    it('should sit strictly between a release and any possible next release', () => {
-      const version = unshippedMigrationVersion('1.2.3');
-      expect(compareVersions(version, '1.2.3')).toBeGreaterThan(0);
-      expect(compareVersions(version, '1.2.4')).toBeLessThan(0);
-      expect(compareVersions(version, '1.3.0')).toBeLessThan(0);
-      expect(compareVersions(version, '2.0.0')).toBeLessThan(0);
-    });
-
-    it('should sit strictly between a prerelease and the next release', () => {
-      const version = unshippedMigrationVersion('1.0.0-rc.32');
-      expect(compareVersions(version, '1.0.0-rc.32')).toBeGreaterThan(0);
-      expect(compareVersions(version, '1.0.0')).toBeLessThan(0);
-    });
-
-    it('should throw on an invalid version', () => {
-      expect(() => unshippedMigrationVersion('not-a-version')).toThrow();
-    });
-  });
-
   describe('stampMigrationVersions', () => {
-    it('should stamp shipped migrations with their first shipped version', () => {
-      const stamped = stampMigrationVersions(
+    it('should stamp unversioned migrations with the release version', () => {
+      const { migrations, stamped } = stampMigrationVersions(
         {
           generators: {
-            'my-migration': { description: 'shipped' },
+            'new-migration': { description: 'unversioned' },
           },
         },
-        { 'my-migration': '1.1.0' },
         '1.2.0',
       );
-      expect(stamped.generators?.['my-migration'].version).toBe('1.1.0');
+      expect(migrations.generators?.['new-migration'].version).toBe('1.2.0');
+      expect(stamped).toEqual(['new-migration']);
     });
 
-    it('should stamp unshipped migrations with a version above the latest release', () => {
-      const stamped = stampMigrationVersions(
+    it('should leave migrations that already have a version untouched', () => {
+      const { migrations, stamped } = stampMigrationVersions(
         {
           generators: {
-            'new-migration': { description: 'unshipped' },
+            'shipped-migration': { version: '1.1.0', description: 'shipped' },
           },
         },
-        {},
         '1.2.0',
       );
-      const version = stamped.generators?.['new-migration'].version as string;
-      expect(compareVersions(version, '1.2.0')).toBeGreaterThan(0);
-      expect(compareVersions(version, '1.2.1')).toBeLessThan(0);
+      expect(migrations.generators?.['shipped-migration'].version).toBe(
+        '1.1.0',
+      );
+      expect(stamped).toEqual([]);
+    });
+
+    it('should stamp only the unversioned entries in a mixed collection', () => {
+      const { migrations, stamped } = stampMigrationVersions(
+        {
+          generators: {
+            shipped: { version: '1.1.0', description: 'shipped' },
+            unshipped: { description: 'unshipped' },
+          },
+        },
+        '1.2.0',
+      );
+      expect(migrations.generators?.shipped.version).toBe('1.1.0');
+      expect(migrations.generators?.unshipped.version).toBe('1.2.0');
+      expect(stamped).toEqual(['unshipped']);
     });
 
     it('should preserve all other entry fields', () => {
-      const stamped = stampMigrationVersions(
+      const { migrations } = stampMigrationVersions(
         {
           generators: {
             'my-migration': {
@@ -69,14 +60,37 @@ describe('migration versions', () => {
             },
           },
         },
-        {},
-        '1.0.0-rc.32',
+        '1.0.0-rc.45',
       );
-      expect(stamped.generators?.['my-migration']).toEqual({
-        version: '1.0.0-rc.33',
+      expect(migrations.generators?.['my-migration']).toEqual({
+        version: '1.0.0-rc.45',
         description: 'a migration',
         implementation: './src/migrations/my-migration/migration',
       });
+    });
+
+    it('should preserve other top-level keys', () => {
+      const { migrations } = stampMigrationVersions(
+        {
+          $schema: 'http://json-schema.org/schema',
+          name: '@aws/nx-plugin',
+          generators: { 'my-migration': { description: 'a migration' } },
+        } as never,
+        '1.2.0',
+      );
+      expect(migrations).toMatchObject({
+        $schema: 'http://json-schema.org/schema',
+        name: '@aws/nx-plugin',
+      });
+    });
+
+    it('should handle an empty collection', () => {
+      const { migrations, stamped } = stampMigrationVersions(
+        { generators: {} },
+        '1.2.0',
+      );
+      expect(migrations.generators).toEqual({});
+      expect(stamped).toEqual([]);
     });
   });
 });

@@ -181,7 +181,9 @@ When a deterministic migration meets a file that has diverged from the vended sh
 
 #### Versioning
 
-Do not add a `version` field to `migrations.json` entries. Versions are stamped at package time (`scripts/stamp-migrations.ts`): a migration that already shipped keeps the version of the first release tag that included it, and an unshipped migration gets a version just above the latest release tag so it runs for every user upgrading from any released version.
+Do not add a `version` field to `migrations.json` entries. At release time the pipeline resolves the version about to be published (`nx release version --dry-run`), stamps it onto every entry that has no version yet (`scripts/stamp-migrations.ts`), and commits the result back as `chore(migrations): stamp migration versions to x.y.z`. Entries that already carry a version were stamped by an earlier release and are left alone, so a migration never re-runs for users already past the release that shipped it.
+
+CI skips `chore(migrations)` commits, so the commit the release makes can't trigger another release.
 
 #### Testing
 
