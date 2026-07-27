@@ -225,6 +225,21 @@ describe('nx-migration generator', () => {
       );
     });
 
+    it('should work when description is omitted', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+      });
+
+      const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
+      expect(migrations.generators['rename-foo-target'].description).toBe(
+        'TODO: Add short description of the migration',
+      );
+      expect(tree.read(dir('migration.ts'), 'utf-8')).toContain(
+        'TODO: Add short description of the migration',
+      );
+    });
+
     it('should group the migration under the day it was scaffolded', async () => {
       await tsNxMigrationGenerator(tree, {
         project: PROJECT,

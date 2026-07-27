@@ -7,7 +7,7 @@ export type NxMigrationKind = 'deterministic' | 'agentic' | 'hybrid';
 export interface TsNxMigrationGeneratorSchema {
   project: string;
   name: string;
-  description: string;
+  description?: string;
   kind?: NxMigrationKind;
   preferInstallDependencies?: boolean;
 }

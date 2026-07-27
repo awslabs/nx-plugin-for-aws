@@ -51,7 +51,9 @@ export const tsNxMigrationGenerator = async (
   options: TsNxMigrationGeneratorSchema,
 ): Promise<GeneratorCallback | void> => {
   const name = kebabCase(options.name);
-  const { description } = options;
+  // Shown by `nx migrate` when the migration runs, so it needs to say something
+  const description =
+    options.description ?? 'TODO: Add short description of the migration';
   const kind = options.kind ?? 'deterministic';
 
   const hasImplementation = kind === 'deterministic' || kind === 'hybrid';
