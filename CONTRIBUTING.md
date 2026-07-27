@@ -135,6 +135,8 @@ Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migratio
 - **agentic** — `prompt.md` (self-contained agent/human instructions).
 - **hybrid** — `migration.ts` (returning `agentContext`) + `migration.spec.ts` + `prompt.md`.
 
+Entries are keyed by folder and name (`latest-<name>`, becoming `v<x.y.z>-<name>` once a release claims them), so reusing a name for a later change can't silently overwrite a migration that has already shipped.
+
 `ts#nx-migration` is a public generator, so it works on any Nx Plugin project (it creates `migrations.json` and wires the `nx-migrations` field into the plugin's `package.json` if absent). See its [guide](./docs/src/content/docs/en/guides/nx-migration.mdx) for the full reference. Within this repo, always pass `--project=@aws/nx-plugin`.
 
 #### What should be a migration
@@ -183,7 +185,7 @@ When a deterministic migration meets a file that has diverged from the vended sh
 
 Do not add a `version` field to `migrations.json` entries — versions arrive on their own:
 
-- The weekly `update-versions` PR records the version of the release that shipped each migration and moves it out of `latest/` into that release's `v<x.y.z>/` folder (`scripts/backfill-migration-versions.ts`), so `migrations.json` in `main` converges on the versions of everything already released. Only released migrations are touched; one that hasn't shipped stays in `latest/`.
+- The weekly `update-versions` PR records the version of the release that shipped each migration, moves it out of `latest/` into that release's `v<x.y.z>/` folder and re-keys it to match (`scripts/backfill-migration-versions.ts`), so `migrations.json` in `main` converges on the versions of everything already released. Only released migrations are touched; one that hasn't shipped stays in `latest/`.
 - At package time (`scripts/stamp-migrations.ts`) any entry still without a version is stamped into the compiled `migrations.json`: one that already shipped gets the version of the first release tag that included it, and a net-new one gets a version just above the latest release tag so it runs for every user upgrading from any released version.
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.

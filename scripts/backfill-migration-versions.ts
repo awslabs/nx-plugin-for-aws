@@ -23,9 +23,10 @@ import {
 
 /**
  * Records the release that shipped each migration in the source
- * `migrations.json` and moves the migration out of `latest/` into that
- * release's `v<version>/` folder (see `utils/migration-versions.ts` for the
- * versioning model). Runs in the weekly `update-versions` workflow, whose PR
+ * `migrations.json`, moves the migration out of `latest/` into that release's
+ * `v<version>/` folder and re-keys its entry to match (see
+ * `utils/migration-versions.ts` for the versioning model). Runs in the weekly
+ * `update-versions` workflow, whose PR
  * commits the result, so source converges on the versions of everything already
  * released and the release only has to reason about what's still in `latest`.
  *

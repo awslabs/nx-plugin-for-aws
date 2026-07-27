@@ -99,12 +99,12 @@ describe('nx-migration generator', () => {
       });
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target']).toEqual({
+      expect(migrations.generators['latest-rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
         implementation: `./src/migrations/latest/rename-foo-target/migration`,
       });
       expect(
-        migrations.generators['rename-foo-target'].version,
+        migrations.generators['latest-rename-foo-target'].version,
       ).toBeUndefined();
     });
 
@@ -121,7 +121,7 @@ describe('nx-migration generator', () => {
       expect(tree.exists(dir('migration.spec.ts'))).toBeFalsy();
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target']).toEqual({
+      expect(migrations.generators['latest-rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
         prompt: `./src/migrations/latest/rename-foo-target/prompt.md`,
       });
@@ -140,7 +140,7 @@ describe('nx-migration generator', () => {
       expect(tree.exists(dir('prompt.md'))).toBeTruthy();
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target']).toEqual({
+      expect(migrations.generators['latest-rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
         implementation: `./src/migrations/latest/rename-foo-target/migration`,
         prompt: `./src/migrations/latest/rename-foo-target/prompt.md`,
@@ -193,7 +193,7 @@ describe('nx-migration generator', () => {
 
       expect(tree.exists(dir('migration.ts'))).toBeTruthy();
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target']).toBeDefined();
+      expect(migrations.generators['latest-rename-foo-target']).toBeDefined();
     });
 
     it('should reference the migration description in the scaffolded file', async () => {
@@ -229,9 +229,9 @@ describe('nx-migration generator', () => {
       });
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target'].description).toBe(
-        'TODO: Add short description of the migration',
-      );
+      expect(
+        migrations.generators['latest-rename-foo-target'].description,
+      ).toBe('TODO: Add short description of the migration');
       expect(tree.read(dir('migration.ts'), 'utf-8')).toContain(
         'TODO: Add short description of the migration',
       );
@@ -250,9 +250,9 @@ describe('nx-migration generator', () => {
         ),
       ).toBeTruthy();
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target'].implementation).toBe(
-        './src/migrations/latest/rename-foo-target/migration',
-      );
+      expect(
+        migrations.generators['latest-rename-foo-target'].implementation,
+      ).toBe('./src/migrations/latest/rename-foo-target/migration');
     });
 
     it('should preserve a version already stamped onto the entry', async () => {
@@ -260,11 +260,11 @@ describe('nx-migration generator', () => {
         $schema: 'http://json-schema.org/schema',
         name: '@aws/nx-plugin',
         generators: {
-          'rename-foo-target': {
+          'latest-rename-foo-target': {
             version: '1.0.0-rc.20',
             description: 'Rename the foo target to bar',
             implementation:
-              './src/migrations/2020-01-02/rename-foo-target/migration',
+              './src/migrations/latest/rename-foo-target/migration',
           },
         },
       });
@@ -276,9 +276,49 @@ describe('nx-migration generator', () => {
       });
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target'].version).toBe(
+      expect(migrations.generators['latest-rename-foo-target'].version).toBe(
         '1.0.0-rc.20',
       );
+    });
+
+    it('should not overwrite a released migration of the same name', async () => {
+      const released = {
+        version: '1.0.0',
+        description: 'Renamed the foo target the first time round',
+        implementation: './src/migrations/v1.0.0/rename-foo-target/migration',
+      };
+      writeJson(tree, MIGRATIONS_JSON, {
+        $schema: 'http://json-schema.org/schema',
+        name: '@aws/nx-plugin',
+        generators: { 'v1.0.0-rename-foo-target': released },
+      });
+      tree.write(
+        'packages/nx-plugin/src/migrations/v1.0.0/rename-foo-target/migration.ts',
+        '// already released',
+      );
+
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target again',
+      });
+
+      const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
+      expect(migrations.generators['v1.0.0-rename-foo-target']).toEqual(
+        released,
+      );
+      expect(migrations.generators['latest-rename-foo-target']).toEqual({
+        description: 'Rename the foo target again',
+        implementation: './src/migrations/latest/rename-foo-target/migration',
+      });
+      expect(
+        tree
+          .read(
+            'packages/nx-plugin/src/migrations/v1.0.0/rename-foo-target/migration.ts',
+            'utf-8',
+          )
+          .trim(),
+      ).toBe('// already released');
     });
 
     it('should preserve existing migrations.json entries', async () => {
@@ -301,7 +341,7 @@ describe('nx-migration generator', () => {
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
       expect(migrations.generators['existing-migration']).toBeDefined();
-      expect(migrations.generators['rename-foo-target']).toBeDefined();
+      expect(migrations.generators['latest-rename-foo-target']).toBeDefined();
     });
 
     it('should not add @nx/devkit to the plugin repo package.json', async () => {
@@ -381,7 +421,7 @@ describe('nx-migration generator', () => {
 
       expect(tree.exists(MIGRATIONS_JSON)).toBeTruthy();
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target']).toEqual({
+      expect(migrations.generators['latest-rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
         implementation: `./src/migrations/latest/rename-foo-target/migration`,
       });
@@ -501,7 +541,7 @@ describe('nx-migration generator', () => {
       expect(tree.exists(dir('migration.ts'))).toBeTruthy();
       expect(tree.exists(dir('prompt.md'))).toBeTruthy();
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target']).toEqual({
+      expect(migrations.generators['latest-rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
         implementation: `./src/migrations/latest/rename-foo-target/migration`,
         prompt: `./src/migrations/latest/rename-foo-target/prompt.md`,
@@ -517,7 +557,9 @@ describe('nx-migration generator', () => {
       });
 
       const migrations = JSON.parse(tree.read(MIGRATIONS_JSON, 'utf-8'));
-      expect(migrations.generators['rename-foo-target'].metric).toBeUndefined();
+      expect(
+        migrations.generators['latest-rename-foo-target'].metric,
+      ).toBeUndefined();
     });
   });
 });

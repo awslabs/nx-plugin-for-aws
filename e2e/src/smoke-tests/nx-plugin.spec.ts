@@ -175,23 +175,26 @@ describe('smoke test - nx-plugin', () => {
         true,
       );
 
-      // migrations.json is created and registers each kind's fields, with no
-      // version (the plugin author stamps versions at release time).
+      // migrations.json is created and registers each kind's fields under its
+      // folder-prefixed key, with no version (the plugin author stamps versions
+      // at release time).
       const migrationsJson = JSON.parse(
         readFileSync(
           join(projectRoot, 'tools/plugin/migrations.json'),
           'utf-8',
         ),
       );
-      expect(migrationsJson.generators['rename-foo-target']).toEqual({
+      expect(migrationsJson.generators['latest-rename-foo-target']).toEqual({
         description: 'Rename the foo target to bar',
         implementation: `./src/migrations/latest/rename-foo-target/migration`,
       });
-      expect(migrationsJson.generators['migrate-custom-handlers']).toEqual({
+      expect(
+        migrationsJson.generators['latest-migrate-custom-handlers'],
+      ).toEqual({
         description: 'Update custom handlers',
         prompt: `./src/migrations/latest/migrate-custom-handlers/prompt.md`,
       });
-      expect(migrationsJson.generators['upgrade-framework']).toEqual({
+      expect(migrationsJson.generators['latest-upgrade-framework']).toEqual({
         description: 'Upgrade the framework',
         implementation: `./src/migrations/latest/upgrade-framework/migration`,
         prompt: `./src/migrations/latest/upgrade-framework/prompt.md`,

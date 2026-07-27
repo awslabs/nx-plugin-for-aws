@@ -13,9 +13,10 @@ import { compare, inc } from 'semver';
  * git tag). Versions reach the published `migrations.json` two ways:
  *
  * - The weekly `update-versions` PR backfills the version of the release that
- *   shipped each migration and moves it out of `latest/` into that release's
- *   `v<version>/` folder, so over time source carries the versions of
- *   everything already released (see `scripts/backfill-migration-versions.ts`).
+ *   shipped each migration, moves it out of `latest/` into that release's
+ *   `v<version>/` folder and re-keys it to match, so over time source carries
+ *   the versions of everything already released (see
+ *   `scripts/backfill-migration-versions.ts`).
  * - At package time, entries still missing a version are stamped into the
  *   compiled `migrations.json` (see `scripts/stamp-migrations.ts`): one that has
  *   already shipped (but isn't backfilled yet) gets the version of the earliest
@@ -90,6 +91,16 @@ export const LATEST_MIGRATIONS_DIR = 'latest';
 /** Directory holding the migrations shipped by a given release. */
 export const versionMigrationsDir = (version: string) => `v${version}`;
 
+/**
+ * Key a migration is registered under in `migrations.json`. Prefixed with the
+ * directory the migration lives in so reusing a name in a later release can't
+ * silently overwrite the entry (or the files) of the one that already shipped.
+ */
+export const migrationKey = (dir: string, name: string) => `${dir}-${name}`;
+
+/** Prefix of the key of a migration that no release has claimed yet. */
+const LATEST_KEY_PREFIX = `${LATEST_MIGRATIONS_DIR}-`;
+
 /** A migration directory move the caller needs to make on disk. */
 export interface MigrationDirMove {
   name: string;
@@ -101,15 +112,16 @@ export interface MigrationDirMove {
 /**
  * Return a copy of the migrations collection with the version of the release
  * that shipped each migration written onto entries that don't have one yet, the
- * names of the entries that changed, and the directory moves that go with them
- * (out of `latest` and into the release's version folder).
+ * keys of the entries that changed, and the directory moves that go with them
+ * (out of `latest` and into the release's version folder). Entries are re-keyed
+ * and their paths re-pointed to match the new folder.
  *
  * Unlike `stampMigrationVersions` this only records versions that are already
  * released — a migration not present in any release tag is left without a
  * version, so the release keeps deciding what a net-new migration gets.
  *
  * @param migrations parsed migrations.json to backfill
- * @param shippedVersions migration name -> version of the earliest release tag
+ * @param shippedVersions migration key -> version of the earliest release tag
  *   that registers it (absent for migrations that haven't shipped)
  */
 export const backfillMigrationVersions = (
@@ -123,18 +135,22 @@ export const backfillMigrationVersions = (
   const entries = Object.entries(migrations.generators ?? {});
   const moves: MigrationDirMove[] = [];
 
-  const backfilledEntries = entries.map(([name, entry]) => {
-    const version = shippedVersions[name];
+  const backfilledEntries = entries.map(([key, entry]) => {
+    const version = shippedVersions[key];
     if (entry.version || !version) {
-      return [name, entry] as const;
+      return [key, entry] as const;
     }
-    // Re-point the entry's paths at the release's version folder, and record the
-    // matching directory move for the caller to make.
+    // Re-key and re-point the entry at the release's version folder, and record
+    // the matching directory move for the caller to make.
+    const name = key.startsWith(LATEST_KEY_PREFIX)
+      ? key.slice(LATEST_KEY_PREFIX.length)
+      : key;
+    const versionDir = versionMigrationsDir(version);
     const latestSegment = `/${LATEST_MIGRATIONS_DIR}/${name}/`;
-    const versionSegment = `/${versionMigrationsDir(version)}/${name}/`;
+    const versionSegment = `/${versionDir}/${name}/`;
     const repointed = Object.fromEntries(
-      Object.entries(entry).map(([key, value]) => [
-        key,
+      Object.entries(entry).map(([field, value]) => [
+        field,
         typeof value === 'string' && value.includes(latestSegment)
           ? value.replace(latestSegment, versionSegment)
           : value,
@@ -153,7 +169,7 @@ export const backfillMigrationVersions = (
         to: `${dir}${versionSegment}`.replace(/^\.\/|\/$/g, ''),
       });
     }
-    return [name, { version, ...repointed }] as const;
+    return [migrationKey(versionDir, name), { version, ...repointed }] as const;
   });
 
   return {
@@ -162,8 +178,8 @@ export const backfillMigrationVersions = (
       generators: Object.fromEntries(backfilledEntries),
     },
     backfilled: entries
-      .filter(([name, entry]) => !entry.version && shippedVersions[name])
-      .map(([name]) => name),
+      .filter(([key, entry]) => !entry.version && shippedVersions[key])
+      .map(([key]) => key),
     moves,
   };
 };

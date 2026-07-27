@@ -17,6 +17,10 @@ import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import {
+  LATEST_MIGRATIONS_DIR,
+  migrationKey,
+} from '../../utils/migration-versions';
 import { isEsmWorkspace } from '../../utils/module-format';
 import { kebabCase } from '../../utils/names';
 import {
@@ -74,13 +78,16 @@ export const tsNxMigrationGenerator = async (
   // Migrations are grouped by the release that ships them, so their order is
   // visible at a glance as the collection grows. A new migration lands in
   // `latest` — the release that picks it up moves it into its version folder.
-  const migrationPath = `${srcDir}/migrations/latest/${name}`;
+  const migrationPath = `${srcDir}/migrations/${LATEST_MIGRATIONS_DIR}/${name}`;
   const migrationDir = joinPathFragments(
     sourceRoot,
     'migrations',
-    'latest',
+    LATEST_MIGRATIONS_DIR,
     name,
   );
+  // The registered key carries the folder, so reusing a name in a later release
+  // can't silently overwrite an entry that has already shipped.
+  const key = migrationKey(LATEST_MIGRATIONS_DIR, name);
 
   const rootPackageJson = tree.exists('package.json')
     ? readJson(tree, 'package.json')
@@ -130,10 +137,11 @@ export const tsNxMigrationGenerator = async (
     tree.delete(joinPathFragments(migrationDir, 'prompt.md'));
   }
 
-  // Register the migration in migrations.json (no version of our own — the
-  // plugin author stamps versions at release time, and an already-stamped one
-  // is preserved). The fields present discriminate the kind for nx. Paths are
-  // relative to the migrations.json directory (plugin root).
+  // Register the migration in migrations.json under its folder-prefixed key (no
+  // version of our own — the plugin author stamps versions at release time, and
+  // an already-stamped one is preserved). The fields present discriminate the
+  // kind for nx. Paths are relative to the migrations.json directory (plugin
+  // root).
   const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
   const migrationsJson = tree.exists(migrationsJsonPath)
     ? readJson(tree, migrationsJsonPath)
@@ -146,9 +154,9 @@ export const tsNxMigrationGenerator = async (
     ...migrationsJson,
     generators: sortObjectKeys({
       ...migrationsJson.generators,
-      [name]: {
-        ...(migrationsJson.generators?.[name]?.version
-          ? { version: migrationsJson.generators[name].version }
+      [key]: {
+        ...(migrationsJson.generators?.[key]?.version
+          ? { version: migrationsJson.generators[key].version }
           : {}),
         description,
         ...(hasImplementation
