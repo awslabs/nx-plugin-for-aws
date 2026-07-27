@@ -41,13 +41,15 @@ Nx 23のマイグレーションには3つの形式があり、`migrations.json`
 ジェネレーターは、選択した`kind`に応じて、プラグインプロジェクトのソースフォルダー配下に以下のファイルを作成します：
 
 <FileTree>
-  - src/migrations/\<name>/
+  - src/migrations/\<YYYY-MM-DD>/\<name>/
     - migration.ts コードモッドの実装（deterministicとhybrid）
     - migration.spec.ts マイグレーションのテスト（deterministicとhybrid）
     - prompt.md エージェント/人間向けの指示（agenticとhybrid）
   - migrations.json マイグレーションを登録するために作成または更新
   - package.json "nx-migrations"エントリを追加するために作成または更新
 </FileTree>
+
+マイグレーションは、スキャフォールディングされた日ごとにグループ化されるため、コレクションが増えても大まかな順序が一目でわかります。
 
 マイグレーションは、その種類のフィールドと`version`なしで`migrations.json`に登録されます。詳細は下記の[バージョニング](#versioning)を参照してください。
 
@@ -88,7 +90,7 @@ export default async function migration(
 
 ### Migrationのテスト
 
-スキャフォールディングされた`migration.spec.ts`は、`createTreeUsingTsSolutionSetup()`を使用して、プリセットが生成する形状に一致する仮想ワークスペースを構築します。マイグレーションがジェネレーターが生成する形状に適用され、カスタマイズされたファイルをスキップ（および報告）し、冪等であることをカバーします：
+スキャフォールディングされた`migration.spec.ts`は、`createTreeUsingTsSolutionSetup()`を使用して、プリセットが生成する形状に一致する仮想ワークスペースを構築します。マイグレーションがワークスペースを「変更前」の状態からターゲット状態に移行し、カスタマイズされたファイルをスキップ（および報告）し、冪等であることをテストします：
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -103,9 +105,16 @@ describe('my migration', () => {
   });
 
   it('should update the generated shape', async () => {
-    // Arrange the vended shape, run the migration, assert the changes
-    const result = await migration(tree);
-    expect(result.nextSteps).toBeDefined();
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
   });
 });
 ```
@@ -148,8 +157,5 @@ Nxは、ユーザーがインストールしているプラグインのバージ
 <NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
 
 Agenticおよびhybridマイグレーションは、利用可能な場合、`nx migrate --run-migrations`の実行中にユーザーのローカルコーディングエージェントによって適用されます。
-
-アップグレードするユーザーの視点からの完全なフロー（deterministicおよびagenticマイグレーションの出力例を含む）については、<Link path="get_started/upgrading">ワークスペースのアップグレード</Link>を参照してください。
-中にユーザーのローカルコーディングエージェントによって適用されます。
 
 アップグレードするユーザーの視点からの完全なフロー（deterministicおよびagenticマイグレーションの出力例を含む）については、<Link path="get_started/upgrading">ワークスペースのアップグレード</Link>を参照してください。
