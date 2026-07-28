@@ -43,7 +43,7 @@ export const NX_MIGRATION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
  * `nx-migrations` field into the plugin's `package.json` if absent), so
  * `nx migrate` applies it when users upgrade the plugin.
  *
- * Supports all three Nx 23 migration kinds:
+ * Supports all three migration kinds:
  * - `deterministic`: a codemod (`implementation`).
  * - `agentic`: a `prompt` markdown file applied by the user's agent.
  * - `hybrid`: both — the codemod does the mechanical part and returns
