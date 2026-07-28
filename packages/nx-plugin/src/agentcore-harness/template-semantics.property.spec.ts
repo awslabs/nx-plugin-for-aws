@@ -691,5 +691,9 @@ describe('agentcore-harness cross-provider template semantics (Property 4)', () 
       // runs (one per provider) with real formatting.
       { numRuns: 100 },
     );
-  }, 120_000);
+    // Two full generator runs per case put this a few seconds under the
+    // default 120s budget in isolation, so it times out once the suite runs
+    // in parallel. Use the same allowance as the other whole-workspace
+    // property tests.
+  }, 300_000);
 });
