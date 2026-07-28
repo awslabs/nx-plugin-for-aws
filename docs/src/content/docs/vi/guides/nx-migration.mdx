@@ -30,11 +30,11 @@ Chúng tôi khuyến nghị sử dụng generator <Link path="/vi/guides/ts-nx-p
 
 ## Ba loại migration
 
-Nx 23 migrations có ba dạng, được phân biệt bởi các trường mà mục nhập `migrations.json` mang theo. Truyền `--kind` để chọn (mặc định `deterministic`):
+Migrations có ba dạng, được phân biệt bởi các trường mà mục nhập `migrations.json` mang theo. Truyền `--kind` để chọn (mặc định `deterministic`):
 
-- **Deterministic** (`implementation`) — một codemod với trước/sau chính xác. Chạy tự động, bao gồm trong CI và các terminal không tương tác. Đây là loại được ưu tiên: ưu tiên nó bất cứ khi nào tệp đích là một tệp mà generators của bạn hoàn toàn sở hữu và việc chỉnh sửa có thể được biểu diễn một cách cơ học.
-- **Agentic** (`prompt`) — một tệp hướng dẫn markdown được áp dụng bởi coding agent cục bộ của người dùng thông qua luồng `nx migrate` agentic của Nx. Sử dụng cho các thay đổi đối với code thuộc sở hữu của người dùng, nơi việc chỉnh sửa đúng phụ thuộc vào những gì người dùng đã xây dựng. Khi không có agent chạy (CI, không cài đặt agent, từ chối đồng ý), Nx hiển thị prompt dưới dạng hướng dẫn thủ công — vì vậy hãy viết prompts dưới dạng các bước độc lập, có thể thực hiện bởi con người.
-- **Hybrid** (`implementation` + `prompt`) — một thay đổi phá vỡ với một nửa cơ học và một nửa phán đoán. `implementation` thực hiện mọi thứ bạn sở hữu một cách xác định và trả về `agentContext` mô tả những gì nó đã thay đổi hoặc bỏ qua; Nx truyền context đó cho `prompt` được ghép đôi, điều hướng agent đến các vị trí gọi thuộc sở hữu của người dùng.
+- **Deterministic** (`implementation`) — một codemod với trước/sau chính xác. Chạy tự động, bao gồm trong CI và các terminal không tương tác. Sử dụng nó một mình khi thay đổi có một hình dạng mà bạn có thể khớp một cách đáng tin cậy ở mọi nơi nó xuất hiện.
+- **Agentic** (`prompt`) — một tệp hướng dẫn markdown được áp dụng bởi coding agent cục bộ của người dùng thông qua luồng `nx migrate` agentic của Nx. Sử dụng nó một mình khi không có trước/sau cơ học nào phù hợp, bởi vì việc chỉnh sửa đúng phụ thuộc vào những gì người dùng đã xây dựng. Khi không có agent chạy (CI, không cài đặt agent, từ chối đồng ý), Nx hiển thị prompt dưới dạng hướng dẫn thủ công — vì vậy hãy viết prompts dưới dạng các bước độc lập, có thể thực hiện bởi con người.
+- **Hybrid** (`implementation` + `prompt`) — cả hai nửa của một thay đổi, và thường là lựa chọn đúng đắn. Mọi thứ mà generators của bạn cung cấp là code mà người dùng sở hữu và có thể đã sửa đổi, vì vậy codemod thực hiện nhiều nhất có thể khớp một cách an toàn và trả về `agentContext` mô tả những gì nó đã thay đổi *và những gì nó đã bỏ qua*; Nx truyền context đó cho `prompt` được ghép đôi, điều hướng agent đến phần còn lại.
 
 ## Đầu Ra Của Generator
 
@@ -55,7 +55,7 @@ Nó đăng ký migration trong `migrations.json` với các trường cho loại
 
 ## Triển Khai một Migration
 
-Một migration deterministic (hoặc hybrid) là một hàm biến đổi hệ thống tệp ảo (`Tree`), trả về một [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject):
+Một migration deterministic (hoặc hybrid) là một hàm biến đổi hệ thống tệp ảo (`Tree`), trả về một [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject). Đây là một migration hybrid, trả về cả hai:
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
@@ -65,31 +65,32 @@ export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
+  const agentContext: string[] = [];
 
   // Read and update the files your generators produce here.
 
   await formatFilesInSubtree(tree);
 
-  return { nextSteps };
+  return { nextSteps, agentContext };
 }
 ```
 
 - **`nextSteps`** — các ghi chú trên toàn workspace được hiển thị cho người dùng sau khi `nx migrate` chạy. Sử dụng chúng để báo cáo các tệp bạn đã bỏ qua (xem các guardrails bên dưới) hoặc các bước tiếp theo thủ công mà migration không thể thực hiện.
 - **`agentContext`** (chỉ hybrid) — một tóm tắt về những gì codemod đã thay đổi, được truyền cho `prompt` được ghép đôi khi nó chạy dưới luồng agentic của Nx để agent có thể tập trung vào các phần thuộc sở hữu của người dùng.
 
-Đối với các thao tác tương tự mà bạn sử dụng trong generators (`generateFiles`, các phép biến đổi GritQL, đọc và cập nhật JSON), hãy tham khảo <Link path="/vi/guides/nx-generator">hướng dẫn Nx Generator</Link>.
+Để biết một số ví dụ về các thao tác bạn có thể thực hiện trong migration của mình (tạo tệp, sửa đổi các tệp hiện có bằng GritQL, đọc và cập nhật JSON), hãy tham khảo <Link path="/vi/guides/nx-generator">hướng dẫn Nx Generator</Link>.
 
 ### Guardrails
 
 Migrations chạy trên các workspace mà bạn không kiểm soát, vì vậy được khuyến nghị tuân thủ các quy tắc sau (khung được tạo sẵn đã tích hợp chúng):
 
-- **Pattern-match trước khi ghi.** Nếu một tệp đích đã khác biệt so với hình dạng mà generators của bạn tạo ra, hãy bỏ qua nó và báo cáo nó qua `nextSteps` thay vì ghi đè các thay đổi của người dùng.
+- **Pattern-match trước khi ghi.** Nếu một tệp đích đã khác biệt so với hình dạng mà generators của bạn tạo ra, hãy bỏ qua nó và báo cáo nó qua `nextSteps`, hoặc xem xét một migration hybrid, thay vì ghi đè các thay đổi của người dùng.
 - **Idempotent.** Chạy lại migration phải là một no-op.
 - **Định dạng những gì bạn ghi.** Kết thúc với `formatFilesInSubtree(tree)` để các tệp mà migration của bạn ghi được định dạng chính xác.
 
 ### Kiểm Thử Migration Của Bạn
 
-`migration.spec.ts` được tạo sẵn sử dụng `createTreeUsingTsSolutionSetup()` để xây dựng một workspace ảo khớp với hình dạng mà preset của chúng tôi tạo ra. Kiểm tra rằng migration đưa một workspace từ trạng thái "trước" đến trạng thái đích, bỏ qua (và báo cáo) các tệp tùy chỉnh, và là idempotent:
+`migration.spec.ts` được tạo sẵn sử dụng `createTreeUsingTsSolutionSetup()` để xây dựng một workspace ảo khớp với hình dạng mà preset của chúng tôi tạo ra. Kiểm tra rằng migration đưa một workspace từ trạng thái "trước" đến trạng thái đích, bỏ qua (và báo cáo) code mà nó không nhận ra, và là idempotent:
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -118,6 +119,8 @@ describe('my migration', () => {
 });
 ```
 
+Unit tests chỉ chứng minh migration thực hiện những gì bạn đã viết nó để làm. Cũng kiểm tra nó với một workspace được tạo bởi phiên bản **đã xuất bản** của plugin của bạn — trạng thái mà người dùng của bạn nâng cấp từ đó — và xác nhận kết quả khớp với những gì generators của bạn tạo ra ngày hôm nay: kiểm tra diff, tạo các dự án tương tự vào một workspace mới và so sánh, kiểm tra workspace vẫn build được, sau đó chạy lại migration để xác nhận nó không thay đổi gì. Lặp lại với một workspace mà bạn đã tùy chỉnh trước, để kiểm tra migration để các chỉnh sửa của bạn nguyên vẹn và báo cáo chúng thay thế.
+
 ## Versioning
 
 Nx chạy một migration khi phiên bản plugin đã cài đặt của người dùng nhỏ hơn `version` của migration. Generator này ghi **không có** trường `version` — gán nó (hoặc đóng dấu nó từ quy trình phát hành của bạn) khi bạn cắt bản phát hành mà gửi migration, để nó chạy cho mọi người nâng cấp từ phiên bản trước đó.
@@ -129,21 +132,21 @@ Sau khi bạn gán các phiên bản, một `migrations.json` đăng ký một m
   "$schema": "http://json-schema.org/schema",
   "name": "my-plugin",
   "generators": {
-    "rename-foo-target": {
+    "v2.0.0-rename-foo-target": {
       "version": "2.0.0",
       "description": "Rename the foo target to bar",
-      "implementation": "./src/migrations/2026-01-15/rename-foo-target/migration"
+      "implementation": "./src/migrations/v2.0.0/rename-foo-target/migration"
     },
-    "migrate-custom-handlers": {
+    "v3.0.0-migrate-custom-handlers": {
       "version": "3.0.0",
       "description": "Update custom handlers for the new API",
-      "prompt": "./src/migrations/2026-02-03/migrate-custom-handlers/prompt.md"
+      "prompt": "./src/migrations/v3.0.0/migrate-custom-handlers/prompt.md"
     },
-    "upgrade-framework": {
+    "v4.0.0-upgrade-framework": {
       "version": "4.0.0",
       "description": "Upgrade the framework and reconcile call sites",
-      "implementation": "./src/migrations/2026-03-20/upgrade-framework/migration",
-      "prompt": "./src/migrations/2026-03-20/upgrade-framework/prompt.md"
+      "implementation": "./src/migrations/v4.0.0/upgrade-framework/migration",
+      "prompt": "./src/migrations/v4.0.0/upgrade-framework/prompt.md"
     }
   }
 }
@@ -156,8 +159,5 @@ Người dùng áp dụng các migrations của plugin của bạn với luồng
 <NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
 
 Các migrations agentic và hybrid được áp dụng bởi coding agent cục bộ của người dùng trong quá trình `nx migrate --run-migrations` khi có sẵn.
-
-Để biết luồng đầy đủ từ góc độ người dùng đang nâng cấp — bao gồm đầu ra ví dụ cho các migrations deterministic và agentic — xem <Link path="get_started/upgrading">Nâng Cấp Workspace Của Bạn</Link>.
- bởi coding agent cục bộ của người dùng trong quá trình `nx migrate --run-migrations` khi có sẵn.
 
 Để biết luồng đầy đủ từ góc độ người dùng đang nâng cấp — bao gồm đầu ra ví dụ cho các migrations deterministic và agentic — xem <Link path="get_started/upgrading">Nâng Cấp Workspace Của Bạn</Link>.
