@@ -169,6 +169,20 @@ export default defineConfig({
               },
             },
             {
+              label: 'Workspaces',
+              link: '/guides/workspace',
+              translations: {
+                jp: 'ワークスペース',
+                ko: '워크스페이스',
+                fr: 'Espaces de travail',
+                it: 'Workspace',
+                es: 'Espacios de trabajo',
+                pt: 'Espaços de trabalho',
+                zh: '工作区',
+                vi: 'Không gian làm việc',
+              },
+            },
+            {
               label: 'Upgrading your workspace',
               link: '/get_started/upgrading',
               translations: {
@@ -194,20 +208,6 @@ export default defineConfig({
                 pt: 'Adicionar a um projeto existente',
                 zh: '添加到现有项目',
                 vi: 'Thêm vào dự án hiện có',
-              },
-            },
-            {
-              label: 'Workspaces',
-              link: '/guides/workspace',
-              translations: {
-                jp: 'ワークスペース',
-                ko: '워크스페이스',
-                fr: 'Espaces de travail',
-                it: 'Workspace',
-                es: 'Espacios de trabajo',
-                pt: 'Espaços de trabalho',
-                zh: '工作区',
-                vi: 'Không gian làm việc',
               },
             },
             {
