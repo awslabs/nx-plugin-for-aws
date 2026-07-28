@@ -30,7 +30,7 @@ export const resolveIac = async (
   iacOption: 'cdk' | 'terraform' | 'inherit',
 ): Promise<(typeof IAC_PROVIDERS)[number]> => {
   if (iacOption === 'inherit') {
-    const pluginConfig = await readAwsNxPluginConfig(tree);
+    const pluginConfig = readAwsNxPluginConfig(tree);
 
     if (!pluginConfig?.iac?.provider) {
       throw new Error(

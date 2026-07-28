@@ -12,21 +12,21 @@ import InstallCommand from '@components/install-command.astro';
 
 Il progetto `CloudscapeReactTsWebsiteProject` utilizzato nell'applicazione della lista della spesa configurava un sito web React con integrazione nativa di CloudScape e autenticazione Cognito.
 
-Questo tipo di progetto si basava su [`create-react-app`](https://github.com/facebook/create-react-app), ora deprecato. Per migrare il sito web in questa guida, utilizzeremo il <Link path="/guides/react-website">generatore `ts#react-website`</Link>, che impiega tecnologie più moderne e supportate, in particolare [Vite](https://vite.dev/).
+Questo tipo di progetto si basava su [`create-react-app`](https://github.com/facebook/create-react-app), ora deprecato. Per migrare il sito web in questa guida, utilizzeremo il <Link path="/guides/react-website">generatore `ts#website`</Link>, che impiega tecnologie più moderne e supportate, in particolare [Vite](https://vite.dev/).
 
 Come parte della migrazione, passeremo anche dal React Router configurato da PDK a [TanStack Router](https://tanstack.com/router), che aggiunge maggiore type-safety al routing del sito web.
 
 #### Genera un Sito Web React
 
-Esegui il <Link path="/guides/react-website">generatore `ts#react-website`</Link> per configurare il progetto del sito web in `packages/website`:
+Esegui il <Link path="/guides/react-website">generatore `ts#website`</Link> con `framework` impostato su `react` per configurare il progetto del sito web in `packages/website`. Poiché l'applicazione della lista della spesa è costruita con componenti CloudScape, impostiamo anche `ux` su `cloudscape` (il valore predefinito è `shadcn`):
 
-<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} />
 
 #### Aggiungi Autenticazione Cognito
 
-Il generatore per siti web React sopra citato non include l'autenticazione Cognito di default come `CloudscapeReactTsWebsiteProject`, ma può essere aggiunta esplicitamente tramite il <Link path="/guides/react-website-auth">generatore `ts#react-website#auth`</Link>.
+Il generatore per siti web React sopra citato non include l'autenticazione Cognito di default come `CloudscapeReactTsWebsiteProject`, ma può essere aggiunta esplicitamente tramite il <Link path="/guides/react-website-auth">generatore `ts#website#auth`</Link>.
 
-<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
 
 Questo aggiunge componenti React che gestiscono i redirect necessari per garantire il login degli utenti tramite l'UI ospitata da Cognito. Viene inoltre aggiunto un costrutto CDK per distribuire le risorse Cognito in `packages/common/constructs`, chiamato `UserIdentity`.
 
@@ -58,9 +58,26 @@ Questo genera i provider client necessari e i target di build affinché il tuo s
 
 #### Aggiungi Dipendenza AWS Northstar
 
-Il `CloudscapeReactTsWebsiteProject` includeva automaticamente una dipendenza da `@aws-northstar/ui` utilizzata nella nostra applicazione della lista della spesa, quindi la aggiungiamo qui:
+Il `CloudscapeReactTsWebsiteProject` includeva automaticamente una dipendenza da `@aws-northstar/ui` utilizzata nella nostra applicazione della lista della spesa, quindi la aggiungiamo al progetto `@shopping-list/website`:
 
-<InstallCommand pkg="@aws-northstar/ui" />
+<InstallCommand pkg="@aws-northstar/ui" project="@shopping-list/website" />
+
+`@aws-northstar/ui` include un componente editor di codice che dipende da `ace-builds`, utilizzando un import specifico di webpack che Vite non può risolvere. Poiché la nostra applicazione della lista della spesa non utilizza questo componente, lo escludiamo dal bundle aggiungendolo alla configurazione `external` all'interno delle opzioni `build` esistenti in `packages/website/vite.config.mts`:
+
+```diff lang="ts"
+// packages/website/vite.config.mts
+  build: {
+    outDir: '../../dist/packages/website/bundle',
+    emptyOutDir: true,
+    reportCompressedSize: true,
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
++    rollupOptions: {
++      external: ['ace-builds/webpack-resolver'],
++    },
+  },
+```
 
 #### Sposta Componenti e Pagine
 
@@ -80,12 +97,14 @@ Noterai alcuni errori di compilazione nell'IDE: apporteremo ulteriori modifiche 
 
 #### Migra da React Router a TanStack Router
 
-Utilizzando il [routing basato su file](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing), possiamo usare il server di sviluppo locale per generare automaticamente la configurazione delle rotte. Avviamo il server locale del sito web:
+Utilizzando il [routing basato su file](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing), possiamo usare il server di sviluppo locale per generare automaticamente la configurazione delle rotte.
 
-<NxCommands commands={["serve-local website"]} />
+Avviamo il server locale del sito web:
+
+<NxCommands commands={["dev website"]} />
 
 :::tip
-Utilizziamo il target `serve-local` che avvia anche server locali per le API connesse tramite `connection`, con hot-reload in caso di modifiche! Questo ci permette di testare API e sito web localmente prima ancora di scrivere codice CDK.
+Utilizziamo il target `dev` che avvia anche server locali per le API connesse tramite `connection`, con hot-reload in caso di modifiche al sito web, al modello o al backend! Questo ci permette di testare API e sito web localmente prima ancora di scrivere codice CDK.
 :::
 
 Potresti vedere alcuni errori, ma il server locale del sito web dovrebbe avviarsi sulla porta `4200`, e il server Smithy API locale sulla porta `3001`.

@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, type Tree, updateJson } from '@nx/devkit';
+import { joinPathFragments, logger, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
 import { isEsmWorkspace } from '../../utils/module-format';
-import { toScopeAlias } from '../../utils/npm-scope';
+import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { configureBiomeLint } from './biome';
 import type { ConfigureProjectOptions } from './types';
 import { configureVitest } from './vitest';
@@ -42,6 +43,14 @@ export const configureTsProject = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
+  // Point users at init when the workspace hasn't been configured, since
+  // lint/format targets and workspace dependency sync depend on it.
+  if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
+    logger.warn(
+      `This workspace has no ${AWS_NX_PLUGIN_CONFIG_FILE_NAME} — run 'nx g @aws/nx-plugin:init' (or 'nx add @aws/nx-plugin') to configure linting, formatting and workspace dependency sync.`,
+    );
+  }
+
   // When the caller doesn't specify a module format, infer it from the
   // workspace root package.json (defaulting to ESM for a fresh workspace).
   const esm = options.esm ?? isEsmWorkspace(tree);
@@ -90,14 +99,8 @@ export const configureTsProject = async (
       baseUrl: undefined,
       rootDir: '.',
       paths: {
-        // Remove any path aliases for this project with the npm scope prefix (eg remove @foo/bar)
-        ...Object.fromEntries(
-          Object.entries(tsConfig.compilerOptions?.paths ?? {}).filter(
-            ([k]) => k !== options.fullyQualifiedName,
-          ),
-        ),
-        // Add aliases which begin with colon (eg :foo/bar) to avoid sniping attacks
-        [toScopeAlias(options.fullyQualifiedName)]: [
+        ...tsConfig.compilerOptions?.paths,
+        [options.fullyQualifiedName]: [
           `./${joinPathFragments(options.dir, 'src', 'index.ts')}`,
         ],
       },
@@ -112,10 +115,13 @@ export const configureTsProject = async (
       ]),
     }));
   }
-  // Remove package.json if it exists
-  if (tree.exists(join(options.dir, 'package.json'))) {
-    tree.delete(join(options.dir, 'package.json'));
-  }
+  // Every project carries a minimal private package.json so the workspace
+  // follows the standard npm package layout (see ensureProjectPackageJson).
+  ensureProjectPackageJson(tree, {
+    dir: options.dir,
+    fullyQualifiedName: options.fullyQualifiedName,
+    esm,
+  });
 
   await configureBiomeLint(tree, options);
   await configureVitest(tree, options);

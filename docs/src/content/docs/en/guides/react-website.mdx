@@ -23,7 +23,7 @@ This generator creates a new [React](https://react.dev/) website with [shadcn/ui
 The generated application uses [Vite](https://vite.dev/) as the build tool and bundler. It uses [TanStack Router](https://tanstack.com/router/v1) for type-safe routing.
 
 :::note[UX Provider]
-The default `uxProvider` is [shadcn/ui](https://ui.shadcn.com/). You can also select [Cloudscape](http://cloudscape.design/) or `None` (bring your own component library).
+The default `ux` is [shadcn/ui](https://ui.shadcn.com/). You can also select [Cloudscape](http://cloudscape.design/) or `none` (bring your own component library).
 :::
 
 ## Usage
@@ -59,6 +59,7 @@ The generator will create the following project structure in the `<directory>/<n
   - tsconfig.json Base TypeScript configuration for source and tests
   - tsconfig.app.json TypeScript configuration for source code
   - tsconfig.spec.json TypeScript configuration for tests
+  - package.json Project manifest defining the project's package name and dependencies
 </FileTree>
 
 :::note[Without TanStack Router]
@@ -69,7 +70,7 @@ If you opted not to use [TanStack Router](https://tanstack.com/router/v1), you w
 
 <Snippet name="shared-constructs" />
 
-The generator creates infrastructure as code for deploying your website based on your selected `iacProvider`:
+The generator creates infrastructure as code for deploying your website based on your selected `iac`:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -135,6 +136,49 @@ The CloudFront distribution applies a response headers policy that sets `Strict-
 A default `Content-Security-Policy` is enforced. It restricts scripts and framing to mitigate XSS and clickjacking, while permitting HTTPS and WSS connections so the website can call AWS service endpoints (such as API Gateway, Cognito and Bedrock AgentCore) whose URLs are only known at deploy time. To adjust the policy (for example to tighten `connect-src` to your specific origins), edit the `content_security_policy` value in your generated `static-website.ts` (CDK) or `static-website.tf` (Terraform).
 
 `runtime-config.json` is served with `Cache-Control: no-cache` so that browsers always fetch the latest configuration after a redeploy, rather than using a stale cached copy.
+
+#### Custom Domain & TLS
+
+By default the distribution uses the default CloudFront domain name (`*.cloudfront.net`) and its default certificate, which does not support enforcing a minimum TLS version of 1.2. To serve your website from your own domain, supply an [ACM certificate](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (which must reside in `us-east-1` for use with CloudFront) and your domain names — a minimum TLS version of 1.2 is then enforced for viewers:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pass the `certificate` and `domainNames` props through in your generated website construct in `packages/common/constructs/src/app/static-websites`:
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Set the `custom_domain_names` and `acm_certificate_arn` variables in your generated website module in `packages/common/terraform/src/app/static-websites`:
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+You will also need to create DNS records (for example in Route 53) pointing your domain at the CloudFront distribution.
 
 ## Implementing your React Website
 
@@ -202,7 +246,7 @@ Your website CDK construct will deploy the `connection` namespace of the runtime
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite, MyApi } from ':my-scope/common-constructs';
+import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -373,7 +417,7 @@ You can run your tests using the `test` target:
 
 ## Deploying Your Website
 
-The React website generator creates CDK or Terraform infrastructure as code based on your selected `iacProvider`. You can use this to deploy your website.
+The React website generator creates CDK or Terraform infrastructure as code based on your selected `iac`. You can use this to deploy your website.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -384,7 +428,7 @@ You can use the CDK construct generated for you in `packages/common/constructs` 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -404,7 +448,7 @@ This sets up:
 5. Automatic deployment of website files and runtime configuration
 </Fragment>
 <Fragment slot="terraform">
-To deploy your website, we recommend using the <Link path="guides/terraform-infrastructure">`terraform#project` generator</Link> to create a Terraform project.
+To deploy your website, we recommend using the <Link path="/guides/terraform-project">`terraform#project` generator</Link> to create a Terraform project.
 
 You can use the Terraform module generated for you in `packages/common/terraform` to deploy your website.
 

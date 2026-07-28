@@ -18,11 +18,11 @@ import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/
 import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator';
 import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator';
 import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator';
+import fastApiReactGenerator from '../py/fast-api/react/generator';
 import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator';
 import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator';
 import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator';
 import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator';
-import fastApiReactGenerator from '../py/fast-api/react/generator';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';

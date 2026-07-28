@@ -51,33 +51,29 @@ describe('license generator', () => {
       copyrightHolder: 'Foo',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
-      'MIT',
+    expect(readAwsNxPluginConfig(tree).license!.source!.spdx).toBe('MIT');
+    expect(readAwsNxPluginConfig(tree).license!.source!.copyrightHolder).toBe(
+      'Foo',
     );
-    expect(
-      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
-    ).toBe('Foo');
 
     await licenseGenerator(tree, {
       license: 'MIT',
       copyrightHolder: 'Bar',
     });
 
-    expect(
-      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
-    ).toBe('Bar');
+    expect(readAwsNxPluginConfig(tree).license!.source!.copyrightHolder).toBe(
+      'Bar',
+    );
 
     await licenseGenerator(tree, {
       license: 'ASL',
       copyrightHolder: 'Baz',
     });
 
-    expect((await readAwsNxPluginConfig(tree)).license!.source!.spdx).toBe(
-      'ASL',
+    expect(readAwsNxPluginConfig(tree).license!.source!.spdx).toBe('ASL');
+    expect(readAwsNxPluginConfig(tree).license!.source!.copyrightHolder).toBe(
+      'Baz',
     );
-    expect(
-      (await readAwsNxPluginConfig(tree)).license!.source!.copyrightHolder,
-    ).toBe('Baz');
   });
 
   it('should add generator metric to app.ts', async () => {

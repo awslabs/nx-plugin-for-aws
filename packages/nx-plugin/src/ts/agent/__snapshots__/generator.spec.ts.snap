@@ -565,13 +565,24 @@ await chatLoop(new TrpcWebSocketAdapter(), process.env.URL ?? '');
 `;
 
 exports[`ts#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
-"FROM public.ecr.aws/docker/library/node:lts-jod
+"FROM public.ecr.aws/docker/library/node:lts-slim
+
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
+RUN npm install -g npm@12.0.1
 
 WORKDIR /app
 
 # Add AWS Distro for OpenTelemetry for observability
 # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
-RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.12.0
+# The overrides pin transitive dependencies with known HIGH/CRITICAL
+# vulnerabilities to fixed versions. npm is removed once the install is done —
+# the runtime only needs node, and npm's own bundled dependencies would
+# otherwise carry vulnerabilities into the image.
+RUN npm init -y \\
+  && npm pkg set "overrides.@opentelemetry/propagator-jaeger=2.9.0" \\
+  && npm pkg set "overrides.minimatch=10.2.5" \\
+  && npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.12.0 \\
+  && npm uninstall -g npm
 
 # Copy bundled agent
 COPY index.js /app
@@ -875,7 +886,7 @@ exports[`ts#agent generator > should match snapshot for Terraform generated file
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.54.0"
+      version = "6.55.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -1283,7 +1294,7 @@ resource "null_resource" "runtime_ready" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      uv run --with boto3==1.43.46 python -c "
+      uv run --with boto3==1.43.51 python -c "
 import boto3
 import json
 import os
@@ -1379,7 +1390,7 @@ output "security_group_id" {
 
 exports[`ts#agent generator > should match snapshot for generated files > agent-agent.ts 1`] = `
 "import { Agent, tool } from '@strands-agents/sdk';
-import { logModelErrors } from ':proj/agent-connection';
+import { logModelErrors } from '@proj/agent-connection';
 import { z } from 'zod';
 
 const multiply = tool({
@@ -1684,7 +1695,7 @@ exports[`ts#agent generator > should match snapshot for generated files > agent-
 "import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
-import { enterSessionContext, withSessionId } from ':proj/agent-connection';
+import { enterSessionContext, withSessionId } from '@proj/agent-connection';
 import { getAgent } from './agent.js';
 
 export const router = t.router;

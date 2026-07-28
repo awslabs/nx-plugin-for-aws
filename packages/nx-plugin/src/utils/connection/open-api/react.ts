@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -14,6 +13,7 @@ import {
 import { addTargetToLocalDev } from '../../../connection/local-dev';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../ast';
+import { addDependenciesToPackageJson } from '../../dependencies';
 import { updateGitIgnore } from '../../git';
 import { kebabCase, toClassName } from '../../names';
 import { sortObjectKeys } from '../../object';
@@ -271,5 +271,6 @@ export const addOpenApiReactClient = async (
       '@tanstack/react-query-devtools',
     ]),
     withVersions(['@smithy/types']),
+    joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 };

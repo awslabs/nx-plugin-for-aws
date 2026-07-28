@@ -4,12 +4,13 @@ description: "Documentación de referencia para proyectos de TypeScript"
 generator: ts#project
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 El generador de proyectos TypeScript se puede utilizar para crear una biblioteca o aplicación moderna [TypeScript](https://www.typescriptlang.org/) configurada con mejores prácticas como [Módulos ECMAScript (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), [referencias de proyecto](https://www.typescriptlang.org/docs/handbook/project-references.html) de TypeScript, [Vitest](https://vitest.dev/) para ejecutar pruebas y [Biome](https://biomejs.dev/) para linting y formateo.
@@ -34,6 +35,7 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 
   - src Código fuente TypeScript
     - index.ts
+  - package.json Manifiesto del proyecto que define el nombre del paquete y las dependencias del proyecto
   - project.json Configuración del proyecto y objetivos de compilación
   - tsconfig.json Configuración base de TypeScript para este proyecto (extiende tsconfig.base.json del workspace)
   - tsconfig.lib.json Configuración TypeScript para tu biblioteca (código en tiempo de ejecución o empaquetado)
@@ -42,8 +44,8 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 
 </FileTree>
 
-:::tip[No se necesita package.json]
-¡Observa que no se crea ningún archivo `package.json` para este proyecto! Puedes descubrir por qué [abajo](#dependencies).
+:::tip[package.json del proyecto]
+El `package.json` del proyecto comienza siendo mínimo. A medida que añades dependencias de tiempo de ejecución, se declaran aquí (las herramientas compartidas de compilación/prueba permanecen en la raíz del workspace) — puedes descubrir más [abajo](#dependencies).
 :::
 
 También notarás cambios en los siguientes archivos en la raíz de tu workspace:
@@ -86,12 +88,8 @@ export * from './algorithms/index.js';
 Los [alias de TypeScript](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) para tu proyecto están configurados en el `tsconfig.base.json` del workspace, permitiéndote referenciar tu proyecto TypeScript desde otros proyectos:
 
 ```ts title="packages/my-other-project/src/index.ts"
-import { sayHello } from ':my-scope/my-library';
+import { sayHello } from '@my-scope/my-library';
 ```
-
-:::note[Alias de proyecto]
-Los alias para proyectos TypeScript comienzan con `:` en lugar del tradicional `@`, evitando posibles conflictos de nombres entre paquetes locales en tu workspace y paquetes remotos en [NPM](https://www.npmjs.com/).
-:::
 
 Cuando añadas una sentencia de importación para un nuevo proyecto en tu workspace por primera vez, probablemente verás un error en tu IDE similar a este:
 
@@ -107,28 +105,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-Esto ocurre porque no se ha configurado una [referencia de proyecto](https://www.typescriptlang.org/docs/handbook/project-references.html).
+Esto ocurre porque no se ha configurado una [referencia de proyecto](https://www.typescriptlang.org/docs/handbook/project-references.html), y el proyecto importado aún no se ha declarado como dependencia del workspace en el `package.json` de tu proyecto.
 
-Los proyectos TypeScript vienen configurados con el generador de sincronización de TypeScript de Nx, evitando que necesites configurar manualmente las referencias. Simplemente ejecuta el siguiente comando y Nx añadirá la configuración requerida:
+Tu workspace está configurado con generadores de sincronización que gestionan ambos por ti, por lo que no necesitas configurarlos manualmente. Simplemente ejecuta el siguiente comando y Nx añadirá la configuración requerida:
 
 <NxCommands commands={['sync']} />
 
-Después de esto, el error en tu IDE debería desaparecer y estarás listo para usar tu biblioteca.
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+El generador de sincronización de TypeScript de Nx añade la referencia de proyecto, y el generador `ts#sync` del plugin declara el proyecto importado en el `package.json` de tu proyecto (`workspace:*` donde el gestor de paquetes soporta el protocolo de workspace, `*` en npm y yarn classic), para que el gestor de paquetes enlace el proyecto local en la instalación. Después de esto, el error en tu IDE debería desaparecer y estarás listo para usar tu biblioteca.
 
 :::tip[Atajo de compilación]
-También puedes simplemente construir tu proyecto y verás un mensaje como:
+También puedes simplemente construir tu proyecto — los generadores de sincronización se ejecutan primero y se te pedirá aplicar cualquier cambio pendiente:
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Selecciona `Yes` para permitir que Nx actualice tus referencias de proyecto.
+Selecciona `Yes` para permitir que Nx sincronice tu workspace.
 :::
 
 ### Manteniendo los alias de rutas sincronizados
@@ -137,17 +147,120 @@ Si añades entradas personalizadas de `compilerOptions.paths` en el `tsconfig.js
 
 ### Dependencias
 
-Notarás que tu proyecto TypeScript no tiene archivo `package.json`, lo cual puede ser inesperado si estás acostumbrado a monorepos TypeScript tradicionales.
+Cada proyecto TypeScript declara sus dependencias de tiempo de ejecución de terceros en su propio `package.json`. Las herramientas de compilación y prueba compartidas entre proyectos se definen en el `package.json` raíz.
 
-Para añadir una dependencia para cualquier paquete TypeScript en tu monorepo, simplemente añádela al `package.json` en la raíz de tu workspace. Puedes hacer esto vía línea de comandos para tu gestor de paquetes:
+Para añadir una dependencia de tiempo de ejecución a un proyecto, instálala en ese proyecto:
 
-<InstallCommand pkg="some-npm-package" />
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-La dependencia estará entonces disponible para cualquier proyecto TypeScript en tu workspace.
+También puedes ejecutar el comando `add`/`install` simple de tu gestor de paquetes desde dentro del directorio del proyecto.
+
+Para añadir una herramienta de desarrollo compartida, instálala en la raíz del workspace:
+
+<InstallCommand pkg="some-dev-tool" dev />
+
+:::note
+La regla de lint [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) de Biome garantiza que el código fuente de un proyecto solo importe paquetes declarados en su propio `package.json`. Los archivos de configuración, scripts de compilación y pruebas están exentos, por lo que las herramientas compartidas pueden permanecer en la raíz.
+:::
+
+#### Catálogos
+
+Para gestores de paquetes que soportan catálogos ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) y [bun](https://bun.com/docs/install/catalogs)), los generadores registran cada versión en el catálogo y la referencian con el protocolo `catalog:` (ej. `"zod": "catalog:"`), por lo que el catálogo es la única fuente de verdad para las versiones independientemente de qué proyecto declare la dependencia. Esto te ayuda a seguir una [política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), evitando conflictos de tipos y múltiples copias de paquetes en los bundles de despliegue.
+
+Cuando añadas una nueva dependencia tú mismo, mantenla también en el catálogo:
+
+<Tabs syncKey="package-manager">
+  <TabItem label="pnpm">
+    El workspace establece [`catalogMode: strict`](https://pnpm.io/settings#catalogmode), por lo que `pnpm add` registra la versión en el catálogo y la referencia automáticamente — sin pasos adicionales.
+
+    ```bash
+    pnpm add some-npm-package --filter my-library
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    El protocolo `catalog:` de yarn solo *referencia* una entrada de catálogo existente — no puede crear una — así que registra la versión primero.
+
+    <Steps>
+    1. Añade la versión bajo `catalog` en `.yarnrc.yml`:
+
+       ```yaml title=".yarnrc.yml"
+       catalog:
+         some-npm-package: ^1.0.0
+       ```
+
+    2. Refiérela desde el proyecto:
+
+       ```bash
+       yarn workspace @my-scope/my-library add some-npm-package@catalog:
+       ```
+    </Steps>
+  </TabItem>
+  <TabItem label="bun">
+    El protocolo `catalog:` de bun solo *referencia* una entrada de catálogo existente — no puede crear una — así que registra la versión primero.
+
+    <Steps>
+    1. Añade la versión bajo `catalog` en el `package.json` raíz:
+
+       ```json title="package.json"
+       {
+         "catalog": {
+           "some-npm-package": "^1.0.0"
+         }
+       }
+       ```
+
+    2. Refiérela desde el proyecto:
+
+       ```bash
+       bun add some-npm-package@catalog: --cwd packages/my-library
+       ```
+    </Steps>
+  </TabItem>
+</Tabs>
+
+:::tip[Alineando versiones en npm]
+npm no tiene función de catálogo, por lo que las versiones se declaran directamente en cada `package.json`. Para mantenerlas consistentes entre proyectos, recomendamos [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+:::
+
+##### Desactivar los catálogos
+
+Los catálogos están habilitados por defecto. Para desactivarlos, crea tu workspace con `--catalog false`:
+
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
+
+O configúralo en `aws-nx-plugin.config.mts` en cualquier momento:
+
+```ts title="aws-nx-plugin.config.mts"
+export default {
+  packageManager: {
+    catalogs: false,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+Con los catálogos desactivados, los generadores escriben las versiones de dependencias directamente en el `package.json` de cada proyecto, y mantener las versiones alineadas entre proyectos es tu responsabilidad.
+
+#### Declarando todas las dependencias en la raíz
+
+Si prefieres declarar cada dependencia solo en el `package.json` raíz (sin declaraciones de dependencias por proyecto), desactiva la regla de lint en el `biome.json` del workspace:
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+Los proyectos resuelven paquetes instalados en la raíz en tiempo de compilación, por lo que todo sigue compilando — renuncias a los manifiestos por proyecto como un registro preciso de las dependencias de cada proyecto (lo cual importa si luego publicas un proyecto o divides el repositorio).
 
 #### Código en tiempo de ejecución
 
-Cuando uses tu proyecto TypeScript como código en tiempo de ejecución (por ejemplo como handler para una función AWS Lambda), se recomienda usar una herramienta como [Rolldown](https://rolldown.rs/) para empaquetar tu proyecto, ya que puede realizar [tree-shake](https://rolldown.rs/guide/in-depth/why-bundlers) para incluir solo las dependencias realmente usadas.
+Cuando uses tu proyecto TypeScript como código en tiempo de ejecución (por ejemplo como handler para una función AWS Lambda), se recomienda usar una herramienta como [Rolldown](https://rolldown.rs/) para empaquetar tu proyecto, ya que puede realizar [tree-shake](https://rolldown.rs/in-depth/why-bundlers) para incluir solo las dependencias realmente usadas.
 
 Puedes lograr esto añadiendo un objetivo como el siguiente en tu archivo `project.json`:
 
@@ -193,12 +306,6 @@ Nota que en el objetivo anterior elegimos `src/index.ts` como punto de entrada p
 :::tip[Funciones Lambda]
 Si estás construyendo una función AWS Lambda, revisa el generador <Link path="/guides/ts-lambda-function">`ts#lambda-function`</Link> ya que configura el empaquetado automáticamente, además de generar infraestructura y añadir observabilidad y type-safety.
 :::
-
-#### Publicación en NPM
-
-Si vas a publicar tu proyecto TypeScript en NPM, debes crear un archivo `package.json` para él.
-
-Este debe declarar las dependencias que tu proyecto utiliza. Dado que en tiempo de compilación tu proyecto resuelve dependencias instaladas vía el `package.json` raíz del workspace, la regla `noUndeclaredDependencies` de Biome te avisará si tu proyecto importa un paquete que no está listado en su `package.json`.
 
 ### Compilación
 

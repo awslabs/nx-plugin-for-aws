@@ -60,6 +60,7 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<na
   - tsconfig.json Configuração TypeScript base para código e testes
   - tsconfig.app.json Configuração TypeScript para código fonte
   - tsconfig.spec.json Configuração TypeScript para testes
+  - package.json Manifesto do projeto definindo o nome do pacote e dependências do projeto
 </FileTree>
 
 :::note[Sem TanStack Router]
@@ -137,6 +138,49 @@ Um `Content-Security-Policy` padrão é aplicado. Ele restringe scripts e framin
 
 `runtime-config.json` é servido com `Cache-Control: no-cache` para que os navegadores sempre busquem a configuração mais recente após uma reimplantação, em vez de usar uma cópia em cache desatualizada.
 
+#### Domínio Personalizado & TLS
+
+Por padrão, a distribuição usa o nome de domínio padrão do CloudFront (`*.cloudfront.net`) e seu certificado padrão, que não suporta a imposição de uma versão mínima de TLS de 1.2. Para servir seu website a partir do seu próprio domínio, forneça um [certificado ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (que deve residir em `us-east-1` para uso com CloudFront) e seus nomes de domínio — uma versão mínima de TLS de 1.2 é então imposta para os visualizadores:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Passe as props `certificate` e `domainNames` no construct do website gerado em `packages/common/constructs/src/app/static-websites`:
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Defina as variáveis `custom_domain_names` e `acm_certificate_arn` no módulo do website gerado em `packages/common/terraform/src/app/static-websites`:
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+Você também precisará criar registros DNS (por exemplo, no Route 53) apontando seu domínio para a distribuição CloudFront.
+
 ## Implementando seu Website React
 
 A [documentação do React](https://react.dev/learn) é um bom ponto de partida para aprender os fundamentos de desenvolvimento com React.
@@ -203,7 +247,7 @@ Seu construct CDK do website implantará o namespace `connection` da configuraç
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite, MyApi } from ':my-scope/common-constructs';
+import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -374,7 +418,7 @@ Você pode executar seus testes usando o target `test`:
 
 ## Implantando Seu Website
 
-O gerador de website React cria infraestrutura como código CDK ou Terraform baseado no `iacProvider` selecionado. Você pode usar isso para implantar seu website.
+O gerador de website React cria infraestrutura como código CDK ou Terraform baseado no `iac` selecionado. Você pode usar isso para implantar seu website.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -405,7 +449,7 @@ Isso configura:
 5. Implantação automática de arquivos do website e configuração de runtime
 </Fragment>
 <Fragment slot="terraform">
-Para implantar seu website, recomendamos usar o gerador <Link path="guides/terraform-infrastructure">`terraform#project`</Link> para criar um projeto Terraform.
+Para implantar seu website, recomendamos usar o gerador <Link path="/guides/terraform-project">`terraform#project`</Link> para criar um projeto Terraform.
 
 Você pode usar o módulo Terraform gerado em `packages/common/terraform` para implantar seu website.
 

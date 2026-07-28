@@ -74,6 +74,29 @@ describe('react-website generator', () => {
     expect(viteConfig).toMatchSnapshot('vite.config.mts');
   });
 
+  it('keeps a single react copy: declared only on the website and deduped', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+
+    // The website declares its own react/react-dom.
+    const websitePackageJson = readJson(tree, 'test-app/package.json');
+    expect(websitePackageJson.dependencies?.react).toBeDefined();
+    expect(websitePackageJson.dependencies?.['react-dom']).toBeDefined();
+
+    // @nx/react seeds react/react-dom into the root manifest; without catalogs
+    // (npm) its floating range resolves to a different version than the
+    // website's pin and installs a second React. The generator removes them.
+    const rootPackageJson = readJson(tree, 'package.json');
+    expect(rootPackageJson.dependencies?.react).toBeUndefined();
+    expect(rootPackageJson.dependencies?.['react-dom']).toBeUndefined();
+    expect(rootPackageJson.devDependencies?.react).toBeUndefined();
+    expect(rootPackageJson.devDependencies?.['react-dom']).toBeUndefined();
+
+    // The bundle also dedupes react so a hoisted workspace-library copy can't
+    // become a second React instance at build time.
+    const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
+    expect(viteConfig).toContain("dedupe: ['react', 'react-dom']");
+  });
+
   it('should generate shared constructs', async () => {
     await tsReactWebsiteGenerator(tree, options);
     // Check shared constructs files
@@ -116,7 +139,10 @@ describe('react-website generator', () => {
 
   it('should update package.json with required dependencies', async () => {
     await tsReactWebsiteGenerator(tree, options);
-    const packageJson = JSON.parse(tree.read('package.json').toString());
+    // The website's runtime dependencies live in its own project manifest
+    const packageJson = JSON.parse(
+      tree.read('test-app/package.json').toString(),
+    );
     // Check for Tanstack router dependencies
     expect(packageJson.dependencies).toMatchObject({
       '@tanstack/react-router': expect.any(String),
@@ -125,12 +151,18 @@ describe('react-website generator', () => {
     expect(packageJson.dependencies).toMatchObject({
       tailwindcss: expect.any(String),
     });
-    expect(packageJson.devDependencies).toMatchObject({
+
+    // Pure build tooling stays in the workspace root devDependencies
+    const rootPackageJson = JSON.parse(tree.read('package.json').toString());
+    expect(rootPackageJson.devDependencies).toMatchObject({
       '@tailwindcss/vite': expect.any(String),
     });
 
-    // Check for AWS CDK dependencies
-    expect(packageJson.dependencies).toMatchObject({
+    // AWS CDK dependencies live in the shared constructs project manifest
+    const constructsPackageJson = JSON.parse(
+      tree.read('packages/common/constructs/package.json').toString(),
+    );
+    expect(constructsPackageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
       'aws-cdk-lib': expect.any(String),
     });
@@ -263,11 +295,17 @@ describe('react-website generator', () => {
   describe('TailwindCSS integration', () => {
     it('should include TailwindCSS dependencies by default', async () => {
       await tsReactWebsiteGenerator(tree, options);
-      const packageJson = JSON.parse(tree.read('package.json').toString());
-
-      // Check for TailwindCSS dependencies
+      // tailwindcss is a runtime dep declared in the project manifest
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
       expect(packageJson.dependencies).toHaveProperty('tailwindcss');
-      expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
+
+      // @tailwindcss/vite is build tooling and stays at the root
+      const rootPackageJson = JSON.parse(tree.read('package.json').toString());
+      expect(rootPackageJson.devDependencies).toHaveProperty(
+        '@tailwindcss/vite',
+      );
     });
 
     it('should configure vite with TailwindCSS plugin by default', async () => {
@@ -294,11 +332,14 @@ describe('react-website generator', () => {
 
     it('should not include TailwindCSS when disabled', async () => {
       await tsReactWebsiteGenerator(tree, optionsWithoutTailwind);
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
+      const rootPackageJson = JSON.parse(tree.read('package.json').toString());
 
       // Check that TailwindCSS dependencies are NOT included
       expect(packageJson.dependencies).not.toHaveProperty('tailwindcss');
-      expect(packageJson.devDependencies).not.toHaveProperty(
+      expect(rootPackageJson.devDependencies).not.toHaveProperty(
         '@tailwindcss/vite',
       );
     });
@@ -326,13 +367,18 @@ describe('react-website generator', () => {
 
     it('should handle tailwind explicitly set to true', async () => {
       await tsReactWebsiteGenerator(tree, { ...options, tailwind: true });
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
+      const rootPackageJson = JSON.parse(tree.read('package.json').toString());
       const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
       const stylesContent = tree.read('test-app/src/styles.css')?.toString();
 
       // Verify TailwindCSS is included
       expect(packageJson.dependencies).toHaveProperty('tailwindcss');
-      expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
+      expect(rootPackageJson.devDependencies).toHaveProperty(
+        '@tailwindcss/vite',
+      );
       expect(viteConfig).toContain('tailwindcss()');
       expect(stylesContent).toContain('@import');
       expect(stylesContent).toContain('tailwindcss');
@@ -767,23 +813,24 @@ describe('react-website generator ux tests', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it.each(
-    SUPPORTED_UX_PROVIDERS.map((p) => [p]),
-  )('should add ux metadata (ux=%s)', async (ux) => {
-    const options: TsReactWebsiteGeneratorSchema = {
-      name: 'test-app',
-      iac: 'cdk',
-      ux: ux,
-    };
+  it.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
+    'should add ux metadata (ux=%s)',
+    async (ux) => {
+      const options: TsReactWebsiteGeneratorSchema = {
+        name: 'test-app',
+        iac: 'cdk',
+        ux: ux,
+      };
 
-    await tsReactWebsiteGenerator(tree, options);
+      await tsReactWebsiteGenerator(tree, options);
 
-    const projectConfig = JSON.parse(
-      tree.read(`test-app/project.json`, 'utf-8'),
-    );
+      const projectConfig = JSON.parse(
+        tree.read(`test-app/project.json`, 'utf-8'),
+      );
 
-    expect(projectConfig.metadata.ux).toEqual(ux);
-  });
+      expect(projectConfig.metadata.ux).toEqual(ux);
+    },
+  );
 
   describe('Cloudscape', () => {
     const options: TsReactWebsiteGeneratorSchema = {
@@ -795,7 +842,10 @@ describe('react-website generator ux tests', () => {
     it('should update package.json with required dependencies', async () => {
       await tsReactWebsiteGenerator(tree, options);
       snapshotTreeDir(tree, 'test-app/src');
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      // Website runtime dependencies live in the website's own manifest
+      const packageJson = JSON.parse(
+        tree.read('test-app/package.json').toString(),
+      );
       // Check for website dependencies
       expect(packageJson.dependencies).toMatchObject({
         '@cloudscape-design/components': expect.any(String),
@@ -814,7 +864,10 @@ describe('react-website generator ux tests', () => {
     it('should update package.json with required dependencies', async () => {
       await tsReactWebsiteGenerator(tree, options);
       snapshotTreeDir(tree, 'test-app/src');
-      const packageJson = JSON.parse(tree.read('package.json').toString());
+      // Shadcn dependencies are declared on the shared shadcn package manifest
+      const packageJson = JSON.parse(
+        tree.read('packages/common/shadcn/package.json').toString(),
+      );
       expect(packageJson.dependencies).toMatchObject({
         'class-variance-authority': expect.any(String),
         clsx: expect.any(String),
@@ -832,28 +885,19 @@ describe('react-website generator ux tests', () => {
       expect(
         tree.exists('packages/common/shadcn/src/components/ui/button.tsx'),
       ).toBeTruthy();
-      expect(tree.exists('components.json')).toBeTruthy();
+      // components.json lives in the package so `shadcn add` installs
+      // component dependencies into the package's own manifest
+      expect(
+        tree.exists('packages/common/shadcn/components.json'),
+      ).toBeTruthy();
+      expect(tree.exists('components.json')).toBeFalsy();
     });
 
-    it('should ensure pnpm-workspace.yaml ignores workspace root check when using Shadcn', async () => {
+    it('should not relax the pnpm workspace root check', async () => {
       await tsReactWebsiteGenerator(tree, options);
 
       const workspaceYaml = tree.read('pnpm-workspace.yaml', 'utf-8') ?? '';
-      expect(workspaceYaml).toMatch(/ignoreWorkspaceRootCheck:\s*true/);
-    });
-
-    it('should preserve existing pnpm-workspace.yaml entries when enabling ignoreWorkspaceRootCheck', async () => {
-      tree.write(
-        'pnpm-workspace.yaml',
-        "packages:\n  - packages/*\nallowBuilds:\n  '@swc/core': true\n",
-      );
-
-      await tsReactWebsiteGenerator(tree, options);
-
-      const workspaceYaml = tree.read('pnpm-workspace.yaml', 'utf-8') ?? '';
-      expect(workspaceYaml).toMatch(/ignoreWorkspaceRootCheck:\s*true/);
-      expect(workspaceYaml).toMatch(/packages:/);
-      expect(workspaceYaml).toMatch(/@swc\/core/);
+      expect(workspaceYaml).not.toMatch(/ignoreWorkspaceRootCheck/);
     });
 
     it('should use shared Shadcn components when ux is Shadcn', async () => {

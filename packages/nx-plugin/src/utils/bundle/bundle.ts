@@ -4,7 +4,6 @@
  */
 
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -13,6 +12,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { applyGritQL } from '../ast';
+import { addDependenciesToPackageJson } from '../dependencies';
 import {
   addDependencyToTargetIfNotPresent,
   normalizeTargetKeyOrder,

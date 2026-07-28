@@ -3,15 +3,40 @@ title: "Empacotamento Docker"
 description: "Construa e implante imagens Docker para projetos TypeScript e Python em um workspace Nx Plugin for AWS."
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 Vários geradores (como <Link path="/guides/ts-agent">`ts#agent`</Link> e <Link path="/guides/py-agent">`py#agent`</Link>) produzem uma imagem Docker que é enviada para o Amazon ECR e consumida pela infraestrutura AWS. Este guia descreve o padrão que eles seguem para que você possa aplicá-lo a outros casos de uso — por exemplo, executar um projeto <Link path="/guides/fastapi">FastAPI</Link> no Amazon ECS, ou implantar um servidor Express containerizado.
 
 :::tip[Docker ou Finch]
-O motor de container usado para construir imagens é escolhido no momento da criação do workspace através da flag `--containerEngine` (`docker`, `finch`, ou `infer` — o padrão — que detecta automaticamente o que está instalado). [Finch](https://runfinch.com/) é uma alternativa open-source e drop-in para o Docker. A seleção é registrada em `aws-nx-plugin.config.mts` e aplicada a todos os geradores que emitem comandos de construção de container. As construções de assets de imagem do CDK respeitam a escolha através da variável de ambiente `CDK_DOCKER`.
+O motor de container usado para construir imagens é escolhido no momento da criação do workspace através da flag `--containers` (`docker`, `finch`, ou `infer` — o padrão — que detecta automaticamente o que está instalado). [Finch](https://runfinch.com/) é uma alternativa open-source e drop-in para o Docker. A seleção é registrada em `aws-nx-plugin.config.mts` e aplicada a todos os geradores que emitem comandos de construção de container. As construções de assets de imagem do CDK respeitam a escolha através da variável de ambiente `CDK_DOCKER`.
 :::
 
 ## O Padrão
@@ -253,6 +278,32 @@ Isso limpa o diretório de saída, e então copia tanto o conteúdo do bundle qu
 
 <NxCommands commands={['docker my-project']} />
 
+## Escaneando Imagens com Trivy
+
+É uma boa prática escanear suas imagens em busca de vulnerabilidades conhecidas. Os geradores que seguem este padrão adicionam um target `trivy` que escaneia a imagem construída com [Trivy](https://trivy.dev/), executando a partir da [imagem Trivy hospedada no ECR](https://gallery.ecr.aws/aquasecurity/trivy), e sai com código diferente de zero em descobertas `HIGH` ou `CRITICAL`.
+
+Adicione um target `trivy` que `dependsOn` do seu target `docker`. Ele salva a imagem construída em um tarball e a escaneia através de um bind mount relativo ao workspace, para que o mesmo comando funcione tanto com `docker` quanto com `finch`:
+
+<Code lang="json" code={trivyTarget} />
+
+Os targets de escaneamento por imagem de cada projeto são agregados sob um target `trivy` em todo o workspace, que o script raiz `trivy` fornecido executa (`nx run-many --target trivy`).
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+:::tip[Execute o Trivy no CI]
+O escaneamento é intencionalmente não conectado ao `build`, pois isso pode introduzir atrito desnecessário ao iterar durante o desenvolvimento, já que o banco de dados de vulnerabilidades do Trivy é continuamente atualizado com novos CVEs.
+
+Em vez disso, recomendamos executar o comando acima como uma etapa dedicada em seu pipeline de CI antes da implantação em ambientes de produção.
+:::
+
+:::tip[Cache pula imagens não alteradas]
+Como a imagem é totalmente determinada pelo código-fonte do seu projeto, declarar `inputs` (aqui `default` e `^production`, correspondendo ao target `bundle`) permite que o Nx faça cache do escaneamento e pule o re-escaneamento de uma imagem que não mudou. Fixe a versão da imagem Trivy (por exemplo, <code>trivy:<TrivyVersion /></code>) para que os escaneamentos sejam reproduzíveis.
+:::
+
+:::note[Suprimindo descobertas]
+O Trivy lê um arquivo `.trivyignore` (uma lista de IDs de vulnerabilidade, um por linha) da raiz do seu projeto. `--ignore-unfixed` pula vulnerabilidades sem correção disponível, então o escaneamento só falha em problemas que você pode resolver atualizando ferramentas em seu `Dockerfile`. Veja a [documentação de filtragem do Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) para detalhes.
+:::
+
 ## Infrastructure
 
 Conectar o diretório de contexto de build resultante à infraestrutura como código é o mesmo tanto para TypeScript quanto para Python — apenas o caminho para o diretório de contexto de build difere (`dist/packages/my-project/bundle` para TypeScript, `dist/packages/my-project/docker` para Python).
@@ -305,7 +356,7 @@ const image = new DockerImageAsset(this, 'MyImage', {
 });
 ```
 
-O helper `findWorkspaceRoot` é gerado pelo gerador <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> e exportado de `:my-scope/common-constructs`. Se você não está usando constructs compartilhados, você pode codificar o caminho para o diretório `dist` relativo a onde `cdk` é invocado — tipicamente a raiz do workspace — e omitir completamente a chamada `findWorkspaceRoot`.
+O helper `findWorkspaceRoot` é gerado pelo gerador <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> e exportado de `@my-scope/common-constructs`. Se você não está usando constructs compartilhados, você pode codificar o caminho para o diretório `dist` relativo a onde `cdk` é invocado — tipicamente a raiz do workspace — e omitir completamente a chamada `findWorkspaceRoot`.
 
 :::note[Executando bundle antes do synth]
 O CDK não executa os targets `bundle`/`docker` automaticamente — você deve executar `nx build my-project` (ou configurar o target deploy para depender de `build`) antes de `cdk deploy`. Os geradores que usam este padrão declaram `docker` e `bundle` como dependências de `build` para que isso aconteça de forma transparente.

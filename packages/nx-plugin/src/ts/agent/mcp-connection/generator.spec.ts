@@ -52,6 +52,16 @@ describe('ts#agent#mcp-connection generator', () => {
       }),
     );
 
+    tree.write(
+      'packages/my-api/package.json',
+      JSON.stringify({
+        name: '@test/my-api',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
+
     // Create agent.ts
     tree.write(
       'packages/my-api/src/my-agent/agent.ts',
@@ -391,7 +401,7 @@ export const getAgent = async (sessionId: string) => {
 
     // Should have exactly one import statement from agent-connection
     const importSourceCount = (
-      agentContent.match(/from ':proj\/agent-connection'/g) ?? []
+      agentContent.match(/from '@proj\/agent-connection'/g) ?? []
     ).length;
     expect(importSourceCount).toBe(1);
 

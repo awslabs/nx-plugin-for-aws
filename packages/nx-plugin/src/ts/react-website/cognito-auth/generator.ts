@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -17,6 +16,7 @@ import {
   applyGritQL,
 } from '../../../utils/ast';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
@@ -97,6 +97,7 @@ export async function tsReactWebsiteAuthGenerator(
     tree,
     withVersions(['oidc-client-ts', 'react-oidc-context']),
     {},
+    joinPathFragments(projectConfig.root, 'package.json'),
   );
 
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');

@@ -15,5 +15,6 @@ export interface PresetGeneratorSchema {
   readonly mcp?: boolean;
   readonly containers?: PresetContainersOption;
   readonly module?: ModuleFormat;
+  readonly catalog?: boolean;
   readonly preferInstallDependencies?: boolean;
 }

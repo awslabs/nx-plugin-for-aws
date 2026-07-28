@@ -15,11 +15,3 @@ export function getNpmScopePrefix(tree: Tree): string | undefined {
   const npmScope = getNpmScope(tree);
   return `@${npmScope}/`;
 }
-/**
- * Returns a safe import alias for local packages to avoid the potential for sniping attacks
- */
-export function toScopeAlias(npmScopeOrPackageName: string): string {
-  return npmScopeOrPackageName.startsWith('@')
-    ? `:${npmScopeOrPackageName.slice(1)}`
-    : npmScopeOrPackageName;
-}

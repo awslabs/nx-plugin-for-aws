@@ -89,13 +89,13 @@ describe('ts#astro-docs generator', () => {
     ).toMatchSnapshot('translate.config.json');
   });
 
-  it('should add astro + starlight + translation dependencies to the root package.json', async () => {
+  it('should declare astro + starlight + translation dependencies in the docs project manifest', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'docs',
       preferInstallDependencies: false,
     });
 
-    const packageJson = readJson(tree, 'package.json');
+    const packageJson = readJson(tree, 'docs/package.json');
     const deps = {
       ...(packageJson.dependencies ?? {}),
       ...(packageJson.devDependencies ?? {}),
@@ -104,10 +104,17 @@ describe('ts#astro-docs generator', () => {
     expect(deps).toHaveProperty('@astrojs/starlight');
     // Blog on by default.
     expect(deps).toHaveProperty('starlight-blog');
-    // Translation on by default.
+    // Translation on by default — its scripts import these at runtime.
     expect(deps).toHaveProperty('@strands-agents/sdk');
     expect(deps).toHaveProperty('commander');
-    expect(deps).toHaveProperty('tsx');
+    expect(deps).toHaveProperty('fast-glob');
+    expect(deps).toHaveProperty('fs-extra');
+    expect(deps).toHaveProperty('simple-git');
+
+    // tsx is shared build tooling and stays in the root manifest.
+    const rootPackageJson = readJson(tree, 'package.json');
+    expect(rootPackageJson.devDependencies).toHaveProperty('tsx');
+    expect(deps).not.toHaveProperty('tsx');
   });
 
   it('should generate a compiling translate.ts using import.meta.dirname in an ESM workspace', async () => {
@@ -292,7 +299,7 @@ describe('ts#astro-docs generator', () => {
       tree.exists('docs/src/content/docs/en/blog/welcome.mdx'),
     ).toBeTruthy();
 
-    const packageJson = readJson(tree, 'package.json');
+    const packageJson = readJson(tree, 'docs/package.json');
     const deps = {
       ...(packageJson.dependencies ?? {}),
       ...(packageJson.devDependencies ?? {}),

@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import { addDependenciesToPackageJson } from './dependencies';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 /**
  * Ensures the shared scripts package exists and adds RDB local-dev scripts
@@ -61,5 +61,18 @@ export async function sharedRdbScriptsGenerator(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
+  // The engine's wait-for-db script imports the database client, so declare it
+  // in the scripts project's own package.json (tsx runs the scripts and lives
+  // in the workspace root devDependencies).
+  const clientDeps: ITsDepVersion[] =
+    engine === 'postgres' ? ['pg'] : ['mariadb'];
+  const clientDevDeps: ITsDepVersion[] =
+    engine === 'postgres' ? ['@types/pg'] : [];
+  addDependenciesToPackageJson(
+    tree,
+    withVersions(clientDeps),
+    withVersions(clientDevDeps),
+    joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'package.json'),
+  );
   addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 }

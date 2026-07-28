@@ -3,9 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { readJsonFile } from '@nx/devkit';
+import { ensureDirSync } from 'fs-extra';
 import { describe, expect, it } from 'vitest';
+import { createTestWorkspace, tmpProjPath } from '../utils';
 
 describe('smoke test - mcp-server', () => {
   it('should start the MCP server and respond to tool calls', async () => {
@@ -92,13 +97,73 @@ describe('smoke test - mcp-server', () => {
         name: 'add-to-existing-project',
         arguments: {
           packageManager: 'pnpm',
-          errorMessage: 'IaC provider "inherit" requires iac.provider to be set',
+          errorMessage:
+            'IaC provider "inherit" requires iac.provider to be set',
         },
       });
       const existingText = (existingResult.content[0] as { text: string }).text;
       expect(existingText).toContain('init');
       // Content sourced from the bundled docs guide (not just the static map)
       expect(existingText).toContain('existing');
+    } finally {
+      await client.close();
+    }
+  });
+
+  // The vended config runs the workspace's own `@aws/nx-plugin-mcp`, so the
+  // server tracks the version installed in the workspace rather than whatever is
+  // latest on the registry.
+  it('should start the server from the config vended into a workspace', async () => {
+    const pkgMgr = 'pnpm';
+    const targetDir = `${tmpProjPath()}/mcp-vended-${pkgMgr}`;
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { force: true, recursive: true });
+    }
+    ensureDirSync(targetDir);
+
+    await createTestWorkspace(pkgMgr, targetDir, 'mcp-vended', 'cdk');
+    const projectRoot = join(targetDir, 'mcp-vended');
+
+    const { command, args } = readJsonFile(join(projectRoot, '.mcp.json'))
+      .mcpServers['nx-plugin-for-aws'];
+    expect({ command, args }).toEqual({
+      command: 'npx',
+      args: ['-y', '@aws/nx-plugin-mcp'],
+    });
+
+    // The package the config names is installed, so npx resolves it from the
+    // workspace instead of the registry
+    expect(
+      existsSync(
+        join(
+          projectRoot,
+          'node_modules',
+          '@aws',
+          'nx-plugin-mcp',
+          'package.json',
+        ),
+      ),
+    ).toBe(true);
+
+    // Launch exactly what the config specifies, from the workspace directory.
+    // A dead registry proves the resolution is local: nothing can be fetched, so
+    // the server can only start from the installed package.
+    const transport = new StdioClientTransport({
+      command,
+      args,
+      cwd: projectRoot,
+      env: { ...process.env, npm_config_registry: 'http://127.0.0.1:9/' },
+    });
+    const client = new Client({ name: 'e2e-test-client', version: '1.0.0' });
+
+    await client.connect(transport);
+    try {
+      expect(client.getServerVersion()).toMatchObject({
+        name: 'nx-plugin-for-aws',
+      });
+
+      const { tools } = await client.listTools();
+      expect(tools.map((t) => t.name)).toContain('list-generators');
     } finally {
       await client.close();
     }

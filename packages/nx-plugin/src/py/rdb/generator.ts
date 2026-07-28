@@ -4,7 +4,6 @@
  */
 import { relative } from 'node:path';
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -14,6 +13,8 @@ import {
 } from '@nx/devkit';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import { addDockerScanTarget } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -271,6 +272,14 @@ export const pyRdbGenerator = async (
         dependsOn: ['bundle-migration', 'bundle-create-db-user'],
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+
+      addDockerScanTarget(tree, {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag, createDbUserDockerImageTag],
+      });
     }
     addDependencyToTargetIfNotPresent(
       projectConfig,
@@ -314,6 +323,11 @@ export const pyRdbGenerator = async (
   addDependenciesToPyProjectToml(tree, dir, [
     'sqlmodel',
     'alembic',
+    // SQLAlchemy's async engine (used by connection.py for both engines)
+    // requires greenlet at runtime. Vend it explicitly at a pinned version so
+    // the dependency graph is fully determined and doesn't float to an
+    // unpublished-wheel release at install time.
+    'greenlet',
     ...(engine === 'mysql'
       ? (['aiomysql', 'boto3', 'aws-lambda-powertools'] as const)
       : (['asyncpg', 'boto3', 'aws-lambda-powertools'] as const)),

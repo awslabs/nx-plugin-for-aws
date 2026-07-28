@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -19,6 +18,8 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -38,7 +39,7 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
 export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -96,7 +97,7 @@ export const tsAgentGenerator = async (
     name,
     agentNameClassName,
     distDir,
-    agentConnectionImport: `:${getNpmScope(tree)}/agent-connection`,
+    agentConnectionImport: `@${getNpmScope(tree)}/agent-connection`,
     ...esmVars(tree),
   };
 
@@ -139,6 +140,9 @@ export const tsAgentGenerator = async (
         protocol,
         adotVersion:
           TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+        jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
+        nodeBaseImage: BASE_IMAGES.node,
+        ...nodeImageVersions(),
         ...esmVars(tree),
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -173,6 +177,14 @@ export const tsAgentGenerator = async (
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+
+    addDockerScanTarget(tree, {
+      project,
+      containerEngine: containers,
+      trivyTargetName: `${agentTargetPrefix}-trivy`,
+      dockerTargetName,
+      imageTags: [dockerImageTag],
+    });
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
@@ -210,6 +222,11 @@ export const tsAgentGenerator = async (
         : protocol === 'ag-ui'
           ? ([
               '@ag-ui/aws-strands',
+              // @ag-ui/aws-strands declares these as peer dependencies but
+              // statically imports them, so they must be installed for the
+              // bundler to resolve and inline them into the runtime image.
+              '@ag-ui/a2ui-toolkit',
+              '@ag-ui/client',
               '@ag-ui/core',
               '@ag-ui/encoder',
               'express',
@@ -224,10 +241,9 @@ export const tsAgentGenerator = async (
             ] as const)),
     ]),
     withVersions([
-      // The chat CLI runs standalone via tsx for every protocol, and resolves
-      // the deployed agent from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
-      'tsx',
       '@types/node',
+      // The chat CLI runs standalone via tsx and resolves the deployed agent
+      // from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
       'agent-chat-cli',
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
@@ -240,7 +256,9 @@ export const tsAgentGenerator = async (
         ? (['@types/express', '@types/cors'] as const)
         : (['@types/ws', '@types/cors'] as const)),
     ]),
+    joinPathFragments(project.root, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.

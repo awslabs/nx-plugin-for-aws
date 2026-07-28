@@ -183,16 +183,21 @@ describe('infra generator', () => {
     expect(packageJson.dependencies).toMatchSnapshot('dependencies');
     // Snapshot devDependencies section
     expect(packageJson.devDependencies).toMatchSnapshot('dev-dependencies');
-    // Test specific dependency values
-    expect(packageJson.dependencies).toMatchObject({
-      'aws-cdk-lib': expect.any(String),
-      'aws-cdk': expect.any(String),
-      esbuild: expect.any(String),
-      constructs: expect.any(String),
-      'source-map-support': expect.any(String),
+    // Runtime dependencies live in the infra project's own package.json as
+    // catalog references; build tooling (aws-cdk CLI, esbuild, tsx) stays at
+    // the workspace root.
+    const infraPackageJson = JSON.parse(
+      tree.read('packages/test/package.json').toString(),
+    );
+    expect(infraPackageJson.dependencies).toMatchObject({
+      'aws-cdk-lib': 'catalog:',
+      constructs: 'catalog:',
+      'source-map-support': 'catalog:',
     });
     expect(packageJson.devDependencies).toMatchObject({
-      tsx: expect.any(String),
+      'aws-cdk': 'catalog:',
+      esbuild: 'catalog:',
+      tsx: 'catalog:',
     });
   });
 
@@ -370,6 +375,15 @@ describe('infra generator', () => {
       // Pre-create scripts with project.json to trigger early return
       tree.write('packages/common/scripts/project.json', '{}');
       tree.write(
+        'packages/common/scripts/package.json',
+        JSON.stringify({
+          name: '@proj/scripts',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+        }),
+      );
+      tree.write(
         'packages/common/scripts/src/infra/infra-deploy.ts',
         '// custom deploy\n',
       );
@@ -408,10 +422,14 @@ describe('infra generator', () => {
       );
     });
 
-    it('should add @aws-sdk/client-sts as dev dependency', async () => {
+    it('should add @aws-sdk/client-sts to the shared scripts project', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
-      const packageJson = JSON.parse(tree.read('package.json').toString());
-      expect(packageJson.devDependencies['@aws-sdk/client-sts']).toBeDefined();
+      const scriptsPackageJson = JSON.parse(
+        tree.read('packages/common/scripts/package.json').toString(),
+      );
+      expect(scriptsPackageJson.devDependencies['@aws-sdk/client-sts']).toBe(
+        'catalog:',
+      );
     });
 
     it('should configure deploy and destroy targets with tsx scripts', async () => {

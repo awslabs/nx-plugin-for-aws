@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -15,6 +14,7 @@ import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
 import { addApiGatewayInfra } from '../../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
 import { addTypeScriptBundleTarget } from '../../../utils/bundle/bundle';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FsCommands } from '../../../utils/fs';
 import { updateGitIgnore } from '../../../utils/git';
@@ -317,8 +317,10 @@ export const tsSmithyApiGenerator = async (
         ? (['@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
-    withVersions(['@types/aws-lambda', 'tsx']),
+    withVersions(['@types/aws-lambda']),
+    joinPathFragments(backendProjectConfig.root, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   await addGeneratorMetricsIfApplicable(tree, [TS_SMITHY_API_GENERATOR_INFO]);
 

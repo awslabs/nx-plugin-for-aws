@@ -9,7 +9,7 @@ export interface AgentcoreGatewayGeneratorSchema {
   directory?: string;
   subDirectory?: string;
   protocol?: 'mcp';
-  auth?: 'iam';
+  auth?: 'iam' | 'cognito';
   cedarPolicy?: boolean;
   infra?: 'agentcore' | 'none';
   iac: IacOption;

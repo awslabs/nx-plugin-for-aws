@@ -24,7 +24,7 @@ Generator này tạo một trang web [React](https://react.dev/) mới với [sh
 Ứng dụng được tạo ra sử dụng [Vite](https://vite.dev/) làm công cụ xây dựng và đóng gói. Nó sử dụng [TanStack Router](https://tanstack.com/router/v1) cho định tuyến an toàn kiểu.
 
 :::note[UX Provider]
-`uxProvider` mặc định là [shadcn/ui](https://ui.shadcn.com/). Bạn cũng có thể chọn [Cloudscape](http://cloudscape.design/) hoặc `None` (tự mang thư viện component của bạn).
+`ux` mặc định là [shadcn/ui](https://ui.shadcn.com/). Bạn cũng có thể chọn [Cloudscape](http://cloudscape.design/) hoặc `none` (tự mang thư viện component của bạn).
 :::
 
 ## Cách sử dụng
@@ -60,6 +60,7 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<nam
   - tsconfig.json Cấu hình TypeScript cơ bản cho mã nguồn và test
   - tsconfig.app.json Cấu hình TypeScript cho mã nguồn
   - tsconfig.spec.json Cấu hình TypeScript cho test
+  - package.json Manifest dự án xác định tên package và các dependency của dự án
 </FileTree>
 
 :::note[Không dùng TanStack Router]
@@ -137,6 +138,49 @@ Một `Content-Security-Policy` mặc định được thực thi. Nó hạn ch�
 
 `runtime-config.json` được phục vụ với `Cache-Control: no-cache` để trình duyệt luôn tải cấu hình mới nhất sau khi triển khai lại, thay vì sử dụng bản sao được lưu trong cache cũ.
 
+#### Custom Domain & TLS
+
+Theo mặc định, distribution sử dụng tên miền CloudFront mặc định (`*.cloudfront.net`) và chứng chỉ mặc định của nó, không hỗ trợ việc thực thi phiên bản TLS tối thiểu là 1.2. Để phục vụ trang web của bạn từ tên miền riêng của bạn, hãy cung cấp một [chứng chỉ ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (phải nằm trong `us-east-1` để sử dụng với CloudFront) và tên miền của bạn — phiên bản TLS tối thiểu là 1.2 sau đó sẽ được thực thi cho người xem:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Truyền các props `certificate` và `domainNames` trong construct website được tạo của bạn trong `packages/common/constructs/src/app/static-websites`:
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Đặt các biến `custom_domain_names` và `acm_certificate_arn` trong module website được tạo của bạn trong `packages/common/terraform/src/app/static-websites`:
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+Bạn cũng sẽ cần tạo các bản ghi DNS (ví dụ trong Route 53) trỏ tên miền của bạn đến CloudFront distribution.
+
 ## Triển khai React Website của bạn
 
 [Tài liệu React](https://react.dev/learn) là nơi tốt để bắt đầu học các kiến thức cơ bản về xây dựng với React.
@@ -203,7 +247,7 @@ Construct CDK của trang web của bạn sẽ triển khai namespace `connectio
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite, MyApi } from ':my-scope/common-constructs';
+import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -385,7 +429,7 @@ Bạn có thể sử dụng construct CDK được tạo cho bạn trong `packag
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -405,7 +449,7 @@ export class ApplicationStack extends Stack {
 5. Tự động triển khai các file trang web và cấu hình runtime
 </Fragment>
 <Fragment slot="terraform">
-Để triển khai trang web của bạn, chúng tôi khuyên bạn nên sử dụng <Link path="guides/terraform-infrastructure">generator `terraform#project`</Link> để tạo một dự án Terraform.
+Để triển khai trang web của bạn, chúng tôi khuyên bạn nên sử dụng <Link path="/guides/terraform-project">generator `terraform#project`</Link> để tạo một dự án Terraform.
 
 Bạn có thể sử dụng module Terraform được tạo cho bạn trong `packages/common/terraform` để triển khai trang web của bạn.
 

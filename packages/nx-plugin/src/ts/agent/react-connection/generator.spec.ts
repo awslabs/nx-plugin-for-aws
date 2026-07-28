@@ -28,6 +28,10 @@ describe('ts strands agent react connection generator', () => {
         sourceRoot: 'apps/frontend/src',
       }),
     );
+    tree.write(
+      'apps/frontend/package.json',
+      JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+    );
     // Mock agent project configuration
     tree.write(
       'apps/agent-project/project.json',
@@ -129,15 +133,17 @@ export function Main() {
         auth: 'iam',
       },
     });
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['@trpc/client']).toBeDefined();
-    expect(
-      packageJson.dependencies['@trpc/tanstack-react-query'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
-    expect(
-      packageJson.dependencies['@tanstack/react-query-devtools'],
-    ).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['@trpc/client']).toBe('catalog:');
+    expect(packageJson.dependencies['@trpc/tanstack-react-query']).toBe(
+      'catalog:',
+    );
+    expect(packageJson.dependencies['@tanstack/react-query']).toBe('catalog:');
+    expect(packageJson.dependencies['@tanstack/react-query-devtools']).toBe(
+      'catalog:',
+    );
   });
 
   it('should handle IAM auth option', async () => {
@@ -163,13 +169,15 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['oidc-client-ts']).toBe('catalog:');
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
     expect(
       packageJson.dependencies['@aws-sdk/credential-provider-cognito-identity'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+    ).toBe('catalog:');
+    expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
   });
 
   it('should handle Cognito auth option', async () => {
@@ -195,8 +203,10 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
   });
 
   it('should handle no auth option', async () => {
@@ -222,7 +232,9 @@ export function Main() {
 
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
     expect(packageJson.dependencies['react-oidc-context']).toBeUndefined();
     expect(packageJson.dependencies['aws4fetch']).toBeUndefined();
   });
@@ -264,8 +276,10 @@ export function Main() {
     // Should default to IAM
     expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -338,9 +352,11 @@ export function Main() {
     ).toBeFalsy();
 
     // Should add AG-UI/CopilotKit dependencies
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
-    expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
+    const packageJson = JSON.parse(
+      tree.read('apps/frontend/package.json', 'utf-8'),
+    );
+    expect(packageJson.dependencies['@copilotkit/react-core']).toBe('catalog:');
+    expect(packageJson.dependencies['@ag-ui/client']).toBe('catalog:');
 
     // Should NOT add tRPC dependencies
     expect(packageJson.dependencies['@trpc/client']).toBeUndefined();

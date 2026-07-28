@@ -193,9 +193,12 @@ export const tsNxGeneratorGenerator = async (
 
   await formatFilesInSubtree(tree);
 
+  // The generated generator.ts imports @nx/devkit, which must resolve for
+  // Nx to run it (bun's isolated layout doesn't hoist it from @nx/js).
   return () =>
     installDependencies(tree, options.preferInstallDependencies, {
       languages: ['typescript'],
+      ensureResolvable: ['@nx/devkit'],
     });
 };
 

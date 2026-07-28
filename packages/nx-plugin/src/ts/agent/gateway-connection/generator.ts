@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -19,6 +18,7 @@ import {
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -65,7 +65,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   }
   if (gateway.auth !== 'iam') {
     throw new Error(
-      `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Only IAM-authenticated gateways are supported in v1.`,
+      `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Agent connections currently require the gateway to use IAM authentication.`,
     );
   }
   if (agentComponent.auth && agentComponent.auth !== 'iam') {
@@ -126,7 +126,7 @@ export const tsAgentGatewayConnectionGenerator = async (
       tree,
       agentFilePath,
       [clientClassName],
-      `:${npmScope}/agent-connection`,
+      `@${npmScope}/agent-connection`,
     );
     await addTypeScriptClientToAgent(
       tree,
@@ -172,6 +172,7 @@ export const tsAgentGatewayConnectionGenerator = async (
       '@aws-sdk/credential-providers',
     ]),
     {},
+    joinPathFragments(sourceProject.root, 'package.json'),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

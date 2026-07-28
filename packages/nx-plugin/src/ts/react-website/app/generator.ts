@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   names,
   OverwriteStrategy,
   readProjectConfiguration,
+  removeDependenciesFromPackageJson,
   type Tree,
   updateJson,
   updateProjectConfiguration,
@@ -20,12 +20,13 @@ import {
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
+import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
-import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
+import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -66,7 +67,7 @@ export async function tsReactWebsiteGenerator(
     throw new Error('Shadcn requires TailwindCSS to be enabled.');
   }
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const scopeAlias = npmScopePrefix;
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
   const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
@@ -416,11 +417,15 @@ export async function tsReactWebsiteGenerator(
       );
     }
 
-    // Use Vite's native tsconfig paths resolution (replaces vite-tsconfig-paths)
+    // Use Vite's native tsconfig paths resolution (replaces vite-tsconfig-paths).
+    // `dedupe` forces a single copy of react/react-dom into the bundle: each
+    // project declares its own react dependency, so without this a workspace
+    // library's hoisted copy can produce a second React instance and the
+    // "Invalid hook call" runtime crash.
     await applyGritQL(
       tree,
       viteConfigPath,
-      'or { `defineConfig(() => ({ $props }))` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true }` }, `defineConfig({ $props })` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true }` } }',
+      "or { `defineConfig(() => ({ $props }))` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] }` }, `defineConfig({ $props })` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] }` } }",
     );
 
     // Add define: { global: {} } to the config (handles both callback and direct forms)
@@ -478,9 +483,9 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
-
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
+  // Build/test tooling imported only from vite.config.mts stays at the root.
+  const rootDevDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
 
   if (ux === 'cloudscape') {
     dependencies.push(
@@ -489,17 +494,21 @@ export async function tsReactWebsiteGenerator(
       '@cloudscape-design/global-styles',
     );
   } else if (ux === 'shadcn') {
-    // not required to add any dependencies because dependencies are added by the common/shadcn package.
+    // Shared shadcn components live in the common/shadcn package, but the
+    // website's own generated components (e.g. the tanstack-router sidebar)
+    // import lucide-react directly, so the website must declare it.
+    if (tanstackRouter) {
+      dependencies.push('lucide-react');
+    }
   }
 
-  // Add TailwindCSS dependencies if enabled
   if (tailwind) {
     dependencies.push('tailwindcss');
-    devDependencies.push('@tailwindcss/vite');
+    rootDevDependencies.push('@tailwindcss/vite');
   }
   if (tanstackRouter) {
     dependencies.push('@tanstack/react-router');
-    devDependencies.push(
+    rootDevDependencies.push(
       '@tanstack/router-plugin',
       '@tanstack/router-generator',
       '@tanstack/virtual-file-routes',
@@ -510,8 +519,17 @@ export async function tsReactWebsiteGenerator(
   addDependenciesToPackageJson(
     tree,
     withVersions(dependencies),
-    withVersions(devDependencies),
+    {},
+    joinPathFragments(libraryRoot, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(rootDevDependencies));
+
+  // @nx/react's applicationGenerator seeds react/react-dom into the root
+  // manifest. The website now declares its own pinned versions, so drop the
+  // root copies: without catalogs (npm) the root's floating range resolves to
+  // a different version than the website's pin, installing a second React and
+  // producing the "Invalid hook call" runtime crash.
+  removeDependenciesFromPackageJson(tree, ['react', 'react-dom'], []);
 
   await addGeneratorMetricsIfApplicable(tree, [
     REACT_WEBSITE_APP_GENERATOR_INFO,

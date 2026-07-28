@@ -9,6 +9,7 @@ import {
   type NxJsonConfiguration,
   OverwriteStrategy,
   readProjectConfiguration,
+  type TargetConfiguration,
   type Tree,
   updateJson,
   updateProjectConfiguration,
@@ -23,6 +24,7 @@ import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
+  mergeTargetDefault,
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx';
@@ -154,37 +156,25 @@ export const tsProjectGenerator = async (
       ],
     };
 
+    const withDefaultInput = (base: Partial<TargetConfiguration>) => ({
+      ...base,
+      inputs: [
+        ...(base.inputs ?? []).filter((i) => i !== 'default'),
+        'default',
+      ],
+    });
+
     nxJson.targetDefaults = {
       ...nxJson.targetDefaults,
-      compile: {
+      compile: mergeTargetDefault(nxJson.targetDefaults?.compile, (base) => ({
         cache: true,
-        ...nxJson.targetDefaults?.compile,
-        inputs: [
-          ...(nxJson.targetDefaults?.compile?.inputs ?? []).filter(
-            (i) => i !== 'default',
-          ),
-          'default',
-        ],
-      },
-      build: {
+        ...withDefaultInput(base),
+      })),
+      build: mergeTargetDefault(nxJson.targetDefaults?.build, (base) => ({
         cache: true,
-        ...nxJson.targetDefaults?.build,
-        inputs: [
-          ...(nxJson.targetDefaults?.build?.inputs ?? []).filter(
-            (i) => i !== 'default',
-          ),
-          'default',
-        ],
-      },
-      test: {
-        ...nxJson.targetDefaults?.test,
-        inputs: [
-          ...(nxJson.targetDefaults?.test?.inputs ?? []).filter(
-            (i) => i !== 'default',
-          ),
-          'default',
-        ],
-      },
+        ...withDefaultInput(base),
+      })),
+      test: mergeTargetDefault(nxJson.targetDefaults?.test, withDefaultInput),
     };
 
     // Ensure we only declare a single typescript plugin with the correct settings

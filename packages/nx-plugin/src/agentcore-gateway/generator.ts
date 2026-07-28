@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
@@ -14,6 +13,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addAgentCoreGatewayInfra } from '../utils/agent-core-constructs/agent-core-constructs';
+import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';
@@ -28,6 +28,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
 import { assignPort } from '../utils/port';
+import { ensureProjectPackageJson } from '../utils/project-package-json';
 import { sharedConstructsGenerator } from '../utils/shared-constructs';
 import { withVersions } from '../utils/versions';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
@@ -46,11 +47,13 @@ export const agentcoreGatewayGenerator = async (
   const projectRoot = joinPathFragments(parentDir, subDir);
   const fullyQualifiedName = `${getNpmScopePrefix(tree)}${name}`;
 
-  // Protocol / auth are fixed to mcp / iam in v1 — the enums accept only
-  // these values, but we still persist the resolved value in metadata so
-  // that connection generators can read it uniformly (and future additions
-  // are non-breaking).
+  // Protocol is fixed to mcp — the enum accepts only this value, but we still
+  // persist the resolved value in metadata so connection generators can read
+  // it uniformly (and future additions are non-breaking).
   const protocol = options.protocol ?? 'mcp';
+  // Inbound auth is iam (default) or cognito. Persisted in metadata so
+  // connection generators can validate it (agent -> gateway connections
+  // require an IAM gateway).
   const auth = options.auth ?? 'iam';
   const cedarPolicy = options.cedarPolicy ?? true;
   const infra = options.infra ?? 'agentcore';
@@ -90,6 +93,12 @@ export const agentcoreGatewayGenerator = async (
     });
     project = readProjectConfigurationUnqualified(tree, fullyQualifiedName);
   }
+  // Ensure the project has its own package.json so its runtime dependencies
+  // (added below) are declared in it rather than the workspace root.
+  ensureProjectPackageJson(tree, {
+    dir: projectRoot,
+    fullyQualifiedName,
+  });
   const port = assignPort(tree, project, 8100);
   // A gateway is its own standalone project, so it uses plain `serve` / `dev`
   // targets. Re-run: keep existing targets (their dependsOn may have been
@@ -108,11 +117,14 @@ export const agentcoreGatewayGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (cedarPolicy) {
+    // The default permit-all policy differs by auth type: AgentCore represents
+    // IAM callers as `AgentCore::IamEntity` and Cognito/JWT callers as
+    // `AgentCore::OAuthUser`, so the two policies match different principals.
     generateFiles(
       tree,
       joinPathFragments(import.meta.dirname, 'files', 'cedar'),
       projectRoot,
-      { nameClassName },
+      { nameClassName, auth },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
   }
@@ -135,8 +147,10 @@ export const agentcoreGatewayGenerator = async (
   addDependenciesToPackageJson(
     tree,
     withVersions(['@modelcontextprotocol/sdk', 'express']),
-    withVersions(['tsx', '@types/express', 'ejs', '@types/ejs']),
+    withVersions(['@types/express', 'ejs', '@types/ejs']),
+    joinPathFragments(projectRoot, 'package.json'),
   );
+  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
   // the infrastructure to a previously infra-less gateway.
@@ -150,6 +164,7 @@ export const agentcoreGatewayGenerator = async (
       projectName: fullyQualifiedName,
       projectDirectory: projectRoot,
       cedarPolicy,
+      auth,
       iac,
     });
   }

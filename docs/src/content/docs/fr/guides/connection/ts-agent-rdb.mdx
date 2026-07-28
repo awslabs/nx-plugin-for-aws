@@ -107,21 +107,21 @@ db.grantConnect(myAgent);
 </Fragment>
 <Fragment slot="terraform">
 
-Exécutez l'agent dans le même VPC que la base de données, accordez-lui `rds-db:connect` via `additional_iam_policy_statements`, et ouvrez le chemin réseau avec une paire de règles de groupe de sécurité :
+Exécutez l'agent dans le même VPC que la base de données, accordez-lui `rds-db:connect` via `additional_iam_policy_statements`, et ouvrez le chemin réseau avec une paire de règles de groupe de sécurité. Les ressources `aws_vpc.main` et `aws_subnet` sont définies dans le guide de déploiement de la base de données :
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -138,6 +138,7 @@ module "my_agent" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  description                  = "Allow the agent runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_agent.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -146,6 +147,7 @@ resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  description                  = "Allow outbound traffic from the agent runtime to the database"
   security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -154,7 +156,16 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` proviennent de l'application <Link path="guides/runtime-config">configuration d'exécution</Link> AppConfig partagée déclarée une fois dans votre module racine, et non du module de base de données.
+`appconfig_application_id`/`appconfig_application_arn` proviennent de l'application <Link path="guides/runtime-config">configuration d'exécution</Link> AppConfig partagée déclarée une fois dans votre module racine, et non du module de base de données. Incluez le namespace `database` lors de son instanciation afin que l'entrée de configuration d'exécution du module de base de données soit déployée :
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

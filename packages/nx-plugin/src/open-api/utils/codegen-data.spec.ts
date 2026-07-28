@@ -776,12 +776,18 @@ describe('openapi codegen data utils', () => {
             Cat: {
               type: 'object',
               required: ['kind'],
-              properties: { kind: { type: 'string' }, meow: { type: 'boolean' } },
+              properties: {
+                kind: { type: 'string' },
+                meow: { type: 'boolean' },
+              },
             },
             Dog: {
               type: 'object',
               required: ['kind'],
-              properties: { kind: { type: 'string' }, bark: { type: 'boolean' } },
+              properties: {
+                kind: { type: 'string' },
+                bark: { type: 'boolean' },
+              },
             },
             Animal: {
               oneOf: [
@@ -886,12 +892,18 @@ describe('openapi codegen data utils', () => {
             Cat: {
               type: 'object',
               required: ['kind'],
-              properties: { kind: { type: 'string' }, meow: { type: 'boolean' } },
+              properties: {
+                kind: { type: 'string' },
+                meow: { type: 'boolean' },
+              },
             },
             Dog: {
               type: 'object',
               required: ['kind'],
-              properties: { kind: { type: 'string' }, bark: { type: 'boolean' } },
+              properties: {
+                kind: { type: 'string' },
+                bark: { type: 'boolean' },
+              },
             },
             Animal: {
               oneOf: [
@@ -1013,12 +1025,18 @@ describe('openapi codegen data utils', () => {
             'pet-cat': {
               type: 'object',
               required: ['kind'],
-              properties: { kind: { type: 'string' }, meow: { type: 'boolean' } },
+              properties: {
+                kind: { type: 'string' },
+                meow: { type: 'boolean' },
+              },
             },
             'pet-dog': {
               type: 'object',
               required: ['kind'],
-              properties: { kind: { type: 'string' }, bark: { type: 'boolean' } },
+              properties: {
+                kind: { type: 'string' },
+                bark: { type: 'boolean' },
+              },
             },
             Animal: {
               oneOf: [

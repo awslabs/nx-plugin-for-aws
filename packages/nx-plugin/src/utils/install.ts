@@ -78,7 +78,9 @@ export const installDependencies = async (
     return;
   }
   if (languages.includes('typescript')) {
-    installPackagesTask(tree);
+    // Force the install: devkit's default only installs when the root
+    // package.json changed, but deps land in per-project manifests.
+    installPackagesTask(tree, true);
   }
   if (languages.includes('python')) {
     await new UVProvider(tree.root, new Logger(), tree).install();

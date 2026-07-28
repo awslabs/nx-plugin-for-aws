@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { getNpmScope, getNpmScopePrefix, toScopeAlias } from './npm-scope';
+import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 import { createTreeUsingTsSolutionSetup } from './test';
 
 describe('npm-scope utils', () => {
@@ -45,15 +45,6 @@ describe('npm-scope utils', () => {
         JSON.stringify({ name: '@my-org/my-package' }),
       );
       expect(getNpmScopePrefix(tree)).toBe('@my-org/');
-    });
-  });
-  describe('toScopeAlias', () => {
-    it('should convert scoped package to alias format', () => {
-      expect(toScopeAlias('@my-org')).toBe(':my-org');
-      expect(toScopeAlias('@my-org/sub-path')).toBe(':my-org/sub-path');
-    });
-    it('should return original name for non-scoped packages', () => {
-      expect(toScopeAlias('my-package')).toBe('my-package');
     });
   });
 });

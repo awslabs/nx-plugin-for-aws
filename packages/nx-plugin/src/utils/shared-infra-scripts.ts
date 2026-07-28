@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import { esmVars } from './module-format';
-import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
+import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
@@ -32,7 +32,7 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
   await ensureSharedScriptsProject(tree);
 
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const scopeAlias = npmScopePrefix;
 
   generateFiles(
     tree,
@@ -53,6 +53,10 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
     tree,
     {},
     withVersions(['@aws-sdk/client-sts', '@aws-sdk/credential-providers']),
+    joinPathFragments(
+      joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR),
+      'package.json',
+    ),
   );
 
   generateFiles(

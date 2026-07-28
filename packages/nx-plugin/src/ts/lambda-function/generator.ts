@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -13,6 +12,7 @@ import {
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
@@ -160,6 +160,7 @@ export const tsLambdaFunctionGenerator = async (
       'zod',
     ]),
     withVersions(['@types/aws-lambda']),
+    joinPathFragments(dir, 'package.json'),
   );
 
   addComponentGeneratorMetadata(

@@ -299,7 +299,9 @@ dependencies = ["strands-agents"]
     );
     await expect(
       pyAgentGatewayConnectionGenerator(tree, fullOptions()),
-    ).rejects.toThrow(/Only IAM-authenticated gateways/);
+    ).rejects.toThrow(
+      /Agent connections currently require the gateway to use IAM authentication/,
+    );
   });
 
   it('rejects non-IAM agent', async () => {

@@ -426,6 +426,76 @@ export async function invokeCustomAuthTrpcApi(
   expect([401, 403]).toContain(response.status);
 }
 
+/**
+ * IAM-authorized (SigV4) API Gateway endpoints must reject an unsigned request.
+ * API Gateway returns 403 ("Missing Authentication Token" / "Forbidden") when
+ * the SigV4 signature is absent, so a bare fetch should never reach the
+ * integration. Covers both the tRPC (`?input=`) and REST/FastAPI/Smithy
+ * (`?message=`) shapes — the query string is irrelevant since auth is rejected
+ * before routing.
+ */
+export async function invokeIamApiNoAuthDenied(
+  apiUrl: string,
+  apiName: string,
+): Promise<void> {
+  console.log(`Testing ${apiName} IAM deny (no SigV4) at ${apiUrl}`);
+  const response = await fetch(`${normalizeApiUrl(apiUrl)}/echo?message=test`);
+  console.log(`${apiName} response status (no auth):`, response.status);
+  expect([401, 403]).toContain(response.status);
+}
+
+/**
+ * AgentCore runtimes require SigV4 (`bedrock-agentcore`). An unsigned invoke
+ * must be denied before the runtime is reached. Used for MCP servers, agents
+ * (HTTP/AG-UI/tRPC) and A2A runtimes alike — all share the same runtime
+ * invocation URL and IAM auth, so an unsigned POST should be rejected
+ * regardless of the body the runtime expects.
+ */
+export async function invokeAgentCoreNoAuthDenied(
+  arn: string,
+  name: string,
+): Promise<void> {
+  console.log(`Testing ${name} AgentCore deny (no SigV4) with ARN ${arn}`);
+  const response = await fetch(buildAgentCoreUrl(arn), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': AGENT_CORE_SESSION_ID,
+    },
+    body: JSON.stringify({ prompt: 'hello' }),
+  });
+  console.log(`${name} response status (no auth):`, response.status);
+  expect([401, 403]).toContain(response.status);
+}
+
+/**
+ * AgentCore Gateways require SigV4 too. An unsigned MCP request to the gateway
+ * URL must be denied before Cedar authorization or tool routing is reached.
+ */
+export async function invokeAgentCoreGatewayNoAuthDenied(
+  gatewayUrl: string,
+  gatewayName: string,
+): Promise<void> {
+  console.log(
+    `Testing ${gatewayName} Gateway deny (no SigV4) at ${gatewayUrl}`,
+  );
+  const response = await fetch(gatewayUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {},
+    }),
+  });
+  console.log(`${gatewayName} response status (no auth):`, response.status);
+  expect([401, 403]).toContain(response.status);
+}
+
 export async function pingWebsite(domain: string): Promise<void> {
   console.log('Testing website with domain', domain);
   const status = (await fetch(`https://${domain}/`)).status;

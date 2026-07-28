@@ -39,12 +39,13 @@ TypeScriptインフラストラクチャジェネレータは、TypeScriptで記
     - stacks CDKスタック定義
       - application-stack.ts メインアプリケーションスタック
   - cdk.json CDK設定ファイル
+  - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - checkov.yml Checkov設定ファイル
 
 </FileTree>
 
-`enableStageConfig`オプションを設定した場合、ジェネレータは集中認証情報管理用の2つの共有パッケージも作成します（まだ存在しない場合）:
+`stageConfig`オプションを設定した場合、ジェネレータは集中認証情報管理用の2つの共有パッケージも作成します（まだ存在しない場合）:
 
 <FileTree>
 
@@ -100,9 +101,9 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 `env`プロパティは、デプロイ先のAWSアカウントとリージョンをCDKに指示します。`CDK_DEFAULT_ACCOUNT`と`CDK_DEFAULT_REGION`は、アクティブなAWS認証情報からCDK CLIによって自動的に解決されます。詳細は[CDK環境ドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)を参照してください。
 
-`enableStageConfig`で生成した場合、`main.ts`は集中設定ファイルからアカウントとリージョンを読み取り、設定がない場合は環境変数にフォールバックします:
+`stageConfig`で生成した場合、`main.ts`は集中設定ファイルからアカウントとリージョンを読み取り、設定がない場合は環境変数にフォールバックします:
 
-```ts title="src/main.ts (enableStageConfigの場合)"
+```ts title="src/main.ts (stageConfigの場合)"
 import stagesConfig from ':my-scope/common-infra-config';
 
 const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
@@ -159,12 +160,12 @@ export class ApplicationStage extends Stage {
 ### ステージ認証情報の設定
 
 :::note[ステージ設定]
-このセクションは`enableStageConfig`で生成した場合に適用されます。これを使用しない場合、ジェネレータはAWS認証情報を自分で管理する（例: デプロイ前に`AWS_PROFILE`をエクスポートする）よりシンプルなセットアップを生成します。
+このセクションは`stageConfig`で生成した場合に適用されます。これを使用しない場合、ジェネレータはAWS認証情報を自分で管理する（例: デプロイ前に`AWS_PROFILE`をエクスポートする）よりシンプルなセットアップを生成します。
 :::
 
 複数のステージが異なるAWSアカウントをターゲットとする場合、特にステージ数が増えるにつれて、認証情報を手動で管理することはエラーが発生しやすくなります。
 
-`enableStageConfig`オプションは、2つの共有パッケージを生成することでこれを解決します:
+`stageConfig`オプションは、2つの共有パッケージを生成することでこれを解決します:
 
 - **`packages/common/infra-config`** — 各ステージをAWS認証情報、アカウント、リージョンにマッピングする単一の設定ファイル。これはワークスペース内の任意のパッケージからインポート可能なため、CDKの`main.ts`は同じ信頼できる情報源からアカウントとリージョンを読み取ることができます。
 - **`packages/common/scripts`** — CDKを自動認証情報解決でラップする`infra-deploy`と`infra-destroy`コマンド。`deploy`を実行すると、スクリプトは設定を読み取り、CDK子プロセス用に適切なAWS環境変数を設定し、`cdk deploy`を実行します。シェル環境は変更されません。
@@ -243,7 +244,7 @@ export default config;
 生成された`main.ts`は設定からこれらの値を読み取るため、CDKの合成とデプロイは同じ環境設定を使用します:
 
 ```ts title="src/main.ts"
-const sandboxConfig = projectStages['my-app-sandbox'];
+const sandboxConfig = resolveStage('packages/infra', 'my-app-sandbox');
 new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
@@ -271,7 +272,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 ```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyApi } from ':my-scope/common-constructs';
+import { MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -376,7 +377,7 @@ npx cdk bootstrap aws://<account-id>/<region>
 CI/CDパイプラインでのデプロイには`deploy-ci`ターゲットを使用してください。詳細は後述します。
 :::
 
-まず、AWS認証情報が設定されていることを確認してください。`enableStageConfig`で生成し、`packages/common/infra-config/src/stages.config.ts`でステージ認証情報を設定している場合、デプロイコマンドはターゲットステージに対して正しい認証情報を自動的に解決して適用します。それ以外の場合は、環境にAWS認証情報が設定されていることを確認してください（例: `AWS_PROFILE`または環境変数経由）。利用可能なオプションについては、[AWS認証情報ドキュメント](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)を参照してください。
+まず、AWS認証情報が設定されていることを確認してください。`stageConfig`で生成し、`packages/common/infra-config/src/stages.config.ts`でステージ認証情報を設定している場合、デプロイコマンドはターゲットステージに対して正しい認証情報を自動的に解決して適用します。それ以外の場合は、環境にAWS認証情報が設定されていることを確認してください（例: `AWS_PROFILE`または環境変数経由）。利用可能なオプションについては、[AWS認証情報ドキュメント](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)を参照してください。
 
 次にデプロイターゲットを実行します:
 

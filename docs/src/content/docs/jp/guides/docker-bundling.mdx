@@ -3,15 +3,40 @@ title: "Docker バンドリング"
 description: "Nx Plugin for AWS ワークスペースで TypeScript および Python プロジェクト用の Docker イメージをビルドおよびデプロイします。"
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import TrivyVersion from '@components/trivy-version.astro';
+import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const trivyTarget = `{
+  "targets": {
+    "trivy": {
+      "cache": true,
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/trivy",
+          "make-dir dist/packages/my-project/trivy",
+          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
+          "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["docker"]
+    }
+  }
+}`;
 
 いくつかのジェネレーター(<Link path="/guides/ts-agent">`ts#agent`</Link>や<Link path="/guides/py-agent">`py#agent`</Link>など)は、Amazon ECRにプッシュされ、AWSインフラストラクチャによって使用されるDockerイメージを生成します。このガイドでは、これらのジェネレーターが従うパターンについて説明し、他のユースケースに適用できるようにします。例えば、Amazon ECS上で<Link path="/guides/fastapi">FastAPI</Link>プロジェクトを実行したり、コンテナ化されたExpressサーバーをデプロイしたりする場合などです。
 
 :::tip[DockerまたはFinch]
-イメージのビルドに使用されるコンテナエンジンは、ワークスペース作成時に`--containerEngine`フラグ(`docker`、`finch`、または`infer` — デフォルト — インストールされているものを自動検出)を介して選択されます。[Finch](https://runfinch.com/)は、Dockerのオープンソースのドロップイン代替品です。選択は`aws-nx-plugin.config.mts`に記録され、コンテナビルドコマンドを出力するすべてのジェネレーターに適用されます。CDKイメージアセットビルドは、`CDK_DOCKER`環境変数を介してこの選択を尊重します。
+イメージのビルドに使用されるコンテナエンジンは、ワークスペース作成時に`--containers`フラグ(`docker`、`finch`、または`infer` — デフォルト — インストールされているものを自動検出)を介して選択されます。[Finch](https://runfinch.com/)は、Dockerのオープンソースのドロップイン代替品です。選択は`aws-nx-plugin.config.mts`に記録され、コンテナビルドコマンドを出力するすべてのジェネレーターに適用されます。CDKイメージアセットビルドは、`CDK_DOCKER`環境変数を介してこの選択を尊重します。
 :::
 
 ## パターン
@@ -253,6 +278,32 @@ CMD ["python", "-m", "my_project.main"]
 
 <NxCommands commands={['docker my-project']} />
 
+## Trivyによるイメージスキャン
+
+イメージに既知の脆弱性がないかスキャンすることは良い習慣です。このパターンに従うジェネレーターは、[Trivy](https://trivy.dev/)でビルドされたイメージをスキャンする`trivy`ターゲットを追加します。これは[ECRホストのTrivyイメージ](https://gallery.ecr.aws/aquasecurity/trivy)から実行され、`HIGH`または`CRITICAL`の検出結果があるとゼロ以外で終了します。
+
+`docker`ターゲットに`dependsOn`する`trivy`ターゲットを追加します。これはビルドされたイメージをtarballに保存し、ワークスペース相対のバインドマウントを介してスキャンするため、`docker`と`finch`の両方で同じコマンドが機能します:
+
+<Code lang="json" code={trivyTarget} />
+
+各プロジェクトのイメージごとのスキャンターゲットは、ワークスペース全体の`trivy`ターゲットの下に集約され、提供される`trivy`ルートスクリプトがそれを実行します(`nx run-many --target trivy`)。
+
+<PackageManagerShortCommand commands={['trivy']} />
+
+:::tip[CIでTrivyを実行してください]
+スキャンは意図的に`build`に組み込まれていません。これは、Trivyの脆弱性データベースが新しいCVEで継続的に更新されるため、開発中の反復作業時に不要な摩擦を引き起こす可能性があるためです。
+
+代わりに、本番ステージへのデプロイ前に、CIパイプラインの専用ステップとして上記のコマンドを実行することをお勧めします。
+:::
+
+:::tip[キャッシュは変更されていないイメージをスキップします]
+イメージはプロジェクトソースによって完全に決定されるため、`inputs`を宣言する(ここでは`bundle`ターゲットに一致する`default`と`^production`)ことで、Nxはスキャンをキャッシュし、変更されていないイメージの再スキャンをスキップできます。Trivyイメージのバージョンをピン留めして(例: <code>trivy:<TrivyVersion /></code>)、スキャンを再現可能にします。
+:::
+
+:::note[検出結果の抑制]
+Trivyはプロジェクトのルートから`.trivyignore`ファイル(脆弱性IDのリスト、1行に1つ)を読み取ります。`--ignore-unfixed`は修正が利用できない脆弱性をスキップするため、スキャンは`Dockerfile`内のツールをアップグレードすることで対処できる問題でのみ失敗します。詳細については、[Trivyフィルタリングドキュメント](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids)を参照してください。
+:::
+
 ## Infrastructure
 
 結果のビルドコンテキストディレクトリをInfrastructure as Codeに配線することは、TypeScriptとPythonの両方で同じです — ビルドコンテキストディレクトリへのパスのみが異なります(TypeScriptの場合は`dist/packages/my-project/bundle`、Pythonの場合は`dist/packages/my-project/docker`)。
@@ -291,7 +342,7 @@ infra.asset -> ecr: cdk deploy\nbuilds + pushes
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import { findWorkspaceRoot } from ':my-scope/common-constructs';
+import { findWorkspaceRoot } from '@my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
@@ -305,7 +356,7 @@ const image = new DockerImageAsset(this, 'MyImage', {
 });
 ```
 
-`findWorkspaceRoot`ヘルパーは、<Link path="/guides/typescript-infrastructure">`ts#infra`</Link>ジェネレーターによって生成され、`:my-scope/common-constructs`からエクスポートされます。共有コンストラクトを使用していない場合は、`cdk`が呼び出される場所(通常はワークスペースルート)から相対的な`dist`ディレクトリへのパスをハードコードし、`findWorkspaceRoot`呼び出しを完全に省略できます。
+`findWorkspaceRoot`ヘルパーは、<Link path="/guides/typescript-infrastructure">`ts#infra`</Link>ジェネレーターによって生成され、`@my-scope/common-constructs`からエクスポートされます。共有コンストラクトを使用していない場合は、`cdk`が呼び出される場所(通常はワークスペースルート)から相対的な`dist`ディレクトリへのパスをハードコードし、`findWorkspaceRoot`呼び出しを完全に省略できます。
 
 :::note[synth前のbundleの実行]
 CDKは`bundle`/`docker`ターゲットを自動的に実行しません — `cdk deploy`の前に`nx build my-project`を実行する(またはdeployターゲットが`build`に依存するように配線する)必要があります。このパターンを使用するジェネレーターは、`docker`と`bundle`を`build`の依存関係として宣言しているため、これは透過的に行われます。

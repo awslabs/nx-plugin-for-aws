@@ -38,12 +38,13 @@ The generator will create the following project structure in the `<directory>/<n
     - stacks CDK Stack definitions
       - application-stack.ts Main application stack
   - cdk.json CDK configuration
+  - package.json Project manifest defining the project's package name and dependencies
   - project.json Project configuration and build targets
   - checkov.yml Checkov configuration file
 
 </FileTree>
 
-If you set the `enableStageConfig` option, the generator also creates two shared packages for centralized credential management (if they don't already exist):
+If you set the `stageConfig` option, the generator also creates two shared packages for centralized credential management (if they don't already exist):
 
 <FileTree>
 
@@ -99,13 +100,14 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 The `env` property tells CDK which AWS account and region to deploy to. `CDK_DEFAULT_ACCOUNT` and `CDK_DEFAULT_REGION` are resolved automatically by the CDK CLI from your active AWS credentials. See the [CDK environments documentation](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) for more details.
 
-If you generated with `enableStageConfig`, the `main.ts` reads account and region from a centralized config file instead, falling back to environment variables when no config is set:
+If you generated with `stageConfig`, the `main.ts` reads account and region from a centralized config file instead, falling back to environment variables when no config is set:
 
-```ts title="src/main.ts (with enableStageConfig)"
-import stagesConfig from ':my-scope/common-infra-config';
+```ts title="src/main.ts (with stageConfig)"
+import { resolveStage } from '@my-scope/common-infra-config';
 
-const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
-const sandboxConfig = projectStages['my-app-sandbox'];
+// Looks up the stage under this project (packages/infra), falling back to
+// shared stages. Returns undefined when no config exists for the stage.
+const sandboxConfig = resolveStage('packages/infra', 'my-app-sandbox');
 
 new ApplicationStage(app, 'my-app-sandbox', {
   env: {
@@ -158,12 +160,12 @@ export class ApplicationStage extends Stage {
 ### Stage Credential Configuration
 
 :::note[Staged Configuration]
-This section applies when you generate with `enableStageConfig`. Without it, the generator produces a simpler setup where you manage AWS credentials yourself (e.g., by exporting `AWS_PROFILE` before deploying).
+This section applies when you generate with `stageConfig`. Without it, the generator produces a simpler setup where you manage AWS credentials yourself (e.g., by exporting `AWS_PROFILE` before deploying).
 :::
 
 When you have multiple stages targeting different AWS accounts, managing credentials manually can be error-prone, especially as the number of stages grows.
 
-The `enableStageConfig` option solves this by generating two shared packages:
+The `stageConfig` option solves this by generating two shared packages:
 
 - **`packages/common/infra-config`** — A single config file where you map each stage to its AWS credentials, account, and region. This is importable from any package in your workspace, so your CDK `main.ts` can read account and region from the same source of truth.
 - **`packages/common/scripts`** — `infra-deploy` and `infra-destroy` commands that wrap CDK with automatic credential resolution. When you run `deploy`, the script reads the config, sets the right AWS environment variables for the CDK child process, and runs `cdk deploy`. Your shell environment is never modified.
@@ -242,7 +244,7 @@ Each stage config includes a required `region` and an optional `account`:
 The generated `main.ts` reads these values from the config so that CDK synthesis and deployment use the same environment settings:
 
 ```ts title="src/main.ts"
-const sandboxConfig = projectStages['my-app-sandbox'];
+const sandboxConfig = resolveStage('packages/infra', 'my-app-sandbox');
 new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
@@ -270,7 +272,7 @@ If, for example, you created a tRPC API called `my-api`, you can simply import a
 ```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyApi } from ':my-scope/common-constructs';
+import { MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -291,7 +293,7 @@ If you have used the <Link path="guides/react-website">React Website</Link> gene
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -338,7 +340,7 @@ There may be instances where you want to suppress certain rules on resources. Yo
 #### Supress a rule on a given construct
 
 ```typescript
-import { suppressRules } from ':my-scope/common-constructs';
+import { suppressRules } from '@my-scope/common-constructs';
 
 // suppresses the CKV_AWS_XXX for the given construct.
 suppressRules(construct, ['CKV_AWS_XXX'], 'Reason');
@@ -347,7 +349,7 @@ suppressRules(construct, ['CKV_AWS_XXX'], 'Reason');
 #### Supress a rule on a descendant construct
 
 ```typescript
-import { suppressRules } from ':my-scope/common-constructs';
+import { suppressRules } from '@my-scope/common-constructs';
 
 // Supresses the CKV_AWS_XXX for the construct or any of its descendants if it is an instance of Bucket
 suppressRules(construct, ['CKV_AWS_XXX'], 'Reason', (construct) => construct instanceof Bucket);
@@ -375,7 +377,7 @@ After a build, you can deploy your infrastructure to AWS using the `deploy` targ
 Use the `deploy-ci` target if deploying in a CI/CD pipeline. See below for more details.
 :::
 
-First, make sure you have AWS credentials configured. If you generated with `enableStageConfig` and have configured stage credentials in `packages/common/infra-config/src/stages.config.ts`, the deploy command will automatically resolve and apply the correct credentials for the target stage. Otherwise, ensure your AWS credentials are set in your environment (e.g., via `AWS_PROFILE` or environment variables). See the [AWS credentials documentation](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) for the available options.
+First, make sure you have AWS credentials configured. If you generated with `stageConfig` and have configured stage credentials in `packages/common/infra-config/src/stages.config.ts`, the deploy command will automatically resolve and apply the correct credentials for the target stage. Otherwise, ensure your AWS credentials are set in your environment (e.g., via `AWS_PROFILE` or environment variables). See the [AWS credentials documentation](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) for the available options.
 
 Then run the deploy target:
 

@@ -366,6 +366,7 @@ export default defineConfig({
                   label: 'agentcore-harness',
                   link: '/guides/agentcore-harness',
                 },
+                { label: 'ts#dcr-proxy', link: '/guides/ts-dcr-proxy' },
               ],
             },
             {
@@ -613,6 +614,20 @@ export default defineConfig({
                 vi: 'Đóng gói Docker',
               },
               link: '/guides/docker-bundling',
+            },
+            {
+              label: 'Security',
+              translations: {
+                jp: 'セキュリティ',
+                ko: '보안',
+                fr: 'Sécurité',
+                it: 'Sicurezza',
+                es: 'Seguridad',
+                pt: 'Segurança',
+                zh: '安全',
+                vi: 'Bảo mật',
+              },
+              link: '/guides/security',
             },
           ],
         },

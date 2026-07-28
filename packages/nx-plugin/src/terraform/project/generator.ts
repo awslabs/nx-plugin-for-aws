@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   detectPackageManager,
   type GeneratorCallback,
@@ -18,6 +17,7 @@ import {
 } from '@nx/devkit';
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -286,6 +286,8 @@ export async function terraformProjectGenerator(
     TERRAFORM_PROJECT_GENERATOR_INFO,
   ]);
 
+  // Terraform projects carry no package.json, so their build tooling and the
+  // AWS SDK the vended deploy scripts import are declared at the workspace root.
   addDependenciesToPackageJson(
     tree,
     {},

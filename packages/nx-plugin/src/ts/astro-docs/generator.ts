@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
@@ -12,6 +11,7 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -25,6 +25,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { type ITsDepVersion, withVersions } from '../../utils/versions';
 import type { TsAstroDocsGeneratorSchema } from './schema';
 
@@ -102,6 +103,8 @@ export const tsAstroDocsGenerator = async (
     });
   }
 
+  ensureProjectPackageJson(tree, { dir, fullyQualifiedName });
+
   const templateOptions = {
     fullyQualifiedName,
     title: schema.name,
@@ -166,13 +169,15 @@ export const tsAstroDocsGenerator = async (
       'fs-extra',
       'simple-git',
     );
-    devDependencies.push('tsx', '@types/fs-extra');
+    devDependencies.push('@types/fs-extra');
+    addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
   }
 
   addDependenciesToPackageJson(
     tree,
     withVersions(dependencies),
     withVersions(devDependencies),
+    joinPathFragments(dir, 'package.json'),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_ASTRO_DOCS_GENERATOR_INFO]);

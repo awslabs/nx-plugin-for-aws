@@ -47,6 +47,7 @@ import OptionFilter from '@components/option-filter.astro';
   - .gitignore 生成されたPrismaクライアント出力を含むGit無視エントリ
   - config.json ローカル開発接続の詳細とランタイム設定キー
   - Dockerfile マイグレーションハンドラー用のコンテナイメージ定義
+  - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - prisma.config.ts Prisma CLIの設定
 </FileTree>
@@ -148,7 +149,7 @@ AWSスタックをデプロイすると、生成されたインフラストラ�
 
 <NxCommands commands={['run <project>:prisma <prisma-command>']} />
 
-### Using Prisma Studio
+### Prisma Studioの使用
 
 [Prisma Studio](https://www.prisma.io/studio)は、ローカルデータベース用のビジュアルエディタです。テーブルの閲覧、レコードの検査と編集、データのフィルタリング、リレーションのフォロー、組み込みSQLコンソールを介した生SQLの実行に使用できます。開発中のマイグレーションの検証とテストデータのシードに便利です。以下で起動します：
 
@@ -183,15 +184,23 @@ const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 
 Prismaクライアントは`prisma/models/`スキーマから派生した完全に型付けされたモデルを公開し、データベースからAPIレスポンスまでのエンドツーエンドの型安全性を提供します。
 
+`getPrisma()`は実行時にAWS AppConfigからデータベース接続設定を取得します。
+
+<Snippet name="runtime-config-app-id-note" parentHeading="データベースへの接続" />
+
 ## データベースのデプロイ
 
 <Snippet name="rdb/deploying" parentHeading="データベースのデプロイ" />
+
+### イメージスキャン
+
+<Snippet name="trivy-image-scan" parentHeading="イメージスキャン" />
 
 ### RDS Proxyの設定
 
 <Snippet name="rdb/rds-proxy" parentHeading="RDS Proxyの設定" />
 
-#### SSL Requirements When Connecting Without RDS Proxy
+#### RDS Proxyを使用しない接続時のSSL要件
 
 Auroraクラスターに直接接続する場合（RDS Proxyを使用しない場合）、`getPrisma()`を呼び出すランタイムはAmazon RDS CAバンドルを信頼する必要があります。生成されたPrismaクライアントは証明書検証を有効にします。CAバンドルを利用可能にする方法は、データベースに接続するランタイムによって異なります。
 
@@ -201,7 +210,7 @@ Amazon RDSの場合、以下からグローバルCAバンドルを使用しま�
 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 ```
 
-##### Runtime Container Images
+##### ランタイムコンテナイメージ
 
 ランタイム用に独自のコンテナイメージを準備する場合は、DockerfileでRDS CAバンドルをダウンロードし、オペレーティングシステムのトラストストアに追加します。
 
@@ -228,7 +237,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 </TabItem>
 </Tabs>
 
-##### Zipped Lambda Functions
+##### Zip形式のLambda関数
 
 Node.js 20以降のランタイムを使用するZip形式のLambda関数の場合、`NODE_EXTRA_CA_CERTS`を設定してAmazon RDS CAバンドルを読み込みます：
 
@@ -288,7 +297,15 @@ module "api" {
 
 ### ロギングとモニタリング
 
-<Snippet name="rdb/logging" />
+<OptionFilter when={{ engine: 'postgres' }}>
+<Snippet name="rdb/logging-postgres" />
+</OptionFilter>
+
+<OptionFilter when={{ engine: 'mysql' }}>
+<Snippet name="rdb/logging-mysql" />
+</OptionFilter>
+
+<Snippet name="rdb/performance-insights" />
 
 ### 暗号化キーのローテーション
 

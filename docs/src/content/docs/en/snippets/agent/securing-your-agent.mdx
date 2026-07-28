@@ -1,0 +1,39 @@
+---
+title: Securing your Agent
+---
+
+Agents act on untrusted input and can drive real actions through their tools, so it's worth considering security from the start. The following practices apply to the generated agent.
+
+### Treat model input and output as untrusted
+
+Prompts can contain adversarial instructions (prompt injection), and model output is non-deterministic — neither should be trusted in security-sensitive logic:
+
+- Define strict input schemas for your tools, as in the generated example tool. Constrain values to what the tool actually needs (enums, length limits, numeric ranges) rather than accepting free-form strings.
+- Never pass model output directly into shell commands, SQL queries, code evaluation, or rendered HTML without validation or encoding.
+- Apply authorization checks in your tools and downstream services — don't rely on the system prompt to prevent the model from misusing a tool it has access to.
+
+Strands' [Prompt Engineering](https://strandsagents.com/docs/user-guide/safety-security/prompt-engineering/) and [Responsible AI](https://strandsagents.com/docs/user-guide/safety-security/responsible-ai/) guides cover writing robust, safety-conscious system prompts.
+
+### Scope tool permissions tightly
+
+Grant the agent's IAM role only the permissions its tools need. The vended CDK constructs and Terraform modules expose `grant*` methods and scoped policies for this purpose — for example granting an agent access to invoke a specific API rather than attaching broad managed policies. Where a tool acts on behalf of a user, prefer authorizing the action using the calling user's identity (passed through via the request context) over the agent's own ambient permissions.
+
+### Provide a kill switch
+
+Because model behaviour can change in unexpected ways, plan for quickly disabling or swapping the model without a code change:
+
+- Read the model ID from configuration (for example a `MODEL_ID` environment variable) so operators can switch or roll back to a different model by updating configuration.
+- Gate the agent behind a feature flag so its AI functionality can be disabled entirely. When disabled, return a generic message rather than an error, and ensure the rest of your application degrades gracefully.
+
+Document how to flip these controls in your operational runbook.
+
+### Protect sensitive data
+
+- Avoid logging prompts and completions, which may contain user data. The generated agent's model error logging hook logs error metadata only, not conversation content — keep this property when adding your own logging.
+- Return generic error messages to users; log detailed errors server-side.
+- Isolate conversation state between users and sessions, and authorize access to any persisted session data.
+- Redact personally identifiable information (PII) from prompts and outputs — either with a Bedrock Guardrail sensitive information filter (below) or, for Strands agents, the approaches in the [PII Redaction](https://strandsagents.com/docs/user-guide/safety-security/pii-redaction/) guide.
+
+### Amazon Bedrock Guardrails
+
+[Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) provide configurable content filters, denied topics, and sensitive information (PII) filters which are evaluated on model input and output. You can attach a guardrail to the model used by the generated agent:

@@ -39,6 +39,15 @@ describe('cognito-auth generator terraform iac', () => {
         },
       }),
     );
+    tree.write(
+      'packages/test-project/package.json',
+      JSON.stringify({
+        name: '@proj/test-project',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+      }),
+    );
 
     // Setup main.tsx with RuntimeConfigProvider for terraform tests
     tree.write(
@@ -186,7 +195,14 @@ module "static_website" {
       'source = "../user-identity/add-callback-url"',
     );
     expect(coreStaticWebsiteContent).toContain(
-      'callback_url = "https://${aws_cloudfront_distribution.website.domain_name}"',
+      'for_each = local.callback_urls',
+    );
+    expect(coreStaticWebsiteContent).toContain('callback_url = each.value');
+    expect(coreStaticWebsiteContent).toContain(
+      '"https://${aws_cloudfront_distribution.website.domain_name}"',
+    );
+    expect(coreStaticWebsiteContent).toContain(
+      'for domain in var.custom_domain_names',
     );
 
     // Read the project-specific static website terraform file
@@ -374,6 +390,15 @@ resource "aws_cloudfront_distribution" "website" {
         name: 'nested-test-website',
         sourceRoot: 'apps/nested/test-website/src',
         ux,
+      }),
+    );
+    tree.write(
+      'apps/nested/test-website/package.json',
+      JSON.stringify({
+        name: '@proj/nested-test-website',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
       }),
     );
 

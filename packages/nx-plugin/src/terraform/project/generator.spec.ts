@@ -65,6 +65,31 @@ describe('terraformProjectGenerator', () => {
       expect(projectConfig.targets).toHaveProperty('output');
     });
 
+    it('should declare all dependencies at the root and vend no project package.json', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      // Terraform projects don't carry a package.json (only Node projects do).
+      expect(
+        tree.exists('packages/my-terraform-project/package.json'),
+      ).toBeFalsy();
+
+      // Build tooling and the AWS SDK the vended deploy scripts import both
+      // live in the root manifest, where those scripts resolve them.
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      for (const dep of [
+        '@nx-extend/terraform',
+        'make-dir-cli',
+        'tsx',
+        '@aws-sdk/client-s3',
+        '@aws-sdk/client-sts',
+        '@aws-sdk/credential-providers',
+        '@smithy/config-resolver',
+        '@smithy/node-config-provider',
+      ]) {
+        expect(rootPackageJson.devDependencies[dep]).toBeDefined();
+      }
+    });
+
     it('should configure apply target correctly', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 

@@ -144,24 +144,39 @@ describe('ts#rdb generator', () => {
     expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
       '@proj/db:build',
     );
+    // Runtime dependencies (and the @types/* backing type imports) land in the
+    // project's own manifest as catalog references
+    const projectPackageJson = JSON.parse(
+      tree.read('packages/db/package.json', 'utf-8') ?? '{}',
+    );
     expect(
-      packageJson.dependencies['@aws-lambda-powertools/parameters'],
-    ).toBeDefined();
+      projectPackageJson.dependencies['@aws-lambda-powertools/parameters'],
+    ).toBe('catalog:');
     expect(
-      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
-    ).toBeDefined();
+      projectPackageJson.dependencies['@aws-sdk/client-appconfigdata'],
+    ).toBe('catalog:');
     expect(
-      packageJson.dependencies['@aws-sdk/client-secrets-manager'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBeDefined();
-    expect(packageJson.dependencies['@prisma/adapter-pg']).toBeDefined();
-    expect(packageJson.dependencies['@prisma/client']).toBeDefined();
-    expect(packageJson.dependencies.pg).toBeDefined();
-    expect(packageJson.dependencies.mariadb).toBeUndefined();
-    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
+      projectPackageJson.dependencies['@aws-sdk/client-secrets-manager'],
+    ).toBe('catalog:');
+    expect(projectPackageJson.dependencies['@aws-sdk/rds-signer']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['@prisma/adapter-pg']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['@prisma/client']).toBe('catalog:');
+    expect(projectPackageJson.dependencies.pg).toBe('catalog:');
+    expect(projectPackageJson.dependencies.mariadb).toBeUndefined();
+    expect(
+      projectPackageJson.dependencies['@prisma/adapter-mariadb'],
+    ).toBeUndefined();
+    expect(projectPackageJson.devDependencies['@types/aws-lambda']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.devDependencies['@types/pg']).toBe('catalog:');
+
+    // Pure build/test tooling stays in the workspace root devDependencies
     expect(packageJson.devDependencies['tsx']).toBeDefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
-    expect(packageJson.devDependencies['@types/pg']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();
     expect(packageJson.devDependencies.ncp).toBeDefined();
     expect(packageJson.devDependencies.rimraf).toBeDefined();
@@ -173,7 +188,6 @@ describe('ts#rdb generator', () => {
       ...defaultOptions,
       engine: 'mysql',
     });
-    const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
 
     expect(
       tree.read('packages/common/constructs/src/core/rdb/aurora.ts', 'utf-8'),
@@ -223,11 +237,18 @@ describe('ts#rdb generator', () => {
         'utf-8',
       ),
     ).not.toContain("import('pg')");
-    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeDefined();
-    expect(packageJson.dependencies.mariadb).toBeDefined();
-    expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
-    expect(packageJson.dependencies.pg).toBeUndefined();
-    expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
+    const projectPackageJson = JSON.parse(
+      tree.read('packages/db/package.json', 'utf-8') ?? '{}',
+    );
+    expect(projectPackageJson.dependencies['@prisma/adapter-mariadb']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies.mariadb).toBe('catalog:');
+    expect(
+      projectPackageJson.dependencies['@prisma/adapter-pg'],
+    ).toBeUndefined();
+    expect(projectPackageJson.dependencies.pg).toBeUndefined();
+    expect(projectPackageJson.devDependencies?.['@types/pg']).toBeUndefined();
   });
 
   it('should generate terraform modules when iac is Terraform', async () => {

@@ -118,7 +118,7 @@ import {
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
-import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import { CfnDistribution, Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import { suppressRules } from './checkov.js';
 
 const WEB_CLIENT_ID = 'WebClient';
@@ -334,9 +334,7 @@ export class UserIdentity extends Construct {
     const lazilyComputedCallbackUrls = Lazy.list({
       produce: () =>
         ['http://localhost:4200', 'http://localhost:4300'].concat(
-          this.findCloudFrontDistributions().map(
-            (d) => \`https://\${d.domainName}\`,
-          ),
+          this.findCloudFrontDomainNames().map((domain) => \`https://\${domain}\`),
         ),
     });
 
@@ -386,10 +384,17 @@ export class UserIdentity extends Construct {
     }).node.addDependency(userPoolClient, userPool, userPoolDomain);
   };
 
-  private findCloudFrontDistributions = (): Distribution[] =>
+  // Includes each distribution's default domain name plus any custom domain names (aliases) configured on it.
+  private findCloudFrontDomainNames = (): string[] =>
     Stack.of(this)
       .node.findAll()
-      .filter((child) => child instanceof Distribution);
+      .filter((child): child is Distribution => child instanceof Distribution)
+      .flatMap((d) => {
+        const cfnDistribution = d.node.defaultChild as CfnDistribution;
+        const distributionConfig =
+          cfnDistribution.distributionConfig as CfnDistribution.DistributionConfigProperty;
+        return [d.domainName, ...(distributionConfig.aliases ?? [])];
+      });
 }
 "
 `;

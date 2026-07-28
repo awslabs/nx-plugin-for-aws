@@ -58,6 +58,12 @@ Nx et le plugin sont distribués sous forme de paquets npm, donc un projet sans 
 
 Créez ce fichier, puis exécutez `nx init` et [ajoutez le plugin](#adding-the-plugin) comme d'habitude. Votre outillage de langage existant reste intact — les projets Nx générés par le plugin (y compris les <Link path="guides/py-project">projets Python</Link>) vivent aux côtés de votre code existant, et vous pouvez intégrer votre construction existante dans Nx de manière incrémentale.
 
+Pour intégrer vos projets existants sous Nx, vous avez plusieurs options selon le langage :
+
+- **Langages avec un plugin Nx officiel** — [Java (Gradle ou Maven)](https://nx.dev/docs/technologies/java/introduction) et [.NET](https://nx.dev/docs/technologies/dotnet/introduction) ont des plugins dédiés qui infèrent automatiquement les tâches de vos projets. Ajoutez celui qui convient, par exemple `nx add @nx/gradle`, `nx add @nx/maven` ou `nx add @nx/dotnet`.
+- **Langages avec un plugin communautaire** — par exemple [Go](https://nx.dev/plugin-registry) (`@nx-go/nx-go`) ou [Rust](https://nx.dev/plugin-registry) (`@monodon/rust`). Parcourez le [Registre de plugins Nx](https://nx.dev/plugin-registry) pour d'autres.
+- **Tout autre langage** — ajoutez un `project.json` à chaque projet et définissez ses cibles pour exécuter vos commandes de construction existantes, afin que `nx build <project>` (et `nx run-many`) les pilotent. Consultez le <Link path="guides/workspace">guide de l'espace de travail</Link> pour savoir comment `project.json` et les cibles sont configurés.
+
 ### Projets à paquet unique
 
 Le plugin est conçu pour les monorepos — il génère chaque projet dans son propre répertoire sous `packages/`. Si vous partez d'un **projet à paquet unique** (un `package.json` à la racine avec votre source directement en dessous, pas d'espaces de travail), déplacez votre paquet existant dans `packages/` avant d'adopter le plugin afin que votre projet se trouve aux côtés de ceux que le plugin génère :
@@ -118,9 +124,9 @@ Il crée ou met à jour les fichiers suivants :
 - tsconfig.json une configuration TypeScript racine référençant les projets de votre espace de travail, que la synchronisation TypeScript de Nx maintient à jour
 - tsconfig.base.json les options de compilateur partagées que les projets TypeScript du plugin étendent (voir ci-dessous pour ce qu'il contient)
 - pnpm-workspace.yaml (pnpm uniquement) ajoute à la liste blanche les scripts de construction dont les dépendances du plugin ont besoin (`@swc/core`, `esbuild`, `nx`, `sharp`)
-- package.json scripts de commodité pour les tâches courantes, plus les dépendances de développement `nx`, `@nx/js`, `@nx/workspace`, `typescript` et Biome
+- package.json scripts de commodité pour les tâches courantes, plus les dépendances de développement `@aws/nx-plugin`, `@aws/nx-plugin-mcp`, `nx`, `@nx/js`, `@nx/workspace`, `typescript` et Biome
 - biome.json configuration par défaut du formateur et du linter Biome
-- .mcp.json configure le serveur MCP pour les agents de codage pris en charge sauf si désactivé (également les équivalents .cursor/, .kiro/, .gemini/, .vscode/ et .codex/)
+- .mcp.json configure le serveur MCP pour les agents de codage pris en charge sauf si désactivé (également les équivalents .cursor/, .kiro/, .gemini/, .vscode/ et .codex/). Il exécute le propre `@aws/nx-plugin-mcp` de l'espace de travail, de sorte que le serveur correspond toujours à la version installée dans votre espace de travail
 </FileTree>
 
 La configuration du <Link path="get_started/building-with-ai">serveur MCP</Link> peut être désactivée avec `--mcp=false`.
@@ -136,6 +142,10 @@ Les projets TypeScript du plugin s'appuient sur ces options du compilateur. Si u
 <GeneratorParameters generator="init" />
 
 ## Dépannage
+
+#### `nx build <project>` ne fonctionne plus pour une bibliothèque TypeScript existante
+
+La première exécution de `ts#project` configure le plugin `@nx/js/typescript` pour inférer la cible de construction TypeScript comme `compile` (le plugin réserve `build` pour orchestrer `lint`, `compile` et `test`). Les bibliothèques existantes qui s'appuient sur la cible `build` inférée sont également inférées comme `compile` — exécutez `nx run <project>:compile`, ou utilisez `nx run-many --target build,compile`. Les bibliothèques avec une cible `build` explicite dans leur `project.json` ne sont pas affectées.
 
 #### `The workspace is out of sync`
 
@@ -164,11 +174,6 @@ Votre `package.json` **racine** est enregistré comme un projet Nx (il a une cl�
 Les propres projets générés par le plugin portent les paramètres TypeScript dont ils ont besoin dans leur `tsconfig.lib.json` par projet, donc ils se construisent indépendamment de votre `tsconfig.base.json`. Ces erreurs apparaissent plutôt dans un **projet préexistant à vous** qui hérite d'un `tsconfig.base.json` créé par `init` (avec `composite`/`emitDeclarationOnly`/`nodenext`) mais n'est pas compatible avec ces paramètres — par exemple, le compilateur Angular rejette `emitDeclarationOnly` (`NG4006`), ou un projet qui définit `outDir` sans `rootDir` en a maintenant besoin d'un (`TS5011`). Ajoutez des remplacements `tsconfig` par projet en redéclarant les options conflictuelles pour ces projets (par exemple `"rootDir": "src"`), ou pointez les projets du plugin et vos projets vers des configurations de base séparées.
 
 `init` ne réécrit jamais un `tsconfig.base.json` existant, précisément pour qu'il ne puisse pas casser silencieusement les projets qui en héritent — résoudre ces incompatibilités est une décision que vous seul pouvez prendre pour votre base de code.
-
-<Aside type="note" title="ESM et CommonJS">
-Le format de module est à l'échelle de l'espace de travail, lu depuis le champ `type` du `package.json` racine : `type: "module"` signifie ESM, tout le reste (y compris l'absence de champ `type`) signifie CommonJS. `init` préserve celui que votre espace de travail utilise, et les générateurs TypeScript du plugin émettent du code correspondant. Si vous souhaitez changer plus tard, modifiez le `type` racine — mais c'est une migration de votre code existant, pas quelque chose que `init` fait pour vous.
-</Aside>
-e réécrit jamais un `tsconfig.base.json` existant, précisément pour qu'il ne puisse pas casser silencieusement les projets qui en héritent — résoudre ces incompatibilités est une décision que vous seul pouvez prendre pour votre base de code.
 
 <Aside type="note" title="ESM et CommonJS">
 Le format de module est à l'échelle de l'espace de travail, lu depuis le champ `type` du `package.json` racine : `type: "module"` signifie ESM, tout le reste (y compris l'absence de champ `type`) signifie CommonJS. `init` préserve celui que votre espace de travail utilise, et les générateurs TypeScript du plugin émettent du code correspondant. Si vous souhaitez changer plus tard, modifiez le `type` racine — mais c'est une migration de votre code existant, pas quelque chose que `init` fait pour vous.

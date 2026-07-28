@@ -39,12 +39,10 @@ export const generateOpenApiTsHooks = (
   data: CodeGenData,
   outputPath: string,
 ) => {
-  generateFiles(
-    tree,
-    path.join(import.meta.dirname, 'files'),
-    outputPath,
-    { ...data, ...esmVars(tree) },
-  );
+  generateFiles(tree, path.join(import.meta.dirname, 'files'), outputPath, {
+    ...data,
+    ...esmVars(tree),
+  });
 };
 
 export default openApiTsHooksGenerator;

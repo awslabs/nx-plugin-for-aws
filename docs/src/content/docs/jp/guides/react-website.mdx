@@ -24,7 +24,7 @@ import OptionFilter from '@components/option-filter.astro';
 生成されるアプリケーションはビルドツールとバンドラーに[Vite](https://vite.dev/)を使用し、型安全なルーティングに[TanStack Router](https://tanstack.com/router/v1)を採用しています。
 
 :::note[UX Provider]
-デフォルトの`uxProvider`は[shadcn/ui](https://ui.shadcn.com/)です。[Cloudscape](http://cloudscape.design/)または`None`（独自のコンポーネントライブラリを使用）も選択できます。
+デフォルトの`ux`は[shadcn/ui](https://ui.shadcn.com/)です。[Cloudscape](http://cloudscape.design/)または`none`（独自のコンポーネントライブラリを使用）も選択できます。
 :::
 
 ## 使用方法
@@ -60,6 +60,7 @@ import OptionFilter from '@components/option-filter.astro';
   - tsconfig.json ソースとテスト用の基本TypeScript設定
   - tsconfig.app.json ソースコード用TypeScript設定
   - tsconfig.spec.json テスト用TypeScript設定
+  - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
 </FileTree>
 
 :::note[TanStack Routerなし]
@@ -136,6 +137,49 @@ CloudFrontディストリビューションは、すべてのレスポンスに`
 デフォルトの`Content-Security-Policy`が適用されます。これはXSSやクリックジャッキングを軽減するためにスクリプトとフレーミングを制限しつつ、デプロイ時にのみURLが判明するAWSサービスエンドポイント（API Gateway、Cognito、Bedrock AgentCoreなど）をウェブサイトが呼び出せるようHTTPSおよびWSS接続を許可します。ポリシーを調整する場合（例えば`connect-src`を特定のオリジンに絞り込む場合）、生成された`static-website.ts`（CDK）または`static-website.tf`（Terraform）の`content_security_policy`値を編集してください。
 
 `runtime-config.json`は`Cache-Control: no-cache`で配信されるため、ブラウザは再デプロイ後に古いキャッシュコピーではなく常に最新の設定を取得します。
+
+#### カスタムドメインとTLS
+
+デフォルトでは、ディストリビューションはデフォルトのCloudFrontドメイン名（`*.cloudfront.net`）とそのデフォルト証明書を使用しますが、これは最小TLSバージョン1.2の強制をサポートしていません。独自のドメインからウェブサイトを配信するには、[ACM証明書](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（CloudFrontで使用するため`us-east-1`に存在する必要があります）とドメイン名を指定します。これにより、ビューアーに対して最小TLSバージョン1.2が強制されます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+`packages/common/constructs/src/app/static-websites`の生成されたウェブサイトコンストラクトで、`certificate`と`domainNames`プロパティを渡します：
+
+```ts {6-9}
+export class MyWebsite extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'MyWebsite',
+      websiteFilePath: ...,
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(scope, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+`packages/common/terraform/src/app/static-websites`の生成されたウェブサイトモジュールで、`custom_domain_names`と`acm_certificate_arn`変数を設定します：
+
+```hcl {5-6}
+module "static_website" {
+  source            = "../../../core/static-website"
+  website_name      = "my-website"
+  website_file_path = ...
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+また、ドメインをCloudFrontディストリビューションに向けるDNSレコード（例：Route 53）を作成する必要があります。
 
 ## Reactウェブサイトの実装
 
@@ -405,7 +449,7 @@ export class ApplicationStack extends Stack {
 5. ウェブサイトファイルとランタイム設定の自動デプロイ
 </Fragment>
 <Fragment slot="terraform">
-ウェブサイトのデプロイには、Terraformプロジェクト作成用の<Link path="guides/terraform-infrastructure">`terraform#project`ジェネレータ</Link>の使用を推奨します。
+ウェブサイトのデプロイには、Terraformプロジェクト作成用の<Link path="/guides/terraform-project">`terraform#project`ジェネレータ</Link>の使用を推奨します。
 
 `packages/common/terraform`に生成されたTerraformモジュールを使用してウェブサイトをデプロイできます。
 

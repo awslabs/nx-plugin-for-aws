@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -12,11 +11,11 @@ import {
 import { addTargetToLocalDev } from '../../connection/local-dev';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName } from '../../utils/names';
-import { toScopeAlias } from '../../utils/npm-scope';
 import {
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -50,7 +49,7 @@ export async function reactGenerator(
   const isRestApi =
     rawInfra === 'rest-lambda' || rawInfra === 'serverlessapigatewayrestapi';
   const apiNameClassName = toClassName(apiName);
-  const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
+  const backendProjectAlias = backendProjectConfig.name;
 
   generateFiles(
     tree,
@@ -169,6 +168,7 @@ export async function reactGenerator(
       '@smithy/types',
       ...((isRestApi ? ['@types/event-source-polyfill'] : []) as any),
     ]),
+    joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);

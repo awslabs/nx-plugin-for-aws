@@ -3,8 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import { execSync } from 'child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import os from 'os';
@@ -14,11 +13,16 @@ import {
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { initTestGitRepo, useIsolatedGitEnv } from '../../utils/test-git';
 import type { LicenseSourceConfig } from '../config-types';
 import { licenseSyncGenerator } from './generator';
 
 describe('licenseSyncGenerator', () => {
   let tree: Tree;
+
+  // The git-backed cases below shell out to git in a temp directory; keep those
+  // calls off the developer's real repository and config.
+  useIsolatedGitEnv();
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
@@ -110,7 +114,7 @@ describe('licenseSyncGenerator', () => {
 
       // Write file to the filesystem that's not tracked by the tree
       mkdirSync(path.join(tmpDir, 'nested'));
-      execSync("echo 'const foo = 3;' > nested/foo.ts", { cwd: tmpDir });
+      writeFileSync(path.join(tmpDir, 'nested/foo.ts'), 'const foo = 3;\n');
 
       await addLicenseConfig(undefined, fsTree);
 
@@ -939,9 +943,7 @@ describe('licenseSyncGenerator', () => {
 
     try {
       const fsTree = new FsTree(tmpDir, false);
-      execSync('git init', { cwd: tmpDir });
-      execSync('git config user.email test@example.com', { cwd: tmpDir });
-      execSync('git config user.name test', { cwd: tmpDir });
+      initTestGitRepo(tmpDir);
 
       // Add default config
       await addLicenseConfig(undefined, fsTree);
@@ -968,9 +970,7 @@ describe('licenseSyncGenerator', () => {
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-dir'));
 
     try {
-      execSync('git init', { cwd: tmpDir });
-      execSync('git config user.email test@example.com', { cwd: tmpDir });
-      execSync('git config user.name test', { cwd: tmpDir });
+      initTestGitRepo(tmpDir);
 
       const subDir = path.join(tmpDir, 'sub-dir');
       mkdirSync(subDir);
@@ -1047,25 +1047,23 @@ describe('licenseSyncGenerator', () => {
       expected: '=begin\nTest Header\n=end\nputs "hello"',
       description: 'alternative block syntax (Ruby)',
     },
-  ])('should support popular languages: $description', async ({
-    ext,
-    content,
-    format,
-    expected,
-  }) => {
-    await addLicenseConfig({
-      header: {
-        content: {
-          lines: ['Test Header'],
+  ])(
+    'should support popular languages: $description',
+    async ({ ext, content, format, expected }) => {
+      await addLicenseConfig({
+        header: {
+          content: {
+            lines: ['Test Header'],
+          },
+          format: {
+            [`**/*.${ext}`]: format,
+          },
         },
-        format: {
-          [`**/*.${ext}`]: format,
-        },
-      },
-    });
+      });
 
-    tree.write(`test.${ext}`, content);
-    await licenseSyncGenerator(tree);
-    expect(tree.read(`test.${ext}`, 'utf-8')).toBe(expected);
-  });
+      tree.write(`test.${ext}`, content);
+      await licenseSyncGenerator(tree);
+      expect(tree.read(`test.${ext}`, 'utf-8')).toBe(expected);
+    },
+  );
 });

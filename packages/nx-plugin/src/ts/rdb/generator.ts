@@ -4,7 +4,6 @@
  */
 import { relative } from 'node:path';
 import {
-  addDependenciesToPackageJson,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -15,6 +14,8 @@ import {
 } from '@nx/devkit';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
@@ -23,7 +24,7 @@ import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { esmVars } from '../../utils/module-format';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names';
-import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
+import { getNpmScope } from '../../utils/npm-scope';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
@@ -102,9 +103,10 @@ export const tsRdbGenerator = async (
   const templateOptions = {
     engine: options.engine,
     runtimeConfigKey: nameClassName,
-    databasePackageAlias: toScopeAlias(fullyQualifiedName),
+    databasePackageAlias: fullyQualifiedName,
     databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
+    ...nodeImageVersions(),
     prismaAdapterPackage:
       options.engine === 'mysql'
         ? '@prisma/adapter-mariadb'
@@ -244,6 +246,14 @@ export const tsRdbGenerator = async (
         dependsOn: ['bundle'],
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+
+      addDockerScanTarget(tree, {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag],
+      });
     }
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
   }
@@ -262,7 +272,7 @@ export const tsRdbGenerator = async (
       projectRoot: dir,
       nameClassName,
       nameKebabCase,
-      databasePackageAlias: toScopeAlias(fullyQualifiedName),
+      databasePackageAlias: fullyQualifiedName,
       databaseName,
       adminUser: databaseUser,
       engine: options.engine,
@@ -292,14 +302,15 @@ export const tsRdbGenerator = async (
         : (['@prisma/adapter-pg', 'pg'] as const)),
     ]),
     withVersions([
-      'prisma',
-      'tsx',
       '@types/aws-lambda',
       ...(options.engine === 'mysql'
         ? ([] as const)
         : (['@types/pg'] as const)),
     ]),
+    joinPathFragments(projectConfig.root, 'package.json'),
   );
+  // The prisma CLI and tsx run migration/seed scripts from the root.
+  addDependenciesToPackageJson(tree, {}, withVersions(['prisma', 'tsx']));
 
   registerPnpmBuiltDependencies(tree, {
     '@prisma/engines': false,

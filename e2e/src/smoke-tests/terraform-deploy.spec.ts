@@ -12,10 +12,13 @@ import {
   invokeAgentCoreA2a,
   invokeAgentCoreAgent,
   invokeAgentCoreAgUi,
+  invokeAgentCoreGatewayNoAuthDenied,
   invokeAgentCoreGatewayTool,
   invokeAgentCoreMcp,
+  invokeAgentCoreNoAuthDenied,
   invokeCustomAuthApi,
   invokeCustomAuthTrpcApi,
+  invokeIamApiNoAuthDenied,
   invokeLambda,
   invokeRestApi,
   invokeTrpcAgentCoreAgent,
@@ -101,7 +104,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
         // application variant deploys the website.
         config.variant === 'terraform-deploy'
           ? async (projectRoot) => {
-              writeIntegrationTestPage(
+              await writeIntegrationTestPage(
                 `${projectRoot}/packages/website`,
                 WEBSITE_APIS,
                 WEBSITE_AGENTS,
@@ -202,6 +205,28 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeCustomAuthApi(
             outputs.py_api_custom_http_endpoint,
             'FastAPI HTTP Custom Auth',
+          );
+
+          // IAM-auth APIs — unsigned (no SigV4) requests must be denied
+          await invokeIamApiNoAuthDenied(
+            outputs.my_api_endpoint,
+            'tRPC REST API',
+          );
+          await invokeIamApiNoAuthDenied(
+            outputs.my_api_http_endpoint,
+            'tRPC HTTP API',
+          );
+          await invokeIamApiNoAuthDenied(
+            outputs.py_api_endpoint,
+            'FastAPI REST',
+          );
+          await invokeIamApiNoAuthDenied(
+            outputs.py_api_http_endpoint,
+            'FastAPI HTTP',
+          );
+          await invokeIamApiNoAuthDenied(
+            outputs.my_smithy_api_endpoint,
+            'Smithy REST',
           );
 
           // MCP
@@ -314,6 +339,50 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             'my-gateway___hosted-mcp-server___divide',
             { a: 6, b: 2 },
             '3',
+          );
+
+          // AgentCore runtimes and gateway — unsigned (no SigV4) requests must
+          // be denied across every MCP server, agent (HTTP/AG-UI/tRPC), A2A
+          // runtime and the gateway.
+          await invokeAgentCoreNoAuthDenied(
+            outputs.ts_mcp_server_arn,
+            'TypeScript MCP Server',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.py_mcp_server_arn,
+            'Python MCP Server',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.py_agent_arn,
+            'Python Agent',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.ts_agent_arn,
+            'TypeScript Agent',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.py_langchain_agent_arn,
+            'Python LangChain Agent (AG-UI)',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.py_langchain_http_agent_arn,
+            'Python LangChain Agent (HTTP)',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.ts_a2a_agent_arn,
+            'TypeScript A2A Agent',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.py_a2a_agent_arn,
+            'Python A2A Agent',
+          );
+          await invokeAgentCoreNoAuthDenied(
+            outputs.py_langchain_a2a_agent_arn,
+            'Python LangChain A2A Agent',
+          );
+          await invokeAgentCoreGatewayNoAuthDenied(
+            outputs.parent_gateway_url,
+            'Parent Gateway',
           );
 
           // Lambda functions

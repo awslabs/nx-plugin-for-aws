@@ -12,8 +12,9 @@ import {
   SetUserPoolMfaConfigCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { generateFiles } from '@nx/devkit';
-import { type Browser, type Page, chromium } from 'playwright';
 import { FsTree, flushChanges } from 'nx/src/generators/tree';
+import { type Browser, chromium, type Page } from 'playwright';
+import { formatFilesInSubtree } from '../../../packages/nx-plugin/src/utils/format';
 
 /**
  * Browser-driven website ↔ API/agent integration test.
@@ -63,13 +64,15 @@ export interface AgentSpec {
  * The page is rendered from `files/website-integration` via the same
  * `generateFiles` + `Tree` machinery the generators use, so only the hooks for
  * the connected APIs/agents are imported and called (satisfying the website's
- * `noUnusedLocals` build).
+ * `noUnusedLocals` build). It is also formatted with the plugin's own
+ * formatter, matching what the generators do, so the website's `format` check
+ * (wired into `build`) passes on the generated page.
  */
-export const writeIntegrationTestPage = (
+export const writeIntegrationTestPage = async (
   websiteRoot: string,
   apis: ApiSpec[],
   agents: AgentSpec[],
-): string => {
+): Promise<string> => {
   const tree = new FsTree(websiteRoot, false);
   generateFiles(
     tree,
@@ -84,6 +87,7 @@ export const writeIntegrationTestPage = (
       ),
     },
   );
+  await formatFilesInSubtree(tree);
   flushChanges(websiteRoot, tree.listChanges());
   return '/integration-test';
 };

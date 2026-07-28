@@ -18,7 +18,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 このジェネレーターを使用する前に、以下を確認してください：
 
-1. <Link path="guides/fastapi">`py#fast-api`</Link> プロジェクト
+1. FastAPI プロジェクト（`py#api --framework=fastapi` で生成）、<Link path="guides/fastapi">`py#api`</Link> ガイドを参照してください
 2. <Link path="guides/py-rdb">`py#rdb`</Link> プロジェクト
 
 ## 使用方法
@@ -82,7 +82,7 @@ FastAPI Lambda 関数が実行時にデータベースに接続できるよう�
 アプリケーションスタックで、API をデータベースと同じ VPC にデプロイし、`allowDefaultPortFrom` と `grantConnect` を呼び出してネットワークパスを開き、Lambda ハンドラーに IAM `rds-db:connect` 権限を付与します：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -112,19 +112,24 @@ API Lambda 関数は、プライベート分離サブネットではなく、**�
 
 API をデータベースと同じ VPC にデプロイし、`additional_iam_policy_statements` を介して `rds-db:connect` を付与し、セキュリティグループルールのペアでネットワークパスを開きます：
 
+以下の例は、<Link path="guides/py-rdb">Python リレーショナルデータベース</Link> デプロイメントガイドの VPC リソースを参照しています：`aws_subnet.database` サブネットにはインターネットルートがなく、`aws_subnet.private` サブネットには NAT エグレスがあります。
+
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source     = "..."
+  source     = "../../common/terraform/src/app/apis/my-api"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   additional_iam_policy_statements = [
     {
@@ -135,13 +140,10 @@ module "api" {
       ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -150,6 +152,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -158,7 +161,18 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-API Lambda 関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。`RUNTIME_CONFIG_APP_ID` は、データベースモジュールの出力ではなく、共有 <Link path="guides/runtime-config">ランタイム設定</Link> AppConfig アプリケーションを指す必要があります。
+API Lambda 関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。`appconfig_application_id`/`appconfig_application_arn` は、データベースモジュールではなく、ルートモジュールで一度宣言された共有 <Link path="guides/runtime-config">ランタイム設定</Link> AppConfig アプリケーションから取得されます。これらを渡すことで、Lambda 関数に `RUNTIME_CONFIG_APP_ID` が設定され、アプリケーションへの読み取りアクセスが許可されます。
+
+AppConfig アプリケーションは、データベースモジュールのランタイム設定エントリがデプロイされるように、`database` 名前空間を公開する必要があります。`runtime-config/appconfig` モジュールをインスタンス化する際に、`namespaces` に含めてください：
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

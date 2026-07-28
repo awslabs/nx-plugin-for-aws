@@ -8,6 +8,7 @@ import { ensureDirSync } from 'fs-extra';
 import { beforeEach, describe, it } from 'vitest';
 import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
+import { runTerraformPlanTest } from './terraform-plan-test';
 
 /**
  * Runs the full matrix of generators against a Terraform-backed workspace.
@@ -101,11 +102,16 @@ export const terraformSmokeTest = (
     });
 
     it(`Should generate and build - ${variant}`, async () => {
-      await runTerraformSmokeTest(
+      const { opts } = await runTerraformSmokeTest(
         `${tmpProjPath()}/${variant}-${pkgMgr}`,
         pkgMgr,
         options.onProjectCreate,
       );
+
+      // Validate the generated Terraform plans cleanly, with mocked providers
+      // so no AWS credentials are needed. Catches plan-time graph errors the
+      // build can't (e.g. a for_each over an apply-time value).
+      await runTerraformPlanTest(opts);
     });
   });
 };

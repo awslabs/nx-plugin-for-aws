@@ -34,7 +34,7 @@ Key capabilities:
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
   1. install Python 3.14 by running: `uv python install 3.14.0`
   2. verify with `uv python list --only-installed`
-- [AWS Credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) configured to your target AWS account (where your application will be deployed)
+- [AWS Credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) configured to your target AWS account are required to deploy, and for some local development workflows
 
 ### Getting Started
 
@@ -135,6 +135,7 @@ Add capabilities to existing projects:
 | `ts#docs`            | Generates a documentation site                                                                                     |
 | `ts#infra`           | Generates a cdk application                                                                                        |
 | `ts#lambda-function` | Generate a TypeScript lambda function                                                                              |
+| `ts#dcr-proxy`       | Generate an OAuth Dynamic Client Registration (DCR) proxy construct for Cognito-authenticated MCP servers          |
 | `ts#mcp-server`      | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
 | `ts#nx-generator`    | Generator for adding an Nx Generator to an existing TypeScript project                                             |
 | `ts#nx-plugin`       | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |

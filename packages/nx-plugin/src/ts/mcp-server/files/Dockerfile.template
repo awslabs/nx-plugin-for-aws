@@ -1,10 +1,21 @@
-FROM public.ecr.aws/docker/library/node:lts-jod
+FROM <%- nodeBaseImage %>
+
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
+RUN npm install -g npm@<%- npmVersion %>
 
 WORKDIR /app
 
 # Add AWS Distro for OpenTelemetry for observability
 # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
-RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@<%- adotVersion %>
+# The overrides pin transitive dependencies with known HIGH/CRITICAL
+# vulnerabilities to fixed versions. npm is removed once the install is done —
+# the runtime only needs node, and npm's own bundled dependencies would
+# otherwise carry vulnerabilities into the image.
+RUN npm init -y \
+  && npm pkg set "overrides.@opentelemetry/propagator-jaeger=<%- jaegerVersion %>" \
+  && npm pkg set "overrides.minimatch=<%- minimatchVersion %>" \
+  && npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@<%- adotVersion %> \
+  && npm uninstall -g npm
 
 # Copy bundled streamable http server
 COPY index.js /app

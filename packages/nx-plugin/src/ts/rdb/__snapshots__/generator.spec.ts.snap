@@ -105,6 +105,7 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
@@ -122,7 +123,8 @@ const buildDatabaseUrl = async (): Promise<string> => {
 export const handler = async () => {
   await withConnectionRetry(async () => {
     const databaseUrl = await buildDatabaseUrl();
-    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+    const prisma = join(__dirname, 'node_modules', '.bin', 'prisma');
+    await promisify(execFile)(prisma, ['migrate', 'deploy'], {
       cwd: __dirname,
       env: {
         ...process.env,
@@ -522,7 +524,11 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    * Whether to export Aurora engine logs to CloudWatch Logs.
    * See https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html
    *
-   * @default false
+   * PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables
+   * Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL).
+   * Neither logs statement parameter values, to avoid leaking PII into log data.
+   *
+   * @default true
    */
   readonly enableCloudwatchLogs?: boolean;
 
@@ -559,7 +565,7 @@ export abstract class AuroraDatabase extends Construct {
       deletionProtection = true,
       removalPolicy = RemovalPolicy.RETAIN,
       enableKeyRotation = true,
-      enableCloudwatchLogs = false,
+      enableCloudwatchLogs = true,
       enablePerformanceInsights = true,
       engine,
       engineVersion,
@@ -591,8 +597,19 @@ export abstract class AuroraDatabase extends Construct {
       monitoringInterval: Duration.seconds(5),
       cloudwatchLogsExports: enableCloudwatchLogs
         ? engine.type === 'mysql'
-          ? ['audit', 'error', 'general', 'slowquery']
+          ? ['audit', 'error']
           : ['postgresql']
+        : undefined,
+      parameters: enableCloudwatchLogs
+        ? engine.type === 'mysql'
+          ? {
+              server_audit_logging: '1',
+              server_audit_events: 'CONNECT,QUERY_DDL',
+            }
+          : // Only safe statement-at-a-time; a multi-statement batch mixing
+            // DDL with DML (e.g. one \`psql -c "a;b;c"\` call) logs the whole
+            // raw text verbatim, including any literal DML values.
+            { log_statement: 'ddl' }
         : undefined,
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
@@ -782,7 +799,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.54.0"
+      version = "6.55.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -899,9 +916,9 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL). Neither logs statement parameter values, to avoid leaking PII into log data."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "enable_performance_insights" {
@@ -956,11 +973,30 @@ resource "aws_rds_cluster_parameter_group" "database" {
   family      = local.parameter_group_family
   description = "Parameter group for \${var.name} Aurora cluster"
 
+  # Only safe statement-at-a-time; a multi-statement batch mixing DDL with
+  # DML (e.g. one \`psql -c "a;b;c"\` call) logs the whole raw text verbatim,
+  # including any literal DML values.
   dynamic "parameter" {
     for_each = var.engine == "aurora-postgresql" ? [1] : []
     content {
       name  = "log_statement"
-      value = "all"
+      value = "ddl"
+    }
+  }
+
+  dynamic "parameter" {
+    for_each = var.engine == "aurora-mysql" ? [1] : []
+    content {
+      name  = "server_audit_logging"
+      value = "1"
+    }
+  }
+
+  dynamic "parameter" {
+    for_each = var.engine == "aurora-mysql" ? [1] : []
+    content {
+      name  = "server_audit_events"
+      value = "CONNECT,QUERY_DDL"
     }
   }
 
@@ -1082,7 +1118,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
+  #checkov:skip=CKV2_AWS_27:Query logging is enabled by default via enable_cloudwatch_logs; checkov cannot resolve the conditional count expression on aws_rds_cluster_parameter_group.database
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = local.cluster_name
   engine                              = var.engine
@@ -1103,7 +1139,7 @@ resource "aws_rds_cluster" "database" {
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
+  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error"] : ["postgresql"]) : null
 
   serverlessv2_scaling_configuration {
     min_capacity = var.serverless_min_capacity
@@ -1517,7 +1553,7 @@ exports[`ts#rdb generator > should generate terraform modules when iac is Terraf
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "6.54.0"
+      version = "6.55.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -2249,7 +2285,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.54.0"
+      version = "6.55.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -2366,9 +2402,9 @@ variable "enable_credential_rotation" {
 }
 
 variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL). Neither logs statement parameter values, to avoid leaking PII into log data."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "enable_performance_insights" {
@@ -2423,11 +2459,30 @@ resource "aws_rds_cluster_parameter_group" "database" {
   family      = local.parameter_group_family
   description = "Parameter group for \${var.name} Aurora cluster"
 
+  # Only safe statement-at-a-time; a multi-statement batch mixing DDL with
+  # DML (e.g. one \`psql -c "a;b;c"\` call) logs the whole raw text verbatim,
+  # including any literal DML values.
   dynamic "parameter" {
     for_each = var.engine == "aurora-postgresql" ? [1] : []
     content {
       name  = "log_statement"
-      value = "all"
+      value = "ddl"
+    }
+  }
+
+  dynamic "parameter" {
+    for_each = var.engine == "aurora-mysql" ? [1] : []
+    content {
+      name  = "server_audit_logging"
+      value = "1"
+    }
+  }
+
+  dynamic "parameter" {
+    for_each = var.engine == "aurora-mysql" ? [1] : []
+    content {
+      name  = "server_audit_events"
+      value = "CONNECT,QUERY_DDL"
     }
   }
 
@@ -2549,7 +2604,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
+  #checkov:skip=CKV2_AWS_27:Query logging is enabled by default via enable_cloudwatch_logs; checkov cannot resolve the conditional count expression on aws_rds_cluster_parameter_group.database
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = local.cluster_name
   engine                              = var.engine
@@ -2570,7 +2625,7 @@ resource "aws_rds_cluster" "database" {
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
+  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error"] : ["postgresql"]) : null
 
   serverlessv2_scaling_configuration {
     min_capacity = var.serverless_min_capacity
@@ -2984,7 +3039,7 @@ exports[`ts#rdb generator > should generate terraform modules with MySQL engine 
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "6.54.0"
+      version = "6.55.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -3829,6 +3884,7 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
@@ -3846,7 +3902,8 @@ const buildDatabaseUrl = async (): Promise<string> => {
 export const handler = async () => {
   await withConnectionRetry(async () => {
     const databaseUrl = await buildDatabaseUrl();
-    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+    const prisma = join(__dirname, 'node_modules', '.bin', 'prisma');
+    await promisify(execFile)(prisma, ['migrate', 'deploy'], {
       cwd: __dirname,
       env: {
         ...process.env,
@@ -4259,7 +4316,11 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    * Whether to export Aurora engine logs to CloudWatch Logs.
    * See https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.html
    *
-   * @default false
+   * PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables
+   * Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL).
+   * Neither logs statement parameter values, to avoid leaking PII into log data.
+   *
+   * @default true
    */
   readonly enableCloudwatchLogs?: boolean;
 
@@ -4296,7 +4357,7 @@ export abstract class AuroraDatabase extends Construct {
       deletionProtection = true,
       removalPolicy = RemovalPolicy.RETAIN,
       enableKeyRotation = true,
-      enableCloudwatchLogs = false,
+      enableCloudwatchLogs = true,
       enablePerformanceInsights = true,
       engine,
       engineVersion,
@@ -4328,8 +4389,19 @@ export abstract class AuroraDatabase extends Construct {
       monitoringInterval: Duration.seconds(5),
       cloudwatchLogsExports: enableCloudwatchLogs
         ? engine.type === 'mysql'
-          ? ['audit', 'error', 'general', 'slowquery']
+          ? ['audit', 'error']
           : ['postgresql']
+        : undefined,
+      parameters: enableCloudwatchLogs
+        ? engine.type === 'mysql'
+          ? {
+              server_audit_logging: '1',
+              server_audit_events: 'CONNECT,QUERY_DDL',
+            }
+          : // Only safe statement-at-a-time; a multi-statement batch mixing
+            // DDL with DML (e.g. one \`psql -c "a;b;c"\` call) logs the whole
+            // raw text verbatim, including any literal DML values.
+            { log_statement: 'ddl' }
         : undefined,
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
@@ -4598,9 +4670,27 @@ export default defineConfig({
 exports[`ts#rdb generator > should generate the aurora shared construct 4`] = `
 "FROM public.ecr.aws/lambda/nodejs:24
 
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
+RUN npm install -g npm@12.0.1
+
+# Patch OS packages beyond the base image's pinned release, and drop the
+# runtime's convenience copy of the AWS SDK (the handler bundle inlines its
+# own dependencies), keeping the image free of known HIGH/CRITICAL
+# vulnerabilities
+RUN microdnf upgrade -y --releasever latest && microdnf clean all \\
+    && rm -rf /var/runtime/node_modules/@aws-sdk
+
 WORKDIR \${LAMBDA_TASK_ROOT}
 
-RUN npm install prisma@7.8.0
+# npm blocks dependency install scripts by default; allow prisma's so its
+# postinstall downloads the schema-engine binary needed to run migrations.
+# npm is removed once prisma is installed — the handler runs prisma's own
+# binary directly, and npm's bundled dependencies would otherwise carry known
+# HIGH/CRITICAL vulnerabilities into the image.
+RUN printf 'allow-scripts[]=prisma\\nallow-scripts[]=@prisma/engines\\n' > .npmrc \\
+    && npm install prisma@7.8.0 \\
+    && rm .npmrc \\
+    && npm uninstall -g npm
 
 COPY index.js ./index.js
 COPY prisma ./prisma

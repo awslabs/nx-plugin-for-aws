@@ -1,8 +1,26 @@
 FROM public.ecr.aws/lambda/nodejs:24
 
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
+RUN npm install -g npm@<%= npmVersion %>
+
+# Patch OS packages beyond the base image's pinned release, and drop the
+# runtime's convenience copy of the AWS SDK (the handler bundle inlines its
+# own dependencies), keeping the image free of known HIGH/CRITICAL
+# vulnerabilities
+RUN microdnf upgrade -y --releasever latest && microdnf clean all \
+    && rm -rf /var/runtime/node_modules/@aws-sdk
+
 WORKDIR ${LAMBDA_TASK_ROOT}
 
-RUN npm install prisma@<%= prismaVersion %>
+# npm blocks dependency install scripts by default; allow prisma's so its
+# postinstall downloads the schema-engine binary needed to run migrations.
+# npm is removed once prisma is installed — the handler runs prisma's own
+# binary directly, and npm's bundled dependencies would otherwise carry known
+# HIGH/CRITICAL vulnerabilities into the image.
+RUN printf 'allow-scripts[]=prisma\nallow-scripts[]=@prisma/engines\n' > .npmrc \
+    && npm install prisma@<%= prismaVersion %> \
+    && rm .npmrc \
+    && npm uninstall -g npm
 
 COPY index.js ./index.js
 COPY prisma ./prisma

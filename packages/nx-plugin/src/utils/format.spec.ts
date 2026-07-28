@@ -8,8 +8,23 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatFilesInSubtree } from './format';
+import { formatFilesInSubtree, requiresPythonToRuffTarget } from './format';
 import { createTreeUsingTsSolutionSetup } from './test';
+
+describe('requiresPythonToRuffTarget', () => {
+  it('maps a lower-bound specifier to a ruff target', () => {
+    expect(requiresPythonToRuffTarget('>=3.14')).toBe('py314');
+    expect(requiresPythonToRuffTarget('>=3.9')).toBe('py39');
+  });
+  it('uses the lowest version in a range', () => {
+    expect(requiresPythonToRuffTarget('>=3.12,<3.15')).toBe('py312');
+  });
+  it('returns undefined for missing or unparseable input', () => {
+    expect(requiresPythonToRuffTarget(undefined)).toBeUndefined();
+    expect(requiresPythonToRuffTarget('')).toBeUndefined();
+    expect(requiresPythonToRuffTarget(3.14 as unknown)).toBeUndefined();
+  });
+});
 
 describe('format utils', () => {
   let tree: Tree;
@@ -27,6 +42,8 @@ describe('format utils', () => {
     name: string,
     moduleName: string,
     lineLength?: number,
+    requiresPython?: string,
+    select?: string[],
   ) => {
     const root = `packages/${name}`;
     addProjectConfiguration(tree, `proj.${name}`, { root });
@@ -39,8 +56,14 @@ describe('format utils', () => {
         ...(lineLength !== undefined
           ? ['[tool.ruff]', `line-length = ${lineLength}`, '']
           : []),
+        ...(select !== undefined
+          ? ['[tool.ruff.lint]', `select = ${JSON.stringify(select)}`, '']
+          : []),
         '[project]',
         `name = "proj-${name}"`,
+        ...(requiresPython !== undefined
+          ? [`requires-python = "${requiresPython}"`]
+          : []),
         '',
       ].join('\n'),
     );
@@ -125,9 +148,9 @@ describe('format utils', () => {
       expect(tree.read('lib/test.ts')?.toString()).toBe('const y = 2;\n');
     });
     it('should sort imports in Python files', async () => {
-      // isort (ruff rule I) is not in ruff's default rule set and the project
-      // config is not on disk during generation, so the formatter must opt into
-      // import sorting explicitly to match what the project's build enforces.
+      // The project's ruff config is not on disk during generation, so the
+      // formatter must pin the rule selection the project's build enforces
+      // (which includes isort, rule I) rather than defer to ruff's defaults.
       tree.write(
         'src/__init__.py',
         [
@@ -149,6 +172,45 @@ describe('format utils', () => {
           '__all__ = ["beta", "alpha"]',
           '',
         ].join('\n'),
+      );
+    });
+    it('should not apply rules outside the selection the project enforces', async () => {
+      // Ruff widens its default rule set between releases (0.16 went from `E`
+      // and `F` to 36 prefixes), so deferring to those defaults would rewrite
+      // generated files in ways the project's own `lint` target never asks for.
+      // RUF022 (`__all__` is not sorted) is one such default-on rule: it is
+      // outside the vended selection, so `__all__` must be left alone.
+      tree.write(
+        'src/__init__.py',
+        ['__all__ = ["beta", "alpha"]', ''].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - `__all__` order preserved
+      expect(tree.read('src/__init__.py')?.toString()).toBe(
+        ['__all__ = ["beta", "alpha"]', ''].join('\n'),
+      );
+    });
+    it("should apply the owning project's own rule selection when set", async () => {
+      // A project that narrows its select must have that honoured: isort is not
+      // in the selection here, so imports are left unsorted.
+      addFirstPartyPythonProject('my_lib', 'my_lib', undefined, undefined, [
+        'E',
+        'F',
+      ]);
+      const unsorted = [
+        'from my_lib.b import beta',
+        'from my_lib.a import alpha',
+        '',
+        '__all__ = ["beta", "alpha"]',
+        '',
+      ].join('\n');
+      tree.write('packages/my_lib/my_lib/__init__.py', unsorted);
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - imports untouched
+      expect(tree.read('packages/my_lib/my_lib/__init__.py')?.toString()).toBe(
+        unsorted,
       );
     });
     it('should group a workspace package as first-party even when its module is not on disk', async () => {
@@ -269,6 +331,27 @@ describe('format utils', () => {
         [line, '    return first_value', ''].join('\n'),
       );
     });
+    it("should apply the owning project's target-version so output matches the on-disk build", async () => {
+      // For py314+ ruff drops the parentheses from a multi-exception `except`
+      addFirstPartyPythonProject('my_lib', 'my_lib', undefined, '>=3.14');
+      tree.write(
+        'packages/my_lib/my_lib/main.py',
+        [
+          'def f():',
+          '    try:',
+          '        pass',
+          '    except (ValueError, KeyError):',
+          '        pass',
+          '',
+        ].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - py314 formatting removes the parentheses
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toContain(
+        'except ValueError, KeyError:',
+      );
+    });
     it('should format json and css files', async () => {
       // Setup
       tree.write('src/data.json', '{"a":1,"b":2}');
@@ -300,7 +383,7 @@ describe('format utils', () => {
       writeFileSync(
         path.join(workspaceDir, 'biome.json'),
         JSON.stringify({
-          $schema: 'https://biomejs.dev/schemas/2.4.16/schema.json',
+          $schema: 'https://biomejs.dev/schemas/2.5.4/schema.json',
           root: true,
           formatter: { indentStyle: 'space', indentWidth: 2 },
           javascript: {
@@ -336,6 +419,20 @@ describe('format utils', () => {
       await formatFilesInSubtree(tree, 'src');
       // Verify - imports left as-is (the on-disk config does not enable I)
       expect(tree.read('src/__init__.py')?.toString()).toBe(unsorted);
+    });
+    it('should apply formatter settings from an on-disk ruff config', async () => {
+      // Positive check that the on-disk config is genuinely read (ruff runs from
+      // tree.root so it discovers it): a formatter setting only this config sets
+      // must show up in the output.
+      writeFileSync(
+        path.join(workspaceDir, 'ruff.toml'),
+        ['[format]', 'quote-style = "single"', ''].join('\n'),
+      );
+      tree.write('src/quotes.py', 'x = "double"\n');
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - the config's quote-style was applied
+      expect(tree.read('src/quotes.py')?.toString()).toBe("x = 'double'\n");
     });
     it('should ignore a ruff config above the workspace root', async () => {
       // A ruff config in a parent of the workspace (e.g. a stray config on the

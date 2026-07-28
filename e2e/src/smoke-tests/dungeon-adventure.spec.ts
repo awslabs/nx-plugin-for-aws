@@ -6,9 +6,9 @@ import { type ChildProcess, execSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
-import { getPackageManagerCommand } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
+import { buildInstallCommand } from '../../../packages/nx-plugin/src/utils/commands';
 import {
   buildPackageManagerShortCommand,
   createTestWorkspace,
@@ -325,7 +325,12 @@ describe('smoke test - dungeon-adventure', () => {
     // 2. Game API and Inventory MCP Server
 
     await runCLI(
-      `${getPackageManagerCommand(pkgMgr).add} ${getDungeonAdventureElectroDbDependencies()}`,
+      buildInstallCommand(
+        pkgMgr,
+        getDungeonAdventureElectroDbDependencies(),
+        false,
+        '@dungeon-adventure/game-api',
+      ),
       {
         ...opts,
         prefixWithPackageManagerCmd: false,

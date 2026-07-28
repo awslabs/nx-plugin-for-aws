@@ -3,12 +3,13 @@ title: TypeScript Projects
 description: Reference documentation for TypeScript projects
 generator: ts#project
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import InstallCommand from '@components/install-command.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import Link from '@components/link.astro';
 
 The TypeScript project generator can be used to create a modern [TypeScript](https://www.typescriptlang.org/) library or application configured with best practices such as [ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), TypeScript [project references](https://www.typescriptlang.org/docs/handbook/project-references.html), [Vitest](https://vitest.dev/) for running tests and [Biome](https://biomejs.dev/) for linting and formatting.
@@ -33,6 +34,7 @@ The generator will create the following project structure in the `<directory>/<n
 
   - src TypeScript source code
     - index.ts
+  - package.json Project manifest defining the project's package name and dependencies
   - project.json Project configuration and build targets
   - tsconfig.json Base TypeScript configuration for this project (extends workspace root tsconfig.base.json)
   - tsconfig.lib.json TypeScript configuration for your library (your runtime or packaged source)
@@ -41,8 +43,8 @@ The generator will create the following project structure in the `<directory>/<n
 
 </FileTree>
 
-:::tip[No package.json Needed]
-Notice that no `package.json` file is created for this project! You can find out why [below](#dependencies).
+:::tip[Project package.json]
+The project's `package.json` starts minimal. As you add runtime dependencies they are declared here (shared build/test tooling stays in the workspace root) — you can find out more [below](#dependencies).
 :::
 
 You will also notice some changes to the following files in your workspace root:
@@ -85,12 +87,8 @@ export * from './algorithms/index.js';
 [TypeScript aliases](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) for your project are configured in your workspace `tsconfig.base.json`, which allows you to reference your TypeScript project from other TypeScript projects:
 
 ```ts title="packages/my-other-project/src/index.ts"
-import { sayHello } from ':my-scope/my-library';
+import { sayHello } from '@my-scope/my-library';
 ```
-
-:::note[Project Aliases]
-Aliases for your TypeScript projects begin with a `:` rather than the traditional `@`, since this avoids the possibility of name conflicts between local packages in your workspace and remote packages in [NPM](https://www.npmjs.com/).
-:::
 
 When you add an import statement for a new project in your workspace for the first time, you will likely see an error in your IDE similar to the below:
 
@@ -106,28 +104,40 @@ File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed with
 
 </details>
 
-This is because a [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) has not yet been set up.
+This is because a [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) has not yet been set up, and the imported project has not yet been declared as a workspace dependency in your project's `package.json`.
 
-TypeScript projects are configured with the Nx TypeScript Sync generator out of the box, saving you from needing to manually configure the project reference. Simply run the following command and Nx will add the required configuration:
+Your workspace is configured with sync generators which manage both for you, so you don't need to configure them by hand. Simply run the following command and Nx will add the required configuration:
 
 <NxCommands commands={['sync']} />
 
-After this, the error in your IDE should be gone and you are ready to use your library.
+```bash wrap
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Local project dependencies are out of sync. The following workspace dependencies will be declared:
+packages/my-other-project/package.json:
+- @my-scope/my-library: workspace:*
+
+Syncing the workspace...
+The workspace was synced successfully!
+```
+
+Nx's TypeScript sync generator adds the project reference, and the plugin's `ts#sync` generator declares the imported project in your project's `package.json` (`workspace:*` where the package manager supports the workspace protocol, `*` on npm and yarn classic), so the package manager links the local project on install. After this, the error in your IDE should be gone and you are ready to use your library.
 
 :::tip[Build Shortcut]
-You can also just build your project and you'll be prompted with a message such as:
+You can also just build your project — the sync generators run first and you'll be prompted to apply any outstanding changes:
 
 ```bash wrap
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+ NX   The workspace is out of sync
 
-This will result in an error in CI.
+...
 
-? Would you like to sync the identified changes to get your workspace up to date?
+? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Select `Yes` to allow Nx to update your project references.
+Select `Yes` to allow Nx to sync your workspace.
 :::
 
 ### Keeping Path Aliases In Sync
@@ -136,13 +146,116 @@ If you add custom `compilerOptions.paths` entries in a project's `tsconfig.json`
 
 ### Dependencies
 
-You will notice that your TypeScript project does not have a `package.json` file, which might be unexpected if you are used to traditional TypeScript monorepos.
+Each TypeScript project declares its third-party runtime dependencies in its own `package.json`. Build and test tooling shared across projects is defined in the root `package.json`.
 
-To add a dependency for any TypeScript package in your monorepo, simply add the dependency to the `package.json` in the root of your workspace. You can do this via the command line for your package manager:
+To add a runtime dependency to a project, install it into that project:
 
-<InstallCommand pkg="some-npm-package" />
+<InstallCommand pkg="some-npm-package" project="@my-scope/my-library" />
 
-The dependency is then available for any of the TypeScript projects in your workspace to use.
+You can also run your package manager's plain `add`/`install` command from within the project's directory.
+
+To add a shared dev tool, install it at the workspace root:
+
+<InstallCommand pkg="some-dev-tool" dev />
+
+:::note
+Biome's [`noUndeclaredDependencies`](https://biomejs.dev/linter/rules/no-undeclared-dependencies/) lint rule enforces that a project's source only imports packages declared in its own `package.json`. Config files, build scripts and tests are exempt, so shared tooling can stay at the root.
+:::
+
+#### Catalogs
+
+For package managers which support catalogs ([pnpm](https://pnpm.io/catalogs), [yarn](https://yarnpkg.com/features/catalogs) and [bun](https://bun.com/docs/install/catalogs)), generators record each version in the catalog and reference it with the `catalog:` protocol (eg `"zod": "catalog:"`), so the catalog is the single source of truth for versions regardless of which project declares the dependency. This helps you to follow a [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy), avoiding type conflicts and multiple copies of packages in deployment bundles.
+
+When you add a new dependency yourself, keep it in the catalog too:
+
+<Tabs syncKey="package-manager">
+  <TabItem label="pnpm">
+    The workspace sets [`catalogMode: strict`](https://pnpm.io/settings#catalogmode), so `pnpm add` records the version in the catalog and references it automatically — no extra steps.
+
+    ```bash
+    pnpm add some-npm-package --filter my-library
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    yarn's `catalog:` protocol only *references* an existing catalog entry — it cannot create one — so record the version first.
+
+    <Steps>
+    1. Add the version under `catalog` in `.yarnrc.yml`:
+
+       ```yaml title=".yarnrc.yml"
+       catalog:
+         some-npm-package: ^1.0.0
+       ```
+
+    2. Reference it from the project:
+
+       ```bash
+       yarn workspace @my-scope/my-library add some-npm-package@catalog:
+       ```
+    </Steps>
+  </TabItem>
+  <TabItem label="bun">
+    bun's `catalog:` protocol only *references* an existing catalog entry — it cannot create one — so record the version first.
+
+    <Steps>
+    1. Add the version under `catalog` in the root `package.json`:
+
+       ```json title="package.json"
+       {
+         "catalog": {
+           "some-npm-package": "^1.0.0"
+         }
+       }
+       ```
+
+    2. Reference it from the project:
+
+       ```bash
+       bun add some-npm-package@catalog: --cwd packages/my-library
+       ```
+    </Steps>
+  </TabItem>
+</Tabs>
+
+:::tip[Aligning versions on npm]
+npm has no catalog feature, so versions are declared directly in each `package.json`. To keep them consistent across projects, we recommend [syncpack](https://github.com/JamieMason/syncpack) (`npx syncpack lint`).
+:::
+
+##### Opting out of catalogs
+
+Catalogs are enabled by default. To turn them off, create your workspace with `--catalog false`:
+
+<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
+
+Or set it in `aws-nx-plugin.config.mts` at any time:
+
+```ts title="aws-nx-plugin.config.mts"
+export default {
+  packageManager: {
+    catalogs: false,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+With catalogs disabled, generators write dependency versions directly into each project's `package.json`, and keeping versions aligned across projects is your responsibility.
+
+#### Declaring all dependencies at the root
+
+If you prefer declaring every dependency in the root `package.json` only (no per-project dependency declarations), turn off the lint rule in the workspace `biome.json`:
+
+```json title="biome.json"
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUndeclaredDependencies": "off"
+      }
+    }
+  }
+}
+```
+
+Projects resolve root-installed packages at build time, so everything still builds — you give up per-project manifests as an accurate record of each project's dependencies (which matters if you later publish a project or split the repo).
 
 #### Runtime Code
 
@@ -192,12 +305,6 @@ Note that in the above target, we chose `src/index.ts` as our entrypoint for the
 :::tip[Lambda Functions]
 If you're building an AWS Lambda function, check out the <Link path="/guides/ts-lambda-function">`ts#lambda-function`</Link> generator as this configures bundling for you, as well as generating infrastructure and adding observability and type-safety.
 :::
-
-#### Publishing to NPM
-
-If you are publishing your TypeScript project to NPM, you must create a `package.json` file for it.
-
-This must declare the dependencies that your project references. Since at build time your project will resolve dependencies installed via the workspace root `package.json`, Biome's `noUndeclaredDependencies` rule will warn you if your project imports a package that isn't listed in its `package.json`.
 
 ### Building
 

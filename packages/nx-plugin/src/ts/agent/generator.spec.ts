@@ -10,6 +10,7 @@ import {
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { TS_AGENT_GENERATOR_INFO, tsAgentGenerator } from './generator';
 
 describe('ts#agent generator', () => {
@@ -40,6 +41,9 @@ describe('ts#agent generator', () => {
       name: 'test-project',
       version: '1.0.0',
     });
+
+    // An initialised workspace has the plugin config file
+    tree.write('aws-nx-plugin.config.mts', 'export default {};\n');
   });
 
   it('should add strands agent to existing TypeScript project with default name', async () => {
@@ -131,24 +135,32 @@ describe('ts#agent generator', () => {
       iac: 'cdk',
     });
 
-    // Check root package.json dependencies
+    // Runtime dependencies (and the @types/* backing type imports) land in the
+    // project's own manifest as catalog references
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.dependencies['@trpc/server']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['@trpc/client']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['zod']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['@strands-agents/sdk']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['ws']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['cors']).toBe('catalog:');
+    expect(
+      projectPackageJson.dependencies['@aws-sdk/credential-providers'],
+    ).toBe('catalog:');
+    expect(projectPackageJson.dependencies['aws4fetch']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['@modelcontextprotocol/sdk']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.devDependencies['@types/ws']).toBe('catalog:');
+    expect(projectPackageJson.devDependencies['@types/cors']).toBe('catalog:');
+
+    // Pure build/test tooling stays in the workspace root devDependencies
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.dependencies['@trpc/server']).toBeDefined();
-    expect(rootPackageJson.dependencies['@trpc/client']).toBeDefined();
-    expect(rootPackageJson.dependencies['zod']).toBeDefined();
-    expect(rootPackageJson.dependencies['@strands-agents/sdk']).toBeDefined();
-    expect(rootPackageJson.dependencies['ws']).toBeDefined();
-    expect(rootPackageJson.dependencies['cors']).toBeDefined();
-    expect(
-      rootPackageJson.dependencies['@aws-sdk/credential-providers'],
-    ).toBeDefined();
-    expect(rootPackageJson.dependencies['aws4fetch']).toBeDefined();
-    expect(
-      rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
-    ).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/ws']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/cors']).toBeDefined();
   });
 
   it('should handle kebab-case conversion for names with special characters', async () => {
@@ -201,6 +213,12 @@ describe('ts#agent generator', () => {
         module: 'commonjs',
       },
     });
+    writeJson(tree, 'libs/nested-project/package.json', {
+      name: '@org/nested-project',
+      version: '0.0.0',
+      private: true,
+      type: 'module',
+    });
 
     await tsAgentGenerator(tree, {
       project: '@org/nested-project',
@@ -228,6 +246,12 @@ describe('ts#agent generator', () => {
         target: 'ES2020',
         module: 'commonjs',
       },
+    });
+    writeJson(tree, 'apps/no-source-root/package.json', {
+      name: '@proj/no-source-root',
+      version: '0.0.0',
+      private: true,
+      type: 'module',
     });
 
     await tsAgentGenerator(tree, {
@@ -337,6 +361,32 @@ describe('ts#agent generator', () => {
     expect(projectConfig.targets['agent-docker'].outputs).toEqual([
       '{workspaceRoot}/dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
     ]);
+
+    // Check that a cacheable trivy scan target was added
+    expect(projectConfig.targets['agent-trivy']).toEqual({
+      cache: true,
+      inputs: ['default', '^production'],
+      outputs: [
+        '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-agent-latest',
+      ],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'rimraf dist/apps/test-project/trivy/proj-test-project-agent-latest',
+          'make-dir dist/apps/test-project/trivy/proj-test-project-agent-latest',
+          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
+          'docker save -o dist/apps/test-project/trivy/proj-test-project-agent-latest/image-0.tar proj-test-project-agent:latest',
+          `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-agent-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
+        ],
+        parallel: false,
+      },
+      dependsOn: ['agent-docker'],
+    });
+    expect(projectConfig.targets['trivy'].dependsOn).toContain('agent-trivy');
+    // Trivy is not wired into build (its result depends on the vulnerability DB).
+    expect(projectConfig.targets['build'].dependsOn ?? []).not.toContain(
+      'trivy',
+    );
   });
 
   it('should generate strands agent with BedrockAgentCoreRuntime and custom name', async () => {
@@ -902,19 +952,23 @@ describe('ts#agent generator', () => {
     expect(indexContent).toContain('A2AExpressServer');
     expect(indexContent).not.toContain('tRPC');
 
-    // Check dependencies include express and @a2a-js/sdk
-    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.dependencies['express']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
+    // Check dependencies include express and @a2a-js/sdk in the project manifest
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.dependencies['express']).toBe('catalog:');
+    expect(projectPackageJson.devDependencies['@types/express']).toBe(
+      'catalog:',
+    );
     // @a2a-js/sdk must be a direct dependency so it lands in node_modules
     // for local dev AND is bundled into the Docker image (the Strands SDK's
     // a2a/express-server module statically imports it via peer dependency).
-    expect(rootPackageJson.dependencies['@a2a-js/sdk']).toBeDefined();
+    expect(projectPackageJson.dependencies['@a2a-js/sdk']).toBe('catalog:');
 
     // HTTP-specific deps should not be present
-    expect(rootPackageJson.dependencies['@trpc/server']).toBeUndefined();
-    expect(rootPackageJson.dependencies['ws']).toBeUndefined();
-    expect(rootPackageJson.dependencies['cors']).toBeUndefined();
+    expect(projectPackageJson.dependencies['@trpc/server']).toBeUndefined();
+    expect(projectPackageJson.dependencies['ws']).toBeUndefined();
+    expect(projectPackageJson.dependencies['cors']).toBeUndefined();
   });
 
   it('should include protocol in component metadata for A2A', async () => {
@@ -1019,18 +1073,28 @@ describe('ts#agent generator', () => {
     expect(indexContent).not.toContain('tRPC');
     expect(indexContent).not.toContain('A2AExpressServer');
 
-    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.dependencies['@ag-ui/aws-strands']).toBeDefined();
-    expect(rootPackageJson.dependencies['@ag-ui/core']).toBeDefined();
-    expect(rootPackageJson.dependencies['@ag-ui/encoder']).toBeDefined();
-    expect(rootPackageJson.dependencies['express']).toBeDefined();
-    expect(rootPackageJson.dependencies['cors']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
-    expect(rootPackageJson.devDependencies['@types/cors']).toBeDefined();
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.dependencies['@ag-ui/aws-strands']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['@ag-ui/a2ui-toolkit']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.dependencies['@ag-ui/client']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['@ag-ui/core']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['@ag-ui/encoder']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['express']).toBe('catalog:');
+    expect(projectPackageJson.dependencies['cors']).toBe('catalog:');
+    expect(projectPackageJson.devDependencies['@types/express']).toBe(
+      'catalog:',
+    );
+    expect(projectPackageJson.devDependencies['@types/cors']).toBe('catalog:');
 
     // HTTP-only deps should not be present
-    expect(rootPackageJson.dependencies['@trpc/server']).toBeUndefined();
-    expect(rootPackageJson.dependencies['ws']).toBeUndefined();
+    expect(projectPackageJson.dependencies['@trpc/server']).toBeUndefined();
+    expect(projectPackageJson.dependencies['ws']).toBeUndefined();
   });
 
   it('should include protocol in component metadata for AG-UI', async () => {
@@ -1118,8 +1182,13 @@ describe('ts#agent generator', () => {
     expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
     expect(chatTarget.dependsOn).toBeUndefined();
 
-    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.devDependencies['agent-chat-cli']).toBeDefined();
+    // The chat script imports agent-chat-cli, so it is declared in the
+    // project's own package.json (not the workspace root) for
+    // noUndeclaredDependencies to pass.
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(projectPackageJson.devDependencies['agent-chat-cli']).toBeDefined();
   });
 
   it('should vend a standalone chat script for A2A', async () => {
@@ -1170,35 +1239,36 @@ describe('ts#agent generator', () => {
     ).toBeUndefined();
   });
 
-  describe.each([
-    'http',
-    'a2a',
-    'ag-ui',
-  ] as const)('chat scripts for %s protocol', (protocol) => {
-    it.each([
-      'iam',
-      'cognito',
-    ] as const)('should match snapshot for chat scripts with %s auth', async (auth) => {
-      await tsAgentGenerator(tree, {
-        project: 'test-project',
-        protocol,
-        auth,
-        infra: 'agentcore',
-        iac: 'cdk',
-      });
+  describe.each(['http', 'a2a', 'ag-ui'] as const)(
+    'chat scripts for %s protocol',
+    (protocol) => {
+      it.each(['iam', 'cognito'] as const)(
+        'should match snapshot for chat scripts with %s auth',
+        async (auth) => {
+          await tsAgentGenerator(tree, {
+            project: 'test-project',
+            protocol,
+            auth,
+            infra: 'agentcore',
+            iac: 'cdk',
+          });
 
-      const chat = tree.read(
-        'apps/test-project/scripts/agent/chat.ts',
-        'utf-8',
+          const chat = tree.read(
+            'apps/test-project/scripts/agent/chat.ts',
+            'utf-8',
+          );
+          const agentcore = tree.read(
+            'apps/test-project/scripts/agent/agentcore.ts',
+            'utf-8',
+          );
+          expect(chat).toMatchSnapshot(`chat.ts (${protocol}, ${auth})`);
+          expect(agentcore).toMatchSnapshot(
+            `agentcore.ts (${protocol}, ${auth})`,
+          );
+        },
       );
-      const agentcore = tree.read(
-        'apps/test-project/scripts/agent/agentcore.ts',
-        'utf-8',
-      );
-      expect(chat).toMatchSnapshot(`chat.ts (${protocol}, ${auth})`);
-      expect(agentcore).toMatchSnapshot(`agentcore.ts (${protocol}, ${auth})`);
-    });
-  });
+    },
+  );
 
   it('should warn when auth is explicitly set with infra=none', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

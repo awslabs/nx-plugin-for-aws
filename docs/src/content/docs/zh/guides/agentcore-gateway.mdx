@@ -15,7 +15,7 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-生成一个 [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 项目。AgentCore Gateway 是一个托管的入口点，它将一个或多个 MCP 服务器目标聚合在单个 MCP 端点后面，针对 [Cedar 策略引擎](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)评估每个工具调用，并使用 IAM SigV4 对发往 MCP 服务器的出站流量进行签名。
+生成一个 [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 项目。AgentCore Gateway 是一个托管的入口点，它将一个或多个 MCP 服务器目标聚合在单个 MCP 端点后面，对入站请求进行身份验证（IAM 或 Cognito），针对 [Cedar 策略引擎](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)评估每个工具调用，并使用 IAM SigV4 对发往 MCP 服务器的出站流量进行签名。
 
 ## 用法
 
@@ -34,7 +34,7 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - packages/\<name>/
     - policies/ Cedar 策略源文件（当 `cedarPolicy: false` 时省略）
-      - permit-all.cedar 默认的 Cedar 策略，允许来自同一 AWS 账户内的已认证调用者
+      - permit-all.cedar 默认的 Cedar 策略，允许已认证的调用者（来自同一 AWS 账户的 IAM 调用者，或任何 Cognito 用户——参见 [Authentication](#authentication)）
       - README.md 编写 Cedar 策略的参考文档
     - local-dev.ts 用于本地开发的本地网关，聚合附加的 MCP 服务器
     - project.json 添加 `serve` 和 `dev` 目标
@@ -71,7 +71,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 生成的构造创建以下 AWS 资源：
 
-- 一个为 MCP 协议配置的 `AgentCore::Gateway`，使用 `GatewayAuthorizer.usingAwsIam()`（入站 IAM 身份验证）
+- 一个为 MCP 协议配置的 `AgentCore::Gateway`，使用入站 IAM 身份验证（默认）或 Cognito JWT 身份验证（参见 <a href="#authentication">Authentication</a>）
 - 一个以 `ENFORCE` 模式运行的 `AgentCore::PolicyEngine`，附加到 Gateway（当 `cedarPolicy: false` 时省略）
 - `policies/` 中每个 `.cedar` 文件对应一个 `AgentCore::Policy`
 - 与 Gateway 关联的 AWS WAFv2 Web ACL，并将请求日志记录到 CloudWatch（默认启用——参见 <a href="#aws-waf">AWS WAF</a>）
@@ -80,7 +80,7 @@ Gateway URL 会自动注册到 <Link path="guides/runtime-config">运行时配�
 
 #### 架构
 
-已部署的 Gateway 具有以下架构。入站请求通过 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL 和 IAM 身份验证，针对 Cedar [策略引擎](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)进行授权，然后路由到下游 MCP 服务器目标：
+已部署的 Gateway 具有以下架构，入站请求通过 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL，然后路由到下游 MCP 服务器目标：
 
 ```d2 inline=true
 direction: right
@@ -95,7 +95,7 @@ waf: WAF {
   icon: /nx-plugin-for-aws/icons/aws/waf.svg
 }
 
-gateway: AgentCore Gateway\n(MCP, IAM auth) {
+gateway: AgentCore Gateway\n(MCP, IAM or Cognito auth) {
   shape: image
   icon: /nx-plugin-for-aws/icons/aws/bedrock-agentcore-gateway.svg
 }
@@ -108,6 +108,61 @@ client -> waf
 waf -> gateway
 gateway -> targets
 ```
+
+## Authentication
+
+`auth` 选项配置 Gateway 如何对入站请求进行身份验证。可以在 `IAM`（默认）和 `Cognito` 之间选择。
+
+### IAM
+
+默认情况下，Gateway 配置为 `GatewayAuthorizer.usingAwsIam()`。调用者使用 SigV4 签名请求，调用者的 IAM 身份作为 `AgentCore::IamEntity` 主体可用于 Cedar 策略。当您的调用者是在 AWS 中运行的代理或服务时，这是推荐的选项——例如通过 <Link path="guides/connection/ts-agent-gateway">agent to Gateway 连接生成器</Link>连接的 <Link path="/guides/ts-agent">agent</Link>，它使用自己的执行角色对调用进行签名。
+
+### Cognito
+
+当您选择 `Cognito` 时，Gateway 配置为指向 Cognito 用户池的自定义 JWT 授权器。调用者通过提供 JWT bearer token 进行身份验证，token 的 `sub` 声明作为 `AgentCore::OAuthUser` 主体可用于 Cedar 策略。当您的调用者是通过 Cognito 进行身份验证的最终用户时（例如网站或非 AWS 客户端），请使用此选项。
+
+生成的基础设施使用现有的 Cognito 用户池和客户端——它不会创建它们。您可以使用 <Link path="/guides/react-website-auth">`ts#website#auth` 生成器</Link>生成 `UserIdentity`，或提供您自己的。
+
+<Infrastructure>
+<Fragment slot="cdk">
+生成的构造需要一个 `identity` 属性来提供用户池和客户端：
+
+```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
+import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyGateway(this, 'MyGateway', {
+      identity,
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+生成的模块需要 `user_pool_id` 和 `user_pool_client_ids` 变量：
+
+```hcl {6-7} title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_gateway" {
+  source               = "../../common/terraform/src/app/gateways/my-gateway"
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note[自定义 OIDC 提供商]
+要使用非 Cognito OIDC 提供商进行身份验证，请直接修改生成的 Gateway 构造或 Terraform 模块——将授权器的发现 URL 和允许的客户端替换为您的提供商的。Agent to Gateway 连接生成器仅支持 `IAM` 身份验证的网关，因为代理使用 SigV4 签名其调用。
+:::
 
 ## 编写策略
 
@@ -190,7 +245,9 @@ Tool Execution Denied: Tool call not allowed due to policy enforcement
 
 ### 默认 `permit-all.cedar`
 
-生成器提供了一个默认策略，允许来自部署 Gateway 的 AWS 账户的任何 IAM 调用者：
+生成器提供了一个默认策略，其范围限定为 Gateway 的身份验证类型。
+
+对于 **IAM** Gateway，它允许来自部署 Gateway 的 AWS 账户的任何 IAM 调用者：
 
 ```cedar title="packages/<name>/policies/permit-all.cedar"
 permit (
@@ -202,11 +259,23 @@ permit (
 };
 ```
 
+对于 **Cognito** Gateway，它允许任何已认证的 OAuth 用户（JWT 授权器在评估策略之前已经验证了 token 的用户池和客户端）：
+
+```cedar title="packages/<name>/policies/permit-all.cedar"
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+);
+```
+
 要进一步锁定，请在其旁边添加更窄的策略。始终在策略集中保留至少一个匹配的 `permit`，否则默认拒绝将阻止每个调用。
 
 ### 策略范围参考
 
-对于此插件生成的 Gateway，所有调用者都是 IAM 主体（Gateway 配置为 `GatewayAuthorizer.usingAwsIam()`）：
+主体类型取决于 Gateway 如何对调用者进行身份验证（参见 <a href="#authentication">Authentication</a>）。
+
+对于 **IAM** Gateway，调用者是 IAM 主体：
 
 ```
 principal is AgentCore::IamEntity
@@ -219,6 +288,24 @@ principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<
 ```
 
 相同的值可作为 `principal.id` 用于 `when` 子句。将 `like` 保留用于真正的模式，例如默认 `permit-all.cedar` 中的账户范围匹配。
+
+对于 **Cognito** Gateway，调用者是从 JWT token 的 `sub` 声明构建的 OAuth 用户，JWT 声明（用户名、范围等）作为主体标签可用：
+
+```
+principal is AgentCore::OAuthUser
+```
+
+在 `when` 子句中匹配单个声明——例如要求一个范围：
+
+```cedar
+permit (
+  principal is AgentCore::OAuthUser,
+  action,
+  resource == AgentCore::Gateway::"<%= gatewayArn %>"
+) when {
+  principal.scope == "gateway/invoke"
+};
+```
 
 工具调用以以下形式的操作到达策略引擎：
 
@@ -268,14 +355,14 @@ forbid (
 
 ## 部署您的 AgentCore Gateway
 
-AgentCore Gateway 生成器根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施即代码。您可以使用它来部署您的 Gateway。
+AgentCore Gateway 生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施即代码。您可以使用它来部署您的 Gateway。
 
 <Infrastructure>
 <Fragment slot="cdk">
 用于部署 Gateway 的 CDK 构造位于 `common/constructs` 文件夹中。您可以在 CDK 应用程序中使用它，例如：
 
 ```ts {7} title="packages/infra/src/stacks/application-stack.ts"
-import { MyGateway } from ':my-scope/common-constructs';
+import { MyGateway } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {

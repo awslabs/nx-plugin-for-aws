@@ -71,8 +71,9 @@ Il costrutto agent generato implementa `IGrantable` e `IConnectable`, quindi puo
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -80,6 +81,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -92,21 +96,21 @@ db.grantConnect(myAgent);
 </Fragment>
 <Fragment slot="terraform">
 
-Esegui l'agent all'interno dello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group:
+Esegui l'agent all'interno dello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group. Le risorse `aws_vpc.main` e `aws_subnet` sono definite nella guida di deployment del database:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -123,6 +127,7 @@ module "my_agent" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  description                  = "Allow the agent runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_agent.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -131,6 +136,7 @@ resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  description                  = "Allow outbound traffic from the agent runtime to the database"
   security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -139,7 +145,16 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione AppConfig condivisa per la <Link path="guides/runtime-config">configurazione di runtime</Link> dichiarata una volta nel tuo modulo root, non dal modulo del database.
+`appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione AppConfig condivisa per la <Link path="guides/runtime-config">configurazione di runtime</Link> dichiarata una volta nel tuo modulo root, non dal modulo del database. Includi il namespace `database` quando la istanzi in modo che la voce di configurazione di runtime del modulo del database venga distribuita:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

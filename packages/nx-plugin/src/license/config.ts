@@ -583,5 +583,5 @@ export const writeLicenseConfig = async (
 export const readLicenseConfig = async (
   tree: Tree,
 ): Promise<LicenseConfig | undefined> => {
-  return (await readAwsNxPluginConfig(tree))?.license;
+  return readAwsNxPluginConfig(tree)?.license;
 };

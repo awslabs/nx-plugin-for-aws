@@ -53,13 +53,14 @@ describe('license config', () => {
   });
 
   describe('defaultLicenseConfig', () => {
-    it.each(
-      LICENSES,
-    )('should generate default license config for %s', (spdx) => {
-      expect(
-        defaultLicenseConfig(spdx, 'Test Inc. or its affiliates'),
-      ).toMatchSnapshot();
-    });
+    it.each(LICENSES)(
+      'should generate default license config for %s',
+      (spdx) => {
+        expect(
+          defaultLicenseConfig(spdx, 'Test Inc. or its affiliates'),
+        ).toMatchSnapshot();
+      },
+    );
   });
 
   describe('readLicenseConfig', () => {
@@ -206,7 +207,7 @@ describe('license config', () => {
 
         await ensureLicenseExceptions(tree, [exception('pkg-a')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect((config!.license as any).dependencies.exceptions).toEqual([
           { package: 'pkg-a', reason: 'because', spdx: 'MIT' },
         ]);
@@ -225,7 +226,7 @@ describe('license config', () => {
 
         await ensureLicenseExceptions(tree, [exception('pkg-b')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(2);
         expect(exceptions.map((e: any) => e.package)).toEqual([
@@ -247,7 +248,7 @@ describe('license config', () => {
           exception('pkg-c'),
         ]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect(
           (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
@@ -270,7 +271,7 @@ describe('license config', () => {
           exception('pkg-a', 'a different reason'),
         ]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(1);
         // Original reason preserved — not overwritten
@@ -293,7 +294,7 @@ describe('license config', () => {
           exception('pkg-b'),
         ]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect(
           (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
@@ -332,7 +333,7 @@ describe('license config', () => {
           exception('pkg-a', "it's a 'quoted' reason"),
         ]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect((config!.license as any).dependencies.exceptions[0].reason).toBe(
           "it's a 'quoted' reason",
         );
@@ -424,7 +425,7 @@ describe('license config', () => {
         await ensurePythonLicenseCollector(tree);
         await ensureLicenseExceptions(tree, [exception('pkg-a')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const dc = (config!.license as any).dependencies;
         expect(dc.exceptions.map((e: any) => e.package)).toEqual(['pkg-a']);
         expect(read()).toContain('pythonCollector()');
@@ -448,7 +449,7 @@ describe('license config', () => {
         // Re-run the block ensure to confirm it doesn't clobber exceptions
         await ensureDependencyCheckBlock(tree);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect(
           (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
@@ -478,7 +479,7 @@ describe('license config', () => {
 
         await ensureLicenseExceptions(tree, [exception('c')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(3);
         expect(noHole(exceptions)).toBe(true);
@@ -505,7 +506,7 @@ describe('license config', () => {
 
         await ensureLicenseExceptions(tree, [exception('bar')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(2);
         expect(noHole(exceptions)).toBe(true);
@@ -528,7 +529,7 @@ describe('license config', () => {
 
         await ensureLicenseExceptions(tree, [exception('bar')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions.map((e: any) => e.package)).toEqual(['foo', 'bar']);
         expect(noHole(exceptions)).toBe(true);
@@ -550,7 +551,7 @@ describe('license config', () => {
 
         await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(noHole(exceptions)).toBe(true);
         expect(exceptions[0].package).toBe('foo');
@@ -578,7 +579,7 @@ describe('license config', () => {
         // Second, separate call (after a format pass) appends one more
         await ensureLicenseExceptions(tree, [exception('p5')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(5);
         expect(noHole(exceptions)).toBe(true);
@@ -602,7 +603,7 @@ describe('license config', () => {
         await ensureLicenseExceptions(tree, [exception('c')]);
         await ensureLicenseExceptions(tree, [exception('d')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(noHole(exceptions)).toBe(true);
         expect(exceptions.map((e: any) => e.package)).toEqual([
@@ -633,7 +634,7 @@ export default {
 
         await ensurePythonLicenseCollector(tree);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const collectors = (config!.license as any).dependencies.collectors;
         expect(noHole(collectors)).toBe(true);
         expect(collectors).toHaveLength(3);
@@ -715,7 +716,7 @@ export default {
           header: { content: { lines: ['hi'] }, format: {} },
         });
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(1);
         expect(exceptions[0].package).toBe('tick');
@@ -743,7 +744,7 @@ export default {
 
         await ensureLicenseExceptions(tree, [exception('real')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'real']);
         // The decoy object is untouched, and no placeholder leaked into source.
@@ -766,7 +767,7 @@ export default {
           },
         ]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect((config!.license as any).dependencies.exceptions[0].reason).toBe(
           'line1\nline2 \\ back `tick` ${x}',
         );
@@ -794,7 +795,7 @@ export default {
         expect(source).toContain('pythonCollector()');
         // The single existing collector is a call WITH an argument; appending
         // must still insert a comma (no `)pythonCollector` run-on).
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect((config!.license as any).dependencies.collectors).toHaveLength(
           2,
         );
@@ -818,7 +819,7 @@ export default {
 
         // No safe array literal to edit — config is left valid and unchanged
         // rather than corrupted.
-        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(readAwsNxPluginConfig(tree)).toBeDefined();
         expect(read()).not.toContain('pythonCollector()');
       });
 
@@ -833,7 +834,7 @@ export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, co
           await ensureLicenseExceptions(tree, [exception(`pkg-${i}`)]);
         }
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions).toHaveLength(12);
         expect(exceptions.every((e: any) => e != null)).toBe(true);
@@ -860,7 +861,7 @@ export default {
 
         await ensureLicenseExceptions(tree, [exception('b')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'b']);
         // The new element is live (not swallowed by the comment) and the
@@ -888,7 +889,7 @@ export default {
 
         await ensureLicenseExceptions(tree, [exception('b')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect(
           (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
@@ -915,7 +916,7 @@ export default {
 
         await ensureLicenseExceptions(tree, [exception('first')]);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect(
           (config!.license as any).dependencies.exceptions.map(
             (e: any) => e.package,
@@ -942,7 +943,7 @@ export default {
 
         await ensurePythonLicenseCollector(tree);
 
-        const config = await readAwsNxPluginConfig(tree);
+        const config = readAwsNxPluginConfig(tree);
         expect((config!.license as any).dependencies.collectors).toHaveLength(
           2,
         );
@@ -961,7 +962,7 @@ export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, co
         await expect(
           ensureLicenseExceptions(tree, [exception('x')]),
         ).resolves.toBeUndefined();
-        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(readAwsNxPluginConfig(tree)).toBeDefined();
       });
 
       it('should not crash when the collectors key is missing', async () => {
@@ -974,7 +975,7 @@ export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, ex
         await expect(
           ensurePythonLicenseCollector(tree),
         ).resolves.toBeUndefined();
-        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(readAwsNxPluginConfig(tree)).toBeDefined();
       });
 
       it('should not crash on an empty dependencies object', async () => {
@@ -986,7 +987,7 @@ export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, ex
         await ensureLicenseExceptions(tree, [exception('x')]);
         await ensurePythonLicenseCollector(tree);
 
-        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(readAwsNxPluginConfig(tree)).toBeDefined();
       });
 
       it('should not crash when there is no license object at all', async () => {
@@ -999,7 +1000,7 @@ export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, ex
         await ensurePythonLicenseCollector(tree);
         await ensureDependencyCheckBlock(tree);
 
-        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(readAwsNxPluginConfig(tree)).toBeDefined();
         expect(read()).not.toContain('dependencies');
       });
 
@@ -1013,7 +1014,7 @@ export default { license: { dependencies: { allow: DEFAULT_LICENSE_ALLOWLIST, co
         await expect(
           ensureLicenseExceptions(tree, [exception('x')]),
         ).resolves.toBeUndefined();
-        await expect(readAwsNxPluginConfig(tree)).resolves.toBeDefined();
+        expect(readAwsNxPluginConfig(tree)).toBeDefined();
       });
     });
   });

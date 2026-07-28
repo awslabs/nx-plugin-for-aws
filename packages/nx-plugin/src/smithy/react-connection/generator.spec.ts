@@ -53,6 +53,10 @@ export function Main() {
           },
         }),
       );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({ name: '@proj/frontend', type: 'module' }),
+      );
 
       // Setup a Smithy model project
       tree.write(
@@ -326,16 +330,18 @@ export function Main() {
       // Verify sigv4 hook was added for IAM auth
       expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-      // Verify IAM-specific dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
-      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+      // Verify IAM-specific dependencies were added to the frontend manifest
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['oidc-client-ts']).toBe('catalog:');
+      expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
       expect(
         packageJson.dependencies[
           '@aws-sdk/credential-provider-cognito-identity'
         ],
-      ).toBeDefined();
-      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+      ).toBe('catalog:');
+      expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
 
       // Create snapshot of generated provider with IAM auth
       expect(
@@ -361,9 +367,11 @@ export function Main() {
       // Verify sigv4 hook was NOT added for Cognito auth
       expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
 
-      // Verify Cognito-specific dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+      // Verify Cognito-specific dependencies were added to the frontend manifest
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['react-oidc-context']).toBe('catalog:');
 
       // Create snapshot of generated provider with Cognito auth
       expect(
@@ -467,6 +475,10 @@ export function Main() {
             bundle: {},
           },
         }),
+      );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({ name: '@proj/frontend', type: 'module' }),
       );
 
       // Setup a Smithy backend project
@@ -828,6 +840,15 @@ export function Main() {
           },
         }),
       );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({
+          name: '@my-scope/frontend',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
+        }),
+      );
     });
 
     it('should handle qualified project names', async () => {
@@ -915,6 +936,15 @@ export function Main() {
           name: 'frontend',
           root: 'apps/frontend',
           sourceRoot: 'apps/frontend/src',
+        }),
+      );
+      tree.write(
+        'apps/frontend/package.json',
+        JSON.stringify({
+          name: '@proj/frontend',
+          version: '0.0.0',
+          private: true,
+          type: 'module',
         }),
       );
 
@@ -1104,14 +1134,16 @@ export function Main() {
       // Verify IAM-specific files were generated
       expect(tree.exists('frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
 
-      // Verify IAM-specific dependencies were added
-      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+      // Verify IAM-specific dependencies were added to the frontend manifest
+      const packageJson = JSON.parse(
+        tree.read('frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['aws4fetch']).toBe('catalog:');
       expect(
         packageJson.dependencies[
           '@aws-sdk/credential-provider-cognito-identity'
         ],
-      ).toBeDefined();
+      ).toBe('catalog:');
 
       // Verify that the runtime config includes the correct API
       const runtimeConfigContent = tree.read(

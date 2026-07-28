@@ -2,15 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  addDependenciesToPackageJson,
-  readNxJson,
-  type Tree,
-  updateNxJson,
-} from '@nx/devkit';
+import { readNxJson, type Tree, updateNxJson } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { applyGritQL } from '../../utils/ast';
+import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { withVersions } from '../../utils/versions';
 import type { ConfigureProjectOptions } from './types';
 

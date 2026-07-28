@@ -170,48 +170,44 @@ const syncAndBuild = async (cwd: string) => {
 describe.skipIf(shardStandalone.length === 0)(
   'smoke test - standalone projects',
   () => {
-    it.each(
-      shardStandalone,
-    )('should generate and build $generator in isolation', async ({
-      generator,
-      hasName,
-    }) => {
-      const cwd = await freshWorkspace(generator);
-      await runCLI(
-        `generate @aws/nx-plugin:${generator} ${hasName ? '--name=test' : ''} --no-interactive`,
-        { cwd, env: { NX_DAEMON: 'false' } },
-      );
-      await syncAndBuild(cwd);
-    });
+    it.each(shardStandalone)(
+      'should generate and build $generator in isolation',
+      async ({ generator, hasName }) => {
+        const cwd = await freshWorkspace(generator);
+        await runCLI(
+          `generate @aws/nx-plugin:${generator} ${hasName ? '--name=test' : ''} --no-interactive`,
+          { cwd, env: { NX_DAEMON: 'false' } },
+        );
+        await syncAndBuild(cwd);
+      },
+    );
   },
 );
 
 describe.skipIf(shardComponents.length === 0)(
   'smoke test - standalone components',
   () => {
-    it.each(
-      shardComponents,
-    )('should generate and build $generator on its own project', async ({
-      generator,
-      hasName,
-    }) => {
-      const cwd = await freshWorkspace(generator);
-      const opts = { cwd, env: { NX_DAEMON: 'false' } };
+    it.each(shardComponents)(
+      'should generate and build $generator on its own project',
+      async ({ generator, hasName }) => {
+        const cwd = await freshWorkspace(generator);
+        const opts = { cwd, env: { NX_DAEMON: 'false' } };
 
-      const baseGenerator =
-        COMPONENT_BASE_OVERRIDES[generator] ??
-        (generator.startsWith('py') ? 'py#project' : 'ts#project');
+        const baseGenerator =
+          COMPONENT_BASE_OVERRIDES[generator] ??
+          (generator.startsWith('py') ? 'py#project' : 'ts#project');
 
-      await runCLI(
-        `generate @aws/nx-plugin:${baseGenerator} --name=base --no-interactive`,
-        opts,
-      );
-      await runCLI(
-        `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
-        opts,
-      );
-      await syncAndBuild(cwd);
-    });
+        await runCLI(
+          `generate @aws/nx-plugin:${baseGenerator} --name=base --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
+          opts,
+        );
+        await syncAndBuild(cwd);
+      },
+    );
   },
 );
 
@@ -416,29 +412,27 @@ const shardConnectionCases = forThisShard(keepForRunner(connectionCases));
 describe.skipIf(shardConnectionCases.length === 0)(
   'smoke test - standalone connections',
   () => {
-    it.each(
-      shardConnectionCases,
-    )('should generate and build the $key connection', async ({
-      key,
-      factory,
-    }) => {
-      const cwd = await freshWorkspace(`connection-${key}`);
-      const opts = { cwd, env: { NX_DAEMON: 'false' } };
+    it.each(shardConnectionCases)(
+      'should generate and build the $key connection',
+      async ({ key, factory }) => {
+        const cwd = await freshWorkspace(`connection-${key}`);
+        const opts = { cwd, env: { NX_DAEMON: 'false' } };
 
-      const { source, target } = await factory(opts);
+        const { source, target } = await factory(opts);
 
-      const sourceComponent = source.component
-        ? ` --sourceComponent=${source.component}`
-        : '';
-      const targetComponent = target.component
-        ? ` --targetComponent=${target.component}`
-        : '';
-      await runCLI(
-        `generate @aws/nx-plugin:connection --sourceProject=${source.project} --targetProject=${target.project}${sourceComponent}${targetComponent} --no-interactive`,
-        opts,
-      );
+        const sourceComponent = source.component
+          ? ` --sourceComponent=${source.component}`
+          : '';
+        const targetComponent = target.component
+          ? ` --targetComponent=${target.component}`
+          : '';
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=${source.project} --targetProject=${target.project}${sourceComponent}${targetComponent} --no-interactive`,
+          opts,
+        );
 
-      await syncAndBuild(cwd);
-    });
+        await syncAndBuild(cwd);
+      },
+    );
   },
 );

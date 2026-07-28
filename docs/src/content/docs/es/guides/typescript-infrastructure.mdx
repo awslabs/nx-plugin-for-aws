@@ -39,12 +39,13 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
     - stacks Definiciones de stacks CDK
       - application-stack.ts Stack principal de la aplicación
   - cdk.json Configuración de CDK
+  - package.json Manifiesto del proyecto que define el nombre del paquete y las dependencias del proyecto
   - project.json Configuración del proyecto y objetivos de compilación
   - checkov.yml Archivo de configuración de Checkov
 
 </FileTree>
 
-Si estableces la opción `enableStageConfig`, el generador también crea dos paquetes compartidos para gestión centralizada de credenciales (si aún no existen):
+Si estableces la opción `stageConfig`, el generador también crea dos paquetes compartidos para gestión centralizada de credenciales (si aún no existen):
 
 <FileTree>
 
@@ -100,13 +101,14 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 La propiedad `env` indica a CDK en qué cuenta y región de AWS desplegar. `CDK_DEFAULT_ACCOUNT` y `CDK_DEFAULT_REGION` son resueltos automáticamente por el CLI de CDK desde tus credenciales AWS activas. Consulta la [documentación de entornos CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) para más detalles.
 
-Si generaste con `enableStageConfig`, el `main.ts` lee la cuenta y región desde un archivo de configuración centralizado, recurriendo a variables de entorno cuando no hay configuración establecida:
+Si generaste con `stageConfig`, el `main.ts` lee la cuenta y región desde un archivo de configuración centralizado, recurriendo a variables de entorno cuando no hay configuración establecida:
 
-```ts title="src/main.ts (con enableStageConfig)"
-import stagesConfig from ':my-scope/common-infra-config';
+```ts title="src/main.ts (con stageConfig)"
+import { resolveStage } from ':my-scope/common-infra-config';
 
-const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
-const sandboxConfig = projectStages['my-app-sandbox'];
+// Busca la etapa bajo este proyecto (packages/infra), recurriendo a
+// etapas compartidas. Devuelve undefined cuando no existe configuración para la etapa.
+const sandboxConfig = resolveStage('packages/infra', 'my-app-sandbox');
 
 new ApplicationStage(app, 'my-app-sandbox', {
   env: {
@@ -159,12 +161,12 @@ export class ApplicationStage extends Stage {
 ### Configuración de credenciales de etapas
 
 :::note[Configuración por etapas]
-Esta sección aplica cuando generas con `enableStageConfig`. Sin ella, el generador produce una configuración más simple donde gestionas las credenciales AWS tú mismo (por ejemplo, exportando `AWS_PROFILE` antes de desplegar).
+Esta sección aplica cuando generas con `stageConfig`. Sin ella, el generador produce una configuración más simple donde gestionas las credenciales AWS tú mismo (por ejemplo, exportando `AWS_PROFILE` antes de desplegar).
 :::
 
 Cuando tienes múltiples etapas dirigidas a diferentes cuentas AWS, gestionar credenciales manualmente puede ser propenso a errores, especialmente a medida que crece el número de etapas.
 
-La opción `enableStageConfig` resuelve esto generando dos paquetes compartidos:
+La opción `stageConfig` resuelve esto generando dos paquetes compartidos:
 
 - **`packages/common/infra-config`** — Un único archivo de configuración donde mapeas cada etapa a sus credenciales AWS, cuenta y región. Es importable desde cualquier paquete en tu workspace, por lo que tu `main.ts` de CDK puede leer cuenta y región desde la misma fuente de verdad.
 - **`packages/common/scripts`** — Comandos `infra-deploy` e `infra-destroy` que envuelven CDK con resolución automática de credenciales. Cuando ejecutas `deploy`, el script lee la configuración, establece las variables de entorno AWS correctas para el proceso hijo de CDK, y ejecuta `cdk deploy`. Tu entorno de shell nunca se modifica.
@@ -271,7 +273,7 @@ Si, por ejemplo, creaste una API tRPC llamada `my-api`, simplemente importa e in
 ```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyApi } from ':my-scope/common-constructs';
+import { MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -292,7 +294,7 @@ Si has usado el generador <Link path="guides/react-website">sitio web React</Lin
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -376,7 +378,7 @@ Después de una compilación, puedes desplegar tu infraestructura en AWS usando 
 Usa el objetivo `deploy-ci` si despliegas en un pipeline CI/CD. Ver más abajo para más detalles.
 :::
 
-Primero, asegúrate de tener credenciales AWS configuradas. Si generaste con `enableStageConfig` y has configurado credenciales de etapas en `packages/common/infra-config/src/stages.config.ts`, el comando de despliegue resolverá y aplicará automáticamente las credenciales correctas para la etapa objetivo. De lo contrario, asegúrate de que tus credenciales AWS estén establecidas en tu entorno (por ejemplo, mediante `AWS_PROFILE` o variables de entorno). Consulta la [documentación de credenciales AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) para las opciones disponibles.
+Primero, asegúrate de tener credenciales AWS configuradas. Si generaste con `stageConfig` y has configurado credenciales de etapas en `packages/common/infra-config/src/stages.config.ts`, el comando de despliegue resolverá y aplicará automáticamente las credenciales correctas para la etapa objetivo. De lo contrario, asegúrate de que tus credenciales AWS estén establecidas en tu entorno (por ejemplo, mediante `AWS_PROFILE` o variables de entorno). Consulta la [documentación de credenciales AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) para las opciones disponibles.
 
 Luego ejecuta el objetivo de despliegue:
 
@@ -414,4 +416,4 @@ Usa el objetivo `destroy` para eliminar tus recursos:
 
 ## Más información
 
-Para más información sobre CDK, consulta la [Guía para desarrolladores de CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) y [Referencia de API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
+Para más información sobre CDK, consulta la [Guía para desarrolladores de CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) y [Referencia de API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html). y [Referencia de API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).

@@ -12,6 +12,9 @@ export type { TsAgentGeneratorSchema } from '../ts/agent/schema';
 // TypeScript API
 export { tsApiGenerator } from '../ts/api/generator';
 export type { TsApiGeneratorSchema } from '../ts/api/schema';
+// TypeScript DCR Proxy Generator
+export { tsDcrProxyGenerator } from '../ts/dcr-proxy/generator';
+export type { TsDcrProxyGeneratorSchema } from '../ts/dcr-proxy/schema';
 // Documentation Site Generator
 export { tsDocsGenerator } from '../ts/docs/generator';
 export type { TsDocsGeneratorSchema } from '../ts/docs/schema';

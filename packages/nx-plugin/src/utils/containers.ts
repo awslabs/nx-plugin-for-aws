@@ -56,7 +56,7 @@ export const resolveContainers = async (
   option: ContainersOption,
 ): Promise<Containers> => {
   if (option === 'inherit') {
-    const pluginConfig = await readAwsNxPluginConfig(tree);
+    const pluginConfig = readAwsNxPluginConfig(tree);
     const engine = pluginConfig?.containers?.engine ?? 'docker';
     if (!CONTAINER_ENGINES.includes(engine)) {
       throw new Error(

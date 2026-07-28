@@ -43,7 +43,7 @@ export const ensureAwsNxPluginConfig = async (
     );
   }
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  return await readAwsNxPluginConfig(tree)!;
+  return readAwsNxPluginConfig(tree)!;
 };
 
 /**
@@ -51,11 +51,12 @@ export const ensureAwsNxPluginConfig = async (
  *
  * Uses jiti to evaluate the TypeScript source in-memory with proper module
  * resolution — imports from @aws/nx-plugin/* resolve via alias, and any
- * third-party imports resolve from the workspace's node_modules.
+ * third-party imports resolve from the workspace's node_modules. Synchronous,
+ * since `jiti.evalModule` runs in-memory.
  */
-export const readAwsNxPluginConfig = async (
+export const readAwsNxPluginConfig = (
   tree: Tree,
-): Promise<AwsNxPluginConfig | undefined> => {
+): AwsNxPluginConfig | undefined => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) {
     return undefined;
   }

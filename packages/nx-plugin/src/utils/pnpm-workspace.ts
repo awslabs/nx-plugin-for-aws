@@ -2,15 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { detectPackageManager, type Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
+import { detectWorkspacePackageManager } from './dependencies';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 
 interface PnpmWorkspaceYaml {
   allowBuilds?: Record<string, boolean>;
   onlyBuiltDependencies?: string[];
-  ignoreWorkspaceRootCheck?: boolean;
   [key: string]: unknown;
 }
 
@@ -34,7 +34,7 @@ export const registerPnpmBuiltDependencies = (
   tree: Tree,
   entries: Record<string, boolean>,
 ): void => {
-  if (detectPackageManager(tree.root) !== 'pnpm') {
+  if (detectWorkspacePackageManager(tree) !== 'pnpm') {
     return;
   }
   if (!tree.exists(WORKSPACE_FILE)) {
@@ -67,34 +67,4 @@ export const registerPnpmBuiltDependencies = (
   parsed.onlyBuiltDependencies = [...onlyBuiltDependencies];
 
   tree.write(WORKSPACE_FILE, yaml.dump(parsed, { quotingType: "'" }));
-};
-
-/**
- * Set `ignoreWorkspaceRootCheck: true` in `pnpm-workspace.yaml` so `pnpm add`
- * from the workspace root does not error with `ERR_PNPM_ADDING_TO_ROOT`.
- *
- * pnpm 11 no longer honours `ignore-workspace-root-check=true` in `.npmrc`;
- * it must live in `pnpm-workspace.yaml` as the camelCased key. pnpm 10 also
- * accepts the yaml form, so writing it here works for both majors.
- *
- * No-op for non-pnpm workspaces or when `pnpm-workspace.yaml` is absent.
- */
-export const ensurePnpmIgnoresWorkspaceRootCheck = (tree: Tree): boolean => {
-  if (detectPackageManager(tree.root) !== 'pnpm') {
-    return false;
-  }
-  if (!tree.exists(WORKSPACE_FILE)) {
-    return false;
-  }
-
-  const original = tree.read(WORKSPACE_FILE, 'utf-8') ?? '';
-  const parsed = (yaml.load(original) as PnpmWorkspaceYaml | null) ?? {};
-
-  if (parsed.ignoreWorkspaceRootCheck === true) {
-    return false;
-  }
-
-  parsed.ignoreWorkspaceRootCheck = true;
-  tree.write(WORKSPACE_FILE, yaml.dump(parsed, { quotingType: "'" }));
-  return true;
 };
