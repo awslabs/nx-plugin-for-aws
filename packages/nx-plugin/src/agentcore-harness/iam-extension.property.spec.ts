@@ -68,7 +68,7 @@ const FIXED_MODEL_RESOURCES: readonly string[] = [
 ];
 
 /** The baseline concat arm renders exactly these reviewed statements. */
-const BASELINE_STATEMENT_COUNT = 11;
+const BASELINE_STATEMENT_COUNT = 12;
 
 // ---------------------------------------------------------------------------
 // Exact rendered extension texts. These anchor both the compilation (the
@@ -177,10 +177,17 @@ const hclObjectToJs = (hcl: string): string => {
   if (hcl.includes('${')) {
     throw new Error('unsubstituted interpolation in extracted HCL');
   }
-  if (/^\s*#/m.test(hcl)) {
-    throw new Error('unexpected HCL comment in extracted policy expression');
-  }
-  const keyed = hcl.replace(/^(\s*)([A-Za-z_]\w*|"[^"]+")\s*=\s*/gm, '$1$2: ');
+  // Strip standalone `#` comment lines (explanatory documentation on
+  // individual statements) before conversion - they carry no policy
+  // semantics and are not valid JavaScript.
+  const uncommented = hcl
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const keyed = uncommented.replace(
+    /^(\s*)([A-Za-z_]\w*|"[^"]+")\s*=\s*/gm,
+    '$1$2: ',
+  );
   return keyed
     .split('\n')
     .map((line) => {

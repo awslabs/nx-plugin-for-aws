@@ -10,6 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import yaml from 'js-yaml';
 import { formatFilesInSubtree } from '../utils/format';
 import { installDependencies } from '../utils/install';
 import {
@@ -354,6 +355,22 @@ describe('agentcore-harness generator', () => {
       });
 
       const packageJson = readJson(tree, 'package.json');
+      // pnpm catalogs are enabled by default in the test tree: the version
+      // is recorded in the workspace catalog and package.json is left with
+      // a `catalog:` reference, so resolve it back to the recorded range.
+      const catalog: Record<string, string> = tree.exists('pnpm-workspace.yaml')
+        ? ((
+            yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as {
+              catalog?: Record<string, string>;
+            }
+          ).catalog ?? {})
+        : {};
+      const resolveVersion = (
+        section: Record<string, string>,
+        pkg: string,
+      ): string | undefined =>
+        section[pkg] === 'catalog:' ? catalog[pkg] : section[pkg];
+
       const runtimeDependencies = {
         '@aws-sdk/client-bedrock-agentcore':
           TS_VERSIONS['@aws-sdk/client-bedrock-agentcore'],
@@ -367,8 +384,12 @@ describe('agentcore-harness generator', () => {
         tsx: TS_VERSIONS.tsx,
         typescript: TS_VERSIONS.typescript,
       };
-      expect(packageJson.dependencies).toMatchObject(runtimeDependencies);
-      expect(packageJson.devDependencies).toMatchObject(devDependencies);
+      for (const [pkg, expected] of Object.entries(runtimeDependencies)) {
+        expect(resolveVersion(packageJson.dependencies, pkg)).toBe(expected);
+      }
+      for (const [pkg, expected] of Object.entries(devDependencies)) {
+        expect(resolveVersion(packageJson.devDependencies, pkg)).toBe(expected);
+      }
 
       // Runtime and development dependencies must not bleed into each other.
       for (const pkg of Object.keys(devDependencies)) {
@@ -378,10 +399,15 @@ describe('agentcore-harness generator', () => {
         expect(packageJson.devDependencies[pkg]).toBeUndefined();
       }
       // Every added version is an exact pin with no range operator.
-      for (const version of [
-        ...Object.values(runtimeDependencies),
-        ...Object.values(devDependencies),
+      for (const [pkg, section] of [
+        ...Object.keys(runtimeDependencies).map(
+          (pkg) => [pkg, packageJson.dependencies] as const,
+        ),
+        ...Object.keys(devDependencies).map(
+          (pkg) => [pkg, packageJson.devDependencies] as const,
+        ),
       ]) {
+        const version = resolveVersion(section, pkg);
         expect(version).toMatch(/^\d+\.\d+\.\d+(?:-[\w.]+)?$/);
       }
     });
@@ -618,39 +644,39 @@ describe('agentcore-harness generator', () => {
       expect(snapshotTreeChanges(tree)).toEqual(before);
     });
 
-    it.each([
-      'invoke',
-      'build',
-    ] as const)('rejects an incompatible reserved %s target on rerun, naming the target', async (targetName) => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      const config = readProjectConfiguration(tree, PROJECT_NAME);
-      config.targets![targetName] = {
-        ...config.targets![targetName],
-        options: { command: 'echo user-conflict', cwd: '{projectRoot}' },
-      };
-      updateProjectConfiguration(tree, PROJECT_NAME, config);
-      const projectJson = tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8');
-
-      await expect(
-        agentcoreHarnessGenerator(tree, {
+    it.each(['invoke', 'build'] as const)(
+      'rejects an incompatible reserved %s target on rerun, naming the target',
+      async (targetName) => {
+        await agentcoreHarnessGenerator(tree, {
           name: 'my-harness',
           infra: 'none',
-        }),
-      ).rejects.toThrow(
-        new RegExp(
-          `^Integration conflict: .*reserved '${targetName}' target that differs from the agentcore-harness target contract`,
-        ),
-      );
+        });
 
-      // The conflicting project is untouched by the failed run.
-      expect(tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8')).toBe(
-        projectJson,
-      );
-    });
+        const config = readProjectConfiguration(tree, PROJECT_NAME);
+        config.targets![targetName] = {
+          ...config.targets![targetName],
+          options: { command: 'echo user-conflict', cwd: '{projectRoot}' },
+        };
+        updateProjectConfiguration(tree, PROJECT_NAME, config);
+        const projectJson = tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8');
+
+        await expect(
+          agentcoreHarnessGenerator(tree, {
+            name: 'my-harness',
+            infra: 'none',
+          }),
+        ).rejects.toThrow(
+          new RegExp(
+            `^Integration conflict: .*reserved '${targetName}' target that differs from the agentcore-harness target contract`,
+          ),
+        );
+
+        // The conflicting project is untouched by the failed run.
+        expect(tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8')).toBe(
+          projectJson,
+        );
+      },
+    );
 
     it('rejects an explicit creation option that conflicts with persisted metadata, naming option and both values', async () => {
       await agentcoreHarnessGenerator(tree, {

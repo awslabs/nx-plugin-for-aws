@@ -40,7 +40,7 @@
  * configuration points - the CDK destructuring default (applies only when
  * the prop is `undefined`) and the Terraform `var != null ? var : default`
  * local (applies only when the variable is `null`) - and asserts each
- * normalized trust document and 11-statement baseline equals the reviewed
+ * normalized trust document and 12-statement baseline equals the reviewed
  * design table and the other provider's output. Evaluating pre-rendered
  * logic keeps each of the 100+ runs to sub-millisecond cost.
  */
@@ -61,6 +61,7 @@ const REGION = '<region>';
 const ACCOUNT = '<account-id>';
 const DEPLOYED_NAME = '<deployed-harness-name>';
 const HARNESS_ATTR_ARN = '<harness-attr-arn-token>';
+const MEMORY_ATTR_ARN = '<harness-attr-memory-arn-token>';
 
 /** CDK `stack` sentinel mirroring the `Stack.of(this)` references. */
 const STACK = {
@@ -101,7 +102,7 @@ const EXPECTED_TRUST = {
 };
 
 /**
- * Requirements 7.2-7.4: the 11 reviewed Baseline Permission statements from
+ * Requirements 7.2-7.4: the 12 reviewed Baseline Permission statements from
  * the design table, in template order, parameterized only by the effective
  * model-resource allowlist.
  */
@@ -181,6 +182,20 @@ const expectedBaseline = (
     ],
   },
   {
+    Sid: 'AgentCoreManagedMemory',
+    Effect: 'Allow',
+    Action: [
+      'bedrock-agentcore:CreateEvent',
+      'bedrock-agentcore:DeleteEvent',
+      'bedrock-agentcore:GetEvent',
+      'bedrock-agentcore:ListEvents',
+      'bedrock-agentcore:RetrieveMemoryRecords',
+    ],
+    Resource: [
+      `arn:${PARTITION}:bedrock-agentcore:${REGION}:${ACCOUNT}:memory/harness_*`,
+    ],
+  },
+  {
     Sid: 'AgentCoreBrowserDefault',
     Effect: 'Allow',
     Action: [
@@ -221,10 +236,18 @@ const PROHIBITED_FRAGMENTS = [
   'browser-custom',
   'code-interpreter-custom',
   ':gateway/',
-  ':memory/',
   'secretsmanager:',
   'ec2:',
 ] as const;
+
+/**
+ * The default managed-memory grant (AgentCoreManagedMemory) is scoped to
+ * the harness_*-prefixed memory ARN, so a blanket ':memory/' fragment check
+ * would also flag that legitimate default. Any OTHER, unscoped memory
+ * resource pattern would indicate a BYO/customer-owned memory grant leaking
+ * into the defaults.
+ */
+const PROHIBITED_MEMORY_PATTERN = /:memory\/(?!harness_\*)/;
 
 // ---------------------------------------------------------------------------
 // Extraction helpers
@@ -258,8 +281,9 @@ const mustIndexOf = (
   text: string,
   needle: string,
   description: string,
+  fromIndex = 0,
 ): number => {
-  const index = text.indexOf(needle);
+  const index = text.indexOf(needle, fromIndex);
   if (index < 0) {
     throw new Error(`${description} not found in rendered output`);
   }
@@ -407,6 +431,32 @@ const compileCdk = (construct: string): CompiledCdk => {
     harnessName: string,
   ) => FakePolicyStatement[];
 
+  // The managed-memory statement, added in a second guarded block after
+  // the Harness resource exists (it references the Harness's
+  // service-generated managed-memory attribute, so it cannot join the
+  // pre-Harness baseline array above).
+  const memoryGuardIndex = mustIndexOf(
+    construct,
+    '!executionRole && harnessProps.memory === undefined',
+    'managed-memory guard',
+  );
+  const memoryStatementStart = mustIndexOf(
+    construct,
+    'new iam.PolicyStatement({',
+    'managed-memory statement',
+    memoryGuardIndex,
+  );
+  const memoryStatementArgs = balancedSlice(
+    construct,
+    construct.indexOf('(', memoryStatementStart),
+    '(',
+    ')',
+  );
+  const memoryStatementFn = new Function(
+    'iam',
+    `return new iam.PolicyStatement${memoryStatementArgs};`,
+  ) as (this: unknown, iam: unknown) => FakePolicyStatement;
+
   // The grantInvokeAccess grant call.
   const grantStart = mustIndexOf(
     construct,
@@ -438,13 +488,20 @@ const compileCdk = (construct: string): CompiledCdk => {
         { Role: FakeRole, ServicePrincipal: FakeServicePrincipal },
         STACK,
       ),
-    statements: (modelResourceArns) =>
-      statementsFn(
+    statements: (modelResourceArns) => [
+      ...statementsFn(
         { PolicyStatement: FakePolicyStatement },
         STACK,
         modelResourceArns,
         DEPLOYED_NAME,
       ),
+      memoryStatementFn.call(
+        {
+          harness: { attrMemoryManagedMemoryConfigurationArn: MEMORY_ATTR_ARN },
+        },
+        { PolicyStatement: FakePolicyStatement },
+      ),
+    ],
     grant: (grantee) =>
       grantFn.call(
         { harness: { attrArn: HARNESS_ATTR_ARN } },
@@ -489,10 +546,17 @@ const hclObjectToJs = (hcl: string): string => {
   if (hcl.includes('${')) {
     throw new Error('unsubstituted interpolation in extracted HCL');
   }
-  if (/^\s*#/m.test(hcl)) {
-    throw new Error('unexpected HCL comment in extracted policy expression');
-  }
-  const keyed = hcl.replace(/^(\s*)([A-Za-z_]\w*|"[^"]+")\s*=\s*/gm, '$1$2: ');
+  // Strip standalone `#` comment lines (explanatory documentation on
+  // individual statements) before conversion - they carry no policy
+  // semantics and are not valid JavaScript.
+  const uncommented = hcl
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const keyed = uncommented.replace(
+    /^(\s*)([A-Za-z_]\w*|"[^"]+")\s*=\s*/gm,
+    '$1$2: ',
+  );
   return keyed
     .split('\n')
     .map((line) => {
@@ -808,7 +872,7 @@ describe('agentcore-harness default IAM boundary (Property 8)', () => {
 
   // Feature: agentcore-harness-generator, Property 8: Default IAM output preserves the security boundary
   // **Validates: Requirements 5.8, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 13.7**
-  it('renders the reviewed trust and 11-statement baseline for all model-resource allowlists on both providers', () => {
+  it('renders the reviewed trust and 12-statement baseline for all model-resource allowlists on both providers', () => {
     fc.assert(
       fc.property(arbModelResourceList, (modelResourceList) => {
         // --- The effective allowlist through both real configuration
@@ -862,7 +926,7 @@ describe('agentcore-harness default IAM boundary (Property 8)', () => {
         // --- Baseline statements (7.2-7.4, 13.7): each provider's
         // normalized output equals the reviewed design table (SIDs,
         // actions, resources, conditions, order) and the other provider's.
-        const cdkStatements = normalizeCdkStatements(
+        const rawCdkStatements = normalizeCdkStatements(
           cdk.statements([...cdkResolved]),
         );
         const tfPolicyDocument = tf.policyDocument([...tfResolved]);
@@ -870,9 +934,40 @@ describe('agentcore-harness default IAM boundary (Property 8)', () => {
         const tfStatements = normalizeTfStatements(tfPolicyDocument.Statement);
 
         const expected = expectedBaseline(expectedModelResources);
-        expect(cdkStatements).toEqual(expected);
-        expect(tfStatements).toEqual(expected);
-        expect(cdkStatements).toEqual(tfStatements);
+
+        // AgentCoreManagedMemory's Resource is only known once the Harness
+        // is synthesized (a CFN attribute token on the CDK side), unlike
+        // Terraform's static harness_*-prefixed ARN pattern. Assert the CDK
+        // side really uses that attribute token, then normalize it to the
+        // reviewed static pattern so the cross-provider structural
+        // comparison below still validates every other field exactly.
+        const cdkMemoryStatement = rawCdkStatements.find(
+          (statement) => statement.Sid === 'AgentCoreManagedMemory',
+        );
+        expect(cdkMemoryStatement?.Resource).toEqual([MEMORY_ATTR_ARN]);
+        const cdkStatements = rawCdkStatements.map((statement) =>
+          statement.Sid === 'AgentCoreManagedMemory'
+            ? {
+                ...statement,
+                Resource: expected.find(
+                  (e) => e.Sid === 'AgentCoreManagedMemory',
+                )!.Resource,
+              }
+            : statement,
+        );
+        // AgentCoreManagedMemory is necessarily positioned differently
+        // between providers: CDK adds it in a second guarded block after
+        // the Harness resource exists (its Resource is a Harness attribute
+        // token unavailable pre-synthesis), while Terraform inlines it in
+        // the main statement list. Exact per-provider order (including that
+        // divergence) is covered by cdk-template.spec.ts and
+        // terraform-template.spec.ts; here, compare content irrespective of
+        // that one structurally-forced position difference.
+        const bySid = (statements: NormalizedStatement[]) =>
+          [...statements].sort((a, b) => a.Sid.localeCompare(b.Sid));
+        expect(bySid(cdkStatements)).toEqual(bySid(expected));
+        expect(bySid(tfStatements)).toEqual(bySid(expected));
+        expect(bySid(cdkStatements)).toEqual(bySid(tfStatements));
 
         // --- Ownership boundary (7.4, 7.6): default Browser and Code
         // Interpreter access targets AWS-owned resources (owner segment
@@ -913,6 +1008,7 @@ describe('agentcore-harness default IAM boundary (Property 8)', () => {
           for (const fragment of PROHIBITED_FRAGMENTS) {
             expect(surface).not.toContain(fragment);
           }
+          expect(surface).not.toMatch(PROHIBITED_MEMORY_PATTERN);
         }
       }),
       // At least 100 runs required; evaluation of pre-rendered logic keeps

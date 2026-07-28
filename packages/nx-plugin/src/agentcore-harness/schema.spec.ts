@@ -310,14 +310,14 @@ describe('agentcore-harness schema contract', () => {
       expect(guide).toMatch(/^generator:\s*agentcore-harness\s*$/m);
     });
 
-    it('uses metric g60, unique to this generator', () => {
-      expect(registration.metric).toBe('g60');
+    it('uses metric g68, unique to this generator', () => {
+      expect(registration.metric).toBe('g68');
       // generators.json contains pre-existing duplicate metrics among other
-      // generators (eg. g43), so assert that g60 specifically is used by
+      // generators (eg. g43), so assert that g68 specifically is used by
       // exactly one registration rather than asserting global uniqueness.
       const usages = Object.values(
         GeneratorsJson.generators as Record<string, { metric: string }>,
-      ).filter((generator) => generator.metric === 'g60');
+      ).filter((generator) => generator.metric === 'g68');
       expect(usages).toHaveLength(1);
     });
   });
@@ -326,7 +326,7 @@ describe('agentcore-harness schema contract', () => {
     const EXACT_SEMVER = /^\d+\.\d+\.\d+(?:-[\w.]+)?$/;
 
     it('pins the AgentCore data-plane client to the exact AWS SDK baseline', () => {
-      expect(TS_VERSIONS['@aws-sdk/client-bedrock-agentcore']).toBe('3.1085.0');
+      expect(TS_VERSIONS['@aws-sdk/client-bedrock-agentcore']).toBe('3.1090.0');
       // The harness client must share the exact version baseline used by the
       // other repository AWS SDK clients.
       expect(TS_VERSIONS['@aws-sdk/client-bedrock-agentcore']).toBe(
@@ -351,7 +351,7 @@ describe('agentcore-harness schema contract', () => {
       }
       // Version lookup resolves every required package without throwing.
       expect(withVersions(requiredPackages)).toMatchObject({
-        '@aws-sdk/client-bedrock-agentcore': '3.1085.0',
+        '@aws-sdk/client-bedrock-agentcore': '3.1090.0',
       });
     });
 

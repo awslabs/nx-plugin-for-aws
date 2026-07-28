@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   addProjectConfiguration,
   type GeneratorCallback,
   generateFiles,
@@ -14,6 +13,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addAgentCoreHarnessInfra } from '../utils/agent-core-constructs/agent-core-constructs';
+import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { type Iac, type IacOption, resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';

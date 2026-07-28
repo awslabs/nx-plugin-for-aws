@@ -47,6 +47,7 @@
 import { builtinModules } from 'node:module';
 import { joinPathFragments, readJson, type Tree } from '@nx/devkit';
 import fc from 'fast-check';
+import yaml from 'js-yaml';
 import ts from 'typescript';
 import type { IacOption } from '../utils/iac';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
@@ -420,12 +421,30 @@ describe('agentcore-harness generated dependency set (Property 3)', () => {
         const devDependencies: Record<string, string> =
           packageJson.devDependencies ?? {};
 
+        // When pnpm catalogs are enabled (the default in test trees, and in
+        // any workspace on a catalog-capable package manager), generators
+        // record the real version in the workspace catalog and leave a
+        // `catalog:` reference in package.json instead. Resolve that
+        // reference to the recorded range so the exact-pin assertions below
+        // check the actual version regardless of catalog mode.
+        const catalog: Record<string, string> = tree.exists(
+          'pnpm-workspace.yaml',
+        )
+          ? ((
+              yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as {
+                catalog?: Record<string, string>;
+              }
+            ).catalog ?? {})
+          : {};
+        const resolveCatalogRef = (version: string, packageName: string) =>
+          version === 'catalog:' ? catalog[packageName] : version;
+
         const assertExactCentralizedPin = (
           packageName: string,
           section: Record<string, string>,
           sectionName: string,
         ): void => {
-          const version = section[packageName];
+          const version = resolveCatalogRef(section[packageName], packageName);
           expect(
             version,
             `required package '${packageName}' is missing from ${sectionName}`,
@@ -469,9 +488,12 @@ describe('agentcore-harness generated dependency set (Property 3)', () => {
 
         // The AWS SDK baseline (13.2): the Harness SDK pin equals the
         // centralized exact version shared by repository AWS SDK clients.
-        expect(dependencies[HARNESS_SDK_PACKAGE]).toBe(
-          TS_VERSIONS[AWS_SDK_BASELINE_PACKAGE],
-        );
+        expect(
+          resolveCatalogRef(
+            dependencies[HARNESS_SDK_PACKAGE],
+            HARNESS_SDK_PACKAGE,
+          ),
+        ).toBe(TS_VERSIONS[AWS_SDK_BASELINE_PACKAGE]);
       }),
       // At least 100 runs required; 120 mirrors the routing property's
       // budget (each run is one full generator run) and gives roughly 40

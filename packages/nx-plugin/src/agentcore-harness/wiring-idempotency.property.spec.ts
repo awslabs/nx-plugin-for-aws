@@ -99,7 +99,7 @@ const tfModulePath = (kebab: string): string =>
   `${SHARED_TERRAFORM_ROOT}/src/app/harnesses/${kebab}/${kebab}.tf`;
 const TF_METRICS_PATH = `${SHARED_TERRAFORM_ROOT}/src/metrics/metrics.tf`;
 
-/** The unique Harness metric tag registered for this generator (g60). */
+/** The unique Harness metric tag registered for this generator (g68). */
 const HARNESS_METRIC = AGENTCORE_HARNESS_GENERATOR_INFO.metric;
 
 /** Runtime dependencies the generated Invocation Client imports. */

@@ -40,7 +40,7 @@ import {
 const TF_MODULE_PATH =
   'packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf';
 
-/** The 11 Baseline Permission SIDs from the design, in template order. */
+/** The 12 Baseline Permission SIDs from the design, in template order. */
 const BASELINE_SIDS = [
   'BedrockModelInvocation',
   'EcrPublicTokenAccess',
@@ -51,6 +51,7 @@ const BASELINE_SIDS = [
   'CloudWatchLogsStream',
   'CloudWatchMetricsPublish',
   'AgentCoreWorkloadIdentity',
+  'AgentCoreManagedMemory',
   'AgentCoreBrowserDefault',
   'AgentCoreCodeInterpreterDefault',
 ] as const;
@@ -159,7 +160,7 @@ describe('agentcore-harness Terraform template contract', () => {
     // Requirements 6.3, 6.4, 13.5: exact centralized provider pins.
     it('pins the aws and random providers to the exact centralized versions', () => {
       // The centralized registry itself carries the required exact pin.
-      expect(TERRAFORM_VERSIONS.aws).toBe('6.54.0');
+      expect(TERRAFORM_VERSIONS.aws).toBe('6.55.0');
 
       const providers = tfBlock(module, 'required_providers');
       expect(providers).toContain('source  = "hashicorp/aws"');
@@ -239,15 +240,16 @@ describe('agentcore-harness Terraform template contract', () => {
 
     // Requirements 3.2, 3.3, 6.6: nullable limits validated positive only
     // when non-null.
-    it.each([
-      'max_iterations',
-      'max_tokens',
-      'timeout_seconds',
-    ])('validates %s as positive when non-null', (limit) => {
-      const block = tfBlock(module, `variable "${limit}"`);
-      expect(block).toMatch(/type\s*=\s*number/);
-      expect(block).toContain(`var.${limit} == null ? true : var.${limit} > 0`);
-    });
+    it.each(['max_iterations', 'max_tokens', 'timeout_seconds'])(
+      'validates %s as positive when non-null',
+      (limit) => {
+        const block = tfBlock(module, `variable "${limit}"`);
+        expect(block).toMatch(/type\s*=\s*number/);
+        expect(block).toContain(
+          `var.${limit} == null ? true : var.${limit} > 0`,
+        );
+      },
+    );
 
     // Requirement 7.2: configurable model access with the two default
     // resource patterns when the caller does not narrow it.
@@ -374,12 +376,12 @@ describe('agentcore-harness Terraform template contract', () => {
       );
     });
 
-    // Requirements 5.6-parity, 7.2-7.4, 13.7: all 11 Baseline Permission
+    // Requirements 5.6-parity, 7.2-7.4, 13.7: all 12 Baseline Permission
     // statements with exact per-SID actions, resources, and conditions.
-    it('renders exactly the 11 baseline permission statements with exact contents', () => {
+    it('renders exactly the 12 baseline permission statements with exact contents', () => {
       const statements = parseBaselineStatements(module);
 
-      // Exactly the 11 design SIDs, in template order.
+      // Exactly the 12 design SIDs, in template order.
       expect(Object.keys(statements)).toEqual([...BASELINE_SIDS]);
 
       expect(statements.BedrockModelInvocation.actions).toEqual([
@@ -516,7 +518,11 @@ describe('agentcore-harness Terraform template contract', () => {
       expect(module).not.toContain('browser-custom');
       expect(module).not.toContain('code-interpreter-custom');
       expect(module).not.toMatch(/:gateway\//);
-      expect(module).not.toMatch(/:memory\//);
+      // The default managed-memory grant is scoped to the harness_*
+      // name-prefixed memory ARN (AgentCoreManagedMemory above); any
+      // unscoped or wildcard memory access would be a BYO/customer-owned
+      // extension and must not appear in generated defaults.
+      expect(module).not.toMatch(/:memory\/(?!harness_\*)/);
       expect(module).not.toContain('secretsmanager:');
       expect(module).not.toContain('ec2:');
       // No wildcard action grants.

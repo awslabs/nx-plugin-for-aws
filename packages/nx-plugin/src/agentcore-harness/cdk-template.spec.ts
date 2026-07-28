@@ -35,7 +35,7 @@ const HARNESSES_INDEX_PATH =
   'packages/common/constructs/src/app/harnesses/index.ts';
 const APP_INDEX_PATH = 'packages/common/constructs/src/app/index.ts';
 
-/** The 11 Baseline Permission SIDs from the design, in template order. */
+/** The 12 Baseline Permission SIDs from the design, in template order. */
 const BASELINE_SIDS = [
   'BedrockModelInvocation',
   'EcrPublicTokenAccess',
@@ -48,6 +48,7 @@ const BASELINE_SIDS = [
   'AgentCoreWorkloadIdentity',
   'AgentCoreBrowserDefault',
   'AgentCoreCodeInterpreterDefault',
+  'AgentCoreManagedMemory',
 ] as const;
 
 interface ParsedStatement {
@@ -210,11 +211,24 @@ describe('agentcore-harness CDK template contract', () => {
       const guardIdx = construct.indexOf('if (!executionRole) {');
       expect(guardIdx).toBeGreaterThanOrEqual(0);
       const harnessIdx = construct.indexOf('new agentcore.CfnHarness(');
+      // AgentCoreManagedMemory is scoped to the Harness's managed-memory
+      // attribute, so it is necessarily added in a second guarded block
+      // after the Harness resource exists rather than in the pre-Harness
+      // array with the other baseline statements.
       for (const sid of BASELINE_SIDS) {
+        if (sid === 'AgentCoreManagedMemory') {
+          continue;
+        }
         const sidIdx = construct.indexOf(`sid: '${sid}'`);
         expect(sidIdx).toBeGreaterThan(guardIdx);
         expect(sidIdx).toBeLessThan(harnessIdx);
       }
+      const memoryGuardIdx = construct.indexOf(
+        '!executionRole && harnessProps.memory === undefined',
+      );
+      expect(memoryGuardIdx).toBeGreaterThan(harnessIdx);
+      const memorySidIdx = construct.indexOf("sid: 'AgentCoreManagedMemory'");
+      expect(memorySidIdx).toBeGreaterThan(memoryGuardIdx);
       expect(construct).toContain(
         'this.executionRole.addToPrincipalPolicy(statement)',
       );
@@ -234,15 +248,15 @@ describe('agentcore-harness CDK template contract', () => {
       );
     });
 
-    // Requirements 5.6, 7.2-7.4: all 11 Baseline Permission statements with
+    // Requirements 5.6, 7.2-7.4: all 12 Baseline Permission statements with
     // exact per-SID actions, resource patterns, and conditions.
-    it('renders exactly the 11 baseline permission statements with exact contents', () => {
+    it('renders exactly the 12 baseline permission statements with exact contents', () => {
       const statements = parsePolicyStatements(construct);
 
-      // Exactly the 11 design SIDs, in template order, and no other
+      // Exactly the 12 design SIDs, in template order, and no other
       // policy statements anywhere in the construct.
       expect(Object.keys(statements)).toEqual([...BASELINE_SIDS]);
-      expect(countOccurrences(construct, 'new iam.PolicyStatement(')).toBe(11);
+      expect(countOccurrences(construct, 'new iam.PolicyStatement(')).toBe(12);
 
       expect(statements.BedrockModelInvocation.actions).toEqual([
         'bedrock:InvokeModel',
@@ -455,7 +469,9 @@ describe('agentcore-harness CDK template contract', () => {
 
     // Requirement 5.4: collision-resistant, service-safe default name.
     it('keeps the 39-char unique name with underscore separator and H-prefix fallback', () => {
-      expect(construct).toContain("import { Names, Stack } from 'aws-cdk-lib'");
+      expect(construct).toContain(
+        "import { CfnOutput, Names, Stack } from 'aws-cdk-lib'",
+      );
       expect(construct).toContain('Names.uniqueResourceName(this, {');
       // 39 + the conditionally applied leading 'H' stays within the
       // 40-character Harness Name limit.
