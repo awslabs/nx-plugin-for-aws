@@ -59,17 +59,21 @@ export const buildPackageManagerShortCommand = (
 };
 
 /**
- * Build an install command. With `project`, targets that project's manifest
- * (pnpm `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
+ * Build an install command. Without `pkg`, installs the workspace's existing
+ * dependencies. With `project`, targets that project's manifest (pnpm
+ * `--filter` by unscoped name, npm/bun by `projectDir` defaulting to
  * `packages/<name>`, yarn by fully-qualified name); otherwise the root.
  */
 export const buildInstallCommand = (
   pm: string,
-  pkg: string,
-  dev: boolean,
+  pkg?: string,
+  dev?: boolean,
   project?: string,
   projectDir?: string,
 ) => {
+  if (!pkg) {
+    return pm === 'yarn' ? 'yarn' : `${pm} install`;
+  }
   if (project) {
     const shortName = project.split('/').pop();
     const dir = projectDir ?? `packages/${shortName}`;

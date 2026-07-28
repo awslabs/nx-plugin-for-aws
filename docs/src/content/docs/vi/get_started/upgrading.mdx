@@ -1,0 +1,149 @@
+---
+title: Nâng cấp Workspace của bạn
+description: Cách nâng cấp Nx và @aws/nx-plugin với nx migrate.
+---
+import { Aside } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import InstallCommand from '@components/install-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+
+`@aws/nx-plugin` cung cấp các migration tự động cập nhật workspace của bạn khi bạn nâng cấp nó, sử dụng [`nx migrate`](https://nx.dev/docs/features/automate-updating-dependencies).
+
+<Aside type="tip">
+Bạn có thể sử dụng công cụ lập trình tác nhân (agentic coding tool) mà bạn chọn để nâng cấp workspace cho bạn, sử dụng <Link path="get_started/building-with-ai">MCP server</Link>. Thử prompt sau:
+
+> Upgrade Nx and the Nx Plugin for AWS in this workspace.
+</Aside>
+
+
+
+## Nâng cấp @aws/nx-plugin
+
+Đầu tiên, chạy lệnh sau để cập nhật phiên bản plugin và chuẩn bị các migration:
+
+<NxCommands commands={['migrate @aws/nx-plugin@latest']} />
+
+```
+ NX   The migrate command has run successfully.
+
+- package.json has been updated.
+- migrations.json has been generated.
+- 1 AI migration prompt(s) have been written to tools/ai-migrations/.
+
+ NX   Next steps:
+
+- Make sure package.json changes make sense and then run 'pnpm install --no-frozen-lockfile',
+- Review and tweak the AI migration prompts in tools/ai-migrations/ as needed.
+- Run 'pnpm exec nx migrate --run-migrations'
+- To learn more go to https://nx.dev/features/automate-updating-dependencies
+```
+
+Xem xét các thay đổi trong `package.json` sau đó cài đặt:
+
+<InstallCommand />
+
+Sau đó chạy các migration:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+### Migration xác định (Deterministic migrations)
+
+Hầu hết các migration là các codemod xác định — chúng chạy tự động và báo cáo bất kỳ điều gì chúng cố ý bỏ qua:
+
+```
+ NX   Running migrations from 'migrations.json'
+
+Running the following migrations:
+- @aws/nx-plugin: update-vitest-workspace-config — Add a coverage reporter to vitest configs
+- @aws/nx-plugin: update-custom-api-handlers — Update custom API handlers for the new middleware signature
+
+── Migration 1 of 2 · @aws/nx-plugin:update-vitest-workspace-config ─────
+→ Running generator…
+Changes:
+  UPDATE packages/api/vite.config.mts
+
+...
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+2 migrations applied, 0 commits created.
+
+ NX   Some migrations have additional information, see below.
+
+- packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+```
+
+Chú ý đến **thông tin bổ sung** ở cuối: khi một migration tìm thấy một file mà bạn đã tùy chỉnh vượt quá những gì nó có thể cập nhật an toàn, nó sẽ giữ nguyên các thay đổi của bạn và báo cáo các bước tiếp theo cần thực hiện thủ công ở đó.
+
+### Migration tác nhân (Agentic migrations)
+
+Một số migration nhắm đến code mà bạn sở hữu, nơi mà việc chỉnh sửa đúng phụ thuộc vào những gì bạn đã xây dựng — những migration này được cung cấp dưới dạng các prompt được áp dụng bởi AI coding agent cục bộ của bạn (Claude Code, Codex hoặc OpenCode). Khi có bất kỳ migration nào đang chờ xử lý, Nx sẽ yêu cầu sự đồng ý trước khi sử dụng agent:
+
+```
+? Enable the agentic flow? …
+❯ Yes, just this time      Apply 1 prompt migration and validate generator output with an AI agent
+  Yes, always              Saved to nx.json so Nx won't ask again
+  No, just this time       Skip prompts and run generators without AI validation
+  No, never                Saved to nx.json so Nx won't ask again
+```
+
+Nếu bạn chấp nhận, agent sẽ áp dụng từng prompt migration tại chỗ và tóm tắt những gì nó đã thay đổi:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+→ Running prompt with Claude Code…
+✓ update-custom-api-handlers: Updated 3 API handlers to the new middleware signature.
+```
+
+Nếu bạn từ chối — hoặc không có agent nào được cài đặt, hoặc quá trình chạy không tương tác (ví dụ: CI) — các prompt migration sẽ bị bỏ qua và được lưu lại để bạn áp dụng thủ công:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — agentic flow disabled. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration skipped.
+
+ NX   Some migrations have additional information, see below.
+
+- Some prompt migrations were skipped. Review and apply each of the following
+  prompt files to the workspace, in the listed order:
+  - tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+```
+
+Mỗi prompt bị bỏ qua là một file hướng dẫn markdown độc lập trong `tools/ai-migrations/` — dán nó vào coding agent của bạn, hoặc làm theo các bước của nó một cách thủ công.
+
+Cuối cùng, xác minh mọi thứ vẫn build được, sau đó xóa `migrations.json` và commit:
+
+<PackageManagerShortCommand commands={['build']} />
+
+## Nâng cấp với AI agent
+
+Toàn bộ quy trình có thể được điều khiển bởi một AI coding agent từ đầu đến cuối — không có gì bị chặn trên terminal tương tác. Khi `nx migrate --run-migrations` chạy từ bên trong một agent, Nx phát hiện điều này, bỏ qua prompt đồng ý tác nhân, và thay vì tạo một agent lồng nhau, nó **hoãn lại** mỗi prompt migration về agent đang điều khiển quá trình chạy:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration deferred.
+
+ NX   Next steps for the AI agent driving this run
+
+Apply the deferred prompts below, in order:
+  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+       (update-custom-api-handlers — prompt-only migration)
+Then relay these migration-emitted notes to the user:
+  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+Finally, summarize what was done across the run and commit the changes per workspace conventions.
+```
+
+Một agent thực hiện nâng cấp nên:
+
+1. Chạy chu trình trên cho từng package một (`nx migrate <package>@latest`, cài đặt, `nx migrate --run-migrations`), truyền `--no-interactive` để ngăn chặn bất kỳ prompt còn lại nào.
+2. Sau khi chạy, đọc từng file prompt bị hoãn lại được liệt kê trong **Next steps**, theo thứ tự được liệt kê, và áp dụng các bước của nó trực tiếp vào workspace.
+3. Chuyển tiếp bất kỳ ghi chú nào do migration phát ra (các file tùy chỉnh bị bỏ qua, các bước tiếp theo cần thực hiện thủ công) cho người dùng.
+4. Xác minh workspace build được, sau đó xóa `migrations.json` và commit trước khi bắt đầu nâng cấp package tiếp theo.

@@ -461,9 +461,9 @@ const renderComponent = (
       return [codeBlock(buildNxInitCommand(pm))];
     }
     case 'InstallCommand': {
+      // Without `pkg`, installs the workspace's existing dependencies
       const pkg =
         readStringAttr(node, 'pkg') ?? readExpressionAttr(node, 'pkg');
-      if (!pkg) return undefined;
       return [
         codeBlock(buildInstallCommand(pm, pkg, hasBareAttr(node, 'dev'))),
       ];

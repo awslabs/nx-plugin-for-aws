@@ -102,6 +102,148 @@ it('should be idempotent when re-run with same options', async () => {
 - **Component generators**: run twice with the same inputs and assert the tree is unchanged after the second run (no duplicate wiring), and that adding a second differently-named component leaves the first intact.
 - **Guarded refusals**: assert the generator throws the expected error on re-run.
 
+### Migrations
+
+A migration's job is to carry an existing workspace to the state it would be in **had the user generated it from today's generators**. That is a higher bar than "keep it building": any change to a generator's output is a candidate for a migration, because otherwise a workspace generated last month silently diverges from one generated today. Ship a migration so `nx migrate @aws/nx-plugin` closes that gap automatically.
+
+Migrations live under `packages/nx-plugin/src/migrations/<version>/<name>/` — grouped by the release that ships them, so their order stays visible as the collection grows — and are registered in `packages/nx-plugin/migrations.json`. A new migration lands in `latest/`; the weekly `update-versions` PR moves it into `v<x.y.z>/` once a release has shipped it.
+
+#### The three kinds of migration
+
+Migrations come in three forms, discriminated by which fields the `migrations.json` entry carries:
+
+- **Deterministic** (`implementation`): a generator function with an exact before/after. Runs unattended, including in CI and non-interactive terminals.
+- **Agentic** (`prompt`): a markdown instruction file applied by the user's local coding agent (Claude Code, Codex or OpenCode) via Nx's agentic migrate flow. When no agent runs (CI, no agent installed, consent declined), Nx writes the prompt to `tools/ai-migrations/` in the user's workspace as manual instructions — so prompts must read as standalone, self-contained instructions.
+- **Hybrid** (`implementation` + `prompt`): both halves of one change. The `implementation` does everything it can mechanically and returns `agentContext` (a `MigrationReturnObject` field) describing what it changed *and what it couldn't*; Nx passes that context to the paired `prompt`, which directs the agent at whatever is left.
+
+#### Scaffolding a migration
+
+Use the `ts#nx-migration` generator to scaffold a new migration — it creates the right files for the chosen kind and registers it in `migrations.json` (with no `version`; see [Versioning](#versioning) below). Pass `--kind` to choose; hybrid is usually the right one here (see [Choosing the kind](#choosing-the-kind-prefer-hybrid)):
+
+```bash
+# Hybrid: a codemod that hands off to an agent
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid
+
+# Deterministic (the generator's default): a codemod alone
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=rename-foo-target --description="Rename the foo target to bar"
+
+# Agentic: a prompt alone, applied by the user's agent
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=migrate-custom-handlers --description="Update custom handlers for the new API" --kind=agentic
+```
+
+Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migrations/latest/<name>/`:
+
+- **deterministic** — `migration.ts` (implementation skeleton with the guardrails baked in) + `migration.spec.ts`.
+- **agentic** — `prompt.md` (self-contained agent/human instructions).
+- **hybrid** — `migration.ts` (returning `agentContext`) + `migration.spec.ts` + `prompt.md`.
+
+Entries are keyed by folder and name (`latest-<name>`, becoming `v<x.y.z>-<name>` once a release claims them), so reusing a name for a later change can't silently overwrite a migration that has already shipped.
+
+`ts#nx-migration` is a public generator, so it works on any Nx Plugin project (it creates `migrations.json` and wires the `nx-migrations` field into the plugin's `package.json` if absent). See its [guide](./docs/src/content/docs/en/guides/nx-migration.mdx) for the full reference. Within this repo, always pass `--project=@aws/nx-plugin`.
+
+#### What should be a migration
+
+**Assume a migration is needed.** If a change alters what a generator produces, a workspace generated before it needs a migration to reach the same state — so a migration is the default, not the exception. That covers breaking changes, new features, security hardening and bug fixes alike, anywhere in the generated surface: vended config (`project.json`, `nx.json`, `aws-nx-plugin.config.mts`), `common/constructs` and `common/terraform`, generated clients and runtime-config wiring, and the application code we scaffold.
+
+The narrow exceptions:
+
+- Formatting or stylistic changes to vended templates
+- Changes that only affect the *choices offered* at generation time (a new option whose default leaves existing output unchanged)
+- Removing a file the generator no longer vends, where the leftover copy is harmless
+
+#### Choosing the kind: prefer hybrid
+
+**Everything we vend is user code.** Users own it, and they are free to modify it however they like — there is no file we can assume is untouched. That reality makes **hybrid the default kind**: a deterministic half that does as much as it safely can, plus a prompt that covers what it couldn't.
+
+Within a hybrid migration, split the work by how reliably the edit can be pattern-matched:
+
+- **Deterministic half** — changes with a narrow, recognisable shape: vended config, `common/constructs` / `common/terraform`, generated clients, agent connection wiring, import paths and renamed exports. The transform must **match the exact shape it expects before writing**: read the target, confirm it still looks like what the generator produced, and if it doesn't, leave it alone and record that in `agentContext` and `nextSteps`. A transform that rewrites whatever it finds will destroy customisations.
+- **Agentic half** — whatever the deterministic half skipped, plus code users routinely rewrite where no single shape holds: `agent.ts` / `agent.py`, individual tRPC procedures and routers, custom CDK stacks, React components. Note that the split isn't "our files vs theirs" — put an edit in the deterministic half whenever it can be matched generically and safely, however user-facing the file, and defer it to the prompt when it can't. **Judge mostly by complexity:** if a codemod would need a wide surface of shapes to handle, the prompt is the better home for it.
+
+Reach for a *pure* kind only when one half would be empty: pure deterministic when nothing can be left over (a config-only edit), pure agentic when nothing can be matched mechanically at all.
+
+Worked examples:
+
+- **Renaming a generator (new generator ID).** Deterministic. The generator metadata recorded in each project's `project.json` is what lets later generators identify a project, so a codemod rewriting the old ID to the new one across every `project.json` is both exhaustive and safe — miss it and generators on the new version no longer recognise projects created by the old one.
+- **Upgrading to a new major of Vite.** Hybrid. The deterministic half performs the routine codemods (bump the vended config, apply the mechanical config-shape changes we know about); the prompt points the agent at the upstream migration guide and has it reconcile the user's own Vite config, plugins and build code against the new API.
+- **Adding a KMS key to the static website's S3 bucket.** Hybrid. The deterministic half makes the change in `common/constructs` / `common/terraform` where the bucket is vended; where it finds a bucket definition it doesn't recognise, it records that in `agentContext`, and the prompt describes the change so the agent can apply it to whatever shape the user's bucket has ended up in.
+
+#### Guardrails for the deterministic half
+
+- **Pattern-match before writing.** Confirm the target still matches the shape the generator produced. If it doesn't, skip it, and report it via `nextSteps` and `agentContext` (both `MigrationReturnObject` fields) so the paired prompt can pick it up — never rewrite what you don't recognise.
+- **Idempotent.** Re-running the migration must be a no-op, mirroring the generator idempotency principle above.
+- **Never destroy user intent.** The same rule as generators: unrecognised code is reported on, not rewritten.
+- **Format what you write.** Finish with `await formatFilesInSubtree(tree)`. `updateJson` / `writeJson` re-serialise the whole file and expand inline arrays, which the vended `format` target rejects — without this a clean migration run leaves the user's `build` failing.
+
+#### Versioning
+
+Do not add a `version` field to `migrations.json` entries — versions arrive on their own:
+
+- At release time the workflow runs `nx release version` (no tag, no commit) to write the pending version into the dist manifests, then passes it to `scripts/stamp-migrations.ts --pending-version`, which stamps it into the compiled `migrations.json` before the release tags and publishes. Both steps share one set of release flags, and the version itself is resolved from the latest git tag, so a net-new migration carries the version that actually shipped it. One that already shipped keeps the version of the first release tag that included it.
+- The weekly `update-versions` PR records the version of the release that shipped each migration, moves it out of `latest/` into that release's `v<x.y.z>/` folder and re-keys it to match (`scripts/backfill-migration-versions.ts`), so `migrations.json` in `main` converges on the versions of everything already released. Only released migrations are touched; one that hasn't shipped stays in `latest/`.
+
+A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
+
+#### Testing
+
+Every migration needs a `migration.spec.ts` alongside it using `createTreeUsingTsSolutionSetup()`, covering: the migration applies to the vended shape, skips (and reports) code it doesn't recognise, and is idempotent.
+
+Unit tests only prove the migration does what you wrote it to do. Also **test the migration manually against a real workspace generated by the latest published version**, since that is the state your users are upgrading from. The goal is to confirm the migrated workspace matches what today's generators would produce.
+
+First build the local packages:
+
+```bash
+pnpm package:all
+```
+
+Then create a workspace on the **published** version, generate the projects your migration touches, and commit it so the migration's changes are easy to inspect:
+
+```bash
+pnpm create @aws/nx-workspace my-migration-test
+cd my-migration-test
+# Generate whatever your migration targets, on the published version
+pnpm nx g @aws/nx-plugin:ts#website --name=website --no-interactive
+git add -A && git commit -m "baseline on published version"
+```
+
+Now swap in the local build:
+
+```bash
+pnpm link <path-to-this-repo>/dist/packages/nx-plugin
+```
+
+`nx migrate @aws/nx-plugin@latest` resolves migrations from the **registry**, so it won't see one that hasn't been published — and running it replaces your link with the published version. Write `migrations.json` by hand instead, listing your migration exactly as it appears in `packages/nx-plugin/migrations.json` (any `version` above the installed one will do):
+
+```json
+{
+  "migrations": [
+    {
+      "cli": "nx",
+      "package": "@aws/nx-plugin",
+      "name": "latest-my-migration",
+      "version": "999.0.0",
+      "description": "My migration",
+      "implementation": "./src/migrations/latest/my-migration/migration"
+    }
+  ]
+}
+```
+
+Then run it:
+
+```bash
+pnpm exec nx migrate --run-migrations
+```
+
+Finally, verify the outcome:
+
+1. **Inspect the diff** (`git diff`) — every change should be one today's generators would make, and nothing else.
+2. **Compare against a fresh workspace** — generate the same projects into a brand-new workspace using the local build, and diff the two. Remaining differences are gaps in the migration.
+3. **Confirm it still builds** — `pnpm nx run-many --target build --all`.
+4. **Re-run it** — running the migration a second time must report no changes.
+
+Worth repeating with a *customised* workspace: hand-edit the files your migration touches first, then check it leaves your edits alone and reports them via `nextSteps` / `agentContext` instead of clobbering them.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).

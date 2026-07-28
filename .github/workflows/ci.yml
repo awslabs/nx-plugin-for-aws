@@ -289,12 +289,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           HUSKY: "0"
         run: |
+          # Shared by the versioning step below and the release itself, so the
+          # version stamped onto migrations is the version that actually ships.
+          # Keep these in one place when changing release flags.
           CURRENT_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
           if echo "$CURRENT_VERSION" | grep -q "rc"; then
-            pnpm nx release --skip-publish --preid rc
+            RELEASE_ARGS=(--preid rc)
           else
-            pnpm nx release --skip-publish --specifier premajor --preid rc
+            RELEASE_ARGS=(--specifier premajor --preid rc)
           fi
+
+          # Write the pending version into the dist manifests without tagging or
+          # committing anything, so migrations can be stamped with it. The
+          # release below resolves the same version (from the git tag, per
+          # release.version.currentVersionResolver) and then tags and publishes.
+          pnpm nx release version "${RELEASE_ARGS[@]}" \
+            --git-tag=false --git-commit=false --stage-changes=false
+          pnpm exec tsx ./scripts/stamp-migrations.ts \
+            --pending-version "$(node -p "require('./dist/packages/nx-plugin/package.json').version")"
+
+          pnpm nx release --skip-publish "${RELEASE_ARGS[@]}"
           # Publish the release candidate to "latest" so the default install
           # path resolves to it.
           pnpm nx release publish --tag latest

@@ -12,12 +12,12 @@ export type { TsAgentGeneratorSchema } from '../ts/agent/schema';
 // TypeScript API
 export { tsApiGenerator } from '../ts/api/generator';
 export type { TsApiGeneratorSchema } from '../ts/api/schema';
-// Documentation Site Generator
-export { tsDocsGenerator } from '../ts/docs/generator';
-export type { TsDocsGeneratorSchema } from '../ts/docs/schema';
 // TypeScript DCR Proxy Generator
 export { tsDcrProxyGenerator } from '../ts/dcr-proxy/generator';
 export type { TsDcrProxyGeneratorSchema } from '../ts/dcr-proxy/schema';
+// Documentation Site Generator
+export { tsDocsGenerator } from '../ts/docs/generator';
+export type { TsDocsGeneratorSchema } from '../ts/docs/schema';
 // DynamoDB Generator
 export { tsDynamoDBGenerator } from '../ts/dynamodb/generator';
 export type { TsDynamoDBGeneratorSchema } from '../ts/dynamodb/schema';
@@ -33,6 +33,9 @@ export type { TsMcpServerGeneratorSchema } from '../ts/mcp-server/schema';
 // TypeScript Nx Generator Generator
 export { tsNxGeneratorGenerator } from '../ts/nx-generator/generator';
 export type { TsNxGeneratorGeneratorSchema } from '../ts/nx-generator/schema';
+// TypeScript Nx Migration Generator
+export { tsNxMigrationGenerator } from '../ts/nx-migration/generator';
+export type { TsNxMigrationGeneratorSchema } from '../ts/nx-migration/schema';
 // TypeScript Nx Plugin Generator
 export { tsNxPluginGenerator } from '../ts/nx-plugin/generator';
 export type { TsNxPluginGeneratorSchema } from '../ts/nx-plugin/schema';
