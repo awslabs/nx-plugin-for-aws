@@ -5,7 +5,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 /**
@@ -57,24 +57,9 @@ describe('smoke test - idempotency', () => {
     // partially written, and re-running would complete them, producing a diff
     // that looks like a (false) idempotency failure.
 
-    // CDK-specific infrastructure projects (mirrors runSmokeTest).
-    await runCLI(
-      `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
-      opts,
-    );
-    await runCLI(
-      `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive`,
-      opts,
-    );
-
-    // First pass — scaffold the full matrix.
+    // First pass — scaffold the full matrix (which covers the CDK infrastructure
+    // projects and a Terraform project alongside them).
     await runGeneratorMatrix(opts, { preferInstallDependencies: true });
-
-    // Terraform project alongside CDK (mirrors runSmokeTest).
-    await runCLI(
-      `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive`,
-      opts,
-    );
 
     // Commit the generated workspace as the baseline. The workspace is created
     // with git already initialised, so just stage and commit on top of its
@@ -86,19 +71,7 @@ describe('smoke test - idempotency', () => {
     );
 
     // Second pass — re-run the exact same matrix on the committed workspace.
-    await runCLI(
-      `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
-      opts,
-    );
-    await runCLI(
-      `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive`,
-      opts,
-    );
     await runGeneratorMatrix(opts, { preferInstallDependencies: true });
-    await runCLI(
-      `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive`,
-      opts,
-    );
 
     // Any change (modified, added or deleted tracked files) means a generator
     // mutated the workspace on re-run and is therefore not idempotent.
