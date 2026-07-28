@@ -277,10 +277,13 @@ const assertMigrationRunOutcome = (
  * dungeon-adventure shape (infra, website + auth, tRPC API, FastAPI, a lambda
  * function and an agent) rather than the full generator matrix.
  *
- * The full matrix is too version-sensitive to run against an older release —
- * generators added or renamed since the start version would need a per-version
- * fork of the matrix. These generators and options have been stable across the
- * supported start versions, so one recipe covers every hop.
+ * Reusing the full matrix would couple this test to it: the matrix grows with
+ * every new generator, and one that postdates a start version makes `nx g` exit
+ * non-zero, failing the hop during scaffolding as though a migration broke.
+ * Guarding that means version-gating each of its ~60 invocations, most of which
+ * add no migration coverage. A fixed recipe of generators present in every
+ * supported start version covers every hop instead, and adding a project type a
+ * migration touches is one more line here.
  */
 const runMigrateRecipe = async (opts: {
   cwd: string;
