@@ -196,17 +196,14 @@ First build the local packages:
 pnpm package:all
 ```
 
-Then create a workspace on the **published** version, generate the projects your migration touches, and commit it so the migration's changes are easy to inspect. Create it somewhere with no parent `package.json` or `pnpm-workspace.yaml` above it, or pnpm treats that parent as the workspace root and links into the wrong place:
+Then create a workspace on the **published** version, generate the projects your migration touches, and commit it so the migration's changes are easy to inspect:
 
 ```bash
-mkdir -p ~/tmp/migtest && cd ~/tmp/migtest
-npx -y create-nx-workspace@latest ws --preset=@aws/nx-plugin --ci=skip --pm=pnpm
-cd ws
-# Resolve the vended pnpm-workspace.yaml `allowBuilds` placeholder, then install
-pnpm install --no-frozen-lockfile
+pnpm create @aws/nx-workspace my-migration-test
+cd my-migration-test
 # Generate whatever your migration targets, on the published version
 pnpm nx g @aws/nx-plugin:ts#website --name=website --no-interactive
-git init && git add -A && git commit -m "baseline on published version"
+git add -A && git commit -m "baseline on published version"
 ```
 
 Now swap in the local build:
