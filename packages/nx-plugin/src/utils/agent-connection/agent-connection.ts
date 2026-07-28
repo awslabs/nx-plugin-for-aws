@@ -175,6 +175,10 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
           fromModule: './core/model-errors-strands.js',
           importName: '*',
         },
+        {
+          fromModule: './core/tool-errors-strands.js',
+          importName: '*',
+        },
       ],
       protocols: {
         mcp: 'core-strands/mcp',
