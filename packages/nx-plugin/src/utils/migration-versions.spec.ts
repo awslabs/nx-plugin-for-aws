@@ -45,6 +45,26 @@ describe('migration versions', () => {
       expect(stamped.generators?.['my-migration'].version).toBe('1.1.0');
     });
 
+    it('should stamp unshipped migrations with the pending release version', () => {
+      const stamped = stampMigrationVersions(
+        { generators: { 'new-migration': { description: 'unshipped' } } },
+        {},
+        '1.0.0-rc.48',
+        '1.0.0-rc.49',
+      );
+      expect(stamped.generators?.['new-migration'].version).toBe('1.0.0-rc.49');
+    });
+
+    it('should prefer a shipped version over the pending release version', () => {
+      const stamped = stampMigrationVersions(
+        { generators: { 'my-migration': { description: 'shipped' } } },
+        { 'my-migration': '1.1.0' },
+        '1.2.0',
+        '1.3.0',
+      );
+      expect(stamped.generators?.['my-migration'].version).toBe('1.1.0');
+    });
+
     it('should stamp unshipped migrations with a version above the latest release', () => {
       const stamped = stampMigrationVersions(
         {

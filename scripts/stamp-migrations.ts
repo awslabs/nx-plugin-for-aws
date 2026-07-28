@@ -4,6 +4,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
+  isValidVersion,
   type MigrationsJson,
   stampMigrationVersions,
 } from '../packages/nx-plugin/src/utils/migration-versions';
@@ -15,16 +16,46 @@ import {
 
 /**
  * Stamps versions onto the compiled `migrations.json` (see
- * `utils/migration-versions.ts` for the versioning model). Runs as part of
- * the nx-plugin `package` target, after `compile` populates dist.
+ * `utils/migration-versions.ts` for the versioning model).
  *
  * Entries backfilled into source by the weekly `update-versions` PR keep their
- * version; the rest are resolved from release tags here.
+ * version. Anything still unversioned is stamped with the pending release
+ * version when one is passed (`--pending-version`), and otherwise with a
+ * version just above the latest tag.
+ *
+ * Runs twice on a release: once in the `package` target with no pending version,
+ * then again in the release job once `nx release version --dry-run` has resolved
+ * the version about to publish. Stamping always derives from *source*
+ * `migrations.json`, so the second run replaces the first's fallback rather than
+ * compounding it.
+ *
+ * Usage: tsx scripts/stamp-migrations.ts [--pending-version <x.y.z>]
  */
 
 const DIST_MIGRATIONS_PATH = 'dist/packages/nx-plugin/migrations.json';
 
+/**
+ * The release the publish is about to make, resolved by the release job with
+ * `nx release version --dry-run` so both runs share one set of flags.
+ */
+const readPendingVersion = (argv: string[]): string | undefined => {
+  const index = argv.indexOf('--pending-version');
+  if (index === -1) {
+    return undefined;
+  }
+  const version = argv[index + 1];
+  if (!version || version.startsWith('--')) {
+    throw new Error('--pending-version requires a version argument');
+  }
+  if (!isValidVersion(version)) {
+    throw new Error(`--pending-version is not a valid semver: ${version}`);
+  }
+  return version;
+};
+
 const main = () => {
+  const pendingVersion = readPendingVersion(process.argv.slice(2));
+
   const migrations: MigrationsJson = JSON.parse(
     readFileSync(SOURCE_MIGRATIONS_PATH, 'utf-8'),
   );
@@ -41,6 +72,7 @@ const main = () => {
     migrations,
     readShippedMigrationVersions(tags),
     latestVersion,
+    pendingVersion,
   );
 
   writeFileSync(
@@ -49,7 +81,11 @@ const main = () => {
     'utf-8',
   );
   console.log(
-    `Stamped ${Object.keys(stamped.generators ?? {}).length} migration(s) into ${DIST_MIGRATIONS_PATH} (latest release: ${latestVersion})`,
+    `Stamped ${Object.keys(stamped.generators ?? {}).length} migration(s) into ${DIST_MIGRATIONS_PATH} (${
+      pendingVersion
+        ? `pending release: ${pendingVersion}`
+        : `latest release: ${latestVersion}, no pending release given`
+    })`,
   );
 };
 

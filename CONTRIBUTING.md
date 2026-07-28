@@ -186,7 +186,8 @@ When a deterministic migration meets a file that has diverged from the vended sh
 Do not add a `version` field to `migrations.json` entries — versions arrive on their own:
 
 - The weekly `update-versions` PR records the version of the release that shipped each migration, moves it out of `latest/` into that release's `v<x.y.z>/` folder and re-keys it to match (`scripts/backfill-migration-versions.ts`), so `migrations.json` in `main` converges on the versions of everything already released. Only released migrations are touched; one that hasn't shipped stays in `latest/`.
-- At package time (`scripts/stamp-migrations.ts`) any entry still without a version is stamped into the compiled `migrations.json`: one that already shipped gets the version of the first release tag that included it, and a net-new one gets a version just above the latest release tag so it runs for every user upgrading from any released version.
+- At release time the workflow resolves the version it is about to publish with `nx release version --dry-run` (sharing one set of flags with the real release) and passes it to `scripts/stamp-migrations.ts --pending-version`, which stamps it into the compiled `migrations.json`. A net-new migration therefore carries the version that actually shipped it. One that already shipped keeps the version of the first release tag that included it.
+- Packaging outside a release (locally, or on a PR) has no pending version, so a net-new migration falls back to a version just above the latest release tag — still correct for `nx migrate`, which runs a migration when `installed < version`, just not a version that was really published.
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
 

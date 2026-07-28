@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { compare, inc } from 'semver';
+import { compare, inc, valid } from 'semver';
 
 /**
  * Version stamping for migrations.
@@ -16,11 +16,16 @@ import { compare, inc } from 'semver';
  *   (`scripts/backfill-migration-versions.ts`).
  * - At package time (`scripts/stamp-migrations.ts`) entries still missing a
  *   version are stamped into the compiled `migrations.json`: an already shipped
- *   one gets the earliest release tag registering it, a net-new one gets a
- *   version strictly between the latest tag and any possible next release.
- *   `nx migrate` runs a migration when `installed < migration.version`, so any
- *   version in that interval is correct whatever the next release turns out
- *   to be.
+ *   one gets the earliest release tag registering it, and a net-new one gets the
+ *   version the release is about to publish, which the release job resolves with
+ *   `nx release version --dry-run` and passes in.
+ *
+ * When no pending version is supplied (packaging locally or on a PR, where no
+ * release follows) a net-new migration falls back to a version strictly between
+ * the latest tag and any possible next release. `nx migrate` runs a migration
+ * when `installed < migration.version`, so that interval is always correct — it
+ * just isn't a version that was really published, which is why the release
+ * itself passes the real one.
  *
  * A version already in source always wins, so backfilled entries are stable.
  */
@@ -32,8 +37,13 @@ export interface MigrationsJson {
 /** Ascending semver comparator for `Array.prototype.sort`. */
 export const compareVersions = compare;
 
+/** Whether a string is an exact semver version. */
+export const isValidVersion = (version: string): boolean =>
+  valid(version) !== null;
+
 /**
- * Version stamped onto migrations that are not present in any release tag.
+ * Fallback version for a migration that hasn't shipped, used when the release
+ * about to publish is unknown (see the module comment).
  *
  * `semver.inc(latest, 'prerelease')` yields a version that sorts strictly
  * between the latest release and every possible next release:
@@ -56,14 +66,19 @@ export const unshippedMigrationVersion = (latestVersion: string): string => {
  * @param shippedVersions migration key -> version of the earliest release
  *   tag that registers it (absent for migrations that haven't shipped)
  * @param latestVersion version of the latest release tag (without the `v`
- *   prefix), used to derive versions for unshipped migrations
+ *   prefix), used to derive a version for unshipped migrations when no
+ *   `pendingVersion` is given
+ * @param pendingVersion version the release is about to publish, stamped onto
+ *   unshipped migrations so their version is one that really shipped
  */
 export const stampMigrationVersions = (
   migrations: MigrationsJson,
   shippedVersions: Record<string, string>,
   latestVersion: string,
+  pendingVersion?: string,
 ): MigrationsJson => {
-  const unshippedVersion = unshippedMigrationVersion(latestVersion);
+  const unshippedVersion =
+    pendingVersion ?? unshippedMigrationVersion(latestVersion);
   return {
     ...migrations,
     generators: Object.fromEntries(
