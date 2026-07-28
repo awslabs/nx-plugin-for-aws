@@ -137,6 +137,7 @@ Add capabilities to existing projects:
 | `ts#dcr-proxy`       | Generate an OAuth Dynamic Client Registration (DCR) proxy construct for Cognito-authenticated MCP servers          |
 | `ts#mcp-server`      | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
 | `ts#nx-generator`    | Generator for adding an Nx Generator to an existing TypeScript project                                             |
+| `ts#nx-migration`    | Generator for adding an Nx Migration to an Nx Plugin, applied by nx migrate when users upgrade                     |
 | `ts#nx-plugin`       | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
 | `ts#project`         | Generates a TypeScript project                                                                                     |
 | `ts#website`         | Generates a website application                                                                                    |

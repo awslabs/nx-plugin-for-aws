@@ -169,20 +169,6 @@ export default defineConfig({
               },
             },
             {
-              label: 'Add to an existing project',
-              link: '/get_started/existing-project',
-              translations: {
-                jp: '既存のプロジェクトに追加',
-                ko: '기존 프로젝트에 추가',
-                fr: 'Ajouter à un projet existant',
-                it: 'Aggiungere a un progetto esistente',
-                es: 'Añadir a un proyecto existente',
-                pt: 'Adicionar a um projeto existente',
-                zh: '添加到现有项目',
-                vi: 'Thêm vào dự án hiện có',
-              },
-            },
-            {
               label: 'Workspaces',
               link: '/guides/workspace',
               translations: {
@@ -194,6 +180,34 @@ export default defineConfig({
                 pt: 'Espaços de trabalho',
                 zh: '工作区',
                 vi: 'Không gian làm việc',
+              },
+            },
+            {
+              label: 'Upgrading your workspace',
+              link: '/get_started/upgrading',
+              translations: {
+                jp: 'ワークスペースのアップグレード',
+                ko: '워크스페이스 업그레이드',
+                fr: 'Mettre à niveau votre espace de travail',
+                it: 'Aggiornare il workspace',
+                es: 'Actualizar tu espacio de trabajo',
+                pt: 'Atualizando seu espaço de trabalho',
+                zh: '升级您的工作区',
+                vi: 'Nâng cấp không gian làm việc',
+              },
+            },
+            {
+              label: 'Add to an existing project',
+              link: '/get_started/existing-project',
+              translations: {
+                jp: '既存のプロジェクトに追加',
+                ko: '기존 프로젝트에 추가',
+                fr: 'Ajouter à un projet existant',
+                it: 'Aggiungere a un progetto esistente',
+                es: 'Añadir a un proyecto existente',
+                pt: 'Adicionar a um projeto existente',
+                zh: '添加到现有项目',
+                vi: 'Thêm vào dự án hiện có',
               },
             },
             {
@@ -540,6 +554,7 @@ export default defineConfig({
                 { label: 'license', link: '/guides/license' },
                 { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
                 { label: 'ts#nx-generator', link: '/guides/nx-generator' },
+                { label: 'ts#nx-migration', link: '/guides/nx-migration' },
               ],
             },
             {

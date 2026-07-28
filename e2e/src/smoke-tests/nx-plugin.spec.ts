@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 /**
- * Exercises the `ts#nx-plugin` and `ts#nx-generator` generators end-to-end and,
- * crucially, *runs* the generated generator.
+ * Exercises the `ts#nx-plugin`, `ts#nx-generator` and `ts#nx-migration`
+ * generators end-to-end and, crucially, *runs* the generated generator.
  *
  * The generated plugin is `"type": "module"`, so Nx 23 loads its unbuilt `.ts`
  * generators as ESM via Node's native type stripping — no swc/ts-node
@@ -127,6 +127,89 @@ describe('smoke test - nx-plugin', () => {
       expect(
         existsSync(join(projectRoot, 'sdk-consumed-lib/src/index.ts')),
       ).toBe(true);
+    },
+    15 * 60 * 1000,
+  );
+
+  it(
+    'should scaffold migrations of each kind and compile them',
+    async () => {
+      const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
+      const project = '@nx-plugin-test/plugin';
+      // New migrations land in `latest` until a release claims them
+      const migration = (name: string, file: string) =>
+        join(projectRoot, 'tools/plugin/src/migrations/latest', name, file);
+
+      // Deterministic (default) — the plugin has no migrations.json yet, so
+      // this run must create it and wire up the nx-migrations field.
+      await runCLI(
+        `generate @aws/nx-plugin:ts#nx-migration --project=${project} --name=rename-foo-target --description="Rename the foo target to bar" --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#nx-migration --project=${project} --name=migrate-custom-handlers --description="Update custom handlers" --kind=agentic --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#nx-migration --project=${project} --name=upgrade-framework --description="Upgrade the framework" --kind=hybrid --no-interactive`,
+        opts,
+      );
+
+      // Each kind scaffolds only the files it uses
+      expect(existsSync(migration('rename-foo-target', 'migration.ts'))).toBe(
+        true,
+      );
+      expect(existsSync(migration('rename-foo-target', 'prompt.md'))).toBe(
+        false,
+      );
+      expect(
+        existsSync(migration('migrate-custom-handlers', 'prompt.md')),
+      ).toBe(true);
+      expect(
+        existsSync(migration('migrate-custom-handlers', 'migration.ts')),
+      ).toBe(false);
+      expect(existsSync(migration('upgrade-framework', 'migration.ts'))).toBe(
+        true,
+      );
+      expect(existsSync(migration('upgrade-framework', 'prompt.md'))).toBe(
+        true,
+      );
+
+      // migrations.json is created and registers each kind's fields under its
+      // folder-prefixed key, with no version (the plugin author stamps versions
+      // at release time).
+      const migrationsJson = JSON.parse(
+        readFileSync(
+          join(projectRoot, 'tools/plugin/migrations.json'),
+          'utf-8',
+        ),
+      );
+      expect(migrationsJson.generators['latest-rename-foo-target']).toEqual({
+        description: 'Rename the foo target to bar',
+        implementation: `./src/migrations/latest/rename-foo-target/migration`,
+      });
+      expect(
+        migrationsJson.generators['latest-migrate-custom-handlers'],
+      ).toEqual({
+        description: 'Update custom handlers',
+        prompt: `./src/migrations/latest/migrate-custom-handlers/prompt.md`,
+      });
+      expect(migrationsJson.generators['latest-upgrade-framework']).toEqual({
+        description: 'Upgrade the framework',
+        implementation: `./src/migrations/latest/upgrade-framework/migration`,
+        prompt: `./src/migrations/latest/upgrade-framework/prompt.md`,
+      });
+
+      // The plugin's package.json points nx migrate at the manifest
+      const pluginPackageJson = JSON.parse(
+        readFileSync(join(projectRoot, 'tools/plugin/package.json'), 'utf-8'),
+      );
+      expect(pluginPackageJson['nx-migrations']).toEqual({
+        migrations: './migrations.json',
+      });
+
+      // The scaffolded codemods must type-check against @nx/devkit
+      await runCLI(`run ${project}:compile`, opts);
     },
     15 * 60 * 1000,
   );

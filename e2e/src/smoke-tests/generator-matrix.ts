@@ -456,4 +456,18 @@ export const runGeneratorMatrix = async (
     `generate @e2e-test/plugin:my#generator --exampleOption=test --no-interactive${deferFlag}`,
     opts,
   );
+  // A migration of each kind, so the scaffolded codemods compile and the
+  // plugin's migrations.json (created by the first run) registers all three.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#nx-migration --project=@e2e-test/plugin --name=rename-foo-target --description="Rename the foo target to bar" --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#nx-migration --project=@e2e-test/plugin --name=migrate-custom-handlers --description="Update custom handlers for the new API" --kind=agentic --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#nx-migration --project=@e2e-test/plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid --no-interactive${deferFlag}`,
+    opts,
+  );
 };

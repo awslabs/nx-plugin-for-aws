@@ -54,7 +54,7 @@ export const getPackageVersion = () => {
  * True inside the plugin's own monorepo, where the plugin is the source rather
  * than a dependency.
  */
-const isNxPluginForAwsWorkspace = (tree: Tree): boolean => {
+export const isNxPluginForAwsWorkspace = (tree: Tree): boolean => {
   const rootPackageJson = tree.exists('package.json')
     ? readJson(tree, 'package.json')
     : undefined;

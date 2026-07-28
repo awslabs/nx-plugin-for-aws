@@ -33,6 +33,9 @@ export type { TsMcpServerGeneratorSchema } from '../ts/mcp-server/schema';
 // TypeScript Nx Generator Generator
 export { tsNxGeneratorGenerator } from '../ts/nx-generator/generator';
 export type { TsNxGeneratorGeneratorSchema } from '../ts/nx-generator/schema';
+// TypeScript Nx Migration Generator
+export { tsNxMigrationGenerator } from '../ts/nx-migration/generator';
+export type { TsNxMigrationGeneratorSchema } from '../ts/nx-migration/schema';
 // TypeScript Nx Plugin Generator
 export { tsNxPluginGenerator } from '../ts/nx-plugin/generator';
 export type { TsNxPluginGeneratorSchema } from '../ts/nx-plugin/schema';
