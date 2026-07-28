@@ -24,10 +24,10 @@ import {
  * version just above the latest tag.
  *
  * Runs twice on a release: once in the `package` target with no pending version,
- * then again in the release job once `nx release version --dry-run` has resolved
- * the version about to publish. Stamping always derives from *source*
- * `migrations.json`, so the second run replaces the first's fallback rather than
- * compounding it.
+ * then again in the release job once `nx release version` has written the
+ * version about to publish into the dist manifests. Stamping always derives from
+ * *source* `migrations.json`, so the second run replaces the first's fallback
+ * rather than compounding it.
  *
  * Usage: tsx scripts/stamp-migrations.ts [--pending-version <x.y.z>]
  */
@@ -35,8 +35,8 @@ import {
 const DIST_MIGRATIONS_PATH = 'dist/packages/nx-plugin/migrations.json';
 
 /**
- * The release the publish is about to make, resolved by the release job with
- * `nx release version --dry-run` so both runs share one set of flags.
+ * The release the publish is about to make, which the release job reads out of
+ * the dist manifest `nx release version` just wrote.
  */
 const readPendingVersion = (argv: string[]): string | undefined => {
   const index = argv.indexOf('--pending-version');

@@ -17,8 +17,8 @@ import { compare, inc, valid } from 'semver';
  * - At package time (`scripts/stamp-migrations.ts`) entries still missing a
  *   version are stamped into the compiled `migrations.json`: an already shipped
  *   one gets the earliest release tag registering it, and a net-new one gets the
- *   version the release is about to publish, which the release job resolves with
- *   `nx release version --dry-run` and passes in.
+ *   version the release is about to publish, which the release job passes in
+ *   after `nx release version` writes it to the dist manifests.
  *
  * When no pending version is supplied (packaging locally or on a PR, where no
  * release follows) a net-new migration falls back to a version strictly between
