@@ -5,29 +5,97 @@
 import { describe, expect, it } from 'vitest';
 import {
   backfillMigrationVersions,
-  compareVersions,
+  type MigrationsJson,
+  readShippedMigrationVersions,
   stampMigrationVersions,
-  unshippedMigrationVersion,
 } from './migration-versions';
 
 describe('migration versions', () => {
-  describe('unshippedMigrationVersion', () => {
-    it('should sit strictly between a release and any possible next release', () => {
-      const version = unshippedMigrationVersion('1.2.3');
-      expect(compareVersions(version, '1.2.3')).toBeGreaterThan(0);
-      expect(compareVersions(version, '1.2.4')).toBeLessThan(0);
-      expect(compareVersions(version, '1.3.0')).toBeLessThan(0);
-      expect(compareVersions(version, '2.0.0')).toBeLessThan(0);
+  describe('readShippedMigrationVersions', () => {
+    // Releases newest first, as `readShippedMigrationVersions` expects
+    const RELEASES: Record<string, string[]> = {
+      '1.2.0': ['v1.0.0-old', 'v1.1.0-middle', 'v1.2.0-newest'],
+      '1.1.0': ['v1.0.0-old', 'v1.1.0-middle'],
+      '1.0.0': ['v1.0.0-old'],
+      '0.9.0': [],
+    };
+    const VERSIONS = ['1.2.0', '1.1.0', '1.0.0', '0.9.0'];
+
+    const reader = (calls: string[] = []) => {
+      const read = (version: string): MigrationsJson | undefined => {
+        calls.push(version);
+        const keys = RELEASES[version];
+        // A release predating migrations.json has no manifest at all
+        return keys
+          ? { generators: Object.fromEntries(keys.map((key) => [key, {}])) }
+          : undefined;
+      };
+      return { read, calls };
+    };
+
+    const unversioned = (keys: string[]): MigrationsJson => ({
+      generators: Object.fromEntries(keys.map((key) => [key, {}])),
     });
 
-    it('should sit strictly between a prerelease and the next release', () => {
-      const version = unshippedMigrationVersion('1.0.0-rc.32');
-      expect(compareVersions(version, '1.0.0-rc.32')).toBeGreaterThan(0);
-      expect(compareVersions(version, '1.0.0')).toBeLessThan(0);
+    it('should resolve the earliest release registering each migration', () => {
+      const { read } = reader();
+      expect(
+        readShippedMigrationVersions(
+          unversioned(['v1.0.0-old', 'v1.1.0-middle', 'v1.2.0-newest']),
+          VERSIONS,
+          read,
+        ),
+      ).toEqual({
+        'v1.0.0-old': '1.0.0',
+        'v1.1.0-middle': '1.1.0',
+        'v1.2.0-newest': '1.2.0',
+      });
     });
 
-    it('should throw on an invalid version', () => {
-      expect(() => unshippedMigrationVersion('not-a-version')).toThrow();
+    it('should omit a migration that has never shipped', () => {
+      const { read } = reader();
+      expect(
+        readShippedMigrationVersions(
+          unversioned(['latest-net-new']),
+          VERSIONS,
+          read,
+        ),
+      ).toEqual({});
+    });
+
+    it('should skip entries that already have a version', () => {
+      const { read, calls } = reader();
+      expect(
+        readShippedMigrationVersions(
+          { generators: { 'v1.0.0-old': { version: '1.0.0' } } },
+          VERSIONS,
+          read,
+        ),
+      ).toEqual({});
+      // Nothing to resolve, so no release manifests are read
+      expect(calls).toEqual([]);
+    });
+
+    it('should stop reading releases once every migration is resolved', () => {
+      const { read, calls } = reader();
+      readShippedMigrationVersions(
+        unversioned(['v1.2.0-newest']),
+        VERSIONS,
+        read,
+      );
+      // Absent from 1.1.0, so nothing older needs reading
+      expect(calls).toEqual(['1.2.0', '1.1.0']);
+    });
+
+    it('should treat a release with no manifest as registering nothing', () => {
+      const { read } = reader();
+      expect(
+        readShippedMigrationVersions(
+          unversioned(['v1.0.0-old']),
+          ['0.9.0'],
+          read,
+        ),
+      ).toEqual({});
     });
   });
 
@@ -49,7 +117,6 @@ describe('migration versions', () => {
       const stamped = stampMigrationVersions(
         { generators: { 'new-migration': { description: 'unshipped' } } },
         {},
-        '1.0.0-rc.48',
         '1.0.0-rc.49',
       );
       expect(stamped.generators?.['new-migration'].version).toBe('1.0.0-rc.49');
@@ -59,25 +126,9 @@ describe('migration versions', () => {
       const stamped = stampMigrationVersions(
         { generators: { 'my-migration': { description: 'shipped' } } },
         { 'my-migration': '1.1.0' },
-        '1.2.0',
         '1.3.0',
       );
       expect(stamped.generators?.['my-migration'].version).toBe('1.1.0');
-    });
-
-    it('should stamp unshipped migrations with a version above the latest release', () => {
-      const stamped = stampMigrationVersions(
-        {
-          generators: {
-            'new-migration': { description: 'unshipped' },
-          },
-        },
-        {},
-        '1.2.0',
-      );
-      const version = stamped.generators?.['new-migration'].version as string;
-      expect(compareVersions(version, '1.2.0')).toBeGreaterThan(0);
-      expect(compareVersions(version, '1.2.1')).toBeLessThan(0);
     });
 
     it('should preserve all other entry fields', () => {
@@ -91,7 +142,7 @@ describe('migration versions', () => {
           },
         },
         {},
-        '1.0.0-rc.32',
+        '1.0.0-rc.33',
       );
       expect(stamped.generators?.['my-migration']).toEqual({
         version: '1.0.0-rc.33',

@@ -32,9 +32,9 @@ We recommend using the <Link path="/guides/ts-nx-plugin">`ts#nx-plugin`</Link> g
 
 Migrations come in three forms, discriminated by which fields the `migrations.json` entry carries. Pass `--kind` to choose (default `deterministic`):
 
-- **Deterministic** (`implementation`) — a codemod with an exact before/after. Runs unattended, including in CI and non-interactive terminals. This is the preferred kind: prefer it whenever the target file is one your generators fully own and the edit can be expressed mechanically.
-- **Agentic** (`prompt`) — a markdown instruction file applied by the user's local coding agent via Nx's agentic `nx migrate` flow. Use for changes to user-owned code where the correct edit depends on what the user has built. When no agent runs (CI, no agent installed, consent declined), Nx surfaces the prompt as manual instructions — so write prompts as self-contained, human-actionable steps.
-- **Hybrid** (`implementation` + `prompt`) — one breaking change with a mechanical half and a judgment half. The `implementation` does everything you own deterministically and returns `agentContext` describing what it changed or skipped; Nx passes that context to the paired `prompt`, which directs the agent at the user-owned call sites.
+- **Deterministic** (`implementation`) — a codemod with an exact before/after. Runs unattended, including in CI and non-interactive terminals. Use it alone when the change has a shape you can match reliably everywhere it appears.
+- **Agentic** (`prompt`) — a markdown instruction file applied by the user's local coding agent via Nx's agentic `nx migrate` flow. Use it alone when no mechanical before/after holds, because the correct edit depends on what the user has built. When no agent runs (CI, no agent installed, consent declined), Nx surfaces the prompt as manual instructions — so write prompts as self-contained, human-actionable steps.
+- **Hybrid** (`implementation` + `prompt`) — both halves of one change, and usually the right choice. Everything your generators vend is code the user owns and may have modified, so the codemod does as much as it can safely match and returns `agentContext` describing what it changed *and what it skipped*; Nx passes that context to the paired `prompt`, which directs the agent at the rest.
 
 ## Generator Output
 
@@ -55,7 +55,7 @@ It registers the migration in `migrations.json` with the fields for its kind and
 
 ## Implementing a Migration
 
-A deterministic (or hybrid) migration is a function which mutates the virtual filesystem (the `Tree`), returning a [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject):
+A deterministic (or hybrid) migration is a function which mutates the virtual filesystem (the `Tree`), returning a [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject). Here's a hybrid one, which returns both:
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
@@ -65,31 +65,32 @@ export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
+  const agentContext: string[] = [];
 
   // Read and update the files your generators produce here.
 
   await formatFilesInSubtree(tree);
 
-  return { nextSteps };
+  return { nextSteps, agentContext };
 }
 ```
 
 - **`nextSteps`** — workspace-wide notes surfaced to the user after `nx migrate` runs. Use these to report files you skipped (see the guardrails below) or manual follow-up the migration couldn't perform.
 - **`agentContext`** (hybrid only) — a summary of what the codemod changed, passed to the paired `prompt` when it runs under Nx's agentic flow so the agent can focus on the user-owned parts.
 
-For the same operations you use in generators (`generateFiles`, GritQL transforms, reading and updating JSON), refer to the <Link path="/guides/nx-generator">Nx Generator guide</Link>.
+For some example operations you can perform in your migration (generating files, modifying existing files using GritQL, reading and updating JSON), refer to the <Link path="/guides/nx-generator">Nx Generator guide</Link>.
 
 ### Guardrails
 
 Migrations run against workspaces you don't control, so it is recommended to adhere to the following (the scaffolded skeleton bakes these in):
 
-- **Pattern-match before writing.** If a target file has diverged from the shape your generators produce, skip it and report it via `nextSteps` rather than clobbering the user's changes.
+- **Pattern-match before writing.** If a target file has diverged from the shape your generators produce, skip it and report it via `nextSteps`, or consider a hybrid migration, rather than clobbering the user's changes.
 - **Idempotent.** Re-running the migration must be a no-op.
 - **Format what you write.** Finish with `formatFilesInSubtree(tree)` so the files your migration wrote are formatted correctly.
 
 ### Testing Your Migration
 
-The scaffolded `migration.spec.ts` uses `createTreeUsingTsSolutionSetup()` to build a virtual workspace matching the shape our preset generates. Test that the migration takes a workspace from the "before" state to the target state, skips (and reports) customised files, and is idempotent:
+The scaffolded `migration.spec.ts` uses `createTreeUsingTsSolutionSetup()` to build a virtual workspace matching the shape our preset generates. Test that the migration takes a workspace from the "before" state to the target state, skips (and reports) code it doesn't recognise, and is idempotent:
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -117,6 +118,8 @@ describe('my migration', () => {
   });
 });
 ```
+
+Unit tests only prove the migration does what you wrote it to do. Also test it against a workspace generated by the **published** version of your plugin — the state your users upgrade from — and confirm the result matches what your generators produce today: inspect the diff, generate the same projects into a fresh workspace and compare, check the workspace still builds, then re-run the migration to confirm it changes nothing. Repeat with a workspace you've customised first, to check the migration leaves your edits alone and reports them instead.
 
 ## Versioning
 

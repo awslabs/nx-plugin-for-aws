@@ -9,6 +9,7 @@ import {
   updateJson,
   writeJson,
 } from '@nx/devkit';
+import type { PackageJson } from 'nx/src/utils/package-json';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { isEsmWorkspace } from '../../utils/module-format';
 import {
@@ -37,15 +38,20 @@ export const readNxPluginProject = (
   return project;
 };
 
+/** `package.json` field pointing Nx at one of a plugin's manifests. */
+type NxPluginManifestField = 'generators' | 'nx-migrations';
+
 /**
  * Create the plugin project's package.json if absent and point it at the given
- * manifest (eg `generators`, `nx-migrations`), returning its path.
+ * manifest, returning its path.
  */
-export const configureNxPluginPackageJson = (
+export const configureNxPluginPackageJson = <
+  TField extends NxPluginManifestField,
+>(
   tree: Tree,
   project: ProjectConfiguration,
-  manifestField: string,
-  manifestValue: unknown,
+  manifestField: TField,
+  manifestValue: PackageJson[TField],
 ): string => {
   const pluginPackageJsonPath = joinPathFragments(project.root, 'package.json');
   if (!tree.exists(pluginPackageJsonPath)) {

@@ -14,10 +14,11 @@ import { dirname, join } from 'node:path';
 import {
   backfillMigrationVersions,
   type MigrationsJson,
+  readShippedMigrationVersions,
 } from '../packages/nx-plugin/src/utils/migration-versions';
 import {
-  readShippedMigrationVersions,
-  releaseTagsAscending,
+  readReleasedMigrations,
+  releasedVersionsDescending,
   SOURCE_MIGRATIONS_PATH,
 } from './utils/migration-release-tags';
 
@@ -50,8 +51,8 @@ const main = () => {
     readFileSync(SOURCE_MIGRATIONS_PATH, 'utf-8'),
   );
 
-  const tags = releaseTagsAscending();
-  if (tags.length === 0) {
+  const versions = releasedVersionsDescending();
+  if (versions.length === 0) {
     throw new Error(
       'No release tags found — migration versions cannot be backfilled. Fetch tags (git fetch --tags) and retry.',
     );
@@ -61,7 +62,10 @@ const main = () => {
     migrations: backfilledMigrations,
     backfilled,
     moves,
-  } = backfillMigrationVersions(migrations, readShippedMigrationVersions(tags));
+  } = backfillMigrationVersions(
+    migrations,
+    readShippedMigrationVersions(migrations, versions, readReleasedMigrations),
+  );
 
   if (backfilled.length === 0) {
     console.log(

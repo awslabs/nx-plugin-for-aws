@@ -169,20 +169,6 @@ export default defineConfig({
               },
             },
             {
-              label: 'Add to an existing project',
-              link: '/get_started/existing-project',
-              translations: {
-                jp: '既存のプロジェクトに追加',
-                ko: '기존 프로젝트에 추가',
-                fr: 'Ajouter à un projet existant',
-                it: 'Aggiungere a un progetto esistente',
-                es: 'Añadir a un proyecto existente',
-                pt: 'Adicionar a um projeto existente',
-                zh: '添加到现有项目',
-                vi: 'Thêm vào dự án hiện có',
-              },
-            },
-            {
               label: 'Upgrading your workspace',
               link: '/get_started/upgrading',
               translations: {
@@ -194,6 +180,20 @@ export default defineConfig({
                 pt: 'Atualizando seu espaço de trabalho',
                 zh: '升级您的工作区',
                 vi: 'Nâng cấp không gian làm việc',
+              },
+            },
+            {
+              label: 'Add to an existing project',
+              link: '/get_started/existing-project',
+              translations: {
+                jp: '既存のプロジェクトに追加',
+                ko: '기존 프로젝트에 추가',
+                fr: 'Ajouter à un projet existant',
+                it: 'Aggiungere a un progetto esistente',
+                es: 'Añadir a un proyecto existente',
+                pt: 'Adicionar a um projeto existente',
+                zh: '添加到现有项目',
+                vi: 'Thêm vào dự án hiện có',
               },
             },
             {

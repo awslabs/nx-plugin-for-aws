@@ -6,11 +6,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   isValidVersion,
   type MigrationsJson,
+  readShippedMigrationVersions,
   stampMigrationVersions,
 } from '../packages/nx-plugin/src/utils/migration-versions';
 import {
-  readShippedMigrationVersions,
-  releaseTagsAscending,
+  readReleasedMigrations,
+  releasedVersionsDescending,
   SOURCE_MIGRATIONS_PATH,
 } from './utils/migration-release-tags';
 
@@ -20,16 +21,13 @@ import {
  *
  * Entries backfilled into source by the weekly `update-versions` PR keep their
  * version. Anything still unversioned is stamped with the pending release
- * version when one is passed (`--pending-version`), and otherwise with a
- * version just above the latest tag.
+ * version.
  *
- * Runs twice on a release: once in the `package` target with no pending version,
- * then again in the release job once `nx release version` has written the
- * version about to publish into the dist manifests. Stamping always derives from
- * *source* `migrations.json`, so the second run replaces the first's fallback
- * rather than compounding it.
+ * Runs in the release job once `nx release version` has written the version
+ * about to publish into the dist manifests, and stamps from *source*
+ * `migrations.json` so it is safe to re-run.
  *
- * Usage: tsx scripts/stamp-migrations.ts [--pending-version <x.y.z>]
+ * Usage: tsx scripts/stamp-migrations.ts --pending-version <x.y.z>
  */
 
 const DIST_MIGRATIONS_PATH = 'dist/packages/nx-plugin/migrations.json';
@@ -38,14 +36,13 @@ const DIST_MIGRATIONS_PATH = 'dist/packages/nx-plugin/migrations.json';
  * The release the publish is about to make, which the release job reads out of
  * the dist manifest `nx release version` just wrote.
  */
-const readPendingVersion = (argv: string[]): string | undefined => {
+const readPendingVersion = (argv: string[]): string => {
   const index = argv.indexOf('--pending-version');
-  if (index === -1) {
-    return undefined;
-  }
-  const version = argv[index + 1];
+  const version = index === -1 ? undefined : argv[index + 1];
   if (!version || version.startsWith('--')) {
-    throw new Error('--pending-version requires a version argument');
+    throw new Error(
+      'Usage: tsx scripts/stamp-migrations.ts --pending-version <x.y.z>',
+    );
   }
   if (!isValidVersion(version)) {
     throw new Error(`--pending-version is not a valid semver: ${version}`);
@@ -60,18 +57,16 @@ const main = () => {
     readFileSync(SOURCE_MIGRATIONS_PATH, 'utf-8'),
   );
 
-  const tags = releaseTagsAscending();
-  if (tags.length === 0) {
+  const versions = releasedVersionsDescending();
+  if (versions.length === 0) {
     throw new Error(
       'No release tags found — migrations cannot be stamped. Fetch tags (git fetch --tags) and retry.',
     );
   }
 
-  const latestVersion = tags[tags.length - 1].slice(1);
   const stamped = stampMigrationVersions(
     migrations,
-    readShippedMigrationVersions(tags),
-    latestVersion,
+    readShippedMigrationVersions(migrations, versions, readReleasedMigrations),
     pendingVersion,
   );
 
@@ -81,11 +76,7 @@ const main = () => {
     'utf-8',
   );
   console.log(
-    `Stamped ${Object.keys(stamped.generators ?? {}).length} migration(s) into ${DIST_MIGRATIONS_PATH} (${
-      pendingVersion
-        ? `pending release: ${pendingVersion}`
-        : `latest release: ${latestVersion}, no pending release given`
-    })`,
+    `Stamped ${Object.keys(stamped.generators ?? {}).length} migration(s) into ${DIST_MIGRATIONS_PATH} (pending release: ${pendingVersion})`,
   );
 };
 
