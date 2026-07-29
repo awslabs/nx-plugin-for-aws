@@ -146,7 +146,7 @@ import {
 export const echo = publicProcedure
   .input(EchoInputSchema)
   .output(EchoOutputSchema)
-  .query((opts) => ({ result: opts.input.message }));
+  .query((opts) => ({ message: opts.input.message }));
 ```
 
 该文件是 `echo` 方法的实现,通过声明输入输出数据结构实现强类型。
@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -300,19 +301,22 @@ export class GameApi<
    * 将 CORS 限制为提供的来源
    *
    * 将 CloudFront 分发域或来源字符串配置为 API Gateway 预检响应和 AWS
-   * Lambda 集成中唯一允许的 CORS 来源
+   * Lambda 集成中唯一允许的 CORS 来源。CloudFront 分发上配置的任何自定义域名(别名)
+   * 都会自动包含在其默认的 `*.cloudfront.net` 域旁边。
    *
    * @param origins - 授予 CORS 的来源字符串、CloudFront 分发或包含 CloudFront 分发的对象
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
