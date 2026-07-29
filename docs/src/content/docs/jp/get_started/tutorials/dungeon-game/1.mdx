@@ -146,7 +146,7 @@ import {
 export const echo = publicProcedure
   .input(EchoInputSchema)
   .output(EchoOutputSchema)
-  .query((opts) => ({ result: opts.input.message }));
+  .query((opts) => ({ message: opts.input.message }));
 ```
 
 このファイルは`echo`メソッドの実装であり、入力および出力データ構造を宣言することで厳密に型付けされています。
@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -301,19 +302,23 @@ export class GameApi<
    *
    * CloudFrontディストリビューションドメインまたはオリジン文字列を、
    * API Gatewayプリフライトレスポンスおよび
-   * AWS Lambda統合で許可される唯一のCORSオリジンとして設定します。
+   * AWS Lambda統合で許可される唯一のCORSオリジンとして設定します。CloudFront
+   * ディストリビューションに設定されたカスタムドメイン名（エイリアス）は、
+   * デフォルトの`*.cloudfront.net`ドメインと共に自動的に含まれます。
    *
    * @param origins - CORSを許可するオリジン文字列、CloudFrontディストリビューション、またはCloudFrontディストリビューションを含むオブジェクト
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
@@ -476,7 +481,7 @@ _agent = _agent_ctx.__enter__()
 agui_agent = StrandsAgent(
     agent=_agent,
     name="StoryAgent",
-    description="A Agent exposed via the AG-UI protocol.",
+    description="An Agent exposed via the AG-UI protocol.",
 )
 
 

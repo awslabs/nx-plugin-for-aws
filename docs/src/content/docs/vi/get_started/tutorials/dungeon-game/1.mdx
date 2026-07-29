@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -302,19 +303,22 @@ export class GameApi<
    *
    * Cấu hình các domain CloudFront distribution hoặc chuỗi origin
    * là các CORS origin được phép duy nhất trong các phản hồi preflight của API Gateway và các
-   * tích hợp AWS Lambda.
+   * tích hợp AWS Lambda. Bất kỳ tên miền tùy chỉnh (bí danh) nào được cấu hình trên CloudFront
+   * distribution đều được bao gồm tự động cùng với domain `*.cloudfront.net` mặc định của nó.
    *
    * @param origins - Các chuỗi origin, CloudFront distribution, hoặc các đối tượng chứa CloudFront distribution để cấp CORS từ
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
