@@ -181,12 +181,28 @@ export async function formatFilesInSubtree(
 }
 
 /**
- * Format files with Biome in-process, reusing one instance across the batch.
+ * The Biome configuration to format with: the workspace's own `biome.json`, else
+ * the config we vend.
  *
- * The workspace's own `biome.json` still applies: `tree.read` falls through to
- * disk, so a customised config — including path-based `overrides` — formats
- * exactly as the workspace's `format` target would, and unlike shelling out to
- * the CLI this also sees config a generator has just written to the tree.
+ * Read through the tree, which falls back to disk for a file it doesn't hold. So
+ * this resolves the most current config either way — the workspace's on-disk one,
+ * or the version a generator has just written to the tree and not yet flushed,
+ * which shelling out to the CLI could never see.
+ */
+function readBiomeConfig(tree: Tree): unknown {
+  const config = tree.read('biome.json', 'utf-8');
+  if (config) {
+    try {
+      return JSON.parse(config);
+    } catch {
+      // Malformed config — fall through to the config we vend
+    }
+  }
+  return getDefaultBiomeConfig(tree);
+}
+
+/**
+ * Format files with Biome in-process, reusing one instance across the batch.
  *
  * Replaces one `biome format --stdin-file-path` process per file, which
  * dominated generation at ~70ms each: `formatFilesInSubtree` formats every
@@ -203,14 +219,7 @@ function formatWithBiome(
   try {
     const biome = new Biome();
     const { projectKey } = biome.openProject();
-    // The workspace's own config when it has one, else the config we vend.
-    const workspaceConfig = tree.read('biome.json', 'utf-8');
-    biome.applyConfiguration(
-      projectKey,
-      workspaceConfig
-        ? JSON.parse(workspaceConfig)
-        : getDefaultBiomeConfig(tree),
-    );
+    biome.applyConfiguration(projectKey, readBiomeConfig(tree));
 
     for (const file of files) {
       try {

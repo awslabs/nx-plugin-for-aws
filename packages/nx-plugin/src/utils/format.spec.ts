@@ -5,6 +5,7 @@
 
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { FsTree } from 'nx/src/generators/tree';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -379,7 +380,12 @@ describe('format utils', () => {
       rmSync(workspaceDir, { recursive: true, force: true });
     });
     it("should format using the workspace's on-disk biome config", async () => {
-      // Setup - on-disk config with no semicolons and single quotes
+      // Setup - on-disk config with no semicolons and single quotes, read
+      // through a tree that holds no config of its own (as in a real run, where
+      // the tree carries one only when a generator has just written it). The
+      // test helper mirrors the preset by writing biome.json into the tree, so
+      // use a fresh tree here rather than one already carrying that copy.
+      const diskTree = new FsTree(workspaceDir, false);
       writeFileSync(
         path.join(workspaceDir, 'biome.json'),
         JSON.stringify({
@@ -391,13 +397,42 @@ describe('format utils', () => {
           },
         }),
       );
-      tree.write('src/test.ts', 'const x=1;const y="hello";');
+      diskTree.write('src/test.ts', 'const x=1;const y="hello";');
       // Execute
-      await formatFilesInSubtree(tree, 'src');
+      await formatFilesInSubtree(diskTree, 'src');
       // Verify - respects the on-disk config (no semicolons, single quotes)
-      expect(tree.read('src/test.ts')?.toString()).toBe(
+      expect(diskTree.read('src/test.ts')?.toString()).toBe(
         "const x = 1\nconst y = 'hello'\n",
       );
+    });
+
+    it('should prefer a biome config a generator has just written to the tree', async () => {
+      // The on-disk config would produce semicolon-free output, but a generator
+      // has written a newer config to the tree. Formatting must use the newer
+      // one — the state that motivates reading config through the tree.
+      writeFileSync(
+        path.join(workspaceDir, 'biome.json'),
+        JSON.stringify({
+          root: true,
+          javascript: {
+            formatter: { quoteStyle: 'single', semicolons: 'asNeeded' },
+          },
+        }),
+      );
+      tree.write(
+        'biome.json',
+        JSON.stringify({
+          root: true,
+          javascript: {
+            formatter: { quoteStyle: 'double', semicolons: 'always' },
+          },
+        }),
+      );
+      tree.write('src/test.ts', "const y='hello'");
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - the in-tree config wins (double quotes, semicolons)
+      expect(tree.read('src/test.ts')?.toString()).toBe('const y = "hello";\n');
     });
     it('should defer to an on-disk ruff config that omits import sorting', async () => {
       // On-disk ruff config selecting rules that exclude isort (I): the
