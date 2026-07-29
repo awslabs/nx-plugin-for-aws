@@ -9,21 +9,28 @@ import path from 'path';
 /**
  * Rules whose fixes are applied to generated Python.
  *
- * `ruff_wasm`'s `check` serialises every fix without its applicability, and
- * ignores `unsafe-fixes`, so it cannot be asked for only the fixes `ruff check
- * --fix` would apply — taking them all would rewrite `if x == True` to `if x`.
- * Ruff's `fixable` setting filters inside the linter, so naming rules here keeps
- * the decision in ruff rather than reimplementing applicability.
+ * `ruff_wasm`'s `check` serialises every fix without its applicability (the
+ * `Fix::applicability()` it drops is what `ruff check --fix` filters on) and
+ * ignores `unsafe-fixes`, so it cannot be asked for only the fixes the CLI would
+ * apply. Taking them all would rewrite `if x == True` to `if x`.
  *
- * Deliberately narrow rather than an enumeration of every safe fix: 141 rules
- * under the vended selection offer one, and a list that size would silently
- * drift from ruff's applicability on each release — the very thing this must not
- * do. These four cover the import hygiene generation itself creates by merging
- * imports into existing files, which is what generated code needs fixed. Other
- * violations are avoided in the templates and left to the user's own `lint
- * --configuration=fix`, so generation never rewrites code beyond its own doing.
+ * Ruff's `fixable` setting filters inside the linter, which keeps the decision
+ * in ruff — but it selects by *rule*, and applicability is a property of each
+ * *diagnostic*: across ruff's own 1598 lint fixtures, 27 rules under the vended
+ * selection emit both safe and unsafe fixes depending on the code (one `UP008`
+ * is safe, another is unsafe when dropping the arguments would take a comment
+ * with them). So no rule list, allowing or denying, can reproduce `--fix`: for
+ * those 27 it can only take both or neither.
+ *
+ * Given that, the list stays as small as generation needs rather than reaching
+ * for an equivalence it cannot have. These four cover the import hygiene
+ * generation itself creates by merging imports into existing files, and ruff
+ * documents each of their fixes as safe — except F401 in an `__init__.py`, which
+ * is excluded below. Templates are authored free of other violations, so nothing
+ * else needs fixing here, and the user's own `lint --configuration=fix` remains
+ * the full-fidelity path. A test re-checks these against ruff's own docs.
  */
-const FIXABLE_RULES = ['I001', 'F401', 'F811', 'E401'];
+export const FIXABLE_RULES = ['I001', 'F401', 'F811', 'E401'];
 
 /** Escape hatch matching ruff's own fix loop bound. */
 const MAX_FIX_ITERATIONS = 100;

@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { describe, expect, it } from 'vitest';
-import { RUFF_WASM_VERSION, ruffFixAndFormat } from './ruff';
-import { PY_VERSIONS } from './versions';
+import { FIXABLE_RULES, RUFF_WASM_VERSION, ruffFixAndFormat } from './ruff';
+import { PY_VERSIONS, withPyVersions } from './versions';
 
 const require = createRequire(import.meta.url);
 
@@ -26,6 +27,45 @@ describe('ruff wasm version', () => {
     // Guards against the package version and the ruff build inside it diverging.
     const { version } = require('@astral-sh/ruff-wasm-nodejs/package.json');
     expect(version).toBe(RUFF_WASM_VERSION);
+  });
+
+  it('should only make fixable rules whose fix ruff documents as safe', () => {
+    // `fixable` selects by rule, but applicability is per diagnostic: several
+    // rules emit a safe fix for one occurrence and an unsafe one for another, and
+    // for those `fixable` can only take both or neither. Asking ruff itself keeps
+    // FIXABLE_RULES honest if a release changes a fix's safety — the CLI is only
+    // used here, never at generation time.
+    //
+    // F401's fix is safe except in an `__init__.py`, where removing a
+    // third-party import changes the module's interface. That case is excluded
+    // separately (see `isInitPy`), so the exemption is recorded here.
+    const documentedUnsafe: Record<string, string> = {
+      F401: 'unsafe only in `__init__.py`, where F401 is made unfixable',
+    };
+    const [ruff] = withPyVersions(['ruff']);
+    const docs = execFileSync(
+      'uvx',
+      ['--from', ruff, 'ruff', 'rule', '--all', '--output-format', 'json'],
+      { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 },
+    );
+    const byCode = new Map<string, string>(
+      (JSON.parse(docs) as { code: string; explanation: string }[]).map((r) => [
+        r.code,
+        r.explanation,
+      ]),
+    );
+    for (const code of FIXABLE_RULES) {
+      if (code in documentedUnsafe) {
+        continue;
+      }
+      const fixSafety = /##\s*Fix safety([\s\S]*?)(?=\n##|$)/i.exec(
+        byCode.get(code) ?? '',
+      );
+      expect(
+        fixSafety?.[1].toLowerCase().includes('unsafe') ?? false,
+        `${code} documents an unsafe fix, so it cannot be applied by rule`,
+      ).toBe(false);
+    }
   });
 });
 
