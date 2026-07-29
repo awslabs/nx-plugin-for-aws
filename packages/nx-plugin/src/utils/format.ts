@@ -7,17 +7,13 @@ import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
 import {
   type ExecSyncOptionsWithStringEncoding,
-  execFileSync,
   execSync,
 } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
-import { createRequire } from 'module';
 import path from 'path';
 import { uvxCommand } from './py';
 import { readToml } from './toml';
 import { TS_VERSIONS } from './versions';
-
-const require = createRequire(import.meta.url);
 
 /**
  * The biome.json vended into a new workspace. The pnpm catalog resolver is only
@@ -181,67 +177,49 @@ export async function formatFilesInSubtree(
 
   if (otherFiles.length === 0) return;
 
-  // Use the workspace's own Biome CLI (its version and config) when biome.json
-  // exists on disk; otherwise format via the bundled library API with the
-  // in-memory tree config. The CLI path does not see in-tree config changes.
-  if (existsSync(path.join(tree.root, 'biome.json'))) {
-    formatWithBiomeCli(tree, otherFiles);
-  } else {
-    formatWithBiomeApi(tree, otherFiles);
-  }
+  formatWithBiome(tree, otherFiles);
 }
 
 /**
- * Format files via the workspace's Biome CLI, run from the workspace root so it
- * discovers the on-disk biome.json.
+ * The Biome configuration to format with: the workspace's own `biome.json`, else
+ * the config we vend.
+ *
+ * Read through the tree, which falls back to disk for a file it doesn't hold. So
+ * this resolves the most current config either way — the workspace's on-disk one,
+ * or the version a generator has just written to the tree and not yet flushed,
+ * which shelling out to the CLI could never see.
  */
-function formatWithBiomeCli(
-  tree: Tree,
-  files: { path: string; content: Buffer | null }[],
-): void {
-  const biome = getBiomeCommand(tree.root);
-  if (!biome) {
-    // Fall back to the library API if the CLI cannot be resolved
-    formatWithBiomeApi(tree, files);
-    return;
-  }
-
-  for (const file of files) {
+function readBiomeConfig(tree: Tree): unknown {
+  const config = tree.read('biome.json', 'utf-8');
+  if (config) {
     try {
-      const content = execFileSync(
-        biome.command,
-        [...biome.args, 'format', `--stdin-file-path=${file.path}`],
-        {
-          input: file.content?.toString('utf-8') ?? '',
-          encoding: 'utf-8',
-          cwd: tree.root,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        },
-      );
-      tree.write(file.path, content);
+      return JSON.parse(config);
     } catch {
-      // Leave individual files that fail to format untouched
+      // Malformed config — fall through to the config we vend
     }
   }
+  return getDefaultBiomeConfig(tree);
 }
 
 /**
- * Format files via the bundled Biome library API, applying the in-memory tree
- * config.
+ * Format files with Biome in-process, reusing one instance across the batch.
+ *
+ * Replaces one `biome format --stdin-file-path` process per file, which
+ * dominated generation at ~70ms each: `formatFilesInSubtree` formats every
+ * change accumulated in the tree, not only the ones its caller made, so
+ * generators sharing a tree reformat the same files once per call. In-process is
+ * ~0.5ms per file. Output was verified byte-identical across the plugin's whole
+ * source tree, except that the CLI corrupts control characters passed through
+ * stdin (a NUL in a template literal) where formatting in-process preserves them.
  */
-function formatWithBiomeApi(
+function formatWithBiome(
   tree: Tree,
   files: { path: string; content: Buffer | null }[],
 ): void {
   try {
     const biome = new Biome();
     const { projectKey } = biome.openProject();
-    // Apply the workspace biome.json if it exists in the tree, otherwise the defaults.
-    const treeConfig = tree.read('biome.json', 'utf-8');
-    biome.applyConfiguration(
-      projectKey,
-      treeConfig ? JSON.parse(treeConfig) : getDefaultBiomeConfig(tree),
-    );
+    biome.applyConfiguration(projectKey, readBiomeConfig(tree));
 
     for (const file of files) {
       try {
@@ -257,53 +235,6 @@ function formatWithBiomeApi(
     }
   } catch {
     // Silently skip formatting failures
-  }
-}
-
-interface BiomeCommand {
-  command: string;
-  args: string[];
-}
-
-/**
- * Resolve the `@biomejs/biome` CLI from the user's workspace, falling back to a
- * `biome` binary on the PATH.
- */
-const _biomeCommands = new Map<string, BiomeCommand | null>();
-function getBiomeCommand(root: string): BiomeCommand | undefined {
-  if (_biomeCommands.has(root)) {
-    return _biomeCommands.get(root) ?? undefined;
-  }
-
-  // Run via node for cross-platform execution of the bin shim.
-  try {
-    const pkgJsonPath = require.resolve('@biomejs/biome/package.json', {
-      paths: [root, import.meta.dirname],
-    });
-    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-    const binRelative =
-      typeof pkgJson.bin === 'string' ? pkgJson.bin : pkgJson.bin?.biome;
-    if (binRelative) {
-      const binPath = path.join(path.dirname(pkgJsonPath), binRelative);
-      const command = { command: process.execPath, args: [binPath] };
-      _biomeCommands.set(root, command);
-      return command;
-    }
-  } catch {
-    // Fall back to a biome binary on the PATH
-  }
-
-  try {
-    execSync('biome --version', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const command = { command: 'biome', args: [] };
-    _biomeCommands.set(root, command);
-    return command;
-  } catch {
-    _biomeCommands.set(root, null);
-    return undefined;
   }
 }
 
