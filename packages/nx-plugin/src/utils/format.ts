@@ -4,11 +4,10 @@
  */
 
 import { Biome } from '@biomejs/js-api/nodejs';
-import TOML from '@iarna/toml';
 import { getProjects, type Tree } from '@nx/devkit';
 import path from 'path';
 import { type RuffOptions, ruffFixAndFormat } from './ruff';
-import { readToml } from './toml';
+import { tryReadToml } from './toml';
 import { TS_VERSIONS } from './versions';
 
 /**
@@ -249,12 +248,12 @@ function readRuffConfig(tree: Tree, filePath: string): RuffOptions | undefined {
   let dir = path.dirname(filePath);
   while (true) {
     for (const name of ['.ruff.toml', 'ruff.toml']) {
-      const config = parseTreeToml(tree, path.join(dir, name));
+      const config = tryReadToml(tree, path.join(dir, name));
       if (config) {
         return config as RuffOptions;
       }
     }
-    const ruff = (parseTreeToml(tree, path.join(dir, 'pyproject.toml')) as any)
+    const ruff = (tryReadToml(tree, path.join(dir, 'pyproject.toml')) as any)
       ?.tool?.ruff;
     if (ruff) {
       return ruff as RuffOptions;
@@ -264,22 +263,6 @@ function readRuffConfig(tree: Tree, filePath: string): RuffOptions | undefined {
       return undefined;
     }
     dir = path.dirname(dir);
-  }
-}
-
-/**
- * Parse a TOML file from the tree, treating a missing or unparseable file as
- * absent.
- */
-function parseTreeToml(
-  tree: Tree,
-  filePath: string,
-): Record<string, unknown> | undefined {
-  try {
-    const content = tree.read(filePath, 'utf-8');
-    return content ? TOML.parse(content) : undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -344,46 +327,47 @@ function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
   const configs: PythonProjectRuffConfig[] = [];
 
   for (const project of getProjects(tree).values()) {
-    const pyprojectPath = path.join(project.root, 'pyproject.toml');
-    if (tree.exists(pyprojectPath)) {
-      try {
-        const pyproject = readToml(tree, pyprojectPath) as any;
-        const wheelPackages: unknown =
-          pyproject?.tool?.hatch?.build?.targets?.wheel?.packages;
-        // Record the top-level module segment (`pkg/sub` -> `pkg`), which is
-        // all `known-first-party` keys off.
-        const modules = Array.isArray(wheelPackages)
-          ? wheelPackages
-              .filter((pkg): pkg is string => typeof pkg === 'string' && !!pkg)
-              .map((pkg) => pkg.split('/')[0])
-          : [];
-        const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
-        const targetVersion = requiresPythonToRuffTarget(
-          pyproject?.project?.['requires-python'],
-        );
-        const selected: unknown = pyproject?.tool?.ruff?.lint?.select;
-        const select = Array.isArray(selected)
-          ? selected.filter(
-              (rule): rule is string => typeof rule === 'string' && !!rule,
-            )
-          : undefined;
-        if (
-          modules.length ||
-          typeof lineLength === 'number' ||
-          targetVersion ||
-          select?.length
-        ) {
-          configs.push({
-            root: project.root.split(path.sep).join('/'),
-            modules,
-            lineLength: typeof lineLength === 'number' ? lineLength : undefined,
-            targetVersion,
-            select: select?.length ? select : undefined,
-          });
-        }
-      } catch {
-        // Skip projects whose pyproject.toml cannot be parsed
-      }
+    // Projects without a pyproject.toml, or whose one cannot be parsed, have no
+    // ruff settings to contribute.
+    const pyproject = tryReadToml(
+      tree,
+      path.join(project.root, 'pyproject.toml'),
+    ) as any;
+    if (!pyproject) {
+      continue;
+    }
+    const wheelPackages: unknown =
+      pyproject?.tool?.hatch?.build?.targets?.wheel?.packages;
+    // Record the top-level module segment (`pkg/sub` -> `pkg`), which is
+    // all `known-first-party` keys off.
+    const modules = Array.isArray(wheelPackages)
+      ? wheelPackages
+          .filter((pkg): pkg is string => typeof pkg === 'string' && !!pkg)
+          .map((pkg) => pkg.split('/')[0])
+      : [];
+    const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
+    const targetVersion = requiresPythonToRuffTarget(
+      pyproject?.project?.['requires-python'],
+    );
+    const selected: unknown = pyproject?.tool?.ruff?.lint?.select;
+    const select = Array.isArray(selected)
+      ? selected.filter(
+          (rule): rule is string => typeof rule === 'string' && !!rule,
+        )
+      : undefined;
+    if (
+      modules.length ||
+      typeof lineLength === 'number' ||
+      targetVersion ||
+      select?.length
+    ) {
+      configs.push({
+        root: project.root.split(path.sep).join('/'),
+        modules,
+        lineLength: typeof lineLength === 'number' ? lineLength : undefined,
+        targetVersion,
+        select: select?.length ? select : undefined,
+      });
     }
   }
 
