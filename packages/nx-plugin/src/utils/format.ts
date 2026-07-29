@@ -117,6 +117,22 @@ const isTsConfig = (filePath: string): boolean =>
   /(^|\/)tsconfig[^/]*\.json$/.test(filePath);
 
 /**
+ * Matches TanStack Router's `routeTree.gen.ts`. Its vite plugin rewrites the
+ * file in its own (unformatted) shape whenever the config is loaded — including
+ * when Nx computes the project graph — so formatting it here only makes
+ * generation non-idempotent: the file reverts on the next run and the workspace
+ * flips between the two forms.
+ *
+ * Safe to leave: the vended biome config excludes `**\/*.gen.*`, so the
+ * workspace's own `format` target does not check it either.
+ *
+ * Narrow by design — the OpenAPI clients we generate are also `.gen.ts`, but
+ * they are ours to format and nothing else rewrites them.
+ */
+const isRouteTree = (filePath: string): boolean =>
+  /(^|\/)routeTree\.gen\.ts$/.test(filePath);
+
+/**
  * Format files in the given directory within the tree.
  * Handles both TypeScript/JavaScript/JSON (via biome) and Python (via ruff) files.
  * See https://github.com/nrwl/nx/blob/4cd640a9187954505d12de5b6d76a90d8ce4c2eb/packages/devkit/src/generators/format-files.ts#L11
@@ -139,7 +155,8 @@ export async function formatFilesInSubtree(
       // so formatting them at generation would only diverge from the form
       // written on later runs. Leave them as updateJson/writeJson emit them so
       // repeated generation stays idempotent.
-      !isTsConfig(file.path),
+      !isTsConfig(file.path) &&
+      !isRouteTree(file.path),
   );
 
   // Resolve each project's ruff settings (module names, line-length) so files

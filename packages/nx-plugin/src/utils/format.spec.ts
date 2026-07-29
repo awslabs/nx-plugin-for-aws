@@ -138,6 +138,23 @@ describe('format utils', () => {
       // Verify
       expect(tree.exists('src/test.ts')).toBe(false);
     });
+    it("should leave routeTree.gen.ts in TanStack Router's own shape", async () => {
+      // TanStack's vite plugin rewrites this file unformatted whenever the
+      // config is loaded, so formatting it makes generation non-idempotent — the
+      // file reverts on the next run. The vended biome config excludes
+      // `**/*.gen.*`, so the workspace's format target doesn't check it either.
+      // Other `.gen.ts` files (e.g. our OpenAPI clients) are ours to format.
+      const tanstackShape = "import { Route } from './routes/__root'\n";
+      tree.write('src/routeTree.gen.ts', tanstackShape);
+      tree.write('src/client.gen.ts', tanstackShape);
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify
+      expect(tree.read('src/routeTree.gen.ts')?.toString()).toBe(tanstackShape);
+      expect(tree.read('src/client.gen.ts')?.toString()).toBe(
+        "import { Route } from './routes/__root';\n",
+      );
+    });
     it('should format all changed files when no directory is given', async () => {
       // Setup
       tree.write('src/test.ts', 'const x=1;');
