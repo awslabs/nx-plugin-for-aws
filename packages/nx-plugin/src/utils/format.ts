@@ -4,14 +4,10 @@
  */
 
 import { Biome } from '@biomejs/js-api/nodejs';
+import TOML from '@iarna/toml';
 import { getProjects, type Tree } from '@nx/devkit';
-import {
-  type ExecSyncOptionsWithStringEncoding,
-  execSync,
-} from 'child_process';
-import { existsSync, readFileSync } from 'fs';
 import path from 'path';
-import { uvxCommand } from './py';
+import { type RuffOptions, ruffFixAndFormat } from './ruff';
 import { readToml } from './toml';
 import { TS_VERSIONS } from './versions';
 
@@ -153,21 +149,16 @@ export async function formatFilesInSubtree(
     ? getPythonProjectRuffConfigs(tree)
     : [];
 
-  // Run ruff from the workspace root so it resolves the same on-disk config
-  // hasRuffConfigOnDisk probed for. An in-memory tree has no root on disk, in
-  // which case there is no config to find and the process cwd is left alone.
-  const ruffCwd =
-    pyFiles.length && existsSync(tree.root) ? tree.root : undefined;
-
   // Format Python files with ruff (lint fixes + formatting)
   for (const file of pyFiles) {
     try {
       const content = ruffFixAndFormat(
         file.content.toString('utf-8'),
         file.path,
-        hasRuffConfigOnDisk(tree, file.path),
-        ruffCwd,
-        getOwningProjectRuffConfig(file.path, pythonProjectConfigs),
+        resolveRuffOptions(
+          readRuffConfig(tree, file.path),
+          getOwningProjectRuffConfig(file.path, pythonProjectConfigs),
+        ),
       );
       tree.write(file.path, content);
     } catch {
@@ -239,63 +230,56 @@ function formatWithBiome(
 }
 
 /**
- * Find the ruff command: `uvx --from ruff==<version> ruff`. uvx works
- * regardless of workspace resolution state (unlike `uv run ruff`, which fails
- * while installs are deferred), and the version pin matches the project's
- * `format` target (PY_VERSIONS) so generation and check format identically.
- * Only a successful probe is cached — ruff can become available mid-run in the
- * long-lived Nx daemon, so a cached failure would skip formatting thereafter.
+ * Read the ruff config for a file, by walking from its directory up to the
+ * workspace root looking for `.ruff.toml`, `ruff.toml`, or a `pyproject.toml`
+ * with a `[tool.ruff]` section — the same files, in the same order, that ruff
+ * itself resolves. The walk stops at the workspace root so a stray config in a
+ * parent of the workspace (or the home directory) is never treated as the
+ * project's.
+ *
+ * The settings are read rather than merely detected because formatting runs
+ * in-process against tree content, so ruff never sees the file's location and
+ * cannot resolve the config itself (see {@link resolveRuffOptions}).
+ *
+ * Reads go through the tree, which falls through to disk for files this run has
+ * not touched, so a config the generator has just written in memory is picked up
+ * as well as one already on disk.
  */
-let _ruffCommand: string | undefined;
-function getRuffCommand(): string | undefined {
-  if (_ruffCommand) {
-    return _ruffCommand;
-  }
-  const cmd = uvxCommand('ruff');
-  try {
-    execSync(`${cmd} --version`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    _ruffCommand = cmd;
-    return cmd;
-  } catch {
-    return undefined;
+function readRuffConfig(tree: Tree, filePath: string): RuffOptions | undefined {
+  let dir = path.dirname(filePath);
+  while (true) {
+    for (const name of ['.ruff.toml', 'ruff.toml']) {
+      const config = parseTreeToml(tree, path.join(dir, name));
+      if (config) {
+        return config as RuffOptions;
+      }
+    }
+    const ruff = (parseTreeToml(tree, path.join(dir, 'pyproject.toml')) as any)
+      ?.tool?.ruff;
+    if (ruff) {
+      return ruff as RuffOptions;
+    }
+    // Stop once the workspace root ('.') has been checked.
+    if (dir === '.' || dir === '' || dir === path.dirname(dir)) {
+      return undefined;
+    }
+    dir = path.dirname(dir);
   }
 }
 
 /**
- * Whether ruff would discover a config on disk for a file, by walking from its
- * directory up to the workspace root looking for `.ruff.toml`, `ruff.toml`, or a
- * `pyproject.toml` with a `[tool.ruff]` section — the same files ruff itself
- * resolves. The walk stops at `tree.root` so a stray config in a parent of the
- * workspace (or the home directory) is never treated as the project's. Used to
- * decide whether to nudge ruff towards import sorting (see
- * {@link ruffFixAndFormat}).
+ * Parse a TOML file from the tree, treating a missing or unparseable file as
+ * absent.
  */
-function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
-  const root = path.resolve(tree.root);
-  let dir = path.resolve(root, path.dirname(filePath));
-  while (true) {
-    if (
-      existsSync(path.join(dir, '.ruff.toml')) ||
-      existsSync(path.join(dir, 'ruff.toml'))
-    ) {
-      return true;
-    }
-    const pyproject = path.join(dir, 'pyproject.toml');
-    if (
-      existsSync(pyproject) &&
-      readFileSync(pyproject, 'utf-8').includes('[tool.ruff')
-    ) {
-      return true;
-    }
-    const parent = path.dirname(dir);
-    // Stop once the workspace root has been checked (or we hit the FS root).
-    if (dir === root || parent === dir) {
-      return false;
-    }
-    dir = parent;
+function parseTreeToml(
+  tree: Tree,
+  filePath: string,
+): Record<string, unknown> | undefined {
+  try {
+    const content = tree.read(filePath, 'utf-8');
+    return content ? TOML.parse(content) : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -431,94 +415,51 @@ function getOwningProjectRuffConfig(
 }
 
 /**
- * Run ruff check --fix and ruff format on Python file content via stdin.
- * Applies all configured lint fixes (including import sorting) and formatting.
+ * Resolve the ruff settings to format a Python file with, mirroring what the
+ * file's build enforces.
  *
- * When no ruff config exists on disk (`hasConfig` false) ruff would fall back to
- * its own defaults, which change between releases — 0.16 widened them from `E`
- * and `F` to 36 rule prefixes — so generation would apply fixes the project's
- * build never asks for (eg `RUF022` reordering `__all__`). Instead run
- * `--isolated` with the project's own `lint.select` pinned, so generation
- * enforces exactly what `lint` does and nothing more. `--isolated` also stops
- * ruff walking above the workspace to a stray config on the host.
+ * Ruff's own config discovery never runs: settings are passed to the linter
+ * directly rather than resolved from the file's location, which it never sees.
+ * That also means a stray config above the workspace (or in the home directory)
+ * can never be picked up.
  *
- * When a config does exist we defer to it entirely, honouring the user's rule
- * selection, and run from `tree.root` so ruff discovers it.
+ * `config` is the file's nearest ruff config, whose rule selection is honoured
+ * as-is. Without one, ruff would fall back to its own defaults, which change
+ * between releases — 0.16 widened them from `E` and `F` to 36 rule prefixes — so
+ * generation would apply fixes the project's build never asks for (eg `RUF022`
+ * reordering `__all__`). Instead the project's own `lint.select` is pinned, so
+ * generation enforces exactly what `lint` does and nothing more.
  *
- * `projectConfig` carries the owning project's ruff settings, which ruff cannot
- * detect from the filesystem during generation because the project lives only
- * in the tree. We pass them via `--config` so in-tree formatting matches the
- * on-disk build: `known-first-party` (the project's own modules) keeps its
- * imports in their own group, and `line-length` keeps wrapping consistent (the
- * generated config raises it above ruff's default of 88). These are additive to
- * any on-disk config, so they are safe to pass regardless of `hasConfig`.
+ * `projectConfig` layers on the settings derived from the owning project rather
+ * than declared under `[tool.ruff]`: `known-first-party` (the project's own
+ * modules, from its wheel packages) keeps its imports in their own group, and
+ * `target-version` (from its `requires-python`) matches the formatting the build
+ * produces.
  */
-function ruffFixAndFormat(
-  content: string,
-  filePath: string,
-  hasConfig: boolean,
-  cwd: string | undefined,
+function resolveRuffOptions(
+  config: RuffOptions | undefined,
   projectConfig?: PythonProjectRuffConfig,
-): string {
-  const ruff = getRuffCommand();
-  if (!ruff) return content;
-
-  const configArgs: string[] = [];
+): RuffOptions {
+  const lint: Record<string, unknown> = { ...config?.lint };
   // Pin the rule selection only when deferring to ruff's defaults would
   // otherwise apply rules the project's build does not enforce.
-  const isolated = !hasConfig;
-  if (isolated) {
-    configArgs.push(
-      `lint.select = ${JSON.stringify(projectConfig?.select ?? DEFAULT_RUFF_SELECT)}`,
-    );
+  if (!config) {
+    lint.select = projectConfig?.select ?? DEFAULT_RUFF_SELECT;
   }
   if (projectConfig?.modules.length) {
-    configArgs.push(
-      `lint.isort.known-first-party = ${JSON.stringify(projectConfig.modules)}`,
-    );
+    lint.isort = {
+      ...(lint.isort as object | undefined),
+      'known-first-party': projectConfig.modules,
+    };
   }
-  if (typeof projectConfig?.lineLength === 'number') {
-    configArgs.push(`line-length = ${projectConfig.lineLength}`);
-  }
-  if (projectConfig?.targetVersion) {
-    configArgs.push(`target-version = "${projectConfig.targetVersion}"`);
-  }
-  const config = configArgs
-    .map((arg) => ` --config ${JSON.stringify(arg)}`)
-    .join('');
-  const flags = `${isolated ? ' --isolated' : ''}${config}`;
-  // Built per invocation: `input` carries the content the previous step emitted.
-  const options = (input: string): ExecSyncOptionsWithStringEncoding => ({
-    input,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    ...(cwd ? { cwd } : {}),
-  });
-
-  // First apply lint fixes (import sorting, unused imports, etc.)
-  try {
-    const result = execSync(
-      `${ruff} check --fix${flags} --stdin-filename ${filePath} -`,
-      options(content),
-    );
-    content = result;
-  } catch (e: any) {
-    // ruff check exits non-zero when it finds unfixable issues,
-    // but stdout still contains the fixed content
-    if (e.stdout) {
-      content = e.stdout;
-    }
-  }
-
-  // Then apply formatting
-  try {
-    content = execSync(
-      `${ruff} format${flags} --stdin-filename ${filePath} -`,
-      options(content),
-    );
-  } catch {
-    // Fall through with whatever content we have
-  }
-
-  return content;
+  return {
+    ...config,
+    ...(typeof projectConfig?.lineLength === 'number'
+      ? { 'line-length': projectConfig.lineLength }
+      : {}),
+    ...(projectConfig?.targetVersion
+      ? { 'target-version': projectConfig.targetVersion }
+      : {}),
+    lint,
+  };
 }

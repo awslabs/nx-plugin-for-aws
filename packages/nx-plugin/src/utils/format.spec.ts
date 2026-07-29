@@ -353,6 +353,30 @@ describe('format utils', () => {
         'except ValueError, KeyError:',
       );
     });
+    it('should apply a ruff config written into the tree by the same run', async () => {
+      // A generator that writes both a ruff config and Python files in one run
+      // must format those files with the config it just wrote, which is only
+      // visible in the tree. Here the config omits isort, so imports are left
+      // alone rather than sorted.
+      tree.write(
+        'packages/my_lib/ruff.toml',
+        ['[lint]', 'select = ["E", "F"]', ''].join('\n'),
+      );
+      const unsorted = [
+        'from .b import beta',
+        'from .a import alpha',
+        '',
+        'x = beta, alpha',
+        '',
+      ].join('\n');
+      tree.write('packages/my_lib/my_lib/main.py', unsorted);
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - the in-tree config is honoured, so imports stay unsorted
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        unsorted,
+      );
+    });
     it('should format json and css files', async () => {
       // Setup
       tree.write('src/data.json', '{"a":1,"b":2}');
