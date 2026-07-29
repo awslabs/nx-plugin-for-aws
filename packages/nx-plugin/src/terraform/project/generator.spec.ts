@@ -137,6 +137,22 @@ describe('terraformProjectGenerator', () => {
       expect(bootstrapTarget.options.cwd).toBe('{workspaceRoot}');
     });
 
+    it('should import an existing state bucket when its state object is missing', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const bootstrapScript = tree.read(
+        'packages/my-terraform-project/scripts/bootstrap.ts',
+        'utf-8',
+      );
+
+      // Without the import, a surviving bucket whose state object was lost
+      // wedges bootstrap on a permanent BucketAlreadyOwnedByYou.
+      expect(bootstrapScript).toContain('HeadBucketCommand');
+      expect(bootstrapScript).toContain("'import'");
+      expect(bootstrapScript).toContain("'aws_s3_bucket.terraform_state'");
+      expect(bootstrapScript).toMatch(/!haveState\s*&&/);
+    });
+
     it('should configure plan target correctly', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
