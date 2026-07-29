@@ -27,3 +27,18 @@ export const readToml = (tree: Tree, filePath: string): TOML.JsonMap => {
   }
   return TOML.parse(tree.read(filePath, 'utf-8'));
 };
+
+/**
+ * Read a toml file, treating one that is missing or cannot be parsed as absent.
+ * For callers that probe for optional configuration rather than requiring it.
+ */
+export const tryReadToml = (
+  tree: Tree,
+  filePath: string,
+): TOML.JsonMap | undefined => {
+  try {
+    return readToml(tree, filePath);
+  } catch {
+    return undefined;
+  }
+};
