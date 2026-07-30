@@ -128,6 +128,18 @@ describe('ownedDependencies', () => {
 const ADDS_DEPENDENCIES =
   /withVersions\(|withPyVersions\(|addDependenciesToPyProjectToml\(|addDependenciesToDependencyGroupInPyProjectToml\(/;
 
+/** Calls that record a generator against a project, making its deps discoverable. */
+const RECORDS_METADATA =
+  /addGeneratorMetadata\(|addComponentGeneratorMetadata\(|metadata: \{/;
+
+/**
+ * Generators discovered through something they delegate to instead of their own
+ * metadata: `preset` marks the workspace via `aws-nx-plugin.config.mts`, which
+ * stands in for `init` (whose declaration therefore carries `husky`), and
+ * `ts#dcr-proxy` creates its project through `ts#project`.
+ */
+const DISCOVERED_INDIRECTLY = new Set(['preset', 'ts#dcr-proxy']);
+
 describe('declaration coverage', () => {
   // A generator that adds vended dependencies must declare them, or the version
   // sync would leave them behind. Generators that add none need no declaration.
@@ -143,6 +155,25 @@ describe('declaration coverage', () => {
     }
 
     expect(undeclared).toEqual([]);
+  });
+
+  // Declaring is not enough: the generator must also record itself against a
+  // project, or `ownedDependencies` never discovers it and the deps it added are
+  // silently left behind.
+  it('should have every generator that adds dependencies record metadata', async () => {
+    const unrecorded: string[] = [];
+    for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
+      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
+      if (
+        ADDS_DEPENDENCIES.test(source) &&
+        !RECORDS_METADATA.test(source) &&
+        !DISCOVERED_INDIRECTLY.has(info.id)
+      ) {
+        unrecorded.push(info.id);
+      }
+    }
+
+    expect(unrecorded).toEqual([]);
   });
 
   it('should declare only packages the plugin vends', async () => {

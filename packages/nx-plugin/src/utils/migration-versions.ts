@@ -112,15 +112,23 @@ export const stampMigrationVersions = (
 ): MigrationsJson => ({
   ...migrations,
   generators: Object.fromEntries(
-    Object.entries(migrations.generators ?? {}).map(([name, entry]) => {
-      // Source-only marker, stripped from what nx reads.
-      const { everyMigration, version: sourceVersion, ...published } = entry;
-      // Overrides any source version so it stays ahead of what is installed.
-      const version = everyMigration
-        ? pendingVersion
-        : (sourceVersion ?? shippedVersions[name] ?? pendingVersion);
-      return [name, { version, ...published }];
-    }),
+    // `nx migrate` sorts the run ascending by version and preserves the
+    // manifest's order among equal versions, so emitting the every-migration
+    // entries last is what makes them run after the release's own migrations.
+    Object.entries(migrations.generators ?? {})
+      .sort(
+        ([, a], [, b]) =>
+          Number(a.everyMigration ?? false) - Number(b.everyMigration ?? false),
+      )
+      .map(([name, entry]) => {
+        // Source-only marker, stripped from what nx reads.
+        const { everyMigration, version: sourceVersion, ...published } = entry;
+        // Overrides any source version so it stays ahead of what is installed.
+        const version = everyMigration
+          ? pendingVersion
+          : (sourceVersion ?? shippedVersions[name] ?? pendingVersion);
+        return [name, { version, ...published }];
+      }),
   ),
   ...(migrations.packageJsonUpdates && {
     packageJsonUpdates: stampPackageJsonUpdates(

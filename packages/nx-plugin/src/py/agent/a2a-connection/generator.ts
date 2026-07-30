@@ -33,11 +33,13 @@ import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
@@ -241,6 +243,15 @@ export const pyAgentA2aConnectionGenerator = async (
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_AGENT_A2A_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, agentFilePath),
+    targetAgentClassName,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_AGENT_A2A_CONNECTION_GENERATOR_INFO,

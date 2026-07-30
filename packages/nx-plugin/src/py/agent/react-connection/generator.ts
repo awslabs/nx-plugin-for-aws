@@ -25,12 +25,14 @@ import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { sortObjectKeys } from '../../../utils/object';
+import { toProjectRelativePath } from '../../../utils/paths';
 import {
   addPyAgentTargetToLocalDev,
   openApiClientLocalDevDeps,
@@ -173,6 +175,28 @@ export const pyAgentReactConnectionGenerator = async (
       targetComponent,
       additionalDependencyTargets: additionalLocalDevDeps,
     },
+  );
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    frontendProjectConfig.name,
+    PY_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      protocol === 'ag-ui'
+        ? joinPathFragments(
+            frontendProjectConfig.sourceRoot,
+            'hooks',
+            `useAgui${agentNameClassName}`,
+          )
+        : joinPathFragments(
+            frontendProjectConfig.sourceRoot,
+            'components',
+            `${agentNameClassName}Provider`,
+          ),
+    ),
+    agentNameClassName,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { joinPathFragments, type Tree } from '@nx/devkit';
 import {
   addOpenApiReactClient,
   OPEN_API_REACT_DEPENDENCIES,
@@ -11,11 +11,14 @@ import { declareDependencies } from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { toClassName } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import { addOpenApiGeneration } from './open-api';
 import type { FastApiReactGeneratorSchema } from './schema';
 
@@ -63,6 +66,24 @@ export const fastApiReactGenerator = async (
       port,
     },
     DECLARED_DEPENDENCIES,
+  );
+
+  const apiNameClassName = toClassName(apiName);
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    frontendProjectConfig.name,
+    FAST_API_REACT_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        `${apiNameClassName}Provider`,
+      ),
+    ),
+    apiNameClassName,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [FAST_API_REACT_GENERATOR_INFO]);

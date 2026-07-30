@@ -18,11 +18,14 @@ import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { toClassName } from '../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
+import { toProjectRelativePath } from '../../utils/paths';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
 import type { SmithyReactConnectionGeneratorSchema } from './schema';
@@ -92,6 +95,24 @@ export const smithyReactConnectionGenerator = async (
       port,
     },
     DECLARED_DEPENDENCIES,
+  );
+
+  const apiNameClassName = toClassName(apiName);
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    frontendProjectConfig.name,
+    SMITHY_REACT_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        `${apiNameClassName}Provider`,
+      ),
+    ),
+    apiNameClassName,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

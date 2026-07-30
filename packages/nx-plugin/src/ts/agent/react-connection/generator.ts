@@ -19,11 +19,13 @@ import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import { withVersions } from '../../../utils/versions';
 import {
   DECLARED_DEPENDENCIES as AGUI_DECLARED_DEPENDENCIES,
@@ -102,6 +104,22 @@ export async function tsAgentReactConnectionGenerator(
         port: agentPort,
         targetComponent,
       },
+    );
+
+    // Recorded so the version sync knows this connection's dependencies are ours.
+    addComponentGeneratorMetadata(
+      tree,
+      frontendProjectConfig.name,
+      TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+      toProjectRelativePath(
+        frontendProjectConfig,
+        joinPathFragments(
+          frontendProjectConfig.sourceRoot,
+          'hooks',
+          `useAgui${agentNameClassName}`,
+        ),
+      ),
+      agentNameClassName,
     );
 
     await addGeneratorMetricsIfApplicable(tree, [
@@ -246,6 +264,22 @@ export async function tsAgentReactConnectionGenerator(
     ]),
     withVersions(DECLARED_DEPENDENCIES, ['@smithy/types']),
     joinPathFragments(frontendProjectConfig.root, 'package.json'),
+  );
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    frontendProjectConfig.name,
+    TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        clientProviderName,
+      ),
+    ),
+    agentNameClassName,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

@@ -11,8 +11,10 @@ import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
 import type { InitGeneratorSchema } from './schema';
 
+// `husky` comes from the preset, which is discovered as init: both mark the
+// workspace by writing aws-nx-plugin.config.mts, and only init has an id there.
 export const DECLARED_DEPENDENCIES = declareDependencies({
-  ts: [...INIT_DEPENDENCIES],
+  ts: ['husky', ...INIT_DEPENDENCIES],
 });
 
 export const INIT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

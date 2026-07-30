@@ -171,6 +171,29 @@ describe('migration versions', () => {
       );
     });
 
+    it('should emit every-migration entries last so they run after the rest', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'sync-vended-versions': {
+              description: 'runs every migration',
+              everyMigration: true,
+            },
+            'latest-code-change': { description: 'a code migration' },
+          },
+        },
+        {},
+        '1.3.0',
+      );
+
+      // Every entry carries the pending version here, and `nx migrate` keeps the
+      // manifest's order among equal versions — so order is the only lever.
+      expect(Object.keys(stamped.generators ?? {})).toEqual([
+        'latest-code-change',
+        'sync-vended-versions',
+      ]);
+    });
+
     it('should strip the source-only everyMigration flag', () => {
       const stamped = stampMigrationVersions(
         {

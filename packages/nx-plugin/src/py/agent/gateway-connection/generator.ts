@@ -29,11 +29,13 @@ import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
@@ -212,6 +214,15 @@ export const pyAgentGatewayConnectionGenerator = async (
   if (projectConfigChanged) {
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, agentFilePath),
+    gatewayClassName,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,

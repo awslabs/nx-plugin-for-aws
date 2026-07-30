@@ -30,11 +30,13 @@ import { esmVars } from '../../../utils/module-format';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import { withVersions } from '../../../utils/versions';
 import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
 
@@ -212,6 +214,15 @@ export const tsAgentA2aConnectionGenerator = async (
       'zod',
     ]),
     {},
+  );
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    TS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, agentFilePath),
+    targetAgentClassName,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

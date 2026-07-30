@@ -18,10 +18,12 @@ import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName } from '../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
+import { toProjectRelativePath } from '../../utils/paths';
 import { withVersions } from '../../utils/versions';
 import type { ReactGeneratorSchema } from './schema';
 
@@ -186,6 +188,22 @@ export async function reactGenerator(
       ...((isRestApi ? ['@types/event-source-polyfill'] : []) as any),
     ]),
     joinPathFragments(frontendProjectConfig.root, 'package.json'),
+  );
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    frontendProjectConfig.name,
+    TRPC_REACT_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        clientProviderName,
+      ),
+    ),
+    apiNameClassName,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);
