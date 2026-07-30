@@ -151,17 +151,17 @@ describe('migration versions', () => {
       });
     });
 
-    it('should re-stamp an every-release migration with the pending version', () => {
+    it('should re-stamp an every-migration migration with the pending version', () => {
       const stamped = stampMigrationVersions(
         {
           generators: {
             'sync-metrics-version': {
               description: 'runs every release',
-              everyRelease: true,
+              everyMigration: true,
             },
           },
         },
-        // Already shipped, and carrying a source version — an every-release
+        // Already shipped, and carrying a source version — an every-migration
         // entry must ignore both, or it would never run again.
         { 'sync-metrics-version': '1.1.0' },
         '1.3.0',
@@ -171,14 +171,14 @@ describe('migration versions', () => {
       );
     });
 
-    it('should strip the source-only everyRelease flag', () => {
+    it('should strip the source-only everyMigration flag', () => {
       const stamped = stampMigrationVersions(
         {
           generators: {
             'sync-metrics-version': {
               description: 'runs every release',
               implementation: './x',
-              everyRelease: true,
+              everyMigration: true,
             },
           },
         },
@@ -344,15 +344,14 @@ describe('migration versions', () => {
       });
     });
 
-    it('should never claim an every-release migration for a release', () => {
+    it('should never claim an every-migration migration for a release', () => {
       const { migrations, backfilled, moves } = backfillMigrationVersions(
         {
           generators: {
             'sync-metrics-version': {
               description: 'runs every release',
-              implementation:
-                './src/utils/version-upgrade-migration/metrics-migration',
-              everyRelease: true,
+              implementation: './src/utils/version-upgrade-migration/migration',
+              everyMigration: true,
             },
           },
         },
@@ -362,9 +361,8 @@ describe('migration versions', () => {
       );
       expect(migrations.generators?.['sync-metrics-version']).toEqual({
         description: 'runs every release',
-        implementation:
-          './src/utils/version-upgrade-migration/metrics-migration',
-        everyRelease: true,
+        implementation: './src/utils/version-upgrade-migration/migration',
+        everyMigration: true,
       });
       expect(backfilled).toEqual([]);
       expect(moves).toEqual([]);

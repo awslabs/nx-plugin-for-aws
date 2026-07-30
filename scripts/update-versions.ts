@@ -22,7 +22,7 @@ import { execSync } from 'child_process';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
-import { registerSyncVersionsMigration } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
+import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
   parsePipRequirementsLine,
   ProjectNameRequirement,
@@ -413,7 +413,7 @@ const main = async () => {
     const updatedShadcnTemplateFiles = refreshShadcnTemplates(tree, tmpDir);
 
     // Ship the bumps to existing workspaces.
-    const migrationFiles = registerSyncVersionsMigration(
+    const migrationFiles = registerNxPackageUpdates(
       tree,
       tsChanges.some((change) => isNxPackage(change.name)),
     );

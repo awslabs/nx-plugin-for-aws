@@ -23,14 +23,14 @@ import { compare, valid } from 'semver';
  *
  * A version already in source always wins, so backfilled entries are stable.
  *
- * An entry marked `everyRelease: true` is never backfilled or pinned, and is
+ * An entry marked `everyMigration: true` is never backfilled or pinned, and is
  * re-stamped with each pending version, so it runs on every upgrade.
  */
 
 export interface MigrationsJson {
   generators?: Record<
     string,
-    { version?: string; everyRelease?: boolean } & Record<string, unknown>
+    { version?: string; everyMigration?: boolean } & Record<string, unknown>
   >;
   /**
    * Declarative dependency bumps `nx migrate` applies to the root manifest.
@@ -114,9 +114,9 @@ export const stampMigrationVersions = (
   generators: Object.fromEntries(
     Object.entries(migrations.generators ?? {}).map(([name, entry]) => {
       // Source-only marker, stripped from what nx reads.
-      const { everyRelease, version: sourceVersion, ...published } = entry;
+      const { everyMigration, version: sourceVersion, ...published } = entry;
       // Overrides any source version so it stays ahead of what is installed.
-      const version = everyRelease
+      const version = everyMigration
         ? pendingVersion
         : (sourceVersion ?? shippedVersions[name] ?? pendingVersion);
       return [name, { version, ...published }];
@@ -208,8 +208,8 @@ export const backfillMigrationVersions = (
 
   for (const [key, entry] of Object.entries(migrations.generators ?? {})) {
     const version = shippedVersions[key];
-    // Pinning an every-release entry would stop it running on later upgrades.
-    if (entry.version || !version || entry.everyRelease) {
+    // Pinning an every-migration entry would stop it running on later upgrades.
+    if (entry.version || !version || entry.everyMigration) {
       generators[key] = entry;
       continue;
     }

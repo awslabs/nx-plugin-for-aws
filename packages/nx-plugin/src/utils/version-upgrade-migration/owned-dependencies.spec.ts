@@ -124,6 +124,10 @@ describe('ownedDependencies', () => {
   });
 });
 
+/** Calls that add a vended dependency, and so require a declaration. */
+const ADDS_DEPENDENCIES =
+  /withVersions\(|withPyVersions\(|addDependenciesToPyProjectToml\(|addDependenciesToDependencyGroupInPyProjectToml\(/;
+
 describe('declaration coverage', () => {
   // A generator that adds vended dependencies must declare them, or the version
   // sync would leave them behind. Generators that add none need no declaration.
@@ -131,7 +135,7 @@ describe('declaration coverage', () => {
     const undeclared: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
       const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
-      const addsDependencies = /withVersions\(|withPyVersions\(/.test(source);
+      const addsDependencies = ADDS_DEPENDENCIES.test(source);
       const module = await import(`${info.resolvedFactoryPath}.js`);
       if (addsDependencies && !module.DECLARED_DEPENDENCIES) {
         undeclared.push(info.id);
