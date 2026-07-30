@@ -80,7 +80,7 @@ const main = async () => {
     }
   } catch (err: any) {
     const name = err?.name ?? '';
-    const status = err?.\$metadata?.httpStatusCode;
+    const status = err?.$metadata?.httpStatusCode;
     const firstRun =
       name === 'NoSuchBucket' ||
       name === 'NoSuchKey' ||

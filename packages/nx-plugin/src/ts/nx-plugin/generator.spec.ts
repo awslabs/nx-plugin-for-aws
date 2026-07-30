@@ -3,13 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
 import { TS_NX_PLUGIN_GENERATOR_INFO, tsNxPluginGenerator } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('ts#nx-plugin generator', () => {
   let tree: Tree;
@@ -172,7 +180,11 @@ describe('ts#nx-plugin generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await tsNxPluginGenerator(tree, { name: 'my-plugin' });
 

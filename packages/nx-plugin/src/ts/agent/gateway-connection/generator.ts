@@ -12,12 +12,14 @@ import {
 } from '@nx/devkit';
 import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generator';
 import {
+  AGENT_CONNECTION_DEPENDENCIES,
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
@@ -33,6 +35,18 @@ import {
 } from '../../../utils/nx';
 import { withVersions } from '../../../utils/versions';
 import type { TsAgentGatewayConnectionGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@modelcontextprotocol/sdk',
+    '@strands-agents/sdk',
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+    'aws4fetch',
+    '@aws-sdk/credential-providers',
+    ...AGENT_CONNECTION_DEPENDENCIES,
+  ],
+});
 
 export const TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -84,8 +98,8 @@ export const tsAgentGatewayConnectionGenerator = async (
 
   // 1. Ensure the shared agent-connection project exists + has the gateway
   //    core client template.
-  await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'gateway');
+  await ensureTypeScriptAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
+  await addTypeScriptCoreClient(tree, 'gateway', DECLARED_DEPENDENCIES);
 
   // 2. Generate the per-connection <Gateway>Client into app/. Local mode
   //    points at the gateway project's local gateway port.
@@ -163,7 +177,7 @@ export const tsAgentGatewayConnectionGenerator = async (
   // 5. Dependencies
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@modelcontextprotocol/sdk',
       '@strands-agents/sdk',
       '@aws-lambda-powertools/parameters',

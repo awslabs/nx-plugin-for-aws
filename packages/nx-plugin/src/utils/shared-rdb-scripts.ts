@@ -8,13 +8,25 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import type {
+  DependencyDeclaration,
+  MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
-import { type ITsDepVersion, withVersions } from './versions';
+import { withVersions } from './versions';
+
+/** Dependencies a caller must declare to use the shared RDB scripts. */
+export const SHARED_RDB_SCRIPTS_DEPENDENCIES = [
+  'pg',
+  '@types/pg',
+  'mariadb',
+  'tsx',
+] as const;
 
 /**
  * Ensures the shared scripts package exists and adds RDB local-dev scripts
@@ -26,9 +38,12 @@ import { type ITsDepVersion, withVersions } from './versions';
  * The engine-specific file names allow postgres and mysql projects to
  * coexist in the same workspace.
  */
-export async function sharedRdbScriptsGenerator(
+export async function sharedRdbScriptsGenerator<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   engine: 'postgres' | 'mysql',
+  declaration: D & MustDeclare<typeof SHARED_RDB_SCRIPTS_DEPENDENCIES, D>,
 ): Promise<void> {
   await ensureSharedScriptsProject(tree);
 
@@ -64,15 +79,34 @@ export async function sharedRdbScriptsGenerator(
   // The engine's wait-for-db script imports the database client, so declare it
   // in the scripts project's own package.json (tsx runs the scripts and lives
   // in the workspace root devDependencies).
-  const clientDeps: ITsDepVersion[] =
+  const clientDeps: (typeof SHARED_RDB_SCRIPTS_DEPENDENCIES)[number][] =
     engine === 'postgres' ? ['pg'] : ['mariadb'];
-  const clientDevDeps: ITsDepVersion[] =
+  const clientDevDeps: (typeof SHARED_RDB_SCRIPTS_DEPENDENCIES)[number][] =
     engine === 'postgres' ? ['@types/pg'] : [];
   addDependenciesToPackageJson(
     tree,
-    withVersions(clientDeps),
-    withVersions(clientDevDeps),
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_RDB_SCRIPTS_DEPENDENCIES
+      >,
+      clientDeps,
+    ),
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_RDB_SCRIPTS_DEPENDENCIES
+      >,
+      clientDevDeps,
+    ),
     joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'package.json'),
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_RDB_SCRIPTS_DEPENDENCIES
+      >,
+      ['tsx'],
+    ),
+  );
 }

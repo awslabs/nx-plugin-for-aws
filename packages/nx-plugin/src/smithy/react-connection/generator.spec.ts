@@ -6,8 +6,12 @@ import { type Tree, updateJson } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator';
 import { matchGritQL } from '../../utils/ast';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import {
@@ -18,6 +22,10 @@ import {
   SMITHY_REACT_CONNECTION_GENERATOR_INFO,
   smithyReactConnectionGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('smithy#react-connection generator', () => {
   let tree: Tree;
@@ -915,7 +923,11 @@ export function Main() {
 
   describe('metrics', () => {
     it('should add generator metric to app.ts', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(
+        tree,
+        { iac: 'cdk' },
+        sharedConstructsDeclaration,
+      );
 
       // Setup a React project with proper main.tsx structure
       tree.write(

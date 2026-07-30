@@ -11,6 +11,7 @@ import {
 import { addTargetToLocalDev } from '../../connection/local-dev';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
@@ -23,6 +24,22 @@ import {
 } from '../../utils/nx';
 import { withVersions } from '../../utils/versions';
 import type { ReactGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@trpc/client',
+    '@trpc/tanstack-react-query',
+    '@tanstack/react-query',
+    '@tanstack/react-query-devtools',
+    'event-source-polyfill',
+    'oidc-client-ts',
+    'aws4fetch',
+    '@aws-sdk/credential-provider-cognito-identity',
+    'react-oidc-context',
+    '@smithy/types',
+    '@types/event-source-polyfill',
+  ],
+});
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -148,7 +165,7 @@ export async function reactGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@trpc/client',
       '@trpc/tanstack-react-query',
       '@tanstack/react-query',
@@ -164,7 +181,7 @@ export async function reactGenerator(
         : []) as any),
       ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@smithy/types',
       ...((isRestApi ? ['@types/event-source-polyfill'] : []) as any),
     ]),

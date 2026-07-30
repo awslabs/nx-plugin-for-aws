@@ -16,6 +16,7 @@ import {
   applyGritQL,
 } from '../../../utils/ast';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
@@ -30,7 +31,10 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { toProjectRelativePath } from '../../../utils/paths';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { withVersions } from '../../../utils/versions';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
@@ -46,6 +50,14 @@ const readGritPattern = (name: string): string =>
     join(import.meta.dirname, 'grit', `${name}.grit`),
     'utf-8',
   ).trim();
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    'oidc-client-ts',
+    'react-oidc-context',
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -73,9 +85,13 @@ export async function tsReactWebsiteAuthGenerator(
 
   const iac = await resolveIac(tree, options.iac);
 
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  await sharedConstructsGenerator(
+    tree,
+    {
+      iac,
+    },
+    DECLARED_DEPENDENCIES,
+  );
 
   await addIdentityInfra(tree, {
     iac,
@@ -95,7 +111,10 @@ export async function tsReactWebsiteAuthGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions(['oidc-client-ts', 'react-oidc-context']),
+    withVersions(DECLARED_DEPENDENCIES, [
+      'oidc-client-ts',
+      'react-oidc-context',
+    ]),
     {},
     joinPathFragments(projectConfig.root, 'package.json'),
   );

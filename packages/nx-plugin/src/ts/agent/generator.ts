@@ -12,16 +12,25 @@ import {
 } from '@nx/devkit';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
+  AGENT_CONNECTION_DEPENDENCIES,
   addTypeScriptFrameworkBase,
   ensureTypeScriptAgentConnectionProject,
 } from '../../utils/agent-connection/agent-connection';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
+import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  nodeImageVersions,
+} from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -38,9 +47,47 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
+
+// Unions every protocol and auth branch.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    'zod',
+    '@strands-agents/sdk',
+    '@aws-sdk/credential-providers',
+    '@aws-sdk/client-appconfigdata',
+    '@aws-lambda-powertools/parameters',
+    '@modelcontextprotocol/sdk',
+    'express',
+    '@a2a-js/sdk',
+    '@ag-ui/aws-strands',
+    '@ag-ui/a2ui-toolkit',
+    '@ag-ui/client',
+    '@ag-ui/core',
+    '@ag-ui/encoder',
+    'cors',
+    '@trpc/server',
+    '@trpc/client',
+    'ws',
+    'aws4fetch',
+    '@types/node',
+    'agent-chat-cli',
+    '@types/express',
+    '@types/cors',
+    '@types/ws',
+    'tsx',
+    ...AGENT_CONNECTION_DEPENDENCIES,
+    ...BUNDLE_DEPENDENCIES,
+    ...FS_DEPENDENCIES,
+    ...DOCKER_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -88,10 +135,10 @@ export const tsAgentGenerator = async (
   // point can import `runWithSessionId` and propagate the AgentCore session
   // ID to any downstream MCP / A2A clients a later connection generator
   // wires into this agent.
-  await ensureTypeScriptAgentConnectionProject(tree);
+  await ensureTypeScriptAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
   // The agent server imports the framework base helpers (session cache + model
   // error logging) regardless of whether a connection client is wired in.
-  await addTypeScriptFrameworkBase(tree);
+  await addTypeScriptFrameworkBase(tree, DECLARED_DEPENDENCIES);
 
   const templateContext = {
     name,
@@ -124,10 +171,15 @@ export const tsAgentGenerator = async (
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    await addTypeScriptBundleTarget(tree, project, {
-      targetFilePath: `${targetSourceDirRelativeToProjectRoot}/index.ts`,
-      bundleOutputDir: joinPathFragments('agent', name),
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      project,
+      {
+        targetFilePath: `${targetSourceDirRelativeToProjectRoot}/index.ts`,
+        bundleOutputDir: joinPathFragments('agent', name),
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     // Add the Dockerfile
     generateFiles(
@@ -157,7 +209,7 @@ export const tsAgentGenerator = async (
     );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree);
+    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
@@ -178,17 +230,21 @@ export const tsAgentGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    addDockerScanTarget(tree, {
-      project,
-      containerEngine: containers,
-      trivyTargetName: `${agentTargetPrefix}-trivy`,
-      dockerTargetName,
-      imageTags: [dockerImageTag],
-    });
+    addDockerScanTarget(
+      tree,
+      {
+        project,
+        containerEngine: containers,
+        trivyTargetName: `${agentTargetPrefix}-trivy`,
+        dockerTargetName,
+        imageTags: [dockerImageTag],
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
 
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
     const infraProtocol: 'http' | 'a2a' =
@@ -210,7 +266,7 @@ export const tsAgentGenerator = async (
   // Add dependencies
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       'zod',
       '@strands-agents/sdk',
       '@aws-sdk/credential-providers',
@@ -240,7 +296,7 @@ export const tsAgentGenerator = async (
               'aws4fetch',
             ] as const)),
     ]),
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@types/node',
       // The chat CLI runs standalone via tsx and resolves the deployed agent
       // from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
@@ -258,7 +314,11 @@ export const tsAgentGenerator = async (
     ]),
     joinPathFragments(project.root, 'package.json'),
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
+  );
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.

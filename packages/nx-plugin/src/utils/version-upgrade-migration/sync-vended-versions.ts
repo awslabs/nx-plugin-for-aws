@@ -19,6 +19,10 @@ import { formatFilesInSubtree } from '../format';
 import { updateToml } from '../toml';
 import { PY_VERSIONS, TERRAFORM_VERSIONS, TS_VERSIONS } from '../versions';
 import { isNxPackage } from './nx-package-updates';
+import {
+  type OwnedDependencies,
+  ownedDependencies,
+} from './owned-dependencies';
 import { syncMetricsVersion } from './sync-metrics-version';
 import { isVendedUpgrade } from './vended-upgrade';
 
@@ -33,12 +37,26 @@ import { isVendedUpgrade } from './vended-upgrade';
 
 const YAML_CATALOG_FILES = ['pnpm-workspace.yaml', '.yarnrc.yml'];
 
-const vendedTsVersion = (name: string): string | undefined =>
-  isNxPackage(name) ? undefined : TS_VERSIONS[name as keyof typeof TS_VERSIONS];
+/**
+ * Vended version for a dependency this workspace's generators own, or undefined
+ * for one the user added themselves.
+ */
+const vendedTsVersion = (
+  owned: OwnedDependencies,
+  name: string,
+): string | undefined =>
+  isNxPackage(name) || !owned.ts.has(name)
+    ? undefined
+    : TS_VERSIONS[name as keyof typeof TS_VERSIONS];
 
 /** PY_VERSIONS records the `==` operator; the pin holds the bare version. */
-const vendedPyVersion = (name: string): string | undefined =>
-  PY_VERSIONS[name as keyof typeof PY_VERSIONS]?.replace(/^==/, '');
+const vendedPyVersion = (
+  owned: OwnedDependencies,
+  name: string,
+): string | undefined =>
+  owned.py.has(name)
+    ? PY_VERSIONS[name as keyof typeof PY_VERSIONS]?.replace(/^==/, '')
+    : undefined;
 
 /** Protocols whose version lives elsewhere, and is synced there instead. */
 const REFERENCE_PROTOCOL =
@@ -101,6 +119,7 @@ const alreadyPermitsVended = (
  */
 const declaredVendedPackages = (
   tree: Tree,
+  owned: OwnedDependencies,
   packageJsonPath: string,
 ): {
   dependencies: Record<string, string>;
@@ -111,7 +130,7 @@ const declaredVendedPackages = (
     Object.fromEntries(
       Object.entries((json[field] ?? {}) as Record<string, string>).flatMap(
         ([name, declared]) => {
-          const vended = vendedTsVersion(name);
+          const vended = vendedTsVersion(owned, name);
           return vended &&
             isSyncableSpecifier(tree, declared) &&
             !alreadyPermitsVended(tree, name, declared, vended)
@@ -136,7 +155,7 @@ const declaredVendedPackages = (
  * Called directly rather than through this plugin's wrapper, which *migrates*
  * declarations into the catalog; right when generating, wrong for a version bump.
  */
-const syncPackageJsons = (tree: Tree): string[] => {
+const syncPackageJsons = (tree: Tree, owned: OwnedDependencies): string[] => {
   const updated: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -145,6 +164,7 @@ const syncPackageJsons = (tree: Tree): string[] => {
     }
     const { dependencies, devDependencies } = declaredVendedPackages(
       tree,
+      owned,
       path,
     );
     if (
@@ -179,7 +199,10 @@ const readCatalogFiles = (tree: Tree): string =>
  * Upgrade vended catalog entries devkit cannot reach: those no manifest
  * references, and every bun entry (bun has no catalog manager).
  */
-const syncOrphanCatalogEntries = (tree: Tree): string[] => {
+const syncOrphanCatalogEntries = (
+  tree: Tree,
+  owned: OwnedDependencies,
+): string[] => {
   const referenced = referencedCatalogPackages(tree);
   const updated: string[] = [];
 
@@ -188,7 +211,7 @@ const syncOrphanCatalogEntries = (tree: Tree): string[] => {
   ): boolean => {
     let changed = false;
     for (const [name, declared] of Object.entries(catalog ?? {})) {
-      const vended = vendedTsVersion(name);
+      const vended = vendedTsVersion(owned, name);
       if (!vended || referenced.has(name)) {
         continue;
       }
@@ -273,9 +296,8 @@ const referencedCatalogPackages = (tree: Tree): Set<string> => {
  * user's choice.
  */
 const syncPyRequirement = (
-  tree: Tree,
+  owned: OwnedDependencies,
   requirement: string,
-  manifestPath: string,
 ): string => {
   const parsed = parsePipRequirementsLine(requirement);
   if (parsed?.type !== 'ProjectName' || parsed.versionSpec?.length !== 1) {
@@ -289,7 +311,7 @@ const syncPyRequirement = (
   const name = parsed.extras?.length
     ? `${parsed.name}[${parsed.extras.join(',')}]`
     : parsed.name;
-  const vended = vendedPyVersion(name);
+  const vended = vendedPyVersion(owned, name);
   if (!vended || !isVendedUpgrade(vended, spec.version)) {
     return requirement;
   }
@@ -297,7 +319,7 @@ const syncPyRequirement = (
 };
 
 /** Sync pins in every `pyproject.toml`, dependencies and groups alike. */
-const syncPyProjects = (tree: Tree): string[] => {
+const syncPyProjects = (tree: Tree, owned: OwnedDependencies): string[] => {
   const updated: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -312,7 +334,7 @@ const syncPyProjects = (tree: Tree): string[] => {
             if (typeof requirement !== 'string') {
               return requirement;
             }
-            const synced = syncPyRequirement(tree, requirement, path);
+            const synced = syncPyRequirement(owned, requirement);
             changed ||= synced !== requirement;
             return synced;
           })
@@ -398,15 +420,19 @@ const syncTerraformProviders = async (tree: Tree): Promise<string[]> => {
   return updated;
 };
 
-/** Sync every version in the workspace to those this release vends. */
+/**
+ * Sync the versions this release vends, for the dependencies the workspace's
+ * generators own.
+ */
 export const syncVendedVersions = async (
   tree: Tree,
 ): Promise<MigrationReturnObject> => {
   const nextSteps: string[] = [];
+  const owned = await ownedDependencies(tree);
 
-  const packageJsons = syncPackageJsons(tree);
-  const catalogs = syncOrphanCatalogEntries(tree);
-  const pyProjects = syncPyProjects(tree);
+  const packageJsons = syncPackageJsons(tree, owned);
+  const catalogs = syncOrphanCatalogEntries(tree, owned);
+  const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
   await syncMetricsVersion(tree);
 

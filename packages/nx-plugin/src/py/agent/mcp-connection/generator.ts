@@ -11,6 +11,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
+  AGENT_CONNECTION_PY_DEPENDENCIES,
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
@@ -21,6 +22,7 @@ import {
   resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -36,6 +38,19 @@ import {
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
 import type { PyAgentMcpConnectionGeneratorSchema } from './schema';
+
+// Unions every framework's MCP client deps.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  py: [
+    'boto3',
+    'httpx',
+    'mcp',
+    'langchain-mcp-adapters',
+    ...AGENT_CONNECTION_PY_DEPENDENCIES,
+  ],
+});
+
+type DeclaredPyDependency = (typeof DECLARED_DEPENDENCIES)['py'][number];
 
 export const PY_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -81,20 +96,20 @@ export const pyAgentMcpConnectionGenerator = async (
 
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    MCP core client (framework Layer-2) and its shared SigV4 auth helper.
-  await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'mcp', framework);
+  await ensurePythonAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
+  await addPythonCoreClient(tree, 'mcp', DECLARED_DEPENDENCIES, framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
 
   // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
   // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
-  addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
-    'boto3',
-    'httpx',
-    'mcp',
-    ...connection.deps,
-  ]);
+  addDependenciesToPyProjectToml(
+    tree,
+    agentConnectionProjectDir,
+    DECLARED_DEPENDENCIES,
+    ['boto3', 'httpx', 'mcp', ...(connection.deps as DeclaredPyDependency[])],
+  );
 
   // 2. Generate the per-connection client into the shared agent-connection project
   const appDir = joinPathFragments(

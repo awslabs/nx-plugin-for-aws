@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import type { DependencyDeclaration } from './declared-dependencies';
 
 /**
  * Versons for TypeScript dependencies added by generators
@@ -149,10 +150,17 @@ export const TS_VERSIONS = {
 export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
 /**
- * Add versions to the given dependencies
+ * Add versions to the given dependencies, which the declaration must own.
+ *
+ * @param declaration the calling generator's `DECLARED_DEPENDENCIES`
  */
-export const withVersions = (deps: ITsDepVersion[]) =>
-  Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+export const withVersions = <D extends DependencyDeclaration>(
+  declaration: D,
+  deps: readonly D['ts'][number][],
+): Record<string, string> => {
+  assertDeclared(declaration.ts, deps, 'ts');
+  return Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+};
 
 /**
  * The `nx` and `@nx/*` packages a generated workspace pins, all of which must
@@ -224,8 +232,27 @@ export type IPyDepVersion = keyof typeof PY_VERSIONS;
 /**
  * Add versions to the given dependencies
  */
-export const withPyVersions = (deps: IPyDepVersion[]) =>
-  deps.map((dep) => `${dep}${PY_VERSIONS[dep]}`);
+export const withPyVersions = <D extends DependencyDeclaration>(
+  declaration: D,
+  deps: readonly D['py'][number][],
+): string[] => {
+  assertDeclared(declaration.py, deps, 'py');
+  return deps.map((dep) => `${dep}${PY_VERSIONS[dep]}`);
+};
+
+/** Catches undeclared packages that reach here past the type checker. */
+const assertDeclared = (
+  declared: readonly string[],
+  deps: readonly string[],
+  kind: 'ts' | 'py',
+): void => {
+  const undeclared = deps.filter((dep) => !declared.includes(dep));
+  if (undeclared.length > 0) {
+    throw new Error(
+      `Undeclared ${kind} dependencies: ${undeclared.join(', ')}. Add them to the generator's declareDependencies({ ${kind}: [...] }).`,
+    );
+  }
+};
 
 /**
  * Versions for vendored tools

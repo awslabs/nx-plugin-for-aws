@@ -12,11 +12,15 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import {
+  API_CONSTRUCTS_DEPENDENCIES,
+  addApiGatewayInfra,
+} from '../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -32,10 +36,29 @@ import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { addOpenApiGeneration } from './react/open-api';
 import type { PyFastApiProjectGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    ...FS_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...API_CONSTRUCTS_DEPENDENCIES,
+  ],
+  py: [
+    'fastapi',
+    'uvicorn',
+    'aws-lambda-powertools',
+    'aws-lambda-powertools[tracer]',
+    'aws-lambda-powertools[parser]',
+    'fastapi[standard]',
+  ],
+});
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -88,7 +111,7 @@ export const pyFastApiProjectGenerator = async (
     addPythonBundleTarget(projectConfig);
 
   // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
-  const fs = new FsCommands(tree);
+  const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
   const bundleTarget = projectConfig.targets[bundleTargetName];
   const copyRunShCommand = fs.cp(
     `{projectRoot}/run.sh`,
@@ -158,9 +181,13 @@ export const pyFastApiProjectGenerator = async (
   if (schema.infra !== 'none') {
     const iac = await resolveIac(tree, schema.iac);
 
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     if (schema.auth === 'custom') {
       const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
@@ -185,20 +212,24 @@ export const pyFastApiProjectGenerator = async (
     }
 
     // Add the CDK construct to deploy the FastAPI to shared constructs
-    await addApiGatewayInfra(tree, {
-      apiProjectName: projectConfig.name,
-      apiNameClassName,
-      apiNameKebabCase,
-      constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
-      backend: {
-        type: 'fastapi',
-        moduleName: normalizedModuleName,
-        bundleOutputDir,
-        integrationPattern,
+    await addApiGatewayInfra(
+      tree,
+      {
+        apiProjectName: projectConfig.name,
+        apiNameClassName,
+        apiNameKebabCase,
+        constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
+        backend: {
+          type: 'fastapi',
+          moduleName: normalizedModuleName,
+          bundleOutputDir,
+          integrationPattern,
+        },
+        auth: schema.auth,
+        iac,
       },
-      auth: schema.auth,
-      iac,
-    });
+      DECLARED_DEPENDENCIES,
+    );
 
     addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
       iac,
@@ -208,7 +239,7 @@ export const pyFastApiProjectGenerator = async (
     });
   }
 
-  addDependenciesToPyProjectToml(tree, dir, [
+  addDependenciesToPyProjectToml(tree, dir, DECLARED_DEPENDENCIES, [
     'fastapi',
     'uvicorn',
     'aws-lambda-powertools',
@@ -217,9 +248,13 @@ export const pyFastApiProjectGenerator = async (
       ? (['aws-lambda-powertools[parser]'] as const)
       : []),
   ]);
-  addDependenciesToDependencyGroupInPyProjectToml(tree, dir, 'dev', [
-    'fastapi[standard]',
-  ]);
+  addDependenciesToDependencyGroupInPyProjectToml(
+    tree,
+    dir,
+    'dev',
+    DECLARED_DEPENDENCIES,
+    ['fastapi[standard]'],
+  );
 
   addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
 

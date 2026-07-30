@@ -11,6 +11,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
@@ -32,8 +33,20 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import type { PyLambdaFunctionGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+  py: [
+    'aws-lambda-powertools',
+    'aws-lambda-powertools[tracer]',
+    'aws-lambda-powertools[parser]',
+  ],
+});
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -139,9 +152,13 @@ export const pyLambdaFunctionGenerator = async (
   if (infra !== 'none') {
     const iac = await resolveIac(tree, schema.iac);
 
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     await addLambdaFunctionInfra(tree, {
       functionProjectName: projectConfig.name,
@@ -182,7 +199,7 @@ export const pyLambdaFunctionGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, dir, [
+  addDependenciesToPyProjectToml(tree, dir, DECLARED_DEPENDENCIES, [
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
     'aws-lambda-powertools[parser]',

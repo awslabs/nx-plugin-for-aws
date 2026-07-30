@@ -23,6 +23,11 @@ import {
 } from './config/utils';
 import { type Containers, inferContainers } from './containers';
 import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from './declared-dependencies';
+import {
   addDependenciesToPackageJson,
   detectWorkspacePackageManager,
 } from './dependencies';
@@ -41,6 +46,15 @@ import { withVersions } from './versions';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
+
+/** Dependencies a caller must declare to apply the workspace init. */
+export const INIT_DEPENDENCIES = [
+  'nx',
+  '@nx/js',
+  '@nx/workspace',
+  'typescript',
+  '@biomejs/biome',
+] as const;
 
 // Built dependencies whose install scripts the generated workspace trusts.
 // `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
@@ -238,7 +252,7 @@ const ensureRootTsConfig = (tree: Tree) => {
  * existing projects — those are decisions for the user (see the "add to an
  * existing workspace" guide).
  */
-export const applyWorkspaceInit = async (
+export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
   tree: Tree,
   {
     iac,
@@ -248,6 +262,7 @@ export const applyWorkspaceInit = async (
     overwriteScripts = false,
     catalogs = true,
   }: ApplyWorkspaceInitOptions,
+  declaration: D & MustDeclare<typeof INIT_DEPENDENCIES, D>,
 ) => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
@@ -333,8 +348,15 @@ export const applyWorkspaceInit = async (
     tree,
     {},
     {
-      ...withVersions(['nx', '@nx/js', '@nx/workspace']),
-      ...withVersions(['typescript', '@biomejs/biome']),
+      ...withVersions(forDependencies<typeof INIT_DEPENDENCIES>(declaration), [
+        'nx',
+        '@nx/js',
+        '@nx/workspace',
+      ]),
+      ...withVersions(forDependencies<typeof INIT_DEPENDENCIES>(declaration), [
+        'typescript',
+        '@biomejs/biome',
+      ]),
       // Declare the plugin the generators are running from, plus the MCP server
       // package the vended config runs, so both are pinned in the workspace's
       // lockfile and upgrading them upgrades what the agents use.

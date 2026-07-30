@@ -3,9 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
-import { addDockerScanTarget } from './docker';
+import { declareDependencies } from './declared-dependencies';
+import { addDockerScanTarget, DOCKER_DEPENDENCIES } from './docker';
 import { createTreeUsingTsSolutionSetup } from './test';
 import { CONTAINER_VERSIONS } from './versions';
+
+const declaration = declareDependencies({ ts: [...DOCKER_DEPENDENCIES] });
 
 describe('docker utils', () => {
   let tree: Tree;
@@ -25,13 +28,17 @@ describe('docker utils', () => {
   describe('addDockerScanTarget', () => {
     it('should vend a .trivyignore at the project root', () => {
       const project = makeProject();
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-my-agent:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-my-agent:latest'],
+        },
+        declaration,
+      );
 
       expect(tree.exists('packages/my-project/.trivyignore')).toBe(true);
       expect(tree.read('packages/my-project/.trivyignore', 'utf-8')).toContain(
@@ -43,13 +50,17 @@ describe('docker utils', () => {
       tree.write('packages/my-project/.trivyignore', 'CVE-2021-12345\n');
       const project = makeProject();
 
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-my-agent:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-my-agent:latest'],
+        },
+        declaration,
+      );
 
       expect(tree.read('packages/my-project/.trivyignore', 'utf-8')).toBe(
         'CVE-2021-12345\n',
@@ -58,13 +69,17 @@ describe('docker utils', () => {
 
     it('should add a cacheable scan target depending on the docker target', () => {
       const project = makeProject();
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-my-agent:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-my-agent:latest'],
+        },
+        declaration,
+      );
 
       const target = project.targets['my-agent-trivy'];
       expect(target.cache).toBe(true);
@@ -77,13 +92,17 @@ describe('docker utils', () => {
 
     it('should scan with the pinned Trivy image and fail on findings', () => {
       const project = makeProject();
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-my-agent:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-my-agent:latest'],
+        },
+        declaration,
+      );
 
       const joined =
         project.targets['my-agent-trivy'].options.commands.join('\n');
@@ -99,13 +118,17 @@ describe('docker utils', () => {
 
     it('should aggregate the scan target under trivy without wiring build', () => {
       const project = makeProject();
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-my-agent:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-my-agent:latest'],
+        },
+        declaration,
+      );
 
       expect(project.targets['trivy'].dependsOn).toContain('my-agent-trivy');
       // Trivy is intentionally decoupled from build (its result depends on the
@@ -115,13 +138,17 @@ describe('docker utils', () => {
 
     it('should use the provided container engine', () => {
       const project = makeProject();
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'finch',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-my-agent:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'finch',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-my-agent:latest'],
+        },
+        declaration,
+      );
 
       const joined =
         project.targets['my-agent-trivy'].options.commands.join('\n');
@@ -132,13 +159,17 @@ describe('docker utils', () => {
 
     it('should scan multiple images with distinct tarballs', () => {
       const project = makeProject();
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'trivy',
-        dockerTargetName: 'docker',
-        imageTags: ['scope-migration:latest', 'scope-create-db-user:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'trivy',
+          dockerTargetName: 'docker',
+          imageTags: ['scope-migration:latest', 'scope-create-db-user:latest'],
+        },
+        declaration,
+      );
 
       const joined = project.targets['trivy'].options.commands.join('\n');
       expect(joined).toContain('image-0.tar');
@@ -154,20 +185,28 @@ describe('docker utils', () => {
         options: {},
       };
 
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-agent-trivy',
-        dockerTargetName: 'my-agent-docker',
-        imageTags: ['scope-agent-a:latest'],
-      });
-      addDockerScanTarget(tree, {
-        project,
-        containerEngine: 'docker',
-        trivyTargetName: 'my-other-agent-trivy',
-        dockerTargetName: 'my-other-agent-docker',
-        imageTags: ['scope-agent-b:latest'],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-agent-trivy',
+          dockerTargetName: 'my-agent-docker',
+          imageTags: ['scope-agent-a:latest'],
+        },
+        declaration,
+      );
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: 'docker',
+          trivyTargetName: 'my-other-agent-trivy',
+          dockerTargetName: 'my-other-agent-docker',
+          imageTags: ['scope-agent-b:latest'],
+        },
+        declaration,
+      );
 
       expect(
         project.targets['my-agent-trivy'].options.commands.join('\n'),

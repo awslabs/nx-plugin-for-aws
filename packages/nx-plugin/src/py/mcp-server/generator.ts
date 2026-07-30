@@ -15,10 +15,11 @@ import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget } from '../../utils/docker';
+import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -35,9 +36,28 @@ import {
 import { toProjectRelativePath } from '../../utils/paths';
 import { assignPort } from '../../utils/port';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { BASE_IMAGES, withVersions } from '../../utils/versions';
 import type { PyMcpServerGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@modelcontextprotocol/inspector',
+    ...FS_DEPENDENCIES,
+    ...DOCKER_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+  py: [
+    'aws-lambda-powertools',
+    'mcp',
+    'uvicorn',
+    'boto3',
+    'aws-opentelemetry-distro',
+  ],
+});
 
 export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -105,7 +125,7 @@ export const pyMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, project.root, [
+  addDependenciesToPyProjectToml(tree, project.root, DECLARED_DEPENDENCIES, [
     'aws-lambda-powertools',
     'mcp',
     'uvicorn',
@@ -147,7 +167,7 @@ export const pyMcpServerGenerator = async (
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
     // Add a docker target that prepares the docker context and builds the image
-    const fs = new FsCommands(tree);
+    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
@@ -170,17 +190,21 @@ export const pyMcpServerGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    addDockerScanTarget(tree, {
-      project,
-      containerEngine: containers,
-      trivyTargetName: `${mcpTargetPrefix}-trivy`,
-      dockerTargetName,
-      imageTags: [dockerImageTag],
-    });
+    addDockerScanTarget(
+      tree,
+      {
+        project,
+        containerEngine: containers,
+        trivyTargetName: `${mcpTargetPrefix}-trivy`,
+        dockerTargetName,
+        imageTags: [dockerImageTag],
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -274,7 +298,7 @@ export const pyMcpServerGenerator = async (
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['@modelcontextprotocol/inspector']),
+    withVersions(DECLARED_DEPENDENCIES, ['@modelcontextprotocol/inspector']),
   );
 
   addComponentGeneratorMetadata(

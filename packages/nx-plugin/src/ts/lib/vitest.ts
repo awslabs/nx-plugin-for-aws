@@ -6,6 +6,11 @@ import { readNxJson, type Tree, updateNxJson } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { applyGritQL } from '../../utils/ast';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { withVersions } from '../../utils/versions';
 import type { ConfigureProjectOptions } from './types';
@@ -16,9 +21,17 @@ const readGritPattern = (name: string): string =>
     'utf-8',
   ).trim();
 
-export const configureVitest = async (
+/** Dependencies a caller must declare to configure vitest. */
+export const VITEST_DEPENDENCIES = [
+  'vite',
+  'vitest',
+  '@vitest/coverage-v8',
+] as const;
+
+export const configureVitest = async <const D extends DependencyDeclaration>(
   tree: Tree,
   options: ConfigureProjectOptions,
+  declaration: D & MustDeclare<typeof VITEST_DEPENDENCIES, D>,
 ) => {
   // Find vitest.config.mts or vite.config.mts
   const configPath = [
@@ -55,6 +68,10 @@ export const configureVitest = async (
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['vite', 'vitest', '@vitest/coverage-v8']),
+    withVersions(forDependencies<typeof VITEST_DEPENDENCIES>(declaration), [
+      'vite',
+      'vitest',
+      '@vitest/coverage-v8',
+    ]),
   );
 };

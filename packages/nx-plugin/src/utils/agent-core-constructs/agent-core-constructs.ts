@@ -12,6 +12,11 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../declared-dependencies';
 import { addDependenciesToPackageJson } from '../dependencies';
 import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
@@ -28,6 +33,13 @@ import {
 } from '../versions';
 
 type IACProvider = { iac: Iac };
+
+/** Dependencies a caller must declare to add an AgentCore Gateway construct. */
+export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
+  'ejs',
+  '@aws-sdk/client-bedrock-agentcore',
+  '@types/ejs',
+] as const;
 
 export type AgentCoreAuth = 'iam' | 'cognito';
 
@@ -249,13 +261,16 @@ export interface AddAgentCoreGatewayInfraProps {
   auth: AgentCoreAuth;
 }
 
-export const addAgentCoreGatewayInfra = async (
+export const addAgentCoreGatewayInfra = async <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps & IACProvider,
+  declaration: D & MustDeclare<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES, D>,
 ) => {
   switch (options.iac) {
     case 'cdk':
-      await addAgentCoreGatewayCDKInfra(tree, options);
+      await addAgentCoreGatewayCDKInfra(tree, options, declaration);
       break;
     case 'terraform':
       addAgentCoreGatewayTerraformInfra(tree, options);
@@ -283,6 +298,7 @@ export const addAgentCoreGatewayInfra = async (
 const addAgentCoreGatewayCDKInfra = async (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
+  declaration: DependencyDeclaration,
 ) => {
   // Generic gateway construct (readiness probe, policy engine, Cedar policy
   // loading) shared by all gateways
@@ -376,8 +392,14 @@ const addAgentCoreGatewayCDKInfra = async (
   // probe uses the AgentCore SDK client; declare both so the lint passes.
   addDependenciesToPackageJson(
     tree,
-    withVersions(['ejs', '@aws-sdk/client-bedrock-agentcore']),
-    withVersions(['@types/ejs']),
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['ejs', '@aws-sdk/client-bedrock-agentcore'],
+    ),
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['@types/ejs'],
+    ),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'package.json'),
   );
 };

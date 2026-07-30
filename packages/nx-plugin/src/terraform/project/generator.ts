@@ -17,6 +17,7 @@ import {
 } from '@nx/devkit';
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
@@ -32,11 +33,27 @@ import { sortObjectKeys } from '../../utils/object';
 import { uvxCommand } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from '../../utils/shared-constructs-constants';
 import { terraformProviderVersions, withVersions } from '../../utils/versions';
 import type { TerraformProjectGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@nx-extend/terraform',
+    'make-dir-cli',
+    'tsx',
+    '@aws-sdk/client-s3',
+    '@aws-sdk/client-sts',
+    '@aws-sdk/credential-providers',
+    '@smithy/config-resolver',
+    '@smithy/node-config-provider',
+    '@nx/devkit',
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -279,7 +296,11 @@ export async function terraformProjectGenerator(
   }
 
   // Ensure shared constructs for Terraform are created
-  await sharedConstructsGenerator(tree, { iac: 'terraform' });
+  await sharedConstructsGenerator(
+    tree,
+    { iac: 'terraform' },
+    DECLARED_DEPENDENCIES,
+  );
 
   // Add Terraform metrics
   await addGeneratorMetricsIfApplicable(tree, [
@@ -291,7 +312,7 @@ export async function terraformProjectGenerator(
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@nx-extend/terraform',
       'make-dir-cli',
       'tsx',
@@ -310,7 +331,7 @@ export async function terraformProjectGenerator(
     updateJson(tree, 'package.json', (packageJson) => {
       packageJson.overrides = {
         ...packageJson.overrides,
-        ...withVersions(['@nx/devkit']),
+        ...withVersions(DECLARED_DEPENDENCIES, ['@nx/devkit']),
       };
       return packageJson;
     });

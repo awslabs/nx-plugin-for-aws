@@ -16,12 +16,20 @@ import {
 import { ensureLicenseExceptions } from '../../license/config';
 import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
+import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  nodeImageVersions,
+} from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -38,9 +46,29 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsMcpServerGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@modelcontextprotocol/sdk',
+    'zod',
+    'express',
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+    '@types/express',
+    'tsx',
+    '@modelcontextprotocol/inspector',
+    ...FS_DEPENDENCIES,
+    ...BUNDLE_DEPENDENCIES,
+    ...DOCKER_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -113,16 +141,19 @@ export const tsMcpServerGenerator = async (
   );
 
   // Add dependencies
-  const deps = withVersions([
+  const deps = withVersions(DECLARED_DEPENDENCIES, [
     '@modelcontextprotocol/sdk',
     'zod',
     'express',
     '@aws-lambda-powertools/parameters',
     '@aws-sdk/client-appconfigdata',
   ]);
-  const devDeps = withVersions(['@types/express']);
+  const devDeps = withVersions(DECLARED_DEPENDENCIES, ['@types/express']);
   // tsx (local dev) and the MCP inspector are shared tooling.
-  const rootDevDeps = withVersions(['tsx', '@modelcontextprotocol/inspector']);
+  const rootDevDeps = withVersions(DECLARED_DEPENDENCIES, [
+    'tsx',
+    '@modelcontextprotocol/inspector',
+  ]);
 
   // Add hosting based on infra
   if (infra === 'agentcore') {
@@ -130,10 +161,15 @@ export const tsMcpServerGenerator = async (
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    await addTypeScriptBundleTarget(tree, project, {
-      targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
-      bundleOutputDir: joinPathFragments('mcp', name),
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      project,
+      {
+        targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
+        bundleOutputDir: joinPathFragments('mcp', name),
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     const dockerOutputDir = joinPathFragments(
       'dist',
@@ -144,7 +180,7 @@ export const tsMcpServerGenerator = async (
     );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree);
+    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
@@ -165,17 +201,21 @@ export const tsMcpServerGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    addDockerScanTarget(tree, {
-      project,
-      containerEngine: containers,
-      trivyTargetName: `${mcpTargetPrefix}-trivy`,
-      dockerTargetName,
-      imageTags: [dockerImageTag],
-    });
+    addDockerScanTarget(
+      tree,
+      {
+        project,
+        containerEngine: containers,
+        trivyTargetName: `${mcpTargetPrefix}-trivy`,
+        dockerTargetName,
+        imageTags: [dockerImageTag],
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {

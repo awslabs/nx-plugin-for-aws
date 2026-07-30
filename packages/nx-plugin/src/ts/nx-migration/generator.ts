@@ -12,6 +12,7 @@ import {
   writeJson,
 } from '@nx/devkit';
 import PackageJson from '../../../package.json' with { type: 'json' };
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -29,9 +30,14 @@ import { sortObjectKeys } from '../../utils/object';
 import {
   addNxPluginDependencies,
   configureNxPluginPackageJson,
+  NX_PLUGIN_DEPENDENCIES,
   readNxPluginProject,
 } from '../nx-plugin/utils';
 import type { TsNxMigrationGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...NX_PLUGIN_DEPENDENCIES],
+});
 
 export const NX_MIGRATION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -147,7 +153,7 @@ export const tsNxMigrationGenerator = async (
   // Codemods import @nx/devkit and the @aws/nx-plugin SDK, both of which must
   // resolve for nx to run them
   if (hasImplementation) {
-    addNxPluginDependencies(tree, pluginPackageJsonPath);
+    addNxPluginDependencies(tree, pluginPackageJsonPath, DECLARED_DEPENDENCIES);
   }
 
   await addGeneratorMetricsIfApplicable(tree, [NX_MIGRATION_GENERATOR_INFO]);

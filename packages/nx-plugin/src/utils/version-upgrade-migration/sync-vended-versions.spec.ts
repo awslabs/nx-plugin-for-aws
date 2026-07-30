@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, type Tree, writeJson } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  readJson,
+  type Tree,
+  writeJson,
+} from '@nx/devkit';
 import yaml from 'js-yaml';
 import {
   METRICS_ASPECT_FILE_PATH,
@@ -60,6 +65,20 @@ describe('sync-vended-versions migration', () => {
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
+    // Only dependencies a generator declares are synced, so these tests need a
+    // project recording the generators that own the packages under test.
+    addProjectConfiguration(tree, 'owner', {
+      root: 'packages/owner',
+      metadata: {
+        generator: 'ts#trpc-api',
+        components: [
+          { generator: 'py#project' },
+          { generator: 'py#fast-api' },
+          { generator: 'ts#project' },
+          { generator: 'ts#infra' },
+        ],
+      } as never,
+    });
   });
 
   it('should upgrade outdated catalog entries to the vended versions', async () => {

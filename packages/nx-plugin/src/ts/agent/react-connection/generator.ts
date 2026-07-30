@@ -12,6 +12,7 @@ import {
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
@@ -25,11 +26,28 @@ import {
 } from '../../../utils/nx';
 import { withVersions } from '../../../utils/versions';
 import {
+  DECLARED_DEPENDENCIES as AGUI_DECLARED_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
 } from '../../react-website/agui/generator';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
 import { addTsAgentTargetToLocalDev } from './local-dev';
+
+// Unions both the AG-UI and HTTP protocol paths, and every auth branch.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@trpc/client',
+    '@tanstack/react-query',
+    '@tanstack/react-query-devtools',
+    '@trpc/tanstack-react-query',
+    'oidc-client-ts',
+    'aws4fetch',
+    '@aws-sdk/credential-provider-cognito-identity',
+    'react-oidc-context',
+    '@smithy/types',
+    ...AGUI_DECLARED_DEPENDENCIES.ts,
+  ],
+});
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -211,7 +229,7 @@ export async function tsAgentReactConnectionGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@trpc/client',
       '@tanstack/react-query',
       '@tanstack/react-query-devtools',
@@ -226,7 +244,7 @@ export async function tsAgentReactConnectionGenerator(
         : []) as any),
       ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
     ]),
-    withVersions(['@smithy/types']),
+    withVersions(DECLARED_DEPENDENCIES, ['@smithy/types']),
     joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 

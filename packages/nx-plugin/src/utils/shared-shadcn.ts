@@ -11,6 +11,12 @@ import {
 } from '@nx/devkit';
 import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
+import { VITEST_DEPENDENCIES } from '../ts/lib/vitest';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import { esmVars } from './module-format';
@@ -22,7 +28,8 @@ import {
 } from './shared-constructs-constants';
 import { type ITsDepVersion, withVersions } from './versions';
 
-const SHADCN_DEPS = [
+/** Dependencies a caller must declare to use the shared shadcn project. */
+export const SHADCN_DEPENDENCIES = [
   'react',
   'react-dom',
   'class-variance-authority',
@@ -31,9 +38,12 @@ const SHADCN_DEPS = [
   'lucide-react',
   'tw-animate-css',
   'radix-ui',
-] as const satisfies ITsDepVersion[];
+  ...VITEST_DEPENDENCIES,
+] as const satisfies readonly ITsDepVersion[];
 
-export async function sharedShadcnGenerator(tree: Tree) {
+export async function sharedShadcnGenerator<
+  const D extends DependencyDeclaration,
+>(tree: Tree, declaration: D & MustDeclare<typeof SHADCN_DEPENDENCIES, D>) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const scopeAlias = npmScopePrefix;
   const sharedShadcnAlias = `${scopeAlias}${SHARED_SHADCN_NAME}`;
@@ -81,10 +91,14 @@ export async function sharedShadcnGenerator(tree: Tree) {
       },
     );
 
-    await configureTsProject(tree, {
-      dir: libraryRoot,
-      fullyQualifiedName,
-    });
+    await configureTsProject(
+      tree,
+      {
+        dir: libraryRoot,
+        fullyQualifiedName,
+      },
+      forDependencies<typeof SHADCN_DEPENDENCIES>(declaration),
+    );
 
     updateJson(
       tree,
@@ -106,7 +120,9 @@ export async function sharedShadcnGenerator(tree: Tree) {
 
     addDependenciesToPackageJson(
       tree,
-      withVersions([...SHADCN_DEPS]),
+      withVersions(forDependencies<typeof SHADCN_DEPENDENCIES>(declaration), [
+        ...SHADCN_DEPENDENCIES,
+      ]),
       {},
       joinPathFragments(libraryRoot, 'package.json'),
     );

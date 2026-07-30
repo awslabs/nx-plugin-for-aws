@@ -13,6 +13,10 @@ import {
 import terraformProjectGenerator from '../terraform/project/generator';
 import tsProjectGenerator from '../ts/lib/generator';
 import { readAwsNxPluginConfig } from './config/utils';
+import type {
+  DependencyDeclaration,
+  MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import type { Iac } from './iac';
@@ -21,20 +25,27 @@ import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DEPENDENCIES,
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from './shared-constructs-constants';
+
+export { SHARED_CONSTRUCTS_DEPENDENCIES };
+
 import { terraformProviderVersions, withVersions } from './versions';
 
 export interface SharedConstructsGeneratorOptions {
   iac: Iac;
 }
 
-export async function sharedConstructsGenerator(
+export async function sharedConstructsGenerator<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   options: SharedConstructsGeneratorOptions,
+  declaration: D & MustDeclare<typeof SHARED_CONSTRUCTS_DEPENDENCIES, D>,
 ) {
   const { iac } = options;
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -88,8 +99,18 @@ export async function sharedConstructsGenerator(
       );
       addDependenciesToPackageJson(
         tree,
-        withVersions(['constructs', 'aws-cdk-lib']),
-        withVersions(['@types/node']),
+        withVersions(
+          declaration as DependencyDeclaration<
+            typeof SHARED_CONSTRUCTS_DEPENDENCIES
+          >,
+          ['constructs', 'aws-cdk-lib'],
+        ),
+        withVersions(
+          declaration as DependencyDeclaration<
+            typeof SHARED_CONSTRUCTS_DEPENDENCIES
+          >,
+          ['@types/node'],
+        ),
         joinPathFragments(
           joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
           'package.json',

@@ -15,7 +15,11 @@ import {
   type AgUiAuth,
   addAgUiReactConnection,
 } from '../../../ts/react-website/agui/generator';
-import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
+import {
+  addOpenApiReactClient,
+  OPEN_API_REACT_DEPENDENCIES,
+} from '../../../utils/connection/open-api/react';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -31,6 +35,10 @@ import {
   addPyAgentTargetToLocalDev,
   openApiClientLocalDevDeps,
 } from './local-dev';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...OPEN_API_REACT_DEPENDENCIES],
+});
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -125,18 +133,22 @@ export const pyAgentReactConnectionGenerator = async (
 
     // Use the shared OpenAPI react client utility for hooks, providers, and build targets.
     // The dev target is handled separately below using the agent-specific dev target.
-    await addOpenApiReactClient(tree, {
-      apiName: agentNameClassName,
-      frontendProjectConfig,
-      backendProjectConfig: agentProjectConfig,
-      specBuildProject: agentProjectConfig,
-      specPath,
-      specBuildTargetName: `${agentProjectConfig.name}:${openApiTargetName}`,
-      auth,
-      port: agentPort,
-      isAgentRuntime: true,
-      skipLocalDev: true,
-    });
+    await addOpenApiReactClient(
+      tree,
+      {
+        apiName: agentNameClassName,
+        frontendProjectConfig,
+        backendProjectConfig: agentProjectConfig,
+        specBuildProject: agentProjectConfig,
+        specPath,
+        specBuildTargetName: `${agentProjectConfig.name}:${openApiTargetName}`,
+        auth,
+        port: agentPort,
+        isAgentRuntime: true,
+        skipLocalDev: true,
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     additionalLocalDevDeps = openApiClientLocalDevDeps(agentNameClassName);
 

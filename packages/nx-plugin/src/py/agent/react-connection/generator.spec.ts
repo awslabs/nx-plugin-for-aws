@@ -5,8 +5,12 @@
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
 import { matchGritQL } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { pyProjectGenerator } from '../../project/generator';
 import { pyAgentGenerator } from '../generator';
@@ -14,6 +18,10 @@ import {
   PY_AGENT_REACT_CONNECTION_GENERATOR_INFO,
   pyAgentReactConnectionGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('py strands agent react connection generator', () => {
   let tree: Tree;
@@ -359,7 +367,11 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await pyAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',

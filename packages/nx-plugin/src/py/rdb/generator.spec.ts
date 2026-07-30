@@ -12,7 +12,11 @@ import {
   snapshotTreeDir,
 } from '../../utils/test';
 import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions';
-import { PY_RDB_GENERATOR_INFO, pyRdbGenerator } from './generator';
+import {
+  DECLARED_DEPENDENCIES,
+  PY_RDB_GENERATOR_INFO,
+  pyRdbGenerator,
+} from './generator';
 
 vi.mock('../../utils/containers', () => ({
   resolveContainers: vi.fn(),
@@ -55,9 +59,15 @@ describe('py#rdb generator', () => {
     expect(tree.read('packages/db/config.json', 'utf-8')).toMatchSnapshot();
     expect(pyproject).toMatchSnapshot();
 
-    expect(pyproject).toContain(withPyVersions(['sqlmodel'])[0]);
-    expect(pyproject).toContain(withPyVersions(['alembic'])[0]);
-    expect(pyproject).toContain(withPyVersions(['asyncpg'])[0]);
+    expect(pyproject).toContain(
+      withPyVersions(DECLARED_DEPENDENCIES, ['sqlmodel'])[0],
+    );
+    expect(pyproject).toContain(
+      withPyVersions(DECLARED_DEPENDENCIES, ['alembic'])[0],
+    );
+    expect(pyproject).toContain(
+      withPyVersions(DECLARED_DEPENDENCIES, ['asyncpg'])[0],
+    );
     expect(pyproject).not.toContain('psycopg');
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
@@ -156,7 +166,9 @@ describe('py#rdb generator', () => {
     await pyRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
 
     const pyproject = tree.read('packages/db/pyproject.toml', 'utf-8');
-    expect(pyproject).toContain(withPyVersions(['aiomysql'])[0]);
+    expect(pyproject).toContain(
+      withPyVersions(DECLARED_DEPENDENCIES, ['aiomysql'])[0],
+    );
     expect(pyproject).not.toContain('asyncpg');
     expect(
       tree.read('packages/db/proj_db/connection.py', 'utf-8'),
@@ -253,7 +265,11 @@ describe('py#rdb generator', () => {
   });
 
   it('should add generator metrics', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      DECLARED_DEPENDENCIES,
+    );
     await pyRdbGenerator(tree, defaultOptions);
 
     expectHasMetricTags(tree, PY_RDB_GENERATOR_INFO.metric);

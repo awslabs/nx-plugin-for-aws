@@ -16,13 +16,21 @@ import NxPluginForAwsPackageJson from '../../../package.json' with {
 import NxPluginForAwsProjectJson from '../../../project.json' with {
   type: 'json',
 };
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   NX_GENERATOR_GENERATOR_INFO,
   tsNxGeneratorGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('nx-generator generator', () => {
   describe('within @aws/nx-plugin', () => {
@@ -777,7 +785,11 @@ describe('nx-generator generator', () => {
     });
 
     it('should add generator metric to app.ts', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(
+        tree,
+        { iac: 'cdk' },
+        sharedConstructsDeclaration,
+      );
 
       await tsNxGeneratorGenerator(tree, {
         project: '@test/plugin',

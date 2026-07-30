@@ -10,8 +10,15 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator from '../../ts/lib/generator';
-import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import {
+  API_CONSTRUCTS_DEPENDENCIES,
+  addApiGatewayInfra,
+} from '../../utils/api-constructs/api-constructs';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
@@ -30,9 +37,37 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { assignPort } from '../../utils/port';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import type { TsTrpcApiGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    'aws-xray-sdk-core',
+    'zod',
+    '@aws-lambda-powertools/logger',
+    '@aws-lambda-powertools/metrics',
+    '@aws-lambda-powertools/parameters',
+    '@aws-lambda-powertools/tracer',
+    '@aws-sdk/client-appconfigdata',
+    '@trpc/server',
+    '@trpc/client',
+    'aws4fetch',
+    '@aws-sdk/credential-providers',
+    '@middy/core',
+    '@aws-lambda-powertools/parser',
+    '@types/aws-lambda',
+    'cors',
+    '@types/cors',
+    'tsx',
+    ...API_CONSTRUCTS_DEPENDENCIES,
+    ...BUNDLE_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -103,32 +138,40 @@ export async function tsTrpcApiGenerator(
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
 
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
-
-    await addApiGatewayInfra(tree, {
-      apiProjectName: backendProjectName,
-      apiNameClassName,
-      apiNameKebabCase,
-      constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
-      backend: {
-        type: 'trpc',
-        projectAlias: enhancedOptions.backendProjectAlias,
-        bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
-        integrationPattern: getIntegrationPattern(options),
-        ...(options.auth === 'custom' && {
-          authorizerBundleOutputDir: joinPathFragments(
-            'dist',
-            backendRoot,
-            'bundle',
-            'authorizer',
-          ),
-        }),
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
       },
-      auth: options.auth,
-      iac,
-    });
+      DECLARED_DEPENDENCIES,
+    );
+
+    await addApiGatewayInfra(
+      tree,
+      {
+        apiProjectName: backendProjectName,
+        apiNameClassName,
+        apiNameKebabCase,
+        constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
+        backend: {
+          type: 'trpc',
+          projectAlias: enhancedOptions.backendProjectAlias,
+          bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
+          integrationPattern: getIntegrationPattern(options),
+          ...(options.auth === 'custom' && {
+            authorizerBundleOutputDir: joinPathFragments(
+              'dist',
+              backendRoot,
+              'bundle',
+              'authorizer',
+            ),
+          }),
+        },
+        auth: options.auth,
+        iac,
+      },
+      DECLARED_DEPENDENCIES,
+    );
   }
 
   projectConfig.metadata = {
@@ -161,17 +204,27 @@ export async function tsTrpcApiGenerator(
   };
 
   if (options.infra !== 'none') {
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/handler.ts',
-      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: 'src/handler.ts',
+        external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     if (options.auth === 'custom') {
-      await addTypeScriptBundleTarget(tree, projectConfig, {
-        targetFilePath: 'src/authorizer.ts',
-        bundleOutputDir: 'authorizer',
-        external: [/@aws-sdk\/.*/],
-      });
+      await addTypeScriptBundleTarget(
+        tree,
+        projectConfig,
+        {
+          targetFilePath: 'src/authorizer.ts',
+          bundleOutputDir: 'authorizer',
+          external: [/@aws-sdk\/.*/],
+        },
+        DECLARED_DEPENDENCIES,
+      );
     }
 
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
@@ -225,7 +278,7 @@ export async function tsTrpcApiGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       'aws-xray-sdk-core',
       'zod',
       '@aws-lambda-powertools/logger',
@@ -241,10 +294,18 @@ export async function tsTrpcApiGenerator(
         ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
-    withVersions(['@types/aws-lambda', 'cors', '@types/cors']),
+    withVersions(DECLARED_DEPENDENCIES, [
+      '@types/aws-lambda',
+      'cors',
+      '@types/cors',
+    ]),
     joinPathFragments(backendRoot, 'package.json'),
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
+  );
   addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);

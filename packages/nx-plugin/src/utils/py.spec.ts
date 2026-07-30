@@ -6,12 +6,22 @@
 import { parse, stringify } from '@iarna/toml';
 import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { type DeclaredPy, declareDependencies } from './declared-dependencies';
 import type { UVPyprojectToml } from './nxlv-python';
 import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from './py';
-import type { IPyDepVersion } from './versions';
+
+const declaration = declareDependencies({
+  py: [
+    'fastapi',
+    'uvicorn',
+    'aws-lambda-powertools',
+    'aws-lambda-powertools[tracer]',
+  ],
+});
+type SpecPyDep = DeclaredPy<typeof declaration>;
 
 describe('addDependenciesToPyProjectToml', () => {
   let tree: Tree;
@@ -32,8 +42,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies
-    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi', 'uvicorn'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify dependencies were added
     const updatedToml = parse(
@@ -65,8 +75,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add new dependencies
-    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi', 'uvicorn'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify all dependencies are present
     const updatedToml = parse(
@@ -100,8 +110,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add fastapi dependency (should replace existing)
-    const deps: IPyDepVersion[] = ['fastapi'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify fastapi was replaced and requests remains
     const updatedToml = parse(
@@ -132,7 +142,7 @@ describe('addDependenciesToPyProjectToml', () => {
         },
       }),
     );
-    addDependenciesToPyProjectToml(tree, 'test-project', [
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, [
       'fastapi',
       'uvicorn',
     ]);
@@ -145,7 +155,7 @@ describe('addDependenciesToPyProjectToml', () => {
 
     // Re-adding the same deps must leave the list byte-identical, not move the
     // entries to the end.
-    addDependenciesToPyProjectToml(tree, 'test-project', [
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, [
       'fastapi',
       'uvicorn',
     ]);
@@ -170,8 +180,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies
-    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi', 'uvicorn'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify dependencies were added
     const updatedToml = parse(
@@ -207,8 +217,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add bare fastapi — must not wipe the `fastapi[all]` variant
-    const deps: IPyDepVersion[] = ['fastapi'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     const updatedToml = parse(
       tree.read('test-project/pyproject.toml', 'utf-8'),
@@ -243,7 +253,7 @@ describe('addDependenciesToPyProjectToml', () => {
     };
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
-    addDependenciesToPyProjectToml(tree, 'test-project', [
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, [
       'aws-lambda-powertools',
     ]);
 
@@ -275,7 +285,7 @@ describe('addDependenciesToPyProjectToml', () => {
     };
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
-    addDependenciesToPyProjectToml(tree, 'test-project', [
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, [
       'aws-lambda-powertools[tracer]',
     ]);
 
@@ -310,12 +320,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies (some new, some replacements)
-    const deps: IPyDepVersion[] = [
-      'fastapi',
-      'uvicorn',
-      'aws-lambda-powertools',
-    ];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi', 'uvicorn', 'aws-lambda-powertools'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify correct dependencies are present
     const updatedToml = parse(
@@ -359,8 +365,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add empty dependencies array
-    const deps: IPyDepVersion[] = [];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = [];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify existing dependencies remain unchanged
     const updatedToml = parse(
@@ -393,8 +399,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies
-    const deps: IPyDepVersion[] = ['fastapi'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify other sections are preserved
     const updatedToml = parse(
@@ -431,8 +437,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('apps/nested/path/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies to nested project
-    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
-    addDependenciesToPyProjectToml(tree, 'apps/nested/path', deps);
+    const deps: SpecPyDep[] = ['fastapi', 'uvicorn'];
+    addDependenciesToPyProjectToml(tree, 'apps/nested/path', declaration, deps);
 
     // Assert: Verify dependencies were added to correct file
     const updatedToml = parse(
@@ -469,8 +475,8 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add fastapi dependency (should replace only the ProjectName requirement)
-    const deps: IPyDepVersion[] = ['fastapi'];
-    addDependenciesToPyProjectToml(tree, 'test-project', deps);
+    const deps: SpecPyDep[] = ['fastapi'];
+    addDependenciesToPyProjectToml(tree, 'test-project', declaration, deps);
 
     // Assert: Verify URL dependencies are preserved, only ProjectName fastapi is replaced
     const updatedToml = parse(

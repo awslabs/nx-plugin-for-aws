@@ -16,6 +16,7 @@ import path from 'path';
 import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
@@ -33,16 +34,35 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { uvxCommand } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_INFRA_CONFIG_DIR,
 } from '../../utils/shared-constructs-constants';
 import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
-import { sharedInfraScriptsGenerator } from '../../utils/shared-infra-scripts';
+import {
+  SHARED_INFRA_SCRIPTS_DEPENDENCIES,
+  sharedInfraScriptsGenerator,
+} from '../../utils/shared-infra-scripts';
 import { withVersions } from '../../utils/versions';
 import type { TsInfraGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    'aws-cdk-lib',
+    'constructs',
+    'source-map-support',
+    'aws-cdk',
+    'esbuild',
+    'tsx',
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...SHARED_INFRA_SCRIPTS_DEPENDENCIES,
+  ],
+});
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -76,15 +96,19 @@ export async function tsInfraGenerator(
   addGeneratorMetadata(tree, lib.fullyQualifiedName, INFRA_APP_GENERATOR_INFO);
 
   // Shared constructs always in CDK for typescript infra generator
-  await sharedConstructsGenerator(tree, {
-    iac: 'cdk',
-  });
+  await sharedConstructsGenerator(
+    tree,
+    {
+      iac: 'cdk',
+    },
+    DECLARED_DEPENDENCIES,
+  );
 
   // Shared infra-config and infra-scripts packages (lazy creation, only when enabled)
   const stageConfig = schema.stageConfig ?? false;
   if (stageConfig) {
     await sharedInfraConfigGenerator(tree);
-    await sharedInfraScriptsGenerator(tree);
+    await sharedInfraScriptsGenerator(tree, DECLARED_DEPENDENCIES);
   }
 
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
@@ -218,7 +242,11 @@ export async function tsInfraGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions(['aws-cdk-lib', 'constructs', 'source-map-support']),
+    withVersions(DECLARED_DEPENDENCIES, [
+      'aws-cdk-lib',
+      'constructs',
+      'source-map-support',
+    ]),
     {},
     joinPathFragments(libraryRoot, 'package.json'),
   );
@@ -226,7 +254,7 @@ export async function tsInfraGenerator(
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['aws-cdk', 'esbuild', 'tsx']),
+    withVersions(DECLARED_DEPENDENCIES, ['aws-cdk', 'esbuild', 'tsx']),
   );
 
   updateJson(tree, `${libraryRoot}/tsconfig.lib.json`, (tsConfig) => ({

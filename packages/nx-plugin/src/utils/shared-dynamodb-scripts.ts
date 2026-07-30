@@ -8,6 +8,10 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import type {
+  DependencyDeclaration,
+  MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
 import {
   PACKAGES_DIR,
@@ -16,13 +20,22 @@ import {
 import { ensureSharedScriptsProject } from './shared-scripts';
 import { withVersions } from './versions';
 
+/** Dependencies a caller must declare to use the shared DynamoDB scripts. */
+export const SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES = [
+  '@aws-sdk/client-dynamodb',
+  'tsx',
+] as const;
+
 /**
  * Ensures the shared scripts package exists and adds DynamoDB local-dev scripts
  * to packages/common/scripts/src/dynamodb/. Used by both ts#dynamodb and
  * py#dynamodb so a single set of TypeScript scripts serves both.
  */
-export async function sharedDynamoDBScriptsGenerator(
+export async function sharedDynamoDBScriptsGenerator<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
+  declaration: D & MustDeclare<typeof SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES, D>,
 ): Promise<void> {
   const scriptsDir = joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR);
 
@@ -44,9 +57,23 @@ export async function sharedDynamoDBScriptsGenerator(
 
   addDependenciesToPackageJson(
     tree,
-    withVersions(['@aws-sdk/client-dynamodb']),
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES
+      >,
+      ['@aws-sdk/client-dynamodb'],
+    ),
     {},
     joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'package.json'),
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES
+      >,
+      ['tsx'],
+    ),
+  );
 }

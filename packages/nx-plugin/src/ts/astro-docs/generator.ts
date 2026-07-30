@@ -11,6 +11,7 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
@@ -26,8 +27,25 @@ import {
 } from '../../utils/nx';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { ensureProjectPackageJson } from '../../utils/project-package-json';
-import { type ITsDepVersion, withVersions } from '../../utils/versions';
+import { withVersions } from '../../utils/versions';
 import type { TsAstroDocsGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    'astro',
+    '@astrojs/starlight',
+    'starlight-blog',
+    '@strands-agents/sdk',
+    'commander',
+    'fast-glob',
+    'fs-extra',
+    'simple-git',
+    '@types/fs-extra',
+    'tsx',
+  ],
+});
+
+type DeclaredTsDependency = (typeof DECLARED_DEPENDENCIES)['ts'][number];
 
 export const TS_ASTRO_DOCS_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -154,8 +172,8 @@ export const tsAstroDocsGenerator = async (
     includeBlog,
   });
 
-  const dependencies: ITsDepVersion[] = ['astro', '@astrojs/starlight'];
-  const devDependencies: ITsDepVersion[] = [];
+  const dependencies: DeclaredTsDependency[] = ['astro', '@astrojs/starlight'];
+  const devDependencies: DeclaredTsDependency[] = [];
 
   if (includeBlog) {
     dependencies.push('starlight-blog');
@@ -170,13 +188,17 @@ export const tsAstroDocsGenerator = async (
       'simple-git',
     );
     devDependencies.push('@types/fs-extra');
-    addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+    addDependenciesToPackageJson(
+      tree,
+      {},
+      withVersions(DECLARED_DEPENDENCIES, ['tsx']),
+    );
   }
 
   addDependenciesToPackageJson(
     tree,
-    withVersions(dependencies),
-    withVersions(devDependencies),
+    withVersions(DECLARED_DEPENDENCIES, dependencies),
+    withVersions(DECLARED_DEPENDENCIES, devDependencies),
     joinPathFragments(dir, 'package.json'),
   );
 

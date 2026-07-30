@@ -16,6 +16,7 @@ import {
   addLicenseCheckToLintTarget,
   ensurePythonLicenseCollector,
 } from '../../license/config';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
@@ -39,6 +40,11 @@ import { addDependenciesToDependencyGroupInPyProjectToml } from '../../utils/py'
 import { updateToml } from '../../utils/toml';
 import { withVersions } from '../../utils/versions';
 import type { PyProjectGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: ['@nxlv/python'],
+  py: ['ruff', 'ty'],
+});
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -126,7 +132,7 @@ export const pyProjectGenerator = async (
   const { dir, normalizedModuleName, fullyQualifiedName, distributionName } =
     getPyProjectDetails(tree, schema);
 
-  const pythonPlugin = withVersions(['@nxlv/python']);
+  const pythonPlugin = withVersions(DECLARED_DEPENDENCIES, ['@nxlv/python']);
   addDependenciesToPackageJson(tree, {}, pythonPlugin);
 
   Object.entries(pythonPlugin).forEach(([name, version]) =>
@@ -277,10 +283,13 @@ export const pyProjectGenerator = async (
 
   // Pin ruff to the version generation-time formatting uses (PY_VERSIONS), so
   // generated files stay `ruff format --check`-clean across ruff releases.
-  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', [
-    'ruff',
-    'ty',
-  ]);
+  addDependenciesToDependencyGroupInPyProjectToml(
+    tree,
+    '.',
+    'dev',
+    DECLARED_DEPENDENCIES,
+    ['ruff', 'ty'],
+  );
 
   // Base format target checks rather than writes (so build/lint don't rewrite
   // source); `fix` writes, and `skip-lint` writes without failing so it stays

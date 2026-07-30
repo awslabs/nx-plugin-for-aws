@@ -14,6 +14,7 @@ import { ensureLicenseExceptions } from '../../license/config';
 import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
+  AGENT_CONNECTION_PY_DEPENDENCIES,
   addPythonFrameworkBase,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
@@ -22,10 +23,11 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget } from '../../utils/docker';
+import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -49,9 +51,50 @@ import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { BASE_IMAGES, withVersions } from '../../utils/versions';
 import type { PyAgentGeneratorSchema } from './schema';
+
+// Unions every framework and protocol branch.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    'agent-chat-cli',
+    'tsx',
+    '@types/node',
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+    'aws4fetch',
+    '@aws-sdk/credential-providers',
+    '@a2a-js/sdk',
+    ...FS_DEPENDENCIES,
+    ...DOCKER_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+  py: [
+    'aws-lambda-powertools',
+    'aws-opentelemetry-distro',
+    'bedrock-agentcore',
+    'boto3',
+    'fastapi',
+    'mcp',
+    'langchain',
+    'langchain-aws',
+    'langgraph',
+    'ag-ui-protocol',
+    'ag-ui-langgraph',
+    'a2a-sdk',
+    'strands-agents[a2a]',
+    'strands-agents',
+    'strands-agents-tools',
+    'ag-ui-strands',
+    'uvicorn',
+    'fastapi[standard]',
+    ...AGENT_CONNECTION_PY_DEPENDENCIES,
+  ],
+});
 
 export const PY_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -111,12 +154,12 @@ export const pyAgentGenerator = async (
   // point can import `session_id_context` and propagate the AgentCore
   // session ID to any downstream MCP / A2A clients a later connection
   // generator wires into this agent.
-  await ensurePythonAgentConnectionProject(tree);
+  await ensurePythonAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
   // The agent server imports the framework base helpers (session cache + model
   // error logging) regardless of whether a connection client is wired in. The
   // langchain framework has no base layer (its AG-UI foundation reuses only the
   // framework-agnostic session context), so this is a no-op for langchain.
-  await addPythonFrameworkBase(tree, framework);
+  await addPythonFrameworkBase(tree, DECLARED_DEPENDENCIES, framework);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   addWorkspaceDependencyToPyProject(
     tree,
@@ -189,7 +232,7 @@ export const pyAgentGenerator = async (
     );
   }
 
-  addDependenciesToPyProjectToml(tree, project.root, [
+  addDependenciesToPyProjectToml(tree, project.root, DECLARED_DEPENDENCIES, [
     'aws-lambda-powertools',
     'aws-opentelemetry-distro',
     'bedrock-agentcore',
@@ -223,9 +266,13 @@ export const pyAgentGenerator = async (
           : (['strands-agents', 'strands-agents-tools'] as const)),
     'uvicorn',
   ]);
-  addDependenciesToDependencyGroupInPyProjectToml(tree, project.root, 'dev', [
-    'fastapi[standard]',
-  ]);
+  addDependenciesToDependencyGroupInPyProjectToml(
+    tree,
+    project.root,
+    'dev',
+    DECLARED_DEPENDENCIES,
+    ['fastapi[standard]'],
+  );
 
   if (infra === 'agentcore') {
     const containers = await resolveContainers(tree, 'inherit');
@@ -263,7 +310,7 @@ export const pyAgentGenerator = async (
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
     // Add a docker target that prepares the docker context and builds the image
-    const fs = new FsCommands(tree);
+    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
@@ -286,17 +333,21 @@ export const pyAgentGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    addDockerScanTarget(tree, {
-      project,
-      containerEngine: containers,
-      trivyTargetName: `${agentTargetPrefix}-trivy`,
-      dockerTargetName,
-      imageTags: [dockerImageTag],
-    });
+    addDockerScanTarget(
+      tree,
+      {
+        project,
+        containerEngine: containers,
+        trivyTargetName: `${agentTargetPrefix}-trivy`,
+        dockerTargetName,
+        imageTags: [dockerImageTag],
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
 
     // Add the construct to deploy the agent.
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
@@ -383,7 +434,7 @@ export const pyAgentGenerator = async (
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       'agent-chat-cli',
       'tsx',
       '@types/node',

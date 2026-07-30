@@ -8,14 +8,22 @@ import {
   joinPathFragments,
   type Tree,
 } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('py#agent generator', () => {
   let tree: Tree;
@@ -294,7 +302,11 @@ dev-dependencies = []
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await pyAgentGenerator(tree, {
       project: 'test-project',

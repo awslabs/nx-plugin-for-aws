@@ -11,6 +11,7 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -26,7 +27,11 @@ import { sortObjectKeys } from '../../utils/object';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import tsMcpServerGenerator from '../mcp-server/generator';
 import type { TsNxPluginGeneratorSchema } from './schema';
-import { configureTsProjectAsNxPlugin } from './utils';
+import { configureTsProjectAsNxPlugin, NX_PLUGIN_DEPENDENCIES } from './utils';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...NX_PLUGIN_DEPENDENCIES],
+});
 
 export const TS_NX_PLUGIN_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -44,7 +49,7 @@ export const tsNxPluginGenerator = async (
   });
 
   // Configure the typescript project as an Nx Plugin
-  configureTsProjectAsNxPlugin(tree, fullyQualifiedName);
+  configureTsProjectAsNxPlugin(tree, fullyQualifiedName, DECLARED_DEPENDENCIES);
 
   // Add a "package" target which creates a package which can be published to NPM
   const project = readProjectConfigurationUnqualified(tree, fullyQualifiedName);

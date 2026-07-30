@@ -15,13 +15,39 @@ import {
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
+import type { DeclaredTs } from '../../../utils/declared-dependencies';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
-import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
+import {
+  SHADCN_DEPENDENCIES,
+  sharedShadcnGenerator,
+} from '../../../utils/shared-shadcn';
 import { withVersions } from '../../../utils/versions';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
+
+// Unions every theme and auth branch.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@copilotkit/react-core',
+    '@ag-ui/client',
+    '@cloudscape-design/chat-components',
+    'lucide-react',
+    'oidc-client-ts',
+    'aws4fetch',
+    '@aws-sdk/credential-provider-cognito-identity',
+    'react-oidc-context',
+    '@smithy/types',
+    ...SHADCN_DEPENDENCIES,
+  ],
+});
+
+/** Narrows a conditional list to this generator's declared dependencies. */
+const declared = (
+  deps: readonly DeclaredTs<typeof DECLARED_DEPENDENCIES>[],
+): readonly DeclaredTs<typeof DECLARED_DEPENDENCIES>[] => deps;
 
 export type AgUiAuth = 'iam' | 'cognito' | 'none';
 
@@ -73,7 +99,7 @@ export const addAgUiReactConnection = async (
 
   // Shadcn theme imports from the shared shadcn library, so it must exist.
   if (theme === 'shadcn') {
-    await sharedShadcnGenerator(tree);
+    await sharedShadcnGenerator(tree, DECLARED_DEPENDENCIES);
   }
   generateFiles(
     tree,
@@ -133,24 +159,28 @@ export const addAgUiReactConnection = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@copilotkit/react-core',
       '@ag-ui/client',
-      ...((theme === 'cloudscape'
-        ? ['@cloudscape-design/chat-components']
-        : []) as any),
-      ...((theme === 'shadcn' ? ['lucide-react'] : []) as any),
-      ...((auth === 'iam'
-        ? [
-            'oidc-client-ts',
-            'aws4fetch',
-            '@aws-sdk/credential-provider-cognito-identity',
-            'react-oidc-context',
-          ]
-        : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
+      ...declared(
+        theme === 'cloudscape' ? ['@cloudscape-design/chat-components'] : [],
+      ),
+      ...declared(theme === 'shadcn' ? ['lucide-react'] : []),
+      ...declared(
+        auth === 'iam'
+          ? [
+              'oidc-client-ts',
+              'aws4fetch',
+              '@aws-sdk/credential-provider-cognito-identity',
+              'react-oidc-context',
+            ]
+          : [],
+      ),
+      ...declared(auth === 'cognito' ? ['react-oidc-context'] : []),
     ]),
-    withVersions([...((auth === 'iam' ? ['@smithy/types'] : []) as any)]),
+    withVersions(DECLARED_DEPENDENCIES, [
+      ...declared(auth === 'iam' ? ['@smithy/types'] : []),
+    ]),
     joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
@@ -247,10 +248,13 @@ describe('agentcore-gateway#mcp-connection generator', () => {
   it('adds generator metric tags', async () => {
     const gw = addGateway();
     const mcp = addMcp();
-    const { sharedConstructsGenerator } = await import(
-      '../../utils/shared-constructs'
+    const { SHARED_CONSTRUCTS_DEPENDENCIES, sharedConstructsGenerator } =
+      await import('../../utils/shared-constructs');
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      declareDependencies({ ts: [...SHARED_CONSTRUCTS_DEPENDENCIES] }),
     );
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
 
     await agentcoreGatewayMcpConnectionGenerator(tree, {
       sourceProject: `@proj/${gw.name}`,

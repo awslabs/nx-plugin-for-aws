@@ -11,6 +11,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
+  AGENT_CONNECTION_PY_DEPENDENCIES,
   type AgentFramework,
   addPythonCoreClient,
   addPythonReExport,
@@ -26,6 +27,7 @@ import {
   applyGritQL,
   matchGritQL,
 } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -63,10 +65,21 @@ const AGENT_CONSTRUCTOR: Record<AgentFramework, string> = {
  * wraps strands' `A2AAgent` (strands-agents[a2a]); LangChain drives the a2a SDK
  * directly (a2a-sdk) and must not pull Strands in.
  */
-const A2A_TRANSPORT_DEP: Record<AgentFramework, IPyDepVersion> = {
+const A2A_TRANSPORT_DEP = {
   strands: 'strands-agents[a2a]',
   langchain: 'a2a-sdk',
-};
+} as const satisfies Record<AgentFramework, IPyDepVersion>;
+
+// Unions every framework's A2A transport dep.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  py: [
+    'boto3',
+    'httpx',
+    'strands-agents[a2a]',
+    'a2a-sdk',
+    ...AGENT_CONNECTION_PY_DEPENDENCIES,
+  ],
+});
 
 export const PY_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -125,19 +138,20 @@ export const pyAgentA2aConnectionGenerator = async (
 
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    A2A core client (framework Layer-2) and its shared SigV4 auth helper.
-  await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'a2a', framework);
+  await ensurePythonAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
+  await addPythonCoreClient(tree, 'a2a', DECLARED_DEPENDENCIES, framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
 
   // A2A client config + shared auth helper deps, plus the framework's A2A
   // transport dep (see A2A_TRANSPORT_DEP).
-  addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
-    'boto3',
-    'httpx',
-    A2A_TRANSPORT_DEP[framework],
-  ]);
+  addDependenciesToPyProjectToml(
+    tree,
+    agentConnectionProjectDir,
+    DECLARED_DEPENDENCIES,
+    ['boto3', 'httpx', A2A_TRANSPORT_DEP[framework]],
+  );
 
   // 2. Generate the per-connection client into the shared agent-connection project
   const appDir = joinPathFragments(

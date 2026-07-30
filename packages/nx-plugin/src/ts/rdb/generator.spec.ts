@@ -5,15 +5,23 @@
 
 import type { Tree } from '@nx/devkit';
 import * as devkit from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
 import { TS_VERSIONS } from '../../utils/versions';
 import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('ts#rdb generator', () => {
   let tree: Tree;
@@ -313,7 +321,11 @@ describe('ts#rdb generator', () => {
   });
 
   it('should keep an existing aurora shared construct', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
     tree.write(
       'packages/common/constructs/src/core/rdb/aurora.ts',
       '// preserve custom aurora construct',
@@ -329,7 +341,11 @@ describe('ts#rdb generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await tsRdbGenerator(tree, defaultOptions);
 

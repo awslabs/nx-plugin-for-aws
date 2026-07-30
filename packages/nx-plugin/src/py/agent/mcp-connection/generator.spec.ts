@@ -3,13 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import {
   PY_AGENT_MCP_CONNECTION_GENERATOR_INFO,
   pyAgentMcpConnectionGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('py#agent#mcp-connection generator', () => {
   let tree: Tree;
@@ -461,7 +469,11 @@ dependencies = ["strands-agents"]
 
   it('should add generator metric to app.ts', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await pyAgentMcpConnectionGenerator(tree, {
       sourceProject: 'my_scope.my_agent',

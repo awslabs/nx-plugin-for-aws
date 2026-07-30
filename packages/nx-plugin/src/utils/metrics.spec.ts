@@ -3,14 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import { declareDependencies } from './declared-dependencies';
 import {
   addGeneratorMetricsIfApplicable,
   METRIC_ID,
   METRICS_ASPECT_FILE_PATH,
   TERRAFORM_METRICS_FILE_PATH,
 } from './metrics';
-import { sharedConstructsGenerator } from './shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from './shared-constructs';
 import { createTreeUsingTsSolutionSetup } from './test';
+
+const declaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 /**
  * Asserts that the MetricsAspect tags array in the CDK app.ts file
@@ -73,7 +81,7 @@ describe('metrics', () => {
   });
 
   it('should update metrics and version in app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 
     // Create the app.ts file with MetricsAspect class
     const appPath = METRICS_ASPECT_FILE_PATH;
@@ -136,7 +144,7 @@ describe('metrics', () => {
   });
 
   it('should produce a byte-identical app.ts when re-run with the same generators', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 
     const generatorInfo = ['g23', 'g8', 'g5', 'g37'].map((metric, i) => ({
       id: `gen#${i}`,
@@ -200,7 +208,7 @@ describe('metrics', () => {
   });
 
   it('should handle multi-line formatted tags array correctly', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
     const appPath = METRICS_ASPECT_FILE_PATH;
 
     // Simulate a multi-line tags array (as prettier would format it)
@@ -232,7 +240,7 @@ describe('metrics', () => {
   });
 
   it('should handle many tags added across multiple calls', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
     const appPath = METRICS_ASPECT_FILE_PATH;
 
     for (let batch = 0; batch < 3; batch++) {
@@ -256,7 +264,7 @@ describe('metrics', () => {
   describe('terraform metrics', () => {
     it('should update metrics in terraform metrics.tf file', async () => {
       // Create shared constructs for Terraform
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       // Verify the metrics.tf file was created
       expect(tree.exists(TERRAFORM_METRICS_FILE_PATH)).toBe(true);
@@ -290,7 +298,7 @@ describe('metrics', () => {
 
     it('should add new metrics to existing terraform metrics', async () => {
       // Create shared constructs for Terraform
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       // Add initial metrics
       await addGeneratorMetricsIfApplicable(tree, [
@@ -343,7 +351,7 @@ describe('metrics', () => {
     });
 
     it('should handle empty metrics gracefully for terraform', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       await addGeneratorMetricsIfApplicable(tree, []);
 
@@ -352,7 +360,7 @@ describe('metrics', () => {
     });
 
     it('should handle multi-line formatted terraform tags array correctly', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       // Simulate a multi-line tags array
       const content = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8')!;
@@ -382,7 +390,7 @@ describe('metrics', () => {
     });
 
     it('should produce a byte-identical metrics.tf when re-run with the same generators', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       const generatorInfo = ['g23', 'g8', 'g5', 'g37'].map((metric, i) => ({
         id: `gen#${i}`,
@@ -411,7 +419,7 @@ describe('metrics', () => {
       // Simulate the real generator matrix where CDK generators run first and
       // the terraform metrics file is only created later (by the terraform
       // project generator running last).
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 
       const cdkGenerators = ['g8', 'g5', 'g37', 'g6', 'g9', 'g10', 'g3'].map(
         (metric, i) => ({
@@ -435,7 +443,7 @@ describe('metrics', () => {
         await addGeneratorMetricsIfApplicable(tree, [info]);
       }
       // Then the terraform metrics file is created and the terraform generator runs
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
       await addGeneratorMetricsIfApplicable(tree, [terraformGenerator]);
 
       const firstRunTerraform = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8');
@@ -473,8 +481,8 @@ describe('metrics', () => {
 
     it('should work with both CDK and Terraform metrics simultaneously', async () => {
       // Create both CDK and Terraform shared constructs
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       // Add metrics - should update both files
       await addGeneratorMetricsIfApplicable(tree, [

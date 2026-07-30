@@ -8,13 +8,21 @@ import {
   updateJson,
   writeJson,
 } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   NX_MIGRATION_GENERATOR_INFO,
   tsNxMigrationGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('nx-migration generator', () => {
   describe('within @aws/nx-plugin', () => {
@@ -358,7 +366,11 @@ describe('nx-migration generator', () => {
     });
 
     it('should add generator metric tags', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(
+        tree,
+        { iac: 'cdk' },
+        sharedConstructsDeclaration,
+      );
 
       await tsNxMigrationGenerator(tree, {
         project: PROJECT,

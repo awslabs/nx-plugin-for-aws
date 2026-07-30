@@ -8,6 +8,10 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import type {
+  DependencyDeclaration,
+  MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import { esmVars } from './module-format';
@@ -21,12 +25,23 @@ import {
 import { ensureSharedScriptsProject } from './shared-scripts';
 import { withVersions } from './versions';
 
+/** Dependencies a caller must declare to use the shared infra scripts. */
+export const SHARED_INFRA_SCRIPTS_DEPENDENCIES = [
+  '@aws-sdk/client-sts',
+  '@aws-sdk/credential-providers',
+] as const;
+
 /**
  * Ensures the shared scripts package exists and adds infra-deploy/infra-destroy
  * scripts to packages/common/scripts/src/infra/. Called by ts#infra when
  * stageConfig is enabled.
  */
-export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
+export async function sharedInfraScriptsGenerator<
+  const D extends DependencyDeclaration,
+>(
+  tree: Tree,
+  declaration: D & MustDeclare<typeof SHARED_INFRA_SCRIPTS_DEPENDENCIES, D>,
+): Promise<void> {
   const scriptsDir = joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR);
 
   await ensureSharedScriptsProject(tree);
@@ -52,7 +67,12 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['@aws-sdk/client-sts', '@aws-sdk/credential-providers']),
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_INFRA_SCRIPTS_DEPENDENCIES
+      >,
+      ['@aws-sdk/client-sts', '@aws-sdk/credential-providers'],
+    ),
     joinPathFragments(
       joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR),
       'package.json',

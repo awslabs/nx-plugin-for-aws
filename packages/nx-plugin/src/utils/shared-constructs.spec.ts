@@ -5,7 +5,11 @@
 
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { sharedConstructsGenerator } from './shared-constructs';
+import { declareDependencies } from './declared-dependencies';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from './shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -13,6 +17,10 @@ import {
   SHARED_TERRAFORM_DIR,
 } from './shared-constructs-constants';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from './test';
+
+const declaration = declareDependencies({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('shared-constructs utils', () => {
   let tree: Tree;
@@ -36,7 +44,7 @@ describe('shared-constructs utils', () => {
 
   describe('sharedConstructsGenerator', () => {
     it('should generate shared constructs when they do not exist', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 
       // Check if shared constructs project was created
       expect(
@@ -82,7 +90,7 @@ describe('shared-constructs utils', () => {
     });
 
     it('should add required dependencies when generating shared constructs', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 
       // Dependencies are declared in the shared constructs project manifest as
       // catalog references
@@ -124,14 +132,14 @@ describe('shared-constructs utils', () => {
       );
       tree.write(markerFilePath, 'This is a marker file');
 
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
+      await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 
       // Check if marker file still exists (meaning the directory wasn't recreated)
       expect(tree.exists(markerFilePath)).toBeTruthy();
     });
 
     it('should declare no cached outputs on the shared terraform build target', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
       const projectConfig = JSON.parse(
         tree.read(

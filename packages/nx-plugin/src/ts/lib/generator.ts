@@ -15,6 +15,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { libraryGenerator } from '@nx/js';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -32,6 +33,11 @@ import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import type { TsProjectGeneratorSchema } from './schema';
 import { configureTsProject } from './ts-project-utils';
+import { VITEST_DEPENDENCIES } from './vitest';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...VITEST_DEPENDENCIES],
+});
 
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -110,11 +116,15 @@ export const tsProjectGenerator = async (
       },
     );
   }
-  await configureTsProject(tree, {
-    dir,
-    fullyQualifiedName,
-    esm,
-  });
+  await configureTsProject(
+    tree,
+    {
+      dir,
+      fullyQualifiedName,
+      esm,
+    },
+    DECLARED_DEPENDENCIES,
+  );
 
   const projectConfiguration = readProjectConfiguration(
     tree,

@@ -3,12 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
+import { declareDependencies } from '../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../utils/format';
-import { applyWorkspaceInit } from '../utils/init';
+import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init';
 import { installDependencies } from '../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
 import type { InitGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...INIT_DEPENDENCIES],
+});
 
 export const INIT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -26,7 +31,11 @@ export const initGenerator = async (
   tree: Tree,
   { iac, mcp, containers, preferInstallDependencies }: InitGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  await applyWorkspaceInit(tree, { iac, containers, mcp });
+  await applyWorkspaceInit(
+    tree,
+    { iac, containers, mcp },
+    DECLARED_DEPENDENCIES,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [INIT_GENERATOR_INFO]);
 

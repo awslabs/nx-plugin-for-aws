@@ -13,12 +13,20 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
+import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  nodeImageVersions,
+} from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -36,15 +44,45 @@ import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
 import { assignPort } from '../../utils/port';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { sharedRdbScriptsGenerator } from '../../utils/shared-rdb-scripts';
+import {
+  SHARED_RDB_SCRIPTS_DEPENDENCIES,
+  sharedRdbScriptsGenerator,
+} from '../../utils/shared-rdb-scripts';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsRdbGeneratorSchema } from './schema';
+
+// Unions both engine branches.
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+    '@aws-sdk/client-secrets-manager',
+    '@aws-sdk/rds-signer',
+    '@prisma/client',
+    '@prisma/adapter-mariadb',
+    'mariadb',
+    '@prisma/adapter-pg',
+    'pg',
+    '@types/aws-lambda',
+    '@types/pg',
+    'prisma',
+    'tsx',
+    ...BUNDLE_DEPENDENCIES,
+    ...FS_DEPENDENCIES,
+    ...DOCKER_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...SHARED_RDB_SCRIPTS_DEPENDENCIES,
+  ],
+});
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -132,7 +170,7 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
-  await sharedRdbScriptsGenerator(tree, options.engine);
+  await sharedRdbScriptsGenerator(tree, options.engine, DECLARED_DEPENDENCIES);
   const waitForDbScript =
     options.engine === 'mysql'
       ? 'wait-for-mysql-db.ts'
@@ -144,7 +182,7 @@ export const tsRdbGenerator = async (
   const relativePathToRoot = getRelativePathToRootByDirectory(
     projectConfig.root,
   );
-  const fs = new FsCommands(tree);
+  const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
   const migrationBundleDir = joinPathFragments(
     'dist',
     projectConfig.root,
@@ -154,14 +192,24 @@ export const tsRdbGenerator = async (
   const migrationDockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
 
   if (options.infra !== 'none') {
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/migration-handler.ts',
-      bundleOutputDir: 'migration',
-    });
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/create-db-user-handler.ts',
-      bundleOutputDir: 'create-db-user',
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: 'src/migration-handler.ts',
+        bundleOutputDir: 'migration',
+      },
+      DECLARED_DEPENDENCIES,
+    );
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: 'src/create-db-user-handler.ts',
+        bundleOutputDir: 'create-db-user',
+      },
+      DECLARED_DEPENDENCIES,
+    );
     const bundleTarget = projectConfig.targets['bundle'];
     // The bundle target starts with a single rolldown `command`. Wrap it with
     // the migration asset copy steps, unless it has already been transformed
@@ -248,13 +296,17 @@ export const tsRdbGenerator = async (
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
 
-      addDockerScanTarget(tree, {
-        project: projectConfig,
-        containerEngine,
-        trivyTargetName: 'trivy',
-        dockerTargetName: 'docker',
-        imageTags: [migrationDockerImageTag],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project: projectConfig,
+          containerEngine,
+          trivyTargetName: 'trivy',
+          dockerTargetName: 'docker',
+          imageTags: [migrationDockerImageTag],
+        },
+        DECLARED_DEPENDENCIES,
+      );
     }
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
   }
@@ -266,7 +318,7 @@ export const tsRdbGenerator = async (
 
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
     await addRdbInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
@@ -292,7 +344,7 @@ export const tsRdbGenerator = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
       '@aws-sdk/client-secrets-manager',
@@ -302,7 +354,7 @@ export const tsRdbGenerator = async (
         ? (['@prisma/adapter-mariadb', 'mariadb'] as const)
         : (['@prisma/adapter-pg', 'pg'] as const)),
     ]),
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@types/aws-lambda',
       ...(options.engine === 'mysql'
         ? ([] as const)
@@ -331,7 +383,11 @@ export const tsRdbGenerator = async (
   }
 
   // The prisma CLI and tsx run migration/seed scripts from the root.
-  addDependenciesToPackageJson(tree, {}, withVersions(['prisma', 'tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(DECLARED_DEPENDENCIES, ['prisma', 'tsx']),
+  );
 
   registerPnpmBuiltDependencies(tree, {
     '@prisma/engines': false,

@@ -12,7 +12,11 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addAgentCoreGatewayInfra } from '../utils/agent-core-constructs/agent-core-constructs';
+import {
+  AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
+  addAgentCoreGatewayInfra,
+} from '../utils/agent-core-constructs/agent-core-constructs';
+import { declareDependencies } from '../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
@@ -29,9 +33,25 @@ import {
 } from '../utils/nx';
 import { assignPort } from '../utils/port';
 import { ensureProjectPackageJson } from '../utils/project-package-json';
-import { sharedConstructsGenerator } from '../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../utils/shared-constructs';
 import { withVersions } from '../utils/versions';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@modelcontextprotocol/sdk',
+    'express',
+    '@types/express',
+    'ejs',
+    '@types/ejs',
+    'tsx',
+    ...AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const AGENTCORE_GATEWAY_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -146,27 +166,42 @@ export const agentcoreGatewayGenerator = async (
   // shared gateway construct)
   addDependenciesToPackageJson(
     tree,
-    withVersions(['@modelcontextprotocol/sdk', 'express']),
-    withVersions(['@types/express', 'ejs', '@types/ejs']),
+    withVersions(DECLARED_DEPENDENCIES, [
+      '@modelcontextprotocol/sdk',
+      'express',
+    ]),
+    withVersions(DECLARED_DEPENDENCIES, [
+      '@types/express',
+      'ejs',
+      '@types/ejs',
+    ]),
     joinPathFragments(projectRoot, 'package.json'),
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
+  );
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
   // the infrastructure to a previously infra-less gateway.
   if (infra === 'agentcore') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
 
-    await addAgentCoreGatewayInfra(tree, {
-      gatewayNameClassName: nameClassName,
-      gatewayNameKebabCase: name,
-      projectName: fullyQualifiedName,
-      projectDirectory: projectRoot,
-      cedarPolicy,
-      auth,
-      iac,
-    });
+    await addAgentCoreGatewayInfra(
+      tree,
+      {
+        gatewayNameClassName: nameClassName,
+        gatewayNameKebabCase: name,
+        projectName: fullyQualifiedName,
+        projectDirectory: projectRoot,
+        cedarPolicy,
+        auth,
+        iac,
+      },
+      DECLARED_DEPENDENCIES,
+    );
   }
 
   await addGeneratorMetricsIfApplicable(tree, [

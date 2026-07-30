@@ -16,3 +16,13 @@ export const SHARED_SCRIPTS_NAME = 'common-scripts';
 export const SHARED_SCRIPTS_DIR = 'common/scripts';
 
 export const DYNAMODB_GENERATOR_IDS = ['ts#dynamodb', 'py#dynamodb'];
+
+/**
+ * Dependencies a caller must declare to use the shared constructs project.
+ * Lives here so generators can spread it without importing the generator.
+ */
+export const SHARED_CONSTRUCTS_DEPENDENCIES = [
+  'constructs',
+  'aws-cdk-lib',
+  '@types/node',
+] as const;

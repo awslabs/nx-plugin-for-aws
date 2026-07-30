@@ -14,6 +14,7 @@ import {
 import camelCase from 'lodash.camelcase';
 import PackageJson from '../../../package.json' with { type: 'json' };
 import { addStarExport, applyGritQL } from '../../utils/ast';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -26,8 +27,15 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { configureTsProjectAsNxPlugin } from '../nx-plugin/utils';
+import {
+  configureTsProjectAsNxPlugin,
+  NX_PLUGIN_DEPENDENCIES,
+} from '../nx-plugin/utils';
 import type { TsNxGeneratorGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...NX_PLUGIN_DEPENDENCIES],
+});
 
 export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(
   import.meta.filename,
@@ -52,7 +60,7 @@ export const tsNxGeneratorGenerator = async (
   const isNxPluginForAws = rootPackageJson?.name === '@aws/nx-plugin-source';
 
   // Configure the targeted project as an Nx Plugin
-  configureTsProjectAsNxPlugin(tree, pluginProject);
+  configureTsProjectAsNxPlugin(tree, pluginProject, DECLARED_DEPENDENCIES);
 
   const enhancedOptions = {
     name,

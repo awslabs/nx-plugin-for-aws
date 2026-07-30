@@ -10,7 +10,11 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { addOpenApiReactClient } from '../../utils/connection/open-api/react';
+import {
+  addOpenApiReactClient,
+  OPEN_API_REACT_DEPENDENCIES,
+} from '../../utils/connection/open-api/react';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -22,6 +26,10 @@ import {
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
 import type { SmithyReactConnectionGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [...OPEN_API_REACT_DEPENDENCIES],
+});
 
 export const SMITHY_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -65,22 +73,26 @@ export const smithyReactConnectionGenerator = async (
     },
   );
 
-  await addOpenApiReactClient(tree, {
-    apiName,
-    frontendProjectConfig,
-    backendProjectConfig,
-    specBuildProject: modelProjectConfig,
-    specPath: joinPathFragments(
-      'dist',
-      modelProjectConfig.root,
-      'build',
-      'openapi',
-      'openapi.json',
-    ),
-    specBuildTargetName: `${modelProjectConfig.name}:build`,
-    auth,
-    port,
-  });
+  await addOpenApiReactClient(
+    tree,
+    {
+      apiName,
+      frontendProjectConfig,
+      backendProjectConfig,
+      specBuildProject: modelProjectConfig,
+      specPath: joinPathFragments(
+        'dist',
+        modelProjectConfig.root,
+        'build',
+        'openapi',
+        'openapi.json',
+      ),
+      specBuildTargetName: `${modelProjectConfig.name}:build`,
+      auth,
+      port,
+    },
+    DECLARED_DEPENDENCIES,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     SMITHY_REACT_CONNECTION_GENERATOR_INFO,

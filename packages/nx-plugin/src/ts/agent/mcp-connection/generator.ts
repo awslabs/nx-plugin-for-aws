@@ -11,12 +11,14 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
+  AGENT_CONNECTION_DEPENDENCIES,
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
@@ -32,6 +34,18 @@ import {
 } from '../../../utils/nx';
 import { withVersions } from '../../../utils/versions';
 import type { TsAgentMcpConnectionGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@modelcontextprotocol/sdk',
+    '@strands-agents/sdk',
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+    'aws4fetch',
+    '@aws-sdk/credential-providers',
+    ...AGENT_CONNECTION_DEPENDENCIES,
+  ],
+});
 
 export const TS_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -72,8 +86,8 @@ export const tsAgentMcpConnectionGenerator = async (
   const npmScope = getNpmScope(tree);
 
   // 1. Ensure the shared agent-connection project exists + has the MCP core client
-  await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'mcp');
+  await ensureTypeScriptAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
+  await addTypeScriptCoreClient(tree, 'mcp', DECLARED_DEPENDENCIES);
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
@@ -140,7 +154,7 @@ export const tsAgentMcpConnectionGenerator = async (
   // 5. Add dependencies required by the MCP core client + vended client
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@modelcontextprotocol/sdk',
       '@strands-agents/sdk',
       '@aws-lambda-powertools/parameters',

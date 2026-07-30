@@ -11,12 +11,19 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
-import { addApiGatewayInfra } from '../../../utils/api-constructs/api-constructs';
+import {
+  API_CONSTRUCTS_DEPENDENCIES,
+  addApiGatewayInfra,
+} from '../../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
-import { addTypeScriptBundleTarget } from '../../../utils/bundle/bundle';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../../utils/bundle/bundle';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { FsCommands } from '../../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../../utils/fs';
 import { updateGitIgnore } from '../../../utils/git';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
@@ -32,10 +39,33 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { assignPort } from '../../../utils/port';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { withVersions } from '../../../utils/versions';
 import smithyProjectGenerator from '../../project/generator';
 import type { TsSmithyApiGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@aws-smithy/server-apigateway',
+    '@aws-smithy/server-node',
+    '@middy/core',
+    '@aws-lambda-powertools/logger',
+    '@aws-lambda-powertools/parameters',
+    '@aws-lambda-powertools/tracer',
+    '@aws-lambda-powertools/metrics',
+    '@aws-sdk/client-appconfigdata',
+    '@aws-lambda-powertools/parser',
+    '@types/aws-lambda',
+    'tsx',
+    ...FS_DEPENDENCIES,
+    ...API_CONSTRUCTS_DEPENDENCIES,
+    ...BUNDLE_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const TS_SMITHY_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -160,34 +190,42 @@ export const tsSmithyApiGenerator = async (
 
     // Add infrastructure
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
-    await addApiGatewayInfra(tree, {
-      iac,
-      apiProjectName: backendFullyQualifiedName,
-      apiNameClassName,
-      apiNameKebabCase,
-      auth: options.auth,
-      constructType: 'rest',
-      backend: {
-        type: 'smithy',
-        bundleOutputDir: joinPathFragments(
-          'dist',
-          backendProjectConfig.root,
-          'bundle',
-        ),
-        integrationPattern,
-        ...(options.auth === 'custom' && {
-          authorizerBundleOutputDir: joinPathFragments(
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DECLARED_DEPENDENCIES,
+    );
+    await addApiGatewayInfra(
+      tree,
+      {
+        iac,
+        apiProjectName: backendFullyQualifiedName,
+        apiNameClassName,
+        apiNameKebabCase,
+        auth: options.auth,
+        constructType: 'rest',
+        backend: {
+          type: 'smithy',
+          bundleOutputDir: joinPathFragments(
             'dist',
             backendProjectConfig.root,
             'bundle',
-            'authorizer',
           ),
-        }),
+          integrationPattern,
+          ...(options.auth === 'custom' && {
+            authorizerBundleOutputDir: joinPathFragments(
+              'dist',
+              backendProjectConfig.root,
+              'bundle',
+              'authorizer',
+            ),
+          }),
+        },
       },
-    });
+      DECLARED_DEPENDENCIES,
+    );
     addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
       iac,
       apiNameKebabCase,
@@ -202,21 +240,31 @@ export const tsSmithyApiGenerator = async (
     });
 
     // Add bundle target using rolldown
-    await addTypeScriptBundleTarget(tree, backendProjectConfig, {
-      targetFilePath: 'src/handler.ts',
-      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      backendProjectConfig,
+      {
+        targetFilePath: 'src/handler.ts',
+        external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     if (options.auth === 'custom') {
-      await addTypeScriptBundleTarget(tree, backendProjectConfig, {
-        targetFilePath: 'src/authorizer.ts',
-        bundleOutputDir: 'authorizer',
-        external: [/@aws-sdk\/.*/],
-      });
+      await addTypeScriptBundleTarget(
+        tree,
+        backendProjectConfig,
+        {
+          targetFilePath: 'src/authorizer.ts',
+          bundleOutputDir: 'authorizer',
+          external: [/@aws-sdk\/.*/],
+        },
+        DECLARED_DEPENDENCIES,
+      );
     }
   }
 
-  const cmd = new FsCommands(tree);
+  const cmd = new FsCommands(tree, DECLARED_DEPENDENCIES);
   const generatedSrcDirFromRoot = '{projectRoot}/src/generated';
 
   // Target for copying the ssdk built by the model
@@ -304,7 +352,7 @@ export const tsSmithyApiGenerator = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@aws-smithy/server-apigateway',
       '@aws-smithy/server-node',
       '@middy/core',
@@ -317,10 +365,14 @@ export const tsSmithyApiGenerator = async (
         ? (['@aws-lambda-powertools/parser'] as const)
         : []),
     ]),
-    withVersions(['@types/aws-lambda']),
+    withVersions(DECLARED_DEPENDENCIES, ['@types/aws-lambda']),
     joinPathFragments(backendProjectConfig.root, 'package.json'),
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_SMITHY_API_GENERATOR_INFO]);
 

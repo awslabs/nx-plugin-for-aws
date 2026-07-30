@@ -11,7 +11,11 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
@@ -26,10 +30,29 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import { TS_HANDLER_RETURN_TYPES } from './io';
 import type { TsLambdaFunctionGeneratorSchema } from './schema';
+
+export const DECLARED_DEPENDENCIES = declareDependencies({
+  ts: [
+    '@aws-lambda-powertools/tracer',
+    '@aws-lambda-powertools/logger',
+    '@aws-lambda-powertools/metrics',
+    '@aws-lambda-powertools/parameters',
+    '@aws-lambda-powertools/parser',
+    '@aws-sdk/client-appconfigdata',
+    '@middy/core',
+    'zod',
+    '@types/aws-lambda',
+    ...BUNDLE_DEPENDENCIES,
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+});
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -98,9 +121,13 @@ export const tsLambdaFunctionGenerator = async (
   if (infra !== 'none') {
     const iac = await resolveIac(tree, schema.iac);
 
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DECLARED_DEPENDENCIES,
+    );
 
     await addLambdaFunctionInfra(tree, {
       functionProjectName: projectConfig.name,
@@ -128,11 +155,16 @@ export const tsLambdaFunctionGenerator = async (
 
   if (infra !== 'none') {
     // Add a bundle target for the function
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: functionPathFromProjectRoot,
-      bundleOutputDir,
-      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: functionPathFromProjectRoot,
+        bundleOutputDir,
+        external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+      },
+      DECLARED_DEPENDENCIES,
+    );
   }
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
@@ -149,7 +181,7 @@ export const tsLambdaFunctionGenerator = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
+    withVersions(DECLARED_DEPENDENCIES, [
       '@aws-lambda-powertools/tracer',
       '@aws-lambda-powertools/logger',
       '@aws-lambda-powertools/metrics',
@@ -159,7 +191,7 @@ export const tsLambdaFunctionGenerator = async (
       '@middy/core',
       'zod',
     ]),
-    withVersions(['@types/aws-lambda']),
+    withVersions(DECLARED_DEPENDENCIES, ['@types/aws-lambda']),
     joinPathFragments(dir, 'package.json'),
   );
 
