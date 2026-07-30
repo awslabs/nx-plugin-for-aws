@@ -36,11 +36,28 @@ export const runSmokeTest = async (
     onProjectCreate(projectRoot);
   }
 
-  // The matrix defers installing dependencies so the install happens once
-  // (`runInstall` below) rather than after every generator. It covers the CDK
-  // infrastructure projects and a Terraform project alongside them, so both IaC
-  // providers coexist in this workspace.
+  // Every generator runs with `--prefer-install-dependencies=false` to avoid a
+  // slow install after each one; `runInstall` below installs the full
+  // accumulated set once before the build. Generators still self-install when
+  // skipping would leave a graph-critical dependency unresolvable.
+
+  // CDK-specific infrastructure projects (not part of the shared matrix).
+  await runCLI(
+    `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive --prefer-install-dependencies=false`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive --prefer-install-dependencies=false`,
+    opts,
+  );
+
   await runGeneratorMatrix(opts);
+
+  // Extra: generate a terraform project alongside CDK to verify both coexist.
+  await runCLI(
+    `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive --prefer-install-dependencies=false`,
+    opts,
+  );
 
   // Wire up website, cognito and trpc api
   writeFileSync(

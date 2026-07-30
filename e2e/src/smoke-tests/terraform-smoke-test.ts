@@ -41,10 +41,18 @@ export const runTerraformSmokeTest = async (
     onProjectCreate(projectRoot);
   }
 
-  // The matrix scaffolds the Terraform `infra` application every other generator
-  // deploys into, and defers installing dependencies so the install happens once
-  // (`runInstall` below) rather than after every generator.
-  await runGeneratorMatrix(opts, { infra: 'terraform' });
+  // Every generator runs with `--prefer-install-dependencies=false` to avoid a
+  // slow install after each one; `runInstall` below installs the full
+  // accumulated set once before the build. Generators still self-install when
+  // skipping would leave a graph-critical dependency unresolvable.
+
+  // Terraform application project that wires everything together.
+  await runCLI(
+    `generate @aws/nx-plugin:terraform#project --name=infra --type=application --no-interactive --prefer-install-dependencies=false`,
+    opts,
+  );
+
+  await runGeneratorMatrix(opts);
 
   // Since the smoke tests don't run in a git repo, we need to exclude some
   // patterns for the license sync.
