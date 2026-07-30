@@ -6,6 +6,7 @@ import { type Tree, updateProjectConfiguration } from '@nx/devkit';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -39,6 +40,15 @@ export const tsDynamoDBAgentConnectionGenerator = async (
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO,
+    targetProject.root,
+    `${agentName}-${targetProject.name}`,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO,

@@ -12,6 +12,7 @@ import {
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import {
+  DECLARED_DEPENDENCIES as AGUI_DECLARED_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
 } from '../../../ts/react-website/agui/generator';
@@ -39,7 +40,7 @@ import {
 } from './local-dev';
 
 export const DECLARED_DEPENDENCIES = declareDependencies({
-  ts: [...OPEN_API_REACT_DEPENDENCIES],
+  ts: [...OPEN_API_REACT_DEPENDENCIES, ...AGUI_DECLARED_DEPENDENCIES.ts],
 });
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

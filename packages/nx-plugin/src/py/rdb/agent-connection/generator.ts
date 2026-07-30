@@ -13,6 +13,7 @@ import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { toSnakeCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -62,6 +63,15 @@ export const pyRdbAgentConnectionGenerator = async (
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_RDB_AGENT_CONNECTION_GENERATOR_INFO,
+    targetProject.root,
+    `${agentName}-${targetProject.name}`,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_RDB_AGENT_CONNECTION_GENERATOR_INFO,

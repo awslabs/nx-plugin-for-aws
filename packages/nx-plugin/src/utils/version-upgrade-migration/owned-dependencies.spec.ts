@@ -133,12 +133,35 @@ const RECORDS_METADATA =
   /addGeneratorMetadata\(|addComponentGeneratorMetadata\(|metadata: \{/;
 
 /**
+ * The explicit helpers. A connection wires into a project it did not create, so
+ * an inline `metadata: {` in its source belongs to something else and doesn't
+ * count.
+ */
+const CALLS_METADATA_HELPER =
+  /addGeneratorMetadata\(|addComponentGeneratorMetadata\(/;
+
+/**
  * Generators discovered through something they delegate to instead of their own
  * metadata: `preset` marks the workspace via `aws-nx-plugin.config.mts`, which
  * stands in for `init` (whose declaration therefore carries `husky`), and
  * `ts#dcr-proxy` creates its project through `ts#project`.
  */
-const DISCOVERED_INDIRECTLY = new Set(['preset', 'ts#dcr-proxy']);
+const DISCOVERED_INDIRECTLY = new Set([
+  'preset',
+  'ts#dcr-proxy',
+  // Dispatches to the specific connection generator, which records itself.
+  'connection',
+]);
+
+/**
+ * A generator that delegates to another module's generator must cover that
+ * module's dependencies too, since they land in the workspace on its behalf.
+ * Keyed by the delegating generator id.
+ */
+const DELEGATES_TO: Record<string, string> = {
+  'ts#agent#react-connection': '../../ts/react-website/agui/generator.js',
+  'py#agent#react-connection': '../../ts/react-website/agui/generator.js',
+};
 
 describe('declaration coverage', () => {
   // A generator that adds vended dependencies must declare them, or the version
@@ -172,6 +195,44 @@ describe('declaration coverage', () => {
         unrecorded.push(info.id);
       }
     }
+
+    expect(unrecorded).toEqual([]);
+  });
+
+  // A helper reached through `MustDeclare` is checked by the compiler, but one
+  // that just exports its own declaration is not — the caller has to union it.
+  it('should cover the declarations of generators it delegates to', async () => {
+    const uncovered: string[] = [];
+    for (const [id, delegate] of Object.entries(DELEGATES_TO)) {
+      const info = buildGeneratorInfoList(PLUGIN_ROOT).find((g) => g.id === id);
+      const { DECLARED_DEPENDENCIES } = await import(
+        `${info?.resolvedFactoryPath}.js`
+      );
+      const { DECLARED_DEPENDENCIES: delegated } = await import(delegate);
+      const declared = new Set<string>(DECLARED_DEPENDENCIES?.ts ?? []);
+      for (const dep of delegated?.ts ?? []) {
+        if (!declared.has(dep)) {
+          uncovered.push(`${id}: ${dep}`);
+        }
+      }
+    }
+
+    expect(uncovered).toEqual([]);
+  });
+
+  // Connections must be identifiable during an upgrade, whether or not they add
+  // dependencies today — otherwise adding one later silently goes unowned.
+  it('should have every connection generator record metadata', async () => {
+    const unrecorded = buildGeneratorInfoList(PLUGIN_ROOT)
+      .filter((info) => info.id.endsWith('-connection'))
+      .filter((info) => !DISCOVERED_INDIRECTLY.has(info.id))
+      .filter(
+        (info) =>
+          !CALLS_METADATA_HELPER.test(
+            readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8'),
+          ),
+      )
+      .map((info) => info.id);
 
     expect(unrecorded).toEqual([]);
   });
