@@ -118,14 +118,14 @@ Migrations come in three forms, discriminated by which fields the `migrations.js
 
 #### Scaffolding a migration
 
-Use the `ts#nx-migration` generator to scaffold a new migration — it creates the right files for the chosen kind and registers it in `migrations.json` (with no `version`; see [Versioning](#versioning) below). Pass `--kind` to choose; hybrid is usually the right one here (see [Choosing the kind](#choosing-the-kind-prefer-hybrid)):
+Use the `ts#nx-migration` generator to scaffold a new migration — it creates the right files for the chosen kind and registers it in `migrations.json` (with no `version`; see [Versioning](#versioning) below). Pass `--kind` to choose; deterministic is both the generator's default and the one to reach for first (see [Choosing the kind](#choosing-the-kind-prefer-deterministic)):
 
 ```bash
-# Hybrid: a codemod that hands off to an agent
-pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid
-
 # Deterministic (the generator's default): a codemod alone
 pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=rename-foo-target --description="Rename the foo target to bar"
+
+# Hybrid: a codemod that hands off to an agent
+pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid
 
 # Agentic: a prompt alone, applied by the user's agent
 pnpm nx g @aws/nx-plugin:ts#nx-migration --project=@aws/nx-plugin --name=migrate-custom-handlers --description="Update custom handlers for the new API" --kind=agentic
@@ -151,27 +151,35 @@ The narrow exceptions:
 - Changes that only affect the *choices offered* at generation time (a new option whose default leaves existing output unchanged)
 - Removing a file the generator no longer vends, where the leftover copy is harmless
 
-#### Choosing the kind: prefer hybrid
+#### Choosing the kind: prefer deterministic
 
-**Everything we vend is user code.** Users own it, and they are free to modify it however they like — there is no file we can assume is untouched. That reality makes **hybrid the default kind**: a deterministic half that does as much as it safely can, plus a prompt that covers what it couldn't.
+**Start deterministic.** A codemod runs unattended and identically for everyone — no agent required, no consent prompt, no variation between runs, and it is covered by tests you can rely on. Most migrations touch a shape we vend and can be pattern-matched, so most migrations should be a plain `implementation`. Reporting what it skipped via `nextSteps` is often enough on its own: the user gets a precise manual follow-up rather than a migration that needs an agent to finish.
 
-Within a hybrid migration, split the work by how reliably the edit can be pattern-matched:
+**Reach for hybrid when a change is critical and can't be fully applied deterministically.** The case for the extra prompt is strongest for breaking changes — where a workspace that only gets the deterministic half is left broken, and the leftover edits span too many shapes for a codemod to match. There the prompt is what carries users across; a `nextSteps` note asking them to hand-reconcile a breaking API change across their own code is a poor substitute. Add the prompt when:
+
+- The change is breaking, and code the codemod can't safely match must also change for the workspace to keep working.
+- The leftover edits depend on what the user built, so no single shape holds — `agent.ts` / `agent.py`, individual tRPC procedures and routers, custom CDK stacks, React components.
+
+Choose pure agentic only when nothing can be matched mechanically at all.
+
+When you do write a hybrid, split the work by how reliably the edit can be pattern-matched:
 
 - **Deterministic half** — changes with a narrow, recognisable shape: vended config, `common/constructs` / `common/terraform`, generated clients, agent connection wiring, import paths and renamed exports. The transform must **match the exact shape it expects before writing**: read the target, confirm it still looks like what the generator produced, and if it doesn't, leave it alone and record that in `agentContext` and `nextSteps`. A transform that rewrites whatever it finds will destroy customisations.
-- **Agentic half** — whatever the deterministic half skipped, plus code users routinely rewrite where no single shape holds: `agent.ts` / `agent.py`, individual tRPC procedures and routers, custom CDK stacks, React components. Note that the split isn't "our files vs theirs" — put an edit in the deterministic half whenever it can be matched generically and safely, however user-facing the file, and defer it to the prompt when it can't. **Judge mostly by complexity:** if a codemod would need a wide surface of shapes to handle, the prompt is the better home for it.
-
-Reach for a *pure* kind only when one half would be empty: pure deterministic when nothing can be left over (a config-only edit), pure agentic when nothing can be matched mechanically at all.
+- **Agentic half** — whatever the deterministic half skipped. Note that the split isn't "our files vs theirs" — put an edit in the deterministic half whenever it can be matched generically and safely, however user-facing the file, and defer it to the prompt only when it can't. **Judge mostly by complexity:** if a codemod would need a wide surface of shapes to handle, the prompt is the better home for it.
 
 Worked examples:
 
 - **Renaming a generator (new generator ID).** Deterministic. The generator metadata recorded in each project's `project.json` is what lets later generators identify a project, so a codemod rewriting the old ID to the new one across every `project.json` is both exhaustive and safe — miss it and generators on the new version no longer recognise projects created by the old one.
-- **Upgrading to a new major of Vite.** Hybrid. The deterministic half performs the routine codemods (bump the vended config, apply the mechanical config-shape changes we know about); the prompt points the agent at the upstream migration guide and has it reconcile the user's own Vite config, plugins and build code against the new API.
-- **Adding a KMS key to the static website's S3 bucket.** Hybrid. The deterministic half makes the change in `common/constructs` / `common/terraform` where the bucket is vended; where it finds a bucket definition it doesn't recognise, it records that in `agentContext`, and the prompt describes the change so the agent can apply it to whatever shape the user's bucket has ended up in.
+- **Adding a KMS key to the static website's S3 bucket.** Deterministic. The bucket is vended in `common/constructs` / `common/terraform`, so a codemod that matches that shape covers the ordinary case; where it finds a bucket definition it doesn't recognise it reports it via `nextSteps`. Nothing breaks if a user applies that note later, so the change doesn't warrant a prompt.
+- **Upgrading to a new major of Vite.** Hybrid — breaking, and only partly matchable. The deterministic half performs the routine codemods (bump the vended config, apply the mechanical config-shape changes we know about); the prompt points the agent at the upstream migration guide and has it reconcile the user's own Vite config, plugins and build code against the new API, which a codemod can't do across the shapes those take.
 
-#### Guardrails for the deterministic half
+#### Guardrails for codemods
 
-- **Pattern-match before writing.** Confirm the target still matches the shape the generator produced. If it doesn't, skip it, and report it via `nextSteps` and `agentContext` (both `MigrationReturnObject` fields) so the paired prompt can pick it up — never rewrite what you don't recognise.
-- **Idempotent.** Re-running the migration must be a no-op, mirroring the generator idempotency principle above.
+These apply to any `implementation`, whether it stands alone or forms the deterministic half of a hybrid:
+
+- **Transform source code with GritQL.** Any codemod that edits source — TypeScript, Python, HCL — must use the GritQL helpers in `utils/ast.ts` (`applyGritQL`, `matchGritQL`, `captureGritQL`, `insertViaGritQL`, `addDestructuredImport` and friends), the same way generators do. GritQL matches the AST, so one pattern holds across the formatting, whitespace, quoting and member ordering a user's copy will have drifted into. Regexes and string replacements are brittle by comparison: they match text that merely looks right, miss equivalent code written differently, and silently corrupt files — they are not acceptable for source transforms. Parse-able config is the exception, where a real parser beats both: `updateJson` for JSON, and the matching parser for other structured formats. Reserve textual edits for formats GritQL can't parse (e.g. Dockerfiles), and anchor them as tightly as you can.
+- **Pattern-match before writing.** Confirm the target still matches the shape the generator produced. If it doesn't, skip it and report it via `nextSteps` — plus `agentContext` in a hybrid, so the paired prompt can pick it up (both are `MigrationReturnObject` fields). Never rewrite what you don't recognise. `matchGritQL` is the natural way to make that check.
+- **Idempotent.** Re-running the migration must be a no-op, mirroring the generator idempotency principle above. As with generators, guard GritQL rewrites that inject code with a `where { ... <: not contains ... }` clause so a second run doesn't append a duplicate.
 - **Never destroy user intent.** The same rule as generators: unrecognised code is reported on, not rewritten.
 - **Format what you write.** Finish with `await formatFilesInSubtree(tree)`. `updateJson` / `writeJson` re-serialise the whole file and expand inline arrays, which the vended `format` target rejects — without this a clean migration run leaves the user's `build` failing.
 
