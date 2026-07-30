@@ -32,9 +32,9 @@ We recommend using the <Link path="/guides/ts-nx-plugin">`ts#nx-plugin`</Link> g
 
 Migrations come in three forms, discriminated by which fields the `migrations.json` entry carries. Pass `--kind` to choose (default `deterministic`):
 
-- **Deterministic** (`implementation`) — a codemod with an exact before/after. Runs unattended, including in CI and non-interactive terminals. Use it alone when the change has a shape you can match reliably everywhere it appears.
-- **Agentic** (`prompt`) — a markdown instruction file applied by the user's local coding agent via Nx's agentic `nx migrate` flow. Use it alone when no mechanical before/after holds, because the correct edit depends on what the user has built. When no agent runs (CI, no agent installed, consent declined), Nx surfaces the prompt as manual instructions — so write prompts as self-contained, human-actionable steps.
-- **Hybrid** (`implementation` + `prompt`) — both halves of one change, and usually the right choice. Everything your generators vend is code the user owns and may have modified, so the codemod does as much as it can safely match and returns `agentContext` describing what it changed *and what it skipped*; Nx passes that context to the paired `prompt`, which directs the agent at the rest.
+- **Deterministic** (`implementation`) — a codemod with an exact before/after, and the one to reach for first. It runs unattended, including in CI and non-interactive terminals, and applies identically for every user. Use it alone when the change has a shape you can match reliably everywhere it appears, reporting anything it skipped via `nextSteps`.
+- **Hybrid** (`implementation` + `prompt`) — both halves of one change. Use it when a change is breaking and can't be fully applied mechanically: the codemod does as much as it can safely match and returns `agentContext` describing what it changed *and what it skipped*; Nx passes that context to the paired `prompt`, which directs the agent at the rest. The prompt is what stops a workspace being left broken when the leftover edits span too many shapes to codemod.
+- **Agentic** (`prompt`) — a markdown instruction file applied by the user's local coding agent via Nx's agentic `nx migrate` flow. Use it alone when no mechanical before/after holds at all, because the correct edit depends on what the user has built. When no agent runs (CI, no agent installed, consent declined), Nx surfaces the prompt as manual instructions — so write prompts as self-contained, human-actionable steps.
 
 ## Generator Output
 
@@ -84,8 +84,9 @@ For some example operations you can perform in your migration (generating files,
 
 Migrations run against workspaces you don't control, so it is recommended to adhere to the following (the scaffolded skeleton bakes these in):
 
-- **Pattern-match before writing.** If a target file has diverged from the shape your generators produce, skip it and report it via `nextSteps`, or consider a hybrid migration, rather than clobbering the user's changes.
-- **Idempotent.** Re-running the migration must be a no-op.
+- **Transform source code with GritQL.** Use the <Link path="/guides/nx-generator">GritQL helpers</Link> (`applyGritQL`, `matchGritQL`) to edit source rather than regexes or string replacements. GritQL matches the AST, so one pattern holds across the formatting, whitespace and quoting a user's copy may have drifted into, where text matching quietly misses equivalent code or corrupts the file. Use `updateJson` for JSON and the matching parser for other structured config.
+- **Pattern-match before writing.** If a target file has diverged from the shape your generators produce, skip it and report it via `nextSteps`, or consider a hybrid migration, rather than clobbering the user's changes. `matchGritQL` is a convenient way to make that check.
+- **Idempotent.** Re-running the migration must be a no-op. Guard GritQL rewrites that inject code with a `where { ... <: not contains ... }` clause so a second run doesn't append a duplicate.
 - **Format what you write.** Finish with `formatFilesInSubtree(tree)` so the files your migration wrote are formatted correctly.
 
 ### Testing Your Migration
