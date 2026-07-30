@@ -173,24 +173,74 @@ describe('terraform-bootstrap-adopt-existing-bucket migration', () => {
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('should skip and report a customised script', async () => {
+  it('should migrate a customised script without disturbing the customisation', async () => {
     await generateWithPreFixBootstrap(tree);
-    // A comment between `init` and the `apply` call breaks the anchor the
-    // migration keys off, standing in for any local edit to this region.
+    // Extra statements and reformatting around the edit sites — the kind of
+    // local change that defeats literal matching but not an AST rewrite.
     const customised = PRE_FIX_BOOTSTRAP.replace(
       "  execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });\n  execFileSync(",
-      "  execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });\n\n  // a local customisation\n  execFileSync(",
+      "  execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });\n\n  // our team pins a workspace before applying\n  execFileSync('terraform', ['workspace', 'select', 'ops'], { cwd: bootstrapDir, stdio: 'inherit' });\n\n  execFileSync(",
     );
     tree.write(BOOTSTRAP_FILE, customised);
 
     const result = await migration(tree);
+    const migrated = tree.read(BOOTSTRAP_FILE, 'utf-8') ?? '';
 
-    // Reported rather than rewritten — a half-applied edit is worse than none.
-    expect(tree.read(BOOTSTRAP_FILE, 'utf-8')).toEqual(customised);
+    // The fix lands and the user's statement survives.
+    expect(migrated).toContain('await bucketExists(s3, bucket)');
+    expect(migrated).toContain("'workspace', 'select', 'ops'");
+    expect(migrated).toContain('// our team pins a workspace before applying');
+    expect(
+      result.nextSteps.some((s) => s.includes(BOOTSTRAP_FILE)),
+    ).toBeTruthy();
+  });
+
+  it('should skip and report a script missing an edit site', async () => {
+    await generateWithPreFixBootstrap(tree);
+    // Rewritten to fetch state without `GetObjectCommand`, so there is no
+    // try block to hang `haveState` on and the rewrite must not proceed.
+    const diverged = PRE_FIX_BOOTSTRAP.replace(
+      'new GetObjectCommand({ Bucket: bucket, Key: key }),',
+      'new CustomFetchCommand({ Bucket: bucket, Key: key }),',
+    );
+    tree.write(BOOTSTRAP_FILE, diverged);
+
+    const result = await migration(tree);
+
+    // Reported rather than part-rewritten — a half-applied edit is worse than none.
+    expect(tree.read(BOOTSTRAP_FILE, 'utf-8')).toEqual(diverged);
     expect(
       result.nextSteps.some(
         (s) => s.includes(BOOTSTRAP_FILE) && s.includes('diverged'),
       ),
+    ).toBeTruthy();
+  });
+
+  it('should still apply when the script has been reformatted', async () => {
+    await generateWithPreFixBootstrap(tree);
+    // Same AST, different formatting — the case literal matching cannot handle.
+    const reformatted = PRE_FIX_BOOTSTRAP.replace(
+      "  execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });",
+      "  execFileSync('terraform', ['init'], {\n    cwd: bootstrapDir,\n    stdio: 'inherit',\n  });",
+    ).replace(
+      '  mkdirSync(dirname(tfStatePath), { recursive: true });',
+      '  mkdirSync(dirname(tfStatePath), {\n    recursive: true,\n  });',
+    );
+    tree.write(BOOTSTRAP_FILE, reformatted);
+
+    const result = await migration(tree);
+    const migrated = tree.read(BOOTSTRAP_FILE, 'utf-8') ?? '';
+
+    // Formatting differences must not cost the user the fix. The file won't be
+    // byte-identical to the template — the user's line breaks are preserved —
+    // but every part of the change has to land.
+    expect(migrated).toContain('HeadBucketCommand');
+    expect(migrated).toContain('let haveState = false;');
+    expect(migrated).toContain('haveState = true;');
+    expect(migrated).toContain('await bucketExists(s3, bucket)');
+    expect(migrated).toContain("'aws_s3_bucket.terraform_state'");
+    expect(
+      result.nextSteps.some((s) => s.includes(BOOTSTRAP_FILE)),
     ).toBeTruthy();
   });
 
