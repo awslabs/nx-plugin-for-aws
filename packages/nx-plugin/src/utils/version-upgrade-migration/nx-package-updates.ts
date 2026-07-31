@@ -33,8 +33,12 @@ export type PackageJsonUpdates = Record<string, PackageJsonUpdate>;
 
 /**
  * `alwaysAddToPackageJson: false` so only packages already present are updated.
- * Keyed `<dir>-<name>` rather than by version, which would collide with another
- * PR's entry while both are unversioned in `latest`.
+ *
+ * Keyed by directory rather than version, because the key has to exist before
+ * the version does: an entry is written under `latest` and only re-keyed to
+ * `v<version>` once a release claims it. One release's entry stays behind as the
+ * next is written, so a workspace several releases behind gets each nx bump in
+ * turn — hence `<dir>-<name>`, which keeps every release's entry distinct.
  *
  * @param version version `nx migrate` gates the bump on
  */

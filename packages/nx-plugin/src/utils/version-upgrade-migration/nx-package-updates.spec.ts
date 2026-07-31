@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
+import {
+  backfillMigrationVersions,
+  LATEST_MIGRATIONS_DIR,
+  stampMigrationVersions,
+} from '../migration-versions';
 import { NX_PACKAGES, NX_VERSION } from '../versions';
 import { isNxPackage, nxPackageJsonUpdates } from './nx-package-updates';
 
@@ -28,8 +33,8 @@ describe('nx package updates', () => {
       const updates = nxPackageJsonUpdates('latest', '1.2.3');
       const [key] = Object.keys(updates);
 
-      // Keyed like the migration entries, not by version, so a concurrent PR's
-      // entry can't collide with this one while both sit in `latest`.
+      // Keyed by directory, since the entry is written before a version exists
+      // and re-keyed to `v<version>` once a release claims it.
       expect(key).toBe('latest-nx-packages');
       expect(updates[key].version).toBe('1.2.3');
       expect(Object.keys(updates[key].packages).sort()).toEqual(
@@ -48,6 +53,47 @@ describe('nx package updates', () => {
       expect(Object.keys(merged).sort()).toEqual([
         'latest-nx-packages',
         'v1.1.0-nx-packages',
+      ]);
+    });
+
+    // Each release's bump stays behind as the next is written, so a workspace
+    // several releases behind gets each nx hop rather than only the newest.
+    it('should keep every release its bump shipped in', () => {
+      const source = {
+        generators: {
+          'latest-fix-a': {
+            implementation: './src/migrations/latest/fix-a/migration',
+          },
+        },
+        packageJsonUpdates: nxPackageJsonUpdates(
+          LATEST_MIGRATIONS_DIR,
+          LATEST_MIGRATIONS_DIR,
+        ),
+      };
+
+      // The weekly backfill re-keys the entry with the release that shipped it.
+      const backfilled = backfillMigrationVersions(source, {
+        'latest-fix-a': '1.1.0',
+      }).migrations;
+
+      // A later release bumps nx again, writing `latest` afresh alongside it.
+      const next = {
+        ...backfilled,
+        packageJsonUpdates: {
+          ...backfilled.packageJsonUpdates,
+          ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, LATEST_MIGRATIONS_DIR),
+        },
+      };
+
+      const published = stampMigrationVersions(next, {}, '1.2.0');
+
+      expect(
+        Object.entries(published.packageJsonUpdates ?? {}).map(
+          ([key, entry]) => [key, entry.version],
+        ),
+      ).toEqual([
+        ['v1.1.0-nx-packages', '1.1.0'],
+        ['v1.2.0-nx-packages', '1.2.0'],
       ]);
     });
 

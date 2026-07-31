@@ -32,6 +32,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
+  addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -133,6 +134,11 @@ export const tsDcrProxyGenerator = async (
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
+
+  // Recorded over the `ts#project` id the underlying generator wrote, so the
+  // version sync attributes this project's dependencies to this generator.
+  // After the write above, which would otherwise revert it.
+  addGeneratorMetadata(tree, projectConfig.name, TS_DCR_PROXY_GENERATOR_INFO);
 
   const bundlePathsFromRoot = Object.fromEntries(
     DCR_PROXY_HANDLERS.map((handler) => [

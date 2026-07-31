@@ -242,12 +242,10 @@ const CALLS_METADATA_HELPER =
 /**
  * Generators discovered through something they delegate to instead of their own
  * metadata: `preset` marks the workspace via `aws-nx-plugin.config.mts`, which
- * stands in for `init` (whose declaration therefore carries `husky`), and
- * `ts#dcr-proxy` creates its project through `ts#project`.
+ * stands in for `init` (whose declaration therefore carries `husky`).
  */
 const DISCOVERED_INDIRECTLY = new Set([
   'preset',
-  'ts#dcr-proxy',
   // Dispatches to the specific connection generator, which records itself.
   'connection',
 ]);
