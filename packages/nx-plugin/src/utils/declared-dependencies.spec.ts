@@ -7,6 +7,8 @@ import {
   applicableDependencies,
   declareDependencies,
   declaredNames,
+  ownedDependencyEntries,
+  ownedElsewhere,
 } from './declared-dependencies';
 
 interface AgentMetadata {
@@ -89,8 +91,48 @@ describe('declared dependencies', () => {
       expect(applicableDependencies(pinned.ts, {}).map((e) => e.name)).toEqual([
         'zod',
       ]);
-      // Still owned, so the sync keeps its version current.
-      expect(declaredNames(pinned.ts)).toContain('@nx/devkit');
+    });
+  });
+
+  describe('ownedDependencyEntries', () => {
+    // What the version sync reads. A version-only entry is declared precisely so
+    // its pin stays current, so excluding it here would strand the package on
+    // whatever version it was generated with.
+    it('should own a version-only entry the install skips', () => {
+      const pinned = declareDependencies()({
+        ts: [{ name: 'zod' }, { name: '@nx/devkit', versionOnly: true }],
+      });
+
+      expect(ownedDependencyEntries(pinned.ts, {}).map((e) => e.name)).toEqual([
+        'zod',
+        '@nx/devkit',
+      ]);
+    });
+
+    // A helper's constant is spread to claim ownership; the helper installs it
+    // into the project it owns. The sync must still upgrade it.
+    it('should own the entries a helper installs elsewhere', () => {
+      const delegating = declareDependencies()({
+        ts: [{ name: 'zod' }, ...ownedElsewhere([{ name: 'aws-cdk-lib' }])],
+      });
+
+      expect(
+        applicableDependencies(delegating.ts, {}).map((e) => e.name),
+      ).toEqual(['zod']);
+      expect(
+        ownedDependencyEntries(delegating.ts, {}).map((e) => e.name),
+      ).toEqual(['zod', 'aws-cdk-lib']);
+    });
+
+    // Ownership narrows by metadata like the install does: a project generated
+    // for one branch does not own another's packages.
+    it('should own only the entries whose predicate holds', () => {
+      expect(
+        ownedDependencyEntries(declaration.ts, {
+          protocol: 'http',
+          auth: 'cognito',
+        }).map((entry) => entry.name),
+      ).toEqual(['zod', 'ws']);
     });
   });
 

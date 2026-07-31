@@ -150,6 +150,19 @@ describe('ownedDependencies', () => {
     expect(owned.ts.has('@ag-ui/client')).toBe(false);
   });
 
+  // A generator spreads a helper's constant to claim the packages the helper
+  // installs into its own project. Those are owned here even though this
+  // generator installs none of them, or the sync would leave them behind.
+  it('should own the dependencies its helpers install elsewhere', async () => {
+    addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    // `sharedConstructsGenerator` puts these in the shared constructs project.
+    expect(owned.ts.has('aws-cdk-lib')).toBe(true);
+    expect(owned.ts.has('constructs')).toBe(true);
+  });
+
   it('should union the declarations of every generator that ran', async () => {
     addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
     addProject(tree, 'py', { generator: 'py#project' } as never);

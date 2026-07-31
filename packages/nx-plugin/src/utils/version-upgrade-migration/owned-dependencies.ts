@@ -6,9 +6,9 @@ import * as path from 'node:path';
 import { getProjects, type Tree } from '@nx/devkit';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils';
 import {
-  applicableDependencies,
   type DependencyDeclaration,
   type DependencyMetadata,
+  ownedDependencyEntries,
 } from '../declared-dependencies';
 import { buildGeneratorInfoList } from '../generators';
 
@@ -84,6 +84,9 @@ export const generatorsRun = (tree: Tree): ReadonlySet<string> =>
  * satisfies — a project generated with one protocol does not own another's
  * packages.
  *
+ * A `versionOnly` entry is owned like any other: it is declared precisely so the
+ * sync keeps its pinned version current wherever the workspace already holds it.
+ *
  * Each generator module exports its declaration, so reading one is an import
  * rather than a run — the generators themselves are never invoked.
  */
@@ -106,10 +109,10 @@ export const ownedDependencies = async (
       continue;
     }
     for (const { metadata } of matching) {
-      for (const entry of applicableDependencies(declaration.ts, metadata)) {
+      for (const entry of ownedDependencyEntries(declaration.ts, metadata)) {
         ts.add(entry.name as string);
       }
-      for (const entry of applicableDependencies(declaration.py, metadata)) {
+      for (const entry of ownedDependencyEntries(declaration.py, metadata)) {
         py.add(entry.name as string);
       }
     }

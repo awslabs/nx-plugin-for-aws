@@ -99,13 +99,14 @@ export const declaredNames = <Name>(
 ): Name[] => entries.map((entry) => entry.name);
 
 /**
- * The entries of a declaration that apply for the given metadata.
+ * The entries of a declaration whose condition the given metadata satisfies —
+ * everything this occurrence is responsible for, installed here or not.
  *
  * A predicate that throws — reading a field the metadata doesn't carry, say —
  * counts as not applying. The migration evaluates these against whatever a
  * project happened to record, and must not claim a branch it cannot confirm.
  */
-export const applicableDependencies = <
+export const ownedDependencyEntries = <
   Name,
   M extends DependencyMetadata,
   Entry extends DeclaredDependency<Name, M>,
@@ -114,9 +115,6 @@ export const applicableDependencies = <
   metadata: M,
 ): Entry[] =>
   entries.filter((entry) => {
-    if (entry.versionOnly) {
-      return false;
-    }
     if (!entry.when) {
       return true;
     }
@@ -126,6 +124,23 @@ export const applicableDependencies = <
       return false;
     }
   });
+
+/**
+ * The entries to install for the given metadata: those it owns, less the ones
+ * declared for their version alone. A `versionOnly` entry is still owned — the
+ * sync keeps its pin current wherever it already sits.
+ */
+export const applicableDependencies = <
+  Name,
+  M extends DependencyMetadata,
+  Entry extends DeclaredDependency<Name, M>,
+>(
+  entries: readonly Entry[],
+  metadata: M,
+): Entry[] =>
+  ownedDependencyEntries(entries, metadata).filter(
+    (entry) => !entry.versionOnly,
+  );
 
 /**
  * Requires a caller's declaration to cover `Needed`, naming whatever is missing
