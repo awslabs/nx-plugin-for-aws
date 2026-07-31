@@ -21,7 +21,10 @@ import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
 } from '../../../utils/bundle/bundle';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FS_DEPENDENCIES, FsCommands } from '../../../utils/fs';
 import { updateGitIgnore } from '../../../utils/git';
@@ -70,10 +73,10 @@ export const DEPENDENCIES = declareDependencies<TsSmithyApiMetadata>()({
     { name: '@types/aws-lambda', dev: true },
     // tsx runs the local server from the workspace root.
     { name: 'tsx', dev: true, root: true },
-    ...FS_DEPENDENCIES,
-    ...API_CONSTRUCTS_DEPENDENCIES,
-    ...BUNDLE_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(API_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

@@ -24,7 +24,10 @@ import {
   resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -57,7 +60,7 @@ export const DEPENDENCIES = declareDependencies<PyAgentMcpConnectionMetadata>()(
         name: 'langchain-mcp-adapters',
         when: (m) => m.framework === 'langchain',
       },
-      ...AGENT_CONNECTION_PY_DEPENDENCIES,
+      ...ownedElsewhere(AGENT_CONNECTION_PY_DEPENDENCIES),
     ],
   },
 );

@@ -17,7 +17,10 @@ import {
   applyGritQL,
 } from '../../../utils/ast';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
@@ -54,7 +57,7 @@ export const DEPENDENCIES = declareDependencies()({
   ts: [
     { name: 'oidc-client-ts' },
     { name: 'react-oidc-context' },
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

@@ -16,7 +16,10 @@ import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
 } from '../../utils/bundle/bundle';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
@@ -48,8 +51,8 @@ export const DEPENDENCIES = declareDependencies()({
     { name: '@middy/core' },
     { name: 'zod' },
     { name: '@types/aws-lambda', dev: true },
-    ...BUNDLE_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

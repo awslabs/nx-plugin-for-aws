@@ -12,7 +12,10 @@ import {
 } from '@nx/devkit';
 import { addPyDependencies } from '../../utils/add-dependencies';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
@@ -40,7 +43,7 @@ import {
 import type { PyLambdaFunctionGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({
-  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+  ts: [...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES)],
   py: [
     { name: 'aws-lambda-powertools' },
     { name: 'aws-lambda-powertools[tracer]' },

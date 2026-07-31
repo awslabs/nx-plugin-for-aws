@@ -21,7 +21,10 @@ import {
   DCR_PROXY_HANDLERS,
   type DcrProxyHandler,
 } from '../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -46,8 +49,8 @@ export const DEPENDENCIES = declareDependencies()({
     // @types/aws-lambda (handler signatures).
     { name: '@aws-sdk/client-secrets-manager' },
     { name: '@types/aws-lambda', dev: true },
-    ...BUNDLE_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

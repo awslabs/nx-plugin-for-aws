@@ -28,7 +28,10 @@ import {
   applyGritQL,
   matchGritQL,
 } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -74,7 +77,7 @@ export const DEPENDENCIES = declareDependencies<PyAgentA2aConnectionMetadata>()(
       { name: 'httpx' },
       { name: 'strands-agents[a2a]', when: (m) => m.framework === 'strands' },
       { name: 'a2a-sdk', when: (m) => m.framework === 'langchain' },
-      ...AGENT_CONNECTION_PY_DEPENDENCIES,
+      ...ownedElsewhere(AGENT_CONNECTION_PY_DEPENDENCIES),
     ],
   },
 );

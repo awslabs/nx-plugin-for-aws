@@ -325,6 +325,34 @@ describe('declaration coverage', () => {
     expect(unrecorded).toEqual([]);
   });
 
+  /**
+   * Shared constants a helper adds to the project it owns, not the caller's.
+   * `OWN_TS_DEPENDENCIES` is a generator's own list, so it is excluded.
+   */
+  const HELPER_CONSTANTS =
+    /\.\.\.((?!OWN_)[A-Z][A-Z0-9_]*_DEPENDENCIES|AGUI_DEPENDENCIES\.ts)\b/g;
+
+  // A generator spreads a helper's constant to declare ownership, but the helper
+  // adds those packages to its own project. Passing them to `addTsDependencies`
+  // would install them into the caller's manifest — so they must be wrapped.
+  it('should not install the dependencies its helpers own', async () => {
+    const unwrapped: string[] = [];
+    for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
+      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
+      if (!/addTsDependencies\(|addPyDependencies\(/.test(source)) {
+        continue;
+      }
+      for (const [spread] of source.matchAll(HELPER_CONSTANTS)) {
+        const wrapped = source.includes(`ownedElsewhere(${spread.slice(3)}`);
+        if (!wrapped) {
+          unwrapped.push(`${info.id}: ${spread}`);
+        }
+      }
+    }
+
+    expect(unwrapped).toEqual([]);
+  });
+
   it('should declare only packages the plugin vends', async () => {
     const unvended: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {

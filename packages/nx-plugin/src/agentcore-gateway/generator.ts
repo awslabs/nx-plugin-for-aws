@@ -17,7 +17,10 @@ import {
   AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
   addAgentCoreGatewayInfra,
 } from '../utils/agent-core-constructs/agent-core-constructs';
-import { declareDependencies } from '../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';
@@ -51,8 +54,8 @@ export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
     { name: '@types/ejs', dev: true },
     // local-dev.ts runs via tsx, which is shared tooling.
     { name: 'tsx', dev: true, root: true },
-    ...AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(AGENT_CORE_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

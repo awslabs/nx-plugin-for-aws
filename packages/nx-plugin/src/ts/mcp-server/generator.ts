@@ -22,7 +22,10 @@ import {
   BUNDLE_DEPENDENCIES,
 } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
@@ -71,10 +74,10 @@ export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
     // tsx (local dev) and the MCP inspector are shared tooling.
     { name: 'tsx', dev: true, root: true },
     { name: '@modelcontextprotocol/inspector', dev: true, root: true },
-    ...FS_DEPENDENCIES,
-    ...BUNDLE_DEPENDENCIES,
-    ...DOCKER_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(DOCKER_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

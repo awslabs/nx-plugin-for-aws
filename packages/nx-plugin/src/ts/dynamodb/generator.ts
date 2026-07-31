@@ -14,7 +14,10 @@ import {
 } from '@nx/devkit';
 import { addTsDependencies } from '../../utils/add-dependencies';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
@@ -55,8 +58,8 @@ export const DEPENDENCIES = declareDependencies()({
     { name: '@types/node', dev: true },
     // tsx runs the local-dev scripts from the workspace root.
     { name: 'tsx', dev: true, root: true },
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
-    ...SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES,
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES),
   ],
 });
 

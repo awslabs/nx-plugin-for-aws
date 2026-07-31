@@ -88,7 +88,7 @@ export const DEPENDENCIES = declareDependencies<PyRdbMetadata>()({
     ...ownedElsewhere(FS_DEPENDENCIES),
     ...ownedElsewhere(DOCKER_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
-    ...SHARED_RDB_SCRIPTS_DEPENDENCIES,
+    ...ownedElsewhere(SHARED_RDB_SCRIPTS_DEPENDENCIES),
   ],
   py: [
     { name: 'sqlmodel' },

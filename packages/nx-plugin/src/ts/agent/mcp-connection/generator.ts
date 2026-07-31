@@ -19,7 +19,10 @@ import {
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -46,7 +49,7 @@ export const DEPENDENCIES = declareDependencies()({
     { name: '@aws-sdk/client-appconfigdata' },
     { name: 'aws4fetch' },
     { name: '@aws-sdk/credential-providers' },
-    ...AGENT_CONNECTION_DEPENDENCIES,
+    ...ownedElsewhere(AGENT_CONNECTION_DEPENDENCIES),
   ],
 });
 

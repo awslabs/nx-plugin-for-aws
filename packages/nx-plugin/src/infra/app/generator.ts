@@ -17,7 +17,10 @@ import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
 import { addTsDependencies } from '../../utils/add-dependencies';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -62,8 +65,8 @@ export const DEPENDENCIES = declareDependencies()({
     { name: 'aws-cdk', dev: true, root: true },
     { name: 'esbuild', dev: true, root: true },
     { name: 'tsx', dev: true, root: true },
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
-    ...SHARED_INFRA_SCRIPTS_DEPENDENCIES,
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_INFRA_SCRIPTS_DEPENDENCIES),
   ],
 });
 

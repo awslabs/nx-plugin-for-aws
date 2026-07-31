@@ -19,7 +19,10 @@ import {
 } from '../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
@@ -50,9 +53,9 @@ export interface PyFastApiMetadata {
 
 export const DEPENDENCIES = declareDependencies<PyFastApiMetadata>()({
   ts: [
-    ...FS_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
-    ...API_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(API_CONSTRUCTS_DEPENDENCIES),
   ],
   py: [
     { name: 'fastapi' },

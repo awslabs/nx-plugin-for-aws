@@ -13,7 +13,10 @@ import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import { addTsDependencies } from '../../../utils/add-dependencies';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -64,12 +67,9 @@ export const DEPENDENCIES =
         when: (m) => isHttp(m) && (m.auth === 'iam' || m.auth === 'cognito'),
       },
       { name: '@smithy/types', when: isHttp, dev: true },
-      // The AG-UI generator owns its whole union: it records no theme or auth, so
-      // only the path is predicated here.
-      ...AGUI_DEPENDENCIES.ts.map((entry) => ({
-        ...entry,
-        when: (m: TsAgentReactConnectionMetadata) => !isHttp(m),
-      })),
+      // `addAgUiReactConnection` adds these itself, so they are declared for
+      // ownership only. It records no theme or auth, so it owns its whole union.
+      ...ownedElsewhere(AGUI_DEPENDENCIES.ts),
     ],
   });
 

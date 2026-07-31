@@ -23,7 +23,10 @@ import {
   BUNDLE_DEPENDENCIES,
 } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
@@ -104,11 +107,11 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     { name: '@types/ws', when: (m) => m.protocol === 'http', dev: true },
     { name: '@types/cors', dev: true },
     { name: 'tsx', dev: true, root: true },
-    ...AGENT_CONNECTION_DEPENDENCIES,
-    ...BUNDLE_DEPENDENCIES,
-    ...FS_DEPENDENCIES,
-    ...DOCKER_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(AGENT_CONNECTION_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(DOCKER_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

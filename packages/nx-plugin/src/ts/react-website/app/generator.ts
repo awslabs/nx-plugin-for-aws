@@ -21,7 +21,10 @@ import {
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
@@ -126,9 +129,9 @@ export const DEPENDENCIES = declareDependencies<TsReactWebsiteMetadata>()({
       dev: true,
       root: true,
     },
-    ...SHADCN_DEPENDENCIES,
-    ...VITEST_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(SHADCN_DEPENDENCIES),
+    ...ownedElsewhere(VITEST_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

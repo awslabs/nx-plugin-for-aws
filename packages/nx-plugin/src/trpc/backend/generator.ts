@@ -19,7 +19,10 @@ import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
 } from '../../utils/bundle/bundle';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -75,9 +78,9 @@ export const DEPENDENCIES = declareDependencies<TsTrpcApiMetadata>()({
     { name: '@types/cors', dev: true },
     // tsx runs the local server from the workspace root.
     { name: 'tsx', dev: true, root: true },
-    ...API_CONSTRUCTS_DEPENDENCIES,
-    ...BUNDLE_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(API_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 

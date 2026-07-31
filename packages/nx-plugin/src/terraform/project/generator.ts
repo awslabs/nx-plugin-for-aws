@@ -18,7 +18,10 @@ import {
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
 import { addTsDependencies } from '../../utils/add-dependencies';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -55,7 +58,7 @@ export const DEPENDENCIES = declareDependencies()({
     { name: '@smithy/node-config-provider', dev: true, root: true },
     // Declared for its pinned version, which goes into npm's `overrides` below.
     { name: '@nx/devkit', versionOnly: true },
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
 });
 
