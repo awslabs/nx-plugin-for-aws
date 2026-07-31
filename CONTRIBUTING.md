@@ -237,7 +237,10 @@ Consequences for authoring a generator:
 
   ```ts
   addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });
+  addPyDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });
   ```
+
+  Both take the same options, so the two calls read alike. Omitting `projectRoot` targets the workspace root, which is also where `root: true` entries go regardless.
 
 - **Build the metadata once and use it twice.** Pass the very object recorded via `addGeneratorMetadata` / `addComponentGeneratorMetadata` to the dependency call, so what the generator adds and what the migration owns cannot drift. If a recorded value is computed later (an assigned port, say), move the dependency call below it rather than duplicating the literal.
 - **Only read recorded fields in a predicate.** The migration replays predicates against project metadata, so a field the generator never records can never match — the dependency would silently stop being upgraded. A predicate that reads absent metadata (or throws) counts as not applying: the migration will not claim a branch it cannot confirm. A test enforces that every field a predicate reads is a member of the generator's metadata interface.
