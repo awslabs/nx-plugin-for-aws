@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonFile } from '@nx/devkit';
 import { expect } from 'vitest';
@@ -30,6 +30,9 @@ import {
  * Nx in a non-interactive run, and the contract this test holds is that
  * deterministic migrations alone keep a generated workspace green.
  */
+
+/** Workspace config file the license generator writes. */
+const AWS_NX_PLUGIN_CONFIG_FILE = 'aws-nx-plugin.config.mts';
 
 /** The generator each hop scaffolds the "before" workspace with. */
 const TEST_MATRIX_GENERATOR = 'internal#test-matrix';
@@ -191,6 +194,20 @@ export const runMigrateTest = async (
     return undefined;
   }
   await runMigrateRecipe(opts);
+
+  // The matrix runs the license generator, whose dependency allowlist rejects
+  // some of what the matrix itself pulls in (`mariadb` is LGPL). Replace the
+  // config with one that only checks source headers — and excludes the patterns
+  // a non-git workspace needs — so `license-check` doesn't fail the build for a
+  // reason that has nothing to do with migrating. Same template the `test-matrix`
+  // lane uses.
+  writeFileSync(
+    join(projectRoot, AWS_NX_PLUGIN_CONFIG_FILE),
+    readFileSync(
+      join(__dirname, '../files/aws-nx-plugin.config.mts.template'),
+      'utf-8',
+    ),
+  );
 
   // Install and sync so the baseline is the fully-resolved workspace a user
   // has, then commit it: `git status` after the migration is how the assertions
