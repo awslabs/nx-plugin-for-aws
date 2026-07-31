@@ -168,11 +168,12 @@ export const runMigrateTest = async (
     ]);
   };
 
-  // The workspace must actually be on the start version: `pnpm create` pins the
-  // create package, which pins the preset to its own version — but verdaccio's
-  // `latest` for these packages is the local `0.0.0` build, so a resolution
-  // fallback would silently produce a `0.0.0 -> target` hop that migrates
-  // nothing and still passes.
+  // The workspace must actually be on the start version. `nx migrate` only runs
+  // migrations above the installed version, so a workspace that came out on the
+  // local build instead would make every migration out of range — a hop that
+  // asserts nothing and still passes. Cheap to assert, and it catches any future
+  // regression in how the preset's version is resolved (see
+  // `createTestWorkspace`, which has to defend against one such override).
   await runInstall(opts);
   expect(
     readJsonFile(join(projectRoot, 'node_modules/@aws/nx-plugin/package.json'))

@@ -4,7 +4,7 @@
  */
 import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { afterEach, beforeEach, describe, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, it } from 'vitest';
 import { pinAwsScopeToLocalRegistry, tmpProjPath } from '../utils';
 import { MIGRATE_NPMRC_EXTRA, runMigrateTest } from './migrate';
 import { migrateStartVersions } from './migrate-versions';
@@ -21,9 +21,28 @@ import { migrateStartVersions } from './migrate-versions';
  * generators produce.
  *
  * One `it` per start version so a failure names the hop that broke.
+ *
+ * A hop whose start version predates `internal#test-matrix` skips itself, so
+ * until a release ships that generator every hop skips and this lane proves
+ * nothing. The summary at the end says so explicitly rather than leaving a green
+ * tick to imply coverage that isn't there.
  */
 describe('smoke test - migrate', () => {
   const startVersions = migrateStartVersions();
+  const outcomes: { startVersion: string; migrated: boolean }[] = [];
+
+  afterAll(() => {
+    const migrated = outcomes.filter((o) => o.migrated);
+    if (migrated.length === 0) {
+      console.warn(
+        `migrate smoke test: no hop actually migrated (${outcomes.length} skipped) — no release in the supported range vends the generator the hops scaffold with, so this lane asserted nothing.`,
+      );
+    } else {
+      console.log(
+        `migrate smoke test: migrated from ${migrated.map((o) => o.startVersion).join(', ')} (${outcomes.length - migrated.length} skipped).`,
+      );
+    }
+  });
 
   for (const startVersion of startVersions) {
     const variant = `from-${startVersion}`;
@@ -46,7 +65,8 @@ describe('smoke test - migrate', () => {
       });
 
       it(`should migrate a workspace from ${startVersion} and still build`, async () => {
-        await runMigrateTest(targetDir, startVersion);
+        const result = await runMigrateTest(targetDir, startVersion);
+        outcomes.push({ startVersion, migrated: !!result });
       });
     });
   }
