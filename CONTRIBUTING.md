@@ -259,9 +259,7 @@ The end to end tests run our generators and check that generated projects functi
 A new generator must be added to **both** generator matrices:
 
 - `e2e/src/smoke-tests/generator-matrix.ts` — runs each generator through the CLI, one invocation at a time, as a user would. This is what the package manager and IaC provider smoke tests scaffold with.
-- `packages/nx-plugin/src/internal/test-matrix/generator.ts` — a hidden generator composing all the others in-process on a single tree, covered by the `test-matrix` smoke test.
-
-Both earn their place. The CLI matrix exercises the path users actually take. The composed matrix ships with the plugin, so each released version carries the matrix of the generators it had — which is what lets a test upgrade an older workspace and scaffold it with that version's own matrix. It also type-checks options against each generator's schema, so a new required option or changed enum breaks the build rather than silently reducing coverage.
+- `packages/nx-plugin/src/internal/test-matrix/generator.ts` — a hidden generator which composes all the others for testing migrations between versions.
 
 First ensure you have at least compiled the Nx Plugin (`pnpm nx compile nx-plugin`)
 

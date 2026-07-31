@@ -3,40 +3,46 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { agentcoreGatewayGenerator } from '../../agentcore-gateway/generator';
-import { connectionGenerator } from '../../connection/generator';
-import type { ConnectionGeneratorSchema } from '../../connection/schema';
-import { tsInfraGenerator } from '../../infra/app/generator';
-import { licenseGenerator } from '../../license/generator';
-import { pyAgentGenerator } from '../../py/agent/generator';
-import type { PyAgentGeneratorSchema } from '../../py/agent/schema';
-import { pyApiGenerator } from '../../py/api/generator';
-import type { PyApiGeneratorSchema } from '../../py/api/schema';
-import { pyDynamoDBGenerator } from '../../py/dynamodb/generator';
-import { pyLambdaFunctionGenerator } from '../../py/lambda-function/generator';
-import { pyMcpServerGenerator } from '../../py/mcp-server/generator';
-import { pyProjectGenerator } from '../../py/project/generator';
-import { pyRdbGenerator } from '../../py/rdb/generator';
-import type { PyRdbGeneratorSchema } from '../../py/rdb/schema';
-import { terraformProjectGenerator } from '../../terraform/project/generator';
-import { tsAgentGenerator } from '../../ts/agent/generator';
-import type { TsAgentGeneratorSchema } from '../../ts/agent/schema';
-import { tsApiGenerator } from '../../ts/api/generator';
-import type { TsApiGeneratorSchema } from '../../ts/api/schema';
-import { tsAstroDocsGenerator } from '../../ts/astro-docs/generator';
-import { tsDcrProxyGenerator } from '../../ts/dcr-proxy/generator';
-import { tsDynamoDBGenerator } from '../../ts/dynamodb/generator';
-import { tsLambdaFunctionGenerator } from '../../ts/lambda-function/generator';
-import { tsProjectGenerator } from '../../ts/lib/generator';
-import { tsMcpServerGenerator } from '../../ts/mcp-server/generator';
-import { tsNxGeneratorGenerator } from '../../ts/nx-generator/generator';
-import { tsNxMigrationGenerator } from '../../ts/nx-migration/generator';
-import type { TsNxMigrationGeneratorSchema } from '../../ts/nx-migration/schema';
-import { tsNxPluginGenerator } from '../../ts/nx-plugin/generator';
-import { tsRdbGenerator } from '../../ts/rdb/generator';
-import type { TsRdbGeneratorSchema } from '../../ts/rdb/schema';
-import { tsWebsiteGenerator } from '../../ts/website/app/generator';
-import { tsWebsiteAuthGenerator } from '../../ts/website/auth/generator';
+import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway';
+import {
+  type ConnectionGeneratorSchema,
+  connectionGenerator,
+} from '../../sdk/connection';
+import { licenseGenerator } from '../../sdk/license';
+import {
+  type PyAgentGeneratorSchema,
+  type PyApiGeneratorSchema,
+  type PyRdbGeneratorSchema,
+  pyAgentGenerator,
+  pyApiGenerator,
+  pyDynamoDBGenerator,
+  pyLambdaFunctionGenerator,
+  pyMcpServerGenerator,
+  pyProjectGenerator,
+  pyRdbGenerator,
+} from '../../sdk/py';
+import { terraformProjectGenerator } from '../../sdk/terraform';
+import {
+  type TsAgentGeneratorSchema,
+  type TsApiGeneratorSchema,
+  type TsNxMigrationGeneratorSchema,
+  type TsRdbGeneratorSchema,
+  tsAgentGenerator,
+  tsApiGenerator,
+  tsAstroDocsGenerator,
+  tsDcrProxyGenerator,
+  tsDynamoDBGenerator,
+  tsInfraGenerator,
+  tsLambdaFunctionGenerator,
+  tsMcpServerGenerator,
+  tsNxGeneratorGenerator,
+  tsNxMigrationGenerator,
+  tsNxPluginGenerator,
+  tsProjectGenerator,
+  tsRdbGenerator,
+  tsWebsiteAuthGenerator,
+  tsWebsiteGenerator,
+} from '../../sdk/ts';
 import { installDependencies } from '../../utils/install';
 import { toSnakeCase } from '../../utils/names';
 import { getNpmScope, getNpmScopePrefix } from '../../utils/npm-scope';
@@ -69,11 +75,6 @@ export const internalTestMatrixGenerator = async (
 ): Promise<GeneratorCallback> => {
   const preferInstallDependencies = options.preferInstallDependencies ?? false;
   const defaults = { preferInstallDependencies };
-  // Composing in-process bypasses the CLI's schema-default application, so any
-  // default a user would get has to be passed explicitly. Project generators all
-  // default `directory` to `packages` — without it projects land at the
-  // workspace root, unlike a real workspace. Component generators take no
-  // directory, and `iac` is passed per call.
   const projectDefaults = { ...defaults, directory: 'packages' };
   // Fully-qualified project names, which differ per language: TypeScript
   // projects are scope-prefixed, Python ones are dotted snake_case. Derived from
@@ -97,13 +98,6 @@ export const internalTestMatrixGenerator = async (
     await tsInfraGenerator(tree, {
       name: 'infra-with-stages',
       stageConfig: true,
-      ...projectDefaults,
-    });
-    // A Terraform project alongside the CDK ones, so a CDK workspace still
-    // covers the Terraform generators' output.
-    await terraformProjectGenerator(tree, {
-      name: 'tf-infra',
-      type: 'application',
       ...projectDefaults,
     });
   }

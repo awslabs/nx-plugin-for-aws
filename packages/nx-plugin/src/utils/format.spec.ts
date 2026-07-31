@@ -138,21 +138,44 @@ describe('format utils', () => {
       // Verify
       expect(tree.exists('src/test.ts')).toBe(false);
     });
-    it("should leave routeTree.gen.ts in TanStack Router's own shape", async () => {
-      // TanStack's vite plugin rewrites this file unformatted whenever the
-      // config is loaded, so formatting it makes generation non-idempotent — the
-      // file reverts on the next run. The vended biome config excludes
-      // `**/*.gen.*`, so the workspace's format target doesn't check it either.
-      // Other `.gen.ts` files (e.g. our OpenAPI clients) are ours to format.
-      const tanstackShape = "import { Route } from './routes/__root'\n";
-      tree.write('src/routeTree.gen.ts', tanstackShape);
-      tree.write('src/client.gen.ts', tanstackShape);
+    it('should leave ignored files untouched', async () => {
+      // Files another tool owns the formatting of are left in that tool's shape:
+      // formatting them makes generation non-idempotent, since the tool rewrites
+      // them on the next run. Only the listed paths are skipped — a same-named
+      // file under another project is still formatted.
+      const unformatted = "import { Route } from './routes/__root'\n";
+      tree.write('packages/website/src/routeTree.gen.ts', unformatted);
+      tree.write('packages/other/src/routeTree.gen.ts', unformatted);
       // Execute
-      await formatFilesInSubtree(tree, 'src');
+      await formatFilesInSubtree(tree, 'packages', {
+        ignore: ['packages/website/src/routeTree.gen.ts'],
+      });
       // Verify
-      expect(tree.read('src/routeTree.gen.ts')?.toString()).toBe(tanstackShape);
-      expect(tree.read('src/client.gen.ts')?.toString()).toBe(
+      expect(
+        tree.read('packages/website/src/routeTree.gen.ts')?.toString(),
+      ).toBe(unformatted);
+      expect(tree.read('packages/other/src/routeTree.gen.ts')?.toString()).toBe(
         "import { Route } from './routes/__root';\n",
+      );
+    });
+    it('should keep ignoring a file on later calls for the same tree', async () => {
+      // A call formats every change pending in the tree, not only its caller's,
+      // so generators composing on one tree would otherwise reformat a file an
+      // earlier generator excluded — the non-idempotency all over again.
+      const unformatted = "import { Route } from './routes/__root'\n";
+      tree.write('packages/website/src/routeTree.gen.ts', unformatted);
+      await formatFilesInSubtree(tree, undefined, {
+        ignore: ['packages/website/src/routeTree.gen.ts'],
+      });
+      // Execute - a later generator formats the same tree, listing no paths
+      tree.write('packages/website/src/other.ts', 'const x=1;');
+      await formatFilesInSubtree(tree);
+      // Verify
+      expect(
+        tree.read('packages/website/src/routeTree.gen.ts')?.toString(),
+      ).toBe(unformatted);
+      expect(tree.read('packages/website/src/other.ts')?.toString()).toBe(
+        'const x = 1;\n',
       );
     });
     it('should format all changed files when no directory is given', async () => {
