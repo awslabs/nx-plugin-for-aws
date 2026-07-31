@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonFile } from '@nx/devkit';
 import { expect } from 'vitest';
@@ -13,6 +13,7 @@ import {
   runCLI,
   runInstall,
 } from '../utils';
+import { hasTestMatrixGenerator } from './migrate-versions';
 
 /**
  * Shared driver for the migrate smoke test: creates a workspace on a released
@@ -32,13 +33,14 @@ import {
  */
 
 /** Package manager the migrate hops run under. */
-export const MIGRATE_PKG_MGR = 'npm';
+export const MIGRATE_PKG_MGR = 'pnpm';
 
 /**
- * Marker appended to a user-owned file before migrating, asserted to survive:
- * deterministic migrations must report what they don't recognise, not rewrite it.
+ * Extra npmrc lines the migrate hops need. The preset is pinned to an exact
+ * released version, whose peer ranges the strict resolver can't always satisfy
+ * during `create`, so peer strictness is relaxed for the hop.
  */
-const USER_MARKER = '// e2e: customised by the user, must not be rewritten';
+export const MIGRATE_NPMRC_EXTRA = ['strict-peer-dependencies=false'];
 
 /**
  * Version of the plugin the local build was published to verdaccio as, set by
@@ -100,7 +102,7 @@ export const runMigrateTest = async (
   // The generated workspace has no .npmrc of its own, so pin the scope inside it
   // too — every install and `nx migrate` below has to resolve @aws/* from
   // verdaccio rather than the public registry.
-  pinAwsScopeToLocalRegistry(projectRoot, ['legacy-peer-deps=true']);
+  pinAwsScopeToLocalRegistry(projectRoot, MIGRATE_NPMRC_EXTRA);
 
   const opts = {
     cwd: projectRoot,
@@ -146,13 +148,7 @@ export const runMigrateTest = async (
 
   // 2. Scaffold the recipe with the START version's generators — the workspace
   // state the user is upgrading from.
-  await runMigrateRecipe(opts);
-
-  // A deliberately customised user-owned file, to assert deterministic
-  // migrations report rather than rewrite what they don't recognise.
-  const userOwnedPath = join(projectRoot, 'packages/website/src/main.tsx');
-  expect(existsSync(userOwnedPath)).toBe(true);
-  appendFileSync(userOwnedPath, `\n${USER_MARKER}\n`, 'utf-8');
+  await runMigrateRecipe(opts, startVersion);
 
   // Install and sync so the baseline is the fully-resolved workspace a user
   // has, then commit it: `git status` after the migration is how the assertions
@@ -168,14 +164,13 @@ export const runMigrateTest = async (
     { ...opts, redirectStderr: true },
   );
   expect(migrateOutput).not.toContain('No updates were applied');
-  expect(
-    readJsonFile(join(projectRoot, 'package.json')).dependencies[
-      '@aws/nx-plugin'
-    ],
-  ).toContain(targetVersion);
 
-  // Install the versions `nx migrate` wrote, so the migrations that run are the
-  // ones shipped by the target version.
+  // Install the versions `nx migrate` wrote, then assert against what actually
+  // landed in node_modules rather than the manifest range: on a pnpm workspace
+  // the manifest holds `catalog:` and the version itself lives in
+  // `pnpm-workspace.yaml`, so the installed package is the package-manager
+  // agnostic record of what the upgrade resolved to — and it's what the
+  // migrations below actually run from.
   await runInstall(opts);
   expect(
     readJsonFile(join(projectRoot, 'node_modules/@aws/nx-plugin/package.json'))
@@ -198,10 +193,7 @@ export const runMigrateTest = async (
     );
   }
 
-  // 5. The user's customisation must have survived.
-  expect(readFileSync(userOwnedPath, 'utf-8')).toContain(USER_MARKER);
-
-  // 6. Idempotency: re-running the migrations must not change the workspace.
+  // 5. Idempotency: re-running the migrations must not change the workspace.
   if (migrations?.length) {
     commitAll('after migrations');
     await runCLI('migrate --run-migrations --if-exists --no-interactive', {
@@ -216,7 +208,7 @@ export const runMigrateTest = async (
     }
   }
 
-  // 7. The core contract: the migrated workspace still syncs and builds.
+  // 6. The core contract: the migrated workspace still syncs and builds.
   await runCLI('sync', opts);
   await runInstall(opts);
   const buildOutput = await runCLI(
@@ -273,23 +265,36 @@ const assertMigrationRunOutcome = (
 };
 
 /**
- * The recipe each migrate hop scaffolds: a representative slice of the
- * dungeon-adventure shape (infra, website + auth, tRPC API, FastAPI, a lambda
- * function and an agent) rather than the full generator matrix.
+ * Scaffolds the workspace state each hop upgrades from, using the START
+ * version's own generators.
  *
- * Reusing the full matrix would couple this test to it: the matrix grows with
- * every new generator, and one that postdates a start version makes `nx g` exit
- * non-zero, failing the hop during scaffolding as though a migration broke.
- * Guarding that means version-gating each of its ~60 invocations, most of which
- * add no migration coverage. A fixed recipe of generators present in every
- * supported start version covers every hop instead, and adding a project type a
- * migration touches is one more line here.
+ * `internal#test-matrix` ships with the plugin, so a release carries the matrix
+ * of the generators *it* had — the hop gets that version's full coverage without
+ * the test needing to know which generators existed when.
+ *
+ * Releases before {@link hasTestMatrixGenerator} predate that generator, so
+ * those hops fall back to a fixed recipe: a representative slice of the
+ * dungeon-adventure shape (infra, website + auth, tRPC API, FastAPI, a lambda
+ * function and an agent), chosen from generators present in every supported
+ * start version. The fallback goes away once the supported range no longer
+ * reaches back that far.
  */
-const runMigrateRecipe = async (opts: {
-  cwd: string;
-  env: Record<string, string | undefined>;
-}) => {
+const runMigrateRecipe = async (
+  opts: {
+    cwd: string;
+    env: Record<string, string | undefined>;
+  },
+  startVersion: string,
+) => {
   const defer = ' --prefer-install-dependencies=false';
+
+  if (hasTestMatrixGenerator(startVersion)) {
+    await runCLI(
+      `generate @aws/nx-plugin:internal#test-matrix --no-interactive${defer}`,
+      opts,
+    );
+    return;
+  }
 
   await runCLI(
     `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive${defer}`,

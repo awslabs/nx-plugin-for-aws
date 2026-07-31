@@ -6,7 +6,6 @@
 import { execSync } from 'node:child_process';
 import {
   copyFileSync,
-  cpSync,
   existsSync,
   readFileSync,
   rmSync,
@@ -15,22 +14,10 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { startLocalRegistry } from '@nx/js/plugins/jest/local-registry';
-import {
-  MIGRATE_PACKAGES,
-  migrateStartVersions,
-  resolveMigrateTargetVersion,
-} from './smoke-tests/migrate-versions';
+import { publishForMigrateSmokeTest } from './smoke-tests/migrate-versions';
 
 const PUBLIC_REGISTRY = 'https://registry.npmjs.org/';
 const VERDACCIO_AUTH_TOKEN = 'secretVerdaccioToken';
-
-/**
- * Dist-tags the migrate smoke test publishes under. Anything but `latest`, so
- * republishing the local build at a higher version leaves `latest` pointing at
- * the `0.0.0` build every other smoke test resolves.
- */
-const MIGRATE_DIST_TAG = 'migrate-e2e';
-const MIGRATE_START_DIST_TAG = 'migrate-e2e-start';
 
 const USER_BUNFIG_PATH = join(homedir(), '.bunfig.toml');
 const USER_YARNRC_PATH = join(homedir(), '.yarnrc.yml');
@@ -49,119 +36,6 @@ const restoreBackup = (path: string) => {
     rmSync(backup, { force: true });
   } else {
     rmSync(path, { force: true });
-  }
-};
-
-/**
- * Extra publishes the `migrate` smoke test needs, on top of the local build
- * every other smoke test uses.
- *
- * Two things differ from the default publish:
- *
- * - **The local build gets a version above every release.** `nx migrate` only
- *   runs a migration whose version is greater than the installed one, so the
- *   in-repo `0.0.0` would leave every migration out of range and silently
- *   assert nothing. It is republished under a `prerelease` bump of the latest
- *   tag, with `migrations.json` stamped with that version exactly as the
- *   release job does — under a dedicated dist-tag, so `latest` keeps pointing
- *   at the `0.0.0` build the other smoke tests resolve.
- * - **Each start version is mirrored in.** `.verdaccio/config.yml` deliberately
- *   doesn't proxy the three local packages to npmjs (our `0.0.0` collides with
- *   an early public release), so a released version isn't reachable through the
- *   registry the workspaces are pinned to. Mirroring the tarballs in means one
- *   `@aws:registry` pin serves both ends of the upgrade.
- *
- * A failure here is recorded rather than thrown: every other smoke test shares
- * this setup and doesn't need these publishes, so a registry hiccup fetching an
- * old release shouldn't take the whole run down. The migrate test reads the
- * recorded reason and fails with it.
- */
-const publishForMigrateSmokeTest = (localRegistry: string) => {
-  const distDir = (pkg: string) =>
-    join(__dirname, '../../dist/packages', pkg.replace('@aws/', ''));
-  try {
-    const targetVersion = resolveMigrateTargetVersion();
-    const stageDir = join(__dirname, '../../tmp/migrate-e2e');
-    rmSync(stageDir, { force: true, recursive: true });
-
-    // Restamp and republish each local package at the migrate target version,
-    // from a copy so the dist the other smoke tests published stays untouched.
-    for (const pkg of MIGRATE_PACKAGES) {
-      const pkgStageDir = join(stageDir, pkg.replace('@aws/', ''));
-      cpSync(distDir(pkg), pkgStageDir, { recursive: true });
-
-      const manifestPath = join(pkgStageDir, 'package.json');
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      manifest.version = targetVersion;
-      // Keep the inter-package pins consistent with the version being published
-      // so the migrated workspace doesn't pull a mismatched sibling.
-      for (const field of [
-        'dependencies',
-        'devDependencies',
-        'peerDependencies',
-      ]) {
-        for (const dep of Object.keys(manifest[field] ?? {})) {
-          if (
-            MIGRATE_PACKAGES.includes(dep as (typeof MIGRATE_PACKAGES)[number])
-          ) {
-            manifest[field][dep] = targetVersion;
-          }
-        }
-      }
-      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-
-      // Stamp the pending version onto every unversioned migration, exactly as
-      // the release job does — an unstamped entry is invisible to nx migrate.
-      if (pkg === '@aws/nx-plugin') {
-        execSync(
-          `pnpm exec tsx ./scripts/stamp-migrations.ts --pending-version ${targetVersion} --out ${JSON.stringify(join(pkgStageDir, 'migrations.json'))}`,
-          {
-            cwd: join(__dirname, '../..'),
-            env: process.env,
-            windowsHide: true,
-          },
-        );
-      }
-
-      execSync(
-        `npm publish --tag ${MIGRATE_DIST_TAG} --registry ${localRegistry}`,
-        { env: process.env, cwd: pkgStageDir },
-      );
-    }
-    process.env.NX_E2E_MIGRATE_TARGET_VERSION = targetVersion;
-    console.info(
-      `Published the local build as ${targetVersion} for the migrate smoke test`,
-    );
-
-    // Mirror each start version's tarballs into verdaccio so the "before"
-    // workspace resolves them through the same registry pin.
-    //
-    // The fetch has to override the *scope* registry, not just the default:
-    // the `@aws:registry` entry written above points at verdaccio, and a scope
-    // entry wins over `--registry`, so a plain `--registry` fetch would ask
-    // verdaccio for a version only npmjs has.
-    for (const startVersion of migrateStartVersions()) {
-      for (const pkg of MIGRATE_PACKAGES) {
-        const packed = JSON.parse(
-          execSync(
-            `npm pack ${pkg}@${startVersion} --@aws:registry=${PUBLIC_REGISTRY} --json`,
-            { cwd: stageDir, encoding: 'utf-8', env: process.env },
-          ),
-        );
-        execSync(
-          `npm publish ${packed[0].filename} --tag ${MIGRATE_START_DIST_TAG} --registry ${localRegistry}`,
-          { env: process.env, cwd: stageDir },
-        );
-      }
-      console.info(
-        `Mirrored @aws/* ${startVersion} into the local registry for the migrate smoke test`,
-      );
-    }
-  } catch (err) {
-    process.env.NX_E2E_MIGRATE_SETUP_ERROR = `${err}`;
-    console.warn(
-      `Could not prepare the migrate smoke test's registry state — the migrate test will fail, other smoke tests are unaffected: ${err}`,
-    );
   }
 };
 

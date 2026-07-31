@@ -6,7 +6,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
 import { afterEach, beforeEach, describe, it } from 'vitest';
 import { pinAwsScopeToLocalRegistry, tmpProjPath } from '../utils';
-import { runMigrateTest } from './migrate';
+import { MIGRATE_NPMRC_EXTRA, runMigrateTest } from './migrate';
 import { migrateStartVersions } from './migrate-versions';
 
 /**
@@ -36,7 +36,7 @@ describe('smoke test - migrate', () => {
           rmSync(targetDir, { force: true, recursive: true });
         }
         ensureDirSync(targetDir);
-        pinAwsScopeToLocalRegistry(targetDir, ['legacy-peer-deps=true']);
+        pinAwsScopeToLocalRegistry(targetDir, MIGRATE_NPMRC_EXTRA);
       });
 
       afterEach(() => {

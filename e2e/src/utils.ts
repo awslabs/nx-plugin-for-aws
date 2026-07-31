@@ -269,8 +269,8 @@ export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
  * smoke runs, whereas a cwd-local `.npmrc` is always respected.
  *
  * `extra` appends further npmrc lines — the migrate test pins the preset to an
- * exact released version, whose peer ranges npm's strict resolver can't satisfy
- * during `create`, so it adds `legacy-peer-deps` (matching `runInstall`).
+ * exact released version, whose peer ranges the strict resolver can't always
+ * satisfy during `create`, so it relaxes peer strictness.
  */
 export const pinAwsScopeToLocalRegistry = (
   targetDir: string,
