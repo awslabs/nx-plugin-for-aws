@@ -1307,6 +1307,40 @@ describe('ts#agent generator', () => {
       name: 'no-warn-agent',
       infra: 'none',
       auth: 'iam',
+      session: 'none',
+      iac: 'cdk',
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('should warn when session is not explicitly disabled with infra=none', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'session-warn-agent',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when session is explicitly none with infra=none', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'session-none-agent',
+      infra: 'none',
+      session: 'none',
       iac: 'cdk',
     });
 

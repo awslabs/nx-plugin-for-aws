@@ -1,6 +1,9 @@
-import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+import { Fn, Lazy, Names<%_ if (session === 's3') { _%>, RemovalPolicy<%_ } _%>, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+<%_ if (session === 's3') { _%>
+import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
+<%_ } _%>
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
@@ -16,6 +19,9 @@ import {
 import { <%_ if (serverProtocol !== 'mcp') { _%>PolicyStatement, <%_ } _%>IGrantable, IPrincipal<%_ if (auth === 'iam') { _%>, Grant<%_ } _%> } from 'aws-cdk-lib/aws-iam';
 <%_ if (auth === 'cognito') { _%>
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
+<%_ if (session === 's3') { _%>
+import { suppressRules } from '../../../core/checkov<% if (esm) { %>.js<% } %>';
 <%_ } _%>
 import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<% } %>';
 import { findWorkspaceRoot } from '../../../core/workspace<% if (esm) { %>.js<% } %>';
@@ -73,6 +79,46 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
     const { identity, ...restProps } = props;
 
 <%_ } _%>
+<%_ if (session === 's3') { _%>
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      encryption: BucketEncryption.S3_MANAGED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_145'],
+      'AES256 (S3-managed) encryption is sufficient for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Access logging not required for session data',
+    );
+
+<%_ } _%>
     this.agentCoreRuntime = new Runtime(this, '<%- nameClassName %>', {
       runtimeName: Lazy.string({
         produce: () =>
@@ -115,11 +161,23 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
     );
 
 <%_ } _%>
+<%_ if (session === 's3') { _%>
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
+<%_ } _%>
     rc.grantReadAppConfig(this.agentCoreRuntime);
 
     rc.set('agentcore', 'agentRuntimes', {
       ...rc.get('agentcore').agentRuntimes,
-      <%- nameClassName %>: this.agentCoreRuntime.agentRuntimeArn,
+      <%- nameClassName %>: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          storage: '<%- session %>',
+<%_ if (session === 's3') { _%>
+          bucketName: sessionBucket.bucketName,
+<%_ } _%>
+        },
+      },
     });
   }
 

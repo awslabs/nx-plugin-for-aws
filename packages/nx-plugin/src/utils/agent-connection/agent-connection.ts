@@ -366,6 +366,15 @@ export async function ensureTypeScriptAgentConnectionProject<
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
     './core/session-context.js',
   );
+
+  // Re-export the runtime-config loader so agent server entry points can read
+  // their own connected resources (e.g. session storage) without pulling in
+  // internals.
+  await addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
+    './core/runtime-config.js',
+  );
 }
 
 /**

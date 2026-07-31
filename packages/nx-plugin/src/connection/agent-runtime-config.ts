@@ -28,6 +28,8 @@ export const addAgentRuntimeToConnectionNamespace = async (
     agentNameKebabCase: string;
     /** The class name of the agent, e.g. 'StoryAgent'. */
     agentNameClassName: string;
+    /** How the agent's session is persisted, e.g. 's3'. */
+    session: string;
   },
 ) => {
   const cdkConstructPath = joinPathFragments(
@@ -47,7 +49,10 @@ export const addAgentRuntimeToConnectionNamespace = async (
 
     rc.set('connection', 'agentRuntimes', {
       ...rc.get('connection').agentRuntimes,
-      ${options.agentNameClassName}: this.agentCoreRuntime.agentRuntimeArn,
+      ${options.agentNameClassName}: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: { storage: '${options.session}' },
+      },
     });\` where { $program <: not contains \`rc.set('connection', 'agentRuntimes', $_)\` }`,
     );
   }
@@ -79,7 +84,7 @@ module "${CONNECTION_TF_MODULE_NAME}" {
 
   namespace = "connection"
   key       = "agentRuntimes"
-  value     = { "${options.agentNameClassName}" = module.agent_core_runtime.agent_core_runtime_arn }
+  value     = { "${options.agentNameClassName}" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { storage = "${options.session}" } } }
 
   depends_on = [module.agent_core_runtime]
 }

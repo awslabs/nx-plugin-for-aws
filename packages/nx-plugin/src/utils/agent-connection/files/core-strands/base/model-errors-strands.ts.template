@@ -1,4 +1,8 @@
-import { AfterModelCallEvent, type LocalAgent } from '@strands-agents/sdk';
+import {
+  AfterModelCallEvent,
+  type LocalAgent,
+  type Plugin,
+} from '@strands-agents/sdk';
 
 const NO_CREDENTIALS =
   'Unable to invoke the model: no AWS credentials found. Configure credentials ' +
@@ -20,17 +24,28 @@ const hasErrorNamed = (error: unknown, name: string): boolean => {
   return false;
 };
 
+/**
+ * Plugin that logs model invocation errors, calling out missing credentials or
+ * denied permissions.
+ */
+export class ModelErrorLoggingPlugin implements Plugin {
+  readonly name = 'model-error-logging';
+
+  initAgent(agent: LocalAgent): void {
+    agent.addHook(AfterModelCallEvent, (event) => {
+      const error = event.error;
+      if (!error) return;
+      if (hasErrorNamed(error, 'CredentialsProviderError')) {
+        console.error(NO_CREDENTIALS);
+      } else if (hasErrorNamed(error, 'AccessDeniedException')) {
+        console.error(ACCESS_DENIED);
+      } else {
+        console.error(`Model invocation failed: ${error.message}`);
+      }
+    });
+  }
+}
+
 /** Logs model invocation errors, calling out missing credentials or denied permissions. */
-export const logModelErrors = (agent: LocalAgent): void => {
-  agent.addHook(AfterModelCallEvent, (event) => {
-    const error = event.error;
-    if (!error) return;
-    if (hasErrorNamed(error, 'CredentialsProviderError')) {
-      console.error(NO_CREDENTIALS);
-    } else if (hasErrorNamed(error, 'AccessDeniedException')) {
-      console.error(ACCESS_DENIED);
-    } else {
-      console.error(`Model invocation failed: ${error.message}`);
-    }
-  });
-};
+export const logModelErrors = (agent: LocalAgent): void =>
+  new ModelErrorLoggingPlugin().initAgent(agent);

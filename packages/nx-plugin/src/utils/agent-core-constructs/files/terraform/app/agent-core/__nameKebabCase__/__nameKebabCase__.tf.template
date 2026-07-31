@@ -67,6 +67,38 @@ locals {
 }
 
 <%_ } _%>
+<%_ if (session === 's3') { _%>
+# Bucket storing the agent's session data
+resource "aws_s3_bucket" "session" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for session data
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for session data
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
+  #checkov:skip=CKV_AWS_18:Access logging not required for session data
+  #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
+  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for session data
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+<%_ } _%>
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "<%= nameClassName %>"
@@ -107,6 +139,20 @@ module "agent_core_runtime" {
         "arn:aws:bedrock:*:*:foundation-model/*",
         "arn:aws:bedrock:*:*:inference-profile/*"
       ]
+    }<% } %><% if (session === 's3') { %>,
+    # Grant access for the agent to read/write its session data
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ]
+      Resource = [
+        aws_s3_bucket.session.arn,
+        "${aws_s3_bucket.session.arn}/*"
+      ]
     }<% } %>
   ], var.additional_iam_policy_statements)
   tags = var.tags
@@ -118,7 +164,7 @@ module "add_agent_runtime_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "agentRuntimes"
-  value     = { "<%= nameClassName %>" = module.agent_core_runtime.agent_core_runtime_arn }
+  value     = { "<%= nameClassName %>" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { storage = "<%= session %>"<% if (session === 's3') { %>, bucketName = aws_s3_bucket.session.bucket<% } %> } } }
 
   depends_on = [module.agent_core_runtime]
 }

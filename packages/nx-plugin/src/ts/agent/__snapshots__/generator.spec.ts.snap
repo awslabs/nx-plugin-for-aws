@@ -29,8 +29,8 @@ export const resolveRemoteAgent = async (): Promise<
     application,
     environment: 'default',
     transform: 'json',
-  })) as { agentRuntimes?: Record<string, string> };
-  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  })) as { agentRuntimes?: Record<string, { arn: string }> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent']?.arn;
   if (!arn) {
     throw new Error(
       \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
@@ -131,8 +131,8 @@ export const resolveRemoteAgent = async (): Promise<
     application,
     environment: 'default',
     transform: 'json',
-  })) as { agentRuntimes?: Record<string, string> };
-  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  })) as { agentRuntimes?: Record<string, { arn: string }> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent']?.arn;
   if (!arn) {
     throw new Error(
       \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
@@ -224,8 +224,8 @@ export const resolveRemoteAgent = async (): Promise<
     application,
     environment: 'default',
     transform: 'json',
-  })) as { agentRuntimes?: Record<string, string> };
-  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  })) as { agentRuntimes?: Record<string, { arn: string }> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent']?.arn;
   if (!arn) {
     throw new Error(
       \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
@@ -308,8 +308,8 @@ export const resolveRemoteAgent = async (): Promise<
     application,
     environment: 'default',
     transform: 'json',
-  })) as { agentRuntimes?: Record<string, string> };
-  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  })) as { agentRuntimes?: Record<string, { arn: string }> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent']?.arn;
   if (!arn) {
     throw new Error(
       \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
@@ -383,8 +383,8 @@ export const resolveRemoteAgent = async (): Promise<
     application,
     environment: 'default',
     transform: 'json',
-  })) as { agentRuntimes?: Record<string, string> };
-  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  })) as { agentRuntimes?: Record<string, { arn: string }> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent']?.arn;
   if (!arn) {
     throw new Error(
       \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
@@ -493,8 +493,8 @@ export const resolveRemoteAgent = async (): Promise<
     application,
     environment: 'default',
     transform: 'json',
-  })) as { agentRuntimes?: Record<string, string> };
-  const arn = config?.agentRuntimes?.['TestProjectAgent'];
+  })) as { agentRuntimes?: Record<string, { arn: string }> };
+  const arn = config?.agentRuntimes?.['TestProjectAgent']?.arn;
   if (!arn) {
     throw new Error(
       \`No deployed agent named 'TestProjectAgent' found in runtime configuration (application \${application}).\`,
@@ -596,9 +596,14 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
 `;
 
 exports[`ts#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
-"import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+"import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
@@ -614,6 +619,7 @@ import {
   IPrincipal,
   Grant,
 } from 'aws-cdk-lib/aws-iam';
+import { suppressRules } from '../../../core/checkov.js';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
 
@@ -647,6 +653,44 @@ export class SnapshotBedrockAgent
       platform: Platform.LINUX_ARM64,
     });
 
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      encryption: BucketEncryption.S3_MANAGED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_145'],
+      'AES256 (S3-managed) encryption is sufficient for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Access logging not required for session data',
+    );
+
     this.agentCoreRuntime = new Runtime(this, 'SnapshotBedrockAgent', {
       runtimeName: Lazy.string({
         produce: () =>
@@ -675,11 +719,19 @@ export class SnapshotBedrockAgent
       }),
     );
 
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
     rc.grantReadAppConfig(this.agentCoreRuntime);
 
     rc.set('agentcore', 'agentRuntimes', {
       ...rc.get('agentcore').agentRuntimes,
-      SnapshotBedrockAgent: this.agentCoreRuntime.agentRuntimeArn,
+      SnapshotBedrockAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          storage: 's3',
+          bucketName: sessionBucket.bucketName,
+        },
+      },
     });
   }
 
@@ -805,6 +857,36 @@ variable "appconfig_application_arn" {
   type        = string
 }
 
+# Bucket storing the agent's session data
+resource "aws_s3_bucket" "session" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for session data
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for session data
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
+  #checkov:skip=CKV_AWS_18:Access logging not required for session data
+  #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
+  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for session data
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "TerraformSnapshotAgent"
@@ -837,6 +919,20 @@ module "agent_core_runtime" {
         "arn:aws:bedrock:*:*:foundation-model/*",
         "arn:aws:bedrock:*:*:inference-profile/*"
       ]
+    },
+    # Grant access for the agent to read/write its session data
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ]
+      Resource = [
+        aws_s3_bucket.session.arn,
+        "\${aws_s3_bucket.session.arn}/*"
+      ]
     }
   ], var.additional_iam_policy_statements)
   tags = var.tags
@@ -848,7 +944,7 @@ module "add_agent_runtime_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "agentRuntimes"
-  value     = { "TerraformSnapshotAgent" = module.agent_core_runtime.agent_core_runtime_arn }
+  value     = { "TerraformSnapshotAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { storage = "s3", bucketName = aws_s3_bucket.session.bucket } } }
 
   depends_on = [module.agent_core_runtime]
 }
@@ -1392,6 +1488,7 @@ output "security_group_id" {
 exports[`ts#agent generator > should match snapshot for generated files > agent-agent.ts 1`] = `
 "import { Agent, tool } from '@strands-agents/sdk';
 import { logModelErrors, logToolErrors } from '@proj/agent-connection';
+import { getSessionManager } from './session.js';
 import { z } from 'zod';
 
 const multiply = tool({
@@ -1410,6 +1507,7 @@ export const getAgent = async () => {
   Use your tools for mathematical tasks.
   Refer to tools as your 'spellbook'.\`,
     tools: [multiply],
+    sessionManager: await getSessionManager(),
   });
   logModelErrors(agent);
   logToolErrors(agent);

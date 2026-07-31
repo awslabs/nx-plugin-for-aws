@@ -79,6 +79,8 @@ export interface AgUiReactConnectionOptions {
   agentNameClassName: string;
   /** Auth scheme used by the agent */
   auth: AgUiAuth;
+  /** How the agent's session is persisted, e.g. 's3' */
+  session: string;
 }
 
 /**
@@ -97,8 +99,13 @@ export const addAgUiReactConnection = async (
   tree: Tree,
   options: AgUiReactConnectionOptions,
 ) => {
-  const { frontendProjectConfig, agentName, agentNameClassName, auth } =
-    options;
+  const {
+    frontendProjectConfig,
+    agentName,
+    agentNameClassName,
+    auth,
+    session,
+  } = options;
 
   const theme = resolveAgUiTheme(frontendProjectConfig);
   // The values the declaration's predicates read. Callers record the same pair,
@@ -189,6 +196,7 @@ export const addAgUiReactConnection = async (
   await addAgentRuntimeToConnectionNamespace(tree, {
     agentNameKebabCase: kebabCase(agentNameClassName),
     agentNameClassName,
+    session,
   });
 };
 

@@ -164,6 +164,24 @@ export const tsAgentGenerator = async (
 
   const auth = options.auth ?? 'iam';
 
+  const session = options.session ?? 's3';
+
+  if (infra === 'none' && session !== 'none') {
+    console.warn(
+      'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
+    );
+  }
+
+  // Local-dev session storage lives at the workspace root (`tmp/agentCore/agentRuntimes/sessions`),
+  // not inside the project. The `-dev`/`-serve` targets run with cwd={projectRoot}, so
+  // compute that directory relative to the project root here rather than resolving it
+  // at runtime (e.g. via import.meta.url), which would need an extra runtime helper.
+  const projectDepth = project.root.split('/').filter(Boolean).length;
+  const localSessionsDir = joinPathFragments(
+    Array(projectDepth).fill('..').join('/'),
+    'tmp/agentCore/agentRuntimes/sessions',
+  );
+
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `runWithSessionId` and propagate the AgentCore session
   // ID to any downstream MCP / A2A clients a later connection generator
@@ -177,6 +195,9 @@ export const tsAgentGenerator = async (
     name,
     agentNameClassName,
     distDir,
+    protocol,
+    session,
+    localSessionsDir,
     agentConnectionImport: `@${getNpmScope(tree)}/agent-connection`,
     ...esmVars(tree),
   };
@@ -290,6 +311,7 @@ export const tsAgentGenerator = async (
       dockerOutputDir,
       iac,
       auth,
+      session,
       serverProtocol: infraProtocol,
       containers,
     });
