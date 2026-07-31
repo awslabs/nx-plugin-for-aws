@@ -7,6 +7,7 @@ import {
   applicableDependencies,
   declareDependencies,
   declaredNames,
+  onlyWhen,
   ownedDependencyEntries,
   ownedElsewhere,
 } from './declared-dependencies';
@@ -133,6 +134,50 @@ describe('declared dependencies', () => {
           auth: 'cognito',
         }).map((entry) => entry.name),
       ).toEqual(['zod', 'ws']);
+    });
+  });
+
+  describe('onlyWhen', () => {
+    const helper = [
+      { name: 'zod' },
+      { name: 'express', when: (m: AgentMetadata) => m.auth === 'iam' },
+    ] as const;
+
+    it('should not apply an entry when the added condition fails', () => {
+      expect(
+        applicableDependencies(
+          onlyWhen(helper, (m: AgentMetadata) => m.protocol === 'ag-ui'),
+          { protocol: 'http', auth: 'iam' },
+        ),
+      ).toEqual([]);
+    });
+
+    // Replacing `when` outright would widen ownership to the helper's every
+    // branch, claiming packages this project never received.
+    it("should keep each entry's own condition within the branch", () => {
+      const narrowed = onlyWhen(
+        helper,
+        (m: AgentMetadata) => m.protocol === 'ag-ui',
+      );
+
+      expect(
+        applicableDependencies(narrowed, {
+          protocol: 'ag-ui',
+          auth: 'cognito',
+        }).map((entry) => entry.name),
+      ).toEqual(['zod']);
+      expect(
+        applicableDependencies(narrowed, {
+          protocol: 'ag-ui',
+          auth: 'iam',
+        }).map((entry) => entry.name),
+      ).toEqual(['zod', 'express']);
+    });
+
+    it('should preserve the flags an entry carries', () => {
+      const [entry] = onlyWhen([{ name: 'zod', dev: true }], () => true);
+
+      expect(entry.dev).toBe(true);
     });
   });
 

@@ -150,6 +150,55 @@ describe('ownedDependencies', () => {
     expect(owned.ts.has('@ag-ui/client')).toBe(false);
   });
 
+  // The AG-UI helper picks its theme module from the website's `ux`, and the
+  // connection records the resolved value — so a website on one theme does not
+  // own another's styling packages.
+  it('should own only the theme the connection resolved', async () => {
+    addProject(tree, 'website', {
+      generator: 'ts#project',
+      components: [
+        {
+          generator: 'ts#agent#react-connection',
+          name: 'agent',
+          protocol: 'ag-ui',
+          auth: 'none',
+          theme: 'shadcn',
+        },
+      ],
+    } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    expect(owned.ts.has('lucide-react')).toBe(true);
+    // The cloudscape theme this website did not resolve to.
+    expect(owned.ts.has('@cloudscape-design/chat-components')).toBe(false);
+    // The iam auth branch it did not take.
+    expect(owned.ts.has('aws4fetch')).toBe(false);
+  });
+
+  // The AG-UI packages arrive through `addAgUiReactConnection`, which only the
+  // ag-ui protocol reaches — an http connection must not own them.
+  it('should not own the AG-UI packages for an http connection', async () => {
+    addProject(tree, 'website', {
+      generator: 'ts#react-website',
+      components: [
+        {
+          generator: 'ts#agent#react-connection',
+          name: 'agent',
+          protocol: 'http',
+          auth: 'iam',
+          theme: 'default',
+        },
+      ],
+    } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    expect(owned.ts.has('@trpc/client')).toBe(true);
+    expect(owned.ts.has('@copilotkit/react-core')).toBe(false);
+    expect(owned.ts.has('@ag-ui/client')).toBe(false);
+  });
+
   // A generator spreads a helper's constant to claim the packages the helper
   // installs into its own project. Those are owned here even though this
   // generator installs none of them, or the sync would leave them behind.

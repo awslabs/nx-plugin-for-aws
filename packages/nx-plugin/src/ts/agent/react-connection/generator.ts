@@ -15,6 +15,7 @@ import { addTsDependencies } from '../../../utils/add-dependencies';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
 import {
   declareDependencies,
+  onlyWhen,
   ownedElsewhere,
 } from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
@@ -33,6 +34,7 @@ import {
   DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
+  resolveAgUiTheme,
 } from '../../react-website/agui/generator';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
 import { addTsAgentTargetToLocalDev } from './local-dev';
@@ -41,10 +43,15 @@ import { addTsAgentTargetToLocalDev } from './local-dev';
 export interface TsAgentReactConnectionMetadata {
   readonly auth: string;
   readonly protocol: string;
+  /** The AG-UI theme module, which the website's `ux` selects. */
+  readonly theme: string;
 }
 
 /** The tRPC-over-HTTP path, which the AG-UI path takes none of. */
 const isHttp = (m: TsAgentReactConnectionMetadata) => m.protocol !== 'ag-ui';
+
+/** The AG-UI path, whose packages `addAgUiReactConnection` adds. */
+const isAgUi = (m: TsAgentReactConnectionMetadata) => !isHttp(m);
 
 // Each entry names the protocol path it belongs to: the HTTP path's client and
 // auth packages are added here, the AG-UI path's by `addAgUiReactConnection` on
@@ -68,8 +75,9 @@ export const DEPENDENCIES =
       },
       { name: '@smithy/types', when: isHttp, dev: true },
       // `addAgUiReactConnection` adds these itself, so they are declared for
-      // ownership only. It records no theme or auth, so it owns its whole union.
-      ...ownedElsewhere(AGUI_DEPENDENCIES.ts),
+      // ownership only. Gated on the AG-UI path, and within it on each entry's
+      // own theme or auth condition, which the metadata below records.
+      ...ownedElsewhere(onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi)),
     ],
   });
 
@@ -106,6 +114,7 @@ export async function tsAgentReactConnectionGenerator(
   const connectionMetadata: TsAgentReactConnectionMetadata = {
     auth,
     protocol: targetComponent?.protocol ?? 'http',
+    theme: resolveAgUiTheme(frontendProjectConfig),
   };
 
   if ((targetComponent?.protocol ?? '').toLowerCase() === 'a2a') {

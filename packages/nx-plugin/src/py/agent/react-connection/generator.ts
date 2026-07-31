@@ -15,12 +15,16 @@ import {
   DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
+  resolveAgUiTheme,
 } from '../../../ts/react-website/agui/generator';
 import {
   addOpenApiReactClient,
   OPEN_API_REACT_DEPENDENCIES,
 } from '../../../utils/connection/open-api/react';
-import { declareDependencies } from '../../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  onlyWhen,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -42,26 +46,26 @@ import {
 /** The metadata this generator records, which its predicates read. */
 export interface PyAgentReactConnectionMetadata {
   readonly protocol: string;
+  readonly auth: string;
+  /** The AG-UI theme module, which the website's `ux` selects. */
+  readonly theme: string;
 }
 
 /** The OpenAPI-over-HTTP path, which the AG-UI path takes none of. */
 const isHttp = (m: PyAgentReactConnectionMetadata) => m.protocol !== 'ag-ui';
 
+/** The AG-UI path, whose packages `addAgUiReactConnection` adds. */
+const isAgUi = (m: PyAgentReactConnectionMetadata) => !isHttp(m);
+
 // Each entry names the protocol path it belongs to: the HTTP path's OpenAPI
 // client packages are added by `addOpenApiReactClient`, the AG-UI path's by
-// `addAgUiReactConnection`, both on this generator's behalf. Neither records the
-// auth or theme its own conditions read, so only the path is predicated here.
+// `addAgUiReactConnection`, both on this generator's behalf. The AG-UI entries
+// keep their own theme and auth conditions, which the metadata below records.
 export const DEPENDENCIES =
   declareDependencies<PyAgentReactConnectionMetadata>()({
     ts: [
-      ...OPEN_API_REACT_DEPENDENCIES.map((entry) => ({
-        ...entry,
-        when: isHttp,
-      })),
-      ...AGUI_DEPENDENCIES.ts.map((entry) => ({
-        ...entry,
-        when: (m: PyAgentReactConnectionMetadata) => !isHttp(m),
-      })),
+      ...onlyWhen(OPEN_API_REACT_DEPENDENCIES, isHttp),
+      ...onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi),
     ],
   });
 
@@ -94,7 +98,11 @@ export const pyAgentReactConnectionGenerator = async (
 
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
-  const connectionMetadata: PyAgentReactConnectionMetadata = { protocol };
+  const connectionMetadata: PyAgentReactConnectionMetadata = {
+    protocol,
+    auth,
+    theme: resolveAgUiTheme(frontendProjectConfig),
+  };
 
   if (protocol === 'a2a') {
     throw new Error(

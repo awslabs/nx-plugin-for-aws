@@ -227,8 +227,13 @@ Consequences for authoring a generator:
 - **Spread the helpers you call.** A helper publishes a `*_DEPENDENCIES` constant (`FS_DEPENDENCIES`, `SHARED_CONSTRUCTS_DEPENDENCIES`) covering what it adds, including its own nested helpers, so spreading one constant covers the whole chain.
 - **Name the export `DEPENDENCIES`.** The migration reads it by that name.
 - **Cover what you delegate to.** A helper taken through `MustDeclare` is checked by the compiler, but one that merely exports its own `DEPENDENCIES` (the AG-UI react connection, for instance) is not — spread it, as `ts#agent#react-connection` does.
+- **Wrap a spread the caller doesn't install.** A helper adds its packages to the project it owns, so a generator that spreads the constant to claim ownership must not also install it: wrap with `ownedElsewhere(...)`. Ownership is unaffected — the sync still upgrades those packages wherever they sit; only the install is skipped. If the helper is called down one branch only, wrap with `onlyWhen(..., predicate)` first, which keeps each entry's own condition as well as the branch:
+
+  ```ts
+  ...ownedElsewhere(onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi)),
+  ```
 - **Record the generator against a project.** `addGeneratorMetadata` / `addComponentGeneratorMetadata` is what makes the declaration discoverable; without it the dependencies are never recognised as ours. Connection generators record too, even the ones that add no dependencies today, so adding one later is owned automatically.
-- **Add dependencies from the declaration, not a second list.** Call `addTsDependencies` / `addPyDependencies` with the declaration and the metadata; the call site names no packages. Gate anything option-specific with a `when` predicate, and flag entries with `dev`, `root` (workspace root manifest), `group` (pyproject dependency group) or `versionOnly` (declared for its pinned version, never installed):
+- **Add dependencies from the declaration, not a second list.** Call `addTsDependencies` / `addPyDependencies` with the declaration and the metadata; the call site names no packages. Gate anything option-specific with a `when` predicate, and flag entries with `dev`, `root` (workspace root manifest), `group` (pyproject dependency group) or `versionOnly` (owned so its pinned version stays current, but never installed here):
 
   ```ts
   addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });

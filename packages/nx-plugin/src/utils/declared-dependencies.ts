@@ -81,6 +81,35 @@ export const declareDependencies =
     }) as unknown as DependencyDeclaration<Ts, Py>;
 
 /**
+ * Narrow entries to a further condition, keeping the one each already carries.
+ *
+ * For a helper's constant spread into a generator that calls it down one branch:
+ * the branch gates the whole set, and each entry's own predicate still gates it
+ * within that branch. Replacing `when` outright would widen ownership to the
+ * helper's every branch.
+ */
+export const onlyWhen = <
+  M extends DependencyMetadata,
+  const Entries extends readonly { readonly name: unknown }[],
+>(
+  entries: Entries,
+  condition: (metadata: M) => boolean,
+): {
+  readonly [K in keyof Entries]: Omit<Entries[K], 'when'> & {
+    when: (m: M) => boolean;
+  };
+} =>
+  entries.map((entry) => {
+    // A declaration erases the metadata its predicates read, so calling one back
+    // requires naming the type the caller narrows to.
+    const own = (entry as { when?: (m: M) => boolean }).when;
+    return {
+      ...entry,
+      when: (metadata: M) => condition(metadata) && (own?.(metadata) ?? true),
+    };
+  }) as never;
+
+/**
  * Mark entries as declared for ownership but never installed here — a helper's
  * constant spread into a generator that doesn't own the project the helper adds
  * them to.
