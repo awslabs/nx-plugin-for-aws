@@ -257,7 +257,7 @@ export const pyFastApiProjectGenerator = async (
     });
   }
 
-  addPyDependencies(tree, DEPENDENCIES, dir, { metadata });
+  addPyDependencies(tree, DEPENDENCIES, { metadata, projectRoot: dir });
 
   addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
 

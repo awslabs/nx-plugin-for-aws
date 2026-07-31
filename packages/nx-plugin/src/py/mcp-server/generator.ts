@@ -237,7 +237,10 @@ export const pyMcpServerGenerator = async (
     auth,
   };
 
-  addPyDependencies(tree, DEPENDENCIES, project.root, { metadata });
+  addPyDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: project.root,
+  });
   addTsDependencies(tree, DEPENDENCIES, { metadata });
 
   const mcpTargets = {

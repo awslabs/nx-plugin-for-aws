@@ -122,8 +122,9 @@ export const pyAgentMcpConnectionGenerator = async (
   // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
   // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
   // These belong to the shared agent-connection project, which holds the client.
-  addPyDependencies(tree, DEPENDENCIES, agentConnectionProjectDir, {
+  addPyDependencies(tree, DEPENDENCIES, {
     metadata,
+    projectRoot: agentConnectionProjectDir,
   });
 
   // 2. Generate the per-connection client into the shared agent-connection project

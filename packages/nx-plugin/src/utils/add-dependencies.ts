@@ -17,7 +17,7 @@ import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
 } from './py';
-import { PY_VERSIONS, TS_VERSIONS } from './versions';
+import { TS_VERSIONS } from './versions';
 
 /**
  * Add the dependencies a declaration says apply, so the declaration is the only
@@ -30,7 +30,10 @@ import { PY_VERSIONS, TS_VERSIONS } from './versions';
 export interface AddDependenciesOptions {
   /** The metadata the declaration's `when` predicates read. */
   readonly metadata?: DependencyMetadata;
-  /** Project whose manifests receive the dependencies; defaults to the root. */
+  /**
+   * Project whose manifests receive the dependencies; defaults to the workspace
+   * root. `root: true` entries always go to the root regardless.
+   */
   readonly projectRoot?: string;
 }
 
@@ -76,48 +79,44 @@ export const addTsDependencies = (
 /**
  * Add every applicable Python dependency from a declaration, routing `group`
  * entries to their pyproject dependency group.
+ *
+ * `root: true` entries go to the workspace root pyproject, where shared tooling
+ * belongs, mirroring the TypeScript side.
  */
 export const addPyDependencies = (
   tree: Tree,
   declaration: DependencyDeclaration,
-  projectRoot: string,
-  { metadata = {} }: Pick<AddDependenciesOptions, 'metadata'> = {},
+  { metadata = {}, projectRoot }: AddDependenciesOptions = {},
 ): void => {
   const applicable = applicableDependencies(declaration.py, metadata);
-  const main = applicable.filter((entry) => !entry.group);
-  if (main.length > 0) {
-    addDependenciesToPyProjectToml(
-      tree,
-      projectRoot,
-      declaration,
-      main.map((entry) => entry.name) as never,
-    );
+  const targetRoot = (entry: { root?: boolean }) =>
+    entry.root || !projectRoot ? '.' : projectRoot;
+
+  // Keyed by the pyproject to write and the group within it, since one
+  // declaration may span the project's and the workspace root's.
+  const buckets = new Map<
+    string,
+    { root: string; group?: string; names: string[] }
+  >();
+  for (const entry of applicable) {
+    const root = targetRoot(entry);
+    const key = `${root}\0${entry.group ?? ''}`;
+    const bucket = buckets.get(key) ?? { root, group: entry.group, names: [] };
+    bucket.names.push(entry.name as string);
+    buckets.set(key, bucket);
   }
 
-  const groups = new Set(
-    applicable.map((entry) => entry.group).filter(Boolean) as string[],
-  );
-  for (const group of groups) {
-    addDependenciesToDependencyGroupInPyProjectToml(
-      tree,
-      projectRoot,
-      group,
-      declaration,
-      applicable
-        .filter((entry) => entry.group === group)
-        .map((entry) => entry.name) as never,
-    );
+  for (const { root, group, names } of buckets.values()) {
+    if (group) {
+      addDependenciesToDependencyGroupInPyProjectToml(
+        tree,
+        root,
+        group,
+        declaration,
+        names as never,
+      );
+    } else {
+      addDependenciesToPyProjectToml(tree, root, declaration, names as never);
+    }
   }
 };
-
-/** The versions a declaration's applicable Python dependencies pin to. */
-export const applicablePyVersions = (
-  declaration: DependencyDeclaration,
-  metadata: DependencyMetadata = {},
-): Record<string, string> =>
-  Object.fromEntries(
-    applicableDependencies(declaration.py, metadata).map((entry) => [
-      entry.name,
-      PY_VERSIONS[entry.name],
-    ]),
-  );

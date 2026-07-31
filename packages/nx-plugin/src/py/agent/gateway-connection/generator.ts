@@ -131,8 +131,9 @@ export const pyAgentGatewayConnectionGenerator = async (
   // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
   // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
   // These belong to the shared agent-connection project, which holds the client.
-  addPyDependencies(tree, DEPENDENCIES, agentConnectionProjectDir, {
+  addPyDependencies(tree, DEPENDENCIES, {
     metadata,
+    projectRoot: agentConnectionProjectDir,
   });
 
   const appDir = joinPathFragments(

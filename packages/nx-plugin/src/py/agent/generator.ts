@@ -77,44 +77,34 @@ export interface PyAgentMetadata {
   readonly framework: PyAgentFramework;
 }
 
-/**
- * The TypeScript dependencies this generator adds itself: the chat CLI, which
- * runs standalone via tsx for every protocol and resolves the deployed agent
- * from AppConfig. `agent-chat-cli` transitively bundles the protocol clients
- * (@a2a-js/sdk, @ag-ui/client). The spread helper constants below are added by
- * the helpers that own them, so only these are passed to `addTsDependencies`.
- */
-const OWN_TS_DEPENDENCIES = [
-  { name: 'agent-chat-cli', dev: true, root: true },
-  { name: 'tsx', dev: true, root: true },
-  { name: '@types/node', dev: true, root: true },
-  { name: '@aws-lambda-powertools/parameters', dev: true, root: true },
-  { name: '@aws-sdk/client-appconfigdata', dev: true, root: true },
-  {
-    name: 'aws4fetch',
-    when: (m: PyAgentMetadata) => m.auth === 'iam',
-    dev: true,
-    root: true,
-  },
-  {
-    name: '@aws-sdk/credential-providers',
-    when: (m: PyAgentMetadata) => m.auth === 'iam',
-    dev: true,
-    root: true,
-  },
-  {
-    name: '@a2a-js/sdk',
-    when: (m: PyAgentMetadata) => m.protocol === 'a2a',
-    dev: true,
-    root: true,
-  },
-] as const;
+/** Whether the chat CLI signs its requests, which only IAM auth needs. */
+const isIam = (m: PyAgentMetadata) => m.auth === 'iam';
 
 // Each entry names the framework and protocol branch it belongs to, so the same
 // declaration drives both adding and the version sync.
 export const DEPENDENCIES = declareDependencies<PyAgentMetadata>()({
   ts: [
-    ...OWN_TS_DEPENDENCIES,
+    // The chat CLI, which runs standalone via tsx for every protocol and
+    // resolves the deployed agent from AppConfig. `agent-chat-cli` transitively
+    // bundles the protocol clients (@a2a-js/sdk, @ag-ui/client).
+    { name: 'agent-chat-cli', dev: true, root: true },
+    { name: 'tsx', dev: true, root: true },
+    { name: '@types/node', dev: true, root: true },
+    { name: '@aws-lambda-powertools/parameters', dev: true, root: true },
+    { name: '@aws-sdk/client-appconfigdata', dev: true, root: true },
+    { name: 'aws4fetch', when: isIam, dev: true, root: true },
+    {
+      name: '@aws-sdk/credential-providers',
+      when: isIam,
+      dev: true,
+      root: true,
+    },
+    {
+      name: '@a2a-js/sdk',
+      when: (m) => m.protocol === 'a2a',
+      dev: true,
+      root: true,
+    },
     // Added by the helpers that own the projects they belong to.
     ...ownedElsewhere(FS_DEPENDENCIES),
     ...ownedElsewhere(DOCKER_DEPENDENCIES),
@@ -420,7 +410,10 @@ export const pyAgentGenerator = async (
     framework,
   };
 
-  addPyDependencies(tree, DEPENDENCIES, project.root, { metadata });
+  addPyDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: project.root,
+  });
   addTsDependencies(tree, DEPENDENCIES, { metadata });
 
   // All protocols use fastapi dev for hot reload:

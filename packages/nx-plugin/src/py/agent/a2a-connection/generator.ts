@@ -152,8 +152,9 @@ export const pyAgentA2aConnectionGenerator = async (
   // A2A client config + shared auth helper deps, plus the framework's A2A
   // transport dep. These belong to the shared agent-connection project, which
   // holds the client.
-  addPyDependencies(tree, DEPENDENCIES, agentConnectionProjectDir, {
+  addPyDependencies(tree, DEPENDENCIES, {
     metadata,
+    projectRoot: agentConnectionProjectDir,
   });
 
   // 2. Generate the per-connection client into the shared agent-connection project

@@ -161,7 +161,7 @@ export const pyDynamoDBGenerator = async (
     });
   }
 
-  addPyDependencies(tree, DEPENDENCIES, dir);
+  addPyDependencies(tree, DEPENDENCIES, { projectRoot: dir });
 
   await addGeneratorMetricsIfApplicable(tree, [PY_DYNAMODB_GENERATOR_INFO]);
 

@@ -59,31 +59,17 @@ export interface PyRdbMetadata {
   readonly engine: PyRdbGeneratorSchema['engine'];
 }
 
-/**
- * The TypeScript dependencies this generator adds itself, used by the local dev
- * script wait-for-*-db.ts. The spread helper constants below are added by the
- * helpers that own them, so only these are passed to `addTsDependencies`.
- */
-const OWN_TS_DEPENDENCIES = [
-  {
-    name: 'mariadb',
-    when: (m: PyRdbMetadata) => m.engine === 'mysql',
-    root: true,
-  },
-  { name: 'pg', when: (m: PyRdbMetadata) => m.engine !== 'mysql', root: true },
-  {
-    name: '@types/pg',
-    when: (m: PyRdbMetadata) => m.engine !== 'mysql',
-    dev: true,
-    root: true,
-  },
-] as const;
+/** The Postgres engine, which MySQL takes none of. */
+const isPostgres = (m: PyRdbMetadata) => m.engine !== 'mysql';
 
 // Each entry names the engine branch it belongs to, so the same declaration
 // drives both adding and the version sync.
 export const DEPENDENCIES = declareDependencies<PyRdbMetadata>()({
   ts: [
-    ...OWN_TS_DEPENDENCIES,
+    // The engine client the local dev script wait-for-*-db.ts imports.
+    { name: 'mariadb', when: (m) => m.engine === 'mysql', root: true },
+    { name: 'pg', when: isPostgres, root: true },
+    { name: '@types/pg', when: isPostgres, dev: true, root: true },
     // Added by the helpers that own the projects they belong to.
     ...ownedElsewhere(FS_DEPENDENCIES),
     ...ownedElsewhere(DOCKER_DEPENDENCIES),
@@ -387,7 +373,7 @@ export const pyRdbGenerator = async (
     });
   }
 
-  addPyDependencies(tree, DEPENDENCIES, dir, { metadata });
+  addPyDependencies(tree, DEPENDENCIES, { metadata, projectRoot: dir });
   addTsDependencies(tree, DEPENDENCIES, { metadata });
 
   await addGeneratorMetricsIfApplicable(tree, [PY_RDB_GENERATOR_INFO]);

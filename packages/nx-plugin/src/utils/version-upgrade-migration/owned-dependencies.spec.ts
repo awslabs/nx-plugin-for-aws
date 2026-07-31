@@ -387,12 +387,9 @@ describe('declaration coverage', () => {
     expect(unrecorded).toEqual([]);
   });
 
-  /**
-   * Shared constants a helper adds to the project it owns, not the caller's.
-   * `OWN_TS_DEPENDENCIES` is a generator's own list, so it is excluded.
-   */
+  /** Shared constants a helper adds to the project it owns, not the caller's. */
   const HELPER_CONSTANTS =
-    /\.\.\.((?!OWN_)[A-Z][A-Z0-9_]*_DEPENDENCIES|AGUI_DEPENDENCIES\.ts)\b/g;
+    /\.\.\.(?:ownedElsewhere\(|onlyWhen\()*([A-Z][A-Z0-9_]*_DEPENDENCIES(?:\.ts)?)\b/g;
 
   // A generator spreads a helper's constant to declare ownership, but the helper
   // adds those packages to its own project. Passing them to `addTsDependencies`
@@ -404,10 +401,11 @@ describe('declaration coverage', () => {
       if (!/addTsDependencies\(|addPyDependencies\(/.test(source)) {
         continue;
       }
-      for (const [spread] of source.matchAll(HELPER_CONSTANTS)) {
-        const wrapped = source.includes(`ownedElsewhere(${spread.slice(3)}`);
-        if (!wrapped) {
-          unwrapped.push(`${info.id}: ${spread}`);
+      for (const [spread, constant] of source.matchAll(HELPER_CONSTANTS)) {
+        // `ownedElsewhere` may wrap the constant directly or wrap an `onlyWhen`
+        // that narrows it to the branch reaching the helper.
+        if (!spread.startsWith('...ownedElsewhere(')) {
+          unwrapped.push(`${info.id}: ${constant}`);
         }
       }
     }

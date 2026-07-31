@@ -202,7 +202,7 @@ export const pyLambdaFunctionGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addPyDependencies(tree, DEPENDENCIES, dir);
+  addPyDependencies(tree, DEPENDENCIES, { projectRoot: dir });
 
   addComponentGeneratorMetadata(
     tree,

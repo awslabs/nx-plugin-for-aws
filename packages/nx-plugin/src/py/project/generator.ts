@@ -46,10 +46,11 @@ import type { PyProjectGeneratorSchema } from './schema';
 export const DEPENDENCIES = declareDependencies()({
   ts: [{ name: '@nxlv/python', dev: true, root: true }],
   py: [
+    // The linting and type checking tools live in the workspace root pyproject.
     // Pinned to the version generation-time formatting uses, so generated files
     // stay `ruff format --check`-clean across ruff releases.
-    { name: 'ruff', group: 'dev' },
-    { name: 'ty', group: 'dev' },
+    { name: 'ruff', group: 'dev', root: true },
+    { name: 'ty', group: 'dev', root: true },
   ],
 });
 
@@ -288,8 +289,7 @@ export const pyProjectGenerator = async (
     },
   );
 
-  // The linting and type checking tools live in the workspace root pyproject.
-  addPyDependencies(tree, DEPENDENCIES, '.');
+  addPyDependencies(tree, DEPENDENCIES);
 
   // Base format target checks rather than writes (so build/lint don't rewrite
   // source); `fix` writes, and `skip-lint` writes without failing so it stays
