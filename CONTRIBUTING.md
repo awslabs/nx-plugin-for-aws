@@ -256,6 +256,11 @@ Worth repeating with a *customised* workspace: hand-edit the files your migratio
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
 
+A new generator must be added to **both** generator matrices:
+
+- `e2e/src/smoke-tests/generator-matrix.ts` — runs each generator through the CLI, one invocation at a time, as a user would. This is what the package manager and IaC provider smoke tests scaffold with.
+- `packages/nx-plugin/src/internal/test-matrix/generator.ts` — a hidden generator which composes all the others for testing migrations between versions.
+
 First ensure you have at least compiled the Nx Plugin (`pnpm nx compile nx-plugin`)
 
 You can run them using `pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=xxx` (replacing xxx with the test to run, e.g. `pnpm-10`, `dungeon-adventure`). The `smoke-test` target wraps Vitest with the correct `-t` pattern so the same invocation works on Windows (where shell quoting via `--args` is unreliable).

@@ -116,6 +116,35 @@ const BIOME_FORMATTABLE_EXTENSIONS = new Set([
 const isTsConfig = (filePath: string): boolean =>
   /(^|\/)tsconfig[^/]*\.json$/.test(filePath);
 
+export interface FormatFilesInSubtreeOptions {
+  /**
+   * Paths, relative to the workspace root, to leave untouched.
+   *
+   * For files another tool owns the formatting of: formatting them here makes
+   * generation non-idempotent, since the tool rewrites them in its own shape on
+   * the next run and the workspace flips between the two forms.
+   */
+  readonly ignore?: readonly string[];
+}
+
+/**
+ * Paths declared ignored for a tree, which stay ignored for every later call.
+ *
+ * A call formats every change pending in the tree, not only the ones its caller
+ * made, so the list cannot be scoped to the call that passes it: generators
+ * composing on one tree would reformat a file an earlier generator had excluded.
+ * Once the generator that owns a file declares it ignored, it stays ignored for
+ * the rest of the run.
+ */
+const treeIgnoredPaths = new WeakMap<Tree, Set<string>>();
+
+/**
+ * Tree paths are workspace-relative and forward-slash separated. Normalise so a
+ * caller building a path with `path.join` on Windows still matches.
+ */
+const normalizeTreePath = (filePath: string): string =>
+  filePath.split(path.sep).join('/').replace(/^\.\//, '');
+
 /**
  * Format files in the given directory within the tree.
  * Handles both TypeScript/JavaScript/JSON (via biome) and Python (via ruff) files.
@@ -124,11 +153,23 @@ const isTsConfig = (filePath: string): boolean =>
 export async function formatFilesInSubtree(
   tree: Tree,
   dir?: string,
+  options?: FormatFilesInSubtreeOptions,
 ): Promise<void> {
+  let ignored = treeIgnoredPaths.get(tree);
+  if (options?.ignore?.length) {
+    if (!ignored) {
+      ignored = new Set();
+      treeIgnoredPaths.set(tree, ignored);
+    }
+    for (const filePath of options.ignore) {
+      ignored.add(normalizeTreePath(filePath));
+    }
+  }
   const changedFiles = tree
     .listChanges()
     .filter((file) => file.type !== 'DELETE')
-    .filter((file) => (dir ? file.path.startsWith(dir) : true));
+    .filter((file) => (dir ? file.path.startsWith(dir) : true))
+    .filter((file) => !ignored?.has(normalizeTreePath(file.path)));
 
   const pyFiles = changedFiles.filter((file) => file.path.endsWith('.py'));
   const otherFiles = changedFiles.filter(
