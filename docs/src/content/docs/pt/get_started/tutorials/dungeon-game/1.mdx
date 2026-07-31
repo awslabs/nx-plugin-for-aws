@@ -146,7 +146,7 @@ import {
 export const echo = publicProcedure
   .input(EchoInputSchema)
   .output(EchoOutputSchema)
-  .query((opts) => ({ result: opts.input.message }));
+  .query((opts) => ({ message: opts.input.message }));
 ```
 
 Este arquivo é a implementação do método `echo` e como você pode ver é fortemente tipado ao declarar suas estruturas de dados de entrada e saída.
@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -241,7 +242,7 @@ export class GameApi<
   public static defaultIntegrations = (scope: Construct) => {
     return IntegrationBuilder.rest({
       operations: routerToOperations(appRouter),
-      defaultIntegrationOptions: <FunctionProps>{
+      defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -254,7 +255,7 @@ export class GameApi<
         ),
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-      },
+      } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
         return {
@@ -302,19 +303,23 @@ export class GameApi<
    *
    * Configura os domínios de distribuição CloudFront ou strings de origem
    * como as únicas origens CORS permitidas nas respostas preflight do API Gateway e nas
-   * integrações AWS Lambda.
+   * integrações AWS Lambda. Quaisquer nomes de domínio personalizados (aliases) configurados
+   * em uma distribuição CloudFront são incluídos automaticamente junto com seu domínio
+   * padrão `*.cloudfront.net`.
    *
    * @param origins - As strings de origem, distribuições CloudFront, ou objetos contendo uma distribuição CloudFront para conceder CORS de
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
@@ -476,12 +481,12 @@ _agent = _agent_ctx.__enter__()
 agui_agent = StrandsAgent(
     agent=_agent,
     name="StoryAgent",
-    description="Um Agente exposto via protocolo AG-UI.",
+    description="An Agent exposed via the AG-UI protocol.",
 )
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Vincula o session ID para esta requisição para que clientes MCP / A2A downstream o encaminhem em chamadas de saída."""
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
 
     async def dispatch(self, request: Request, call_next):
         session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
@@ -627,7 +632,7 @@ O estado do nosso jogo — jogos salvos e o inventário de cada jogador — resi
 <RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
 
 :::tip[Desenvolvimento local-first]
-O gerador `ts#dynamodb` fornece um target `serve-local` que executa [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) em um contêiner. Combinado com o gerador `connection` (que executamos abaixo), isso significa que **o jogo inteiro roda em sua máquina sem uma implantação** até o final do tutorial.
+O gerador `ts#dynamodb` fornece um target `dev` que executa [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) em um contêiner. Combinado com o gerador `connection` (que executamos abaixo), isso significa que **o jogo inteiro roda em sua máquina sem uma implantação** até o final do tutorial.
 :::
 
 Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
@@ -660,7 +665,7 @@ O gerador `ts#dynamodb` gera estes arquivos.
           - dynamodb.ts construct de tabela DynamoDB genérico
 </FileTree>
 
-O `src/client.ts` gerado exporta `getDynamoDBClient()` e `resolveTableName()`. Quando `SERVE_LOCAL=true` (definido automaticamente pelos targets `serve-local`) estes se conectam ao DynamoDB Local; caso contrário, eles se conectam à AWS e resolvem o nome da tabela implantada a partir da <Link path="guides/runtime-config">Configuração de Runtime</Link>. Vamos modelar nossas entidades `Game` e `Inventory` neste projeto no <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>.
+O `src/client.ts` gerado exporta `getDynamoDBClient()` e `resolveTableName()`. Quando `LOCAL_DEV=true` (definido automaticamente pelos targets `dev`) estes se conectam ao DynamoDB Local; caso contrário, eles se conectam à AWS e resolvem o nome da tabela implantada a partir da <Link path="guides/runtime-config">Configuração de Runtime</Link>. Vamos modelar nossas entidades `Game` e `Inventory` neste projeto no <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>.
 
 Para mais detalhes, consulte o <Link path="guides/ts-dynamodb">guia do gerador ts#dynamodb</Link>.
 
@@ -852,7 +857,7 @@ import './styles.css';
 +  routeTree,
 +  context: { runtimeConfig: undefined, auth: undefined },
 +});
-// Registra a instância do router para segurança de tipo
+// Register the router instance for type safety
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
@@ -1042,7 +1047,7 @@ Para mais detalhes, consulte o <Link path="guides/connection/react-agui">guia de
 
 ### Conectar a Game API e o servidor MCP de inventário ao banco de dados
 
-Tanto a Game API quanto o servidor MCP de inventário leem e escrevem em nossa tabela DynamoDB, então vamos conectá-los ao projeto `DungeonDb`. O gerador `connection` detecta que o alvo é um projeto `ts#dynamodb` e configura o target `serve-local` de cada projeto de origem para iniciar o DynamoDB Local automaticamente.
+Tanto a Game API quanto o servidor MCP de inventário leem e escrevem em nossa tabela DynamoDB, então vamos conectá-los ao projeto `DungeonDb`. O gerador `connection` detecta que o alvo é um projeto `ts#dynamodb` e configura o target `dev` de cada projeto de origem para iniciar o DynamoDB Local automaticamente.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
 
@@ -1202,4 +1207,4 @@ Selecione a opção **Yes, sync the changes and run the tasks** para prosseguir.
 
 Todos os artefatos construídos estão agora disponíveis dentro da pasta `dist/` localizada na raiz do monorepo. Esta é uma prática padrão ao usar projetos gerados pelo `@aws/nx-plugin`, pois não polui sua árvore de arquivos com arquivos gerados. Caso você queira limpar seus arquivos, delete a pasta `dist/` sem se preocupar com artefatos de build espalhados pela árvore de arquivos.
 
-Parabéns! Você criou todos os sub-projetos necessários para começar a implementar o núcleo do nosso jogo AI Dungeon Adventure.  🎉🎉🎉Adventure.  🎉🎉🎉🎉🎉
+Parabéns! Você criou todos os sub-projetos necessários para começar a implementar o núcleo do nosso jogo AI Dungeon Adventure.  🎉🎉🎉

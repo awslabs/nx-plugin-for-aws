@@ -146,7 +146,7 @@ import {
 export const echo = publicProcedure
   .input(EchoInputSchema)
   .output(EchoOutputSchema)
-  .query((opts) => ({ result: opts.input.message }));
+  .query((opts) => ({ message: opts.input.message }));
 ```
 
 Questo file implementa il metodo `echo` ed è fortemente tipizzato dichiarando le strutture dati di input e output.
@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -241,7 +242,7 @@ export class GameApi<
   public static defaultIntegrations = (scope: Construct) => {
     return IntegrationBuilder.rest({
       operations: routerToOperations(appRouter),
-      defaultIntegrationOptions: <FunctionProps>{
+      defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -254,7 +255,7 @@ export class GameApi<
         ),
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-      },
+      } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
         return {
@@ -302,19 +303,22 @@ export class GameApi<
    *
    * Configura i domini della distribuzione CloudFront o le stringhe di origine
    * come uniche origini CORS permesse nelle risposte preflight di API Gateway e nelle
-   * integrazioni AWS Lambda.
+   * integrazioni AWS Lambda. Eventuali nomi di dominio personalizzati (alias) configurati su una
+   * distribuzione CloudFront sono inclusi automaticamente insieme al dominio predefinito `*.cloudfront.net`.
    *
    * @param origins - Le stringhe di origine, distribuzioni CloudFront, o oggetti contenenti una distribuzione CloudFront da cui concedere CORS
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
@@ -1033,7 +1037,7 @@ Il generatore `connection` genera/aggiorna questi file:
 </FileTree>
 
 Il generatore:
-- Rileva il `uxProvider` del sito web React (Shadcn qui) e fornisce componenti chat corrispondenti.
+- Rileva il `ux` del sito web React (Shadcn qui) e fornisce componenti chat corrispondenti.
 - Registra ogni agente connesso su un singolo `CopilotKitProvider` — rieseguire per un altro agente aggiunge semplicemente un altro hook.
 - Legge l'ARN del runtime dell'agente dalla Runtime Configuration, costruisce l'URL di invocazione AgentCore e allega il token bearer Cognito più l'header dell'id di sessione AgentCore.
 
