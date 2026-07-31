@@ -71,21 +71,6 @@ export const migrateStartVersions = (): string[] => {
 };
 
 /**
- * First release whose `@aws/nx-plugin` ships the hidden `internal#test-matrix`
- * generator, which each hop scaffolds with. Releases before it have no such
- * generator, so those hops fall back to a fixed recipe of generators present in
- * every supported start version (see `runMigrateRecipe`).
- *
- * Drop the fallback — and this constant — once the supported range no longer
- * reaches back past it.
- */
-const FIRST_VERSION_WITH_TEST_MATRIX = '1.0.0-rc.51';
-
-/** Whether `version` ships the `internal#test-matrix` generator. */
-export const hasTestMatrixGenerator = (version: string): boolean =>
-  compareVersions(version, FIRST_VERSION_WITH_TEST_MATRIX) >= 0;
-
-/**
  * Version to publish the local build as for the migrate test.
  *
  * `nx migrate` only runs a migration whose version is greater than the

@@ -13,7 +13,6 @@ import {
   runCLI,
   runInstall,
 } from '../utils';
-import { hasTestMatrixGenerator } from './migrate-versions';
 
 /**
  * Shared driver for the migrate smoke test: creates a workspace on a released
@@ -31,6 +30,9 @@ import { hasTestMatrixGenerator } from './migrate-versions';
  * Nx in a non-interactive run, and the contract this test holds is that
  * deterministic migrations alone keep a generated workspace green.
  */
+
+/** The generator each hop scaffolds the "before" workspace with. */
+const TEST_MATRIX_GENERATOR = 'internal#test-matrix';
 
 /** Package manager the migrate hops run under. */
 export const MIGRATE_PKG_MGR = 'pnpm';
@@ -72,6 +74,26 @@ const readWorkspaceMigrations = (
   return existsSync(migrationsPath)
     ? (readJsonFile(migrationsPath).migrations as WorkspaceMigration[])
     : undefined;
+};
+
+/**
+ * Whether the plugin installed in the workspace vends `internal#test-matrix`,
+ * which the hop scaffolds with.
+ *
+ * Asked of the installed plugin rather than inferred from its version number, so
+ * no release boundary is hardcoded: the answer comes from the collection the hop
+ * is actually about to generate from.
+ */
+const workspaceHasTestMatrixGenerator = async (opts: {
+  cwd: string;
+  env: Record<string, string | undefined>;
+}): Promise<boolean> => {
+  const listOutput = await runCLI('list @aws/nx-plugin', {
+    ...opts,
+    redirectStderr: true,
+    silenceError: true,
+  });
+  return listOutput.includes(TEST_MATRIX_GENERATOR);
 };
 
 /**
@@ -146,9 +168,28 @@ export const runMigrateTest = async (
     ]);
   };
 
-  // 2. Scaffold the recipe with the START version's generators — the workspace
-  // state the user is upgrading from.
-  await runMigrateRecipe(opts, startVersion);
+  // The workspace must actually be on the start version: `pnpm create` pins the
+  // create package, which pins the preset to its own version — but verdaccio's
+  // `latest` for these packages is the local `0.0.0` build, so a resolution
+  // fallback would silently produce a `0.0.0 -> target` hop that migrates
+  // nothing and still passes.
+  await runInstall(opts);
+  expect(
+    readJsonFile(join(projectRoot, 'node_modules/@aws/nx-plugin/package.json'))
+      .version,
+  ).toBe(startVersion);
+
+  // 2. Scaffold the workspace state the user is upgrading from, with the START
+  // version's own generators. A release predating `internal#test-matrix` has
+  // nothing to scaffold from, so skip the hop rather than assert against a
+  // hand-maintained recipe that drifts from what that version actually vended.
+  if (!(await workspaceHasTestMatrixGenerator(opts))) {
+    console.warn(
+      `Skipping the hop from ${startVersion}: its @aws/nx-plugin does not vend ${TEST_MATRIX_GENERATOR}.`,
+    );
+    return undefined;
+  }
+  await runMigrateRecipe(opts);
 
   // Install and sync so the baseline is the fully-resolved workspace a user
   // has, then commit it: `git status` after the migration is how the assertions
@@ -265,71 +306,19 @@ const assertMigrationRunOutcome = (
 };
 
 /**
- * Scaffolds the workspace state each hop upgrades from, using the START
- * version's own generators.
+ * Scaffolds the workspace state the hop upgrades from, using the START version's
+ * own `internal#test-matrix` generator.
  *
- * `internal#test-matrix` ships with the plugin, so a release carries the matrix
- * of the generators *it* had — the hop gets that version's full coverage without
- * the test needing to know which generators existed when.
- *
- * Releases before {@link hasTestMatrixGenerator} predate that generator, so
- * those hops fall back to a fixed recipe: a representative slice of the
- * dungeon-adventure shape (infra, website + auth, tRPC API, FastAPI, a lambda
- * function and an agent), chosen from generators present in every supported
- * start version. The fallback goes away once the supported range no longer
- * reaches back that far.
+ * That generator ships with the plugin, so a release carries the matrix of the
+ * generators *it* had — the hop gets that version's full coverage, and the test
+ * never has to know which generators existed when.
  */
-const runMigrateRecipe = async (
-  opts: {
-    cwd: string;
-    env: Record<string, string | undefined>;
-  },
-  startVersion: string,
-) => {
-  const defer = ' --prefer-install-dependencies=false';
-
-  if (hasTestMatrixGenerator(startVersion)) {
-    await runCLI(
-      `generate @aws/nx-plugin:internal#test-matrix --no-interactive${defer}`,
-      opts,
-    );
-    return;
-  }
-
+const runMigrateRecipe = async (opts: {
+  cwd: string;
+  env: Record<string, string | undefined>;
+}) => {
   await runCLI(
-    `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:ts#website --name=website --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:ts#website#auth --project=@migrate-test/website --cognitoDomain=migrate --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:ts#api --name=my-api --infra=rest-lambda --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=@migrate-test/website --targetProject=@migrate-test/my-api --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:py#api --name=py-api --infra=rest-lambda --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:ts#project --name=ts-project --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:ts#lambda-function --project=ts-project --name=my-function --event=Any --no-interactive${defer}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-agent --infra=agentcore --no-interactive${defer}`,
+    'generate @aws/nx-plugin:internal#test-matrix --no-interactive --prefer-install-dependencies=false',
     opts,
   );
 };
