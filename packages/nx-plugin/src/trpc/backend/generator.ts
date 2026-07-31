@@ -10,6 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator from '../../ts/lib/generator';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
   addApiGatewayInfra,
@@ -19,7 +20,6 @@ import {
   BUNDLE_DEPENDENCIES,
 } from '../../utils/bundle/bundle';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -41,28 +41,40 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { withVersions } from '../../utils/versions';
 import type { TsTrpcApiGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface TsTrpcApiMetadata {
+  readonly apiName: string;
+  readonly apiType: string;
+  readonly auth: TsTrpcApiGeneratorSchema['auth'];
+  readonly infra: TsTrpcApiGeneratorSchema['infra'];
+  readonly integrationPattern: 'isolated' | 'shared';
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsTrpcApiMetadata>()({
   ts: [
-    'aws-xray-sdk-core',
-    'zod',
-    '@aws-lambda-powertools/logger',
-    '@aws-lambda-powertools/metrics',
-    '@aws-lambda-powertools/parameters',
-    '@aws-lambda-powertools/tracer',
-    '@aws-sdk/client-appconfigdata',
-    '@trpc/server',
-    '@trpc/client',
-    'aws4fetch',
-    '@aws-sdk/credential-providers',
-    '@middy/core',
-    '@aws-lambda-powertools/parser',
-    '@types/aws-lambda',
-    'cors',
-    '@types/cors',
-    'tsx',
+    { name: 'aws-xray-sdk-core' },
+    { name: 'zod' },
+    { name: '@aws-lambda-powertools/logger' },
+    { name: '@aws-lambda-powertools/metrics' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-lambda-powertools/tracer' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@trpc/server' },
+    { name: '@trpc/client' },
+    { name: 'aws4fetch' },
+    { name: '@aws-sdk/credential-providers' },
+    // The custom authorizer handler wraps itself with middy and parses its event.
+    { name: '@middy/core', when: (m) => m.auth === 'custom' },
+    { name: '@aws-lambda-powertools/parser', when: (m) => m.auth === 'custom' },
+    { name: '@types/aws-lambda', dev: true },
+    { name: 'cors', dev: true },
+    { name: '@types/cors', dev: true },
+    // tsx runs the local server from the workspace root.
+    { name: 'tsx', dev: true, root: true },
     ...API_CONSTRUCTS_DEPENDENCIES,
     ...BUNDLE_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -143,7 +155,7 @@ export async function tsTrpcApiGenerator(
       {
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     await addApiGatewayInfra(
@@ -170,17 +182,23 @@ export async function tsTrpcApiGenerator(
         auth: options.auth,
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
   }
 
-  projectConfig.metadata = {
-    ...projectConfig.metadata,
+  // Recorded on the project below and read by the declaration's predicates, so
+  // the packages added here are exactly the ones the version sync will own.
+  const metadata: TsTrpcApiMetadata = {
     apiName: options.name,
     apiType: 'trpc',
     auth: options.auth,
     infra: options.infra,
     integrationPattern: getIntegrationPattern(options),
+  };
+
+  projectConfig.metadata = {
+    ...projectConfig.metadata,
+    ...metadata,
   } as unknown;
 
   projectConfig.targets.serve = {
@@ -211,7 +229,7 @@ export async function tsTrpcApiGenerator(
         targetFilePath: 'src/handler.ts',
         external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     if (options.auth === 'custom') {
@@ -223,7 +241,7 @@ export async function tsTrpcApiGenerator(
           bundleOutputDir: 'authorizer',
           external: [/@aws-sdk\/.*/],
         },
-        DECLARED_DEPENDENCIES,
+        DEPENDENCIES,
       );
     }
 
@@ -276,37 +294,16 @@ export async function tsTrpcApiGenerator(
     );
   }
 
-  addDependenciesToPackageJson(
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: backendRoot,
+  });
+  addGeneratorMetadata(
     tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      'aws-xray-sdk-core',
-      'zod',
-      '@aws-lambda-powertools/logger',
-      '@aws-lambda-powertools/metrics',
-      '@aws-lambda-powertools/parameters',
-      '@aws-lambda-powertools/tracer',
-      '@aws-sdk/client-appconfigdata',
-      '@trpc/server',
-      '@trpc/client',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-      ...(options.auth === 'custom'
-        ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
-        : []),
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@types/aws-lambda',
-      'cors',
-      '@types/cors',
-    ]),
-    joinPathFragments(backendRoot, 'package.json'),
+    backendName,
+    TRPC_BACKEND_GENERATOR_INFO,
+    metadata,
   );
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
-  );
-  addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
 

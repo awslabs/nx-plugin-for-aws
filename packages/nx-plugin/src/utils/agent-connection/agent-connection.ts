@@ -26,22 +26,22 @@ import { type IPyDepVersion, withVersions } from '../versions';
 
 /** TypeScript dependencies a caller must declare to emit agent-connection clients. */
 export const AGENT_CONNECTION_DEPENDENCIES = [
-  '@aws-lambda-powertools/parameters',
-  '@aws-sdk/credential-providers',
-  'aws4fetch',
-  '@modelcontextprotocol/sdk',
-  '@a2a-js/sdk',
-  '@strands-agents/sdk',
+  { name: '@aws-lambda-powertools/parameters' },
+  { name: '@aws-sdk/credential-providers' },
+  { name: 'aws4fetch' },
+  { name: '@modelcontextprotocol/sdk' },
+  { name: '@a2a-js/sdk' },
+  { name: '@strands-agents/sdk' },
 ] as const;
 
 /** Python dependencies a caller must declare to emit agent-connection clients. */
 export const AGENT_CONNECTION_PY_DEPENDENCIES = [
-  'aws-lambda-powertools',
-  'strands-agents',
+  { name: 'aws-lambda-powertools' },
+  { name: 'strands-agents' },
 ] as const;
 
 type AgentConnectionPyDependency =
-  (typeof AGENT_CONNECTION_PY_DEPENDENCIES)[number];
+  (typeof AGENT_CONNECTION_PY_DEPENDENCIES)[number]['name'];
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -286,7 +286,7 @@ const tsCoreDir = () =>
  */
 const TS_TEMPLATE_DEPS: Record<
   string,
-  (typeof AGENT_CONNECTION_DEPENDENCIES)[number][]
+  (typeof AGENT_CONNECTION_DEPENDENCIES)[number]['name'][]
 > = {
   'core-runtime-config': ['@aws-lambda-powertools/parameters'],
   'core-auth': ['@aws-sdk/credential-providers', 'aws4fetch'],

@@ -9,7 +9,7 @@ import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 import tsProjectGenerator from './generator';
 import { configureVitest, VITEST_DEPENDENCIES } from './vitest';
 
-const declaration = declareDependencies({ ts: [...VITEST_DEPENDENCIES] });
+const declaration = declareDependencies()({ ts: [...VITEST_DEPENDENCIES] });
 
 // A local defineConfig stub keeps the generated config self-contained so it can
 // be type-checked without loading the vite/vitest dependencies. The grit

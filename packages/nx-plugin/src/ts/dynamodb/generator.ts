@@ -12,9 +12,9 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import { resolveContainers } from '../../utils/containers';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
@@ -42,19 +42,19 @@ import {
   SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES,
   sharedDynamoDBScriptsGenerator,
 } from '../../utils/shared-dynamodb-scripts';
-import { withVersions } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsDynamoDBGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    '@aws-sdk/client-dynamodb',
-    'electrodb',
-    '@aws-lambda-powertools/parameters',
-    '@aws-sdk/client-appconfigdata',
-    '@types/aws-lambda',
-    '@types/node',
-    'tsx',
+    { name: '@aws-sdk/client-dynamodb' },
+    { name: 'electrodb' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@types/aws-lambda', dev: true },
+    { name: '@types/node', dev: true },
+    // tsx runs the local-dev scripts from the workspace root.
+    { name: 'tsx', dev: true, root: true },
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
     ...SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES,
   ],
@@ -121,7 +121,7 @@ export const tsDynamoDBGenerator = async (
     templateOptions,
   );
 
-  await sharedDynamoDBScriptsGenerator(tree, DECLARED_DEPENDENCIES);
+  await sharedDynamoDBScriptsGenerator(tree, DEPENDENCIES);
 
   const scriptsDir = relative(
     dir,
@@ -153,7 +153,7 @@ export const tsDynamoDBGenerator = async (
 
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addDynamoDBInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
@@ -164,22 +164,7 @@ export const tsDynamoDBGenerator = async (
     });
   }
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@aws-sdk/client-dynamodb',
-      'electrodb',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, ['@types/aws-lambda', '@types/node']),
-    joinPathFragments(dir, 'package.json'),
-  );
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: dir });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
 

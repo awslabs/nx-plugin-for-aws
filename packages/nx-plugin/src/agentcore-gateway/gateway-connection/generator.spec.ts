@@ -307,7 +307,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     await sharedConstructsGenerator(
       tree,
       { iac: 'cdk' },
-      declareDependencies({ ts: [...SHARED_CONSTRUCTS_DEPENDENCIES] }),
+      declareDependencies()({ ts: [...SHARED_CONSTRUCTS_DEPENDENCIES] }),
     );
 
     await agentcoreGatewayGatewayConnectionGenerator(tree, {

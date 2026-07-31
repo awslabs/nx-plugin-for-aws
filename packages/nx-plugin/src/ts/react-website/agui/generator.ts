@@ -28,26 +28,28 @@ import {
 import { withVersions } from '../../../utils/versions';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 
-// Unions every theme and auth branch.
-export const DECLARED_DEPENDENCIES = declareDependencies({
+// Unions every theme and auth branch. The generators that call this helper own
+// the whole union: they record no theme or auth, so a predicate on either could
+// never be confirmed at upgrade time.
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    '@copilotkit/react-core',
-    '@ag-ui/client',
-    '@cloudscape-design/chat-components',
-    'lucide-react',
-    'oidc-client-ts',
-    'aws4fetch',
-    '@aws-sdk/credential-provider-cognito-identity',
-    'react-oidc-context',
-    '@smithy/types',
+    { name: '@copilotkit/react-core' },
+    { name: '@ag-ui/client' },
+    { name: '@cloudscape-design/chat-components' },
+    { name: 'lucide-react' },
+    { name: 'oidc-client-ts' },
+    { name: 'aws4fetch' },
+    { name: '@aws-sdk/credential-provider-cognito-identity' },
+    { name: 'react-oidc-context' },
+    { name: '@smithy/types' },
     ...SHADCN_DEPENDENCIES,
   ],
 });
 
 /** Narrows a conditional list to this generator's declared dependencies. */
 const declared = (
-  deps: readonly DeclaredTs<typeof DECLARED_DEPENDENCIES>[],
-): readonly DeclaredTs<typeof DECLARED_DEPENDENCIES>[] => deps;
+  deps: readonly DeclaredTs<typeof DEPENDENCIES>[],
+): readonly DeclaredTs<typeof DEPENDENCIES>[] => deps;
 
 export type AgUiAuth = 'iam' | 'cognito' | 'none';
 
@@ -99,7 +101,7 @@ export const addAgUiReactConnection = async (
 
   // Shadcn theme imports from the shared shadcn library, so it must exist.
   if (theme === 'shadcn') {
-    await sharedShadcnGenerator(tree, DECLARED_DEPENDENCIES);
+    await sharedShadcnGenerator(tree, DEPENDENCIES);
   }
   generateFiles(
     tree,
@@ -159,7 +161,7 @@ export const addAgUiReactConnection = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions(DECLARED_DEPENDENCIES, [
+    withVersions(DEPENDENCIES, [
       '@copilotkit/react-core',
       '@ag-ui/client',
       ...declared(
@@ -178,7 +180,7 @@ export const addAgUiReactConnection = async (
       ),
       ...declared(auth === 'cognito' ? ['react-oidc-context'] : []),
     ]),
-    withVersions(DECLARED_DEPENDENCIES, [
+    withVersions(DEPENDENCIES, [
       ...declared(auth === 'iam' ? ['@smithy/types'] : []),
     ]),
     joinPathFragments(frontendProjectConfig.root, 'package.json'),

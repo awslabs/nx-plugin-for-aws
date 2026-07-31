@@ -5,40 +5,127 @@
 import type { IPyDepVersion, ITsDepVersion } from './versions';
 
 /**
- * Which vended dependencies each generator is responsible for.
+ * Which vended dependencies each generator is responsible for, and when each
+ * applies.
  *
- * A generator declares every dependency it may add, including those added on its
- * behalf by helpers it calls, and passes the declaration to each helper. The
- * version sync migration reads the declarations of the generators a workspace has
- * run to decide which dependencies it owns — so a package the user added
- * themselves is left alone.
+ * A generator declares every dependency it may add — including those added on
+ * its behalf by helpers it calls — once, and `addTsDependencies` /
+ * `addPyDependencies` add the subset whose `when` predicate the generator's
+ * metadata satisfies. The declaration is the only place packages are listed.
  *
- * Declaring is enforced two ways: `withVersions` only accepts declared packages
- * (a type error otherwise), and a helper's signature rejects a caller whose
- * declaration doesn't cover what the helper adds.
+ * The same declaration drives the version sync migration, which replays the
+ * predicates against the metadata recorded on each project. Pass the very object
+ * you record as metadata, so what a generator added and what the migration owns
+ * cannot drift.
  */
+
+/**
+ * The metadata a generator records, which its predicates read. Deliberately
+ * `object` rather than an index signature, so a generator can type its
+ * declaration against a plain interface.
+ */
+export type DependencyMetadata = object;
+
+/** A declared dependency, optionally limited to when its predicate holds. */
+export interface DeclaredDependency<Name, M extends DependencyMetadata> {
+  readonly name: Name;
+  /**
+   * Whether this dependency applies. Reads the metadata the generator records,
+   * so the migration can evaluate the same predicate later.
+   */
+  readonly when?: (metadata: M) => boolean;
+  /** Added as a dev dependency rather than a runtime one. */
+  readonly dev?: boolean;
+  /** Added to the workspace root manifest rather than the project's. */
+  readonly root?: boolean;
+  /** Added to this pyproject dependency group rather than the main list. */
+  readonly group?: string;
+  /**
+   * Declared only so the version sync keeps its pinned version current — an
+   * `overrides` entry, say. Never installed as a dependency.
+   */
+  readonly versionOnly?: boolean;
+}
+
 export interface DependencyDeclaration<
-  Ts extends readonly ITsDepVersion[] = readonly ITsDepVersion[],
-  Py extends readonly IPyDepVersion[] = readonly IPyDepVersion[],
+  Ts extends readonly DeclaredDependency<
+    ITsDepVersion,
+    never
+  >[] = readonly DeclaredDependency<ITsDepVersion, never>[],
+  Py extends readonly DeclaredDependency<
+    IPyDepVersion,
+    never
+  >[] = readonly DeclaredDependency<IPyDepVersion, never>[],
 > {
   readonly ts: Ts;
   readonly py: Py;
 }
 
 /**
- * Declare the dependencies a generator owns. Spread the `*_DEPENDENCIES` of any
- * helper called, so the declaration covers what those helpers add too.
+ * Declare the dependencies a generator owns, typed against the metadata it
+ * records. Spread the `*_DEPENDENCIES` of any helper called, so the declaration
+ * covers what those helpers add too.
  */
-export const declareDependencies = <
-  const Ts extends readonly ITsDepVersion[] = [],
-  const Py extends readonly IPyDepVersion[] = [],
->(declaration: {
-  ts?: Ts;
-  py?: Py;
-}): DependencyDeclaration<Ts, Py> => ({
-  ts: declaration.ts ?? ([] as unknown as Ts),
-  py: declaration.py ?? ([] as unknown as Py),
-});
+export const declareDependencies =
+  <M extends DependencyMetadata = Record<string, never>>() =>
+  <
+    const Ts extends readonly DeclaredDependency<ITsDepVersion, M>[],
+    const Py extends readonly DeclaredDependency<IPyDepVersion, M>[],
+  >(declaration: {
+    ts?: Ts;
+    py?: Py;
+  }): DependencyDeclaration<Ts, Py> =>
+    ({
+      ts: declaration.ts ?? [],
+      py: declaration.py ?? [],
+    }) as unknown as DependencyDeclaration<Ts, Py>;
+
+/**
+ * Mark entries as declared for ownership but never installed here — a helper's
+ * constant spread into a generator that doesn't own the project the helper adds
+ * them to.
+ */
+export const ownedElsewhere = <const Entries extends readonly unknown[]>(
+  entries: Entries,
+): { readonly [K in keyof Entries]: Entries[K] & { versionOnly: true } } =>
+  entries.map((entry) => ({
+    ...(entry as object),
+    versionOnly: true,
+  })) as never;
+
+/** Every package a declaration names, whatever its predicate. */
+export const declaredNames = <Name>(
+  entries: readonly { readonly name: Name }[],
+): Name[] => entries.map((entry) => entry.name);
+
+/**
+ * The entries of a declaration that apply for the given metadata.
+ *
+ * A predicate that throws — reading a field the metadata doesn't carry, say —
+ * counts as not applying. The migration evaluates these against whatever a
+ * project happened to record, and must not claim a branch it cannot confirm.
+ */
+export const applicableDependencies = <
+  Name,
+  M extends DependencyMetadata,
+  Entry extends DeclaredDependency<Name, M>,
+>(
+  entries: readonly Entry[],
+  metadata: M,
+): Entry[] =>
+  entries.filter((entry) => {
+    if (entry.versionOnly) {
+      return false;
+    }
+    if (!entry.when) {
+      return true;
+    }
+    try {
+      return entry.when(metadata) === true;
+    } catch {
+      return false;
+    }
+  });
 
 /**
  * Requires a caller's declaration to cover `Needed`, naming whatever is missing
@@ -46,40 +133,48 @@ export const declareDependencies = <
  * declaration so a forgotten spread can't compile.
  */
 export type MustDeclare<
-  Needed extends readonly ITsDepVersion[],
+  Needed extends readonly { readonly name: ITsDepVersion }[],
   D extends DependencyDeclaration,
-> = [Exclude<Needed[number], D['ts'][number]>] extends [never]
+> = [Exclude<Needed[number]['name'], D['ts'][number]['name']>] extends [never]
   ? unknown
   : {
-      __missingDeclaredDependencies: Exclude<Needed[number], D['ts'][number]>;
+      __missingDeclaredDependencies: Exclude<
+        Needed[number]['name'],
+        D['ts'][number]['name']
+      >;
     };
 
 /** `MustDeclare` for Python dependencies. */
 export type MustDeclarePy<
-  Needed extends readonly IPyDepVersion[],
+  Needed extends readonly { readonly name: IPyDepVersion }[],
   D extends DependencyDeclaration,
-> = [Exclude<Needed[number], D['py'][number]>] extends [never]
+> = [Exclude<Needed[number]['name'], D['py'][number]['name']>] extends [never]
   ? unknown
   : {
-      __missingDeclaredPyDependencies: Exclude<Needed[number], D['py'][number]>;
+      __missingDeclaredPyDependencies: Exclude<
+        Needed[number]['name'],
+        D['py'][number]['name']
+      >;
     };
 
 /**
  * The dependencies a declaration covers, for typing a conditional list without
  * widening it to every vended package.
  */
-export type DeclaredTs<D extends DependencyDeclaration> = D['ts'][number];
+export type DeclaredTs<D extends DependencyDeclaration> =
+  D['ts'][number]['name'];
 
 /** `DeclaredTs` for Python dependencies. */
-export type DeclaredPy<D extends DependencyDeclaration> = D['py'][number];
+export type DeclaredPy<D extends DependencyDeclaration> =
+  D['py'][number]['name'];
 
 /**
  * Narrows a caller's declaration to the subset a helper adds, which
  * `MustDeclare` has already proven the caller covers.
  */
 export const forDependencies = <
-  const Ts extends readonly ITsDepVersion[] = [],
-  const Py extends readonly IPyDepVersion[] = [],
+  const Ts extends readonly DeclaredDependency<ITsDepVersion, never>[] = [],
+  const Py extends readonly DeclaredDependency<IPyDepVersion, never>[] = [],
 >(
   declaration: DependencyDeclaration,
 ): DependencyDeclaration<Ts, Py> =>

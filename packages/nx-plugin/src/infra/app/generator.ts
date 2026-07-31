@@ -15,9 +15,9 @@ import {
 import path from 'path';
 import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import { resolveContainers } from '../../utils/containers';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -48,17 +48,20 @@ import {
   SHARED_INFRA_SCRIPTS_DEPENDENCIES,
   sharedInfraScriptsGenerator,
 } from '../../utils/shared-infra-scripts';
-import { withVersions } from '../../utils/versions';
 import type { TsInfraGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+// This generator records no metadata, so nothing a predicate could read: the
+// CDK app always needs the app libraries, and the CLI, bundler and tsx are
+// shared tooling.
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    'aws-cdk-lib',
-    'constructs',
-    'source-map-support',
-    'aws-cdk',
-    'esbuild',
-    'tsx',
+    { name: 'aws-cdk-lib' },
+    { name: 'constructs' },
+    { name: 'source-map-support' },
+    // The `aws-cdk` CLI, esbuild (CDK bundling) and tsx are shared tooling.
+    { name: 'aws-cdk', dev: true, root: true },
+    { name: 'esbuild', dev: true, root: true },
+    { name: 'tsx', dev: true, root: true },
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
     ...SHARED_INFRA_SCRIPTS_DEPENDENCIES,
   ],
@@ -101,14 +104,14 @@ export async function tsInfraGenerator(
     {
       iac: 'cdk',
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   // Shared infra-config and infra-scripts packages (lazy creation, only when enabled)
   const stageConfig = schema.stageConfig ?? false;
   if (stageConfig) {
     await sharedInfraConfigGenerator(tree);
-    await sharedInfraScriptsGenerator(tree, DECLARED_DEPENDENCIES);
+    await sharedInfraScriptsGenerator(tree, DEPENDENCIES);
   }
 
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
@@ -240,22 +243,7 @@ export async function tsInfraGenerator(
     },
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      'aws-cdk-lib',
-      'constructs',
-      'source-map-support',
-    ]),
-    {},
-    joinPathFragments(libraryRoot, 'package.json'),
-  );
-  // The `aws-cdk` CLI, esbuild (CDK bundling) and tsx are shared tooling.
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['aws-cdk', 'esbuild', 'tsx']),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: libraryRoot });
 
   updateJson(tree, `${libraryRoot}/tsconfig.lib.json`, (tsConfig) => ({
     ...tsConfig,

@@ -17,7 +17,7 @@ import {
 } from '../../utils/test';
 import { PY_DYNAMODB_GENERATOR_INFO, pyDynamoDBGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

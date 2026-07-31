@@ -49,11 +49,11 @@ const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
 /** Dependencies a caller must declare to apply the workspace init. */
 export const INIT_DEPENDENCIES = [
-  'nx',
-  '@nx/js',
-  '@nx/workspace',
-  'typescript',
-  '@biomejs/biome',
+  { name: 'nx' },
+  { name: '@nx/js' },
+  { name: '@nx/workspace' },
+  { name: 'typescript' },
+  { name: '@biomejs/biome' },
 ] as const;
 
 // Built dependencies whose install scripts the generated workspace trusts.

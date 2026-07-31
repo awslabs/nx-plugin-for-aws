@@ -5,7 +5,10 @@
 import { parse, stringify } from '@iarna/toml';
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
-import type { DependencyDeclaration } from './declared-dependencies';
+import type {
+  DeclaredPy,
+  DependencyDeclaration,
+} from './declared-dependencies';
 import { normalizeDistributionName } from './names';
 import type { UVPyprojectToml } from './nxlv-python';
 import { readToml, updateToml } from './toml';
@@ -55,7 +58,7 @@ export const addDependenciesToPyProjectToml = <
   tree: Tree,
   projectRoot: string,
   declaration: D,
-  deps: readonly D['py'][number][],
+  deps: readonly DeclaredPy<D>[],
 ) => {
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
@@ -78,7 +81,7 @@ export const addDependenciesToDependencyGroupInPyProjectToml = <
   projectRoot: string,
   group: string,
   declaration: D,
-  deps: readonly D['py'][number][],
+  deps: readonly DeclaredPy<D>[],
 ) => {
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),

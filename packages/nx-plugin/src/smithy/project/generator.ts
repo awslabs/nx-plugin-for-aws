@@ -27,7 +27,7 @@ import {
 } from '../../utils/nx';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...FS_DEPENDENCIES],
 });
 
@@ -39,7 +39,7 @@ export const smithyProjectGenerator = async (
   tree: Tree,
   options: SmithyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const cmd = new FsCommands(tree, DECLARED_DEPENDENCIES);
+  const cmd = new FsCommands(tree, DEPENDENCIES);
   const containers = await resolveContainers(tree, 'inherit');
   const type = options.type ?? 'service';
 

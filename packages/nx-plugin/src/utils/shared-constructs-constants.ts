@@ -22,7 +22,7 @@ export const DYNAMODB_GENERATOR_IDS = ['ts#dynamodb', 'py#dynamodb'];
  * Lives here so generators can spread it without importing the generator.
  */
 export const SHARED_CONSTRUCTS_DEPENDENCIES = [
-  'constructs',
-  'aws-cdk-lib',
-  '@types/node',
+  { name: 'constructs' },
+  { name: 'aws-cdk-lib' },
+  { name: '@types/node' },
 ] as const;

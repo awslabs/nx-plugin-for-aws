@@ -12,12 +12,12 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addTsDependencies } from '../utils/add-dependencies';
 import {
   AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
   addAgentCoreGatewayInfra,
 } from '../utils/agent-core-constructs/agent-core-constructs';
 import { declareDependencies } from '../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';
@@ -37,17 +37,20 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../utils/shared-constructs';
-import { withVersions } from '../utils/versions';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+// The gateway's local-dev server and Cedar policy rendering need these whatever
+// the protocol or auth, so no entry is conditional.
+export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
   ts: [
-    '@modelcontextprotocol/sdk',
-    'express',
-    '@types/express',
-    'ejs',
-    '@types/ejs',
-    'tsx',
+    { name: '@modelcontextprotocol/sdk' },
+    { name: 'express' },
+    { name: '@types/express', dev: true },
+    // ejs renders the Cedar policy in the shared gateway construct.
+    { name: 'ejs', dev: true },
+    { name: '@types/ejs', dev: true },
+    // local-dev.ts runs via tsx, which is shared tooling.
+    { name: 'tsx', dev: true, root: true },
     ...AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
   ],
@@ -149,45 +152,30 @@ export const agentcoreGatewayGenerator = async (
     );
   }
 
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: AgentCoreGatewayMetadata = {
+    name,
+    rc: nameClassName,
+    protocol,
+    auth,
+    port,
+  };
+
   addGeneratorMetadata(
     tree,
     fullyQualifiedName,
     AGENTCORE_GATEWAY_GENERATOR_INFO,
-    {
-      name,
-      rc: nameClassName,
-      protocol,
-      auth,
-      port,
-    },
+    metadata,
   );
 
-  // local-dev.ts dependencies (+ ejs for Cedar policy rendering in the
-  // shared gateway construct)
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@modelcontextprotocol/sdk',
-      'express',
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@types/express',
-      'ejs',
-      '@types/ejs',
-    ]),
-    joinPathFragments(projectRoot, 'package.json'),
-  );
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot });
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
   // the infrastructure to a previously infra-less gateway.
   if (infra === 'agentcore') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     await addAgentCoreGatewayInfra(
       tree,
@@ -200,7 +188,7 @@ export const agentcoreGatewayGenerator = async (
         auth,
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
   }
 

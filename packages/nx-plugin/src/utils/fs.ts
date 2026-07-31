@@ -12,7 +12,11 @@ import { addDependenciesToPackageJson } from './dependencies';
 import { withVersions } from './versions';
 
 /** Dependencies a caller must declare to use `FsCommands`. */
-export const FS_DEPENDENCIES = ['ncp', 'rimraf', 'make-dir-cli'] as const;
+export const FS_DEPENDENCIES = [
+  { name: 'ncp' },
+  { name: 'rimraf' },
+  { name: 'make-dir-cli' },
+] as const;
 
 /**
  * Platform agnostic commands for filesystem operations, adding the CLIs they
@@ -45,7 +49,7 @@ export class FsCommands<D extends DependencyDeclaration> {
     return `make-dir ${dir}`;
   }
 
-  private add(dep: (typeof FS_DEPENDENCIES)[number]) {
+  private add(dep: (typeof FS_DEPENDENCIES)[number]['name']) {
     addDependenciesToPackageJson(
       this.tree,
       {},

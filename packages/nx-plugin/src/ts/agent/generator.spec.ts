@@ -17,7 +17,7 @@ import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { CONTAINER_VERSIONS } from '../../utils/versions';
 import { TS_AGENT_GENERATOR_INFO, tsAgentGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

@@ -15,6 +15,7 @@ import {
 } from '@nx/devkit';
 import { ensureLicenseExceptions } from '../../license/config';
 import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import {
   addTypeScriptBundleTarget,
@@ -22,7 +23,6 @@ import {
 } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
@@ -50,19 +50,27 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
+import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions';
 import type { TsMcpServerGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface TsMcpServerMetadata {
+  readonly port: number;
+  readonly rc: string;
+  readonly auth: string;
+}
+
+export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
   ts: [
-    '@modelcontextprotocol/sdk',
-    'zod',
-    'express',
-    '@aws-lambda-powertools/parameters',
-    '@aws-sdk/client-appconfigdata',
-    '@types/express',
-    'tsx',
-    '@modelcontextprotocol/inspector',
+    { name: '@modelcontextprotocol/sdk' },
+    { name: 'zod' },
+    { name: 'express' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@types/express', dev: true },
+    // tsx (local dev) and the MCP inspector are shared tooling.
+    { name: 'tsx', dev: true, root: true },
+    { name: '@modelcontextprotocol/inspector', dev: true, root: true },
     ...FS_DEPENDENCIES,
     ...BUNDLE_DEPENDENCIES,
     ...DOCKER_DEPENDENCIES,
@@ -140,21 +148,6 @@ export const tsMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Add dependencies
-  const deps = withVersions(DECLARED_DEPENDENCIES, [
-    '@modelcontextprotocol/sdk',
-    'zod',
-    'express',
-    '@aws-lambda-powertools/parameters',
-    '@aws-sdk/client-appconfigdata',
-  ]);
-  const devDeps = withVersions(DECLARED_DEPENDENCIES, ['@types/express']);
-  // tsx (local dev) and the MCP inspector are shared tooling.
-  const rootDevDeps = withVersions(DECLARED_DEPENDENCIES, [
-    'tsx',
-    '@modelcontextprotocol/inspector',
-  ]);
-
   // Add hosting based on infra
   if (infra === 'agentcore') {
     const containers = await resolveContainers(tree, 'inherit');
@@ -168,7 +161,7 @@ export const tsMcpServerGenerator = async (
         targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
         bundleOutputDir: joinPathFragments('mcp', name),
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     const dockerOutputDir = joinPathFragments(
@@ -180,7 +173,7 @@ export const tsMcpServerGenerator = async (
     );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
+    const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
@@ -210,12 +203,12 @@ export const tsMcpServerGenerator = async (
         dockerTargetName,
         imageTags: [dockerImageTag],
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -232,10 +225,6 @@ export const tsMcpServerGenerator = async (
     // No Dockerfile needed for non-hosted MCP
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
-
-  // Runtime deps go in the project manifest; shared tooling goes to the root.
-  addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
-  addDependenciesToPackageJson(tree, {}, rootDevDeps);
 
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
   // (^3.25 || ^4.0). Yarn does not dedupe the peer to the workspace's pinned zod, so
@@ -255,6 +244,19 @@ export const tsMcpServerGenerator = async (
 
   const localDevPort = assignPort(tree, project, 8000, {
     component: { info: TS_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
+  });
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: TsMcpServerMetadata = {
+    port: localDevPort,
+    rc: mcpServerNameClassName,
+    auth,
+  };
+
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: project.root,
   });
 
   const mcpTargets = {
@@ -333,11 +335,7 @@ export const tsMcpServerGenerator = async (
     TS_MCP_SERVER_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     mcpTargetPrefix,
-    {
-      port: localDevPort,
-      rc: mcpServerNameClassName,
-      auth,
-    },
+    metadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);

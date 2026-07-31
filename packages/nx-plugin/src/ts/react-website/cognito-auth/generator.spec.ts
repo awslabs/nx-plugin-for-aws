@@ -16,7 +16,7 @@ import {
 } from './generator';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

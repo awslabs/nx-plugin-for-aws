@@ -22,10 +22,10 @@ import { withVersions } from './versions';
 
 /** Dependencies a caller must declare to use the shared RDB scripts. */
 export const SHARED_RDB_SCRIPTS_DEPENDENCIES = [
-  'pg',
-  '@types/pg',
-  'mariadb',
-  'tsx',
+  { name: 'pg' },
+  { name: '@types/pg' },
+  { name: 'mariadb' },
+  { name: 'tsx' },
 ] as const;
 
 /**
@@ -79,9 +79,9 @@ export async function sharedRdbScriptsGenerator<
   // The engine's wait-for-db script imports the database client, so declare it
   // in the scripts project's own package.json (tsx runs the scripts and lives
   // in the workspace root devDependencies).
-  const clientDeps: (typeof SHARED_RDB_SCRIPTS_DEPENDENCIES)[number][] =
+  const clientDeps: (typeof SHARED_RDB_SCRIPTS_DEPENDENCIES)[number]['name'][] =
     engine === 'postgres' ? ['pg'] : ['mariadb'];
-  const clientDevDeps: (typeof SHARED_RDB_SCRIPTS_DEPENDENCIES)[number][] =
+  const clientDevDeps: (typeof SHARED_RDB_SCRIPTS_DEPENDENCIES)[number]['name'][] =
     engine === 'postgres' ? ['@types/pg'] : [];
   addDependenciesToPackageJson(
     tree,

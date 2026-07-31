@@ -12,6 +12,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addPyDependencies } from '../../utils/add-dependencies';
 import { resolveContainers } from '../../utils/containers';
 import { declareDependencies } from '../../utils/declared-dependencies';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
@@ -28,7 +29,6 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { assignSharedPort } from '../../utils/port';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
@@ -45,12 +45,16 @@ import {
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import type { PyDynamoDBGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [
     ...SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
   ],
-  py: ['pynamodb', 'boto3', 'aws-lambda-powertools'],
+  py: [
+    { name: 'pynamodb' },
+    { name: 'boto3' },
+    { name: 'aws-lambda-powertools' },
+  ],
 });
 
 export const PY_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -110,7 +114,7 @@ export const pyDynamoDBGenerator = async (
     templateOptions,
   );
 
-  await sharedDynamoDBScriptsGenerator(tree, DECLARED_DEPENDENCIES);
+  await sharedDynamoDBScriptsGenerator(tree, DEPENDENCIES);
 
   const scriptsDir = relative(
     dir,
@@ -143,7 +147,7 @@ export const pyDynamoDBGenerator = async (
 
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addDynamoDBInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
@@ -154,11 +158,7 @@ export const pyDynamoDBGenerator = async (
     });
   }
 
-  addDependenciesToPyProjectToml(tree, dir, DECLARED_DEPENDENCIES, [
-    'pynamodb',
-    'boto3',
-    'aws-lambda-powertools',
-  ]);
+  addPyDependencies(tree, DEPENDENCIES, dir);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_DYNAMODB_GENERATOR_INFO]);
 

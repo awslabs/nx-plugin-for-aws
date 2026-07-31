@@ -10,9 +10,9 @@ import {
 } from '@nx/devkit';
 import { addTargetToLocalDev } from '../../connection/local-dev';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -24,22 +24,40 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { toProjectRelativePath } from '../../utils/paths';
-import { withVersions } from '../../utils/versions';
 import type { ReactGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface TrpcReactMetadata {
+  readonly auth: string;
+  /** Whether the backend is a REST API, which needs the SSE polyfill. */
+  readonly isRestApi: boolean;
+}
+
+// Each entry names the auth and API-type branch it belongs to, so the same
+// declaration drives both adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TrpcReactMetadata>()({
   ts: [
-    '@trpc/client',
-    '@trpc/tanstack-react-query',
-    '@tanstack/react-query',
-    '@tanstack/react-query-devtools',
-    'event-source-polyfill',
-    'oidc-client-ts',
-    'aws4fetch',
-    '@aws-sdk/credential-provider-cognito-identity',
-    'react-oidc-context',
-    '@smithy/types',
-    '@types/event-source-polyfill',
+    { name: '@trpc/client' },
+    { name: '@trpc/tanstack-react-query' },
+    { name: '@tanstack/react-query' },
+    { name: '@tanstack/react-query-devtools' },
+    { name: 'event-source-polyfill', when: (m) => m.isRestApi },
+    { name: 'oidc-client-ts', when: (m) => m.auth === 'iam' },
+    { name: 'aws4fetch', when: (m) => m.auth === 'iam' },
+    {
+      name: '@aws-sdk/credential-provider-cognito-identity',
+      when: (m) => m.auth === 'iam',
+    },
+    {
+      name: 'react-oidc-context',
+      when: (m) => m.auth === 'iam' || m.auth === 'cognito',
+    },
+    { name: '@smithy/types', dev: true },
+    {
+      name: '@types/event-source-polyfill',
+      when: (m) => m.isRestApi,
+      dev: true,
+    },
   ],
 });
 
@@ -69,6 +87,10 @@ export async function reactGenerator(
     rawInfra === 'rest-lambda' || rawInfra === 'serverlessapigatewayrestapi';
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = backendProjectConfig.name;
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const connectionMetadata: TrpcReactMetadata = { auth, isRestApi };
 
   generateFiles(
     tree,
@@ -165,30 +187,10 @@ export async function reactGenerator(
     },
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@trpc/client',
-      '@trpc/tanstack-react-query',
-      '@tanstack/react-query',
-      '@tanstack/react-query-devtools',
-      ...((isRestApi ? ['event-source-polyfill'] : []) as any),
-      ...((auth === 'iam'
-        ? [
-            'oidc-client-ts',
-            'aws4fetch',
-            '@aws-sdk/credential-provider-cognito-identity',
-            'react-oidc-context',
-          ]
-        : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@smithy/types',
-      ...((isRestApi ? ['@types/event-source-polyfill'] : []) as any),
-    ]),
-    joinPathFragments(frontendProjectConfig.root, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata: connectionMetadata,
+    projectRoot: frontendProjectConfig.root,
+  });
 
   // Recorded so the version sync knows this connection's dependencies are ours.
   addComponentGeneratorMetadata(
@@ -204,6 +206,7 @@ export async function reactGenerator(
       ),
     ),
     apiNameClassName,
+    connectionMetadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);

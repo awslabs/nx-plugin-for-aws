@@ -29,7 +29,7 @@ import tsMcpServerGenerator from '../mcp-server/generator';
 import type { TsNxPluginGeneratorSchema } from './schema';
 import { configureTsProjectAsNxPlugin, NX_PLUGIN_DEPENDENCIES } from './utils';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...NX_PLUGIN_DEPENDENCIES],
 });
 
@@ -49,7 +49,7 @@ export const tsNxPluginGenerator = async (
   });
 
   // Configure the typescript project as an Nx Plugin
-  configureTsProjectAsNxPlugin(tree, fullyQualifiedName, DECLARED_DEPENDENCIES);
+  configureTsProjectAsNxPlugin(tree, fullyQualifiedName, DEPENDENCIES);
 
   // Add a "package" target which creates a package which can be published to NPM
   const project = readProjectConfigurationUnqualified(tree, fullyQualifiedName);

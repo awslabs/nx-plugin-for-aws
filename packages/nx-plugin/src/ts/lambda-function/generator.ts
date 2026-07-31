@@ -11,12 +11,12 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
 } from '../../utils/bundle/bundle';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
@@ -34,21 +34,20 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { withVersions } from '../../utils/versions';
 import { TS_HANDLER_RETURN_TYPES } from './io';
 import type { TsLambdaFunctionGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    '@aws-lambda-powertools/tracer',
-    '@aws-lambda-powertools/logger',
-    '@aws-lambda-powertools/metrics',
-    '@aws-lambda-powertools/parameters',
-    '@aws-lambda-powertools/parser',
-    '@aws-sdk/client-appconfigdata',
-    '@middy/core',
-    'zod',
-    '@types/aws-lambda',
+    { name: '@aws-lambda-powertools/tracer' },
+    { name: '@aws-lambda-powertools/logger' },
+    { name: '@aws-lambda-powertools/metrics' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-lambda-powertools/parser' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@middy/core' },
+    { name: 'zod' },
+    { name: '@types/aws-lambda', dev: true },
     ...BUNDLE_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
   ],
@@ -126,7 +125,7 @@ export const tsLambdaFunctionGenerator = async (
       {
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     await addLambdaFunctionInfra(tree, {
@@ -163,7 +162,7 @@ export const tsLambdaFunctionGenerator = async (
         bundleOutputDir,
         external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
   }
 
@@ -179,21 +178,7 @@ export const tsLambdaFunctionGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@aws-lambda-powertools/tracer',
-      '@aws-lambda-powertools/logger',
-      '@aws-lambda-powertools/metrics',
-      '@aws-lambda-powertools/parameters',
-      '@aws-lambda-powertools/parser',
-      '@aws-sdk/client-appconfigdata',
-      '@middy/core',
-      'zod',
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, ['@types/aws-lambda']),
-    joinPathFragments(dir, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: dir });
 
   addComponentGeneratorMetadata(
     tree,

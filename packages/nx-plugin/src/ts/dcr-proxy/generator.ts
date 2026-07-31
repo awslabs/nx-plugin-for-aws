@@ -11,6 +11,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator from '../../ts/lib/generator';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
@@ -21,7 +22,6 @@ import {
   type DcrProxyHandler,
 } from '../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -38,13 +38,14 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { withVersions } from '../../utils/versions';
 import type { TsDcrProxyGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    '@aws-sdk/client-secrets-manager',
-    '@types/aws-lambda',
+    // Handler imports: @aws-sdk/client-secrets-manager (token handler) and
+    // @types/aws-lambda (handler signatures).
+    { name: '@aws-sdk/client-secrets-manager' },
+    { name: '@types/aws-lambda', dev: true },
     ...BUNDLE_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
   ],
@@ -110,14 +111,7 @@ export const tsDcrProxyGenerator = async (
     },
   );
 
-  // Handler imports: @aws-sdk/client-secrets-manager (token handler) and
-  // @types/aws-lambda (handler signatures).
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, ['@aws-sdk/client-secrets-manager']),
-    withVersions(DECLARED_DEPENDENCIES, ['@types/aws-lambda']),
-    joinPathFragments(proxyRoot, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: proxyRoot });
 
   // Bundle each handler independently to dist/<root>/bundle/<handler>/index.js
   for (const handler of DCR_PROXY_HANDLERS) {
@@ -130,7 +124,7 @@ export const tsDcrProxyGenerator = async (
         external: [/@aws-sdk\/.*/], // lambda runtime provides the aws sdk
         platform: 'node',
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
   }
 
@@ -144,7 +138,7 @@ export const tsDcrProxyGenerator = async (
     ]),
   ) as Record<DcrProxyHandler, string>;
 
-  await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+  await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
   await addDcrProxyInfra(tree, {
     dcrProxyNameClassName: nameClassName,

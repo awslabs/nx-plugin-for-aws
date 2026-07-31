@@ -35,7 +35,7 @@ import {
 } from '../nx-plugin/utils';
 import type { TsNxMigrationGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...NX_PLUGIN_DEPENDENCIES],
 });
 
@@ -153,7 +153,7 @@ export const tsNxMigrationGenerator = async (
   // Codemods import @nx/devkit and the @aws/nx-plugin SDK, both of which must
   // resolve for nx to run them
   if (hasImplementation) {
-    addNxPluginDependencies(tree, pluginPackageJsonPath, DECLARED_DEPENDENCIES);
+    addNxPluginDependencies(tree, pluginPackageJsonPath, DEPENDENCIES);
   }
 
   await addGeneratorMetricsIfApplicable(tree, [NX_MIGRATION_GENERATOR_INFO]);

@@ -13,8 +13,8 @@ import type { InitGeneratorSchema } from './schema';
 
 // `husky` comes from the preset, which is discovered as init: both mark the
 // workspace by writing aws-nx-plugin.config.mts, and only init has an id there.
-export const DECLARED_DEPENDENCIES = declareDependencies({
-  ts: ['husky', ...INIT_DEPENDENCIES],
+export const DEPENDENCIES = declareDependencies()({
+  ts: [{ name: 'husky' }, ...INIT_DEPENDENCIES],
 });
 
 export const INIT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -33,11 +33,7 @@ export const initGenerator = async (
   tree: Tree,
   { iac, mcp, containers, preferInstallDependencies }: InitGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  await applyWorkspaceInit(
-    tree,
-    { iac, containers, mcp },
-    DECLARED_DEPENDENCIES,
-  );
+  await applyWorkspaceInit(tree, { iac, containers, mcp }, DEPENDENCIES);
 
   await addGeneratorMetricsIfApplicable(tree, [INIT_GENERATOR_INFO]);
 

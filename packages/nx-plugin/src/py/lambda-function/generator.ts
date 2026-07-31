@@ -10,6 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addPyDependencies } from '../../utils/add-dependencies';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -32,19 +33,18 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import type { PyLambdaFunctionGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
   py: [
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
-    'aws-lambda-powertools[parser]',
+    { name: 'aws-lambda-powertools' },
+    { name: 'aws-lambda-powertools[tracer]' },
+    { name: 'aws-lambda-powertools[parser]' },
   ],
 });
 
@@ -157,7 +157,7 @@ export const pyLambdaFunctionGenerator = async (
       {
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     await addLambdaFunctionInfra(tree, {
@@ -199,11 +199,7 @@ export const pyLambdaFunctionGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, dir, DECLARED_DEPENDENCIES, [
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
-    'aws-lambda-powertools[parser]',
-  ]);
+  addPyDependencies(tree, DEPENDENCIES, dir);
 
   addComponentGeneratorMetadata(
     tree,

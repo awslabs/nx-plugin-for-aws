@@ -12,6 +12,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addPyDependencies } from '../../utils/add-dependencies';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
   addApiGatewayInfra,
@@ -33,10 +34,6 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import {
-  addDependenciesToDependencyGroupInPyProjectToml,
-  addDependenciesToPyProjectToml,
-} from '../../utils/py';
-import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
@@ -44,19 +41,31 @@ import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { addOpenApiGeneration } from './react/open-api';
 import type { PyFastApiProjectGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface PyFastApiMetadata {
+  readonly apiName: string;
+  readonly apiType: string;
+  readonly auth: PyFastApiProjectGeneratorSchema['auth'];
+}
+
+export const DEPENDENCIES = declareDependencies<PyFastApiMetadata>()({
   ts: [
     ...FS_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
     ...API_CONSTRUCTS_DEPENDENCIES,
   ],
   py: [
-    'fastapi',
-    'uvicorn',
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
-    'aws-lambda-powertools[parser]',
-    'fastapi[standard]',
+    { name: 'fastapi' },
+    { name: 'uvicorn' },
+    { name: 'aws-lambda-powertools' },
+    { name: 'aws-lambda-powertools[tracer]' },
+    // The custom authorizer handler parses its event with the parser extra.
+    {
+      name: 'aws-lambda-powertools[parser]',
+      when: (m) => m.auth === 'custom',
+    },
+    // `fastapi dev` runs the local server.
+    { name: 'fastapi[standard]', group: 'dev' },
   ],
 });
 
@@ -111,7 +120,7 @@ export const pyFastApiProjectGenerator = async (
     addPythonBundleTarget(projectConfig);
 
   // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
-  const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
+  const fs = new FsCommands(tree, DEPENDENCIES);
   const bundleTarget = projectConfig.targets[bundleTargetName];
   const copyRunShCommand = fs.cp(
     `{projectRoot}/run.sh`,
@@ -144,11 +153,17 @@ export const pyFastApiProjectGenerator = async (
     },
   };
 
-  projectConfig.metadata = {
-    ...projectConfig.metadata,
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: PyFastApiMetadata = {
     apiName: schema.name,
     apiType: 'fast-api',
     auth: schema.auth,
+  };
+
+  projectConfig.metadata = {
+    ...projectConfig.metadata,
+    ...metadata,
   } as any;
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
@@ -186,7 +201,7 @@ export const pyFastApiProjectGenerator = async (
       {
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     if (schema.auth === 'custom') {
@@ -228,7 +243,7 @@ export const pyFastApiProjectGenerator = async (
         auth: schema.auth,
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
@@ -239,22 +254,7 @@ export const pyFastApiProjectGenerator = async (
     });
   }
 
-  addDependenciesToPyProjectToml(tree, dir, DECLARED_DEPENDENCIES, [
-    'fastapi',
-    'uvicorn',
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
-    ...(schema.auth === 'custom'
-      ? (['aws-lambda-powertools[parser]'] as const)
-      : []),
-  ]);
-  addDependenciesToDependencyGroupInPyProjectToml(
-    tree,
-    dir,
-    'dev',
-    DECLARED_DEPENDENCIES,
-    ['fastapi[standard]'],
-  );
+  addPyDependencies(tree, DEPENDENCIES, dir, { metadata });
 
   addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
 

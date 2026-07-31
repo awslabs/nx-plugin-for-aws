@@ -24,7 +24,7 @@ import {
 import { withVersions } from '../../utils/versions';
 
 /** Dependencies a caller must declare to configure an Nx Plugin project. */
-export const NX_PLUGIN_DEPENDENCIES = ['@nx/devkit'] as const;
+export const NX_PLUGIN_DEPENDENCIES = [{ name: '@nx/devkit' }] as const;
 
 /**
  * Read the configuration of a project which can host Nx Plugin generators or

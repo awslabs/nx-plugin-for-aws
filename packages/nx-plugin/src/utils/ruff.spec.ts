@@ -10,7 +10,7 @@ import { declareDependencies } from './declared-dependencies';
 import { FIXABLE_RULES, RUFF_WASM_VERSION, ruffFixAndFormat } from './ruff';
 import { PY_VERSIONS, withPyVersions } from './versions';
 
-const declaration = declareDependencies({ py: ['ruff'] });
+const declaration = declareDependencies()({ py: [{ name: 'ruff' }] });
 
 const require = createRequire(import.meta.url);
 

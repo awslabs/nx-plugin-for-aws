@@ -30,7 +30,10 @@ import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
 import type { SmithyReactConnectionGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+// `addOpenApiReactClient` conditions these on the API's auth, which this
+// generator reads from the backend rather than recording, so no entry can carry
+// a predicate the version sync could confirm.
+export const DEPENDENCIES = declareDependencies()({
   ts: [...OPEN_API_REACT_DEPENDENCIES],
 });
 
@@ -94,7 +97,7 @@ export const smithyReactConnectionGenerator = async (
       auth,
       port,
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   const apiNameClassName = toClassName(apiName);

@@ -12,7 +12,7 @@ import {
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import {
-  DECLARED_DEPENDENCIES as AGUI_DECLARED_DEPENDENCIES,
+  DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
 } from '../../../ts/react-website/agui/generator';
@@ -39,9 +39,31 @@ import {
   openApiClientLocalDevDeps,
 } from './local-dev';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
-  ts: [...OPEN_API_REACT_DEPENDENCIES, ...AGUI_DECLARED_DEPENDENCIES.ts],
-});
+/** The metadata this generator records, which its predicates read. */
+export interface PyAgentReactConnectionMetadata {
+  readonly protocol: string;
+}
+
+/** The OpenAPI-over-HTTP path, which the AG-UI path takes none of. */
+const isHttp = (m: PyAgentReactConnectionMetadata) => m.protocol !== 'ag-ui';
+
+// Each entry names the protocol path it belongs to: the HTTP path's OpenAPI
+// client packages are added by `addOpenApiReactClient`, the AG-UI path's by
+// `addAgUiReactConnection`, both on this generator's behalf. Neither records the
+// auth or theme its own conditions read, so only the path is predicated here.
+export const DEPENDENCIES =
+  declareDependencies<PyAgentReactConnectionMetadata>()({
+    ts: [
+      ...OPEN_API_REACT_DEPENDENCIES.map((entry) => ({
+        ...entry,
+        when: isHttp,
+      })),
+      ...AGUI_DEPENDENCIES.ts.map((entry) => ({
+        ...entry,
+        when: (m: PyAgentReactConnectionMetadata) => !isHttp(m),
+      })),
+    ],
+  });
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -69,6 +91,10 @@ export const pyAgentReactConnectionGenerator = async (
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
   const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
   const protocol = (targetComponent?.protocol ?? 'http').toLowerCase();
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const connectionMetadata: PyAgentReactConnectionMetadata = { protocol };
 
   if (protocol === 'a2a') {
     throw new Error(
@@ -150,7 +176,7 @@ export const pyAgentReactConnectionGenerator = async (
         isAgentRuntime: true,
         skipLocalDev: true,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     additionalLocalDevDeps = openApiClientLocalDevDeps(agentNameClassName);
@@ -198,6 +224,7 @@ export const pyAgentReactConnectionGenerator = async (
           ),
     ),
     agentNameClassName,
+    connectionMetadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

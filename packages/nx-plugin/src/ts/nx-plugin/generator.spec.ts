@@ -15,7 +15,7 @@ import {
 } from '../../utils/test';
 import { TS_NX_PLUGIN_GENERATOR_INFO, tsNxPluginGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

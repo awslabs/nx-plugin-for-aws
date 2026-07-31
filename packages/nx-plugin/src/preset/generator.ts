@@ -25,8 +25,8 @@ import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
 import { withVersions } from '../utils/versions';
 import type { PresetGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
-  ts: ['husky', ...INIT_DEPENDENCIES],
+export const DEPENDENCIES = declareDependencies()({
+  ts: [{ name: 'husky' }, ...INIT_DEPENDENCIES],
 });
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -115,11 +115,7 @@ const setUpGitSecrets = (tree: Tree) => {
     },
   }));
 
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['husky']),
-  );
+  addDependenciesToPackageJson(tree, {}, withVersions(DEPENDENCIES, ['husky']));
 };
 
 export const presetGenerator = async (
@@ -177,7 +173,7 @@ export const presetGenerator = async (
       readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
       overwriteScripts: true,
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   tree.delete('apps/.gitkeep');

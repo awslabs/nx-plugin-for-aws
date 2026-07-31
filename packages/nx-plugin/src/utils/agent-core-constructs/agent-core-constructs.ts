@@ -36,9 +36,9 @@ type IACProvider = { iac: Iac };
 
 /** Dependencies a caller must declare to add an AgentCore Gateway construct. */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
-  'ejs',
-  '@aws-sdk/client-bedrock-agentcore',
-  '@types/ejs',
+  { name: 'ejs' },
+  { name: '@aws-sdk/client-bedrock-agentcore' },
+  { name: '@types/ejs' },
 ] as const;
 
 export type AgentCoreAuth = 'iam' | 'cognito';

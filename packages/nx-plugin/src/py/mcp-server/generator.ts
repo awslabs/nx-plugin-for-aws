@@ -12,11 +12,17 @@ import {
 } from '@nx/devkit';
 import { ensureLicenseExceptions } from '../../license/config';
 import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
+import {
+  addPyDependencies,
+  addTsDependencies,
+} from '../../utils/add-dependencies';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
@@ -35,27 +41,35 @@ import {
 } from '../../utils/nx';
 import { toProjectRelativePath } from '../../utils/paths';
 import { assignPort } from '../../utils/port';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { BASE_IMAGES, withVersions } from '../../utils/versions';
+import { BASE_IMAGES } from '../../utils/versions';
 import type { PyMcpServerGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface PyMcpServerMetadata {
+  readonly port: number;
+  readonly rc: string;
+  readonly auth: string;
+}
+
+export const DEPENDENCIES = declareDependencies<PyMcpServerMetadata>()({
   ts: [
-    '@modelcontextprotocol/inspector',
-    ...FS_DEPENDENCIES,
-    ...DOCKER_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    // The MCP inspector is shared tooling.
+    { name: '@modelcontextprotocol/inspector', dev: true, root: true },
+    // Added by the helpers that own the projects they belong to.
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(DOCKER_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
   py: [
-    'aws-lambda-powertools',
-    'mcp',
-    'uvicorn',
-    'boto3',
-    'aws-opentelemetry-distro',
+    { name: 'aws-lambda-powertools' },
+    { name: 'mcp' },
+    { name: 'uvicorn' },
+    { name: 'boto3' },
+    { name: 'aws-opentelemetry-distro' },
   ],
 });
 
@@ -125,14 +139,6 @@ export const pyMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, project.root, DECLARED_DEPENDENCIES, [
-    'aws-lambda-powertools',
-    'mcp',
-    'uvicorn',
-    'boto3',
-    'aws-opentelemetry-distro',
-  ]);
-
   if (infra === 'agentcore') {
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
@@ -167,7 +173,7 @@ export const pyMcpServerGenerator = async (
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
     // Add a docker target that prepares the docker context and builds the image
-    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
+    const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
@@ -199,12 +205,12 @@ export const pyMcpServerGenerator = async (
         dockerTargetName,
         imageTags: [dockerImageTag],
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -222,6 +228,17 @@ export const pyMcpServerGenerator = async (
   const localDevPort = assignPort(tree, project, 8000, {
     component: { info: PY_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
   });
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: PyMcpServerMetadata = {
+    port: localDevPort,
+    rc: mcpServerNameClassName,
+    auth,
+  };
+
+  addPyDependencies(tree, DEPENDENCIES, project.root, { metadata });
+  addTsDependencies(tree, DEPENDENCIES, { metadata });
 
   const mcpTargets = {
     ...project.targets,
@@ -295,23 +312,13 @@ export const pyMcpServerGenerator = async (
     targets: mcpTargets,
   });
 
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['@modelcontextprotocol/inspector']),
-  );
-
   addComponentGeneratorMetadata(
     tree,
     project.name,
     PY_MCP_SERVER_GENERATOR_INFO,
     toProjectRelativePath(project, targetSourceDir),
     mcpTargetPrefix,
-    {
-      port: localDevPort,
-      rc: mcpServerNameClassName,
-      auth,
-    },
+    metadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);

@@ -22,8 +22,8 @@ import { withVersions } from './versions';
 
 /** Dependencies a caller must declare to use the shared DynamoDB scripts. */
 export const SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES = [
-  '@aws-sdk/client-dynamodb',
-  'tsx',
+  { name: '@aws-sdk/client-dynamodb' },
+  { name: 'tsx' },
 ] as const;
 
 /**

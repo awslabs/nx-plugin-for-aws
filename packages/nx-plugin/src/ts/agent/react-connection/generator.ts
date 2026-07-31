@@ -11,9 +11,9 @@ import {
 } from '@nx/devkit';
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
 import { declareDependencies } from '../../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -26,30 +26,52 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { toProjectRelativePath } from '../../../utils/paths';
-import { withVersions } from '../../../utils/versions';
 import {
-  DECLARED_DEPENDENCIES as AGUI_DECLARED_DEPENDENCIES,
+  DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
 } from '../../react-website/agui/generator';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
 import { addTsAgentTargetToLocalDev } from './local-dev';
 
-// Unions both the AG-UI and HTTP protocol paths, and every auth branch.
-export const DECLARED_DEPENDENCIES = declareDependencies({
-  ts: [
-    '@trpc/client',
-    '@tanstack/react-query',
-    '@tanstack/react-query-devtools',
-    '@trpc/tanstack-react-query',
-    'oidc-client-ts',
-    'aws4fetch',
-    '@aws-sdk/credential-provider-cognito-identity',
-    'react-oidc-context',
-    '@smithy/types',
-    ...AGUI_DECLARED_DEPENDENCIES.ts,
-  ],
-});
+/** The metadata this generator records, which its predicates read. */
+export interface TsAgentReactConnectionMetadata {
+  readonly auth: string;
+  readonly protocol: string;
+}
+
+/** The tRPC-over-HTTP path, which the AG-UI path takes none of. */
+const isHttp = (m: TsAgentReactConnectionMetadata) => m.protocol !== 'ag-ui';
+
+// Each entry names the protocol path it belongs to: the HTTP path's client and
+// auth packages are added here, the AG-UI path's by `addAgUiReactConnection` on
+// this generator's behalf.
+export const DEPENDENCIES =
+  declareDependencies<TsAgentReactConnectionMetadata>()({
+    ts: [
+      { name: '@trpc/client', when: isHttp },
+      { name: '@tanstack/react-query', when: isHttp },
+      { name: '@tanstack/react-query-devtools', when: isHttp },
+      { name: '@trpc/tanstack-react-query', when: isHttp },
+      { name: 'oidc-client-ts', when: (m) => isHttp(m) && m.auth === 'iam' },
+      { name: 'aws4fetch', when: (m) => isHttp(m) && m.auth === 'iam' },
+      {
+        name: '@aws-sdk/credential-provider-cognito-identity',
+        when: (m) => isHttp(m) && m.auth === 'iam',
+      },
+      {
+        name: 'react-oidc-context',
+        when: (m) => isHttp(m) && (m.auth === 'iam' || m.auth === 'cognito'),
+      },
+      { name: '@smithy/types', when: isHttp, dev: true },
+      // The AG-UI generator owns its whole union: it records no theme or auth, so
+      // only the path is predicated here.
+      ...AGUI_DEPENDENCIES.ts.map((entry) => ({
+        ...entry,
+        when: (m: TsAgentReactConnectionMetadata) => !isHttp(m),
+      })),
+    ],
+  });
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -78,6 +100,13 @@ export async function tsAgentReactConnectionGenerator(
   const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
   const agentProjectAlias = agentProjectConfig.name;
   const agentPath = targetComponent?.path ?? 'src/agent';
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const connectionMetadata: TsAgentReactConnectionMetadata = {
+    auth,
+    protocol: targetComponent?.protocol ?? 'http',
+  };
 
   if ((targetComponent?.protocol ?? '').toLowerCase() === 'a2a') {
     throw new Error(
@@ -120,6 +149,7 @@ export async function tsAgentReactConnectionGenerator(
         ),
       ),
       agentNameClassName,
+      connectionMetadata,
     );
 
     await addGeneratorMetricsIfApplicable(tree, [
@@ -245,26 +275,10 @@ export async function tsAgentReactConnectionGenerator(
     agentNameClassName,
   });
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@trpc/client',
-      '@tanstack/react-query',
-      '@tanstack/react-query-devtools',
-      '@trpc/tanstack-react-query',
-      ...((auth === 'iam'
-        ? [
-            'oidc-client-ts',
-            'aws4fetch',
-            '@aws-sdk/credential-provider-cognito-identity',
-            'react-oidc-context',
-          ]
-        : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, ['@smithy/types']),
-    joinPathFragments(frontendProjectConfig.root, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata: connectionMetadata,
+    projectRoot: frontendProjectConfig.root,
+  });
 
   // Recorded so the version sync knows this connection's dependencies are ours.
   addComponentGeneratorMetadata(
@@ -280,6 +294,7 @@ export async function tsAgentReactConnectionGenerator(
       ),
     ),
     agentNameClassName,
+    connectionMetadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

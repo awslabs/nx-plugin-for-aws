@@ -7,16 +7,16 @@ import PluginPackageJson from '../../package.json' with { type: 'json' };
 import { type DeclaredTs, declareDependencies } from './declared-dependencies';
 import { NX_PACKAGES, NX_VERSION, TS_VERSIONS, withVersions } from './versions';
 
-const declaration = declareDependencies({
+const declaration = declareDependencies()({
   ts: [
-    'zod',
-    'aws-cdk-lib',
-    'constructs',
-    '@trpc/client',
-    '@tanstack/react-query',
-    '@tanstack/react-query-devtools',
-    '@cloudscape-design/components',
-    '@cloudscape-design/board-components',
+    { name: 'zod' },
+    { name: 'aws-cdk-lib' },
+    { name: 'constructs' },
+    { name: '@trpc/client' },
+    { name: '@tanstack/react-query' },
+    { name: '@tanstack/react-query-devtools' },
+    { name: '@cloudscape-design/components' },
+    { name: '@cloudscape-design/board-components' },
   ],
 });
 type SpecTsDep = DeclaredTs<typeof declaration>;

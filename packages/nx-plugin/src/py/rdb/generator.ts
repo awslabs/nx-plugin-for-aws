@@ -11,10 +11,16 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import {
+  addPyDependencies,
+  addTsDependencies,
+} from '../../utils/add-dependencies';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
@@ -31,7 +37,6 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { assignPort } from '../../utils/port';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -45,29 +50,58 @@ import {
   SHARED_RDB_SCRIPTS_DEPENDENCIES,
   sharedRdbScriptsGenerator,
 } from '../../utils/shared-rdb-scripts';
-import { PY_VERSIONS, withVersions } from '../../utils/versions';
+import { PY_VERSIONS } from '../../utils/versions';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import type { PyRdbGeneratorSchema } from './schema';
 
-// Unions both engine branches.
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface PyRdbMetadata {
+  readonly engine: PyRdbGeneratorSchema['engine'];
+}
+
+/**
+ * The TypeScript dependencies this generator adds itself, used by the local dev
+ * script wait-for-*-db.ts. The spread helper constants below are added by the
+ * helpers that own them, so only these are passed to `addTsDependencies`.
+ */
+const OWN_TS_DEPENDENCIES = [
+  {
+    name: 'mariadb',
+    when: (m: PyRdbMetadata) => m.engine === 'mysql',
+    root: true,
+  },
+  { name: 'pg', when: (m: PyRdbMetadata) => m.engine !== 'mysql', root: true },
+  {
+    name: '@types/pg',
+    when: (m: PyRdbMetadata) => m.engine !== 'mysql',
+    dev: true,
+    root: true,
+  },
+] as const;
+
+// Each entry names the engine branch it belongs to, so the same declaration
+// drives both adding and the version sync.
+export const DEPENDENCIES = declareDependencies<PyRdbMetadata>()({
   ts: [
-    'mariadb',
-    'pg',
-    '@types/pg',
-    ...FS_DEPENDENCIES,
-    ...DOCKER_DEPENDENCIES,
-    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+    ...OWN_TS_DEPENDENCIES,
+    // Added by the helpers that own the projects they belong to.
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(DOCKER_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
     ...SHARED_RDB_SCRIPTS_DEPENDENCIES,
   ],
   py: [
-    'sqlmodel',
-    'alembic',
-    'greenlet',
-    'aiomysql',
-    'asyncpg',
-    'boto3',
-    'aws-lambda-powertools',
+    { name: 'sqlmodel' },
+    { name: 'alembic' },
+    // SQLAlchemy's async engine (used by connection.py for both engines)
+    // requires greenlet at runtime. Vend it explicitly at a pinned version so
+    // the dependency graph is fully determined and doesn't float to an
+    // unpublished-wheel release at install time.
+    { name: 'greenlet' },
+    { name: 'aiomysql', when: (m) => m.engine === 'mysql' },
+    { name: 'asyncpg', when: (m) => m.engine !== 'mysql' },
+    { name: 'boto3' },
+    { name: 'aws-lambda-powertools' },
   ],
 });
 
@@ -105,6 +139,9 @@ export const pyRdbGenerator = async (
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
   const { engine } = options;
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: PyRdbMetadata = { engine };
   const localDbPort = assignPort(
     tree,
     projectConfig,
@@ -146,22 +183,12 @@ export const pyRdbGenerator = async (
     templateOptions,
   );
 
-  await sharedRdbScriptsGenerator(tree, engine, DECLARED_DEPENDENCIES);
-  // Used by local dev script wait-for-*-db.ts
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      engine === 'mysql' ? 'mariadb' : 'pg',
-    ]),
-    engine === 'mysql'
-      ? {}
-      : withVersions(DECLARED_DEPENDENCIES, ['@types/pg']),
-  );
+  await sharedRdbScriptsGenerator(tree, engine, DEPENDENCIES);
   const scriptsDir = relative(
     dir,
     joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR, 'src', 'rdb'),
   );
-  const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
+  const fs = new FsCommands(tree, DEPENDENCIES);
 
   const migrationBundleDir = joinPathFragments(
     'dist',
@@ -315,7 +342,7 @@ export const pyRdbGenerator = async (
           dockerTargetName: 'docker',
           imageTags: [migrationDockerImageTag, createDbUserDockerImageTag],
         },
-        DECLARED_DEPENDENCIES,
+        DEPENDENCIES,
       );
     }
     addDependencyToTargetIfNotPresent(
@@ -331,13 +358,16 @@ export const pyRdbGenerator = async (
   }
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
-  addGeneratorMetadata(tree, fullyQualifiedName, PY_RDB_GENERATOR_INFO, {
-    engine,
-  });
+  addGeneratorMetadata(
+    tree,
+    fullyQualifiedName,
+    PY_RDB_GENERATOR_INFO,
+    metadata,
+  );
 
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addRdbInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
@@ -357,18 +387,8 @@ export const pyRdbGenerator = async (
     });
   }
 
-  addDependenciesToPyProjectToml(tree, dir, DECLARED_DEPENDENCIES, [
-    'sqlmodel',
-    'alembic',
-    // SQLAlchemy's async engine (used by connection.py for both engines)
-    // requires greenlet at runtime. Vend it explicitly at a pinned version so
-    // the dependency graph is fully determined and doesn't float to an
-    // unpublished-wheel release at install time.
-    'greenlet',
-    ...(engine === 'mysql'
-      ? (['aiomysql', 'boto3', 'aws-lambda-powertools'] as const)
-      : (['asyncpg', 'boto3', 'aws-lambda-powertools'] as const)),
-  ]);
+  addPyDependencies(tree, DEPENDENCIES, dir, { metadata });
+  addTsDependencies(tree, DEPENDENCIES, { metadata });
 
   await addGeneratorMetricsIfApplicable(tree, [PY_RDB_GENERATOR_INFO]);
 

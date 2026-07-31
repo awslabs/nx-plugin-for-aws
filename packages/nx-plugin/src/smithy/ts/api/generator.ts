@@ -11,6 +11,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
   addApiGatewayInfra,
@@ -21,7 +22,6 @@ import {
   BUNDLE_DEPENDENCIES,
 } from '../../../utils/bundle/bundle';
 import { declareDependencies } from '../../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FS_DEPENDENCIES, FsCommands } from '../../../utils/fs';
 import { updateGitIgnore } from '../../../utils/git';
@@ -43,23 +43,33 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs';
-import { withVersions } from '../../../utils/versions';
 import smithyProjectGenerator from '../../project/generator';
 import type { TsSmithyApiGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface TsSmithyApiMetadata {
+  readonly apiName: string;
+  readonly auth: TsSmithyApiGeneratorSchema['auth'];
+  readonly modelProject: string;
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsSmithyApiMetadata>()({
   ts: [
-    '@aws-smithy/server-apigateway',
-    '@aws-smithy/server-node',
-    '@middy/core',
-    '@aws-lambda-powertools/logger',
-    '@aws-lambda-powertools/parameters',
-    '@aws-lambda-powertools/tracer',
-    '@aws-lambda-powertools/metrics',
-    '@aws-sdk/client-appconfigdata',
-    '@aws-lambda-powertools/parser',
-    '@types/aws-lambda',
-    'tsx',
+    { name: '@aws-smithy/server-apigateway' },
+    { name: '@aws-smithy/server-node' },
+    { name: '@middy/core' },
+    { name: '@aws-lambda-powertools/logger' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-lambda-powertools/tracer' },
+    { name: '@aws-lambda-powertools/metrics' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    // The custom authorizer handler parses its event.
+    { name: '@aws-lambda-powertools/parser', when: (m) => m.auth === 'custom' },
+    { name: '@types/aws-lambda', dev: true },
+    // tsx runs the local server from the workspace root.
+    { name: 'tsx', dev: true, root: true },
     ...FS_DEPENDENCIES,
     ...API_CONSTRUCTS_DEPENDENCIES,
     ...BUNDLE_DEPENDENCIES,
@@ -133,15 +143,19 @@ export const tsSmithyApiGenerator = async (
     } as any,
   });
 
+  // Recorded here and read by the declaration's predicates, so the packages
+  // added below are exactly the ones the version sync will own.
+  const metadata: TsSmithyApiMetadata = {
+    apiName: options.name,
+    auth: options.auth,
+    modelProject: modelProjectConfig.name,
+  };
+
   addGeneratorMetadata(
     tree,
     backendFullyQualifiedName,
     TS_SMITHY_API_GENERATOR_INFO,
-    {
-      apiName: options.name,
-      auth: options.auth,
-      modelProject: modelProjectConfig.name,
-    },
+    metadata,
   );
 
   const backendProjectConfig = readProjectConfigurationUnqualified(
@@ -195,7 +209,7 @@ export const tsSmithyApiGenerator = async (
       {
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
     await addApiGatewayInfra(
       tree,
@@ -224,7 +238,7 @@ export const tsSmithyApiGenerator = async (
           }),
         },
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
     addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
       iac,
@@ -247,7 +261,7 @@ export const tsSmithyApiGenerator = async (
         targetFilePath: 'src/handler.ts',
         external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     if (options.auth === 'custom') {
@@ -259,12 +273,12 @@ export const tsSmithyApiGenerator = async (
           bundleOutputDir: 'authorizer',
           external: [/@aws-sdk\/.*/],
         },
-        DECLARED_DEPENDENCIES,
+        DEPENDENCIES,
       );
     }
   }
 
-  const cmd = new FsCommands(tree, DECLARED_DEPENDENCIES);
+  const cmd = new FsCommands(tree, DEPENDENCIES);
   const generatedSrcDirFromRoot = '{projectRoot}/src/generated';
 
   // Target for copying the ssdk built by the model
@@ -350,29 +364,10 @@ export const tsSmithyApiGenerator = async (
     backendProjectConfig,
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@aws-smithy/server-apigateway',
-      '@aws-smithy/server-node',
-      '@middy/core',
-      '@aws-lambda-powertools/logger',
-      '@aws-lambda-powertools/parameters',
-      '@aws-lambda-powertools/tracer',
-      '@aws-lambda-powertools/metrics',
-      '@aws-sdk/client-appconfigdata',
-      ...(options.auth === 'custom'
-        ? (['@aws-lambda-powertools/parser'] as const)
-        : []),
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, ['@types/aws-lambda']),
-    joinPathFragments(backendProjectConfig.root, 'package.json'),
-  );
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
-  );
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: backendProjectConfig.root,
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_SMITHY_API_GENERATOR_INFO]);
 

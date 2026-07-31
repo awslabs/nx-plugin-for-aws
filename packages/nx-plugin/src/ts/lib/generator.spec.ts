@@ -13,7 +13,7 @@ import {
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

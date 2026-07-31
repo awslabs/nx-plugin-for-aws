@@ -19,7 +19,7 @@ import {
 import { TS_VERSIONS } from '../../utils/versions';
 import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

@@ -15,13 +15,13 @@ import {
 } from '@nx/devkit';
 import { applicationGenerator } from '@nx/react';
 import { relative, sep } from 'path';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
 import { declareDependencies } from '../../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
@@ -48,38 +48,89 @@ import {
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
 } from '../../../utils/shared-shadcn';
-import { withVersions } from '../../../utils/versions';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
 import { configureTsProject } from '../../lib/ts-project-utils';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest';
 // typescript factory imports removed — now using GritQL for vite config transforms
-import type { TsReactWebsiteGeneratorSchema } from './schema';
+import type {
+  TsReactWebsiteGeneratorSchema,
+  WebsiteInfraOption,
+} from './schema';
 
-// Unions every ux, tailwind and tanstackRouter branch.
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface TsReactWebsiteMetadata {
+  readonly ux: UxOption;
+  readonly framework: string;
+  readonly infra: WebsiteInfraOption;
+  readonly tailwind: boolean;
+  readonly tanstackRouter: boolean;
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsReactWebsiteMetadata>()({
   ts: [
-    'react',
-    'react-dom',
-    '@nx/react',
-    '@vitest/ui',
-    '@cloudscape-design/components',
-    '@cloudscape-design/board-components',
-    '@cloudscape-design/global-styles',
-    'lucide-react',
-    'tailwindcss',
-    '@tailwindcss/vite',
-    '@tanstack/react-router',
-    '@tanstack/router-plugin',
-    '@tanstack/router-generator',
-    '@tanstack/virtual-file-routes',
-    '@tanstack/router-utils',
+    { name: 'react' },
+    { name: 'react-dom' },
+    // Build/test tooling imported only from vite.config.mts stays at the root.
+    { name: '@nx/react', dev: true, root: true },
+    { name: '@vitest/ui', dev: true, root: true },
+    {
+      name: '@cloudscape-design/components',
+      when: (m) => m.ux === 'cloudscape',
+    },
+    {
+      name: '@cloudscape-design/board-components',
+      when: (m) => m.ux === 'cloudscape',
+    },
+    {
+      name: '@cloudscape-design/global-styles',
+      when: (m) => m.ux === 'cloudscape',
+    },
+    // Shared shadcn components live in the common/shadcn package, but the
+    // website's own generated components (e.g. the tanstack-router sidebar)
+    // import lucide-react directly, so the website must declare it.
+    {
+      name: 'lucide-react',
+      when: (m) => m.ux === 'shadcn' && m.tanstackRouter,
+    },
+    { name: 'tailwindcss', when: (m) => m.tailwind },
+    {
+      name: '@tailwindcss/vite',
+      when: (m) => m.tailwind,
+      dev: true,
+      root: true,
+    },
+    { name: '@tanstack/react-router', when: (m) => m.tanstackRouter },
+    {
+      name: '@tanstack/router-plugin',
+      when: (m) => m.tanstackRouter,
+      dev: true,
+      root: true,
+    },
+    {
+      name: '@tanstack/router-generator',
+      when: (m) => m.tanstackRouter,
+      dev: true,
+      root: true,
+    },
+    {
+      name: '@tanstack/virtual-file-routes',
+      when: (m) => m.tanstackRouter,
+      dev: true,
+      root: true,
+    },
+    {
+      name: '@tanstack/router-utils',
+      when: (m) => m.tanstackRouter,
+      dev: true,
+      root: true,
+    },
     ...SHADCN_DEPENDENCIES,
     ...VITEST_DEPENDENCIES,
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
   ],
 });
-
-type DeclaredTsDependency = (typeof DECLARED_DEPENDENCIES)['ts'][number];
 
 export const SUPPORTED_UX_PROVIDERS = ['none', 'cloudscape', 'shadcn'] as const;
 
@@ -242,15 +293,21 @@ export async function tsReactWebsiteGenerator(
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+
+  // Recorded here and read by the declaration's predicates, so the packages
+  // added below are exactly the ones the version sync will own.
+  const metadata: TsReactWebsiteMetadata = {
+    ux,
+    framework: 'react',
+    infra,
+    tailwind,
+    tanstackRouter,
+  };
   addGeneratorMetadata(
     tree,
     projectConfiguration.name,
     REACT_WEBSITE_APP_GENERATOR_INFO,
-    {
-      ux,
-      framework: 'react',
-      infra,
-    },
+    metadata,
   );
 
   await configureTsProject(
@@ -259,11 +316,11 @@ export async function tsReactWebsiteGenerator(
       dir: websiteContentPath,
       fullyQualifiedName,
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   if (ux === 'shadcn') {
-    await sharedShadcnGenerator(tree, DECLARED_DEPENDENCIES);
+    await sharedShadcnGenerator(tree, DEPENDENCIES);
   }
 
   if (iac) {
@@ -272,7 +329,7 @@ export async function tsReactWebsiteGenerator(
       {
         iac,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     await addWebsiteInfra(tree, {
@@ -403,7 +460,7 @@ export async function tsReactWebsiteGenerator(
         fullyQualifiedName: e2eFullyQualifiedName,
         dir: e2eRoot,
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
   }
   const viteConfigPath = joinPathFragments(libraryRoot, 'vite.config.mts');
@@ -529,53 +586,7 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const dependencies: DeclaredTsDependency[] = ['react', 'react-dom'];
-  // Build/test tooling imported only from vite.config.mts stays at the root.
-  const rootDevDependencies: DeclaredTsDependency[] = [
-    '@nx/react',
-    '@vitest/ui',
-  ];
-
-  if (ux === 'cloudscape') {
-    dependencies.push(
-      '@cloudscape-design/components',
-      '@cloudscape-design/board-components',
-      '@cloudscape-design/global-styles',
-    );
-  } else if (ux === 'shadcn') {
-    // Shared shadcn components live in the common/shadcn package, but the
-    // website's own generated components (e.g. the tanstack-router sidebar)
-    // import lucide-react directly, so the website must declare it.
-    if (tanstackRouter) {
-      dependencies.push('lucide-react');
-    }
-  }
-
-  if (tailwind) {
-    dependencies.push('tailwindcss');
-    rootDevDependencies.push('@tailwindcss/vite');
-  }
-  if (tanstackRouter) {
-    dependencies.push('@tanstack/react-router');
-    rootDevDependencies.push(
-      '@tanstack/router-plugin',
-      '@tanstack/router-generator',
-      '@tanstack/virtual-file-routes',
-      '@tanstack/router-utils',
-    );
-  }
-
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, dependencies),
-    {},
-    joinPathFragments(libraryRoot, 'package.json'),
-  );
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, rootDevDependencies),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: libraryRoot });
 
   // @nx/react's applicationGenerator seeds react/react-dom into the root
   // manifest. The website now declares its own pinned versions, so drop the

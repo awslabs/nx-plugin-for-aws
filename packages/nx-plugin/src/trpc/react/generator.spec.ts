@@ -14,7 +14,7 @@ import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { tsTrpcApiGenerator } from '../backend/generator';
 import { reactGenerator, TRPC_REACT_GENERATOR_INFO } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

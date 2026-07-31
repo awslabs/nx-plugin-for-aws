@@ -27,8 +27,8 @@ import { withVersions } from './versions';
 
 /** Dependencies a caller must declare to use the shared infra scripts. */
 export const SHARED_INFRA_SCRIPTS_DEPENDENCIES = [
-  '@aws-sdk/client-sts',
-  '@aws-sdk/credential-providers',
+  { name: '@aws-sdk/client-sts' },
+  { name: '@aws-sdk/credential-providers' },
 ] as const;
 
 /**

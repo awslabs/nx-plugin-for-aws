@@ -26,13 +26,13 @@ import { withVersions } from '../../versions';
 
 /** Dependencies a caller must declare to add an OpenAPI React client. */
 export const OPEN_API_REACT_DEPENDENCIES = [
-  'oidc-client-ts',
-  'react-oidc-context',
-  '@aws-sdk/credential-provider-cognito-identity',
-  'aws4fetch',
-  '@tanstack/react-query',
-  '@tanstack/react-query-devtools',
-  '@smithy/types',
+  { name: 'oidc-client-ts' },
+  { name: 'react-oidc-context' },
+  { name: '@aws-sdk/credential-provider-cognito-identity' },
+  { name: 'aws4fetch' },
+  { name: '@tanstack/react-query' },
+  { name: '@tanstack/react-query-devtools' },
+  { name: '@smithy/types' },
 ] as const;
 
 export interface AddOpenApiReactClientOptions {

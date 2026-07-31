@@ -23,9 +23,9 @@ const readGritPattern = (name: string): string =>
 
 /** Dependencies a caller must declare to configure vitest. */
 export const VITEST_DEPENDENCIES = [
-  'vite',
-  'vitest',
-  '@vitest/coverage-v8',
+  { name: 'vite' },
+  { name: 'vitest' },
+  { name: '@vitest/coverage-v8' },
 ] as const;
 
 export const configureVitest = async <const D extends DependencyDeclaration>(

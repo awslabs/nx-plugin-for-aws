@@ -14,6 +14,7 @@ import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { VITEST_DEPENDENCIES } from '../ts/lib/vitest';
 import {
   type DependencyDeclaration,
+  declaredNames,
   forDependencies,
   type MustDeclare,
 } from './declared-dependencies';
@@ -30,16 +31,16 @@ import { type ITsDepVersion, withVersions } from './versions';
 
 /** Dependencies a caller must declare to use the shared shadcn project. */
 export const SHADCN_DEPENDENCIES = [
-  'react',
-  'react-dom',
-  'class-variance-authority',
-  'clsx',
-  'tailwind-merge',
-  'lucide-react',
-  'tw-animate-css',
-  'radix-ui',
+  { name: 'react' },
+  { name: 'react-dom' },
+  { name: 'class-variance-authority' },
+  { name: 'clsx' },
+  { name: 'tailwind-merge' },
+  { name: 'lucide-react' },
+  { name: 'tw-animate-css' },
+  { name: 'radix-ui' },
   ...VITEST_DEPENDENCIES,
-] as const satisfies readonly ITsDepVersion[];
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export async function sharedShadcnGenerator<
   const D extends DependencyDeclaration,
@@ -120,9 +121,10 @@ export async function sharedShadcnGenerator<
 
     addDependenciesToPackageJson(
       tree,
-      withVersions(forDependencies<typeof SHADCN_DEPENDENCIES>(declaration), [
-        ...SHADCN_DEPENDENCIES,
-      ]),
+      withVersions(
+        forDependencies<typeof SHADCN_DEPENDENCIES>(declaration),
+        declaredNames(SHADCN_DEPENDENCIES),
+      ),
       {},
       joinPathFragments(libraryRoot, 'package.json'),
     );

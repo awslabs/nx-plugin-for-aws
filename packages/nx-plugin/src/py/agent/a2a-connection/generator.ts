@@ -10,6 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addPyDependencies } from '../../../utils/add-dependencies';
 import {
   AGENT_CONNECTION_PY_DEPENDENCIES,
   type AgentFramework,
@@ -40,11 +41,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { toProjectRelativePath } from '../../../utils/paths';
-import {
-  addDependenciesToPyProjectToml,
-  addWorkspaceDependencyToPyProject,
-} from '../../../utils/py';
-import type { IPyDepVersion } from '../../../utils/versions';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyAgentA2aConnectionGeneratorSchema } from './schema';
 
 /** Prefix a GritQL pattern with `language python` */
@@ -62,26 +59,25 @@ const AGENT_CONSTRUCTOR: Record<AgentFramework, string> = {
   langchain: 'create_agent($_)',
 };
 
-/**
- * The A2A transport dependency each framework's Layer-2 client needs. Strands
- * wraps strands' `A2AAgent` (strands-agents[a2a]); LangChain drives the a2a SDK
- * directly (a2a-sdk) and must not pull Strands in.
- */
-const A2A_TRANSPORT_DEP = {
-  strands: 'strands-agents[a2a]',
-  langchain: 'a2a-sdk',
-} as const satisfies Record<AgentFramework, IPyDepVersion>;
+/** The metadata this generator records, which its predicates read. */
+export interface PyAgentA2aConnectionMetadata {
+  readonly framework: AgentFramework;
+}
 
-// Unions every framework's A2A transport dep.
-export const DECLARED_DEPENDENCIES = declareDependencies({
-  py: [
-    'boto3',
-    'httpx',
-    'strands-agents[a2a]',
-    'a2a-sdk',
-    ...AGENT_CONNECTION_PY_DEPENDENCIES,
-  ],
-});
+// Each framework's Layer-2 client needs its own A2A transport: Strands wraps
+// strands' `A2AAgent` (strands-agents[a2a]); LangChain drives the a2a SDK
+// directly (a2a-sdk) and must not pull Strands in.
+export const DEPENDENCIES = declareDependencies<PyAgentA2aConnectionMetadata>()(
+  {
+    py: [
+      { name: 'boto3' },
+      { name: 'httpx' },
+      { name: 'strands-agents[a2a]', when: (m) => m.framework === 'strands' },
+      { name: 'a2a-sdk', when: (m) => m.framework === 'langchain' },
+      ...AGENT_CONNECTION_PY_DEPENDENCIES,
+    ],
+  },
+);
 
 export const PY_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -130,7 +126,7 @@ export const pyAgentA2aConnectionGenerator = async (
 
   // The source agent's framework drives everything that varies: the client
   // naming + app template (shared with the mcp/gateway generators via
-  // PY_CLIENT_NAMING), the A2A transport dep (see A2A_TRANSPORT_DEP), and the
+  // PY_CLIENT_NAMING), the A2A transport dep (see DEPENDENCIES), and the
   // agent.py transform below. Each framework wraps its own A2A Layer-2 client
   // (Strands' A2AAgent vs an a2a-sdk-only client) over the shared,
   // framework-agnostic A2A client config. Keyed on the framework, not a
@@ -138,22 +134,24 @@ export const pyAgentA2aConnectionGenerator = async (
   const framework = resolveAgentFramework(agentComponent.framework);
   const naming = PY_CLIENT_NAMING[framework];
 
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: PyAgentA2aConnectionMetadata = { framework };
+
   // 1. Ensure the shared Python agent-connection project exists + has the
   //    A2A core client (framework Layer-2) and its shared SigV4 auth helper.
-  await ensurePythonAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
-  await addPythonCoreClient(tree, 'a2a', DECLARED_DEPENDENCIES, framework);
+  await ensurePythonAgentConnectionProject(tree, DEPENDENCIES);
+  await addPythonCoreClient(tree, 'a2a', DEPENDENCIES, framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
 
   // A2A client config + shared auth helper deps, plus the framework's A2A
-  // transport dep (see A2A_TRANSPORT_DEP).
-  addDependenciesToPyProjectToml(
-    tree,
-    agentConnectionProjectDir,
-    DECLARED_DEPENDENCIES,
-    ['boto3', 'httpx', A2A_TRANSPORT_DEP[framework]],
-  );
+  // transport dep. These belong to the shared agent-connection project, which
+  // holds the client.
+  addPyDependencies(tree, DEPENDENCIES, agentConnectionProjectDir, {
+    metadata,
+  });
 
   // 2. Generate the per-connection client into the shared agent-connection project
   const appDir = joinPathFragments(
@@ -251,6 +249,7 @@ export const pyAgentA2aConnectionGenerator = async (
     PY_AGENT_A2A_CONNECTION_GENERATOR_INFO,
     toProjectRelativePath(sourceProject, agentFilePath),
     targetAgentClassName,
+    metadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

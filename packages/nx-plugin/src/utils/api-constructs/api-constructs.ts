@@ -33,9 +33,9 @@ import {
 
 /** Dependencies a caller must declare to add API Gateway infrastructure. */
 export const API_CONSTRUCTS_DEPENDENCIES = [
-  '@aws-sdk/client-api-gateway',
-  '@aws-sdk/client-iam',
-  '@trpc/server',
+  { name: '@aws-sdk/client-api-gateway' },
+  { name: '@aws-sdk/client-iam' },
+  { name: '@trpc/server' },
 ] as const;
 
 interface BackendOptions {
@@ -143,7 +143,8 @@ const addApiGatewayCdkConstructs = async (
   }
 
   // Declare the deps the generated core construct files import.
-  const constructDeps: (typeof API_CONSTRUCTS_DEPENDENCIES)[number][] = [];
+  const constructDeps: (typeof API_CONSTRUCTS_DEPENDENCIES)[number]['name'][] =
+    [];
   if (options.constructType === 'rest') {
     // REST account construct configures the account via the AWS SDK.
     constructDeps.push('@aws-sdk/client-api-gateway', '@aws-sdk/client-iam');

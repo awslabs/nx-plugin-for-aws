@@ -21,7 +21,7 @@ import {
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

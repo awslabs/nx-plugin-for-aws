@@ -10,6 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   AGENT_CONNECTION_DEPENDENCIES,
   AGENT_CONNECTION_PROJECT_DIR,
@@ -19,7 +20,6 @@ import {
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
 import { declareDependencies } from '../../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -34,17 +34,18 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { toProjectRelativePath } from '../../../utils/paths';
-import { withVersions } from '../../../utils/versions';
 import type { TsAgentMcpConnectionGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+// The MCP core client + vended client need these whatever the connection's
+// options, so no entry is conditional.
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    '@modelcontextprotocol/sdk',
-    '@strands-agents/sdk',
-    '@aws-lambda-powertools/parameters',
-    '@aws-sdk/client-appconfigdata',
-    'aws4fetch',
-    '@aws-sdk/credential-providers',
+    { name: '@modelcontextprotocol/sdk' },
+    { name: '@strands-agents/sdk' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: 'aws4fetch' },
+    { name: '@aws-sdk/credential-providers' },
     ...AGENT_CONNECTION_DEPENDENCIES,
   ],
 });
@@ -88,8 +89,8 @@ export const tsAgentMcpConnectionGenerator = async (
   const npmScope = getNpmScope(tree);
 
   // 1. Ensure the shared agent-connection project exists + has the MCP core client
-  await ensureTypeScriptAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
-  await addTypeScriptCoreClient(tree, 'mcp', DECLARED_DEPENDENCIES);
+  await ensureTypeScriptAgentConnectionProject(tree, DEPENDENCIES);
+  await addTypeScriptCoreClient(tree, 'mcp', DEPENDENCIES);
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
@@ -154,19 +155,7 @@ export const tsAgentMcpConnectionGenerator = async (
   }
 
   // 5. Add dependencies required by the MCP core client + vended client
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@modelcontextprotocol/sdk',
-      '@strands-agents/sdk',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-    ]),
-    {},
-    joinPathFragments(sourceProject.root, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: sourceProject.root });
 
   // Recorded so the version sync knows this connection's dependencies are ours.
   addComponentGeneratorMetadata(

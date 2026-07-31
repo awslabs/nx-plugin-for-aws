@@ -8,7 +8,7 @@ import { addDockerScanTarget, DOCKER_DEPENDENCIES } from './docker';
 import { createTreeUsingTsSolutionSetup } from './test';
 import { CONTAINER_VERSIONS } from './versions';
 
-const declaration = declareDependencies({ ts: [...DOCKER_DEPENDENCIES] });
+const declaration = declareDependencies()({ ts: [...DOCKER_DEPENDENCIES] });
 
 describe('docker utils', () => {
   let tree: Tree;

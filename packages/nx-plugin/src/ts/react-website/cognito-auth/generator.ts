@@ -10,6 +10,7 @@ import {
 } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   addDestructuredImport,
   addSingleImport,
@@ -17,7 +18,6 @@ import {
 } from '../../../utils/ast';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { declareDependencies } from '../../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
@@ -35,7 +35,6 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs';
-import { withVersions } from '../../../utils/versions';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import {
@@ -51,10 +50,10 @@ const readGritPattern = (name: string): string =>
     'utf-8',
   ).trim();
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [
-    'oidc-client-ts',
-    'react-oidc-context',
+    { name: 'oidc-client-ts' },
+    { name: 'react-oidc-context' },
     ...SHARED_CONSTRUCTS_DEPENDENCIES,
   ],
 });
@@ -90,7 +89,7 @@ export async function tsReactWebsiteAuthGenerator(
     {
       iac,
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   await addIdentityInfra(tree, {
@@ -109,15 +108,7 @@ export async function tsReactWebsiteAuthGenerator(
     },
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      'oidc-client-ts',
-      'react-oidc-context',
-    ]),
-    {},
-    joinPathFragments(projectConfig.root, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: projectConfig.root });
 
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
 

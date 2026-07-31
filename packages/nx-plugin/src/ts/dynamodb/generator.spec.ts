@@ -17,7 +17,7 @@ import {
 } from '../../utils/test';
 import { TS_DYNAMODB_GENERATOR_INFO, tsDynamoDBGenerator } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

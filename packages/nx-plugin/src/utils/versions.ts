@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { DependencyDeclaration } from './declared-dependencies';
+import {
+  type DeclaredPy,
+  type DeclaredTs,
+  type DependencyDeclaration,
+  declaredNames,
+} from './declared-dependencies';
 
 /**
  * Versons for TypeScript dependencies added by generators
@@ -152,14 +157,16 @@ export type ITsDepVersion = keyof typeof TS_VERSIONS;
 /**
  * Add versions to the given dependencies, which the declaration must own.
  *
- * @param declaration the calling generator's `DECLARED_DEPENDENCIES`
+ * @param declaration the calling generator's `DEPENDENCIES`
  */
 export const withVersions = <D extends DependencyDeclaration>(
   declaration: D,
-  deps: readonly D['ts'][number][],
+  deps: readonly DeclaredTs<D>[],
 ): Record<string, string> => {
   assertDeclared(declaration.ts, deps, 'ts');
-  return Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+  return Object.fromEntries(
+    deps.map((dep) => [dep, TS_VERSIONS[dep as ITsDepVersion]]),
+  );
 };
 
 /**
@@ -234,19 +241,20 @@ export type IPyDepVersion = keyof typeof PY_VERSIONS;
  */
 export const withPyVersions = <D extends DependencyDeclaration>(
   declaration: D,
-  deps: readonly D['py'][number][],
+  deps: readonly DeclaredPy<D>[],
 ): string[] => {
   assertDeclared(declaration.py, deps, 'py');
-  return deps.map((dep) => `${dep}${PY_VERSIONS[dep]}`);
+  return deps.map((dep) => `${dep}${PY_VERSIONS[dep as IPyDepVersion]}`);
 };
 
 /** Catches undeclared packages that reach here past the type checker. */
 const assertDeclared = (
-  declared: readonly string[],
-  deps: readonly string[],
+  declared: readonly { readonly name: string }[],
+  deps: readonly unknown[],
   kind: 'ts' | 'py',
 ): void => {
-  const undeclared = deps.filter((dep) => !declared.includes(dep));
+  const names = declaredNames(declared);
+  const undeclared = deps.filter((dep) => !names.includes(dep as string));
   if (undeclared.length > 0) {
     throw new Error(
       `Undeclared ${kind} dependencies: ${undeclared.join(', ')}. Add them to the generator's declareDependencies({ ${kind}: [...] }).`,

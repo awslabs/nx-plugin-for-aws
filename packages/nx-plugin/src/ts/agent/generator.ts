@@ -10,6 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
   AGENT_CONNECTION_DEPENDENCIES,
@@ -23,7 +24,6 @@ import {
 } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
@@ -54,33 +54,56 @@ import {
 import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
-// Unions every protocol and auth branch.
-export const DECLARED_DEPENDENCIES = declareDependencies({
+/** The metadata this generator records, which its predicates read. */
+export interface TsAgentMetadata {
+  readonly port: number;
+  readonly rc: string;
+  readonly auth: string;
+  readonly protocol: string;
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
   ts: [
-    'zod',
-    '@strands-agents/sdk',
-    '@aws-sdk/credential-providers',
-    '@aws-sdk/client-appconfigdata',
-    '@aws-lambda-powertools/parameters',
-    '@modelcontextprotocol/sdk',
-    'express',
-    '@a2a-js/sdk',
-    '@ag-ui/aws-strands',
-    '@ag-ui/a2ui-toolkit',
-    '@ag-ui/client',
-    '@ag-ui/core',
-    '@ag-ui/encoder',
-    'cors',
-    '@trpc/server',
-    '@trpc/client',
-    'ws',
-    'aws4fetch',
-    '@types/node',
-    'agent-chat-cli',
-    '@types/express',
-    '@types/cors',
-    '@types/ws',
-    'tsx',
+    { name: 'zod' },
+    { name: '@strands-agents/sdk' },
+    { name: '@aws-sdk/credential-providers' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@modelcontextprotocol/sdk' },
+    { name: 'express', when: (m) => m.protocol !== 'http' },
+    { name: '@a2a-js/sdk', when: (m) => m.protocol === 'a2a' },
+    { name: '@ag-ui/aws-strands', when: (m) => m.protocol === 'ag-ui' },
+    // @ag-ui/aws-strands declares these as peer dependencies but statically
+    // imports them, so they must be installed for the bundler to inline them.
+    { name: '@ag-ui/a2ui-toolkit', when: (m) => m.protocol === 'ag-ui' },
+    { name: '@ag-ui/client', when: (m) => m.protocol === 'ag-ui' },
+    { name: '@ag-ui/core', when: (m) => m.protocol === 'ag-ui' },
+    { name: '@ag-ui/encoder', when: (m) => m.protocol === 'ag-ui' },
+    { name: '@trpc/server', when: (m) => m.protocol === 'http' },
+    { name: '@trpc/client', when: (m) => m.protocol === 'http' },
+    { name: 'ws', when: (m) => m.protocol === 'http' },
+    { name: 'cors', when: (m) => m.protocol !== 'a2a' },
+    { name: 'aws4fetch', when: (m) => m.protocol === 'http' },
+    { name: 'aws4fetch', when: (m) => m.auth === 'iam', dev: true },
+    {
+      name: '@aws-sdk/credential-providers',
+      when: (m) => m.auth === 'iam',
+      dev: true,
+    },
+    { name: '@types/node', dev: true },
+    // The chat CLI runs standalone via tsx and resolves the deployed agent from
+    // AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
+    { name: 'agent-chat-cli', dev: true },
+    { name: '@aws-lambda-powertools/parameters', dev: true },
+    { name: '@aws-sdk/client-appconfigdata', dev: true },
+    // A2A chat builds a signed @a2a-js client factory for the deployed agent.
+    { name: '@a2a-js/sdk', when: (m) => m.protocol === 'a2a', dev: true },
+    { name: '@types/express', when: (m) => m.protocol !== 'http', dev: true },
+    { name: '@types/ws', when: (m) => m.protocol === 'http', dev: true },
+    { name: '@types/cors', dev: true },
+    { name: 'tsx', dev: true, root: true },
     ...AGENT_CONNECTION_DEPENDENCIES,
     ...BUNDLE_DEPENDENCIES,
     ...FS_DEPENDENCIES,
@@ -135,10 +158,10 @@ export const tsAgentGenerator = async (
   // point can import `runWithSessionId` and propagate the AgentCore session
   // ID to any downstream MCP / A2A clients a later connection generator
   // wires into this agent.
-  await ensureTypeScriptAgentConnectionProject(tree, DECLARED_DEPENDENCIES);
+  await ensureTypeScriptAgentConnectionProject(tree, DEPENDENCIES);
   // The agent server imports the framework base helpers (session cache + model
   // error logging) regardless of whether a connection client is wired in.
-  await addTypeScriptFrameworkBase(tree, DECLARED_DEPENDENCIES);
+  await addTypeScriptFrameworkBase(tree, DEPENDENCIES);
 
   const templateContext = {
     name,
@@ -178,7 +201,7 @@ export const tsAgentGenerator = async (
         targetFilePath: `${targetSourceDirRelativeToProjectRoot}/index.ts`,
         bundleOutputDir: joinPathFragments('agent', name),
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     // Add the Dockerfile
@@ -209,7 +232,7 @@ export const tsAgentGenerator = async (
     );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree, DECLARED_DEPENDENCIES);
+    const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
@@ -239,12 +262,12 @@ export const tsAgentGenerator = async (
         dockerTargetName,
         imageTags: [dockerImageTag],
       },
-      DECLARED_DEPENDENCIES,
+      DEPENDENCIES,
     );
 
     // Add shared constructs
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac }, DECLARED_DEPENDENCIES);
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
     const infraProtocol: 'http' | 'a2a' =
@@ -263,68 +286,25 @@ export const tsAgentGenerator = async (
     });
   }
 
-  // Add dependencies
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(DECLARED_DEPENDENCIES, [
-      'zod',
-      '@strands-agents/sdk',
-      '@aws-sdk/credential-providers',
-      '@aws-sdk/client-appconfigdata',
-      '@aws-lambda-powertools/parameters',
-      '@modelcontextprotocol/sdk',
-      ...(protocol === 'a2a'
-        ? (['express', '@a2a-js/sdk'] as const)
-        : protocol === 'ag-ui'
-          ? ([
-              '@ag-ui/aws-strands',
-              // @ag-ui/aws-strands declares these as peer dependencies but
-              // statically imports them, so they must be installed for the
-              // bundler to resolve and inline them into the runtime image.
-              '@ag-ui/a2ui-toolkit',
-              '@ag-ui/client',
-              '@ag-ui/core',
-              '@ag-ui/encoder',
-              'express',
-              'cors',
-            ] as const)
-          : ([
-              '@trpc/server',
-              '@trpc/client',
-              'ws',
-              'cors',
-              'aws4fetch',
-            ] as const)),
-    ]),
-    withVersions(DECLARED_DEPENDENCIES, [
-      '@types/node',
-      // The chat CLI runs standalone via tsx and resolves the deployed agent
-      // from AppConfig when `RUNTIME_CONFIG_APP_ID` is set.
-      'agent-chat-cli',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-      ...(auth === 'iam'
-        ? (['aws4fetch', '@aws-sdk/credential-providers'] as const)
-        : ([] as const)),
-      // A2A chat builds a signed @a2a-js client factory for the deployed agent.
-      ...(protocol === 'a2a' ? (['@a2a-js/sdk'] as const) : ([] as const)),
-      ...(protocol === 'a2a' || protocol === 'ag-ui'
-        ? (['@types/express', '@types/cors'] as const)
-        : (['@types/ws', '@types/cors'] as const)),
-    ]),
-    joinPathFragments(project.root, 'package.json'),
-  );
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(DECLARED_DEPENDENCIES, ['tsx']),
-  );
-
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
   // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
   const localDevPortStart = protocol === 'a2a' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart, {
     component: { info: TS_AGENT_GENERATOR_INFO, name: agentTargetPrefix },
+  });
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: TsAgentMetadata = {
+    port: localDevPort,
+    rc: agentNameClassName,
+    auth,
+    protocol,
+  };
+
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: project.root,
   });
 
   // Every protocol gets a standalone `chat.ts`. It connects to the local
@@ -405,7 +385,7 @@ export const tsAgentGenerator = async (
     TS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort, rc: agentNameClassName, auth, protocol },
+    metadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_AGENT_GENERATOR_INFO]);

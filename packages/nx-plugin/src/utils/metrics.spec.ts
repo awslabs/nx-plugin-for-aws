@@ -16,7 +16,7 @@ import {
 } from './shared-constructs';
 import { createTreeUsingTsSolutionSetup } from './test';
 
-const declaration = declareDependencies({
+const declaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

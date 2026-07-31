@@ -33,7 +33,7 @@ import {
 } from '../nx-plugin/utils';
 import type { TsNxGeneratorGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...NX_PLUGIN_DEPENDENCIES],
 });
 
@@ -60,7 +60,7 @@ export const tsNxGeneratorGenerator = async (
   const isNxPluginForAws = rootPackageJson?.name === '@aws/nx-plugin-source';
 
   // Configure the targeted project as an Nx Plugin
-  configureTsProjectAsNxPlugin(tree, pluginProject, DECLARED_DEPENDENCIES);
+  configureTsProjectAsNxPlugin(tree, pluginProject, DEPENDENCIES);
 
   const enhancedOptions = {
     name,

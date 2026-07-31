@@ -35,7 +35,7 @@ import type { TsProjectGeneratorSchema } from './schema';
 import { configureTsProject } from './ts-project-utils';
 import { VITEST_DEPENDENCIES } from './vitest';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...VITEST_DEPENDENCIES],
 });
 
@@ -123,7 +123,7 @@ export const tsProjectGenerator = async (
       fullyQualifiedName,
       esm,
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   const projectConfiguration = readProjectConfiguration(

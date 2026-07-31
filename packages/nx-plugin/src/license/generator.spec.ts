@@ -20,7 +20,7 @@ import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator';
 import type { LicenseGeneratorSchema } from './schema';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 

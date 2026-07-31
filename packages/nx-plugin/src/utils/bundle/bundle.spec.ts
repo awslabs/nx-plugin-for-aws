@@ -17,7 +17,7 @@ import {
   BUNDLE_DEPENDENCIES,
 } from './bundle';
 
-const declaration = declareDependencies({ ts: [...BUNDLE_DEPENDENCIES] });
+const declaration = declareDependencies()({ ts: [...BUNDLE_DEPENDENCIES] });
 
 describe('bundle utilities', () => {
   let tree: Tree;

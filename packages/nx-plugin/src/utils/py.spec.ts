@@ -13,12 +13,12 @@ import {
   addWorkspaceDependencyToPyProject,
 } from './py';
 
-const declaration = declareDependencies({
+const declaration = declareDependencies()({
   py: [
-    'fastapi',
-    'uvicorn',
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
+    { name: 'fastapi' },
+    { name: 'uvicorn' },
+    { name: 'aws-lambda-powertools' },
+    { name: 'aws-lambda-powertools[tracer]' },
   ],
 });
 type SpecPyDep = DeclaredPy<typeof declaration>;

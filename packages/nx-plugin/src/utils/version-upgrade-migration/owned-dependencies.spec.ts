@@ -10,6 +10,7 @@ import {
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils';
+import { declaredNames } from '../declared-dependencies';
 import { buildGeneratorInfoList } from '../generators';
 import { createTreeUsingTsSolutionSetup } from '../test';
 import { PY_VERSIONS, TS_VERSIONS } from '../versions';
@@ -113,6 +114,42 @@ describe('ownedDependencies', () => {
     expect(owned.py.has('ruff')).toBe(true);
   });
 
+  // The `when` conditions on a declaration read the values the generator
+  // recorded, so a project owns only the branch it was generated with.
+  it('should own only the branch the recorded metadata selects', async () => {
+    addProject(tree, 'agent-a2a', {
+      generator: 'ts#project',
+      components: [
+        { generator: 'ts#agent', name: 'agent', protocol: 'a2a', auth: 'iam' },
+      ],
+    } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    // The a2a branch.
+    expect(owned.ts.has('@a2a-js/sdk')).toBe(true);
+    // The http and ag-ui branches this project did not take.
+    expect(owned.ts.has('@trpc/server')).toBe(false);
+    expect(owned.ts.has('@ag-ui/client')).toBe(false);
+  });
+
+  it('should own each branch when a workspace has one project per branch', async () => {
+    addProject(tree, 'agents', {
+      generator: 'ts#project',
+      components: [
+        { generator: 'ts#agent', name: 'a', protocol: 'a2a', auth: 'iam' },
+        { generator: 'ts#agent', name: 'b', protocol: 'http', auth: 'iam' },
+      ],
+    } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    expect(owned.ts.has('@a2a-js/sdk')).toBe(true);
+    expect(owned.ts.has('@trpc/server')).toBe(true);
+    // Still nothing from the branch neither project took.
+    expect(owned.ts.has('@ag-ui/client')).toBe(false);
+  });
+
   it('should union the declarations of every generator that ran', async () => {
     addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
     addProject(tree, 'py', { generator: 'py#project' } as never);
@@ -126,7 +163,7 @@ describe('ownedDependencies', () => {
 
 /** Calls that add a vended dependency, and so require a declaration. */
 const ADDS_DEPENDENCIES =
-  /withVersions\(|withPyVersions\(|addDependenciesToPyProjectToml\(|addDependenciesToDependencyGroupInPyProjectToml\(/;
+  /withVersions\(|withPyVersions\(|addDependenciesToPyProjectToml\(|addDependenciesToDependencyGroupInPyProjectToml\(|addTsDependencies\(|addPyDependencies\(/;
 
 /** Calls that record a generator against a project, making its deps discoverable. */
 const RECORDS_METADATA =
@@ -172,7 +209,7 @@ describe('declaration coverage', () => {
       const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
       const addsDependencies = ADDS_DEPENDENCIES.test(source);
       const module = await import(`${info.resolvedFactoryPath}.js`);
-      if (addsDependencies && !module.DECLARED_DEPENDENCIES) {
+      if (addsDependencies && !module.DEPENDENCIES) {
         undeclared.push(info.id);
       }
     }
@@ -205,12 +242,12 @@ describe('declaration coverage', () => {
     const uncovered: string[] = [];
     for (const [id, delegate] of Object.entries(DELEGATES_TO)) {
       const info = buildGeneratorInfoList(PLUGIN_ROOT).find((g) => g.id === id);
-      const { DECLARED_DEPENDENCIES } = await import(
-        `${info?.resolvedFactoryPath}.js`
+      const { DEPENDENCIES } = await import(`${info?.resolvedFactoryPath}.js`);
+      const { DEPENDENCIES: delegated } = await import(delegate);
+      const declared = new Set<string>(
+        declaredNames<string>(DEPENDENCIES?.ts ?? []),
       );
-      const { DECLARED_DEPENDENCIES: delegated } = await import(delegate);
-      const declared = new Set<string>(DECLARED_DEPENDENCIES?.ts ?? []);
-      for (const dep of delegated?.ts ?? []) {
+      for (const dep of declaredNames<string>(delegated?.ts ?? [])) {
         if (!declared.has(dep)) {
           uncovered.push(`${id}: ${dep}`);
         }
@@ -237,18 +274,67 @@ describe('declaration coverage', () => {
     expect(unrecorded).toEqual([]);
   });
 
+  // A predicate that reads a field no project records can never hold, so its
+  // dependency would silently stop being upgraded. Probing with an empty object
+  // records which fields each predicate touches, then asserts the generator
+  // records them.
+  it('should record every field its predicates read', async () => {
+    const unrecorded: string[] = [];
+    for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
+      const { DEPENDENCIES } = await import(`${info.resolvedFactoryPath}.js`);
+      const read = new Set<string>();
+      const probe = new Proxy(
+        {},
+        {
+          get: (_target, key) => {
+            read.add(String(key));
+            return undefined;
+          },
+          has: (_target, key) => {
+            read.add(String(key));
+            return false;
+          },
+        },
+      );
+      for (const entry of [
+        ...(DEPENDENCIES?.ts ?? []),
+        ...(DEPENDENCIES?.py ?? []),
+      ]) {
+        try {
+          entry.when?.(probe);
+        } catch {
+          // A predicate that dereferences the undefined it got back still
+          // recorded the field it read, which is all this needs.
+        }
+      }
+      if (read.size === 0) {
+        continue;
+      }
+      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
+      // The metadata interface the generator declares and hands to both the
+      // dependency call and the recording helper. A field a predicate reads must
+      // be one of its members, or no project will carry it.
+      const declared = /interface \w*Metadata \{([^}]*)\}/.exec(source)?.[1];
+      for (const key of read) {
+        if (!declared || !new RegExp(`\\b${key}\\b`).test(declared)) {
+          unrecorded.push(`${info.id}: ${key}`);
+        }
+      }
+    }
+
+    expect(unrecorded).toEqual([]);
+  });
+
   it('should declare only packages the plugin vends', async () => {
     const unvended: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
-      const { DECLARED_DEPENDENCIES } = await import(
-        `${info.resolvedFactoryPath}.js`
-      );
-      for (const dep of DECLARED_DEPENDENCIES?.ts ?? []) {
+      const { DEPENDENCIES } = await import(`${info.resolvedFactoryPath}.js`);
+      for (const dep of declaredNames<string>(DEPENDENCIES?.ts ?? [])) {
         if (!(dep in TS_VERSIONS)) {
           unvended.push(`${info.id}: ${dep}`);
         }
       }
-      for (const dep of DECLARED_DEPENDENCIES?.py ?? []) {
+      for (const dep of declaredNames<string>(DEPENDENCIES?.py ?? [])) {
         if (!(dep in PY_VERSIONS)) {
           unvended.push(`${info.id}: ${dep}`);
         }

@@ -22,7 +22,7 @@ import { toProjectRelativePath } from '../../../utils/paths';
 import { addOpenApiGeneration } from './open-api';
 import type { FastApiReactGeneratorSchema } from './schema';
 
-export const DECLARED_DEPENDENCIES = declareDependencies({
+export const DEPENDENCIES = declareDependencies()({
   ts: [...OPEN_API_REACT_DEPENDENCIES],
 });
 
@@ -65,7 +65,7 @@ export const fastApiReactGenerator = async (
       auth,
       port,
     },
-    DECLARED_DEPENDENCIES,
+    DEPENDENCIES,
   );
 
   const apiNameClassName = toClassName(apiName);

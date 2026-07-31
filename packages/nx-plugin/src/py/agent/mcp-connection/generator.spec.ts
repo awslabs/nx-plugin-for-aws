@@ -15,7 +15,7 @@ import {
   pyAgentMcpConnectionGenerator,
 } from './generator';
 
-const sharedConstructsDeclaration = declareDependencies({
+const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 
