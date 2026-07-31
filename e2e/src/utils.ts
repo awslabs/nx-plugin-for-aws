@@ -318,6 +318,15 @@ export const createTestWorkspace = async (
 ): Promise<string> => {
   const workspaceDir = join(targetDir, name);
   const npmCacheDir = join(targetDir, '.npm-cache');
+  // `@nx/workspace`'s new generator resolves the preset's version as
+  // `NX_E2E_PRESET_VERSION ?? <version parsed from --preset>` — the environment
+  // variable wins. `global-setup` sets it to the local build's version so the
+  // other smoke tests install that, which would silently override the pin here
+  // and create the workspace on the local build instead of the requested
+  // release. Point it at the same version for this create.
+  const presetVersionEnv = version
+    ? { NX_E2E_PRESET_VERSION: version }
+    : undefined;
   // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`, which
   // installs into a cache dir keyed on the package set. A flaky download or
   // interrupted install can corrupt that cache — a half-written module surfaces
@@ -333,7 +342,7 @@ export const createTestWorkspace = async (
           cwd: targetDir,
           prefixWithPackageManagerCmd: false,
           redirectStderr: true,
-          env: { npm_config_cache: npmCacheDir },
+          env: { npm_config_cache: npmCacheDir, ...presetVersionEnv },
         },
       );
       break;
