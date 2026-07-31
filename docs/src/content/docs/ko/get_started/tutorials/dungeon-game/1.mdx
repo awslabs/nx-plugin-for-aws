@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -240,7 +241,7 @@ export class GameApi<
   public static defaultIntegrations = (scope: Construct) => {
     return IntegrationBuilder.rest({
       operations: routerToOperations(appRouter),
-      defaultIntegrationOptions: <FunctionProps>{
+      defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -253,7 +254,7 @@ export class GameApi<
         ),
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-      },
+      } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
         return {
@@ -300,19 +301,23 @@ export class GameApi<
    * 제공된 출처로 CORS 제한
    *
    * CloudFront 배포 도메인 또는 출처 문자열을
-   * API Gateway 사전 요청 응답 및 AWS Lambda 통합에서 허용되는 유일한 CORS 출처로 구성
+   * API Gateway 사전 요청 응답 및 AWS Lambda 통합에서 허용되는 유일한 CORS 출처로 구성합니다.
+   * CloudFront 배포에 구성된 모든 사용자 정의 도메인 이름(별칭)은 기본 `*.cloudfront.net`
+   * 도메인과 함께 자동으로 포함됩니다.
    *
    * @param origins - CORS를 허용할 출처 문자열, CloudFront 배포 또는 CloudFront 배포를 포함하는 객체
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
@@ -657,7 +662,7 @@ export class StoryAgent extends Construct implements IGrantable {
           - dynamodb.ts 일반 DynamoDB 테이블 구성 요소
 </FileTree>
 
-생성된 `src/client.ts`는 `getDynamoDBClient()` 및 `resolveTableName()`을 익스포트합니다. `SERVE_LOCAL=true`일 때(`serve-local` 대상에 의해 자동으로 설정됨) 이들은 DynamoDB Local에 연결하고, 그렇지 않으면 AWS에 연결하여 <Link path="guides/runtime-config">런타임 구성</Link>에서 배포된 테이블 이름을 확인합니다. <Link path="get_started/tutorials/dungeon-game/2">모듈 2</Link>에서 이 프로젝트의 `Game` 및 `Inventory` 엔티티를 모델링할 것입니다.
+생성된 `src/client.ts`는 `getDynamoDBClient()` 및 `resolveTableName()`을 익스포트합니다. `LOCAL_DEV=true`일 때(`dev` 대상에 의해 자동으로 설정됨) 이들은 DynamoDB Local에 연결하고, 그렇지 않으면 AWS에 연결하여 <Link path="guides/runtime-config">런타임 구성</Link>에서 배포된 테이블 이름을 확인합니다. <Link path="get_started/tutorials/dungeon-game/2">모듈 2</Link>에서 이 프로젝트의 `Game` 및 `Inventory` 엔티티를 모델링할 것입니다.
 
 자세한 내용은 <Link path="guides/ts-dynamodb">ts#dynamodb 생성기 가이드</Link>를 참조하세요.
 

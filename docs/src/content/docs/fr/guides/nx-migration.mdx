@@ -1,0 +1,164 @@
+---
+title: Générateur de Migration Nx
+description: Génère une Migration Nx pour un Plugin Nx
+generator: ts#nx-migration
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+
+Ajoute une [Migration Nx](https://nx.dev/docs/kb/migration-generators) à un Plugin Nx. Les migrations permettent à `nx migrate` de mettre à jour automatiquement les projets qui ont été générés par une version précédente de votre plugin lorsque vous effectuez un changement incompatible — cibles renommées, configuration fournie modifiée, ou mise à jour de dépendance nécessitant des modifications de code associées.
+
+Le générateur crée l'échafaudage de la migration, l'enregistre dans le fichier `migrations.json` de votre plugin, et configure le champ `nx-migrations` dans le `package.json` de votre plugin (en créant les deux s'ils n'existent pas encore).
+
+:::tip[Configuration Recommandée]
+Nous recommandons d'utiliser le générateur <Link path="/fr/guides/ts-nx-plugin">`ts#nx-plugin`</Link> comme projet de base pour vos migrations, car il configure un projet de plugin prêt à publier des générateurs et des migrations.
+:::
+
+## Utilisation
+
+### Générer une Migration
+
+<RunGenerator generator="ts#nx-migration" />
+
+### Options
+
+<GeneratorParameters generator="ts#nx-migration" />
+
+## Les trois types de migration
+
+Les migrations se présentent sous trois formes, distinguées par les champs que l'entrée `migrations.json` contient. Passez `--kind` pour choisir (par défaut `deterministic`) :
+
+- **Déterministe** (`implementation`) — un codemod avec un avant/après exact. S'exécute sans surveillance, y compris en CI et dans les terminaux non interactifs. Utilisez-le seul lorsque le changement a une forme que vous pouvez faire correspondre de manière fiable partout où il apparaît.
+- **Agentique** (`prompt`) — un fichier d'instructions markdown appliqué par l'agent de codage local de l'utilisateur via le flux `nx migrate` agentique de Nx. Utilisez-le seul lorsqu'aucun avant/après mécanique ne tient, car la modification correcte dépend de ce que l'utilisateur a construit. Lorsqu'aucun agent ne s'exécute (CI, aucun agent installé, consentement refusé), Nx présente le prompt comme des instructions manuelles — écrivez donc les prompts comme des étapes autonomes et actionnables par un humain.
+- **Hybride** (`implementation` + `prompt`) — les deux moitiés d'un changement, et généralement le bon choix. Tout ce que vos générateurs fournissent est du code que l'utilisateur possède et peut avoir modifié, donc le codemod fait autant qu'il peut faire correspondre en toute sécurité et retourne un `agentContext` décrivant ce qu'il a changé *et ce qu'il a ignoré* ; Nx transmet ce contexte au `prompt` associé, qui dirige l'agent vers le reste.
+
+## Sortie du Générateur
+
+Le générateur crée les fichiers suivants dans le dossier source de votre projet de plugin, selon le `kind` choisi :
+
+<FileTree>
+  - src/migrations/latest/\<name>/
+    - migration.ts Implémentation du codemod (déterministe et hybride)
+    - migration.spec.ts Tests pour votre migration (déterministe et hybride)
+    - prompt.md Instructions pour l'agent/humain (agentique et hybride)
+  - migrations.json Créé ou mis à jour pour enregistrer votre migration
+  - package.json Créé ou mis à jour pour ajouter une entrée "nx-migrations"
+</FileTree>
+
+Une nouvelle migration arrive dans `latest/`. Regrouper les migrations par la version qui les livre permet de garder leur ordre visible d'un coup d'œil à mesure que la collection s'agrandit — déplacez une migration dans un dossier `v<x.y.z>/` (et mettez à jour ses chemins dans `migrations.json`) lorsque vous attribuez sa version.
+
+Il enregistre la migration dans `migrations.json` avec les champs correspondant à son type et sans `version` — voir [Versionnage](#versionnage) ci-dessous. La clé enregistrée est préfixée par le dossier dans lequel vit la migration (`latest-<name>`), de sorte que réutiliser un nom pour un changement ultérieur ne peut pas écraser silencieusement une migration qui a déjà été livrée.
+
+## Implémenter une Migration
+
+Une migration déterministe (ou hybride) est une fonction qui modifie le système de fichiers virtuel (le `Tree`), retournant un [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject). Voici une migration hybride, qui retourne les deux :
+
+```ts
+import { type MigrationReturnObject, type Tree } from '@nx/devkit';
+import { formatFilesInSubtree } from '@aws/nx-plugin/sdk/utils/format';
+
+export default async function migration(
+  tree: Tree,
+): Promise<MigrationReturnObject> {
+  const nextSteps: string[] = [];
+  const agentContext: string[] = [];
+
+  // Read and update the files your generators produce here.
+
+  await formatFilesInSubtree(tree);
+
+  return { nextSteps, agentContext };
+}
+```
+
+- **`nextSteps`** — notes à l'échelle de l'espace de travail présentées à l'utilisateur après l'exécution de `nx migrate`. Utilisez-les pour signaler les fichiers que vous avez ignorés (voir les garde-fous ci-dessous) ou les actions manuelles que la migration n'a pas pu effectuer.
+- **`agentContext`** (hybride uniquement) — un résumé de ce que le codemod a modifié, transmis au `prompt` associé lorsqu'il s'exécute dans le flux agentique de Nx afin que l'agent puisse se concentrer sur les parties appartenant à l'utilisateur.
+
+Pour quelques exemples d'opérations que vous pouvez effectuer dans votre migration (générer des fichiers, modifier des fichiers existants en utilisant GritQL, lire et mettre à jour du JSON), consultez le <Link path="/fr/guides/nx-generator">guide du Générateur Nx</Link>.
+
+### Garde-fous
+
+Les migrations s'exécutent sur des espaces de travail que vous ne contrôlez pas, il est donc recommandé de respecter les règles suivantes (le squelette généré les intègre) :
+
+- **Transformer le code source avec GritQL.** Utilisez les <Link path="/fr/guides/nx-generator">helpers GritQL</Link> (`applyGritQL`, `matchGritQL`) pour éditer le code source plutôt que des regex ou des remplacements de chaînes. GritQL correspond à l'AST, donc un seul motif fonctionne à travers le formatage, les espaces et les guillemets dans lesquels la copie d'un utilisateur peut avoir dérivé, là où la correspondance de texte manque silencieusement du code équivalent ou corrompt le fichier. Utilisez `updateJson` pour JSON et l'analyseur correspondant pour d'autres configurations structurées.
+- **Vérifier le motif avant d'écrire.** Si un fichier cible a divergé de la forme que vos générateurs produisent, ignorez-le et signalez-le via `nextSteps`, ou envisagez une migration hybride, plutôt que d'écraser les modifications de l'utilisateur. `matchGritQL` est un moyen pratique de faire cette vérification.
+- **Idempotent.** Réexécuter la migration doit être une opération sans effet. Protégez les réécritures GritQL qui injectent du code avec une clause `where { ... <: not contains ... }` afin qu'une seconde exécution n'ajoute pas de doublon.
+- **Formater ce que vous écrivez.** Terminez avec `formatFilesInSubtree(tree)` afin que les fichiers écrits par votre migration soient formatés correctement.
+
+### Tester Votre Migration
+
+Le fichier `migration.spec.ts` généré utilise `createTreeUsingTsSolutionSetup()` pour construire un espace de travail virtuel correspondant à la forme que notre preset génère. Testez que la migration fait passer un espace de travail de l'état "avant" à l'état cible, ignore (et signale) le code qu'elle ne reconnaît pas, et est idempotente :
+
+```ts
+import type { Tree } from '@nx/devkit';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
+import migration from './migration';
+
+describe('my migration', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+  });
+
+  it('should update the generated shape', async () => {
+    // Set up a tree with the "before" state
+    tree.write('project.json', JSON.stringify({ targets: { foo: {} } }));
+
+    // Run the migration
+    await migration(tree);
+
+    // Check that the tree matches the target state
+    const projectJson = JSON.parse(tree.read('project.json', 'utf-8'));
+    expect(projectJson.targets).toHaveProperty('bar');
+    expect(projectJson.targets).not.toHaveProperty('foo');
+  });
+});
+```
+
+Les tests unitaires prouvent seulement que la migration fait ce que vous avez écrit qu'elle devait faire. Testez-la également sur un espace de travail généré par la version **publiée** de votre plugin — l'état depuis lequel vos utilisateurs effectuent la mise à niveau — et confirmez que le résultat correspond à ce que vos générateurs produisent aujourd'hui : inspectez le diff, générez les mêmes projets dans un nouvel espace de travail et comparez, vérifiez que l'espace de travail se construit toujours, puis réexécutez la migration pour confirmer qu'elle ne change rien. Répétez avec un espace de travail que vous avez d'abord personnalisé, pour vérifier que la migration laisse vos modifications intactes et les signale à la place.
+
+## Versionnage
+
+Nx exécute une migration lorsque la version du plugin installée par l'utilisateur est inférieure à la `version` de la migration. Ce générateur n'écrit **aucun** champ `version` — attribuez-le (ou tamponnez-le depuis votre processus de publication) lorsque vous publiez la version qui livre la migration, afin qu'elle s'exécute pour tous ceux qui mettent à niveau depuis une version antérieure.
+
+Une fois que vous avez attribué des versions, un `migrations.json` enregistrant une migration de chaque type ressemble à ceci :
+
+```json
+{
+  "$schema": "http://json-schema.org/schema",
+  "name": "my-plugin",
+  "generators": {
+    "v2.0.0-rename-foo-target": {
+      "version": "2.0.0",
+      "description": "Rename the foo target to bar",
+      "implementation": "./src/migrations/v2.0.0/rename-foo-target/migration"
+    },
+    "v3.0.0-migrate-custom-handlers": {
+      "version": "3.0.0",
+      "description": "Update custom handlers for the new API",
+      "prompt": "./src/migrations/v3.0.0/migrate-custom-handlers/prompt.md"
+    },
+    "v4.0.0-upgrade-framework": {
+      "version": "4.0.0",
+      "description": "Upgrade the framework and reconcile call sites",
+      "implementation": "./src/migrations/v4.0.0/upgrade-framework/migration",
+      "prompt": "./src/migrations/v4.0.0/upgrade-framework/prompt.md"
+    }
+  }
+}
+```
+
+## Exécuter les Migrations
+
+Les utilisateurs appliquent les migrations de votre plugin avec le flux `nx migrate` en deux étapes — générer les migrations en attente, installer, puis les exécuter :
+
+<NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
+
+Les migrations agentiques et hybrides sont appliquées par l'agent de codage local de l'utilisateur pendant `nx migrate --run-migrations` lorsqu'un agent est disponible.
+
+Pour le flux complet du point de vue de l'utilisateur effectuant la mise à niveau — y compris des exemples de sortie pour les migrations déterministes et agentiques — voir <Link path="get_started/upgrading">Mise à Niveau de Votre Espace de Travail</Link>.

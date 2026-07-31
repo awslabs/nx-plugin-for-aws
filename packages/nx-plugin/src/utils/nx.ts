@@ -5,6 +5,7 @@
 import {
   getProjects,
   type ProjectConfiguration,
+  readJson,
   readProjectConfiguration,
   type TargetConfiguration,
   type TargetDefaultValue,
@@ -13,6 +14,7 @@ import {
 } from '@nx/devkit';
 import * as path from 'path';
 import PackageJson from '../../package.json' with { type: 'json' };
+import { NX_PLUGIN_MCP_PACKAGE_NAME } from './mcp';
 import { toSnakeCase } from './names';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 
@@ -47,6 +49,38 @@ export const getGeneratorInfo = (generatorFileName: string): GeneratorInfo => {
 export const getPackageVersion = () => {
   return PackageJson.version;
 };
+
+/**
+ * True inside the plugin's own monorepo, where the plugin is the source rather
+ * than a dependency.
+ */
+export const isNxPluginForAwsWorkspace = (tree: Tree): boolean => {
+  const rootPackageJson = tree.exists('package.json')
+    ? readJson(tree, 'package.json')
+    : undefined;
+  return rootPackageJson?.name === '@aws/nx-plugin-source';
+};
+
+/**
+ * The `@aws/nx-plugin` devDependency entry for a workspace the plugin generates
+ * into, keyed to the version the running generators come from. Empty inside the
+ * plugin's own monorepo.
+ */
+export const nxPluginSelfDependency = (tree: Tree): Record<string, string> =>
+  isNxPluginForAwsWorkspace(tree)
+    ? {}
+    : { [PackageJson.name]: `^${PackageJson.version}` };
+
+/**
+ * The `@aws/nx-plugin-mcp` devDependency entry, keyed to the running generators'
+ * version — the two packages are released in lockstep. Declaring it pins the MCP
+ * server the vended config runs in the workspace's lockfile, so upgrading it
+ * upgrades the server. Empty inside the plugin's own monorepo.
+ */
+export const nxPluginMcpDependency = (tree: Tree): Record<string, string> =>
+  isNxPluginForAwsWorkspace(tree)
+    ? {}
+    : { [NX_PLUGIN_MCP_PACKAGE_NAME]: `^${PackageJson.version}` };
 
 /**
  * Read a project configuration where the project name may not be fully qualified (ie may omit the scope prefix)

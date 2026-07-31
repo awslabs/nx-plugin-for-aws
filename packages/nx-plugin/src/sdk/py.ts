@@ -9,6 +9,9 @@ export type { PyAgentGeneratorSchema } from '../py/agent/schema';
 export { pyApiGenerator } from '../py/api/generator';
 export type { PyApiGeneratorSchema } from '../py/api/schema';
 
+export { pyDynamoDBGenerator } from '../py/dynamodb/generator';
+export type { PyDynamoDBGeneratorSchema } from '../py/dynamodb/schema';
+
 export { pyLambdaFunctionGenerator } from '../py/lambda-function/generator';
 export type { PyLambdaFunctionGeneratorSchema } from '../py/lambda-function/schema';
 

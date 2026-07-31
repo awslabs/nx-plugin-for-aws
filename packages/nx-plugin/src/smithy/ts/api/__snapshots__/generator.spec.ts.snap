@@ -32,6 +32,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import {
   OPERATION_DETAILS,
@@ -86,7 +87,7 @@ export class TestApi<
     return IntegrationBuilder.rest({
       pattern: 'isolated',
       operations: OPERATION_DETAILS,
-      defaultIntegrationOptions: <FunctionProps>{
+      defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -99,7 +100,7 @@ export class TestApi<
         ),
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-      },
+      } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
         handler.addEnvironment(
@@ -156,7 +157,9 @@ export class TestApi<
    *
    * Configures the provided CloudFront distribution domains or origin strings
    * as the only permitted CORS origins in API Gateway preflight responses and the
-   * AWS Lambda integrations.
+   * AWS Lambda integrations. Any custom domain names (aliases) configured on a
+   * CloudFront distribution are included automatically alongside its default
+   * \`*.cloudfront.net\` domain.
    *
    * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
    */
@@ -167,12 +170,14 @@ export class TestApi<
       | { cloudFrontDistribution: Distribution }
     )[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? \`https://\${origin.cloudFrontDistribution.distributionDomainName}\`
-          : \`https://\${origin.distributionDomainName}\`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => \`https://\${domain}\`),
     );
 
     this.allowedOrigins = allowedOrigins;
@@ -221,6 +226,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import {
   OPERATION_DETAILS,
@@ -269,7 +275,7 @@ export class TestApi<
     return IntegrationBuilder.rest({
       pattern: 'isolated',
       operations: OPERATION_DETAILS,
-      defaultIntegrationOptions: <FunctionProps>{
+      defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -282,7 +288,7 @@ export class TestApi<
         ),
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-      },
+      } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
         handler.addEnvironment(
@@ -333,7 +339,9 @@ export class TestApi<
    *
    * Configures the provided CloudFront distribution domains or origin strings
    * as the only permitted CORS origins in API Gateway preflight responses and the
-   * AWS Lambda integrations.
+   * AWS Lambda integrations. Any custom domain names (aliases) configured on a
+   * CloudFront distribution are included automatically alongside its default
+   * \`*.cloudfront.net\` domain.
    *
    * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
    */
@@ -344,12 +352,14 @@ export class TestApi<
       | { cloudFrontDistribution: Distribution }
     )[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? \`https://\${origin.cloudFrontDistribution.distributionDomainName}\`
-          : \`https://\${origin.distributionDomainName}\`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => \`https://\${domain}\`),
     );
 
     this.allowedOrigins = allowedOrigins;

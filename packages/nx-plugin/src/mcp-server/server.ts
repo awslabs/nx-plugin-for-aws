@@ -13,6 +13,7 @@ import {
 } from './tools/general-guidance';
 import { addGeneratorGuideTool } from './tools/generator-guide';
 import { addListGeneratorsTool } from './tools/list-generators';
+import { addUpgradeWorkspaceTool } from './tools/upgrade-workspace';
 
 /**
  * Create the MCP Server
@@ -43,6 +44,7 @@ ${TOOL_SELECTION_GUIDE}
   addListGeneratorsTool(server, generators);
   addGeneratorGuideTool(server, generators);
   addToExistingProjectTool(server, generators);
+  addUpgradeWorkspaceTool(server, generators);
 
   return server;
 };

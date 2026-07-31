@@ -146,7 +146,7 @@ import {
 export const echo = publicProcedure
   .input(EchoInputSchema)
   .output(EchoOutputSchema)
-  .query((opts) => ({ result: opts.input.message }));
+  .query((opts) => ({ message: opts.input.message }));
 ```
 
 Ce fichier est l'implémentation de la méthode `echo` et comme vous pouvez le voir, elle est fortement typée en déclarant ses structures de données d'entrée et de sortie.
@@ -200,6 +200,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from '@dungeon-adventure/game-api';
@@ -241,7 +242,7 @@ export class GameApi<
   public static defaultIntegrations = (scope: Construct) => {
     return IntegrationBuilder.rest({
       operations: routerToOperations(appRouter),
-      defaultIntegrationOptions: <FunctionProps>{
+      defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -254,7 +255,7 @@ export class GameApi<
         ),
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-      },
+      } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
         return {
@@ -302,19 +303,22 @@ export class GameApi<
    *
    * Configure les domaines de distribution CloudFront ou les chaînes d'origine
    * comme les seules origines CORS autorisées dans les réponses de pré-vérification d'API Gateway et les
-   * intégrations AWS Lambda.
+   * intégrations AWS Lambda. Tous les noms de domaine personnalisés (alias) configurés sur une distribution
+   * CloudFront sont inclus automatiquement aux côtés de son domaine par défaut `*.cloudfront.net`.
    *
    * @param origins - Les chaînes d'origine, distributions CloudFront, ou objets contenant une distribution CloudFront à partir desquels accorder CORS
    */
   public restrictCorsTo(
     ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = origins.map((origin) =>
+    const allowedOrigins = origins.flatMap((origin) =>
       typeof origin === 'string'
-        ? origin
-        : 'cloudFrontDistribution' in origin
-          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
-          : `https://${origin.distributionDomainName}`,
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
     );
 
     this.allowedOrigins = allowedOrigins;
@@ -628,7 +632,7 @@ L'état de notre jeu — les parties sauvegardées et l'inventaire de chaque jou
 <RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
 
 :::tip[Développement local d'abord]
-Le générateur `ts#dynamodb` fournit une cible `serve-local` qui exécute [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) dans un conteneur. Combiné avec le générateur `connection` (que nous exécutons ci-dessous), cela signifie que **le jeu entier s'exécute sur votre machine sans déploiement** jusqu'à la fin du tutoriel.
+Le générateur `ts#dynamodb` fournit une cible `dev` qui exécute [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) dans un conteneur. Combiné avec le générateur `connection` (que nous exécutons ci-dessous), cela signifie que **le jeu entier s'exécute sur votre machine sans déploiement** jusqu'à la fin du tutoriel.
 :::
 
 Vous verrez de nouveaux fichiers apparaître dans votre arborescence de fichiers.
@@ -661,7 +665,7 @@ Le générateur `ts#dynamodb` génère ces fichiers.
           - dynamodb.ts construct générique de table DynamoDB
 </FileTree>
 
-Le `src/client.ts` généré exporte `getDynamoDBClient()` et `resolveTableName()`. Lorsque `SERVE_LOCAL=true` (défini automatiquement par les cibles `serve-local`), ceux-ci se connectent à DynamoDB Local ; sinon ils se connectent à AWS et résolvent le nom de table déployé depuis <Link path="guides/runtime-config">Runtime Configuration</Link>. Nous modéliserons nos entités `Game` et `Inventory` dans ce projet dans le <Link path="get_started/tutorials/dungeon-game/2">Module 2</Link>.
+Le `src/client.ts` généré exporte `getDynamoDBClient()` et `resolveTableName()`. Lorsque `LOCAL_DEV=true` (défini automatiquement par les cibles `dev`), ceux-ci se connectent à DynamoDB Local ; sinon ils se connectent à AWS et résolvent le nom de table déployé depuis <Link path="guides/runtime-config">Runtime Configuration</Link>. Nous modéliserons nos entités `Game` et `Inventory` dans ce projet dans le <Link path="get_started/tutorials/dungeon-game/2">Module 2</Link>.
 
 Pour plus de détails, consultez le <Link path="guides/ts-dynamodb">guide du générateur ts#dynamodb</Link>.
 
@@ -1004,7 +1008,7 @@ Le générateur :
 - Génère une classe `InventoryMcpServerClientStrands` qui gère la connexion au serveur MCP à la fois localement (HTTP direct) et lors du déploiement (via AgentCore avec authentification IAM)
 - Transforme `agent.py` pour importer le client, créer une instance et connecter les outils du serveur MCP à l'agent
 - Ajoute le projet `agent_connection` en tant que dépendance workspace du projet story
-- Met à jour la cible `serve-local` pour démarrer automatiquement le serveur MCP lors de l'exécution locale
+- Met à jour la cible `dev` pour démarrer automatiquement le serveur MCP lors de l'exécution locale
 
 Pour plus de détails, consultez le <Link path="guides/connection/py-agent-mcp">guide de connexion Python Agent vers MCP</Link>.
 </Drawer>
@@ -1050,7 +1054,7 @@ L'API de jeu et le serveur MCP d'inventaire lisent et écrivent tous deux dans n
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
 
 <Aside type="tip" title="Une commande démarre toute la pile localement">
-Comme la cible `agent-serve-local` de l'agent Story dépend déjà de la cible `mcp-server-serve-local` du serveur MCP d'inventaire (via la connexion `story → inventory` ci-dessus), et que l'API de jeu et le serveur MCP dépendent maintenant de `dungeon-db:serve-local`, l'exécution de la cible `serve-local` de n'importe quel projet démarre toutes les dépendances dont il a besoin dans le bon ordre.
+Comme la cible `agent-dev` de l'agent Story dépend déjà de la cible `mcp-server-dev` du serveur MCP d'inventaire (via la connexion `story → inventory` ci-dessus), et que l'API de jeu et le serveur MCP dépendent maintenant de `dungeon-db:dev`, l'exécution de la cible `dev` de n'importe quel projet démarre toutes les dépendances dont il a besoin dans le bon ordre.
 </Aside>
 
 ### Interface utilisateur du jeu : Infrastructure

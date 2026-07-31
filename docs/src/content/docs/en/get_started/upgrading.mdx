@@ -1,0 +1,147 @@
+---
+title: Upgrading Your Workspace
+description: How to upgrade Nx and @aws/nx-plugin with nx migrate.
+---
+import { Aside } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import InstallCommand from '@components/install-command.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+
+`@aws/nx-plugin` ships migrations that update your workspace automatically when you upgrade it, using [`nx migrate`](https://nx.dev/docs/features/automate-updating-dependencies).
+
+<Aside type="tip">
+You can use your agentic coding tool of choice to upgrade your workspace for you, using the <Link path="get_started/building-with-ai">MCP server</Link>. Try the prompt:
+
+> Upgrade Nx and the Nx Plugin for AWS in this workspace.
+</Aside>
+
+## Upgrading @aws/nx-plugin
+
+First, run the following command to update the plugin version and prepare migrations:
+
+<NxCommands commands={['migrate @aws/nx-plugin@latest']} />
+
+```
+ NX   The migrate command has run successfully.
+
+- package.json has been updated.
+- migrations.json has been generated.
+- 1 AI migration prompt(s) have been written to tools/ai-migrations/.
+
+ NX   Next steps:
+
+- Make sure package.json changes make sense and then run 'pnpm install --no-frozen-lockfile',
+- Review and tweak the AI migration prompts in tools/ai-migrations/ as needed.
+- Run 'pnpm exec nx migrate --run-migrations'
+- To learn more go to https://nx.dev/features/automate-updating-dependencies
+```
+
+Review the `package.json` changes then install:
+
+<InstallCommand />
+
+Then run the migrations:
+
+<NxCommands commands={['migrate --run-migrations']} />
+
+### Deterministic migrations
+
+Most migrations are deterministic codemods — they run unattended and report anything they deliberately skipped:
+
+```
+ NX   Running migrations from 'migrations.json'
+
+Running the following migrations:
+- @aws/nx-plugin: update-vitest-workspace-config — Add a coverage reporter to vitest configs
+- @aws/nx-plugin: update-custom-api-handlers — Update custom API handlers for the new middleware signature
+
+── Migration 1 of 2 · @aws/nx-plugin:update-vitest-workspace-config ─────
+→ Running generator…
+Changes:
+  UPDATE packages/api/vite.config.mts
+
+...
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+2 migrations applied, 0 commits created.
+
+ NX   Some migrations have additional information, see below.
+
+- packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+```
+
+Pay attention to the **additional information** at the end: when a migration finds a file you have customised beyond what it can safely update, it leaves your changes alone and reports the manual follow-up there instead.
+
+### Agentic migrations
+
+Some migrations target code you own, where the right edit depends on what you've built — these ship as prompts applied by your local AI coding agent (Claude Code, Codex or OpenCode). When any are pending, Nx asks for consent before involving an agent:
+
+```
+? Enable the agentic flow? …
+❯ Yes, just this time      Apply 1 prompt migration and validate generator output with an AI agent
+  Yes, always              Saved to nx.json so Nx won't ask again
+  No, just this time       Skip prompts and run generators without AI validation
+  No, never                Saved to nx.json so Nx won't ask again
+```
+
+If you accept, the agent applies each prompt migration in place and summarises what it changed:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+→ Running prompt with Claude Code…
+✓ update-custom-api-handlers: Updated 3 API handlers to the new middleware signature.
+```
+
+If you decline — or no agent is installed, or the run is non-interactive (e.g. CI) — the prompt migrations are skipped and saved for you to apply by hand:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — agentic flow disabled. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration skipped.
+
+ NX   Some migrations have additional information, see below.
+
+- Some prompt migrations were skipped. Review and apply each of the following
+  prompt files to the workspace, in the listed order:
+  - tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+```
+
+Each skipped prompt is a self-contained markdown instruction file in `tools/ai-migrations/` — paste it into your coding agent, or follow its steps manually.
+
+Finally, verify everything still builds, then delete `migrations.json` and commit:
+
+<PackageManagerShortCommand commands={['build']} />
+
+## Upgrading with an AI agent
+
+The whole flow can be driven by an AI coding agent end to end — nothing blocks on an interactive terminal. When `nx migrate --run-migrations` runs from inside an agent, Nx detects this, skips the agentic consent prompt, and instead of spawning a nested agent it **defers** each prompt migration back to the agent driving the run:
+
+```
+── Migration 2 of 2 · @aws/nx-plugin:update-custom-api-handlers ─────────
+↷ Skipped — deferred to the AI agent driving this run. Listed in next steps.
+
+ NX   Successfully finished running migrations from 'migrations.json'.
+
+1 migration applied, 0 commits created, 1 prompt migration deferred.
+
+ NX   Next steps for the AI agent driving this run
+
+Apply the deferred prompts below, in order:
+  1. tools/ai-migrations/@aws/nx-plugin/2.0.0/prompt.md
+       (update-custom-api-handlers — prompt-only migration)
+Then relay these migration-emitted notes to the user:
+  - packages/website/vite.config.mts has a customised shape; add a coverage reporter manually.
+Finally, summarize what was done across the run and commit the changes per workspace conventions.
+```
+
+An agent conducting an upgrade should:
+
+1. Run the cycle above for one package at a time (`nx migrate <package>@latest`, install, `nx migrate --run-migrations`), passing `--no-interactive` to suppress any remaining prompts.
+2. After the run, read each deferred prompt file listed under **Next steps**, in the listed order, and apply its steps directly to the workspace.
+3. Relay any migration-emitted notes (skipped customised files, manual follow-ups) to the user.
+4. Verify the workspace builds, then delete `migrations.json` and commit before starting the next package's upgrade.

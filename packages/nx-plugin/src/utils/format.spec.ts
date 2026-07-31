@@ -5,6 +5,7 @@
 
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { FsTree } from 'nx/src/generators/tree';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +44,7 @@ describe('format utils', () => {
     moduleName: string,
     lineLength?: number,
     requiresPython?: string,
+    select?: string[],
   ) => {
     const root = `packages/${name}`;
     addProjectConfiguration(tree, `proj.${name}`, { root });
@@ -54,6 +56,9 @@ describe('format utils', () => {
         '',
         ...(lineLength !== undefined
           ? ['[tool.ruff]', `line-length = ${lineLength}`, '']
+          : []),
+        ...(select !== undefined
+          ? ['[tool.ruff.lint]', `select = ${JSON.stringify(select)}`, '']
           : []),
         '[project]',
         `name = "proj-${name}"`,
@@ -133,6 +138,46 @@ describe('format utils', () => {
       // Verify
       expect(tree.exists('src/test.ts')).toBe(false);
     });
+    it('should leave ignored files untouched', async () => {
+      // Files another tool owns the formatting of are left in that tool's shape:
+      // formatting them makes generation non-idempotent, since the tool rewrites
+      // them on the next run. Only the listed paths are skipped — a same-named
+      // file under another project is still formatted.
+      const unformatted = "import { Route } from './routes/__root'\n";
+      tree.write('packages/website/src/routeTree.gen.ts', unformatted);
+      tree.write('packages/other/src/routeTree.gen.ts', unformatted);
+      // Execute
+      await formatFilesInSubtree(tree, 'packages', {
+        ignore: ['packages/website/src/routeTree.gen.ts'],
+      });
+      // Verify
+      expect(
+        tree.read('packages/website/src/routeTree.gen.ts')?.toString(),
+      ).toBe(unformatted);
+      expect(tree.read('packages/other/src/routeTree.gen.ts')?.toString()).toBe(
+        "import { Route } from './routes/__root';\n",
+      );
+    });
+    it('should keep ignoring a file on later calls for the same tree', async () => {
+      // A call formats every change pending in the tree, not only its caller's,
+      // so generators composing on one tree would otherwise reformat a file an
+      // earlier generator excluded — the non-idempotency all over again.
+      const unformatted = "import { Route } from './routes/__root'\n";
+      tree.write('packages/website/src/routeTree.gen.ts', unformatted);
+      await formatFilesInSubtree(tree, undefined, {
+        ignore: ['packages/website/src/routeTree.gen.ts'],
+      });
+      // Execute - a later generator formats the same tree, listing no paths
+      tree.write('packages/website/src/other.ts', 'const x=1;');
+      await formatFilesInSubtree(tree);
+      // Verify
+      expect(
+        tree.read('packages/website/src/routeTree.gen.ts')?.toString(),
+      ).toBe(unformatted);
+      expect(tree.read('packages/website/src/other.ts')?.toString()).toBe(
+        'const x = 1;\n',
+      );
+    });
     it('should format all changed files when no directory is given', async () => {
       // Setup
       tree.write('src/test.ts', 'const x=1;');
@@ -144,9 +189,9 @@ describe('format utils', () => {
       expect(tree.read('lib/test.ts')?.toString()).toBe('const y = 2;\n');
     });
     it('should sort imports in Python files', async () => {
-      // isort (ruff rule I) is not in ruff's default rule set and the project
-      // config is not on disk during generation, so the formatter must opt into
-      // import sorting explicitly to match what the project's build enforces.
+      // The project's ruff config is not on disk during generation, so the
+      // formatter must pin the rule selection the project's build enforces
+      // (which includes isort, rule I) rather than defer to ruff's defaults.
       tree.write(
         'src/__init__.py',
         [
@@ -168,6 +213,45 @@ describe('format utils', () => {
           '__all__ = ["beta", "alpha"]',
           '',
         ].join('\n'),
+      );
+    });
+    it('should not apply rules outside the selection the project enforces', async () => {
+      // Ruff widens its default rule set between releases (0.16 went from `E`
+      // and `F` to 36 prefixes), so deferring to those defaults would rewrite
+      // generated files in ways the project's own `lint` target never asks for.
+      // RUF022 (`__all__` is not sorted) is one such default-on rule: it is
+      // outside the vended selection, so `__all__` must be left alone.
+      tree.write(
+        'src/__init__.py',
+        ['__all__ = ["beta", "alpha"]', ''].join('\n'),
+      );
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - `__all__` order preserved
+      expect(tree.read('src/__init__.py')?.toString()).toBe(
+        ['__all__ = ["beta", "alpha"]', ''].join('\n'),
+      );
+    });
+    it("should apply the owning project's own rule selection when set", async () => {
+      // A project that narrows its select must have that honoured: isort is not
+      // in the selection here, so imports are left unsorted.
+      addFirstPartyPythonProject('my_lib', 'my_lib', undefined, undefined, [
+        'E',
+        'F',
+      ]);
+      const unsorted = [
+        'from my_lib.b import beta',
+        'from my_lib.a import alpha',
+        '',
+        '__all__ = ["beta", "alpha"]',
+        '',
+      ].join('\n');
+      tree.write('packages/my_lib/my_lib/__init__.py', unsorted);
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - imports untouched
+      expect(tree.read('packages/my_lib/my_lib/__init__.py')?.toString()).toBe(
+        unsorted,
       );
     });
     it('should group a workspace package as first-party even when its module is not on disk', async () => {
@@ -309,6 +393,30 @@ describe('format utils', () => {
         'except ValueError, KeyError:',
       );
     });
+    it('should apply a ruff config written into the tree by the same run', async () => {
+      // A generator that writes both a ruff config and Python files in one run
+      // must format those files with the config it just wrote, which is only
+      // visible in the tree. Here the config omits isort, so imports are left
+      // alone rather than sorted.
+      tree.write(
+        'packages/my_lib/ruff.toml',
+        ['[lint]', 'select = ["E", "F"]', ''].join('\n'),
+      );
+      const unsorted = [
+        'from .b import beta',
+        'from .a import alpha',
+        '',
+        'x = beta, alpha',
+        '',
+      ].join('\n');
+      tree.write('packages/my_lib/my_lib/main.py', unsorted);
+      // Execute
+      await formatFilesInSubtree(tree, 'packages/my_lib');
+      // Verify - the in-tree config is honoured, so imports stay unsorted
+      expect(tree.read('packages/my_lib/my_lib/main.py')?.toString()).toBe(
+        unsorted,
+      );
+    });
     it('should format json and css files', async () => {
       // Setup
       tree.write('src/data.json', '{"a":1,"b":2}');
@@ -336,7 +444,12 @@ describe('format utils', () => {
       rmSync(workspaceDir, { recursive: true, force: true });
     });
     it("should format using the workspace's on-disk biome config", async () => {
-      // Setup - on-disk config with no semicolons and single quotes
+      // Setup - on-disk config with no semicolons and single quotes, read
+      // through a tree that holds no config of its own (as in a real run, where
+      // the tree carries one only when a generator has just written it). The
+      // test helper mirrors the preset by writing biome.json into the tree, so
+      // use a fresh tree here rather than one already carrying that copy.
+      const diskTree = new FsTree(workspaceDir, false);
       writeFileSync(
         path.join(workspaceDir, 'biome.json'),
         JSON.stringify({
@@ -348,13 +461,42 @@ describe('format utils', () => {
           },
         }),
       );
-      tree.write('src/test.ts', 'const x=1;const y="hello";');
+      diskTree.write('src/test.ts', 'const x=1;const y="hello";');
       // Execute
-      await formatFilesInSubtree(tree, 'src');
+      await formatFilesInSubtree(diskTree, 'src');
       // Verify - respects the on-disk config (no semicolons, single quotes)
-      expect(tree.read('src/test.ts')?.toString()).toBe(
+      expect(diskTree.read('src/test.ts')?.toString()).toBe(
         "const x = 1\nconst y = 'hello'\n",
       );
+    });
+
+    it('should prefer a biome config a generator has just written to the tree', async () => {
+      // The on-disk config would produce semicolon-free output, but a generator
+      // has written a newer config to the tree. Formatting must use the newer
+      // one — the state that motivates reading config through the tree.
+      writeFileSync(
+        path.join(workspaceDir, 'biome.json'),
+        JSON.stringify({
+          root: true,
+          javascript: {
+            formatter: { quoteStyle: 'single', semicolons: 'asNeeded' },
+          },
+        }),
+      );
+      tree.write(
+        'biome.json',
+        JSON.stringify({
+          root: true,
+          javascript: {
+            formatter: { quoteStyle: 'double', semicolons: 'always' },
+          },
+        }),
+      );
+      tree.write('src/test.ts', "const y='hello'");
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - the in-tree config wins (double quotes, semicolons)
+      expect(tree.read('src/test.ts')?.toString()).toBe('const y = "hello";\n');
     });
     it('should defer to an on-disk ruff config that omits import sorting', async () => {
       // On-disk ruff config selecting rules that exclude isort (I): the
@@ -376,6 +518,20 @@ describe('format utils', () => {
       await formatFilesInSubtree(tree, 'src');
       // Verify - imports left as-is (the on-disk config does not enable I)
       expect(tree.read('src/__init__.py')?.toString()).toBe(unsorted);
+    });
+    it('should apply formatter settings from an on-disk ruff config', async () => {
+      // Positive check that the on-disk config is genuinely read (ruff runs from
+      // tree.root so it discovers it): a formatter setting only this config sets
+      // must show up in the output.
+      writeFileSync(
+        path.join(workspaceDir, 'ruff.toml'),
+        ['[format]', 'quote-style = "single"', ''].join('\n'),
+      );
+      tree.write('src/quotes.py', 'x = "double"\n');
+      // Execute
+      await formatFilesInSubtree(tree, 'src');
+      // Verify - the config's quote-style was applied
+      expect(tree.read('src/quotes.py')?.toString()).toBe("x = 'double'\n");
     });
     it('should ignore a ruff config above the workspace root', async () => {
       // A ruff config in a parent of the workspace (e.g. a stray config on the

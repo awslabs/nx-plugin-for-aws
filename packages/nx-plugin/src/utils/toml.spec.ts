@@ -5,7 +5,7 @@
 
 import TOML from '@iarna/toml';
 import { createTree } from '@nx/devkit/testing';
-import { updateToml } from './toml';
+import { tryReadToml, updateToml } from './toml';
 
 describe('toml utils', () => {
   describe('updateToml', () => {
@@ -43,6 +43,28 @@ version = "1.0.0"
       expect(() => {
         updateToml(tree, filePath, () => ({}));
       }).toThrow(`${filePath} does not exist`);
+    });
+  });
+
+  describe('tryReadToml', () => {
+    it('should read an existing toml file', () => {
+      const tree = createTree();
+      tree.write('test.toml', '[package]\nname = "my-package"\n');
+
+      expect(tryReadToml(tree, 'test.toml')).toEqual({
+        package: { name: 'my-package' },
+      });
+    });
+
+    it('should return undefined for a file that does not exist', () => {
+      expect(tryReadToml(createTree(), 'nonexistent.toml')).toBeUndefined();
+    });
+
+    it('should return undefined for a file that cannot be parsed', () => {
+      const tree = createTree();
+      tree.write('broken.toml', '[package\nname =');
+
+      expect(tryReadToml(tree, 'broken.toml')).toBeUndefined();
     });
   });
 });

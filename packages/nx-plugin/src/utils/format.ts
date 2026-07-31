@@ -5,15 +5,10 @@
 
 import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
-import { execFileSync, execSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
-import { createRequire } from 'module';
 import path from 'path';
-import { uvxCommand } from './py';
-import { readToml } from './toml';
+import { type RuffOptions, ruffFixAndFormat } from './ruff';
+import { tryReadToml } from './toml';
 import { TS_VERSIONS } from './versions';
-
-const require = createRequire(import.meta.url);
 
 /**
  * The biome.json vended into a new workspace. The pnpm catalog resolver is only
@@ -121,6 +116,35 @@ const BIOME_FORMATTABLE_EXTENSIONS = new Set([
 const isTsConfig = (filePath: string): boolean =>
   /(^|\/)tsconfig[^/]*\.json$/.test(filePath);
 
+export interface FormatFilesInSubtreeOptions {
+  /**
+   * Paths, relative to the workspace root, to leave untouched.
+   *
+   * For files another tool owns the formatting of: formatting them here makes
+   * generation non-idempotent, since the tool rewrites them in its own shape on
+   * the next run and the workspace flips between the two forms.
+   */
+  readonly ignore?: readonly string[];
+}
+
+/**
+ * Paths declared ignored for a tree, which stay ignored for every later call.
+ *
+ * A call formats every change pending in the tree, not only the ones its caller
+ * made, so the list cannot be scoped to the call that passes it: generators
+ * composing on one tree would reformat a file an earlier generator had excluded.
+ * Once the generator that owns a file declares it ignored, it stays ignored for
+ * the rest of the run.
+ */
+const treeIgnoredPaths = new WeakMap<Tree, Set<string>>();
+
+/**
+ * Tree paths are workspace-relative and forward-slash separated. Normalise so a
+ * caller building a path with `path.join` on Windows still matches.
+ */
+const normalizeTreePath = (filePath: string): string =>
+  filePath.split(path.sep).join('/').replace(/^\.\//, '');
+
 /**
  * Format files in the given directory within the tree.
  * Handles both TypeScript/JavaScript/JSON (via biome) and Python (via ruff) files.
@@ -129,11 +153,23 @@ const isTsConfig = (filePath: string): boolean =>
 export async function formatFilesInSubtree(
   tree: Tree,
   dir?: string,
+  options?: FormatFilesInSubtreeOptions,
 ): Promise<void> {
+  let ignored = treeIgnoredPaths.get(tree);
+  if (options?.ignore?.length) {
+    if (!ignored) {
+      ignored = new Set();
+      treeIgnoredPaths.set(tree, ignored);
+    }
+    for (const filePath of options.ignore) {
+      ignored.add(normalizeTreePath(filePath));
+    }
+  }
   const changedFiles = tree
     .listChanges()
     .filter((file) => file.type !== 'DELETE')
-    .filter((file) => (dir ? file.path.startsWith(dir) : true));
+    .filter((file) => (dir ? file.path.startsWith(dir) : true))
+    .filter((file) => !ignored?.has(normalizeTreePath(file.path)));
 
   const pyFiles = changedFiles.filter((file) => file.path.endsWith('.py'));
   const otherFiles = changedFiles.filter(
@@ -159,8 +195,10 @@ export async function formatFilesInSubtree(
       const content = ruffFixAndFormat(
         file.content.toString('utf-8'),
         file.path,
-        hasRuffConfigOnDisk(tree, file.path),
-        getOwningProjectRuffConfig(file.path, pythonProjectConfigs),
+        resolveRuffOptions(
+          readRuffConfig(tree, file.path),
+          getOwningProjectRuffConfig(file.path, pythonProjectConfigs),
+        ),
       );
       tree.write(file.path, content);
     } catch {
@@ -170,67 +208,49 @@ export async function formatFilesInSubtree(
 
   if (otherFiles.length === 0) return;
 
-  // Use the workspace's own Biome CLI (its version and config) when biome.json
-  // exists on disk; otherwise format via the bundled library API with the
-  // in-memory tree config. The CLI path does not see in-tree config changes.
-  if (existsSync(path.join(tree.root, 'biome.json'))) {
-    formatWithBiomeCli(tree, otherFiles);
-  } else {
-    formatWithBiomeApi(tree, otherFiles);
-  }
+  formatWithBiome(tree, otherFiles);
 }
 
 /**
- * Format files via the workspace's Biome CLI, run from the workspace root so it
- * discovers the on-disk biome.json.
+ * The Biome configuration to format with: the workspace's own `biome.json`, else
+ * the config we vend.
+ *
+ * Read through the tree, which falls back to disk for a file it doesn't hold. So
+ * this resolves the most current config either way — the workspace's on-disk one,
+ * or the version a generator has just written to the tree and not yet flushed,
+ * which shelling out to the CLI could never see.
  */
-function formatWithBiomeCli(
-  tree: Tree,
-  files: { path: string; content: Buffer | null }[],
-): void {
-  const biome = getBiomeCommand(tree.root);
-  if (!biome) {
-    // Fall back to the library API if the CLI cannot be resolved
-    formatWithBiomeApi(tree, files);
-    return;
-  }
-
-  for (const file of files) {
+function readBiomeConfig(tree: Tree): unknown {
+  const config = tree.read('biome.json', 'utf-8');
+  if (config) {
     try {
-      const content = execFileSync(
-        biome.command,
-        [...biome.args, 'format', `--stdin-file-path=${file.path}`],
-        {
-          input: file.content?.toString('utf-8') ?? '',
-          encoding: 'utf-8',
-          cwd: tree.root,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        },
-      );
-      tree.write(file.path, content);
+      return JSON.parse(config);
     } catch {
-      // Leave individual files that fail to format untouched
+      // Malformed config — fall through to the config we vend
     }
   }
+  return getDefaultBiomeConfig(tree);
 }
 
 /**
- * Format files via the bundled Biome library API, applying the in-memory tree
- * config.
+ * Format files with Biome in-process, reusing one instance across the batch.
+ *
+ * Replaces one `biome format --stdin-file-path` process per file, which
+ * dominated generation at ~70ms each: `formatFilesInSubtree` formats every
+ * change accumulated in the tree, not only the ones its caller made, so
+ * generators sharing a tree reformat the same files once per call. In-process is
+ * ~0.5ms per file. Output was verified byte-identical across the plugin's whole
+ * source tree, except that the CLI corrupts control characters passed through
+ * stdin (a NUL in a template literal) where formatting in-process preserves them.
  */
-function formatWithBiomeApi(
+function formatWithBiome(
   tree: Tree,
   files: { path: string; content: Buffer | null }[],
 ): void {
   try {
     const biome = new Biome();
     const { projectKey } = biome.openProject();
-    // Apply the workspace biome.json if it exists in the tree, otherwise the defaults.
-    const treeConfig = tree.read('biome.json', 'utf-8');
-    biome.applyConfiguration(
-      projectKey,
-      treeConfig ? JSON.parse(treeConfig) : getDefaultBiomeConfig(tree),
-    );
+    biome.applyConfiguration(projectKey, readBiomeConfig(tree));
 
     for (const file of files) {
       try {
@@ -249,113 +269,51 @@ function formatWithBiomeApi(
   }
 }
 
-interface BiomeCommand {
-  command: string;
-  args: string[];
-}
-
 /**
- * Resolve the `@biomejs/biome` CLI from the user's workspace, falling back to a
- * `biome` binary on the PATH.
+ * Read the ruff config for a file, by walking from its directory up to the
+ * workspace root looking for `.ruff.toml`, `ruff.toml`, or a `pyproject.toml`
+ * with a `[tool.ruff]` section — the same files, in the same order, that ruff
+ * itself resolves. The walk stops at the workspace root so a stray config in a
+ * parent of the workspace (or the home directory) is never treated as the
+ * project's.
+ *
+ * The settings are read rather than merely detected because formatting runs
+ * in-process against tree content, so ruff never sees the file's location and
+ * cannot resolve the config itself (see {@link resolveRuffOptions}).
+ *
+ * Reads go through the tree, which falls through to disk for files this run has
+ * not touched, so a config the generator has just written in memory is picked up
+ * as well as one already on disk.
  */
-const _biomeCommands = new Map<string, BiomeCommand | null>();
-function getBiomeCommand(root: string): BiomeCommand | undefined {
-  if (_biomeCommands.has(root)) {
-    return _biomeCommands.get(root) ?? undefined;
-  }
-
-  // Run via node for cross-platform execution of the bin shim.
-  try {
-    const pkgJsonPath = require.resolve('@biomejs/biome/package.json', {
-      paths: [root, import.meta.dirname],
-    });
-    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-    const binRelative =
-      typeof pkgJson.bin === 'string' ? pkgJson.bin : pkgJson.bin?.biome;
-    if (binRelative) {
-      const binPath = path.join(path.dirname(pkgJsonPath), binRelative);
-      const command = { command: process.execPath, args: [binPath] };
-      _biomeCommands.set(root, command);
-      return command;
-    }
-  } catch {
-    // Fall back to a biome binary on the PATH
-  }
-
-  try {
-    execSync('biome --version', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const command = { command: 'biome', args: [] };
-    _biomeCommands.set(root, command);
-    return command;
-  } catch {
-    _biomeCommands.set(root, null);
-    return undefined;
-  }
-}
-
-/**
- * Find the ruff command: `uvx --from ruff==<version> ruff`. uvx works
- * regardless of workspace resolution state (unlike `uv run ruff`, which fails
- * while installs are deferred), and the version pin matches the project's
- * `format` target (PY_VERSIONS) so generation and check format identically.
- * Only a successful probe is cached — ruff can become available mid-run in the
- * long-lived Nx daemon, so a cached failure would skip formatting thereafter.
- */
-let _ruffCommand: string | undefined;
-function getRuffCommand(): string | undefined {
-  if (_ruffCommand) {
-    return _ruffCommand;
-  }
-  const cmd = uvxCommand('ruff');
-  try {
-    execSync(`${cmd} --version`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    _ruffCommand = cmd;
-    return cmd;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Whether ruff would discover a config on disk for a file, by walking from its
- * directory up to the workspace root looking for `.ruff.toml`, `ruff.toml`, or a
- * `pyproject.toml` with a `[tool.ruff]` section — the same files ruff itself
- * resolves. The walk stops at `tree.root` so a stray config in a parent of the
- * workspace (or the home directory) is never treated as the project's. Used to
- * decide whether to nudge ruff towards import sorting (see
- * {@link ruffFixAndFormat}).
- */
-function hasRuffConfigOnDisk(tree: Tree, filePath: string): boolean {
-  const root = path.resolve(tree.root);
-  let dir = path.resolve(root, path.dirname(filePath));
+function readRuffConfig(tree: Tree, filePath: string): RuffOptions | undefined {
+  let dir = path.dirname(filePath);
   while (true) {
-    if (
-      existsSync(path.join(dir, '.ruff.toml')) ||
-      existsSync(path.join(dir, 'ruff.toml'))
-    ) {
-      return true;
+    for (const name of ['.ruff.toml', 'ruff.toml']) {
+      const config = tryReadToml(tree, path.join(dir, name));
+      if (config) {
+        return config as RuffOptions;
+      }
     }
-    const pyproject = path.join(dir, 'pyproject.toml');
-    if (
-      existsSync(pyproject) &&
-      readFileSync(pyproject, 'utf-8').includes('[tool.ruff')
-    ) {
-      return true;
+    const ruff = (tryReadToml(tree, path.join(dir, 'pyproject.toml')) as any)
+      ?.tool?.ruff;
+    if (ruff) {
+      return ruff as RuffOptions;
     }
-    const parent = path.dirname(dir);
-    // Stop once the workspace root has been checked (or we hit the FS root).
-    if (dir === root || parent === dir) {
-      return false;
+    // Stop once the workspace root ('.') has been checked.
+    if (dir === '.' || dir === '' || dir === path.dirname(dir)) {
+      return undefined;
     }
-    dir = parent;
+    dir = path.dirname(dir);
   }
 }
+
+/**
+ * The `[tool.ruff.lint].select` generated Python projects vend. Generation
+ * formats before that config lands on disk, so it is pinned here to keep
+ * generated files clean under the project's own `lint` target rather than under
+ * whatever ruff's defaults happen to be for the pinned release.
+ */
+const DEFAULT_RUFF_SELECT = ['E', 'F', 'UP', 'B', 'SIM', 'I'];
 
 interface PythonProjectRuffConfig {
   /** Project root, normalised to use forward slashes. */
@@ -370,6 +328,8 @@ interface PythonProjectRuffConfig {
    * explicitly — ruff's formatting differs by target.
    */
   readonly targetVersion?: string;
+  /** The project's `[tool.ruff.lint].select`, if set. */
+  readonly select?: string[];
 }
 
 /**
@@ -401,40 +361,54 @@ export const requiresPythonToRuffTarget = (
 /**
  * Map each Nx project with a `pyproject.toml` to the ruff settings the on-disk
  * build enforces for it: its top-level module names (from
- * `[tool.hatch.build.targets.wheel].packages`) and its `[tool.ruff].line-length`.
+ * `[tool.hatch.build.targets.wheel].packages`), its `[tool.ruff].line-length`
+ * and its `[tool.ruff.lint].select`.
  */
 function getPythonProjectRuffConfigs(tree: Tree): PythonProjectRuffConfig[] {
   const configs: PythonProjectRuffConfig[] = [];
 
   for (const project of getProjects(tree).values()) {
-    const pyprojectPath = path.join(project.root, 'pyproject.toml');
-    if (tree.exists(pyprojectPath)) {
-      try {
-        const pyproject = readToml(tree, pyprojectPath) as any;
-        const wheelPackages: unknown =
-          pyproject?.tool?.hatch?.build?.targets?.wheel?.packages;
-        // Record the top-level module segment (`pkg/sub` -> `pkg`), which is
-        // all `known-first-party` keys off.
-        const modules = Array.isArray(wheelPackages)
-          ? wheelPackages
-              .filter((pkg): pkg is string => typeof pkg === 'string' && !!pkg)
-              .map((pkg) => pkg.split('/')[0])
-          : [];
-        const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
-        const targetVersion = requiresPythonToRuffTarget(
-          pyproject?.project?.['requires-python'],
-        );
-        if (modules.length || typeof lineLength === 'number' || targetVersion) {
-          configs.push({
-            root: project.root.split(path.sep).join('/'),
-            modules,
-            lineLength: typeof lineLength === 'number' ? lineLength : undefined,
-            targetVersion,
-          });
-        }
-      } catch {
-        // Skip projects whose pyproject.toml cannot be parsed
-      }
+    // Projects without a pyproject.toml, or whose one cannot be parsed, have no
+    // ruff settings to contribute.
+    const pyproject = tryReadToml(
+      tree,
+      path.join(project.root, 'pyproject.toml'),
+    ) as any;
+    if (!pyproject) {
+      continue;
+    }
+    const wheelPackages: unknown =
+      pyproject?.tool?.hatch?.build?.targets?.wheel?.packages;
+    // Record the top-level module segment (`pkg/sub` -> `pkg`), which is
+    // all `known-first-party` keys off.
+    const modules = Array.isArray(wheelPackages)
+      ? wheelPackages
+          .filter((pkg): pkg is string => typeof pkg === 'string' && !!pkg)
+          .map((pkg) => pkg.split('/')[0])
+      : [];
+    const lineLength: unknown = pyproject?.tool?.ruff?.['line-length'];
+    const targetVersion = requiresPythonToRuffTarget(
+      pyproject?.project?.['requires-python'],
+    );
+    const selected: unknown = pyproject?.tool?.ruff?.lint?.select;
+    const select = Array.isArray(selected)
+      ? selected.filter(
+          (rule): rule is string => typeof rule === 'string' && !!rule,
+        )
+      : undefined;
+    if (
+      modules.length ||
+      typeof lineLength === 'number' ||
+      targetVersion ||
+      select?.length
+    ) {
+      configs.push({
+        root: project.root.split(path.sep).join('/'),
+        modules,
+        lineLength: typeof lineLength === 'number' ? lineLength : undefined,
+        targetVersion,
+        select: select?.length ? select : undefined,
+      });
     }
   }
 
@@ -466,77 +440,51 @@ function getOwningProjectRuffConfig(
 }
 
 /**
- * Run ruff check --fix and ruff format on Python file content via stdin.
- * Applies all configured lint fixes (including import sorting) and formatting.
+ * Resolve the ruff settings to format a Python file with, mirroring what the
+ * file's build enforces.
  *
- * When no ruff config exists on disk (`hasConfig` false) ruff falls back to its
- * defaults, which omit isort — but generated projects enable rule `I` and their
- * build fails on unsorted imports (I001). In that case we add `--extend-select
- * I` so import sorting matches what the build enforces. When a config does
- * exist we defer to it entirely, honouring the user's rule selection.
+ * Ruff's own config discovery never runs: settings are passed to the linter
+ * directly rather than resolved from the file's location, which it never sees.
+ * That also means a stray config above the workspace (or in the home directory)
+ * can never be picked up.
  *
- * `projectConfig` carries the owning project's ruff settings, which ruff cannot
- * detect from the filesystem during generation because the project lives only
- * in the tree. We pass them via `--config` so in-tree formatting matches the
- * on-disk build: `known-first-party` (the project's own modules) keeps its
- * imports in their own group, and `line-length` keeps wrapping consistent (the
- * generated config raises it above ruff's default of 88). These are additive to
- * any on-disk config, so they are safe to pass regardless of `hasConfig`.
+ * `config` is the file's nearest ruff config, whose rule selection is honoured
+ * as-is. Without one, ruff would fall back to its own defaults, which change
+ * between releases — 0.16 widened them from `E` and `F` to 36 rule prefixes — so
+ * generation would apply fixes the project's build never asks for (eg `RUF022`
+ * reordering `__all__`). Instead the project's own `lint.select` is pinned, so
+ * generation enforces exactly what `lint` does and nothing more.
+ *
+ * `projectConfig` layers on the settings derived from the owning project rather
+ * than declared under `[tool.ruff]`: `known-first-party` (the project's own
+ * modules, from its wheel packages) keeps its imports in their own group, and
+ * `target-version` (from its `requires-python`) matches the formatting the build
+ * produces.
  */
-function ruffFixAndFormat(
-  content: string,
-  filePath: string,
-  hasConfig: boolean,
+function resolveRuffOptions(
+  config: RuffOptions | undefined,
   projectConfig?: PythonProjectRuffConfig,
-): string {
-  const ruff = getRuffCommand();
-  if (!ruff) return content;
-
-  const extendSelect = hasConfig ? '' : ' --extend-select I';
-  const configArgs: string[] = [];
+): RuffOptions {
+  const lint: Record<string, unknown> = { ...config?.lint };
+  // Pin the rule selection only when deferring to ruff's defaults would
+  // otherwise apply rules the project's build does not enforce.
+  if (!config) {
+    lint.select = projectConfig?.select ?? DEFAULT_RUFF_SELECT;
+  }
   if (projectConfig?.modules.length) {
-    configArgs.push(
-      `lint.isort.known-first-party = ${JSON.stringify(projectConfig.modules)}`,
-    );
+    lint.isort = {
+      ...(lint.isort as object | undefined),
+      'known-first-party': projectConfig.modules,
+    };
   }
-  if (typeof projectConfig?.lineLength === 'number') {
-    configArgs.push(`line-length = ${projectConfig.lineLength}`);
-  }
-  if (projectConfig?.targetVersion) {
-    configArgs.push(`target-version = "${projectConfig.targetVersion}"`);
-  }
-  const config = configArgs
-    .map((arg) => ` --config ${JSON.stringify(arg)}`)
-    .join('');
-
-  // First apply lint fixes (import sorting, unused imports, etc.)
-  try {
-    const result = execSync(
-      `${ruff} check --fix${extendSelect}${config} --stdin-filename ${filePath} -`,
-      { input: content, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    content = result;
-  } catch (e: any) {
-    // ruff check exits non-zero when it finds unfixable issues,
-    // but stdout still contains the fixed content
-    if (e.stdout) {
-      content = e.stdout;
-    }
-  }
-
-  // Then apply formatting
-  try {
-    content = execSync(
-      `${ruff} format${config} --stdin-filename ${filePath} -`,
-      {
-        input: content,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    );
-  } catch {
-    // Fall through with whatever content we have
-  }
-
-  return content;
+  return {
+    ...config,
+    ...(typeof projectConfig?.lineLength === 'number'
+      ? { 'line-length': projectConfig.lineLength }
+      : {}),
+    ...(projectConfig?.targetVersion
+      ? { 'target-version': projectConfig.targetVersion }
+      : {}),
+    lint,
+  };
 }

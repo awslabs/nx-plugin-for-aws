@@ -535,7 +535,16 @@ export async function tsReactWebsiteGenerator(
     REACT_WEBSITE_APP_GENERATOR_INFO,
   ]);
 
-  await formatFilesInSubtree(tree);
+  // TanStack Router's vite plugin owns this website's route tree and rewrites it
+  // in its own (unformatted) shape whenever the config is loaded — including when
+  // Nx computes the project graph — so formatting it here would only make
+  // generation non-idempotent. The vended biome config excludes `**/*.gen.*`, so
+  // the workspace's own `format` target leaves it alone too.
+  await formatFilesInSubtree(tree, undefined, {
+    ignore: tanstackRouter
+      ? [joinPathFragments(libraryRoot, 'src', 'routeTree.gen.ts')]
+      : [],
+  });
   // The generated vite.config.mts imports these, and Nx's inferred `@nx/vite`
   // plugin loads that config when computing the project graph — so they must be
   // installed even if the caller would otherwise prefer to defer.
