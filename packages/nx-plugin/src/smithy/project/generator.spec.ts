@@ -43,7 +43,7 @@ describe('smithyProjectGenerator', () => {
     expect(projectConfig.targets.compile.options.commands).toEqual([
       'rimraf dist/{projectRoot}/build',
       'make-dir dist/{projectRoot}/build',
-      'docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
+      'docker build -f {projectRoot}/build.Dockerfile --build-context workspace={workspaceRoot} --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
     ]);
     expect(projectConfig.targets.compile.outputs).toEqual([
       '{workspaceRoot}/dist/{projectRoot}/build',
@@ -228,7 +228,7 @@ describe('smithyProjectGenerator', () => {
     const projectConfig = readJson(tree, 'test-api/project.json');
     const dockerCommand = projectConfig.targets.compile.options.commands[2];
     expect(dockerCommand).toBe(
-      'docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
+      'docker build -f {projectRoot}/build.Dockerfile --build-context workspace={workspaceRoot} --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
     );
   });
 
@@ -378,7 +378,7 @@ describe('smithyProjectGenerator', () => {
       const projectConfig = readJson(tree, 'test-shapes/project.json');
       expect(projectConfig.targets.build.dependsOn).toEqual(['compile']);
       expect(projectConfig.targets.compile.options.commands[2]).toBe(
-        'docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
+        'docker build -f {projectRoot}/build.Dockerfile --build-context workspace={workspaceRoot} --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
       );
     });
 

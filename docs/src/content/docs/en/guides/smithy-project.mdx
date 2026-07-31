@@ -114,20 +114,65 @@ Smithy projects build using [Docker](https://www.docker.com/), which runs the [S
 
 <NxCommands commands={['build my-shapes']} />
 
-## Sharing Shapes Between Projects
+## Depending on a Shape Library
 
-To use a shape library's shapes in another Smithy project, connect the two with the <Link path="guides/connection/smithy-shapes">`connection` generator</Link>:
+Building a shape library writes an assembled model to `dist/<my-shapes>/build/model/model.json`. This single file contains every shape the library defines, along with any it depends on, so a consumer only ever declares the libraries it references directly.
 
-<RunGenerator generator="connection" requiredParameters={{ sourceProject: 'my-api', targetProject: 'my-shapes' }} />
+To depend on a shape library from another Smithy project, make three changes to the consuming project.
 
-Your model can then reference the library's shapes:
+### 1. Copy the built model into the Docker build
+
+Smithy projects build inside a container, and the build is given the workspace root as a named build context. Add a `COPY` to the consuming project's `build.Dockerfile`, alongside where its own sources are copied in:
+
+```dockerfile ins={4}
+# Copy project files
+COPY smithy-build.json .
+COPY src src
+COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
+```
+
+### 2. Import the model
+
+Add the copied file to `imports` in the consuming project's `smithy-build.json`:
+
+```json ins={4}
+{
+  "version": "1.0",
+  "sources": ["src/"],
+  "imports": ["deps/my-shapes.json"],
+  ...
+}
+```
+
+:::note
+`imports` rather than `sources` keeps the library's shapes out of your project's own source projection, while still resolving them and carrying them through to your build output.
+:::
+
+### 3. Build the library first
+
+Add the library's `build` target as a dependency of the consuming project's `compile` target in its `project.json`, so the model exists before the consumer builds:
+
+```json ins={4}
+{
+  "targets": {
+    "compile": {
+      "dependsOn": ["@my-scope/my-shapes:build"],
+      ...
+    }
+  }
+}
+```
+
+### Using the shapes
+
+Your model can now reference the library's shapes with `use`:
 
 ```smithy
 $version: "2.0"
 
 namespace com.example.api
 
-use com.example#Customer
+use com.example.shared#Customer
 
 structure GetCustomerOutput {
     @required
@@ -135,4 +180,4 @@ structure GetCustomerOutput {
 }
 ```
 
-See the <Link path="guides/connection/smithy-shapes">Smithy shape library connection guide</Link> for details.
+Shape libraries can depend on other shape libraries the same way. Since each library's built model already contains its own dependencies, you only need to repeat these steps for the libraries you reference directly. A library reached by more than one path is resolved once — Smithy ignores duplicate but equivalent shape definitions.

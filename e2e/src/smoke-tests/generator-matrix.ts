@@ -231,21 +231,11 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
-  // Smithy shape libraries, layered so the API picks up my-shapes transitively
-  await runCLI(
-    `generate @aws/nx-plugin:smithy#project --name=my-shared-shapes --type=shapes --no-interactive${deferFlag}`,
-    opts,
-  );
+  // Smithy shape library. Depending on one is a documented set of edits to the
+  // consuming project rather than a generator, so the matrix covers generating
+  // and building a library; `smithy-api` covers consuming one.
   await runCLI(
     `generate @aws/nx-plugin:smithy#project --name=my-shapes --type=shapes --no-interactive${deferFlag}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=my-shapes --targetProject=my-shared-shapes --no-interactive${deferFlag}`,
-    opts,
-  );
-  await runCLI(
-    `generate @aws/nx-plugin:connection --sourceProject=my-smithy-api --targetProject=my-shapes --no-interactive${deferFlag}`,
     opts,
   );
 

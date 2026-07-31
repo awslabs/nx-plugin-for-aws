@@ -59,7 +59,9 @@ export const smithyProjectGenerator = async (
             commands: [
               cmd.rm('dist/{projectRoot}/build'),
               cmd.mkdir('dist/{projectRoot}/build'),
-              `${containers} build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
+              // The workspace build context lets a project's Dockerfile copy in
+              // the built models of shape libraries it depends on
+              `${containers} build -f {projectRoot}/build.Dockerfile --build-context workspace={workspaceRoot} --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
             ],
             parallel: false,
             cwd: '{workspaceRoot}',
