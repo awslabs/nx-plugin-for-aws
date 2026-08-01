@@ -17,12 +17,6 @@ export interface AgentcoreHarnessGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  modelId?: string;
-  systemPrompt?: string;
-  allowedTools?: string[];
-  maxIterations?: number;
-  maxTokens?: number;
-  timeoutSeconds?: number;
   infra?: 'agentcore' | 'none';
   iac?: IacOption;
   preferInstallDependencies?: boolean;

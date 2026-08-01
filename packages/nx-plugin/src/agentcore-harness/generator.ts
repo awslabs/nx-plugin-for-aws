@@ -15,7 +15,7 @@ import {
 import { addAgentCoreHarnessInfra } from '../utils/agent-core-constructs/agent-core-constructs';
 import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
-import { type Iac, type IacOption, resolveIac } from '../utils/iac';
+import { resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import {
@@ -33,49 +33,28 @@ import type { AgentcoreHarnessGeneratorSchema } from './schema';
 export const AGENTCORE_HARNESS_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
-/**
- * Resolve the IaC provider through the repository's existing inheritance
- * behaviour (`resolveIac`).
- *
- * Explicit `cdk`/`terraform` selections resolve to themselves and cannot
- * fail; only `inherit` resolution can throw (no workspace default
- * configured). The shared diagnostic explains the workspace-default fix,
- * so this wrapper adds the invocation-scoped remediation: how to select
- * `cdk` or `terraform` explicitly for this run.
- */
-const resolveHarnessIac = async (
-  tree: Tree,
-  iacOption: IacOption,
-): Promise<Iac> => {
-  try {
-    return await resolveIac(tree, iacOption);
-  } catch (error) {
-    throw new Error(
-      `${
-        error instanceof Error ? error.message : String(error)
-      }. Alternatively, rerun the generator with an explicit provider: --iac=cdk or --iac=terraform.`,
-    );
-  }
-};
-
 export const agentcoreHarnessGenerator = async (
   tree: Tree,
   options: AgentcoreHarnessGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  // Validate every schema predicate and resolve the exact creation defaults
-  // before any tree mutation, so a rejected option terminates generation
-  // without invoking infrastructure helpers.
+  // Validate every schema predicate and resolve defaults before any tree
+  // mutation, so a rejected option terminates generation without invoking
+  // infrastructure helpers.
   const resolved = resolveAgentcoreHarnessOptions(tree, options);
   const {
     nameKebabCase,
     nameClassName,
     fullyQualifiedProjectName,
     projectRoot,
-    modelId,
-    systemPrompt,
-    allowedTools,
     infra,
   } = resolved;
+
+  // AgentCore harness names must start with an ASCII letter and stay within 40
+  // characters once the "_<8 hex>" suffix is appended, so cap the prefix at 31.
+  // toClassName prefixes `_` (not a letter) for digit-leading names.
+  const harnessNamePrefix = (
+    /^[A-Za-z]/.test(nameClassName) ? nameClassName : `H${nameClassName}`
+  ).slice(0, 31);
 
   // Reuse an existing project configuration; create it otherwise.
   let project: ProjectConfiguration;
@@ -102,7 +81,16 @@ export const agentcoreHarnessGenerator = async (
     );
   }
 
+  // `chat` runs the vended chat script against the deployed Harness. Re-run:
+  // keep an existing target so user edits survive.
   project.targets ??= {};
+  project.targets['chat'] ??= {
+    executor: 'nx:run-commands',
+    options: {
+      commands: ['tsx ./scripts/chat.ts'],
+      cwd: '{projectRoot}',
+    },
+  };
   updateProjectConfiguration(tree, project.name, project);
 
   generateFiles(
@@ -117,70 +105,41 @@ export const agentcoreHarnessGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Persist the Harness creation defaults so an `infra: none` project can
-  // add infrastructure later. Omitted execution limits are absent rather
-  // than `undefined`, which JSON cannot represent.
-  const ownedMetadata: Omit<AgentCoreHarnessMetadata, 'generator'> = {
-    name: nameKebabCase,
-    rc: nameClassName,
-    runtimeConfigPath: resolved.runtimeConfigPath,
-    modelId,
-    systemPrompt,
-    allowedTools: [...allowedTools],
-    ...(resolved.maxIterations !== undefined
-      ? { maxIterations: resolved.maxIterations }
-      : {}),
-    ...(resolved.maxTokens !== undefined
-      ? { maxTokens: resolved.maxTokens }
-      : {}),
-    ...(resolved.timeoutSeconds !== undefined
-      ? { timeoutSeconds: resolved.timeoutSeconds }
-      : {}),
-    auth: resolved.auth,
-  };
-  // Fill only missing Generator-owned fields so hand-edited metadata stays
-  // intact. addGeneratorMetadata preserves unrelated fields, and a rerun
-  // that fills nothing skips the project.json write entirely.
-  const existingMetadata = (project.metadata ?? {}) as Record<string, unknown>;
+  // Record only what cannot drift once the user owns the generated
+  // infrastructure: the project identity, its runtime config key and auth mode.
   addGeneratorMetadata(
     tree,
     fullyQualifiedProjectName,
     AGENTCORE_HARNESS_GENERATOR_INFO,
-    Object.fromEntries(
-      Object.entries(ownedMetadata).filter(
-        ([field]) => existingMetadata[field] === undefined,
-      ),
-    ),
+    {
+      name: nameKebabCase,
+      rc: nameClassName,
+      auth: resolved.auth,
+    },
   );
 
+  // scripts/chat.ts dependencies; tsx runs it via the `chat` target.
   addDependenciesToPackageJson(
     tree,
     withVersions([
       '@aws-sdk/client-bedrock-agentcore',
       '@aws-sdk/client-appconfigdata',
       '@aws-lambda-powertools/parameters',
+      'agent-chat-cli',
     ]),
-    withVersions(['@types/node', 'tsx', 'typescript']),
+    withVersions(['@types/node', 'tsx']),
   );
 
-  // Harness infrastructure is written only for `infra: agentcore`; for
-  // `infra: none` no IaC provider is resolved and no Shared Infrastructure
-  // Project is touched. A later `infra: agentcore` rerun adds it here
-  // without replacing project files.
+  // Harness infrastructure is written only for `infra: agentcore`. A later
+  // `infra: agentcore` rerun adds it without replacing project files.
   if (infra === 'agentcore') {
-    const iac = await resolveHarnessIac(tree, resolved.iac);
-    // Ensure the Shared Infrastructure Project for the resolved provider
-    // exists before adding Harness infrastructure.
+    const iac = await resolveIac(tree, resolved.iac);
     await sharedConstructsGenerator(tree, { iac });
     await addAgentCoreHarnessInfra(tree, {
       harnessNameClassName: nameClassName,
       harnessNameKebabCase: nameKebabCase,
-      modelId,
-      systemPrompt,
-      allowedTools: [...allowedTools],
-      maxIterations: resolved.maxIterations,
-      maxTokens: resolved.maxTokens,
-      timeoutSeconds: resolved.timeoutSeconds,
+      projectRoot,
+      harnessNamePrefix,
       iac,
     });
   }
@@ -198,21 +157,11 @@ export const agentcoreHarnessGenerator = async (
 
 /**
  * Harness details stored in the Harness Project's metadata.
- *
- * `generator` is managed by the shared metadata utilities; execution-limit
- * fields are present only when a limit was supplied at creation.
  */
 export interface AgentCoreHarnessMetadata {
   generator: string;
   name: string;
   rc: string;
-  runtimeConfigPath: `agentcore.harnesses.${string}`;
-  modelId: string;
-  systemPrompt: string;
-  allowedTools: string[];
-  maxIterations?: number;
-  maxTokens?: number;
-  timeoutSeconds?: number;
   auth: 'iam';
 }
 

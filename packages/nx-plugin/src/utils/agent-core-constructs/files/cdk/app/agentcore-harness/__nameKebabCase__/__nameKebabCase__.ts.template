@@ -1,8 +1,12 @@
 import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
 import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { Construct } from 'constructs';
+import { Construct, IConstruct } from 'constructs';
+import { suppressRules } from '../../../core/checkov<% if (esm) { %>.js<% } %>';
 import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<% } %>';
+
+// Checkov rules flagging IAM statements whose resource cannot be scoped.
+const WILDCARD_IAM_RULES = ['CKV_AWS_111', 'CKV_AWS_356'];
 
 /**
  * Properties for the <%- nameClassName %> Harness.
@@ -16,11 +20,18 @@ import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<%
  * as a raw string.
  */
 export interface <%- nameClassName %>Props
-  extends Partial<Omit<agentcore.CfnHarnessProps, 'executionRoleArn'>> {
+  extends Partial<
+    Omit<agentcore.CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>
+  > {
   /** Existing execution role to use instead of the generated role. */
   executionRole?: iam.IRole;
   /** Model resources the generated execution role may invoke. */
   modelResourceArns?: string[];
+  /**
+   * Tools the Harness may use. The Harness deploys with no tools unless they
+   * are supplied here.
+   */
+  allowedTools?: agentcore.CfnHarnessProps['allowedTools'];
 }
 
 /**
@@ -180,26 +191,40 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       ].forEach((statement) =>
         this.executionRole.addToPrincipalPolicy(statement),
       );
+
+      // The three statements below take no resource-level permission, so
+      // their suppressions land on the role's policy with each statement
+      // identifier named in its reason.
+      const isPolicy = (c: IConstruct) => c instanceof iam.Policy;
+      suppressRules(
+        this.executionRole,
+        WILDCARD_IAM_RULES,
+        'EcrPublicTokenAccess: ecr-public:GetAuthorizationToken has no resource-level permission.',
+        isPolicy,
+      );
+      suppressRules(
+        this.executionRole,
+        WILDCARD_IAM_RULES,
+        'StsForEcrPublicPull: sts:GetServiceBearerToken has no resource-level permission.',
+        isPolicy,
+      );
+      suppressRules(
+        this.executionRole,
+        WILDCARD_IAM_RULES,
+        'XRayTracingAccess: X-Ray segment and sampling APIs have no resource-level permission.',
+        isPolicy,
+      );
     }
 
     this.harness = new agentcore.CfnHarness(this, 'Harness', {
-      // Generated defaults from the generator run.
+      // Generated defaults. No tools are configured, so the deployed Harness
+      // carries the least capability until tools are supplied by the caller.
       model: {
         bedrockModelConfig: {
-          modelId: <%- modelIdJson %>,
+          modelId: 'global.anthropic.claude-sonnet-4-6',
         },
       },
       systemPrompt: [{ text: <%- systemPromptJson %> }],
-      allowedTools: <%- allowedToolsJson %>,
-<%_ if (maxIterations !== undefined) { _%>
-      maxIterations: <%- maxIterations %>,
-<%_ } _%>
-<%_ if (maxTokens !== undefined) { _%>
-      maxTokens: <%- maxTokens %>,
-<%_ } _%>
-<%_ if (timeoutSeconds !== undefined) { _%>
-      timeoutSeconds: <%- timeoutSeconds %>,
-<%_ } _%>
       // Caller-supplied native properties take precedence over the
       // generated defaults above.
       ...harnessProps,

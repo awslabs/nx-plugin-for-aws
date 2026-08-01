@@ -142,9 +142,6 @@ pnpm nx g @aws/nx-plugin:ts#api --framework=trpc
 # Add a Strands AI agent (Python)
 pnpm nx g @aws/nx-plugin:py#agent
 
-# Add a managed AgentCore Harness agent loop
-pnpm nx g @aws/nx-plugin:agentcore-harness
-
 # Add a React website
 pnpm nx g @aws/nx-plugin:ts#website --framework=react
 

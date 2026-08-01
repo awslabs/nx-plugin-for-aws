@@ -16,7 +16,7 @@ terraform {
 variable "model_id" {
   description = "Amazon Bedrock model or inference profile used by default."
   type        = string
-  default     = <%- modelIdHcl %>
+  default     = "global.anthropic.claude-sonnet-4-6"
 }
 
 variable "system_prompt" {
@@ -24,55 +24,6 @@ variable "system_prompt" {
   type        = string
   sensitive   = true
   default     = <%- systemPromptHcl %>
-}
-
-variable "allowed_tools" {
-  description = "Tool patterns the Harness may call (e.g. \"@builtin\")."
-  type        = list(string)
-  default     = <%- allowedToolsHcl %>
-
-  validation {
-    condition     = length(var.allowed_tools) >= 1 && length(var.allowed_tools) <= 64
-    error_message = "allowed_tools must contain between 1 and 64 entries."
-  }
-
-  validation {
-    condition     = alltrue([for tool in var.allowed_tools : length(trimspace(tool)) > 0])
-    error_message = "Every allowed_tools entry must contain at least one non-whitespace character."
-  }
-}
-
-variable "max_iterations" {
-  description = "Maximum agent-loop iterations per invocation; null uses the AgentCore service default."
-  type        = number
-  default     = <%- maxIterations === undefined ? 'null' : maxIterations %>
-
-  validation {
-    condition     = var.max_iterations == null ? true : var.max_iterations > 0
-    error_message = "max_iterations must be a positive number when set."
-  }
-}
-
-variable "max_tokens" {
-  description = "Maximum total output-token budget per invocation; null uses the AgentCore service default."
-  type        = number
-  default     = <%- maxTokens === undefined ? 'null' : maxTokens %>
-
-  validation {
-    condition     = var.max_tokens == null ? true : var.max_tokens > 0
-    error_message = "max_tokens must be a positive number when set."
-  }
-}
-
-variable "timeout_seconds" {
-  description = "Maximum execution time per invocation; null uses the AgentCore service default."
-  type        = number
-  default     = <%- timeoutSeconds === undefined ? 'null' : timeoutSeconds %>
-
-  validation {
-    condition     = var.timeout_seconds == null ? true : var.timeout_seconds > 0
-    error_message = "timeout_seconds must be a positive number when set."
-  }
 }
 
 variable "model_resource_arns" {
@@ -106,15 +57,10 @@ locals {
   partition  = data.aws_partition.current.partition
   region     = data.aws_region.current.region
 
-  # Deployed Harness names must start with an ASCII letter, contain only
-  # ASCII letters, digits or underscores, and be at most 40 characters long.
-  # The class name can start with "_" when the project name starts with a
-  # digit, so an "H" is prepended when needed; the prefix is then truncated
-  # to 31 characters so the "_" separator plus the eight-hex random suffix
-  # keeps the deployed name within 40 characters. The execution role and
-  # policy names below reuse the same truncated prefix so they also stay
-  # within their IAM limits (64 and 128 characters) for long project names.
-  harness_name_prefix = substr(length(regexall("^[A-Za-z]", "<%- nameClassName %>")) > 0 ? "<%- nameClassName %>" : "H<%- nameClassName %>", 0, 31)
+  # The prefix is generated with a leading ASCII letter and capped at 31
+  # characters, so the "_" separator plus the eight-hex suffix keeps the
+  # deployed Harness name within its 40-character limit.
+  harness_name_prefix = "<%- harnessNamePrefix %>"
   harness_name        = "${local.harness_name_prefix}_${random_id.unique_suffix.hex}"
 
   # Default model access spans every foundation model plus this account's
@@ -151,11 +97,9 @@ resource "aws_iam_role" "execution_role" {
   })
 }
 
-# Baseline permissions from the AgentCore Harness security guidance:
+# Baseline permissions per the AgentCore Harness security guidance; extend for
+# customer-owned resources via var.additional_execution_role_policy_statements.
 # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
-# Access to customer-owned resources (Gateways, memory, custom browsers or
-# code interpreters, skills, secrets, VPCs) is an explicit extension via
-# var.additional_execution_role_policy_statements.
 resource "aws_iam_role_policy" "execution_role" {
   name = "${local.harness_name_prefix}-HarnessPolicy"
   role = aws_iam_role.execution_role.id
@@ -173,18 +117,22 @@ resource "aws_iam_role_policy" "execution_role" {
         Resource = local.model_resource_arns
       },
       {
+        #checkov:skip=CKV_AWS_355:EcrPublicTokenAccess requires a wildcard resource; ecr-public:GetAuthorizationToken has no resource-level permission
         Sid      = "EcrPublicTokenAccess"
         Effect   = "Allow"
         Action   = ["ecr-public:GetAuthorizationToken"]
         Resource = ["*"]
       },
       {
+        #checkov:skip=CKV_AWS_355:StsForEcrPublicPull requires a wildcard resource; sts:GetServiceBearerToken has no resource-level permission
         Sid      = "StsForEcrPublicPull"
         Effect   = "Allow"
         Action   = ["sts:GetServiceBearerToken"]
         Resource = ["*"]
       },
       {
+        #checkov:skip=CKV_AWS_355:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission
+        #checkov:skip=CKV_AWS_290:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission
         Sid    = "XRayTracingAccess"
         Effect = "Allow"
         Action = [
@@ -224,6 +172,8 @@ resource "aws_iam_role_policy" "execution_role" {
         ]
       },
       {
+        #checkov:skip=CKV_AWS_355:CloudWatchMetricsPublish requires a wildcard resource; cloudwatch:PutMetricData is scoped by the namespace condition instead
+        #checkov:skip=CKV_AWS_290:CloudWatchMetricsPublish requires a wildcard resource; cloudwatch:PutMetricData is scoped by the namespace condition instead
         Sid      = "CloudWatchMetricsPublish"
         Effect   = "Allow"
         Action   = ["cloudwatch:PutMetricData"]
@@ -246,12 +196,9 @@ resource "aws_iam_role_policy" "execution_role" {
           "arn:${local.partition}:bedrock-agentcore:${local.region}:${local.account_id}:workload-identity-directory/default/workload-identity/harness_${local.harness_name}-*",
         ]
       },
-      # The Harness provisions a managed AgentCore Memory instance by default
-      # and the agent loop reads and writes it on every invocation. The
-      # service derives the managed memory name from a truncated harness name
-      # plus a generated suffix, so this is scoped by name prefix within the
-      # deployment account and Region. Narrow it to the exact memory ARN once
-      # the deployment is known, or when attaching a BYO memory instance.
+      # The service derives the managed memory name from a truncated harness
+      # name plus a generated suffix, so this is scoped by name prefix; narrow
+      # it to the exact memory ARN once deployed, or for a BYO instance.
       {
         Sid    = "AgentCoreManagedMemory"
         Effect = "Allow"
@@ -305,14 +252,13 @@ resource "aws_iam_role_policy" "execution_role" {
   })
 }
 
-# The AgentCore Harness. Omitting authorizer_configuration (the default)
-# means the Harness uses IAM inbound authorization; add a
-# custom_jwt_authorizer block in the extension region below to change that.
+# The AgentCore Harness. Omitting authorizer_configuration means the Harness
+# uses IAM inbound authorization; add a custom_jwt_authorizer block to change
+# that.
 resource "aws_bedrockagentcore_harness" "this" {
   harness_name       = local.harness_name
   execution_role_arn = aws_iam_role.execution_role.arn
 
-  # Generated defaults; module arguments override the variable defaults.
   model {
     bedrock_model_config {
       model_id = var.model_id
@@ -322,37 +268,6 @@ resource "aws_bedrockagentcore_harness" "this" {
   system_prompt {
     text = var.system_prompt
   }
-
-  allowed_tools   = var.allowed_tools
-  max_iterations  = var.max_iterations
-  max_tokens      = var.max_tokens
-  timeout_seconds = var.timeout_seconds
-
-  # ---------------------------------------------------------------------------
-  # Advanced extension region (provider-native fields of AWS provider 6.54.0).
-  #
-  # This file is yours after generation (reruns keep existing files), so
-  # configure advanced Harness features by adding or replacing provider-native
-  # arguments and blocks directly here, for example:
-  #
-  #   - model: swap bedrock_model_config for gemini_model_config or
-  #     openai_model_config, or tune its max_tokens / temperature / top_p
-  #   - tool { ... } blocks: tool definitions (agentcore_browser,
-  #     agentcore_code_interpreter, agentcore_gateway, inline_function or
-  #     remote_mcp configurations)
-  #   - memory { agentcore_memory_configuration { ... } }: managed memory
-  #   - skill { path = "..." } blocks: skill sources
-  #   - environment, environment_variables and environment_artifact: runtime
-  #     environments, environment variables and container artifacts
-  #   - truncation: conversation truncation strategy (sliding_window or
-  #     summarization)
-  #   - authorizer_configuration { custom_jwt_authorizer { ... } }: replaces
-  #     the default IAM inbound authorization with JWT authorization
-  #   - tags: resource tags
-  #
-  # Grant any newly configured capability least-privilege access through
-  # var.additional_execution_role_policy_statements.
-  # ---------------------------------------------------------------------------
 
   depends_on = [aws_iam_role_policy.execution_role]
 }

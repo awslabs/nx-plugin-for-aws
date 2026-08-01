@@ -8,34 +8,16 @@ import { kebabCase, toClassName } from '../utils/names';
 import { getNpmScopePrefix } from '../utils/npm-scope';
 import type { AgentcoreHarnessGeneratorSchema } from './schema';
 
-/** Exact MVP default Bedrock model ID applied when `modelId` is omitted. */
-export const DEFAULT_HARNESS_MODEL_ID = 'global.anthropic.claude-sonnet-4-6';
-
-/** Exact MVP default system prompt applied when `systemPrompt` is omitted. */
-export const DEFAULT_HARNESS_SYSTEM_PROMPT = 'You are a helpful AI assistant.';
-
-/**
- * Exact MVP default allowed-tool patterns applied when `allowedTools` is
- * omitted. Resolution copies this array before handing it to callers so
- * caller mutation cannot alter this module-level constant.
- */
-export const DEFAULT_HARNESS_ALLOWED_TOOLS: readonly string[] = ['@builtin'];
-
 /** Default parent directory applied when `directory` is omitted. */
 export const DEFAULT_HARNESS_DIRECTORY = 'packages';
-
-/** Bounds for the number of `allowedTools` entries (inclusive). */
-export const ALLOWED_TOOLS_MIN_ITEMS = 1;
-export const ALLOWED_TOOLS_MAX_ITEMS = 64;
 
 const INFRA_VALUES = ['agentcore', 'none'] as const;
 const IAC_VALUES = ['inherit', 'cdk', 'terraform'] as const;
 
 /**
- * Generator options after schema-predicate validation and exact default
+ * Generator options after schema-predicate validation and default
  * resolution. All validation happens before the generator mutates the Nx
- * tree; omitted execution limits stay `undefined` so infrastructure can
- * apply provider-equivalent null behaviour.
+ * tree.
  */
 export interface ResolvedAgentcoreHarnessOptions {
   /** Non-empty kebab-case project name segment. */
@@ -46,18 +28,10 @@ export interface ResolvedAgentcoreHarnessOptions {
   fullyQualifiedProjectName: string;
   /** `join(directory ?? 'packages', subDirectory ?? nameKebabCase)`. */
   projectRoot: string;
-  modelId: string;
-  systemPrompt: string;
-  allowedTools: readonly string[];
-  maxIterations?: number;
-  maxTokens?: number;
-  timeoutSeconds?: number;
   infra: 'agentcore' | 'none';
   iac: IacOption;
   preferInstallDependencies: boolean;
-  /** Runtime configuration key path registered for the deployed harness. */
-  runtimeConfigPath: `agentcore.harnesses.${string}`;
-  /** IAM is the only inbound authorization mode for the MVP. */
+  /** IAM is the only inbound authorization mode. */
   auth: 'iam';
 }
 
@@ -70,21 +44,6 @@ const containsNonWhitespace = (value: string): boolean => /\S/.test(value);
  */
 const invalidOption = (option: string, reason: string): Error =>
   new Error(`Invalid option '${option}': ${reason}`);
-
-const validateNonWhitespaceString = (
-  option: string,
-  value: string | undefined,
-): void => {
-  if (value === undefined) {
-    return;
-  }
-  if (typeof value !== 'string' || !containsNonWhitespace(value)) {
-    throw invalidOption(
-      option,
-      'must contain at least one non-whitespace character',
-    );
-  }
-};
 
 /**
  * Placement options must be non-empty relative path fragments with no
@@ -115,21 +74,6 @@ const validatePathFragment = (
   }
 };
 
-const validatePositiveInteger = (
-  option: string,
-  value: number | undefined,
-): void => {
-  if (value === undefined) {
-    return;
-  }
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw invalidOption(
-      option,
-      `must be a positive integer (received ${value})`,
-    );
-  }
-};
-
 const validateEnumValue = <T extends string>(
   option: string,
   value: string | undefined,
@@ -146,42 +90,14 @@ const validateEnumValue = <T extends string>(
   }
 };
 
-const validateAllowedTools = (value: string[] | undefined): void => {
-  if (value === undefined) {
-    return;
-  }
-  if (!Array.isArray(value)) {
-    throw invalidOption('allowedTools', 'must be an array of tool patterns');
-  }
-  if (
-    value.length < ALLOWED_TOOLS_MIN_ITEMS ||
-    value.length > ALLOWED_TOOLS_MAX_ITEMS
-  ) {
-    throw invalidOption(
-      'allowedTools',
-      `must contain between ${ALLOWED_TOOLS_MIN_ITEMS} and ${ALLOWED_TOOLS_MAX_ITEMS} entries (received ${value.length})`,
-    );
-  }
-  value.forEach((entry, index) => {
-    if (typeof entry !== 'string' || !containsNonWhitespace(entry)) {
-      throw invalidOption(
-        'allowedTools',
-        `entry at index ${index} must contain at least one non-whitespace character`,
-      );
-    }
-  });
-};
-
 /**
  * Validate raw generator options against the schema predicates and resolve
- * the exact MVP defaults.
+ * defaults.
  *
  * Mirrors the schema.json predicates so programmatic invocations receive
  * the same guarantees as Nx CLI schema validation: every rejection names
  * the offending option and is thrown before the generator mutates the Nx
- * tree or invokes infrastructure helpers. Omitted execution limits remain
- * `undefined` (provider null behaviour); all other omitted options resolve
- * to the documented creation defaults.
+ * tree or invokes infrastructure helpers.
  */
 export const resolveAgentcoreHarnessOptions = (
   tree: Tree,
@@ -198,12 +114,6 @@ export const resolveAgentcoreHarnessOptions = (
   }
   validatePathFragment('directory', options.directory);
   validatePathFragment('subDirectory', options.subDirectory);
-  validateNonWhitespaceString('modelId', options.modelId);
-  validateNonWhitespaceString('systemPrompt', options.systemPrompt);
-  validateAllowedTools(options.allowedTools);
-  validatePositiveInteger('maxIterations', options.maxIterations);
-  validatePositiveInteger('maxTokens', options.maxTokens);
-  validatePositiveInteger('timeoutSeconds', options.timeoutSeconds);
   validateEnumValue('infra', options.infra, INFRA_VALUES);
   validateEnumValue('iac', options.iac, IAC_VALUES);
 
@@ -224,18 +134,9 @@ export const resolveAgentcoreHarnessOptions = (
       options.directory ?? DEFAULT_HARNESS_DIRECTORY,
       options.subDirectory ?? nameKebabCase,
     ),
-    modelId: options.modelId ?? DEFAULT_HARNESS_MODEL_ID,
-    systemPrompt: options.systemPrompt ?? DEFAULT_HARNESS_SYSTEM_PROMPT,
-    // Copy so neither the module-level default nor the caller's array is
-    // aliased by the resolved options.
-    allowedTools: [...(options.allowedTools ?? DEFAULT_HARNESS_ALLOWED_TOOLS)],
-    maxIterations: options.maxIterations,
-    maxTokens: options.maxTokens,
-    timeoutSeconds: options.timeoutSeconds,
     infra: options.infra ?? 'agentcore',
     iac: options.iac ?? 'inherit',
     preferInstallDependencies: options.preferInstallDependencies ?? true,
-    runtimeConfigPath: `agentcore.harnesses.${nameClassName}`,
     auth: 'iam',
   };
 };

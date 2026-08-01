@@ -460,13 +460,17 @@ const addAgentCoreGatewayTerraformInfra = (
 export interface AddAgentCoreHarnessInfraProps {
   harnessNameClassName: string;
   harnessNameKebabCase: string;
-  modelId: string;
-  systemPrompt: string;
-  allowedTools: string[];
-  maxIterations?: number;
-  maxTokens?: number;
-  timeoutSeconds?: number;
+  /** Workspace-root-relative harness project root, eg `packages/my-harness`. */
+  projectRoot: string;
+  /** Leading-letter-guaranteed, 31-char-truncated resource name prefix. */
+  harnessNamePrefix: string;
 }
+
+/**
+ * Starter system prompt rendered into both harness templates. Superseded by
+ * the generated `src/PROMPT.md` read, which deletes this constant.
+ */
+const DEFAULT_HARNESS_SYSTEM_PROMPT = 'You are a helpful AI assistant.';
 
 /**
  * Render a string as a quoted Terraform (HCL) string literal.
@@ -502,35 +506,19 @@ const hclStringLiteral = (value: string): string => {
 };
 
 /**
- * Render a string array as a Terraform list literal in the canonical
- * `terraform fmt` style (`", "` separators).
- */
-const hclStringListLiteral = (values: string[]): string =>
-  `[${values.map(hclStringLiteral).join(', ')}]`;
-
-/**
  * Template substitution context shared by the CDK and Terraform harness
- * branches so both providers render the same semantic defaults. String and
- * list values are serialised for the destination language rather than
- * manually quoted so prompts and tool patterns containing quotes, newlines,
+ * branches. The system prompt is serialised for the destination language
+ * rather than manually quoted, so text containing quotes, newlines,
  * backslashes or interpolation-like text (`${`) cannot break the generated
- * source: `*Json` fields are embedded in the TypeScript CDK template and
- * `*Hcl` fields in the Terraform template. Optional execution limits stay
- * `undefined` when omitted; templates omit the corresponding resource
- * property for provider-default semantics.
+ * source: `systemPromptJson` is embedded in the TypeScript CDK template and
+ * `systemPromptHcl` in the Terraform template.
  */
 interface HarnessTemplateContext {
   nameClassName: string;
   nameKebabCase: string;
-  modelIdJson: string;
+  harnessNamePrefix: string;
   systemPromptJson: string;
-  allowedToolsJson: string;
-  modelIdHcl: string;
   systemPromptHcl: string;
-  allowedToolsHcl: string;
-  maxIterations?: number;
-  maxTokens?: number;
-  timeoutSeconds?: number;
 }
 
 /**
@@ -551,21 +539,13 @@ export const addAgentCoreHarnessInfra = async (
   options: AddAgentCoreHarnessInfraProps & IACProvider,
 ): Promise<void> => {
   // One resolved template context, built once and passed to both provider
-  // branches. Execution limits are assigned explicitly (possibly to
-  // `undefined`) so the keys always exist and template conditionals can
-  // test them without a ReferenceError.
+  // branches.
   const templateContext: HarnessTemplateContext = {
     nameClassName: options.harnessNameClassName,
     nameKebabCase: options.harnessNameKebabCase,
-    modelIdJson: JSON.stringify(options.modelId),
-    systemPromptJson: JSON.stringify(options.systemPrompt),
-    allowedToolsJson: JSON.stringify(options.allowedTools),
-    modelIdHcl: hclStringLiteral(options.modelId),
-    systemPromptHcl: hclStringLiteral(options.systemPrompt),
-    allowedToolsHcl: hclStringListLiteral(options.allowedTools),
-    maxIterations: options.maxIterations,
-    maxTokens: options.maxTokens,
-    timeoutSeconds: options.timeoutSeconds,
+    harnessNamePrefix: options.harnessNamePrefix,
+    systemPromptJson: JSON.stringify(DEFAULT_HARNESS_SYSTEM_PROMPT),
+    systemPromptHcl: hclStringLiteral(DEFAULT_HARNESS_SYSTEM_PROMPT),
   };
 
   switch (options.iac) {
