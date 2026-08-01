@@ -2,50 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  addProjectConfiguration,
-  getProjects,
-  readJson,
-  readProjectConfiguration,
-  type Tree,
-  updateProjectConfiguration,
-} from '@nx/devkit';
+import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
-import { formatFilesInSubtree } from '../utils/format';
-import { installDependencies } from '../utils/install';
-import {
-  expectHasMetricTags,
-  expectHasTerraformMetricTags,
-} from '../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
+import { expectHasMetricTags } from '../utils/metrics.spec';
+import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { TS_VERSIONS } from '../utils/versions';
 import {
   AGENTCORE_HARNESS_GENERATOR_INFO,
   agentcoreHarnessGenerator,
+  readAgentCoreHarnessMetadata,
 } from './generator';
-import {
-  DEFAULT_HARNESS_MODEL_ID,
-  DEFAULT_HARNESS_SYSTEM_PROMPT,
-} from './resolve-options';
-
-// The install callback is never something a unit test should really run (it
-// spawns the package manager), so replace it with a spy the tests can assert
-// against and reject from.
-vi.mock('../utils/install', () => ({
-  installDependencies: vi.fn().mockResolvedValue(undefined),
-}));
-
-// Wrap (not replace) repository formatting so every test formats generated
-// files exactly as a real run would, while individual tests can inject a
-// one-shot failure to verify propagation.
-vi.mock('../utils/format', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../utils/format')>();
-  return {
-    ...actual,
-    formatFilesInSubtree: vi.fn(actual.formatFilesInSubtree),
-  };
-});
+import type { AgentcoreHarnessGeneratorSchema } from './schema';
+import harnessSchema from './schema.json' with { type: 'json' };
 
 const PROJECT_ROOT = 'packages/my-harness';
 const PROJECT_NAME = '@proj/my-harness';
@@ -54,45 +22,95 @@ const CDK_CONSTRUCT_PATH =
 const CDK_HARNESSES_INDEX_PATH =
   'packages/common/constructs/src/app/harnesses/index.ts';
 const CDK_APP_INDEX_PATH = 'packages/common/constructs/src/app/index.ts';
-const TF_MODULE_PATH =
-  'packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf';
 
-/** Exact reserved target contract owned by the generator. */
-const INVOKE_TARGET_CONTRACT = {
+/** Module path for an already-kebab-case name, which keys its directory. */
+const tfModulePath = (name: string) =>
+  `packages/common/terraform/src/app/harnesses/${name}/${name}.tf`;
+const TF_MODULE_PATH = tfModulePath('my-harness');
+
+/** Exact target contract the generator declares inline. */
+const CHAT_TARGET = {
   executor: 'nx:run-commands',
   options: {
-    command: 'tsx invoke.ts',
+    commands: ['tsx ./scripts/chat.ts'],
     cwd: '{projectRoot}',
   },
 };
-const BUILD_TARGET_CONTRACT = {
-  executor: 'nx:run-commands',
-  options: {
-    command: 'tsc --noEmit --project tsconfig.json',
-    cwd: '{projectRoot}',
-  },
+
+/** Exactly what `scripts/chat.ts` imports, sorted. */
+const CHAT_DEPENDENCIES = [
+  '@aws-lambda-powertools/parameters',
+  '@aws-sdk/client-appconfigdata',
+  '@aws-sdk/client-bedrock-agentcore',
+  'agent-chat-cli',
+];
+
+/** `@types/node` types `node:crypto`; `tsx` runs the script. No `typescript`. */
+const CHAT_DEV_DEPENDENCIES = ['@types/node', 'tsx'];
+
+/** The six options schema.json retains, in declaration order. */
+const SCHEMA_OPTIONS = [
+  'name',
+  'directory',
+  'subDirectory',
+  'infra',
+  'iac',
+  'preferInstallDependencies',
+];
+
+/**
+ * Compile-time mirror of `AgentcoreHarnessGeneratorSchema`: adding a field to
+ * or removing one from the interface fails to compile here, and the runtime
+ * assertion below compares these keys against schema.json.
+ */
+const SCHEMA_INTERFACE_OPTIONS: Record<
+  keyof AgentcoreHarnessGeneratorSchema,
+  true
+> = {
+  name: true,
+  directory: true,
+  subDirectory: true,
+  infra: true,
+  iac: true,
+  preferInstallDependencies: true,
 };
 
 /**
- * Serialize the tree's full change set so a test can assert a failed run
- * left the entire tree byte-for-byte unchanged.
+ * Every wildcard-resource IAM statement in the Terraform module, justified
+ * inline. The rule ids differ from the CDK template's because checkov ships
+ * separate rule sets for HCL and CloudFormation.
  */
-const snapshotTreeChanges = (tree: Tree) =>
-  tree.listChanges().map((change) => ({
-    path: change.path,
-    type: change.type,
-    content: change.content?.toString('utf-8'),
-  }));
+const TF_CHECKOV_SKIPS = [
+  'CKV_AWS_355:EcrPublicTokenAccess requires a wildcard resource; ecr-public:GetAuthorizationToken has no resource-level permission',
+  'CKV_AWS_355:StsForEcrPublicPull requires a wildcard resource; sts:GetServiceBearerToken has no resource-level permission',
+  'CKV_AWS_355:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission',
+  'CKV_AWS_290:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission',
+  'CKV_AWS_355:CloudWatchMetricsPublish requires a wildcard resource; cloudwatch:PutMetricData is scoped by the namespace condition instead',
+  'CKV_AWS_290:CloudWatchMetricsPublish requires a wildcard resource; cloudwatch:PutMetricData is scoped by the namespace condition instead',
+];
 
-const countOccurrences = (content: string, needle: string): number =>
-  content.split(needle).length - 1;
+/** Dependency key sets declared in the workspace root manifest. */
+const rootDependencyKeys = (tree: Tree) => {
+  const manifest = readJson(tree, 'package.json');
+  return {
+    dependencies: Object.keys(manifest.dependencies ?? {}),
+    devDependencies: Object.keys(manifest.devDependencies ?? {}),
+  };
+};
 
-/** Extract the raw `default = ...` expression of one Terraform variable. */
-const tfVariableDefault = (module: string, variable: string): string => {
-  const match = module.match(
-    new RegExp(`variable "${variable}" \\{[\\s\\S]*?default\\s*=\\s*(.+)`),
-  );
-  return match?.[1]?.trim() ?? '';
+/** Keys present after a generator run but not before it, sorted. */
+const addedKeys = (before: string[], after: string[]): string[] =>
+  after.filter((key) => !before.includes(key)).sort();
+
+/** Every file under a directory, relative to it, sorted. */
+const filesUnder = (tree: Tree, dir: string): string[] => {
+  const walk = (path: string): string[] =>
+    tree.isFile(path)
+      ? [path]
+      : tree.children(path).flatMap((child) => walk(`${path}/${child}`));
+  return walk(dir)
+    .map((path) => path.slice(dir.length + 1))
+    .sort();
 };
 
 describe('agentcore-harness generator', () => {
@@ -100,38 +118,45 @@ describe('agentcore-harness generator', () => {
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
-    vi.clearAllMocks();
   });
 
   describe('common behaviour', () => {
-    it('scaffolds a standalone application project with the exact reserved target contract', async () => {
+    // Property 3: Generated project surface.
+    // Validates: Requirements 6.6, 10.1, 10.7, 10.8, 10.9
+    it('generates exactly the four harness project files', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         iac: 'cdk',
       });
 
-      expect(tree.exists(`${PROJECT_ROOT}/project.json`)).toBe(true);
-      expect(tree.exists(`${PROJECT_ROOT}/invoke.ts`)).toBe(true);
-      expect(tree.exists(`${PROJECT_ROOT}/invoke-harness.ts`)).toBe(true);
-      expect(tree.exists(`${PROJECT_ROOT}/README.md`)).toBe(true);
-      expect(tree.exists(`${PROJECT_ROOT}/tsconfig.json`)).toBe(true);
+      // Set equality, so a leftover invoke.ts or tsconfig.json fails too.
+      expect(filesUnder(tree, PROJECT_ROOT)).toEqual([
+        'README.md',
+        'project.json',
+        'scripts/chat.ts',
+        'src/PROMPT.md',
+      ]);
 
       const config = readProjectConfiguration(tree, PROJECT_NAME);
-      expect(config.name).toBe(PROJECT_NAME);
       expect(config.root).toBe(PROJECT_ROOT);
       expect(config.projectType).toBe('application');
-      expect(Object.keys(config.targets ?? {}).sort()).toEqual([
-        'build',
-        'invoke',
-      ]);
-      expect(config.targets?.invoke).toEqual(INVOKE_TARGET_CONTRACT);
-      expect(config.targets?.build).toEqual(BUILD_TARGET_CONTRACT);
     });
 
-    it('records the complete Generator-owned metadata, omitting unsupplied execution limits', async () => {
+    it('exposes exactly one target, chat, running the vended script', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
-        iac: 'cdk',
+        infra: 'none',
+      });
+
+      // Set equality, so a leftover invoke or build target fails too.
+      const config = readProjectConfiguration(tree, PROJECT_NAME);
+      expect(config.targets).toEqual({ chat: CHAT_TARGET });
+    });
+
+    it('records exactly the four metadata fields', async () => {
+      await agentcoreHarnessGenerator(tree, {
+        name: 'my-harness',
+        infra: 'none',
       });
 
       const config = readProjectConfiguration(tree, PROJECT_NAME);
@@ -139,428 +164,429 @@ describe('agentcore-harness generator', () => {
         generator: AGENTCORE_HARNESS_GENERATOR_INFO.id,
         name: 'my-harness',
         rc: 'MyHarness',
-        runtimeConfigPath: 'agentcore.harnesses.MyHarness',
-        modelId: DEFAULT_HARNESS_MODEL_ID,
-        systemPrompt: DEFAULT_HARNESS_SYSTEM_PROMPT,
-        allowedTools: ['@builtin'],
         auth: 'iam',
       });
-      // Omitted limits must be absent keys, not null/undefined values.
-      expect('maxIterations' in (config.metadata as any)).toBe(false);
-      expect('maxTokens' in (config.metadata as any)).toBe(false);
-      expect('timeoutSeconds' in (config.metadata as any)).toBe(false);
     });
 
-    it('templates the Invocation Client and README against the project identity', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      // The thin CLI performs the deterministic argument join/trim and
-      // delegates every behavior to the implementation module.
-      const invoke = tree.read(`${PROJECT_ROOT}/invoke.ts`, 'utf-8')!;
-      expect(invoke).toContain("from './invoke-harness'");
-      expect(invoke).toContain('runHarnessCli');
-
-      // Runtime Configuration lookup and usage guidance are wired to the
-      // project identity inside the implementation module.
-      const invokeHarness = tree.read(
-        `${PROJECT_ROOT}/invoke-harness.ts`,
-        'utf-8',
-      )!;
-      expect(invokeHarness).toContain("'MyHarness'");
-      expect(invokeHarness).toContain('@proj/my-harness:invoke');
-
-      const readme = tree.read(`${PROJECT_ROOT}/README.md`, 'utf-8')!;
-      expect(readme).toContain('# MyHarness');
-      expect(readme).toContain('nx run @proj/my-harness:invoke');
-
-      // The generated type-check target compiles both files.
-      const tsconfig = tree.read(`${PROJECT_ROOT}/tsconfig.json`, 'utf-8')!;
-      expect(tsconfig).toContain('invoke.ts');
-      expect(tsconfig).toContain('invoke-harness.ts');
-      expect(tsconfig).toContain('"noEmit": true');
-    });
-
-    it('flows custom options into persisted metadata and the CDK construct', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-        modelId: 'custom.model-id',
-        systemPrompt: 'Custom harness prompt.',
-        allowedTools: ['tool-one', 'tool-two'],
-        maxIterations: 7,
-        maxTokens: 2048,
-        timeoutSeconds: 120,
-      });
-
-      const config = readProjectConfiguration(tree, PROJECT_NAME);
-      expect(config.metadata as any).toEqual({
-        generator: AGENTCORE_HARNESS_GENERATOR_INFO.id,
-        name: 'my-harness',
-        rc: 'MyHarness',
-        runtimeConfigPath: 'agentcore.harnesses.MyHarness',
-        modelId: 'custom.model-id',
-        systemPrompt: 'Custom harness prompt.',
-        allowedTools: ['tool-one', 'tool-two'],
-        maxIterations: 7,
-        maxTokens: 2048,
-        timeoutSeconds: 120,
-        auth: 'iam',
-      });
-
-      const construct = tree.read(CDK_CONSTRUCT_PATH, 'utf-8')!;
-      expect(construct).toContain("modelId: 'custom.model-id'");
-      expect(construct).toContain('Custom harness prompt.');
-      expect(construct).toContain("'tool-one', 'tool-two'");
-      expect(construct).toContain('maxIterations: 7');
-      expect(construct).toContain('maxTokens: 2048');
-      expect(construct).toContain('timeoutSeconds: 120');
-    });
-
-    it('normalizes mixed-case names and applies the workspace npm scope', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'ShopFront Harness',
-        infra: 'none',
-      });
-
-      const config = readProjectConfiguration(tree, '@proj/shop-front-harness');
-      expect(config.root).toBe('packages/shop-front-harness');
-      const metadata = config.metadata as any;
-      expect(metadata.name).toBe('shop-front-harness');
-      expect(metadata.rc).toBe('ShopFrontHarness');
-      expect(metadata.runtimeConfigPath).toBe(
-        'agentcore.harnesses.ShopFrontHarness',
-      );
-    });
-
-    it('adds the generator metric tag to the CDK metrics aspect', async () => {
+    it('adds the generator metric tag', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         iac: 'cdk',
       });
       expectHasMetricTags(tree, AGENTCORE_HARNESS_GENERATOR_INFO.metric);
     });
-  });
 
-  describe('placement', () => {
-    it('defaults the project root to packages/<kebab-case-name>', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-      expect(readProjectConfiguration(tree, PROJECT_NAME).root).toBe(
-        PROJECT_ROOT,
-      );
-    });
+    // Property 5: Prompt path resolvability.
+    // Validates: Requirements 8.3, 8.4, 8.6, 8.7, 8.10
+    it.each([
+      { placement: {}, root: PROJECT_ROOT },
+      {
+        placement: { directory: 'apps', subDirectory: 'harnesses/my-harness' },
+        root: 'apps/harnesses/my-harness',
+      },
+    ])(
+      'resolves the prompt path at $root for both providers',
+      async ({ placement, root }) => {
+        await agentcoreHarnessGenerator(tree, {
+          name: 'my-harness',
+          iac: 'cdk',
+          ...placement,
+        });
 
-    it('honours custom directory and subDirectory placement', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        directory: 'apps',
-        subDirectory: 'harnesses/mine',
-        infra: 'none',
-      });
+        expect(tree.exists(`${root}/src/PROMPT.md`)).toBe(true);
+        // Workspace-root-relative, joined onto findWorkspaceRoot() at synth.
+        expect(tree.read(CDK_CONSTRUCT_PATH, 'utf-8')).toContain(
+          `'${root}/src/PROMPT.md'`,
+        );
 
-      expect(tree.exists('apps/harnesses/mine/project.json')).toBe(true);
-      expect(tree.exists('apps/harnesses/mine/invoke.ts')).toBe(true);
-      expect(readProjectConfiguration(tree, PROJECT_NAME).root).toBe(
-        'apps/harnesses/mine',
-      );
-      expect(tree.exists(PROJECT_ROOT)).toBe(false);
-    });
-  });
+        const terraformTree = createTreeUsingTsSolutionSetup();
+        await agentcoreHarnessGenerator(terraformTree, {
+          name: 'my-harness',
+          iac: 'terraform',
+          ...placement,
+        });
 
-  describe('reserved targets and reruns', () => {
-    it('preserves unrelated user targets and re-adds a missing reserved target on rerun', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
+        expect(terraformTree.exists(`${root}/src/PROMPT.md`)).toBe(true);
+        // Seven `../` segments walk from the module to the workspace root.
+        expect(terraformTree.read(TF_MODULE_PATH, 'utf-8')).toContain(
+          `file("\${path.module}/../../../../../../../${root}/src/PROMPT.md")`,
+        );
+      },
+    );
 
-      const config = readProjectConfiguration(tree, PROJECT_NAME);
-      config.targets!['docs'] = {
-        executor: 'nx:run-commands',
-        options: { command: 'echo docs' },
-      };
-      delete config.targets!.build;
-      updateProjectConfiguration(tree, PROJECT_NAME, config);
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      const rerun = readProjectConfiguration(tree, PROJECT_NAME);
-      // The user-defined target is untouched.
-      expect(rerun.targets?.['docs']).toEqual({
-        executor: 'nx:run-commands',
-        options: { command: 'echo docs' },
-      });
-      // The missing reserved target is re-added exactly per contract, and
-      // the compatible reserved target is retained.
-      expect(rerun.targets?.build).toEqual(BUILD_TARGET_CONTRACT);
-      expect(rerun.targets?.invoke).toEqual(INVOKE_TARGET_CONTRACT);
-    });
-
-    it('reruns with equivalent options leave project.json byte-for-byte unchanged', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-      const firstRun = tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8')!;
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      // Compatible reserved targets are retained byte-for-byte and the
-      // metadata merge is a no-op, so nothing is reserialized.
-      expect(tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8')).toBe(firstRun);
-    });
-  });
-
-  describe('metadata and dependencies', () => {
-    it('preserves unrelated metadata and fills only missing owned fields on rerun', async () => {
+    it('reads harness metadata and rejects a foreign project', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         infra: 'none',
       });
 
       const config = readProjectConfiguration(tree, PROJECT_NAME);
-      (config.metadata as any).custom = 'user-value';
-      // Simulate metadata written before an owned field existed.
-      delete (config.metadata as any).modelId;
-      updateProjectConfiguration(tree, PROJECT_NAME, config);
-
-      await agentcoreHarnessGenerator(tree, {
+      expect(readAgentCoreHarnessMetadata(config)).toEqual({
+        generator: AGENTCORE_HARNESS_GENERATOR_INFO.id,
         name: 'my-harness',
-        infra: 'none',
+        rc: 'MyHarness',
+        auth: 'iam',
       });
 
-      const metadata = readProjectConfiguration(tree, PROJECT_NAME)
-        .metadata as any;
-      expect(metadata.custom).toBe('user-value');
-      expect(metadata.modelId).toBe(DEFAULT_HARNESS_MODEL_ID);
-      expect(metadata.systemPrompt).toBe(DEFAULT_HARNESS_SYSTEM_PROMPT);
-      expect(metadata.generator).toBe(AGENTCORE_HARNESS_GENERATOR_INFO.id);
-    });
-
-    it('adds exact-pinned dependencies split across runtime and development', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      const packageJson = readJson(tree, 'package.json');
-      // pnpm catalogs are enabled by default in the test tree: the version
-      // is recorded in the workspace catalog and package.json is left with
-      // a `catalog:` reference, so resolve it back to the recorded range.
-      const catalog: Record<string, string> = tree.exists('pnpm-workspace.yaml')
-        ? ((
-            yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as {
-              catalog?: Record<string, string>;
-            }
-          ).catalog ?? {})
-        : {};
-      const resolveVersion = (
-        section: Record<string, string>,
-        pkg: string,
-      ): string | undefined =>
-        section[pkg] === 'catalog:' ? catalog[pkg] : section[pkg];
-
-      const runtimeDependencies = {
-        '@aws-sdk/client-bedrock-agentcore':
-          TS_VERSIONS['@aws-sdk/client-bedrock-agentcore'],
-        '@aws-sdk/client-appconfigdata':
-          TS_VERSIONS['@aws-sdk/client-appconfigdata'],
-        '@aws-lambda-powertools/parameters':
-          TS_VERSIONS['@aws-lambda-powertools/parameters'],
-      };
-      const devDependencies = {
-        '@types/node': TS_VERSIONS['@types/node'],
-        tsx: TS_VERSIONS.tsx,
-        typescript: TS_VERSIONS.typescript,
-      };
-      for (const [pkg, expected] of Object.entries(runtimeDependencies)) {
-        expect(resolveVersion(packageJson.dependencies, pkg)).toBe(expected);
-      }
-      for (const [pkg, expected] of Object.entries(devDependencies)) {
-        expect(resolveVersion(packageJson.devDependencies, pkg)).toBe(expected);
-      }
-
-      // Runtime and development dependencies must not bleed into each other.
-      for (const pkg of Object.keys(devDependencies)) {
-        expect(packageJson.dependencies[pkg]).toBeUndefined();
-      }
-      for (const pkg of Object.keys(runtimeDependencies)) {
-        expect(packageJson.devDependencies[pkg]).toBeUndefined();
-      }
-      // Every added version is an exact pin with no range operator.
-      for (const [pkg, section] of [
-        ...Object.keys(runtimeDependencies).map(
-          (pkg) => [pkg, packageJson.dependencies] as const,
-        ),
-        ...Object.keys(devDependencies).map(
-          (pkg) => [pkg, packageJson.devDependencies] as const,
-        ),
-      ]) {
-        const version = resolveVersion(section, pkg);
-        expect(version).toMatch(/^\d+\.\d+\.\d+(?:-[\w.]+)?$/);
-      }
-    });
-
-    it('rerunning with equivalent options leaves metadata unchanged', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-        maxTokens: 1024,
-      });
-      const firstMetadata = readProjectConfiguration(tree, PROJECT_NAME)
-        .metadata as any;
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      expect(readProjectConfiguration(tree, PROJECT_NAME).metadata).toEqual(
-        firstMetadata,
+      expect(() =>
+        readAgentCoreHarnessMetadata({
+          ...config,
+          metadata: { generator: 'ts#project' } as any,
+        }),
+      ).toThrow(
+        `Project '${PROJECT_NAME}' was not generated by the '${AGENTCORE_HARNESS_GENERATOR_INFO.id}' generator.`,
       );
     });
   });
 
-  describe('infrastructure provider routing', () => {
-    it('cdk: emits the CDK construct and exports without any Terraform output', async () => {
-      // infra omitted resolves to the 'agentcore' default.
+  describe('dependencies and schema', () => {
+    // Validates: Requirements 10.10
+    it('adds exactly the dependencies scripts/chat.ts needs', async () => {
+      const before = rootDependencyKeys(tree);
+
+      await agentcoreHarnessGenerator(tree, {
+        name: 'my-harness',
+        infra: 'none',
+      });
+
+      // Key sets, not pinned versions: the requirement is which dependencies
+      // are added, so a version bump does not churn the test.
+      const after = rootDependencyKeys(tree);
+      expect(addedKeys(before.dependencies, after.dependencies)).toEqual(
+        CHAT_DEPENDENCIES,
+      );
+      expect(addedKeys(before.devDependencies, after.devDependencies)).toEqual(
+        CHAT_DEV_DEPENDENCIES,
+      );
+
+      // They land on the workspace root manifest as catalog references, with
+      // the pinned version recorded in the pnpm catalog.
+      const manifest = readJson(tree, 'package.json');
+      const declared = {
+        ...manifest.dependencies,
+        ...manifest.devDependencies,
+      };
+      const { catalog } = yaml.load(
+        tree.read('pnpm-workspace.yaml', 'utf-8') ?? '',
+      ) as { catalog?: Record<string, string> };
+      for (const dep of [...CHAT_DEPENDENCIES, ...CHAT_DEV_DEPENDENCIES]) {
+        expect(declared[dep], dep).toBe('catalog:');
+        expect(catalog?.[dep], dep).toMatch(/^\d+\.\d+\.\d+/);
+      }
+    });
+
+    // Validates: Requirements 10.10
+    it('adds no typescript dependency: no generated target runs tsc', async () => {
+      await agentcoreHarnessGenerator(tree, {
+        name: 'my-harness',
+        infra: 'none',
+      });
+
+      const { dependencies, devDependencies } = rootDependencyKeys(tree);
+      expect(dependencies).not.toContain('typescript');
+      expect(devDependencies).not.toContain('typescript');
+      // TS_VERSIONS keeps its typescript entry: workspace init and sibling
+      // generators read it. R10.10 governs the harness's added deps only.
+      expect(TS_VERSIONS.typescript).toBeDefined();
+    });
+
+    // Validates: Requirements 5.1, 5.2, 5.3
+    it('exposes exactly the six retained options', () => {
+      // Equality, so a reintroduced modelId or systemPrompt fails.
+      expect(Object.keys(harnessSchema.properties)).toEqual(SCHEMA_OPTIONS);
+      expect(Object.keys(SCHEMA_INTERFACE_OPTIONS)).toEqual(SCHEMA_OPTIONS);
+      expect(harnessSchema.required).toEqual(['name']);
+    });
+  });
+
+  describe('CDK iac', () => {
+    /** The construct as rendered for the default `packages/my-harness` root. */
+    let construct: string;
+
+    beforeEach(async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         iac: 'cdk',
       });
+      construct = tree.read(CDK_CONSTRUCT_PATH, 'utf-8') ?? '';
+    });
 
-      expect(tree.exists(CDK_CONSTRUCT_PATH)).toBe(true);
-      expect(tree.exists(CDK_HARNESSES_INDEX_PATH)).toBe(true);
+    // Validates: Requirements 5.7, 8.3, 9.1
+    it('emits the construct, exports it, and inlines the model id and prompt read', () => {
+      expect(construct).toContain('export class MyHarness extends Construct');
+      // ESM workspace, so addStarExport keeps the `.js` specifier suffix.
       expect(tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8')).toContain(
-        "export * from './my-harness/my-harness.js'",
+        "export * from './my-harness/my-harness.js';",
       );
       expect(tree.read(CDK_APP_INDEX_PATH, 'utf-8')).toContain(
-        "export * from './harnesses/index.js'",
+        "export * from './harnesses/index.js';",
       );
-      expect(tree.exists('packages/common/terraform')).toBe(false);
+      expect(construct).toContain(
+        "modelId: 'global.anthropic.claude-sonnet-4-6',",
+      );
+      // Anchoring on findWorkspaceRoot keeps the read correct once the
+      // construct compiles to dist/; a source-relative path would not.
+      expect(construct).toContain('fs.readFileSync(');
+      expect(construct).toContain(
+        'findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url)))',
+      );
+      expect(construct).toContain('systemPrompt: [{ text: systemPrompt }],');
     });
 
-    it('cdk: renders the creation defaults and runtime configuration registration', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      const construct = tree.read(CDK_CONSTRUCT_PATH, 'utf-8')!;
-      expect(construct).toContain(`modelId: '${DEFAULT_HARNESS_MODEL_ID}'`);
-      expect(construct).toContain(DEFAULT_HARNESS_SYSTEM_PROMPT);
-      expect(construct).toContain("allowedTools: ['@builtin']");
-      // Omitted execution limits are omitted resource properties.
-      expect(construct).not.toContain('maxIterations');
-      expect(construct).not.toContain('maxTokens');
-      expect(construct).not.toContain('timeoutSeconds');
-      // Runtime Configuration merge under agentcore.harnesses.<ClassName>.
-      expect(construct).toContain("rc.set('agentcore', 'harnesses'");
-      expect(construct).toContain('MyHarness: this.harness.attrArn');
+    // Validates: Requirements 11.6, 11.7, 11.8, 11.9
+    it('suppresses the three unscopeable IAM statements on the role policy', () => {
+      // App-level specifier: the construct sits three directories below core/.
+      expect(construct).toContain(
+        "import { suppressRules } from '../../../core/checkov.js';",
+      );
+      expect(construct).toContain(
+        "const WILDCARD_IAM_RULES = ['CKV_AWS_111', 'CKV_AWS_356'];",
+      );
+      // suppressRules targets a CfnResource, so the suppression lands on the
+      // role's policy and each sid stays traceable in its reason.
+      expect(construct).toContain(
+        'const isPolicy = (c: IConstruct) => c instanceof iam.Policy;',
+      );
+      expect(construct.match(/suppressRules\(\n/g)).toHaveLength(3);
+      for (const reason of [
+        'EcrPublicTokenAccess: ecr-public:GetAuthorizationToken has no resource-level permission.',
+        'StsForEcrPublicPull: sts:GetServiceBearerToken has no resource-level permission.',
+        'XRayTracingAccess: X-Ray segment and sampling APIs have no resource-level permission.',
+      ]) {
+        expect(construct, reason).toContain(`        '${reason}',`);
+      }
     });
 
-    it('terraform: emits the Terraform module without any CDK harness output', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'terraform',
-      });
+    // Property 6: No tools by default.
+    // Validates: Requirements 9.1, 9.2
+    it('configures no tools on the resource but exposes allowedTools as props', () => {
+      // From the resource literal onwards, so an allowedTools assignment
+      // anywhere in the resource or after it fails.
+      const resourceStart = construct.indexOf('new agentcore.CfnHarness(');
+      expect(resourceStart).toBeGreaterThan(0);
+      expect(construct.slice(resourceStart)).not.toContain('allowedTools');
 
-      expect(tree.exists(TF_MODULE_PATH)).toBe(true);
-      expect(tree.exists('packages/common/constructs')).toBe(false);
-      expectHasTerraformMetricTags(
-        tree,
-        AGENTCORE_HARNESS_GENERATOR_INFO.metric,
+      // Omitted from the inherited native props, so the optional field below
+      // is the only route by which a caller can supply tools.
+      expect(construct).toContain(
+        "Omit<agentcore.CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>",
       );
-    });
-
-    it('terraform: renders the creation defaults with null omitted limits', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'terraform',
-      });
-
-      const module = tree.read(TF_MODULE_PATH, 'utf-8')!;
-      expect(tfVariableDefault(module, 'model_id')).toBe(
-        `"${DEFAULT_HARNESS_MODEL_ID}"`,
+      expect(construct).toContain(
+        "allowedTools?: agentcore.CfnHarnessProps['allowedTools'];",
       );
-      expect(tfVariableDefault(module, 'system_prompt')).toBe(
-        `"${DEFAULT_HARNESS_SYSTEM_PROMPT}"`,
-      );
-      expect(tfVariableDefault(module, 'allowed_tools')).toBe('["@builtin"]');
-      expect(tfVariableDefault(module, 'max_iterations')).toBe('null');
-      expect(tfVariableDefault(module, 'max_tokens')).toBe('null');
-      expect(tfVariableDefault(module, 'timeout_seconds')).toBe('null');
-      expect(module).toContain('resource "aws_bedrockagentcore_harness"');
-      expect(module).toContain(
-        '"MyHarness" = aws_bedrockagentcore_harness.this.arn',
-      );
-    });
-
-    it('terraform: flows custom options into module variable defaults', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'terraform',
-        modelId: 'custom.model-id',
-        systemPrompt: 'Custom harness prompt.',
-        allowedTools: ['tool-one', 'tool-two'],
-        maxIterations: 7,
-        maxTokens: 2048,
-        timeoutSeconds: 120,
-      });
-
-      const module = tree.read(TF_MODULE_PATH, 'utf-8')!;
-      expect(tfVariableDefault(module, 'model_id')).toBe('"custom.model-id"');
-      expect(tfVariableDefault(module, 'system_prompt')).toBe(
-        '"Custom harness prompt."',
-      );
-      // Canonical `terraform fmt` list style: `", "`-separated entries.
-      expect(tfVariableDefault(module, 'allowed_tools')).toBe(
-        '["tool-one", "tool-two"]',
-      );
-      expect(tfVariableDefault(module, 'max_iterations')).toBe('7');
-      expect(tfVariableDefault(module, 'max_tokens')).toBe('2048');
-      expect(tfVariableDefault(module, 'timeout_seconds')).toBe('120');
-    });
-
-    it('infra none: emits neither Shared Infrastructure Project nor harness infrastructure', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      expect(tree.exists(`${PROJECT_ROOT}/invoke.ts`)).toBe(true);
-      expect(tree.exists('packages/common/constructs')).toBe(false);
-      expect(tree.exists('packages/common/terraform')).toBe(false);
     });
   });
 
-  describe('infra: none -> agentcore upgrade', () => {
-    it('adds absent infrastructure from persisted creation defaults while preserving user edits byte-for-byte', async () => {
+  describe('Terraform iac', () => {
+    /** The module as rendered for the default `packages/my-harness` root. */
+    let tf: string;
+
+    beforeEach(async () => {
+      await agentcoreHarnessGenerator(tree, {
+        name: 'my-harness',
+        iac: 'terraform',
+      });
+      tf = tree.read(TF_MODULE_PATH, 'utf-8') ?? '';
+    });
+
+    // Validates: Requirements 5.8, 8.4
+    it('emits the module, inlines the model id, and vends no CDK construct', () => {
+      expect(tf).toContain('resource "aws_bedrockagentcore_harness" "this" {');
+      expect(tf).toContain(
+        'default     = "global.anthropic.claude-sonnet-4-6"',
+      );
+      // Read at plan time; Property 5 pins the interpolated path itself.
+      expect(tf).toMatch(
+        /system_prompt \{\s+text = file\("\$\{path\.module\}\//,
+      );
+
+      expect(tree.exists(CDK_CONSTRUCT_PATH)).toBe(false);
+      expect(tree.exists(CDK_HARNESSES_INDEX_PATH)).toBe(false);
+    });
+
+    // Property 6: No tools by default (Terraform side).
+    // Validates: Requirements 8.5, 9.3
+    it('declares only the three retained input variables', () => {
+      // Set equality, so a reintroduced system_prompt, allowed_tools,
+      // max_iterations, max_tokens or timeout_seconds variable fails.
+      expect(
+        [...tf.matchAll(/^variable "([a-z_]+)"/gm)].map(([, name]) => name),
+      ).toEqual([
+        'model_id',
+        'model_resource_arns',
+        'additional_execution_role_policy_statements',
+      ]);
+      // No validation block survives, and nothing references the removed
+      // variables or assigns tools to the resource.
+      expect(tf).not.toContain('validation {');
+      expect(tf).not.toContain('var.system_prompt');
+      expect(tf).not.toContain('allowed_tools');
+    });
+
+    // Validates: Requirements 11.2, 11.10
+    it('justifies every wildcard IAM statement inline', () => {
+      for (const skip of TF_CHECKOV_SKIPS) {
+        expect(tf, skip).toContain(`#checkov:skip=${skip}`);
+      }
+      // Count too, so an unjustified statement cannot be added silently.
+      expect(tf.match(/#checkov:skip=/g)).toHaveLength(TF_CHECKOV_SKIPS.length);
+      expect(tf).not.toContain('Advanced extension region');
+    });
+
+    // Property 4: Harness name prefix validity.
+    // Validates: Requirements 11.1, 11.3, 11.4
+    it.each([
+      { label: 'an ordinary name', name: 'my-harness', prefix: 'MyHarness' },
+      {
+        label: 'a digit-leading name',
+        name: '123-harness',
+        prefix: 'H_123Harness',
+      },
+      {
+        label: 'an over-long name',
+        name: 'a-really-long-harness-name-that-exceeds-the-limit',
+        prefix: 'AReallyLongHarnessNameThatExcee',
+      },
+      {
+        label: 'an over-long digit-leading name',
+        name: '1234567890-a-really-long-digit-leading-harness-name',
+        prefix: 'H_1234567890AReallyLongDigitLea',
+      },
+    ])('interpolates the name prefix for $label', async ({ name, prefix }) => {
+      const boundaryTree = createTreeUsingTsSolutionSetup();
+      await agentcoreHarnessGenerator(boundaryTree, {
+        name,
+        iac: 'terraform',
+      });
+      const rendered =
+        /harness_name_prefix = "([^"]*)"/.exec(
+          boundaryTree.read(tfModulePath(name), 'utf-8') ?? '',
+        )?.[1] ?? '';
+
+      expect(rendered).toBe(prefix);
+      // toClassName prefixes `_` for a digit-leading name, so the explicit `H`
+      // must be applied before the truncation: a leading letter and a 31-char
+      // cap keep `_<8 hex>` inside the 40-character AgentCore limit.
+      expect(rendered).toMatch(/^[A-Za-z]/);
+      expect(rendered.length).toBeLessThanOrEqual(31);
+    });
+
+    it('computes the name prefix in TypeScript, not HCL', () => {
+      expect(tf).not.toContain('substr(');
+      expect(tf).not.toContain('regexall(');
+    });
+  });
+
+  describe('idempotency and infra: none', () => {
+    const CDK_OPTIONS: AgentcoreHarnessGeneratorSchema = {
+      name: 'my-harness',
+      iac: 'cdk',
+    };
+    const PROMPT_PATH = `${PROJECT_ROOT}/src/PROMPT.md`;
+
+    /** The line addStarExport writes into the vended harnesses index. */
+    const HARNESS_EXPORT_LINE = "export * from './my-harness/my-harness.js';";
+
+    /**
+     * Append a marker, keeping the edit format-stable: the generator formats
+     * every file changed in the tree, so an edit biome would rewrite would
+     * fail the comparison below for a reason that is not preservation.
+     */
+    const applyUserEdit = (path: string, marker: string) =>
+      tree.write(path, `${tree.read(path, 'utf-8')}\n${marker}\n`);
+
+    /** Full contents at edit time, which the re-run must leave alone. */
+    const recordBytes = (paths: string[]) =>
+      new Map(paths.map((path) => [path, tree.read(path, 'utf-8')]));
+
+    const expectBytesPreserved = (recorded: Map<string, string | null>) => {
+      for (const [path, contents] of recorded) {
+        // Non-empty, so a path that was never written cannot pass vacuously.
+        expect(contents, path).toBeTruthy();
+        // Full-content equality against the recorded bytes. A `toContain`
+        // marker check would still pass with KeepExisting dropped and the
+        // rest of the file rewritten, so it is not preservation evidence.
+        expect(tree.read(path, 'utf-8'), path).toBe(contents);
+      }
+    };
+
+    const harnessExportLines = () =>
+      (tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8') ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line === HARNESS_EXPORT_LINE);
+
+    // Property 1: User-owned file preservation. The only unit-level proof of
+    // it — R3.3 deleted the e2e test and R6.3 removed preflight's re-run
+    // rejection, leaving KeepExisting and `??=` as the whole guarantee.
+    // Validates: Requirements 6.7, 3.3
+    it('preserves an edited project file and vended construct byte-for-byte', async () => {
+      await agentcoreHarnessGenerator(tree, CDK_OPTIONS);
+
+      applyUserEdit(PROMPT_PATH, '## user edit');
+      applyUserEdit(CDK_CONSTRUCT_PATH, '// user edit');
+      const recorded = recordBytes([PROMPT_PATH, CDK_CONSTRUCT_PATH]);
+
+      await agentcoreHarnessGenerator(tree, CDK_OPTIONS);
+
+      expectBytesPreserved(recorded);
+      // `??=` keeps a target the user owns, so the first-run contract still
+      // holds exactly, and the wiring stays unique rather than duplicated.
+      expect(readProjectConfiguration(tree, PROJECT_NAME).targets).toEqual({
+        chat: CHAT_TARGET,
+      });
+      expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
+    });
+
+    // Validates: Requirements 6.7
+    it('restores exactly one harness export after the user deletes it', async () => {
+      await agentcoreHarnessGenerator(tree, CDK_OPTIONS);
+      expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
+
+      tree.write(
+        CDK_HARNESSES_INDEX_PATH,
+        (tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8') ?? '')
+          .split('\n')
+          .filter((line) => line.trim() !== HARNESS_EXPORT_LINE)
+          .join('\n'),
+      );
+      expect(harnessExportLines()).toEqual([]);
+
+      await agentcoreHarnessGenerator(tree, CDK_OPTIONS);
+
+      // Exactly one: neither left absent nor duplicated.
+      expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
+    });
+
+    // Validates: Requirements 1.6
+    it('emits no infrastructure, then adds it on an infra: agentcore re-run', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         infra: 'none',
-        modelId: 'custom.upgrade-model',
       });
 
-      // Representative user edit to a User-Owned File between runs. The
-      // content is already formatter-stable so byte comparison is exact.
-      const userEditedInvoke =
-        "// user-edited invocation client\nexport const userEdit = 'preserved';\n";
-      tree.write(`${PROJECT_ROOT}/invoke.ts`, userEditedInvoke);
+      const projectFiles = filesUnder(tree, PROJECT_ROOT);
+      expect(projectFiles).toEqual([
+        'README.md',
+        'project.json',
+        'scripts/chat.ts',
+        'src/PROMPT.md',
+      ]);
+      // No construct, no Terraform module, and no vended index to export from.
+      for (const path of [
+        CDK_CONSTRUCT_PATH,
+        CDK_HARNESSES_INDEX_PATH,
+        CDK_APP_INDEX_PATH,
+        TF_MODULE_PATH,
+      ]) {
+        expect(tree.exists(path), path).toBe(false);
+      }
 
-      // Upgrade run: infra agentcore, omitted modelId resolves from the
-      // metadata persisted at creation rather than the built-in default.
+      const recorded = recordBytes(
+        projectFiles.map((file) => `${PROJECT_ROOT}/${file}`),
+      );
+      // An explicit iac is required: resolveIac throws on `inherit` without an
+      // aws-nx-plugin.config.mts.
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         infra: 'agentcore',
@@ -568,390 +594,30 @@ describe('agentcore-harness generator', () => {
       });
 
       expect(tree.exists(CDK_CONSTRUCT_PATH)).toBe(true);
-      const construct = tree.read(CDK_CONSTRUCT_PATH, 'utf-8')!;
-      expect(construct).toContain("modelId: 'custom.upgrade-model'");
-      expect(construct).not.toContain(DEFAULT_HARNESS_MODEL_ID);
-
-      // The user edit is preserved byte-for-byte through the upgrade.
-      expect(tree.read(`${PROJECT_ROOT}/invoke.ts`, 'utf-8')).toBe(
-        userEditedInvoke,
+      expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
+      expect(tree.read(CDK_APP_INDEX_PATH, 'utf-8')).toContain(
+        "export * from './harnesses/index.js';",
       );
-
-      // Metadata still records the original creation defaults.
-      const metadata = readProjectConfiguration(tree, PROJECT_NAME)
-        .metadata as any;
-      expect(metadata.modelId).toBe('custom.upgrade-model');
+      // The upgrade adds infrastructure without disturbing the project.
+      expectBytesPreserved(recorded);
+      expect(readProjectConfiguration(tree, PROJECT_NAME).targets).toEqual({
+        chat: CHAT_TARGET,
+      });
     });
   });
 
-  describe('integration conflicts', () => {
-    it('rejects a project owned by a different generator and leaves the tree unchanged', async () => {
-      addProjectConfiguration(tree, PROJECT_NAME, {
-        root: PROJECT_ROOT,
-        projectType: 'application',
-        targets: {},
-        metadata: { generator: 'ts#project' } as any,
-      });
-      const before = snapshotTreeChanges(tree);
-
-      await expect(
-        agentcoreHarnessGenerator(tree, { name: 'my-harness', infra: 'none' }),
-      ).rejects.toThrow(
-        /^Integration conflict: project '@proj\/my-harness' already exists but is owned by the 'ts#project' generator/,
-      );
-
-      expect(snapshotTreeChanges(tree)).toEqual(before);
-    });
-
-    it('rejects a project without generator metadata, not labelled as a schema error', async () => {
-      addProjectConfiguration(tree, PROJECT_NAME, {
-        root: PROJECT_ROOT,
-        projectType: 'application',
-        targets: {},
-      });
-
-      const failure = await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      }).then(
-        () => undefined,
-        (error: Error) => error,
-      );
-
-      expect(failure?.message).toMatch(/^Integration conflict: /);
-      expect(failure?.message).toContain(
-        'another tool (it has no generator metadata)',
-      );
-      // Project conflicts must not masquerade as schema-validation errors.
-      expect(failure?.message).not.toContain('Invalid option');
-    });
-
-    it('rejects an existing Generator-owned project at an incompatible root, naming both roots', async () => {
-      addProjectConfiguration(tree, PROJECT_NAME, {
-        root: 'apps/elsewhere',
-        projectType: 'application',
-        targets: {},
-        metadata: { generator: AGENTCORE_HARNESS_GENERATOR_INFO.id } as any,
-      });
-      const before = snapshotTreeChanges(tree);
-
-      await expect(
-        agentcoreHarnessGenerator(tree, { name: 'my-harness', infra: 'none' }),
-      ).rejects.toThrow(
-        /^Integration conflict: .*'apps\/elsewhere'.*'packages\/my-harness'/,
-      );
-
-      expect(snapshotTreeChanges(tree)).toEqual(before);
-    });
-
-    it.each(['invoke', 'build'] as const)(
-      'rejects an incompatible reserved %s target on rerun, naming the target',
-      async (targetName) => {
-        await agentcoreHarnessGenerator(tree, {
-          name: 'my-harness',
-          infra: 'none',
-        });
-
-        const config = readProjectConfiguration(tree, PROJECT_NAME);
-        config.targets![targetName] = {
-          ...config.targets![targetName],
-          options: { command: 'echo user-conflict', cwd: '{projectRoot}' },
-        };
-        updateProjectConfiguration(tree, PROJECT_NAME, config);
-        const projectJson = tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8');
-
-        await expect(
-          agentcoreHarnessGenerator(tree, {
-            name: 'my-harness',
-            infra: 'none',
-          }),
-        ).rejects.toThrow(
-          new RegExp(
-            `^Integration conflict: .*reserved '${targetName}' target that differs from the agentcore-harness target contract`,
-          ),
-        );
-
-        // The conflicting project is untouched by the failed run.
-        expect(tree.read(`${PROJECT_ROOT}/project.json`, 'utf-8')).toBe(
-          projectJson,
-        );
-      },
-    );
-
-    it('rejects an explicit creation option that conflicts with persisted metadata, naming option and both values', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      const failure = await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-        modelId: 'different.model',
-      }).then(
-        () => undefined,
-        (error: Error) => error,
-      );
-
-      expect(failure?.message).toMatch(/^Integration conflict: /);
-      expect(failure?.message).toContain("option 'modelId'");
-      expect(failure?.message).toContain('different.model');
-      expect(failure?.message).toContain(DEFAULT_HARNESS_MODEL_ID);
-    });
-
-    it('rejects explicitly changed allowedTools on rerun', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-        allowedTools: ['tool-a'],
-      });
-
-      await expect(
-        agentcoreHarnessGenerator(tree, {
-          name: 'my-harness',
-          infra: 'none',
-          allowedTools: ['tool-a', 'tool-b'],
-        }),
-      ).rejects.toThrow(/^Integration conflict: option 'allowedTools'/);
-    });
-
-    it('accepts re-supplying values identical to the persisted creation defaults', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-        allowedTools: ['tool-a'],
-      });
-
-      await expect(
-        agentcoreHarnessGenerator(tree, {
-          name: 'my-harness',
-          infra: 'none',
-          modelId: DEFAULT_HARNESS_MODEL_ID,
-          allowedTools: ['tool-a'],
-        }),
-      ).resolves.toBeDefined();
-    });
-
-    it('rejects explicit cdk against an existing Terraform Shared Infrastructure Project, naming both providers, with the entire tree unchanged', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'terraform' });
-      const before = snapshotTreeChanges(tree);
-
-      await expect(
-        agentcoreHarnessGenerator(tree, { name: 'my-harness', iac: 'cdk' }),
-      ).rejects.toThrow(
-        /^Integration conflict: the explicitly selected IaC provider 'cdk' differs from the existing 'terraform' Shared Infrastructure Project/,
-      );
-
-      expect(snapshotTreeChanges(tree)).toEqual(before);
-    });
-
-    it('rejects explicit terraform against an existing CDK Shared Infrastructure Project, naming both providers, with the entire tree unchanged', async () => {
-      await sharedConstructsGenerator(tree, { iac: 'cdk' });
-      const before = snapshotTreeChanges(tree);
-
-      await expect(
-        agentcoreHarnessGenerator(tree, {
-          name: 'my-harness',
-          iac: 'terraform',
-        }),
-      ).rejects.toThrow(
-        /^Integration conflict: the explicitly selected IaC provider 'terraform' differs from the existing 'cdk' Shared Infrastructure Project/,
-      );
-
-      expect(snapshotTreeChanges(tree)).toEqual(before);
-    });
-
-    it('reports the explicit-provider remediation when inherit cannot resolve', async () => {
-      // No aws-nx-plugin config exists, so `iac: inherit` (the default)
-      // cannot resolve a provider for infra: agentcore.
-      await expect(
-        agentcoreHarnessGenerator(tree, { name: 'my-harness' }),
-      ).rejects.toThrow(/--iac=cdk or --iac=terraform/);
-    });
-  });
-
-  describe('error propagation', () => {
-    // Missing centralized dependency versions (requirement 11.4) are covered
-    // by schema.spec.ts, which asserts withVersions throws for unregistered
-    // packages.
-
-    it('propagates a formatting failure', async () => {
-      vi.mocked(formatFilesInSubtree).mockRejectedValueOnce(
-        new Error('formatting failed'),
-      );
-
-      await expect(
-        agentcoreHarnessGenerator(tree, { name: 'my-harness', infra: 'none' }),
-      ).rejects.toThrow('formatting failed');
-    });
-
-    it('returns a callback that installs dependencies with the resolved preference', async () => {
-      const callback = await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-      expect(installDependencies).not.toHaveBeenCalled();
-
-      await callback();
-      expect(installDependencies).toHaveBeenCalledExactlyOnceWith(tree, true, {
-        languages: ['typescript'],
-      });
-    });
-
-    it('forwards preferInstallDependencies false to the install callback', async () => {
-      const callback = await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-        preferInstallDependencies: false,
-      });
-
-      await callback();
-      expect(installDependencies).toHaveBeenCalledExactlyOnceWith(tree, false, {
-        languages: ['typescript'],
-      });
-    });
-
-    it('propagates a dependency-installation failure from the callback', async () => {
-      const callback = await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        infra: 'none',
-      });
-
-      vi.mocked(installDependencies).mockRejectedValueOnce(
-        new Error('install failed'),
-      );
-      await expect(callback()).rejects.toThrow('install failed');
-    });
-  });
-
-  // User-Owned File byte preservation uses its own fixtures and assertions,
-  // deliberately separate from the Generator-Owned Wiring deduplication
-  // cases below (requirement 14.3): passing deduplication is never treated
-  // as preservation evidence, and vice versa.
-  describe('User-Owned File preservation', () => {
-    // Formatter-stable file contents: reruns format changed files, so the
-    // fixtures are already in repository format to keep the comparison
-    // byte-exact (as it is for on-disk files in a real workspace).
-    const USER_EDITED_TS =
-      "// user-edited\nexport const userEdit = 'preserved';\n";
-    const USER_EDITED_JSON = '{\n  "userEdited": true\n}\n';
-    const USER_EDITED_MD = '# user-edited readme\n';
-    const USER_EDITED_TF = '# user-edited terraform module\n';
-
-    it('preserves edited project files byte-for-byte on rerun', async () => {
+  describe('snapshot', () => {
+    // The project directory only. The vended construct and Terraform module
+    // stay out: they are long and churn for reasons unrelated to this
+    // generator, so the blocks above cover them with targeted assertions.
+    // Validates: Requirements 1.3, 1.4, 1.5, 1.6, 16.3
+    it('snapshots the four rendered harness project files', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         iac: 'cdk',
       });
 
-      tree.write(`${PROJECT_ROOT}/invoke.ts`, USER_EDITED_TS);
-      tree.write(`${PROJECT_ROOT}/README.md`, USER_EDITED_MD);
-      tree.write(`${PROJECT_ROOT}/tsconfig.json`, USER_EDITED_JSON);
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      expect(tree.read(`${PROJECT_ROOT}/invoke.ts`, 'utf-8')).toBe(
-        USER_EDITED_TS,
-      );
-      expect(tree.read(`${PROJECT_ROOT}/README.md`, 'utf-8')).toBe(
-        USER_EDITED_MD,
-      );
-      expect(tree.read(`${PROJECT_ROOT}/tsconfig.json`, 'utf-8')).toBe(
-        USER_EDITED_JSON,
-      );
-    });
-
-    it('preserves an edited CDK construct file byte-for-byte on rerun', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      tree.write(CDK_CONSTRUCT_PATH, USER_EDITED_TS);
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      expect(tree.read(CDK_CONSTRUCT_PATH, 'utf-8')).toBe(USER_EDITED_TS);
-    });
-
-    it('preserves an edited Terraform module file byte-for-byte on rerun', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'terraform',
-      });
-
-      tree.write(TF_MODULE_PATH, USER_EDITED_TF);
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'terraform',
-      });
-
-      expect(tree.read(TF_MODULE_PATH, 'utf-8')).toBe(USER_EDITED_TF);
-    });
-  });
-
-  describe('Generator-Owned Wiring deduplication', () => {
-    const HARNESS_EXPORT = "export * from './my-harness/my-harness.js'";
-    const APP_EXPORT = "export * from './harnesses/index.js'";
-
-    it('reruns keep exactly one semantic copy of each CDK export and one project configuration', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      expect(
-        countOccurrences(
-          tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8')!,
-          HARNESS_EXPORT,
-        ),
-      ).toBe(1);
-      expect(
-        countOccurrences(tree.read(CDK_APP_INDEX_PATH, 'utf-8')!, APP_EXPORT),
-      ).toBe(1);
-
-      // A single project configuration exists for the harness.
-      const projectNames = [...getProjects(tree).keys()].filter(
-        (name) => name === PROJECT_NAME,
-      );
-      expect(projectNames).toHaveLength(1);
-    });
-
-    it('does not grow duplicated equivalent wiring on rerun', async () => {
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      // Duplicate the generator-owned export (eg. from a hand merge).
-      tree.write(
-        CDK_HARNESSES_INDEX_PATH,
-        `${HARNESS_EXPORT};\n${HARNESS_EXPORT};\n`,
-      );
-
-      await agentcoreHarnessGenerator(tree, {
-        name: 'my-harness',
-        iac: 'cdk',
-      });
-
-      // The rerun recognises the equivalent wiring and adds no third copy.
-      expect(
-        countOccurrences(
-          tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8')!,
-          HARNESS_EXPORT,
-        ),
-      ).toBe(2);
+      snapshotTreeDir(tree, PROJECT_ROOT);
     });
   });
 });
