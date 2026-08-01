@@ -4,6 +4,7 @@
  */
 import { relative } from 'node:path';
 import {
+  detectPackageManager,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -309,6 +310,26 @@ export const tsRdbGenerator = async (
     ]),
     joinPathFragments(projectConfig.root, 'package.json'),
   );
+
+  // @prisma/adapter-pg depends on @types/pg ^8.16.0. Yarn does not dedupe it to
+  // the workspace's pinned @types/pg, so it installs a separate copy under the
+  // adapter's own node_modules whenever a newer @types/pg is published. The two
+  // copies declare structurally incompatible Pool types, so passing our `new
+  // Pool(...)` to `new PrismaPg(...)` fails to compile. Scope the resolution to
+  // the adapter so other @types/pg consumers are unaffected. Classic yarn only
+  // honours the `**/`-prefixed descriptor in a workspace and berry only the
+  // bare one, so declare both.
+  if (options.engine === 'postgres' && detectPackageManager() === 'yarn') {
+    updateJson(tree, 'package.json', (packageJson) => {
+      packageJson.resolutions = {
+        ...packageJson.resolutions,
+        '**/@prisma/adapter-pg/@types/pg': TS_VERSIONS['@types/pg'],
+        '@prisma/adapter-pg/@types/pg': TS_VERSIONS['@types/pg'],
+      };
+      return packageJson;
+    });
+  }
+
   // The prisma CLI and tsx run migration/seed scripts from the root.
   addDependenciesToPackageJson(tree, {}, withVersions(['prisma', 'tsx']));
 
