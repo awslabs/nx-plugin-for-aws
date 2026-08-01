@@ -235,11 +235,15 @@ export const tsMcpServerGenerator = async (
   // The two zod copies have structurally incompatible types, which breaks type
   // inference for registerTool inputSchema. Scope the resolution to the SDK so
   // other consumers (e.g. @tanstack/router-generator pinning zod@3) are unaffected.
+  // Classic yarn only honours the `**/`-prefixed descriptor in a workspace, and
+  // berry only the bare one — it deletes a glob descriptor on install — so
+  // declare both.
   if (detectPackageManager() === 'yarn') {
     updateJson(tree, 'package.json', (packageJson) => {
       packageJson.resolutions = {
         ...packageJson.resolutions,
         '**/@modelcontextprotocol/sdk/zod': TS_VERSIONS['zod'],
+        '@modelcontextprotocol/sdk/zod': TS_VERSIONS['zod'],
       };
       return packageJson;
     });

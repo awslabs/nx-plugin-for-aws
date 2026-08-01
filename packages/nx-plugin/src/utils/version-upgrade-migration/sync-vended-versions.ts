@@ -28,14 +28,15 @@ import { isVendedUpgrade } from './vended-upgrade';
 
 /**
  * Syncs the versions a generated workspace pins to those this release vends:
- * TypeScript dependencies, Python pins, Terraform providers, and the plugin
- * version the metrics files report.
+ * TypeScript dependencies (including those pinned only by an override), Python
+ * pins, Terraform providers, and the plugin version the metrics files report.
  *
  * nx and `@nx/*` are excluded — `packageJsonUpdates` owns them so `nx migrate`
  * collects Nx's own migrations (see `nx-package-updates.ts`).
  */
 
-const YAML_CATALOG_FILES = ['pnpm-workspace.yaml', '.yarnrc.yml'];
+/** Workspace files holding catalog definitions, and pnpm 11's overrides. */
+const YAML_WORKSPACE_FILES = ['pnpm-workspace.yaml', '.yarnrc.yml'];
 
 /**
  * Vended version for a dependency this workspace's generators own, or undefined
@@ -191,7 +192,7 @@ const syncPackageJsons = (tree: Tree, owned: OwnedDependencies): string[] => {
 
 /** Snapshot of every catalog definition file, for change detection. */
 const readCatalogFiles = (tree: Tree): string =>
-  [...YAML_CATALOG_FILES, 'package.json']
+  [...YAML_WORKSPACE_FILES, 'package.json']
     .map((path) => (tree.exists(path) ? tree.read(path, 'utf-8') : ''))
     .join('\0');
 
@@ -223,7 +224,7 @@ const syncOrphanCatalogEntries = (
     return changed;
   };
 
-  for (const path of YAML_CATALOG_FILES) {
+  for (const path of YAML_WORKSPACE_FILES) {
     if (!tree.exists(path)) {
       continue;
     }
@@ -255,6 +256,116 @@ const syncOrphanCatalogEntries = (
     });
     if (changed) {
       updated.push('package.json');
+    }
+  }
+
+  return updated;
+};
+
+/**
+ * The package an override key pins, or undefined when the key names none.
+ *
+ * A key is a package name, optionally preceded by the path it is scoped to and
+ * followed by the parent range it applies at:
+ *
+ *   zod                                     -> zod
+ *   zod@^3                                  -> zod
+ *   **&#47;@modelcontextprotocol/sdk/zod        -> zod
+ *   @prisma/adapter-pg/@types/pg            -> @types/pg
+ *
+ * The last segment is the package, since every earlier one is a parent it is
+ * scoped under — except that a scope and the name after it are one segment.
+ */
+const overriddenPackage = (key: string): string | undefined => {
+  const segments = key.split('/').reduce<string[]>((acc, part) => {
+    // A bare `@scope` is only half a name; join it to what follows.
+    const previous = acc[acc.length - 1];
+    if (previous?.startsWith('@') && !previous.includes('/')) {
+      acc[acc.length - 1] = `${previous}/${part}`;
+      return acc;
+    }
+    acc.push(part);
+    return acc;
+  }, []);
+
+  const name = segments[segments.length - 1];
+  if (!name || name === '.') {
+    return undefined;
+  }
+  // A trailing `@range` scopes the override to a parent version.
+  const at = name.lastIndexOf('@');
+  return at > 0 ? name.slice(0, at) : name;
+};
+
+/**
+ * Sync the owned packages an override pins, wherever the workspace keeps them:
+ * npm's `overrides`, yarn and bun's `resolutions`, and pnpm's `pnpm.overrides`
+ * (10) or `pnpm-workspace.yaml` `overrides` (11).
+ *
+ * Devkit does not manage these fields, so an owned package pinned only here
+ * would otherwise stay on the version it was generated with. Values are compared
+ * with `isVendedUpgrade`, so a range the user widened is left alone.
+ */
+const syncOverrides = (tree: Tree, owned: OwnedDependencies): string[] => {
+  const updated: string[] = [];
+
+  // Nested npm overrides carry the pin under `.`, with sibling keys scoping
+  // deeper, so a value may be a string or another override object.
+  const syncOverrideTree = (overrides: unknown): boolean => {
+    if (typeof overrides !== 'object' || overrides === null) {
+      return false;
+    }
+    let changed = false;
+    for (const [key, value] of Object.entries(
+      overrides as Record<string, unknown>,
+    )) {
+      if (typeof value === 'object' && value !== null) {
+        changed = syncOverrideTree(value) || changed;
+        continue;
+      }
+      if (typeof value !== 'string') {
+        continue;
+      }
+      // `.` pins the package its parent key names.
+      const name =
+        key === '.' ? undefined : (overriddenPackage(key) ?? undefined);
+      const vended = name ? vendedTsVersion(owned, name) : undefined;
+      if (vended && isVendedUpgrade(vended, value)) {
+        (overrides as Record<string, unknown>)[key] = vended;
+        changed = true;
+      }
+    }
+    return changed;
+  };
+
+  visitNotIgnoredFiles(tree, '.', (path) => {
+    if (!path.endsWith('package.json')) {
+      return;
+    }
+    let changed = false;
+    updateJson(tree, path, (json) => {
+      changed = [
+        syncOverrideTree(json.overrides),
+        syncOverrideTree(json.resolutions),
+        syncOverrideTree(json.pnpm?.overrides),
+      ].some(Boolean);
+      return json;
+    });
+    if (changed) {
+      updated.push(path);
+    }
+  });
+
+  // pnpm 11 reads overrides from the workspace file instead of the manifest.
+  for (const path of YAML_WORKSPACE_FILES) {
+    if (!tree.exists(path)) {
+      continue;
+    }
+    const workspaceFile = (yaml.load(tree.read(path, 'utf-8') ?? '') ??
+      {}) as Record<string, unknown>;
+    if (syncOverrideTree(workspaceFile.overrides)) {
+      tree.write(path, yaml.dump(workspaceFile, { quotingType: "'" }));
+      updated.push(path);
     }
   }
 
@@ -432,13 +543,14 @@ export const syncVendedVersions = async (
 
   const packageJsons = syncPackageJsons(tree, owned);
   const catalogs = syncOrphanCatalogEntries(tree, owned);
+  const overrides = syncOverrides(tree, owned);
   const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
   await syncMetricsVersion(tree);
 
   // Lock files are left to the user: `nx migrate` only installs when the root
   // manifest changes, and never runs `uv` or `terraform`.
-  if (catalogs.length > 0 || packageJsons.length > 0) {
+  if (catalogs.length > 0 || packageJsons.length > 0 || overrides.length > 0) {
     nextSteps.push(
       'TypeScript dependency versions were updated. Run your package manager install to update the lock file.',
     );

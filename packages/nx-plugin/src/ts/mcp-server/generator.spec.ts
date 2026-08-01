@@ -1124,9 +1124,14 @@ describe('ts#mcp-server generator', () => {
     const yarnRc = yaml.load(tree.read('.yarnrc.yml', 'utf-8')) as {
       catalog: Record<string, string>;
     };
+    // Classic yarn honours the `**/` form, berry the bare one — and berry deletes
+    // a glob descriptor on install, so both must be declared.
     expect(
       rootPackageJson.resolutions?.['**/@modelcontextprotocol/sdk/zod'],
     ).toBe(yarnRc.catalog.zod);
+    expect(rootPackageJson.resolutions?.['@modelcontextprotocol/sdk/zod']).toBe(
+      yarnRc.catalog.zod,
+    );
   });
 
   it.each(['pnpm', 'npm', 'bun'] as const)(

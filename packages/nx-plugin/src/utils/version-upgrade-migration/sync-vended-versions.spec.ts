@@ -50,6 +50,21 @@ const writeCatalog = (tree: Tree, catalog: Record<string, string>): void => {
   tree.write('pnpm-workspace.yaml', yaml.dump({ ...workspaceYaml, catalog }));
 };
 
+const readWorkspaceYaml = (tree: Tree): Record<string, unknown> =>
+  (yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
+    string,
+    unknown
+  >) ?? {};
+
+const writeWorkspaceYaml = (
+  tree: Tree,
+  entries: Record<string, unknown>,
+): void =>
+  tree.write(
+    'pnpm-workspace.yaml',
+    yaml.dump({ ...readWorkspaceYaml(tree), ...entries }),
+  );
+
 const requiredProviders = (awsVersion: string) => `terraform {
   required_providers {
     aws = {
@@ -130,6 +145,159 @@ describe('sync-vended-versions migration', () => {
     await syncVendedVersions(tree);
 
     expect(readCatalog(tree).zod).toBe(VENDED_ZOD);
+  });
+
+  // Generators pin a package under an override when a dependency's own range
+  // would otherwise resolve a second, incompatible copy. Devkit does not manage
+  // these fields, so without this the pin stays where it was generated.
+  describe('overrides and resolutions', () => {
+    it("should upgrade an owned package npm's overrides pins", async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { zod: '4.3.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').overrides.zod).toBe(VENDED_ZOD);
+    });
+
+    it("should upgrade an owned package yarn's resolutions pins", async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        resolutions: { zod: '4.3.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').resolutions.zod).toBe(VENDED_ZOD);
+    });
+
+    it("should upgrade an owned package pnpm 10's overrides pins", async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        pnpm: { overrides: { zod: '4.3.0' } },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').pnpm.overrides.zod).toBe(
+        VENDED_ZOD,
+      );
+    });
+
+    // pnpm 11 reads overrides from the workspace file rather than the manifest.
+    it("should upgrade an owned package pnpm 11's workspace overrides pins", async () => {
+      writeWorkspaceYaml(tree, { overrides: { zod: '4.3.0' } });
+
+      await syncVendedVersions(tree);
+
+      expect(readWorkspaceYaml(tree).overrides).toEqual({ zod: VENDED_ZOD });
+    });
+
+    // A key names the package in its last segment, with earlier segments the
+    // parents it is scoped under — the form both rdb and mcp-server generate.
+    // A scoped package keeps its `@`, so the boundary is only a `/` that isn't
+    // starting one.
+    it('should upgrade a package a scoped key pins', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        resolutions: {
+          '**/@modelcontextprotocol/sdk/zod': '4.3.0',
+          '@trpc/client/@trpc/server': '11.0.0',
+        },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').resolutions).toEqual({
+        '**/@modelcontextprotocol/sdk/zod': VENDED_ZOD,
+        '@trpc/client/@trpc/server': TS_VERSIONS['@trpc/server'],
+      });
+    });
+
+    // npm allows a trailing range on the key, scoping the override to the
+    // versions it intersects. The package is the part before it.
+    it('should upgrade a package a range-scoped key pins', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { 'zod@^4': '4.3.0', '@trpc/server@^11': '11.0.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').overrides).toEqual({
+        'zod@^4': VENDED_ZOD,
+        '@trpc/server@^11': TS_VERSIONS['@trpc/server'],
+      });
+    });
+
+    // npm nests an override to scope it, so the pin sits a level down.
+    it('should upgrade a package a nested override pins', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { '@modelcontextprotocol/sdk': { zod: '4.3.0' } },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').overrides).toEqual({
+        '@modelcontextprotocol/sdk': { zod: VENDED_ZOD },
+      });
+    });
+
+    it('should leave a package no generator owns alone', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { rxjs: '7.0.0' },
+        resolutions: { 'some-parent/rxjs': '7.0.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      const packageJson = readJson(tree, 'package.json');
+      expect(packageJson.overrides.rxjs).toBe('7.0.0');
+      expect(packageJson.resolutions['some-parent/rxjs']).toBe('7.0.0');
+    });
+
+    it('should leave a range the user widened alone', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { zod: '^4.0.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').overrides.zod).toBe('^4.0.0');
+    });
+
+    // nx moves through `packageJsonUpdates` so `nx migrate` collects Nx's own
+    // migrations; rewriting it here would skip them.
+    it('should leave an nx package alone', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { '@nx/devkit': '23.0.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(readJson(tree, 'package.json').overrides['@nx/devkit']).toBe(
+        '23.0.0',
+      );
+    });
+
+    it('should report the install a changed override needs', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        overrides: { zod: '4.3.0' },
+      });
+
+      const { nextSteps } = await syncVendedVersions(tree);
+
+      expect(nextSteps).toContainEqual(
+        expect.stringContaining('TypeScript dependency versions were updated'),
+      );
+    });
   });
 
   it('should not add a vended package to a manifest that does not declare it', async () => {
