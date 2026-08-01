@@ -140,6 +140,25 @@ module "user_identity" {
 </Fragment>
 </Infrastructure>
 
+##### The `EC2MetaDataSSRF_QUERYARGUMENTS` rule override
+
+One rule within `AWSManagedRulesCommonRuleSet` is overridden to [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) rather than left to Block: `EC2MetaDataSSRF_QUERYARGUMENTS`.
+
+That rule inspects query arguments for strings which look like an attempt at [server-side request forgery](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) against the EC2 instance metadata endpoint, and it treats a loopback address as one. When you run your website locally, the Hosted UI receives a `redirect_uri` pointing at `http://localhost:4200`, so the rule matches and the request is blocked — sign-in fails with an opaque `403 Forbidden` before the login page renders.
+
+Counting the rule means matches are recorded in the Web ACL metrics and WAF logs, but the request is allowed through. Every other rule in the group, including the rest of the SSRF protections, still blocks. The redirect URIs Cognito will accept are constrained by the User Pool client's callback URL allowlist regardless, so this does not widen where users can be redirected to.
+
+If you do not need to sign in against a local dev server, you can remove the override so the rule blocks again:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Delete the `ruleActionOverrides` property from the `CRSRule` rule in `packages/common/constructs/src/core/user-identity.ts`.
+</Fragment>
+<Fragment slot="terraform">
+Delete the `rule_action_override` block from the `CRSRule` rule in `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
+</Fragment>
+</Infrastructure>
+
 ## Infrastructure Usage
 
 <Infrastructure>
