@@ -460,65 +460,28 @@ const addAgentCoreGatewayTerraformInfra = (
 export interface AddAgentCoreHarnessInfraProps {
   harnessNameClassName: string;
   harnessNameKebabCase: string;
-  /** Workspace-root-relative harness project root, eg `packages/my-harness`. */
+  /**
+   * Workspace-root-relative harness project root, eg `packages/my-harness`.
+   * The `src/PROMPT.md` path both templates read is derived from it.
+   */
   projectRoot: string;
   /** Leading-letter-guaranteed, 31-char-truncated resource name prefix. */
   harnessNamePrefix: string;
 }
 
 /**
- * Starter system prompt rendered into both harness templates. Superseded by
- * the generated `src/PROMPT.md` read, which deletes this constant.
- */
-const DEFAULT_HARNESS_SYSTEM_PROMPT = 'You are a helpful AI assistant.';
-
-/**
- * Render a string as a quoted Terraform (HCL) string literal.
- *
- * JSON serialisation alone is not safe for HCL: `${` and `%{` introduce
- * template interpolation/directives inside HCL quoted strings, and HCL does
- * not support JSON's `\b`/`\f` escapes. Backslashes and quotes are escaped
- * first, interpolation introducers are neutralised (`$${`, `%%{`), and any
- * remaining control characters use HCL `\n`/`\r`/`\t` or `\uNNNN` escapes.
- */
-const hclStringLiteral = (value: string): string => {
-  const escaped = value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    // split/join avoids String.replace's `$`-pattern replacement semantics
-    .split('${')
-    .join('$${')
-    .split('%{')
-    .join('%%{')
-    .replace(/[\u0000-\u001f\u2028\u2029]/g, (character) => {
-      switch (character) {
-        case '\n':
-          return '\\n';
-        case '\r':
-          return '\\r';
-        case '\t':
-          return '\\t';
-        default:
-          return `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
-      }
-    });
-  return `"${escaped}"`;
-};
-
-/**
  * Template substitution context shared by the CDK and Terraform harness
- * branches. The system prompt is serialised for the destination language
- * rather than manually quoted, so text containing quotes, newlines,
- * backslashes or interpolation-like text (`${`) cannot break the generated
- * source: `systemPromptJson` is embedded in the TypeScript CDK template and
- * `systemPromptHcl` in the Terraform template.
+ * branches. Both prompt path fields carry the same workspace-root-relative
+ * path, named per provider so each template's usage reads on its own.
  */
 interface HarnessTemplateContext {
   nameClassName: string;
   nameKebabCase: string;
   harnessNamePrefix: string;
-  systemPromptJson: string;
-  systemPromptHcl: string;
+  /** Joined onto `findWorkspaceRoot()` in the CDK construct. */
+  promptPathFromCdk: string;
+  /** Appended to the `path.module` walk to the workspace root in Terraform. */
+  promptPathFromTerraform: string;
 }
 
 /**
@@ -539,13 +502,15 @@ export const addAgentCoreHarnessInfra = async (
   options: AddAgentCoreHarnessInfraProps & IACProvider,
 ): Promise<void> => {
   // One resolved template context, built once and passed to both provider
-  // branches.
+  // branches. The prompt path is derived from the same projectRoot the
+  // Harness Project is written to, so explicit placement needs no extra logic.
+  const promptPath = joinPathFragments(options.projectRoot, 'src', 'PROMPT.md');
   const templateContext: HarnessTemplateContext = {
     nameClassName: options.harnessNameClassName,
     nameKebabCase: options.harnessNameKebabCase,
     harnessNamePrefix: options.harnessNamePrefix,
-    systemPromptJson: JSON.stringify(DEFAULT_HARNESS_SYSTEM_PROMPT),
-    systemPromptHcl: hclStringLiteral(DEFAULT_HARNESS_SYSTEM_PROMPT),
+    promptPathFromCdk: promptPath,
+    promptPathFromTerraform: promptPath,
   };
 
   switch (options.iac) {
