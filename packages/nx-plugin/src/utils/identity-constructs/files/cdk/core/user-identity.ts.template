@@ -36,6 +36,9 @@ import { suppressRules } from './checkov<% if (esm) { %>.js<% } %>';
 
 const WEB_CLIENT_ID = 'WebClient';
 
+/** Local dev server origins permitted to complete the sign-in redirect */
+const LOCAL_CALLBACK_URLS = ['http://localhost:4200', 'http://localhost:4300'];
+
 export interface UserIdentityProps {
   /**
    * Whether to enable AWS WAFv2 with the default managed ruleset
@@ -67,7 +70,11 @@ export class UserIdentity extends Construct {
     this.userPool = this.createUserPool();
 
     if (enableWaf) {
-      this.webAcl = this.createWebAcl(id, this.userPool);
+      this.webAcl = this.createWebAcl(
+        id,
+        this.userPool,
+        LOCAL_CALLBACK_URLS.length > 0
+      );
     }
     this.userPoolDomain = this.createUserPoolDomain(this.userPool);
     this.userPoolClient = this.createUserPoolClient(this.userPool);
@@ -155,7 +162,11 @@ export class UserIdentity extends Construct {
     return userPool;
   };
 
-  private createWebAcl = (id: string, userPool: UserPool) => {
+  private createWebAcl = (
+    id: string,
+    userPool: UserPool,
+    allowsLocalCallback: boolean
+  ) => {
     const webAcl = new CfnWebACL(this, 'WebAcl', {
       defaultAction: { allow: {} },
       scope: 'REGIONAL',
@@ -172,17 +183,17 @@ export class UserIdentity extends Construct {
             managedRuleGroupStatement: {
               name: 'AWSManagedRulesCommonRuleSet',
               vendorName: 'AWS',
-              // EC2MetaDataSSRF_QUERYARGUMENTS blocks any query argument that looks
-              // like an SSRF target, which includes the localhost redirect_uri the
-              // Hosted UI receives when signing in against a local dev server.
-              // Counted rather than blocked so local sign-in works; every other rule
-              // in the group still blocks.
-              ruleActionOverrides: [
-                {
-                  name: 'EC2MetaDataSSRF_QUERYARGUMENTS',
-                  actionToUse: { count: {} },
-                },
-              ],
+              // EC2MetaDataSSRF_QUERYARGUMENTS treats the loopback redirect_uri the
+              // Hosted UI receives during local sign-in as an SSRF attempt. Counted
+              // only while a local callback URL is allowed; every other rule blocks.
+              ruleActionOverrides: allowsLocalCallback
+                ? [
+                    {
+                      name: 'EC2MetaDataSSRF_QUERYARGUMENTS',
+                      actionToUse: { count: {} },
+                    },
+                  ]
+                : undefined,
             },
           },
           visibilityConfig: {
@@ -253,7 +264,7 @@ export class UserIdentity extends Construct {
   private createUserPoolClient = (userPool: UserPool) => {
     const lazilyComputedCallbackUrls = Lazy.list({
       produce: () =>
-        ['http://localhost:4200', 'http://localhost:4300'].concat(
+        LOCAL_CALLBACK_URLS.concat(
           Stack.of(this)
             .node.findAll()
             .filter((child): child is Distribution => child instanceof Distribution)

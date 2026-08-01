@@ -14,11 +14,14 @@ import {
 /**
  * Count the EC2MetaDataSSRF_QUERYARGUMENTS WAF rule on the UserIdentity Web ACL
  *
- * `AWSManagedRulesCommonRuleSet` blocks any query argument that looks like an
- * SSRF target, which includes the `redirect_uri=http://localhost:...` the Cognito
- * Hosted UI receives when signing in against a local dev server. Sign-in fails
- * with an opaque 403 before the login page renders. The rule is overridden to
- * Count so local sign-in works; every other rule in the group still blocks.
+ * `AWSManagedRulesCommonRuleSet` treats the loopback `redirect_uri` the Cognito
+ * Hosted UI receives during local sign-in as an SSRF attempt, so sign-in against
+ * a local dev server fails with an opaque 403 before the login page renders. The
+ * rule is overridden to Count while a local callback URL is allowed; every other
+ * rule in the group still blocks.
+ *
+ * The local callback URLs are lifted into a named constant so the override can be
+ * derived from them rather than restating the condition.
  *
  * How to write a migration:
  * - https://nx.dev/docs/kb/migration-generators
@@ -39,71 +42,171 @@ const TERRAFORM_IDENTITY_FILE = `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/src/cor
 const SSRF_RULE_NAME = 'EC2MetaDataSSRF_QUERYARGUMENTS';
 
 // Guards each file: present only once the override has been added.
-const CDK_MIGRATED_PATTERN = `\`ruleActionOverrides: [{ name: '${SSRF_RULE_NAME}', actionToUse: { count: {} } }]\``;
+const CDK_MIGRATED_PATTERN = `\`ruleActionOverrides: allowsLocalCallback ? $_ : undefined\``;
 const TERRAFORM_MIGRATED_PATTERN = `language hcl\n\`name = "${SSRF_RULE_NAME}"\``;
 
-const OVERRIDE_COMMENT_LINES = [
-  `// ${SSRF_RULE_NAME} blocks any query argument that looks`,
-  '// like an SSRF target, which includes the localhost redirect_uri the',
-  '// Hosted UI receives when signing in against a local dev server.',
-  '// Counted rather than blocked so local sign-in works; every other rule',
-  '// in the group still blocks.',
-];
-
-// Matched on the managed rule group statement rather than the whole rule, so
-// argument order and formatting elsewhere in the Web ACL don't matter.
+// Every CDK edit site, matched structurally so formatting doesn't affect whether
+// the construct is recognised.
+const CDK_CONSTANT_ANCHOR_PATTERN = "`const WEB_CLIENT_ID = 'WebClient'`";
+// Scoped to the `.concat` callsite so it can't also rewrite the array literal
+// inside the constant this migration inserts.
+const CDK_LOCAL_URLS_PATTERN =
+  "`['http://localhost:4200', 'http://localhost:4300'].concat($rest)`";
+const CDK_CALL_PATTERN = '`this.createWebAcl($id, this.userPool)`';
+const CDK_SIGNATURE_PATTERN =
+  '`private createWebAcl = ($id: string, $pool: UserPool) => $body`';
 const CDK_STATEMENT_PATTERN =
   "`managedRuleGroupStatement: { name: 'AWSManagedRulesCommonRuleSet', vendorName: 'AWS' }`";
 
-const CDK_REWRITE = `${CDK_STATEMENT_PATTERN} => \`managedRuleGroupStatement: {
+const CDK_EDITS: Array<[string, string]> = [
+  // Local callback URLs become a named constant the override can key off.
+  [
+    CDK_CONSTANT_ANCHOR_PATTERN,
+    `${CDK_CONSTANT_ANCHOR_PATTERN} => \`const WEB_CLIENT_ID = 'WebClient';
+
+/** Local dev server origins permitted to complete the sign-in redirect */
+const LOCAL_CALLBACK_URLS = ['http://localhost:4200', 'http://localhost:4300']\``,
+  ],
+  [
+    CDK_LOCAL_URLS_PATTERN,
+    `${CDK_LOCAL_URLS_PATTERN} => \`LOCAL_CALLBACK_URLS.concat($rest)\``,
+  ],
+  [
+    CDK_CALL_PATTERN,
+    `${CDK_CALL_PATTERN} => \`this.createWebAcl($id, this.userPool, LOCAL_CALLBACK_URLS.length > 0)\``,
+  ],
+  [
+    CDK_SIGNATURE_PATTERN,
+    `${CDK_SIGNATURE_PATTERN} => \`private createWebAcl = (
+    $id: string,
+    $pool: UserPool,
+    allowsLocalCallback: boolean
+  ) => $body\``,
+  ],
+  [
+    CDK_STATEMENT_PATTERN,
+    `${CDK_STATEMENT_PATTERN} => \`managedRuleGroupStatement: {
               name: 'AWSManagedRulesCommonRuleSet',
               vendorName: 'AWS',
-              ${OVERRIDE_COMMENT_LINES.join('\n              ')}
-              ruleActionOverrides: [
-                {
-                  name: '${SSRF_RULE_NAME}',
-                  actionToUse: { count: {} },
-                },
-              ],
-            }\``;
+              // ${SSRF_RULE_NAME} treats the loopback redirect_uri the
+              // Hosted UI receives during local sign-in as an SSRF attempt. Counted
+              // only while a local callback URL is allowed; every other rule blocks.
+              ruleActionOverrides: allowsLocalCallback
+                ? [
+                    {
+                      name: '${SSRF_RULE_NAME}',
+                      actionToUse: { count: {} },
+                    },
+                  ]
+                : undefined,
+            }\``,
+  ],
+];
 
-const TERRAFORM_REWRITE = [
+const TERRAFORM_DATA_SOURCES_PATTERN = [
   'language hcl',
-  '`managed_rule_group_statement {',
-  '        name        = "AWSManagedRulesCommonRuleSet"',
-  '        vendor_name = "AWS"',
-  '      }` => `managed_rule_group_statement {',
-  '        name        = "AWSManagedRulesCommonRuleSet"',
-  '        vendor_name = "AWS"',
-  '',
-  `        # ${SSRF_RULE_NAME} blocks any query argument that looks like`,
-  '        # an SSRF target, which includes the localhost redirect_uri the Hosted UI',
-  '        # receives when signing in against a local dev server. Counted rather than',
-  '        # blocked so local sign-in works; every other rule in the group still blocks.',
-  '        rule_action_override {',
-  `          name = "${SSRF_RULE_NAME}"`,
-  '',
-  '          action_to_use {',
-  '            count {}',
-  '          }',
-  '        }',
-  '      }`',
+  '`data "aws_region" "current" {}`',
 ].join('\n');
+
+const TERRAFORM_EDITS: Array<[string, string]> = [
+  // Local callback URLs become a local the override can key off.
+  [
+    TERRAFORM_DATA_SOURCES_PATTERN,
+    [
+      'language hcl',
+      '`data "aws_region" "current" {}` => `data "aws_region" "current" {}',
+      '',
+      'locals {',
+      '  # Local dev server origins permitted to complete the sign-in redirect',
+      '  local_callback_urls = [',
+      '    "http://localhost:4200",',
+      '    "http://localhost:4300"',
+      '  ]',
+      '}`',
+    ].join('\n'),
+  ],
+  [
+    [
+      'language hcl',
+      '`callback_urls = concat([',
+      '    "http://localhost:4200",',
+      '    "http://localhost:4300"',
+      '  ], var.callback_urls)`',
+    ].join('\n'),
+    [
+      'language hcl',
+      '`callback_urls = concat([',
+      '    "http://localhost:4200",',
+      '    "http://localhost:4300"',
+      '  ], var.callback_urls)` => `callback_urls = concat(local.local_callback_urls, var.callback_urls)`',
+    ].join('\n'),
+  ],
+  [
+    [
+      'language hcl',
+      '`logout_urls = concat([',
+      '    "http://localhost:4200",',
+      '    "http://localhost:4300"',
+      '  ], var.logout_urls)`',
+    ].join('\n'),
+    [
+      'language hcl',
+      '`logout_urls = concat([',
+      '    "http://localhost:4200",',
+      '    "http://localhost:4300"',
+      '  ], var.logout_urls)` => `logout_urls = concat(local.local_callback_urls, var.logout_urls)`',
+    ].join('\n'),
+  ],
+  [
+    [
+      'language hcl',
+      '`managed_rule_group_statement {',
+      '        name        = "AWSManagedRulesCommonRuleSet"',
+      '        vendor_name = "AWS"',
+      '      }`',
+    ].join('\n'),
+    [
+      'language hcl',
+      '`managed_rule_group_statement {',
+      '        name        = "AWSManagedRulesCommonRuleSet"',
+      '        vendor_name = "AWS"',
+      '      }` => `managed_rule_group_statement {',
+      '        name        = "AWSManagedRulesCommonRuleSet"',
+      '        vendor_name = "AWS"',
+      '',
+      `        # ${SSRF_RULE_NAME} treats the loopback redirect_uri the`,
+      '        # Hosted UI receives during local sign-in as an SSRF attempt. Counted',
+      '        # only while a local callback URL is allowed; every other rule blocks.',
+      '        dynamic "rule_action_override" {',
+      '          for_each = length(local.local_callback_urls) > 0 ? [1] : []',
+      '',
+      '          content {',
+      `            name = "${SSRF_RULE_NAME}"`,
+      '',
+      '            action_to_use {',
+      '              count {}',
+      '            }',
+      '          }',
+      '        }',
+      '      }`',
+    ].join('\n'),
+  ],
+];
 
 const divergedNextStep = (filePath: string) =>
   `${filePath}: the UserIdentity Web ACL has diverged from the generated shape - left untouched. To sign in against a local dev server, override ${SSRF_RULE_NAME} in the AWSManagedRulesCommonRuleSet rule group to Count, otherwise the Cognito Hosted UI returns 403 for localhost redirect URIs.`;
 
 const migratedNextStep = (filePath: string) =>
-  `${filePath}: ${SSRF_RULE_NAME} is now counted rather than blocked, so signing in against a local dev server works. Redeploy to apply it.`;
+  `${filePath}: ${SSRF_RULE_NAME} is now counted rather than blocked while a local callback URL is allowed, so signing in against a local dev server works. Redeploy to apply it.`;
 
 export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
 
-  for (const [filePath, migratedPattern, rewrite] of [
-    [CDK_USER_IDENTITY_FILE, CDK_MIGRATED_PATTERN, CDK_REWRITE],
-    [TERRAFORM_IDENTITY_FILE, TERRAFORM_MIGRATED_PATTERN, TERRAFORM_REWRITE],
+  for (const [filePath, migratedPattern, edits] of [
+    [CDK_USER_IDENTITY_FILE, CDK_MIGRATED_PATTERN, CDK_EDITS],
+    [TERRAFORM_IDENTITY_FILE, TERRAFORM_MIGRATED_PATTERN, TERRAFORM_EDITS],
   ] as const) {
     if (!tree.exists(filePath)) {
       // This workspace doesn't use this IaC provider, or has no UserIdentity.
@@ -115,11 +218,23 @@ export default async function migration(
       continue;
     }
 
-    if (await applyGritQL(tree, filePath, rewrite)) {
-      nextSteps.push(migratedNextStep(filePath));
-    } else {
+    // Confirm every edit site is present before writing any of them, so a file
+    // that only partly matches is left whole rather than half-edited.
+    const allSitesPresent = (
+      await Promise.all(
+        edits.map(([match]) => matchGritQL(tree, filePath, match)),
+      )
+    ).every(Boolean);
+
+    if (!allSitesPresent) {
       nextSteps.push(divergedNextStep(filePath));
+      continue;
     }
+
+    for (const [, rewrite] of edits) {
+      await applyGritQL(tree, filePath, rewrite);
+    }
+    nextSteps.push(migratedNextStep(filePath));
   }
 
   await formatFilesInSubtree(tree);
