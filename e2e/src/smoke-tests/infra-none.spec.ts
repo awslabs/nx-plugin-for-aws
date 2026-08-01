@@ -99,11 +99,12 @@ describe('smoke test - infra-none', () => {
 
     // Representative user edit to a generated harness file — must be
     // preserved when the harness is re-run with infrastructure below
-    const invokePath = `${projectRoot}/packages/my-harness/invoke.ts`;
-    const userEditMarker = '// user-edit: preserved through infra upgrade';
+    const promptPath = `${projectRoot}/packages/my-harness/src/PROMPT.md`;
+    const userEditMarker =
+      '<!-- user-edit: preserved through infra upgrade -->';
     writeFileSync(
-      invokePath,
-      `${readFileSync(invokePath, 'utf-8')}\n${userEditMarker}\n`,
+      promptPath,
+      `${readFileSync(promptPath, 'utf-8')}\n${userEditMarker}\n`,
     );
 
     // --- Phase 2: Re-run with infra to add infrastructure ---
@@ -158,7 +159,7 @@ describe('smoke test - infra-none', () => {
 
     // The infra upgrade must preserve the user edit to the harness project
     // and add the CDK construct for the inherited provider
-    expect(readFileSync(invokePath, 'utf-8')).toContain(userEditMarker);
+    expect(readFileSync(promptPath, 'utf-8')).toContain(userEditMarker);
     expect(
       existsSync(
         `${projectRoot}/packages/common/constructs/src/app/harnesses/my-harness/my-harness.ts`,

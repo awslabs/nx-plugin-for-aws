@@ -5,6 +5,10 @@
 
 // @ts-expect-error no types for virtual module
 import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/agent/files/http/agent-core-trpc-client';
+import {
+  BedrockAgentCoreClient,
+  InvokeHarnessCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
 import { Lambda } from '@aws-sdk/client-lambda';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -375,6 +379,83 @@ export async function invokeAgentCoreA2a(
   }
   expect(events).toBeGreaterThan(0);
   console.log(`Successfully invoked ${agentName} (${events} events)`);
+}
+
+/**
+ * Invoke a deployed AgentCore Harness. A harness has no runtime invocation
+ * endpoint, so this goes through `InvokeHarness` on `BedrockAgentCoreClient`
+ * rather than the SigV4 `fetch` the runtime helpers above use. The SDK streams
+ * a discriminated union of events; assert a non-empty concatenation of the
+ * `contentBlockDelta` text and surface the three service-error events.
+ */
+export async function invokeAgentCoreHarness(
+  arn: string,
+  harnessName: string,
+  prompt = 'what is 3 + 5 - 2?',
+): Promise<string> {
+  const client = new BedrockAgentCoreClient({ region: getRegion() });
+  console.log(`Testing ${harnessName} with ARN ${arn}`);
+
+  // Retry on any failure or empty stream — these typically come from AgentCore
+  // cold starts where the harness is still provisioning on first invoke.
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let text = '';
+    try {
+      const { stream } = await client.send(
+        new InvokeHarnessCommand({
+          harnessArn: arn,
+          // `runtimeSessionId` has a 33 character minimum; the shared constant
+          // is 36, so it clears it.
+          runtimeSessionId: AGENT_CORE_SESSION_ID,
+          messages: [{ role: 'user', content: [{ text: prompt }] }],
+        }),
+      );
+      if (!stream) {
+        throw new Error('AgentCore returned no event stream');
+      }
+      for await (const event of stream) {
+        const serviceError =
+          event.internalServerException ??
+          event.validationException ??
+          event.runtimeClientError;
+        if (serviceError) {
+          throw new Error(`${serviceError.name}: ${serviceError.message}`);
+        }
+        const chunk = event.contentBlockDelta?.delta?.text;
+        if (chunk) {
+          console.log(chunk);
+          text += chunk;
+        }
+      }
+    } catch (e) {
+      if (attempt < maxAttempts) {
+        console.log(
+          `${harnessName} attempt ${attempt}/${maxAttempts} failed; retrying in 15s. Error: ${e}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        continue;
+      }
+      throw e;
+    }
+
+    // A harness that streams no text is a cold-start symptom too, so retry it
+    // rather than failing the assertion on the first attempt.
+    if (!text && attempt < maxAttempts) {
+      console.log(
+        `${harnessName} attempt ${attempt}/${maxAttempts} streamed no text; retrying in 15s.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      continue;
+    }
+
+    console.log(`${harnessName} response:`, text);
+    expect(text.length).toBeGreaterThan(0);
+    console.log(`Successfully invoked ${harnessName}`);
+    return text;
+  }
+  // Unreachable — the final attempt's expect() throws if it still fails.
+  throw new Error(`Exhausted retries invoking ${harnessName}`);
 }
 
 export async function invokeLambda(

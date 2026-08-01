@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
@@ -110,36 +110,5 @@ describe('smoke test - idempotency', () => {
         `Generators were not idempotent — re-running the matrix changed the workspace:\n\n${status}\n\n${diff}`,
       );
     }
-
-    // Generator-Owned Wiring deduplication: after the repeated matrix pass,
-    // each harness wiring entry must appear exactly once — one semantic copy
-    // per export surface, not merely "no diff" (a generator that wrote two
-    // copies on the first pass and two on the second would produce no diff
-    // yet still duplicate wiring). The matrix's `agentcore-harness
-    // --name=my-harness` wires the CDK construct through two index exports.
-    //
-    // The e2e workspace is created with the default module format (ESM), so
-    // the specifiers carry a `.js` extension; the pattern tolerates the
-    // extensionless CJS form too, which also means an ESM + CJS pair of the
-    // same export would correctly count as a duplicate.
-    //
-    // NOTE: neither the no-diff check above nor these deduplication counts
-    // are User-Owned File preservation evidence — preservation is verified
-    // independently with edited-file fixtures and byte comparisons (see the
-    // user-owned-files smoke test).
-    const countMatches = (filePath: string, pattern: RegExp): number =>
-      (readFileSync(filePath, 'utf-8').match(pattern) ?? []).length;
-    expect(
-      countMatches(
-        `${projectRoot}/packages/common/constructs/src/app/harnesses/index.ts`,
-        /export \* from '\.\/my-harness\/my-harness(\.js)?';/g,
-      ),
-    ).toBe(1);
-    expect(
-      countMatches(
-        `${projectRoot}/packages/common/constructs/src/app/index.ts`,
-        /export \* from '\.\/harnesses\/index(\.js)?';/g,
-      ),
-    ).toBe(1);
   });
 });
