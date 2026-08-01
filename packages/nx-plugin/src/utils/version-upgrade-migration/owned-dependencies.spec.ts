@@ -217,6 +217,24 @@ describe('ownedDependencies', () => {
     expect(owned.ts.has('constructs')).toBe(true);
   });
 
+  // The packages an infra helper adds only reach a project that asked for
+  // infrastructure, so one generated without it must claim none of them.
+  it('should not own infrastructure packages for a project with no infra', async () => {
+    addProject(tree, 'api', {
+      generator: 'ts#trpc-api',
+      infra: 'none',
+    } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    // `addApiGatewayInfra` and `sharedConstructsGenerator` never ran.
+    expect(owned.ts.has('@aws-sdk/client-api-gateway')).toBe(false);
+    expect(owned.ts.has('@aws-sdk/client-iam')).toBe(false);
+    expect(owned.ts.has('aws-cdk-lib')).toBe(false);
+    // What the generator adds itself is still owned.
+    expect(owned.ts.has('zod')).toBe(true);
+  });
+
   // `sharedConstructsGenerator` only creates the TypeScript constructs project
   // on the CDK branch, so a Terraform workspace never receives those packages.
   it('should not own the CDK packages for a terraform project', async () => {

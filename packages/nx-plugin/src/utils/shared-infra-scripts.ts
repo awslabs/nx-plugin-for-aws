@@ -18,6 +18,7 @@ import { esmVars } from './module-format';
 import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
+  generatedInfrastructure,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
   SHARED_SCRIPTS_NAME,
@@ -25,10 +26,15 @@ import {
 import { ensureSharedScriptsProject } from './shared-scripts';
 import { withVersions } from './versions';
 
-/** Dependencies a caller must declare to use the shared infra scripts. */
+/**
+ * Dependencies a caller must declare to use the shared infra scripts.
+ *
+ * Gated on infrastructure having been generated, since the scripts project is
+ * only created on that branch.
+ */
 export const SHARED_INFRA_SCRIPTS_DEPENDENCIES = [
-  { name: '@aws-sdk/client-sts' },
-  { name: '@aws-sdk/credential-providers' },
+  { name: '@aws-sdk/client-sts', when: generatedInfrastructure },
+  { name: '@aws-sdk/credential-providers', when: generatedInfrastructure },
 ] as const;
 
 /**

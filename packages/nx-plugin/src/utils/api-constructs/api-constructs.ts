@@ -21,6 +21,7 @@ import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
+  generatedInfrastructure,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
@@ -31,11 +32,17 @@ import {
   withVersions,
 } from '../versions';
 
-/** Dependencies a caller must declare to add API Gateway infrastructure. */
+/**
+ * Dependencies a caller must declare to add API Gateway infrastructure.
+ *
+ * Gated on infrastructure having been generated: `addApiGatewayInfra` only runs
+ * on that branch, so a project generated with `infra: 'none'` never receives
+ * these.
+ */
 export const API_CONSTRUCTS_DEPENDENCIES = [
-  { name: '@aws-sdk/client-api-gateway' },
-  { name: '@aws-sdk/client-iam' },
-  { name: '@trpc/server' },
+  { name: '@aws-sdk/client-api-gateway', when: generatedInfrastructure },
+  { name: '@aws-sdk/client-iam', when: generatedInfrastructure },
+  { name: '@trpc/server', when: generatedInfrastructure },
 ] as const;
 
 interface BackendOptions {

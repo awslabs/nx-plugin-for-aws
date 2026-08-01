@@ -22,6 +22,7 @@ import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
+  generatedInfrastructure,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
@@ -34,11 +35,16 @@ import {
 
 type IACProvider = { iac: Iac };
 
-/** Dependencies a caller must declare to add an AgentCore Gateway construct. */
+/**
+ * Dependencies a caller must declare to add an AgentCore Gateway construct.
+ *
+ * Gated on infrastructure having been generated, since the construct helpers only
+ * run on that branch.
+ */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
-  { name: 'ejs' },
-  { name: '@aws-sdk/client-bedrock-agentcore' },
-  { name: '@types/ejs' },
+  { name: 'ejs', when: generatedInfrastructure },
+  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
+  { name: '@types/ejs', when: generatedInfrastructure },
 ] as const;
 
 export type AgentCoreAuth = 'iam' | 'cognito';

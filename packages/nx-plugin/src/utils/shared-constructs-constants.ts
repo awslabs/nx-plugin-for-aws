@@ -22,12 +22,24 @@ export const DYNAMODB_GENERATOR_IDS = ['ts#dynamodb', 'py#dynamodb'];
  *
  * Every generator that creates infrastructure records the `iac` it used, so a
  * predicate can tell a CDK project from a Terraform one at upgrade time. Absent
- * when the generator was run with no infrastructure, in which case neither
- * provider's packages were added.
+ * when the generator was run with no infrastructure, so its presence doubles as
+ * "infrastructure was generated" — which is what gates the packages an infra
+ * helper adds.
  */
 export interface IacMetadata {
   readonly iac?: string;
 }
+
+/**
+ * Whether infrastructure was generated at all, so the packages an infra helper
+ * adds are only claimed where that helper ran.
+ *
+ * Reads `iac` rather than the generator's own `infra` option: every generator
+ * resolves `iac` only on the infra branch, so one recorded field answers both
+ * questions and no generator needs a second one.
+ */
+export const generatedInfrastructure = (m: IacMetadata): boolean =>
+  m.iac !== undefined;
 
 /**
  * Dependencies a caller must declare to use the shared constructs project.
