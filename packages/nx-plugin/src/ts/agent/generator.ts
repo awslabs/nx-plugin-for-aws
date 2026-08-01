@@ -172,14 +172,16 @@ export const tsAgentGenerator = async (
     );
   }
 
-  // Local-dev session storage lives at the workspace root (`tmp/agentCore/agentRuntimes/sessions`),
-  // not inside the project. The `-dev`/`-serve` targets run with cwd={projectRoot}, so
-  // compute that directory relative to the project root here rather than resolving it
-  // at runtime (e.g. via import.meta.url), which would need an extra runtime helper.
+  // Local-dev session storage lives at the workspace root
+  // (`tmp/agents/strands/<agent-name>`), not inside the project, so each agent
+  // gets its own storage directory. The `-dev`/`-serve` targets run with
+  // cwd={projectRoot}, so compute that directory relative to the project root
+  // here rather than resolving it at runtime (e.g. via import.meta.url),
+  // which would need an extra runtime helper.
   const projectDepth = project.root.split('/').filter(Boolean).length;
   const localSessionsDir = joinPathFragments(
     Array(projectDepth).fill('..').join('/'),
-    'tmp/agentCore/agentRuntimes/sessions',
+    `tmp/agents/strands/${name}`,
   );
 
   // Ensure the shared agent-connection project exists so the server entry

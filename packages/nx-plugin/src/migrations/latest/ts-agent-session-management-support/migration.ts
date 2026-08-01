@@ -12,6 +12,7 @@ import {
 import { applyGritQL, captureGritQL, matchGritQL } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { isEsmWorkspace } from '../../../utils/module-format';
+import { kebabCase } from '../../../utils/names';
 
 /**
  * Add session management support to ts#agent.
@@ -104,20 +105,9 @@ const REACT_DUCK_TYPING_PATTERN =
 // calls from an existing agent.ts — the equivalent behaviour is restored via
 // AGUI_INDEX_*_PATTERN below, which wires the same logic in as StrandsAgent
 // plugins instead (plugins are applied to each per-thread agent via
-// initAgent). Naturally idempotent (nothing to match once removed).
-//
-// A connection generator (mcp-connection/a2a-connection) may have merged its
-// own client import into this same import statement via addDestructuredImport
-// (which only ever appends), so logModelErrors/logToolErrors won't always be
-// the only two specifiers — three patterns cover: exactly the two of them
-// (delete the whole statement), the two of them followed by others (keep the
-// rest), and — defensively, though addDestructuredImport never produces this
-// ordering — others followed by the two of them.
-const AGENT_TS_LOG_IMPORT_PATTERNS = [
-  "`import { logModelErrors, logToolErrors } from '$module';` => .",
-  "`import { logModelErrors, logToolErrors, $rest } from '$module';` => `import { $rest } from '$module';`",
-  "`import { $rest, logModelErrors, logToolErrors } from '$module';` => `import { $rest } from '$module';`",
-];
+// initAgent). Naturally idempotent (nothing to match once removed). The
+// import itself is removed via removeLogErrorsImport below (see its comment
+// for why a plain GritQL rewrite can't express this).
 const AGENT_TS_LOG_MODEL_CALL_PATTERN = '`logModelErrors(agent);` => .';
 const AGENT_TS_LOG_TOOL_CALL_PATTERN = '`logToolErrors(agent);` => .';
 
@@ -156,8 +146,23 @@ const AGENT_TS_SESSION_MANAGER_CONSTRUCTOR_PATTERN =
 const AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN =
   "`import { $names } from '$mod';` where { $names <: contains `logModelErrors`, $names <: contains `logToolErrors` }";
 
+// Removes `logModelErrors`/`logToolErrors` from the import, preserving any
+// other specifiers a connection generator has merged into the same statement
+// (or removing the whole statement if none remain). A naive rewrite like
+// `import { logModelErrors, logToolErrors, $rest } from '$mod'` can't express
+// this: `$rest` binds a *fixed* number of sibling nodes and silently fails to
+// match once 2+ other specifiers are merged in (verified — it works for
+// exactly 1 remaining specifier, not 2+). Decomposing via
+// `import_clause(name=named_imports($imports))` instead exposes `$imports`
+// as an actual GritQL list, so `some import_specifier(name=or {...}) => .`
+// can delete each matching specifier individually regardless of how many
+// others remain or what order they're in; deletes the whole import only when
+// the list is exactly the two of them.
+const AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN =
+  "`import $clause from '$mod';` as $import where { $clause <: import_clause(name=named_imports($imports)), $imports <: contains `logModelErrors`, $imports <: contains `logToolErrors`, if ($imports <: [`logModelErrors`, `logToolErrors`]) { $import => . } else { $imports <: some import_specifier(name=or { `logModelErrors`, `logToolErrors` }) => . } }";
+
 // Existing agents predate session.ts entirely, so there is no prior
-// session type to preserve here — this mirrors LEGACY_SESSION_TYPE ('none').
+// session storage to preserve here — this mirrors LEGACY_SESSION_STORAGE ('none').
 const legacySessionManagerContent = (
   agentConnectionModule: string,
   localSessionsDir: string,
@@ -189,29 +194,42 @@ export const getSessionManager = async (): Promise<SessionManager> => {
 };
 `;
 
-/** The relative path from `dirPath` up to the root of its owning Nx project. */
-const findOwningProjectRoot = (
+/** The root and name of the Nx project owning `dirPath`, if any. */
+const findOwningProject = (
   tree: Tree,
   dirPath: string,
-): string | undefined => {
-  let best: string | undefined;
+): { root: string; name: string } | undefined => {
+  let best: { root: string; name: string } | undefined;
   for (const project of getProjects(tree).values()) {
     if (
       (dirPath === project.root || dirPath.startsWith(`${project.root}/`)) &&
-      (!best || project.root.length > best.length)
+      (!best || project.root.length > best.root.length)
     ) {
-      best = project.root;
+      best = { root: project.root, name: project.name ?? project.root };
     }
   }
   return best;
 };
 
-/** The relative path from `projectRoot` up to the workspace root's local session storage. */
-const localSessionsDirFor = (projectRoot: string): string => {
+// Mirrors the ts#agent generator's own default-name formula (`<project>-agent`
+// when no custom name is given, else the custom name directly) so migrated
+// agents land in the same per-agent folder a fresh generate would produce.
+// `dirName` is the agent's source directory name (e.g. `agent` for the
+// default, or the custom kebab-case name the user passed to the generator).
+const agentTmpNameFor = (projectName: string, dirName: string): string => {
+  const lastSegment = projectName.split('/').pop() ?? projectName;
+  return dirName === 'agent' ? `${kebabCase(lastSegment)}-agent` : dirName;
+};
+
+/** The relative path from `projectRoot` up to this agent's workspace-root-level local session storage. */
+const localSessionsDirFor = (
+  projectRoot: string,
+  agentTmpName: string,
+): string => {
   const depth = projectRoot.split('/').filter(Boolean).length;
   return joinPathFragments(
     Array(depth).fill('..').join('/'),
-    'tmp/agentCore/agentRuntimes/sessions',
+    `tmp/agents/strands/${agentTmpName}`,
   );
 };
 
@@ -289,12 +307,11 @@ export default async function migration(
     }
 
     if (filePath.endsWith('/agent.ts') && isAgUiAgentDir(tree, filePath)) {
-      let rewroteImport = false;
-      for (const pattern of AGENT_TS_LOG_IMPORT_PATTERNS) {
-        rewroteImport = (await applyGritQL(tree, filePath, pattern))
-          ? true
-          : rewroteImport;
-      }
+      const rewroteImport = await applyGritQL(
+        tree,
+        filePath,
+        AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN,
+      );
       const rewroteModelCall = await applyGritQL(
         tree,
         filePath,
@@ -333,7 +350,7 @@ export default async function migration(
       const sessionPath = `${dir}/session.ts`;
 
       if (!tree.exists(sessionPath)) {
-        const projectRoot = findOwningProjectRoot(tree, dir);
+        const project = findOwningProject(tree, dir);
         const capturedImport = await captureGritQL(
           tree,
           filePath,
@@ -341,10 +358,17 @@ export default async function migration(
         );
         const mod = capturedImport?.match(/from '([^']+)'/)?.[1];
 
-        if (projectRoot && mod) {
+        if (project && mod) {
+          const dirName = dir.split('/').filter(Boolean).pop() ?? dir;
           tree.write(
             sessionPath,
-            legacySessionManagerContent(mod, localSessionsDirFor(projectRoot)),
+            legacySessionManagerContent(
+              mod,
+              localSessionsDirFor(
+                project.root,
+                agentTmpNameFor(project.name, dirName),
+              ),
+            ),
           );
         } else {
           nextSteps.push(
@@ -431,7 +455,7 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
       const sessionPath = `${dir}/session.ts`;
 
       if (!tree.exists(sessionPath)) {
-        const projectRoot = findOwningProjectRoot(tree, dir);
+        const project = findOwningProject(tree, dir);
         const capturedImport = await captureGritQL(
           tree,
           filePath,
@@ -439,10 +463,17 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
         );
         const mod = capturedImport?.match(/from '([^']+)'/)?.[1];
 
-        if (projectRoot && mod) {
+        if (project && mod) {
+          const dirName = dir.split('/').filter(Boolean).pop() ?? dir;
           tree.write(
             sessionPath,
-            legacySessionManagerContent(mod, localSessionsDirFor(projectRoot)),
+            legacySessionManagerContent(
+              mod,
+              localSessionsDirFor(
+                project.root,
+                agentTmpNameFor(project.name, dirName),
+              ),
+            ),
           );
         } else {
           nextSteps.push(

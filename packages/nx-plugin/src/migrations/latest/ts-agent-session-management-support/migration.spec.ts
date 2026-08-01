@@ -236,6 +236,34 @@ export const getAgent = async () => {
 };
 `;
 
+// Regression fixture: TWO connection generators (mcp-connection AND
+// a2a-connection) have each merged their own client import into the same
+// statement — this is the exact shape found in a real workspace where the
+// migration silently left logModelErrors/logToolErrors dangling in the
+// import (GritQL's `$rest` metavariable only binds a single remaining
+// specifier, not an arbitrary-length list).
+const DOUBLY_MERGED_IMPORT_OLD_AGENT_TS_FILE = `import { Agent, tool } from '@strands-agents/sdk';
+import {
+  logModelErrors,
+  logToolErrors,
+  A2aAgentClientStrands,
+  AgentsMcpServerClientStrands,
+} from '@my-agent-project/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async () => {
+  const agentsMcpServer = await AgentsMcpServerClientStrands.create();
+  const a2aAgent = await A2aAgentClientStrands.create();
+  const agent = new Agent({
+    systemPrompt: 'You are a mathematical wizard.',
+    tools: [agentsMcpServer],
+  });
+  logModelErrors(agent);
+  logToolErrors(agent);
+  return agent;
+};
+`;
+
 const AGUI_INDEX_TS_FILE_CONTENT = `import { StrandsAgent } from '@ag-ui/aws-strands';
 import { runWithSessionId } from '@proj/agent-connection';
 import { getAgent } from './agent.js';
@@ -277,7 +305,7 @@ export const getSessionManager = async (): Promise<
   if (process.env.LOCAL_DEV === 'true') {
     return new SessionManager({
       sessionId,
-      storage: new LocalFileStorage('../../tmp/agentCore/agentRuntimes/sessions'),
+      storage: new LocalFileStorage('../../tmp/agents/strands/test-project-agent'),
     });
   }
   const config = await getAgentCoreRuntimeConfig();
@@ -643,7 +671,7 @@ describe('ts-agent-session-manager-support migration', () => {
     );
     expect(sessionManagerContent).toContain('new LocalFileStorage(');
     expect(sessionManagerContent).toContain(
-      "'../../tmp/agentCore/agentRuntimes/sessions'",
+      "'../../tmp/agents/strands/http-project-agent'",
     );
     expect(
       result.nextSteps.some(
@@ -721,6 +749,30 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(content).toContain('AgentsMcpServerClientStrands');
     expect(content).toContain(
       "import { AgentsMcpServerClientStrands } from '@my-agent-project/agent-connection';",
+    );
+    expect(result.nextSteps.some((s) => s.includes(AGUI_AGENT_TS_FILE))).toBe(
+      true,
+    );
+  });
+
+  it('removes the model/tool error logging hooks from an AG-UI agent.ts even when TWO connection generators merged their imports into the same statement', async () => {
+    tree.write(AGUI_AGENT_TS_FILE, DOUBLY_MERGED_IMPORT_OLD_AGENT_TS_FILE);
+    tree.write(AGUI_INDEX_TS_FILE, AGUI_INDEX_TS_FILE_CONTENT);
+
+    const result = await migration(tree);
+
+    const content = tree.read(AGUI_AGENT_TS_FILE, 'utf-8') ?? '';
+    expect(content).not.toContain('logModelErrors');
+    expect(content).not.toContain('logToolErrors');
+    // Both merged client imports and their usages must survive intact
+    expect(content).toContain('A2aAgentClientStrands');
+    expect(content).toContain('AgentsMcpServerClientStrands');
+    expect(content).toContain("} from '@my-agent-project/agent-connection';");
+    expect(content).toContain(
+      'const agentsMcpServer = await AgentsMcpServerClientStrands.create();',
+    );
+    expect(content).toContain(
+      'const a2aAgent = await A2aAgentClientStrands.create();',
     );
     expect(result.nextSteps.some((s) => s.includes(AGUI_AGENT_TS_FILE))).toBe(
       true,
