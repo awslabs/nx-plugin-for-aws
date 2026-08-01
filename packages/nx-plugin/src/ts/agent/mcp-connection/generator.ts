@@ -167,6 +167,9 @@ export const tsAgentMcpConnectionGenerator = async (
     TS_AGENT_MCP_CONNECTION_GENERATOR_INFO,
     toProjectRelativePath(sourceProject, agentFilePath),
     mcpServerClassName,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

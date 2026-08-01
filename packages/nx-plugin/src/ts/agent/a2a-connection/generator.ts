@@ -218,6 +218,9 @@ export const tsAgentA2aConnectionGenerator = async (
     TS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
     toProjectRelativePath(sourceProject, agentFilePath),
     targetAgentClassName,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

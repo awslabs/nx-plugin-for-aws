@@ -48,6 +48,9 @@ export const tsDynamoDBMcpServerConnectionGenerator = async (
     TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO,
     targetProject.root,
     `${mcpServerName}-${targetProject.name}`,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

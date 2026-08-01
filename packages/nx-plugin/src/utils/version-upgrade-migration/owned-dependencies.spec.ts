@@ -497,6 +497,34 @@ describe('declaration coverage', () => {
     expect(unrecorded).toEqual([]);
   });
 
+  // Both ends of a component-to-component connection must be identifiable: the
+  // recorded project and target path alone can't say which of several components
+  // on that project is wired up, so the source's path is recorded too.
+  it('should record the source path of a component connection', async () => {
+    const sourceTree = createTreeUsingTsSolutionSetup();
+    const missing: string[] = [];
+    for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
+      if (!info.id.endsWith('-connection')) {
+        continue;
+      }
+      const path = generatorSource(info, sourceTree);
+      // Only a connection whose source is itself a component has one to name.
+      const readsSourceComponent = await matchGritQL(
+        sourceTree,
+        path,
+        '`options.sourceComponent`',
+      );
+      if (!readsSourceComponent) {
+        continue;
+      }
+      if (!(await matchGritQL(sourceTree, path, '`sourcePath`'))) {
+        missing.push(info.id);
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
+
   // A predicate that reads a field no project records can never hold, so its
   // dependency would silently stop being upgraded. Probing with an empty object
   // records which fields each predicate touches, then asserts the generator

@@ -56,6 +56,9 @@ export const pyDynamoDBAgentConnectionGenerator = async (
     PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO,
     targetProject.root,
     `${agentName}-${targetProject.name}`,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

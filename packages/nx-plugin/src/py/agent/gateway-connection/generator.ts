@@ -235,7 +235,9 @@ export const pyAgentGatewayConnectionGenerator = async (
     PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
     toProjectRelativePath(sourceProject, agentFilePath),
     gatewayClassName,
-    metadata,
+    // `sourcePath` names the source component this connection is made from, so
+    // the pair is identifiable rather than just the two projects.
+    { ...metadata, sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

@@ -221,7 +221,9 @@ export const pyAgentMcpConnectionGenerator = async (
     PY_AGENT_MCP_CONNECTION_GENERATOR_INFO,
     toProjectRelativePath(sourceProject, agentFilePath),
     mcpServerClassName,
-    metadata,
+    // `sourcePath` names the source component this connection is made from, so
+    // the pair is identifiable rather than just the two projects.
+    { ...metadata, sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [
