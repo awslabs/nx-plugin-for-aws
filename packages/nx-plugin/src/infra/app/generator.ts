@@ -99,7 +99,10 @@ export async function tsInfraGenerator(
     return { ...opts, env: { ...existingEnv, ...cdkEnv } } as T;
   };
 
-  addGeneratorMetadata(tree, lib.fullyQualifiedName, INFRA_APP_GENERATOR_INFO);
+  // This generator IS the CDK infrastructure project, so the provider is fixed.
+  addGeneratorMetadata(tree, lib.fullyQualifiedName, INFRA_APP_GENERATOR_INFO, {
+    iac: 'cdk',
+  });
 
   // Shared constructs always in CDK for typescript infra generator
   await sharedConstructsGenerator(

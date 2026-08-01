@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   addProjectConfiguration,
   type ProjectConfiguration,
@@ -20,9 +21,6 @@ import {
   ownedDependencies,
   PLUGIN_ROOT,
 } from './owned-dependencies';
-
-/** A workspace on CDK, which is what receives the shared constructs project. */
-const cdkConfig = "export default { iac: { provider: 'cdk' } };";
 
 const addProject = (
   tree: Tree,
@@ -207,8 +205,10 @@ describe('ownedDependencies', () => {
   // installs into its own project. Those are owned here even though this
   // generator installs none of them, or the sync would leave them behind.
   it('should own the dependencies its helpers install elsewhere', async () => {
-    tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, cdkConfig);
-    addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
+    addProject(tree, 'api', {
+      generator: 'ts#trpc-api',
+      iac: 'cdk',
+    } as never);
 
     const owned = await ownedDependencies(tree);
 
@@ -219,12 +219,11 @@ describe('ownedDependencies', () => {
 
   // `sharedConstructsGenerator` only creates the TypeScript constructs project
   // on the CDK branch, so a Terraform workspace never receives those packages.
-  it('should not own the CDK packages in a terraform workspace', async () => {
-    tree.write(
-      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-      "export default { iac: { provider: 'terraform' } };",
-    );
-    addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
+  it('should not own the CDK packages for a terraform project', async () => {
+    addProject(tree, 'api', {
+      generator: 'ts#trpc-api',
+      iac: 'terraform',
+    } as never);
 
     const owned = await ownedDependencies(tree);
 
@@ -252,10 +251,20 @@ describe('ownedDependencies', () => {
  * string can't satisfy an invariant, and a rename shows up as a miss instead of
  * quietly still matching.
  */
+/** Where a shared metadata interface a generator extends is declared. */
+const SHARED_METADATA_PATH = 'shared-metadata.ts';
+
 const generatorSource = (
   info: { resolvedFactoryPath: string },
   tree: Tree,
 ): string => {
+  tree.write(
+    SHARED_METADATA_PATH,
+    readFileSync(
+      join(PLUGIN_ROOT, 'src/utils/shared-constructs-constants.ts'),
+      'utf-8',
+    ),
+  );
   const path = 'generator-under-test.ts';
   tree.write(path, readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8'));
   return path;
@@ -280,6 +289,25 @@ const metadataInterfaceMembers = async (
   if (interfaces.length === 0) {
     return [];
   }
+  // A generator's interface may extend a shared one — `IacMetadata`, say — whose
+  // members are just as recorded, so pull those in too.
+  const inherited = await Promise.all(
+    interfaces
+      .flatMap((declaration) =>
+        [...declaration.matchAll(/\bextends\s+([\w,\s]+?)\s*\{/g)].flatMap(
+          (match) => match[1].split(',').map((name) => name.trim()),
+        ),
+      )
+      .filter((name) => name && !name.endsWith('GeneratorSchema'))
+      .map((name) =>
+        captureAllGritQL(
+          tree,
+          SHARED_METADATA_PATH,
+          `interface_declaration($name, $body) where { $name <: \`${name}\` }`,
+        ),
+      ),
+  );
+  interfaces.push(...inherited.flat());
   const membersPath = 'metadata-interfaces.ts';
   tree.write(membersPath, interfaces.join('\n'));
   const signatures = await captureAllGritQL(
@@ -293,6 +321,31 @@ const metadataInterfaceMembers = async (
       .trim()
       .replace(/^readonly\s+/, ''),
   );
+};
+
+/**
+ * Property names a generator passes to a metadata helper directly, for the ones
+ * that record a field without declaring an interface for it.
+ */
+const recordedPropertyNames = async (
+  path: string,
+  tree: Tree,
+): Promise<string[]> => {
+  const names: string[] = [];
+  for (const helper of METADATA_HELPERS) {
+    const calls = await captureAllGritQL(
+      tree,
+      path,
+      `call_expression($function) as $call where { $function <: \`${helper}\` }`,
+    );
+    for (const call of calls) {
+      // The metadata argument is an object literal, so its keys are the fields.
+      for (const [, key] of call.matchAll(/[{,]\s*(\w+)\s*[,:}]/g)) {
+        names.push(key);
+      }
+    }
+  }
+  return names;
 };
 
 /** Whether the source contains a call to any of the named functions. */
@@ -484,12 +537,13 @@ describe('declaration coverage', () => {
       // The metadata interface the generator declares and hands to both the
       // dependency call and the recording helper. A field a predicate reads must
       // be one of its members, or no project will carry it.
-      const members = new Set(
-        await metadataInterfaceMembers(
-          generatorSource(info, sourceTree),
-          sourceTree,
-        ),
-      );
+      const path = generatorSource(info, sourceTree);
+      const members = new Set([
+        ...(await metadataInterfaceMembers(path, sourceTree)),
+        // A generator with no metadata interface may still record a field by
+        // passing it to the helper directly, which counts just as much.
+        ...(await recordedPropertyNames(path, sourceTree)),
+      ]);
       for (const key of read) {
         if (!members.has(key)) {
           unrecorded.push(`${info.id}: ${key}`);

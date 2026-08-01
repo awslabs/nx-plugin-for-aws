@@ -40,6 +40,7 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../utils/shared-constructs';
+import type { IacMetadata } from '../utils/shared-constructs-constants';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
 // The gateway's local-dev server and Cedar policy rendering need these whatever
@@ -155,6 +156,12 @@ export const agentcoreGatewayGenerator = async (
     );
   }
 
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: AgentCoreGatewayMetadata = {
@@ -163,6 +170,7 @@ export const agentcoreGatewayGenerator = async (
     protocol,
     auth,
     port,
+    ...(iac ? { iac } : {}),
   };
 
   addGeneratorMetadata(
@@ -176,8 +184,8 @@ export const agentcoreGatewayGenerator = async (
 
   // Wire up infra (CDK or Terraform); re-running with infra=agentcore adds
   // the infrastructure to a previously infra-less gateway.
+
   if (infra === 'agentcore') {
-    const iac = await resolveIac(tree, options.iac);
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     await addAgentCoreGatewayInfra(
@@ -209,7 +217,7 @@ export const agentcoreGatewayGenerator = async (
 /**
  * Gateway details stored in the gateway project's metadata.
  */
-export interface AgentCoreGatewayMetadata {
+export interface AgentCoreGatewayMetadata extends IacMetadata {
   name: string;
   rc: string;
   protocol: string;

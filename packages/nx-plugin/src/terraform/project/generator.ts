@@ -269,10 +269,12 @@ export async function terraformProjectGenerator(
   if (!projectExists(tree, lib.fullyQualifiedName)) {
     addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
   }
+  // This generator IS the Terraform project, so the provider is fixed.
   addGeneratorMetadata(
     tree,
     lib.fullyQualifiedName,
     TERRAFORM_PROJECT_GENERATOR_INFO,
+    { iac: 'terraform' },
   );
 
   generateFiles(

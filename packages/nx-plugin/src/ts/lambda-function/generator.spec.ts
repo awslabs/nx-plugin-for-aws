@@ -814,6 +814,9 @@ describe('ts-lambda-function generator', () => {
         generator: TS_LAMBDA_FUNCTION_GENERATOR_INFO.id,
         path: 'src/test-function.ts',
         name: 'test-function',
+        // Recorded so the version sync can tell a CDK project from a Terraform
+        // one. `options` here is the default (cdk), despite the enclosing block.
+        iac: 'cdk',
       });
     });
   });

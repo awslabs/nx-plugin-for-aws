@@ -44,6 +44,7 @@ import {
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs';
 import {
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
 } from '../../../utils/shared-constructs-constants';
@@ -61,7 +62,7 @@ import type {
 } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface TsReactWebsiteMetadata {
+export interface TsReactWebsiteMetadata extends IacMetadata {
   readonly ux: UxOption;
   readonly framework: string;
   readonly infra: WebsiteInfraOption;
@@ -305,6 +306,9 @@ export async function tsReactWebsiteGenerator(
     infra,
     tailwind,
     tanstackRouter,
+    // Undefined when no infrastructure was generated, so neither provider's
+    // packages were added.
+    ...(iac ? { iac } : {}),
   };
   addGeneratorMetadata(
     tree,

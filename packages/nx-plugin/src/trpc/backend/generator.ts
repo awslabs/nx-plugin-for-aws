@@ -44,10 +44,11 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
 import type { TsTrpcApiGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface TsTrpcApiMetadata {
+export interface TsTrpcApiMetadata extends IacMetadata {
   readonly apiName: string;
   readonly apiType: string;
   readonly auth: TsTrpcApiGeneratorSchema['auth'];
@@ -101,6 +102,12 @@ export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   if (options.infra !== 'none') {
     validateTrpcInfraAndIntegrationPatternCombination(options);
   }
@@ -151,8 +158,6 @@ export async function tsTrpcApiGenerator(
   };
 
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
-
     await sharedConstructsGenerator(
       tree,
       {
@@ -197,6 +202,7 @@ export async function tsTrpcApiGenerator(
     auth: options.auth,
     infra: options.infra,
     integrationPattern: getIntegrationPattern(options),
+    ...(iac ? { iac } : {}),
   };
 
   projectConfig.metadata = {

@@ -4,17 +4,13 @@
  */
 import * as path from 'node:path';
 import { getProjects, type Tree } from '@nx/devkit';
-import {
-  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-  readAwsNxPluginConfig,
-} from '../config/utils';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils';
 import {
   type DependencyDeclaration,
   type DependencyMetadata,
   ownedDependencyEntries,
 } from '../declared-dependencies';
 import { buildGeneratorInfoList } from '../generators';
-import { CDK_ONLY_DEPENDENCIES } from '../shared-constructs-constants';
 
 /** Directory holding `generators.json`, which maps ids to their modules. */
 export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
@@ -41,21 +37,6 @@ export interface GeneratorOccurrence {
   readonly id: string;
   readonly metadata: DependencyMetadata;
 }
-
-/**
- * The workspace's IaC provider, or undefined when the config doesn't name one.
- *
- * A workspace-wide choice rather than any one generator's, so it narrows
- * ownership here instead of through a `when` predicate.
- */
-const workspaceIac = (tree: Tree): string | undefined => {
-  try {
-    return readAwsNxPluginConfig(tree)?.iac?.provider;
-  } catch {
-    // A config this plugin can't evaluate must not fail the upgrade.
-    return undefined;
-  }
-};
 
 /**
  * Every recorded run of a generator in this workspace, from the metadata
@@ -134,14 +115,6 @@ export const ownedDependencies = async (
       for (const entry of ownedDependencyEntries(declaration.py, metadata)) {
         py.add(entry.name as string);
       }
-    }
-  }
-
-  // The shared constructs CDK packages only reach a CDK workspace, so a
-  // Terraform one never owns them however many generators declare them.
-  if (workspaceIac(tree) === 'terraform') {
-    for (const name of CDK_ONLY_DEPENDENCIES) {
-      ts.delete(name);
     }
   }
 

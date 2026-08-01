@@ -40,12 +40,13 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { addOpenApiGeneration } from './react/open-api';
 import type { PyFastApiProjectGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface PyFastApiMetadata {
+export interface PyFastApiMetadata extends IacMetadata {
   readonly apiName: string;
   readonly apiType: string;
   readonly auth: PyFastApiProjectGeneratorSchema['auth'];
@@ -156,12 +157,19 @@ export const pyFastApiProjectGenerator = async (
     },
   };
 
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    schema.infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
+
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: PyFastApiMetadata = {
     apiName: schema.name,
     apiType: 'fast-api',
     auth: schema.auth,
+    ...(iac ? { iac } : {}),
   };
 
   projectConfig.metadata = {
@@ -197,8 +205,6 @@ export const pyFastApiProjectGenerator = async (
   );
 
   if (schema.infra !== 'none') {
-    const iac = await resolveIac(tree, schema.iac);
-
     await sharedConstructsGenerator(
       tree,
       {

@@ -18,21 +18,28 @@ export const SHARED_SCRIPTS_DIR = 'common/scripts';
 export const DYNAMODB_GENERATOR_IDS = ['ts#dynamodb', 'py#dynamodb'];
 
 /**
+ * What a generator records about the infrastructure it generated.
+ *
+ * Every generator that creates infrastructure records the `iac` it used, so a
+ * predicate can tell a CDK project from a Terraform one at upgrade time. Absent
+ * when the generator was run with no infrastructure, in which case neither
+ * provider's packages were added.
+ */
+export interface IacMetadata {
+  readonly iac?: string;
+}
+
+/**
  * Dependencies a caller must declare to use the shared constructs project.
  * Lives here so generators can spread it without importing the generator.
  *
- * `constructs` and `aws-cdk-lib` only reach a workspace that uses CDK —
- * `sharedConstructsGenerator` creates the TypeScript project on that branch
- * alone. Ownership is narrowed by the workspace's `iac` in
- * `owned-dependencies.ts` rather than by a `when` here, since `iac` is a
- * workspace-wide choice and typing a predicate against it on this shared
- * constant would force it into all 19 generators' metadata interfaces.
+ * `constructs` and `aws-cdk-lib` are gated on CDK because
+ * `sharedConstructsGenerator` creates the TypeScript constructs project on that
+ * branch alone — a Terraform workspace gets the shared Terraform project and
+ * never receives them.
  */
 export const SHARED_CONSTRUCTS_DEPENDENCIES = [
-  { name: 'constructs' },
-  { name: 'aws-cdk-lib' },
+  { name: 'constructs', when: (m: IacMetadata) => m.iac === 'cdk' },
+  { name: 'aws-cdk-lib', when: (m: IacMetadata) => m.iac === 'cdk' },
   { name: '@types/node' },
 ] as const;
-
-/** The shared constructs packages a Terraform workspace never receives. */
-export const CDK_ONLY_DEPENDENCIES = ['constructs', 'aws-cdk-lib'] as const;

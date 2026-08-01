@@ -152,9 +152,11 @@ export const pyLambdaFunctionGenerator = async (
   // Check if the project has a bundle target and if not add it
   const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
 
-  if (infra !== 'none') {
-    const iac = await resolveIac(tree, schema.iac);
+  // Recorded below so the version sync can tell a CDK project from a
+  // Terraform one; undefined when no infrastructure was generated.
+  const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
+  if (infra !== 'none') {
     await sharedConstructsGenerator(
       tree,
       {
@@ -210,6 +212,7 @@ export const pyLambdaFunctionGenerator = async (
     LAMBDA_FUNCTION_GENERATOR_INFO,
     toProjectRelativePath(projectConfig, functionPath),
     lambdaFunctionKebabCase,
+    iac ? { iac } : {},
   );
 
   await addGeneratorMetricsIfApplicable(tree, [LAMBDA_FUNCTION_GENERATOR_INFO]);

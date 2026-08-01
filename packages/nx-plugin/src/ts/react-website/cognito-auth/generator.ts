@@ -189,6 +189,8 @@ export async function tsReactWebsiteAuthGenerator(
       projectConfig,
       joinPathFragments(srcRoot, 'components', 'CognitoAuth'),
     ),
+    undefined,
+    { iac },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [COGNITO_AUTH_GENERATOR_INFO]);

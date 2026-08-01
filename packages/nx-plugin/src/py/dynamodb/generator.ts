@@ -146,10 +146,19 @@ export const pyDynamoDBGenerator = async (
   };
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
-  addGeneratorMetadata(tree, fullyQualifiedName, PY_DYNAMODB_GENERATOR_INFO);
+  // Recorded so the version sync can tell a CDK project from a Terraform one;
+  // undefined when no infrastructure was generated.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
+  addGeneratorMetadata(
+    tree,
+    fullyQualifiedName,
+    PY_DYNAMODB_GENERATOR_INFO,
+    iac ? { iac } : {},
+  );
 
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addDynamoDBInfra(tree, {
       iac,

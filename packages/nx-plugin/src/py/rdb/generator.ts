@@ -43,6 +43,7 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import {
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
@@ -55,7 +56,7 @@ import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import type { PyRdbGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface PyRdbMetadata {
+export interface PyRdbMetadata extends IacMetadata {
   readonly engine: PyRdbGeneratorSchema['engine'];
 }
 
@@ -125,9 +126,14 @@ export const pyRdbGenerator = async (
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
   const { engine } = options;
+  // Recorded in the metadata below so the version sync can tell a CDK project
+  // from a Terraform one; undefined when no infrastructure was generated.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
-  const metadata: PyRdbMetadata = { engine };
+  const metadata: PyRdbMetadata = { engine, ...(iac ? { iac } : {}) };
   const localDbPort = assignPort(
     tree,
     projectConfig,
@@ -303,7 +309,6 @@ export const pyRdbGenerator = async (
   };
 
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
     if (iac === 'terraform') {
       projectConfig.targets.docker = {
         cache: true,
@@ -352,7 +357,6 @@ export const pyRdbGenerator = async (
   );
 
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addRdbInfra(tree, {
       iac,

@@ -46,11 +46,12 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs';
+import type { IacMetadata } from '../../../utils/shared-constructs-constants';
 import smithyProjectGenerator from '../../project/generator';
 import type { TsSmithyApiGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface TsSmithyApiMetadata {
+export interface TsSmithyApiMetadata extends IacMetadata {
   readonly apiName: string;
   readonly auth: TsSmithyApiGeneratorSchema['auth'];
   readonly modelProject: string;
@@ -146,12 +147,19 @@ export const tsSmithyApiGenerator = async (
     } as any,
   });
 
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   // Recorded here and read by the declaration's predicates, so the packages
   // added below are exactly the ones the version sync will own.
   const metadata: TsSmithyApiMetadata = {
     apiName: options.name,
     auth: options.auth,
     modelProject: modelProjectConfig.name,
+    ...(iac ? { iac } : {}),
   };
 
   addGeneratorMetadata(
@@ -206,7 +214,6 @@ export const tsSmithyApiGenerator = async (
     }
 
     // Add infrastructure
-    const iac = await resolveIac(tree, options.iac);
     await sharedConstructsGenerator(
       tree,
       {

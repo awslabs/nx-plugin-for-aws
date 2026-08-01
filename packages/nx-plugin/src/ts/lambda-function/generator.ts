@@ -120,9 +120,11 @@ export const tsLambdaFunctionGenerator = async (
 
   const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
 
-  if (infra !== 'none') {
-    const iac = await resolveIac(tree, schema.iac);
+  // Recorded below so the version sync can tell a CDK project from a
+  // Terraform one; undefined when no infrastructure was generated.
+  const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
+  if (infra !== 'none') {
     await sharedConstructsGenerator(
       tree,
       {
@@ -189,6 +191,7 @@ export const tsLambdaFunctionGenerator = async (
     TS_LAMBDA_FUNCTION_GENERATOR_INFO,
     functionPathFromProjectRoot,
     lambdaFunctionKebabCase,
+    iac ? { iac } : {},
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

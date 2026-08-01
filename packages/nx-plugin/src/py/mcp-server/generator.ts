@@ -45,11 +45,12 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
 import { BASE_IMAGES } from '../../utils/versions';
 import type { PyMcpServerGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface PyMcpServerMetadata {
+export interface PyMcpServerMetadata extends IacMetadata {
   readonly port: number;
   readonly rc: string;
   readonly auth: string;
@@ -116,6 +117,12 @@ export const pyMcpServerGenerator = async (
   );
 
   const infra = options.infra ?? 'agentcore';
+
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -209,7 +216,6 @@ export const pyMcpServerGenerator = async (
     );
 
     // Add shared constructs
-    const iac = await resolveIac(tree, options.iac);
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     // Add the construct to deploy the mcp server
@@ -235,6 +241,7 @@ export const pyMcpServerGenerator = async (
     port: localDevPort,
     rc: mcpServerNameClassName,
     auth,
+    ...(iac ? { iac } : {}),
   };
 
   addPyDependencies(tree, DEPENDENCIES, {

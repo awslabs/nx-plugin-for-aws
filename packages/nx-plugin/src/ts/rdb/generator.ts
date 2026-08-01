@@ -52,6 +52,7 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import {
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
@@ -64,7 +65,7 @@ import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsRdbGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface TsRdbMetadata {
+export interface TsRdbMetadata extends IacMetadata {
   readonly engine: TsRdbGeneratorSchema['engine'];
 }
 
@@ -293,8 +294,13 @@ export const tsRdbGenerator = async (
       },
     },
   };
+  // Recorded in the metadata below so the version sync can tell a CDK project
+  // from a Terraform one; undefined when no infrastructure was generated, in
+  // which case neither provider's packages were added.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
     if (iac === 'terraform') {
       projectConfig.targets['docker'] = {
         cache: true,
@@ -324,7 +330,10 @@ export const tsRdbGenerator = async (
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
   // Recorded here and read by the declaration's predicates, so the packages
   // added below are exactly the ones the version sync will own.
-  const metadata: TsRdbMetadata = { engine: options.engine };
+  const metadata: TsRdbMetadata = {
+    engine: options.engine,
+    ...(iac ? { iac } : {}),
+  };
   addGeneratorMetadata(
     tree,
     fullyQualifiedName,

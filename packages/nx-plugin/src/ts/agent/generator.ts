@@ -54,11 +54,12 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
 import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
-export interface TsAgentMetadata {
+export interface TsAgentMetadata extends IacMetadata {
   readonly port: number;
   readonly rc: string;
   readonly auth: string;
@@ -148,6 +149,12 @@ export const tsAgentGenerator = async (
 
   const infra = options.infra ?? 'agentcore';
   const protocol = options.protocol ?? 'http';
+
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -269,7 +276,6 @@ export const tsAgentGenerator = async (
     );
 
     // Add shared constructs
-    const iac = await resolveIac(tree, options.iac);
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
@@ -303,6 +309,7 @@ export const tsAgentGenerator = async (
     rc: agentNameClassName,
     auth,
     protocol,
+    ...(iac ? { iac } : {}),
   };
 
   addTsDependencies(tree, DEPENDENCIES, {

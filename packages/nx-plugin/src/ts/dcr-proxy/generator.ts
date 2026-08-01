@@ -138,7 +138,9 @@ export const tsDcrProxyGenerator = async (
   // Recorded over the `ts#project` id the underlying generator wrote, so the
   // version sync attributes this project's dependencies to this generator.
   // After the write above, which would otherwise revert it.
-  addGeneratorMetadata(tree, projectConfig.name, TS_DCR_PROXY_GENERATOR_INFO);
+  addGeneratorMetadata(tree, projectConfig.name, TS_DCR_PROXY_GENERATOR_INFO, {
+    iac,
+  });
 
   const bundlePathsFromRoot = Object.fromEntries(
     DCR_PROXY_HANDLERS.map((handler) => [
