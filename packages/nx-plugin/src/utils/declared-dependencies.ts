@@ -26,20 +26,17 @@ import type { IPyDepVersion, ITsDepVersion } from './versions';
  */
 export type DependencyMetadata = object;
 
-/** A declared dependency, optionally limited to when its predicate holds. */
+/** What every declared dependency carries, whichever language it belongs to. */
 export interface DeclaredDependency<Name, M extends DependencyMetadata> {
   readonly name: Name;
   /**
    * Whether this dependency applies. Reads the metadata the generator records,
-   * so the migration can evaluate the same predicate later.
+   * so the migration can evaluate the same predicate later. Any truthy return
+   * counts, so a predicate can hand back the value it read.
    */
-  readonly when?: (metadata: M) => boolean;
-  /** Added as a dev dependency rather than a runtime one. */
-  readonly dev?: boolean;
+  readonly when?: (metadata: M) => unknown;
   /** Added to the workspace root manifest rather than the project's. */
   readonly root?: boolean;
-  /** Added to this pyproject dependency group rather than the main list. */
-  readonly group?: string;
   /**
    * Declared only so the version sync keeps its pinned version current — an
    * `overrides` entry, say. Never installed as a dependency.
@@ -47,15 +44,36 @@ export interface DeclaredDependency<Name, M extends DependencyMetadata> {
   readonly versionOnly?: boolean;
 }
 
+/**
+ * A TypeScript dependency, which may be a dev dependency.
+ *
+ * `group` is typed as never-present rather than left off, so putting a Python
+ * flag on a TypeScript entry is a type error instead of an ignored property.
+ */
+export interface DeclaredTsDependency<Name, M extends DependencyMetadata>
+  extends DeclaredDependency<Name, M> {
+  /** Added as a dev dependency rather than a runtime one. */
+  readonly dev?: boolean;
+  readonly group?: never;
+}
+
+/** A Python dependency, which may belong to a pyproject dependency group. */
+export interface DeclaredPyDependency<Name, M extends DependencyMetadata>
+  extends DeclaredDependency<Name, M> {
+  /** Added to this pyproject dependency group rather than the main list. */
+  readonly group?: string;
+  readonly dev?: never;
+}
+
 export interface DependencyDeclaration<
-  Ts extends readonly DeclaredDependency<
+  Ts extends readonly DeclaredTsDependency<
     ITsDepVersion,
     never
-  >[] = readonly DeclaredDependency<ITsDepVersion, never>[],
-  Py extends readonly DeclaredDependency<
+  >[] = readonly DeclaredTsDependency<ITsDepVersion, never>[],
+  Py extends readonly DeclaredPyDependency<
     IPyDepVersion,
     never
-  >[] = readonly DeclaredDependency<IPyDepVersion, never>[],
+  >[] = readonly DeclaredPyDependency<IPyDepVersion, never>[],
 > {
   readonly ts: Ts;
   readonly py: Py;
@@ -69,8 +87,8 @@ export interface DependencyDeclaration<
 export const declareDependencies =
   <M extends DependencyMetadata = Record<string, never>>() =>
   <
-    const Ts extends readonly DeclaredDependency<ITsDepVersion, M>[],
-    const Py extends readonly DeclaredDependency<IPyDepVersion, M>[],
+    const Ts extends readonly DeclaredTsDependency<ITsDepVersion, M>[],
+    const Py extends readonly DeclaredPyDependency<IPyDepVersion, M>[],
   >(declaration: {
     ts?: Ts;
     py?: Py;
@@ -93,7 +111,7 @@ export const onlyWhen = <
   const Entries extends readonly { readonly name: unknown }[],
 >(
   entries: Entries,
-  condition: (metadata: M) => boolean,
+  condition: (metadata: M) => unknown,
 ): {
   readonly [K in keyof Entries]: Omit<Entries[K], 'when'> & {
     when: (m: M) => boolean;
@@ -102,10 +120,11 @@ export const onlyWhen = <
   entries.map((entry) => {
     // A declaration erases the metadata its predicates read, so calling one back
     // requires naming the type the caller narrows to.
-    const own = (entry as { when?: (m: M) => boolean }).when;
+    const own = (entry as { when?: (m: M) => unknown }).when;
     return {
       ...entry,
-      when: (metadata: M) => condition(metadata) && (own?.(metadata) ?? true),
+      when: (metadata: M) =>
+        Boolean(condition(metadata)) && Boolean(own?.(metadata) ?? true),
     };
   }) as never;
 
@@ -148,7 +167,7 @@ export const ownedDependencyEntries = <
       return true;
     }
     try {
-      return entry.when(metadata) === true;
+      return Boolean(entry.when(metadata));
     } catch {
       return false;
     }

@@ -31,15 +31,8 @@ describe('registerNxPackageUpdates', () => {
     });
   });
 
-  it('should write nothing when no nx package moved', () => {
-    const written = registerNxPackageUpdates(tree, false);
-
-    expect(written).toEqual([]);
-    expect(readMigrations(tree).packageJsonUpdates).toBeUndefined();
-  });
-
   it('should declare packageJsonUpdates for every nx package when nx moved', () => {
-    const written = registerNxPackageUpdates(tree, true);
+    const written = registerNxPackageUpdates(tree);
 
     expect(written).toEqual([MIGRATIONS_JSON_PATH]);
     const updates = readMigrations(tree).packageJsonUpdates;
@@ -57,13 +50,13 @@ describe('registerNxPackageUpdates', () => {
   });
 
   it('should not register a migration, which is committed as everyMigration', () => {
-    registerNxPackageUpdates(tree, true);
+    registerNxPackageUpdates(tree);
 
     expect(readMigrations(tree).generators).toEqual({});
   });
 
   it('should stamp the nx bump with the pending release version', () => {
-    registerNxPackageUpdates(tree, true);
+    registerNxPackageUpdates(tree);
 
     const stamped = stampMigrationVersions(
       readMigrations(tree),
@@ -80,10 +73,10 @@ describe('registerNxPackageUpdates', () => {
   });
 
   it('should be idempotent across repeated runs before a release', () => {
-    registerNxPackageUpdates(tree, true);
+    registerNxPackageUpdates(tree);
     const first = readMigrations(tree);
 
-    registerNxPackageUpdates(tree, true);
+    registerNxPackageUpdates(tree);
 
     expect(readMigrations(tree)).toEqual(first);
   });
@@ -97,7 +90,7 @@ describe('registerNxPackageUpdates', () => {
       },
     });
 
-    registerNxPackageUpdates(tree, true);
+    registerNxPackageUpdates(tree);
 
     expect(
       Object.keys(readMigrations(tree).packageJsonUpdates ?? {}).sort(),

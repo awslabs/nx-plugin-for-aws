@@ -2,34 +2,34 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { execSync } from 'child_process';
 import {
-  TS_VERSIONS,
-  PY_VERSIONS,
-  VENDORED_VERSIONS,
-  TERRAFORM_VERSIONS,
-} from '../packages/nx-plugin/src/utils/versions';
-import {
+  cpSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
-  writeFileSync,
-  cpSync,
   rmSync,
-  mkdirSync,
+  writeFileSync,
 } from 'fs';
+import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { execSync } from 'child_process';
-import { flushChanges, FsTree } from 'nx/src/generators/tree';
+import {
+  type ProjectNameRequirement,
+  parsePipRequirementsLine,
+  VersionOperator,
+} from 'pip-requirements-js';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
-  parsePipRequirementsLine,
-  ProjectNameRequirement,
-  VersionOperator,
-} from 'pip-requirements-js';
+  PY_VERSIONS,
+  TERRAFORM_VERSIONS,
+  TS_VERSIONS,
+  VENDORED_VERSIONS,
+} from '../packages/nx-plugin/src/utils/versions';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
-
 
 interface VersionChange {
   name: string;
@@ -412,11 +412,12 @@ const main = async () => {
 
     const updatedShadcnTemplateFiles = refreshShadcnTemplates(tree, tmpDir);
 
-    // Ship the bumps to existing workspaces.
-    const migrationFiles = registerNxPackageUpdates(
-      tree,
-      tsChanges.some((change) => isNxPackage(change.name)),
-    );
+    // Ship the bumps to existing workspaces. Only the nx packages need
+    // registering: everything else moves through the version sync migration,
+    // which is committed once and runs on every upgrade.
+    const migrationFiles = tsChanges.some((change) => isNxPackage(change.name))
+      ? registerNxPackageUpdates(tree)
+      : [];
 
     // Only apply changes if not a dry run
     if (!isDryRun) {

@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import * as devkit from '@nx/devkit';
 import {
   addProjectConfiguration,
   readJson,
@@ -151,7 +152,13 @@ describe('sync-vended-versions migration', () => {
   // would otherwise resolve a second, incompatible copy. Devkit does not manage
   // these fields, so without this the pin stays where it was generated.
   describe('overrides and resolutions', () => {
+    // Only the fields the workspace's package manager actually reads are synced,
+    // so each case declares the one whose field it exercises.
+    const usePackageManager = (pkgMgr: 'npm' | 'yarn' | 'pnpm' | 'bun') =>
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+
     it("should upgrade an owned package npm's overrides pins", async () => {
+      usePackageManager('npm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { zod: '4.3.0' },
@@ -163,6 +170,7 @@ describe('sync-vended-versions migration', () => {
     });
 
     it("should upgrade an owned package yarn's resolutions pins", async () => {
+      usePackageManager('yarn');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         resolutions: { zod: '4.3.0' },
@@ -174,6 +182,7 @@ describe('sync-vended-versions migration', () => {
     });
 
     it("should upgrade an owned package pnpm 10's overrides pins", async () => {
+      usePackageManager('pnpm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         pnpm: { overrides: { zod: '4.3.0' } },
@@ -188,6 +197,7 @@ describe('sync-vended-versions migration', () => {
 
     // pnpm 11 reads overrides from the workspace file rather than the manifest.
     it("should upgrade an owned package pnpm 11's workspace overrides pins", async () => {
+      usePackageManager('pnpm');
       writeWorkspaceYaml(tree, { overrides: { zod: '4.3.0' } });
 
       await syncVendedVersions(tree);
@@ -200,6 +210,7 @@ describe('sync-vended-versions migration', () => {
     // A scoped package keeps its `@`, so the boundary is only a `/` that isn't
     // starting one.
     it('should upgrade a package a scoped key pins', async () => {
+      usePackageManager('yarn');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         resolutions: {
@@ -219,6 +230,7 @@ describe('sync-vended-versions migration', () => {
     // npm allows a trailing range on the key, scoping the override to the
     // versions it intersects. The package is the part before it.
     it('should upgrade a package a range-scoped key pins', async () => {
+      usePackageManager('npm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { 'zod@^4': '4.3.0', '@trpc/server@^11': '11.0.0' },
@@ -234,6 +246,7 @@ describe('sync-vended-versions migration', () => {
 
     // npm nests an override to scope it, so the pin sits a level down.
     it('should upgrade a package a nested override pins', async () => {
+      usePackageManager('npm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { '@modelcontextprotocol/sdk': { zod: '4.3.0' } },
@@ -247,6 +260,7 @@ describe('sync-vended-versions migration', () => {
     });
 
     it('should leave a package no generator owns alone', async () => {
+      usePackageManager('bun');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { rxjs: '7.0.0' },
@@ -260,7 +274,26 @@ describe('sync-vended-versions migration', () => {
       expect(packageJson.resolutions['some-parent/rxjs']).toBe('7.0.0');
     });
 
+    // A field the workspace's package manager doesn't read has no effect, so
+    // rewriting it would imply one it doesn't have.
+    it('should leave a field the package manager does not read alone', async () => {
+      usePackageManager('yarn');
+      writeJson(tree, 'package.json', {
+        name: '@org/root',
+        // npm's field, inert under yarn.
+        overrides: { zod: '4.3.0' },
+        resolutions: { zod: '4.3.0' },
+      });
+
+      await syncVendedVersions(tree);
+
+      const packageJson = readJson(tree, 'package.json');
+      expect(packageJson.overrides.zod).toBe('4.3.0');
+      expect(packageJson.resolutions.zod).toBe(VENDED_ZOD);
+    });
+
     it('should leave a range the user widened alone', async () => {
+      usePackageManager('npm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { zod: '^4.0.0' },
@@ -274,6 +307,7 @@ describe('sync-vended-versions migration', () => {
     // nx moves through `packageJsonUpdates` so `nx migrate` collects Nx's own
     // migrations; rewriting it here would skip them.
     it('should leave an nx package alone', async () => {
+      usePackageManager('npm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { '@nx/devkit': '23.0.0' },
@@ -287,6 +321,7 @@ describe('sync-vended-versions migration', () => {
     });
 
     it('should report the install a changed override needs', async () => {
+      usePackageManager('npm');
       writeJson(tree, 'package.json', {
         name: '@org/root',
         overrides: { zod: '4.3.0' },
@@ -382,6 +417,50 @@ dev = [ "fastapi[standard]==0.130.0" ]
       `"aws-lambda-powertools[tracer]==${VENDED_POWERTOOLS}"`,
     );
     expect(pyProject).toContain(`"fastapi[standard]==${VENDED_FASTAPI}"`);
+  });
+
+  // Python follows the TypeScript rule: a range that already reaches the vended
+  // version is the user's to keep, and one that falls short is moved up.
+  it('should leave a python range that already permits the vended version alone', async () => {
+    tree.write(
+      'packages/api/pyproject.toml',
+      `[project]
+name = "api"
+dependencies = [
+  "fastapi>=0.100.0",
+  "aws-lambda-powertools[tracer]>=3.0.0,<4.0.0"
+]
+`,
+    );
+
+    await syncVendedVersions(tree);
+
+    const pyProject = tree.read('packages/api/pyproject.toml', 'utf-8');
+    expect(pyProject).toContain('"fastapi>=0.100.0"');
+    expect(pyProject).toContain(
+      '"aws-lambda-powertools[tracer]>=3.0.0,<4.0.0"',
+    );
+  });
+
+  it('should upgrade a python range that does not reach the vended version', async () => {
+    tree.write(
+      'packages/api/pyproject.toml',
+      `[project]
+name = "api"
+dependencies = [
+  "fastapi<0.130.0",
+  "aws-lambda-powertools[tracer]~=3.20.0"
+]
+`,
+    );
+
+    await syncVendedVersions(tree);
+
+    const pyProject = tree.read('packages/api/pyproject.toml', 'utf-8');
+    expect(pyProject).toContain(`"fastapi==${VENDED_FASTAPI}"`);
+    expect(pyProject).toContain(
+      `"aws-lambda-powertools[tracer]==${VENDED_POWERTOOLS}"`,
+    );
   });
 
   it('should upgrade terraform provider versions', async () => {

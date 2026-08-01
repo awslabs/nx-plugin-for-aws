@@ -31,11 +31,36 @@ export interface AddDependenciesOptions {
   /** The metadata the declaration's `when` predicates read. */
   readonly metadata?: DependencyMetadata;
   /**
-   * Project whose manifests receive the dependencies; defaults to the workspace
-   * root. `root: true` entries always go to the root regardless.
+   * Project whose manifests receive the dependencies. Required unless every
+   * applicable entry is marked `root`, which targets the workspace root instead.
    */
   readonly projectRoot?: string;
 }
+
+/**
+ * The manifest an entry belongs in: the workspace root for shared tooling
+ * (`root: true`), otherwise the project's own.
+ *
+ * A project-level entry with no `projectRoot` is a mistake rather than a default
+ * — silently adding it to the root manifest would leave the project failing
+ * `noUndeclaredDependencies` on a dependency it imports.
+ */
+const requireProjectRoot = (
+  entry: { name: unknown; root?: boolean },
+  projectRoot: string | undefined,
+  generator: string,
+): string | undefined => {
+  if (entry.root) {
+    return undefined;
+  }
+  if (!projectRoot) {
+    throw new Error(
+      `${generator} was called without a projectRoot, but '${String(entry.name)}' is not declared with \`root: true\`. ` +
+        `Pass the project's root, or declare the dependency with \`root: true\` if it belongs to the workspace root.`,
+    );
+  }
+  return projectRoot;
+};
 
 /**
  * Add every applicable TypeScript dependency from a declaration.
@@ -54,12 +79,10 @@ export const addTsDependencies = (
     { runtime: Record<string, string>; dev: Record<string, string> }
   >();
   for (const entry of applicable) {
-    // `root: true` is for shared tooling; everything else belongs to the project
-    // so `noUndeclaredDependencies` passes.
-    const manifestPath =
-      entry.root || !projectRoot
-        ? 'package.json'
-        : joinPathFragments(projectRoot, 'package.json');
+    const root = requireProjectRoot(entry, projectRoot, 'addTsDependencies');
+    const manifestPath = root
+      ? joinPathFragments(root, 'package.json')
+      : 'package.json';
     const manifest = manifests.get(manifestPath) ?? { runtime: {}, dev: {} };
     manifest[entry.dev ? 'dev' : 'runtime'][entry.name as string] =
       TS_VERSIONS[entry.name];
@@ -89,8 +112,6 @@ export const addPyDependencies = (
   { metadata = {}, projectRoot }: AddDependenciesOptions = {},
 ): void => {
   const applicable = applicableDependencies(declaration.py, metadata);
-  const targetRoot = (entry: { root?: boolean }) =>
-    entry.root || !projectRoot ? '.' : projectRoot;
 
   // Keyed by the pyproject to write and the group within it, since one
   // declaration may span the project's and the workspace root's.
@@ -99,7 +120,8 @@ export const addPyDependencies = (
     { root: string; group?: string; names: string[] }
   >();
   for (const entry of applicable) {
-    const root = targetRoot(entry);
+    const root =
+      requireProjectRoot(entry, projectRoot, 'addPyDependencies') ?? '.';
     const key = `${root}\0${entry.group ?? ''}`;
     const bucket = buckets.get(key) ?? { root, group: entry.group, names: [] };
     bucket.names.push(entry.name as string);

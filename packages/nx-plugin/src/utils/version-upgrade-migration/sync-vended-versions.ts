@@ -4,6 +4,7 @@
  */
 import {
   addDependenciesToPackageJson,
+  detectPackageManager,
   type MigrationReturnObject,
   readJson,
   type Tree,
@@ -13,7 +14,7 @@ import {
 import yaml from 'js-yaml';
 import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
-import { parse, satisfies, validRange } from 'semver';
+import { coerce, parse, satisfies, validRange } from 'semver';
 import { applyGritQL, captureAllGritQL } from '../ast';
 import { formatFilesInSubtree } from '../format';
 import { updateToml } from '../toml';
@@ -306,6 +307,39 @@ const overriddenPackage = (key: string): string | undefined => {
  * would otherwise stay on the version it was generated with. Values are compared
  * with `isVendedUpgrade`, so a range the user widened is left alone.
  */
+/**
+ * Where the workspace's package manager reads overrides from.
+ *
+ * Only the root manifest is considered: every package manager resolves overrides
+ * from the workspace root, so a nested `overrides` block is inert and rewriting
+ * it would imply an effect it doesn't have.
+ *
+ * pnpm moved the block between majors — 10 reads `pnpm.overrides` in the
+ * manifest, 11 reads `overrides` in `pnpm-workspace.yaml` — so both are covered
+ * rather than detecting the minor.
+ */
+const overrideLocations = (
+  tree: Tree,
+): {
+  manifestFields: readonly ('overrides' | 'resolutions' | 'pnpm.overrides')[];
+  workspaceFile?: string;
+} => {
+  switch (detectPackageManager(tree.root)) {
+    case 'npm':
+      return { manifestFields: ['overrides'] };
+    case 'yarn':
+      return { manifestFields: ['resolutions'] };
+    case 'bun':
+      // Bun reads npm's `overrides` and yarn's `resolutions` alike.
+      return { manifestFields: ['overrides', 'resolutions'] };
+    default:
+      return {
+        manifestFields: ['pnpm.overrides'],
+        workspaceFile: 'pnpm-workspace.yaml',
+      };
+  }
+};
+
 const syncOverrides = (tree: Tree, owned: OwnedDependencies): string[] => {
   const updated: string[] = [];
 
@@ -338,34 +372,31 @@ const syncOverrides = (tree: Tree, owned: OwnedDependencies): string[] => {
     return changed;
   };
 
-  visitNotIgnoredFiles(tree, '.', (path) => {
-    if (!path.endsWith('package.json')) {
-      return;
-    }
+  const { manifestFields, workspaceFile } = overrideLocations(tree);
+
+  if (manifestFields.length > 0) {
     let changed = false;
-    updateJson(tree, path, (json) => {
-      changed = [
-        syncOverrideTree(json.overrides),
-        syncOverrideTree(json.resolutions),
-        syncOverrideTree(json.pnpm?.overrides),
-      ].some(Boolean);
+    updateJson(tree, 'package.json', (json) => {
+      changed = manifestFields
+        .map((field) =>
+          syncOverrideTree(
+            field === 'pnpm.overrides' ? json.pnpm?.overrides : json[field],
+          ),
+        )
+        .some(Boolean);
       return json;
     });
     if (changed) {
-      updated.push(path);
+      updated.push('package.json');
     }
-  });
+  }
 
-  // pnpm 11 reads overrides from the workspace file instead of the manifest.
-  for (const path of YAML_WORKSPACE_FILES) {
-    if (!tree.exists(path)) {
-      continue;
-    }
-    const workspaceFile = (yaml.load(tree.read(path, 'utf-8') ?? '') ??
+  if (workspaceFile && tree.exists(workspaceFile)) {
+    const contents = (yaml.load(tree.read(workspaceFile, 'utf-8') ?? '') ??
       {}) as Record<string, unknown>;
-    if (syncOverrideTree(workspaceFile.overrides)) {
-      tree.write(path, yaml.dump(workspaceFile, { quotingType: "'" }));
-      updated.push(path);
+    if (syncOverrideTree(contents.overrides)) {
+      tree.write(workspaceFile, yaml.dump(contents, { quotingType: "'" }));
+      updated.push(workspaceFile);
     }
   }
 
@@ -399,23 +430,81 @@ const referencedCatalogPackages = (tree: Tree): Set<string> => {
   return referenced;
 };
 
+/** Pip specifier as `pip-requirements-js` reports it. */
+interface PyVersionSpec {
+  readonly operator: string;
+  readonly version: string;
+}
+
+/**
+ * Whether the declared specifiers already permit the vended version, so
+ * rewriting them would discard the user's range without changing what resolves.
+ *
+ * This mirrors the TypeScript side: an exact pin is the case to upgrade, a range
+ * that already reaches the vended version is left alone, and a range that falls
+ * short is moved up.
+ *
+ * A `*` wildcard or a specifier semver can't read counts as already permitting,
+ * so anything not understood is left as the user wrote it.
+ */
+const pyRangePermitsVended = (
+  specs: readonly PyVersionSpec[],
+  vended: string,
+): boolean =>
+  specs.every((spec) => {
+    if (spec.version.includes('*')) {
+      return true;
+    }
+    const bound = coerce(spec.version, { includePrerelease: true });
+    if (!bound) {
+      return true;
+    }
+    switch (spec.operator) {
+      // An exact pin permits only itself, so a differing vended version is an
+      // upgrade to apply.
+      case '==':
+      case '===':
+        return satisfies(vended, `=${bound.version}`, {
+          includePrerelease: true,
+        });
+      // `~=1.2.3` allows the patch series; `~=1.2` the minor series.
+      case '~=':
+        return satisfies(
+          vended,
+          spec.version.split('.').length > 2
+            ? `~${bound.version}`
+            : `^${bound.version}`,
+          { includePrerelease: true },
+        );
+      case '>=':
+      case '>':
+      case '<=':
+      case '<':
+        return satisfies(vended, `${spec.operator}${bound.version}`, {
+          includePrerelease: true,
+        });
+      // `!=` only excludes, so it never blocks the vended version by itself.
+      case '!=':
+        return true;
+      default:
+        return true;
+    }
+  });
+
 /**
  * Upgrade a pip requirement to the vended version, or return it unchanged.
  *
  * Parsed rather than pattern-matched so extras and operators are read the way
- * `uv` reads them. Only a single `==` pin is rewritten; anything looser is the
- * user's choice.
+ * `uv` reads them. A requirement whose specifiers already permit the vended
+ * version keeps them; one that falls short is replaced with an exact pin, which
+ * is what the generators write.
  */
 const syncPyRequirement = (
   owned: OwnedDependencies,
   requirement: string,
 ): string => {
   const parsed = parsePipRequirementsLine(requirement);
-  if (parsed?.type !== 'ProjectName' || parsed.versionSpec?.length !== 1) {
-    return requirement;
-  }
-  const [spec] = parsed.versionSpec;
-  if (spec.operator !== '==') {
+  if (parsed?.type !== 'ProjectName' || !parsed.versionSpec?.length) {
     return requirement;
   }
 
@@ -423,7 +512,20 @@ const syncPyRequirement = (
     ? `${parsed.name}[${parsed.extras.join(',')}]`
     : parsed.name;
   const vended = vendedPyVersion(owned, name);
-  if (!vended || !isVendedUpgrade(vended, spec.version)) {
+  if (!vended) {
+    return requirement;
+  }
+
+  const specs = parsed.versionSpec as readonly PyVersionSpec[];
+  // Never move a version backwards: a pin above what this release vends is the
+  // user's, and a range already reaching it is theirs to keep.
+  const [first] = specs;
+  const isExactPin =
+    specs.length === 1 && (first.operator === '==' || first.operator === '===');
+  if (isExactPin && !isVendedUpgrade(vended, first.version)) {
+    return requirement;
+  }
+  if (!isExactPin && pyRangePermitsVended(specs, vended)) {
     return requirement;
   }
   return `${name}==${vended}`;

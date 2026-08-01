@@ -9,6 +9,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { captureAllGritQL, matchGritQL } from '../ast';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils';
 import { declaredNames } from '../declared-dependencies';
 import { buildGeneratorInfoList } from '../generators';
@@ -19,6 +20,9 @@ import {
   ownedDependencies,
   PLUGIN_ROOT,
 } from './owned-dependencies';
+
+/** A workspace on CDK, which is what receives the shared constructs project. */
+const cdkConfig = "export default { iac: { provider: 'cdk' } };";
 
 const addProject = (
   tree: Tree,
@@ -203,6 +207,7 @@ describe('ownedDependencies', () => {
   // installs into its own project. Those are owned here even though this
   // generator installs none of them, or the sync would leave them behind.
   it('should own the dependencies its helpers install elsewhere', async () => {
+    tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, cdkConfig);
     addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
 
     const owned = await ownedDependencies(tree);
@@ -210,6 +215,23 @@ describe('ownedDependencies', () => {
     // `sharedConstructsGenerator` puts these in the shared constructs project.
     expect(owned.ts.has('aws-cdk-lib')).toBe(true);
     expect(owned.ts.has('constructs')).toBe(true);
+  });
+
+  // `sharedConstructsGenerator` only creates the TypeScript constructs project
+  // on the CDK branch, so a Terraform workspace never receives those packages.
+  it('should not own the CDK packages in a terraform workspace', async () => {
+    tree.write(
+      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+      "export default { iac: { provider: 'terraform' } };",
+    );
+    addProject(tree, 'api', { generator: 'ts#trpc-api' } as never);
+
+    const owned = await ownedDependencies(tree);
+
+    expect(owned.ts.has('aws-cdk-lib')).toBe(false);
+    expect(owned.ts.has('constructs')).toBe(false);
+    // Everything the generator adds itself is still owned.
+    expect(owned.ts.has('zod')).toBe(true);
   });
 
   it('should union the declarations of every generator that ran', async () => {
@@ -223,21 +245,93 @@ describe('ownedDependencies', () => {
   });
 });
 
-/** Calls that add a vended dependency, and so require a declaration. */
-const ADDS_DEPENDENCIES =
-  /withVersions\(|withPyVersions\(|addDependenciesToPyProjectToml\(|addDependenciesToDependencyGroupInPyProjectToml\(|addTsDependencies\(|addPyDependencies\(/;
-
-/** Calls that record a generator against a project, making its deps discoverable. */
-const RECORDS_METADATA =
-  /addGeneratorMetadata\(|addComponentGeneratorMetadata\(|metadata: \{/;
+/**
+ * A generator's source, on a tree so it can be queried with GritQL.
+ *
+ * Matching the syntax rather than the text means a call inside a comment or a
+ * string can't satisfy an invariant, and a rename shows up as a miss instead of
+ * quietly still matching.
+ */
+const generatorSource = (
+  info: { resolvedFactoryPath: string },
+  tree: Tree,
+): string => {
+  const path = 'generator-under-test.ts';
+  tree.write(path, readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8'));
+  return path;
+};
 
 /**
- * The explicit helpers. A connection wires into a project it did not create, so
- * an inline `metadata: {` in its source belongs to something else and doesn't
- * count.
+ * The property names of the generator's `*Metadata` interface — the fields it
+ * hands to both the dependency call and the recording helper.
+ *
+ * Captured in two passes because a `within` clause doesn't reach a property
+ * signature: the interface first, then its members from that text alone.
  */
-const CALLS_METADATA_HELPER =
-  /addGeneratorMetadata\(|addComponentGeneratorMetadata\(/;
+const metadataInterfaceMembers = async (
+  path: string,
+  tree: Tree,
+): Promise<string[]> => {
+  const interfaces = await captureAllGritQL(
+    tree,
+    path,
+    'interface_declaration($name, $body) where { $name <: r".*Metadata" }',
+  );
+  if (interfaces.length === 0) {
+    return [];
+  }
+  const membersPath = 'metadata-interfaces.ts';
+  tree.write(membersPath, interfaces.join('\n'));
+  const signatures = await captureAllGritQL(
+    tree,
+    membersPath,
+    'property_signature($name)',
+  );
+  return signatures.map((signature) =>
+    signature
+      .split(/[?:]/)[0]
+      .trim()
+      .replace(/^readonly\s+/, ''),
+  );
+};
+
+/** Whether the source contains a call to any of the named functions. */
+const callsAny = async (
+  tree: Tree,
+  path: string,
+  names: readonly string[],
+): Promise<boolean> => {
+  for (const name of names) {
+    // Matched as a call expression rather than a template: an argument-list
+    // pattern doesn't match a multi-argument call.
+    if (
+      await matchGritQL(
+        tree,
+        path,
+        `call_expression($function) where { $function <: \`${name}\` }`,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/** Calls that add a vended dependency, and so require a declaration. */
+const ADDS_DEPENDENCIES = [
+  'withVersions',
+  'withPyVersions',
+  'addDependenciesToPyProjectToml',
+  'addDependenciesToDependencyGroupInPyProjectToml',
+  'addTsDependencies',
+  'addPyDependencies',
+] as const;
+
+/** The helpers that record a generator against a project. */
+const METADATA_HELPERS = [
+  'addGeneratorMetadata',
+  'addComponentGeneratorMetadata',
+] as const;
 
 /**
  * Generators discovered through something they delegate to instead of their own
@@ -264,10 +358,15 @@ describe('declaration coverage', () => {
   // A generator that adds vended dependencies must declare them, or the version
   // sync would leave them behind. Generators that add none need no declaration.
   it('should have every generator that adds dependencies declare them', async () => {
+    const sourceTree = createTreeUsingTsSolutionSetup();
     const undeclared: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
-      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
-      const addsDependencies = ADDS_DEPENDENCIES.test(source);
+      const path = generatorSource(info, sourceTree);
+      const addsDependencies = await callsAny(
+        sourceTree,
+        path,
+        ADDS_DEPENDENCIES,
+      );
       const module = await import(`${info.resolvedFactoryPath}.js`);
       if (addsDependencies && !module.DEPENDENCIES) {
         undeclared.push(info.id);
@@ -281,14 +380,19 @@ describe('declaration coverage', () => {
   // project, or `ownedDependencies` never discovers it and the deps it added are
   // silently left behind.
   it('should have every generator that adds dependencies record metadata', async () => {
+    const sourceTree = createTreeUsingTsSolutionSetup();
     const unrecorded: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
-      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
-      if (
-        ADDS_DEPENDENCIES.test(source) &&
-        !RECORDS_METADATA.test(source) &&
-        !DISCOVERED_INDIRECTLY.has(info.id)
-      ) {
+      if (DISCOVERED_INDIRECTLY.has(info.id)) {
+        continue;
+      }
+      const path = generatorSource(info, sourceTree);
+      // A generator that creates the project may record itself by building the
+      // metadata inline, so an object with a `generator` property counts too.
+      const records =
+        (await callsAny(sourceTree, path, METADATA_HELPERS)) ||
+        (await matchGritQL(sourceTree, path, '`metadata: { $$$ }`'));
+      if ((await callsAny(sourceTree, path, ADDS_DEPENDENCIES)) && !records) {
         unrecorded.push(info.id);
       }
     }
@@ -320,16 +424,22 @@ describe('declaration coverage', () => {
   // Connections must be identifiable during an upgrade, whether or not they add
   // dependencies today — otherwise adding one later silently goes unowned.
   it('should have every connection generator record metadata', async () => {
-    const unrecorded = buildGeneratorInfoList(PLUGIN_ROOT)
-      .filter((info) => info.id.endsWith('-connection'))
-      .filter((info) => !DISCOVERED_INDIRECTLY.has(info.id))
-      .filter(
-        (info) =>
-          !CALLS_METADATA_HELPER.test(
-            readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8'),
-          ),
-      )
-      .map((info) => info.id);
+    const sourceTree = createTreeUsingTsSolutionSetup();
+    const unrecorded: string[] = [];
+    for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
+      if (
+        !info.id.endsWith('-connection') ||
+        DISCOVERED_INDIRECTLY.has(info.id)
+      ) {
+        continue;
+      }
+      // A connection wires into a project it did not create, so only an explicit
+      // helper call counts — inline metadata there belongs to something else.
+      const path = generatorSource(info, sourceTree);
+      if (!(await callsAny(sourceTree, path, METADATA_HELPERS))) {
+        unrecorded.push(info.id);
+      }
+    }
 
     expect(unrecorded).toEqual([]);
   });
@@ -339,6 +449,7 @@ describe('declaration coverage', () => {
   // records which fields each predicate touches, then asserts the generator
   // records them.
   it('should record every field its predicates read', async () => {
+    const sourceTree = createTreeUsingTsSolutionSetup();
     const unrecorded: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
       const { DEPENDENCIES } = await import(`${info.resolvedFactoryPath}.js`);
@@ -370,13 +481,17 @@ describe('declaration coverage', () => {
       if (read.size === 0) {
         continue;
       }
-      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
       // The metadata interface the generator declares and hands to both the
       // dependency call and the recording helper. A field a predicate reads must
       // be one of its members, or no project will carry it.
-      const declared = /interface \w*Metadata \{([^}]*)\}/.exec(source)?.[1];
+      const members = new Set(
+        await metadataInterfaceMembers(
+          generatorSource(info, sourceTree),
+          sourceTree,
+        ),
+      );
       for (const key of read) {
-        if (!declared || !new RegExp(`\\b${key}\\b`).test(declared)) {
+        if (!members.has(key)) {
           unrecorded.push(`${info.id}: ${key}`);
         }
       }
@@ -385,23 +500,42 @@ describe('declaration coverage', () => {
     expect(unrecorded).toEqual([]);
   });
 
-  /** Shared constants a helper adds to the project it owns, not the caller's. */
-  const HELPER_CONSTANTS =
-    /\.\.\.(?:ownedElsewhere\(|onlyWhen\()*([A-Z][A-Z0-9_]*_DEPENDENCIES(?:\.ts)?)\b/g;
+  /** A helper's exported constant, named `*_DEPENDENCIES` by convention. */
+  const HELPER_CONSTANT = /^[A-Z][A-Z0-9_]*_DEPENDENCIES$/;
 
   // A generator spreads a helper's constant to declare ownership, but the helper
   // adds those packages to its own project. Passing them to `addTsDependencies`
   // would install them into the caller's manifest — so they must be wrapped.
   it('should not install the dependencies its helpers own', async () => {
+    const sourceTree = createTreeUsingTsSolutionSetup();
     const unwrapped: string[] = [];
     for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
-      const source = readFileSync(`${info.resolvedFactoryPath}.ts`, 'utf-8');
-      if (!/addTsDependencies\(|addPyDependencies\(/.test(source)) {
+      const path = generatorSource(info, sourceTree);
+      if (
+        !(await callsAny(sourceTree, path, [
+          'addTsDependencies',
+          'addPyDependencies',
+        ]))
+      ) {
         continue;
       }
-      for (const [spread, constant] of source.matchAll(HELPER_CONSTANTS)) {
-        // `ownedElsewhere` may wrap the constant directly or wrap an `onlyWhen`
-        // that narrows it to the branch reaching the helper.
+      // Every spread in the declaration, so a helper's constant can be checked
+      // for its `ownedElsewhere` wrapper. `ownedElsewhere` may wrap the constant
+      // directly or wrap an `onlyWhen` narrowing it to one branch.
+      for (const spread of await captureAllGritQL(
+        sourceTree,
+        path,
+        '`...$spread`',
+      )) {
+        const constant = spread
+          .replace(/^\.\.\./, '')
+          .replace(/^(?:ownedElsewhere|onlyWhen)\(/, '')
+          .replace(/\.ts\b.*$/, '')
+          .replace(/[(),].*$/s, '')
+          .trim();
+        if (!HELPER_CONSTANT.test(constant)) {
+          continue;
+        }
         if (!spread.startsWith('...ownedElsewhere(')) {
           unwrapped.push(`${info.id}: ${constant}`);
         }

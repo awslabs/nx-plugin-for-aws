@@ -44,15 +44,18 @@ import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
 
 // The A2A core client + vended client need these whatever the connection's
 // options, so no entry is conditional.
+// The A2A client the generated agent code imports, plus the AppConfig lookup and
+// sigv4 signing it resolves the remote agent with. Added to the workspace root,
+// where this connection has always put them.
 export const DEPENDENCIES = declareDependencies()({
   ts: [
-    { name: '@a2a-js/sdk' },
-    { name: '@strands-agents/sdk' },
-    { name: '@aws-lambda-powertools/parameters' },
-    { name: '@aws-sdk/client-appconfigdata' },
-    { name: 'aws4fetch' },
-    { name: '@aws-sdk/credential-providers' },
-    { name: 'zod' },
+    { name: '@a2a-js/sdk', root: true },
+    { name: '@strands-agents/sdk', root: true },
+    { name: '@aws-lambda-powertools/parameters', root: true },
+    { name: '@aws-sdk/client-appconfigdata', root: true },
+    { name: 'aws4fetch', root: true },
+    { name: '@aws-sdk/credential-providers', root: true },
+    { name: 'zod', root: true },
     ...ownedElsewhere(AGENT_CONNECTION_DEPENDENCIES),
   ],
 });

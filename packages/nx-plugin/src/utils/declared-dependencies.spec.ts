@@ -93,6 +93,52 @@ describe('declared dependencies', () => {
         'zod',
       ]);
     });
+
+    // A predicate may hand back the value it read rather than a comparison.
+    it('should include an entry whose predicate returns a truthy value', () => {
+      const truthy = declareDependencies<{ port?: number; name?: string }>()({
+        ts: [
+          { name: 'zod', when: (m) => m.port },
+          { name: 'express', when: (m) => m.name },
+        ],
+      });
+
+      expect(
+        applicableDependencies(truthy.ts, { port: 8080 }).map((e) => e.name),
+      ).toEqual(['zod']);
+      // 0 and '' are falsy, so neither applies.
+      expect(applicableDependencies(truthy.ts, { port: 0, name: '' })).toEqual(
+        [],
+      );
+    });
+  });
+
+  // `dev` is a TypeScript concept and `group` a Python one, so each is typed as
+  // never-present on the other — a misplaced flag fails to compile.
+  describe('language-specific flags', () => {
+    it('should reject a Python flag on a TypeScript entry', () => {
+      declareDependencies()({
+        // @ts-expect-error group is Python-only
+        ts: [{ name: 'zod', group: 'dev' }],
+      });
+    });
+
+    it('should reject a TypeScript flag on a Python entry', () => {
+      declareDependencies()({
+        // @ts-expect-error dev is TypeScript-only
+        py: [{ name: 'boto3', dev: true }],
+      });
+    });
+
+    it('should accept each flag on its own language', () => {
+      const declaration = declareDependencies()({
+        ts: [{ name: 'tsx', dev: true, root: true }],
+        py: [{ name: 'ruff', group: 'dev', root: true }],
+      });
+
+      expect(declaration.ts[0].dev).toBe(true);
+      expect(declaration.py[0].group).toBe('dev');
+    });
   });
 
   describe('ownedDependencyEntries', () => {
