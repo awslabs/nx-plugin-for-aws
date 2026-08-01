@@ -143,6 +143,25 @@ module "user_identity" {
 </Fragment>
 </Infrastructure>
 
+##### Le remplacement de la règle `EC2MetaDataSSRF_QUERYARGUMENTS`
+
+Une règle au sein de `AWSManagedRulesCommonRuleSet` est remplacée pour [Compter](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) plutôt que de rester en mode Blocage : `EC2MetaDataSSRF_QUERYARGUMENTS`.
+
+Cette règle inspecte les arguments de requête pour détecter des chaînes qui ressemblent à une tentative de [falsification de requête côté serveur](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) contre le point de terminaison de métadonnées d'instance EC2, et elle traite une adresse de bouclage comme telle. Lorsque vous exécutez votre site web localement, l'interface hébergée reçoit un `redirect_uri` pointant vers `http://localhost:4200`, donc la règle correspond et la requête est bloquée — la connexion échoue avec un `403 Forbidden` opaque avant que la page de connexion ne s'affiche.
+
+Compter la règle signifie que les correspondances sont enregistrées dans les métriques de la Web ACL et les journaux WAF, mais la requête est autorisée à passer. Toutes les autres règles du groupe, y compris le reste des protections SSRF, bloquent toujours. Les URI de redirection que Cognito acceptera sont de toute façon contraints par la liste d'autorisation des URL de callback du client User Pool, donc cela n'élargit pas les destinations vers lesquelles les utilisateurs peuvent être redirigés.
+
+Si vous n'avez pas besoin de vous connecter contre un serveur de développement local, vous pouvez supprimer le remplacement pour que la règle bloque à nouveau :
+
+<Infrastructure>
+<Fragment slot="cdk">
+Supprimez la propriété `ruleActionOverrides` de la règle `CRSRule` dans `packages/common/constructs/src/core/user-identity.ts`.
+</Fragment>
+<Fragment slot="terraform">
+Supprimez le bloc `rule_action_override` de la règle `CRSRule` dans `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
+</Fragment>
+</Infrastructure>
+
 ## Utilisation de l'infrastructure
 
 <Infrastructure>

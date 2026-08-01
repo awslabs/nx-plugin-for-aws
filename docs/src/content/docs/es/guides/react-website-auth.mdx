@@ -140,6 +140,25 @@ module "user_identity" {
 </Fragment>
 </Infrastructure>
 
+##### La anulación de la regla `EC2MetaDataSSRF_QUERYARGUMENTS`
+
+Una regla dentro de `AWSManagedRulesCommonRuleSet` se anula para [Contar](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) en lugar de dejarse en Bloquear: `EC2MetaDataSSRF_QUERYARGUMENTS`.
+
+Esa regla inspecciona los argumentos de consulta en busca de cadenas que parezcan un intento de [falsificación de solicitud del lado del servidor](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) contra el endpoint de metadatos de instancia EC2, y trata una dirección de loopback como una. Cuando ejecutas tu sitio web localmente, la Hosted UI recibe un `redirect_uri` que apunta a `http://localhost:4200`, por lo que la regla coincide y la solicitud se bloquea — el inicio de sesión falla con un `403 Forbidden` opaco antes de que se renderice la página de inicio de sesión.
+
+Contar la regla significa que las coincidencias se registran en las métricas de Web ACL y los registros de WAF, pero la solicitud se permite pasar. Todas las demás reglas del grupo, incluido el resto de las protecciones SSRF, aún bloquean. Los URIs de redirección que Cognito aceptará están restringidos por la lista de permitidos de URL de callback del cliente del User Pool de todos modos, por lo que esto no amplía a dónde se puede redirigir a los usuarios.
+
+Si no necesitas iniciar sesión contra un servidor de desarrollo local, puedes eliminar la anulación para que la regla vuelva a bloquear:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Elimina la propiedad `ruleActionOverrides` de la regla `CRSRule` en `packages/common/constructs/src/core/user-identity.ts`.
+</Fragment>
+<Fragment slot="terraform">
+Elimina el bloque `rule_action_override` de la regla `CRSRule` en `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
+</Fragment>
+</Infrastructure>
+
 ## Uso de la Infraestructura
 
 <Infrastructure>
