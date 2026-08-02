@@ -845,7 +845,10 @@ export default async function migration(
     // The provider each of this project's components generated with. Recorded on
     // the component because that is where these generators record it — an agent
     // and an MCP server each choose their own provider.
-    next.components = (next.components ?? []).map((component) => {
+    //
+    // Left absent rather than set to an empty list where the project has no
+    // components, so a project this backfill has nothing to add to is untouched.
+    next.components = next.components?.map((component) => {
       if (component.iac !== undefined) {
         return component;
       }

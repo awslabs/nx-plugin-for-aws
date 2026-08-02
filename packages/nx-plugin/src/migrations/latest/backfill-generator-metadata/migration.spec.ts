@@ -266,6 +266,20 @@ describe('backfill-generator-metadata migration', () => {
 
       expect(metadataOf(tree, '@proj/hand-written')).toBeUndefined();
     });
+
+    // Materialising an empty list would put `"components": []` in the diff of
+    // every project that has none, which is noise a reviewer has to read past.
+    it('should not add a components list to a project without one', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/api']);
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#smithy-api', apiName: 'my-api' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/api')).not.toHaveProperty('components');
+    });
   });
 
   // `ts#dcr-proxy` creates its project through `ts#project`, which recorded its
