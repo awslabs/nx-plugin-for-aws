@@ -1,0 +1,175 @@
+---
+title: Smithy 项目
+description: Smithy 项目生成器的参考文档
+generator: smithy#project
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+[Smithy](https://smithy.io/) 是一种用于描述服务及其交换数据的接口定义语言。Smithy 项目生成器创建一个包含 Smithy 模型的项目。
+
+Smithy 项目有两种类型：
+
+- **服务** (`--type=service`) — 定义服务及其操作的模型。这是 <Link path="guides/ts-smithy-api">`ts#api --framework=smithy` 生成器</Link>为您创建的内容，同时还包含 TypeScript 实现。
+- **形状库** (`--type=shapes`) — 定义可重用形状但不包含服务的模型。将形状库连接到您的 Smithy 项目以在它们之间共享形状，而不是在每个项目中重复定义。
+
+:::tip
+如果您想要一个带实现的 API，请改用 <Link path="guides/ts-smithy-api">`ts#api` 生成器</Link>。它会创建一个 Smithy 模型项目_以及_实现它的 TypeScript 服务器。
+:::
+
+## 用法
+
+### 生成 Smithy 项目
+
+<RunGenerator generator="smithy#project" requiredParameters={{ name: 'my-shapes' }} />
+
+### 选项
+
+<GeneratorParameters generator="smithy#project" />
+
+## 生成器输出
+
+<OptionFilter when={{ type: 'shapes' }} description="Shape library: a model with no service">
+
+### 形状库
+
+<FileTree>
+
+  - my-shapes
+    - src
+      - main.smithy 您的共享形状定义
+    - smithy-build.json Smithy 构建配置
+    - build.Dockerfile 构建和验证模型
+    - project.json 项目配置和构建目标
+
+</FileTree>
+
+形状库仅定义形状，不包含其他内容：
+
+```smithy
+$version: "2.0"
+
+namespace com.example
+
+structure Customer {
+    @required
+    id: String
+
+    name: String
+    email: String
+}
+```
+
+由于形状库没有服务，其 `smithy-build.json` 不配置代码生成 — 构建它会验证模型并将其组装成位于 `dist/<my-shapes>/build/model/model.json` 的单个 JSON 模型文件。
+
+</OptionFilter>
+
+<OptionFilter when={{ type: 'service' }} description="Service: a model which defines a service and its operations">
+
+### 服务
+
+<FileTree>
+
+  - my-service
+    - src
+      - main.smithy 您的服务定义
+      - operations
+        - echo.smithy 示例操作
+    - smithy-build.json Smithy 构建配置，包括代码生成
+    - build.Dockerfile 构建模型、OpenAPI 规范和 TypeScript Server SDK
+    - project.json 项目配置和构建目标
+
+</FileTree>
+
+服务模型定义服务形状及其公开的操作：
+
+```smithy
+$version: "2.0"
+
+namespace com.example
+
+use aws.protocols#restJson1
+
+@title("MyService")
+@restJson1
+service MyService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+}
+```
+
+构建服务项目会生成 OpenAPI 规范和 TypeScript Server SDK 到 `dist/<my-service>/build/`。
+
+</OptionFilter>
+
+## 构建
+
+Smithy 项目使用 [Docker](https://www.docker.com/) 进行构建，它运行 [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) 来验证您的模型：
+
+<NxCommands commands={['build my-shapes']} />
+
+## 依赖形状库
+
+构建形状库会将组装的模型写入 `dist/<my-shapes>/build/model/model.json`。这个单一文件包含库定义的每个形状，以及它依赖的任何形状，因此消费者只需声明它直接引用的库。
+
+要从另一个 Smithy 项目依赖形状库，需要对消费项目进行三处更改：
+
+<Steps>
+
+1. Smithy 项目在容器内构建，构建时会将工作区根目录作为命名构建上下文提供。在消费项目的 `build.Dockerfile` 中添加 `COPY`，与复制其自身源代码的位置并列：
+
+   ```dockerfile ins={4}
+   # Copy project files
+   COPY smithy-build.json .
+   COPY src src
+   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
+   ```
+
+2. 将复制的文件添加到消费项目的 `smithy-build.json` 中的 `imports`：
+
+   ```json ins={4}
+   {
+     "version": "1.0",
+     "sources": ["src/"],
+     "imports": ["deps/my-shapes.json"],
+     ...
+   }
+   ```
+
+3. 将库的 `build` 目标添加为消费项目的 `compile` 目标的依赖项（在其 `project.json` 中），以便在消费者构建之前模型已存在：
+
+   ```json ins={4}
+   {
+     "targets": {
+       "compile": {
+         "dependsOn": ["@my-scope/my-shapes:build"],
+         ...
+       }
+     }
+   }
+   ```
+
+</Steps>
+
+现在您的模型可以使用 `use` 引用库的形状：
+
+```smithy
+$version: "2.0"
+
+namespace com.example.api
+
+use com.example.shared#Customer
+
+structure GetCustomerOutput {
+    @required
+    customer: Customer
+}
+```
+
+形状库可以以相同的方式依赖其他形状库。由于每个库的构建模型已经包含其自身的依赖项，您只需要对直接引用的库重复这些步骤。通过多个路径到达的库只会被解析一次 — Smithy 会忽略重复但等效的形状定义。
