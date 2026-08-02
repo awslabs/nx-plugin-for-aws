@@ -1,0 +1,676 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import {
+  addProjectConfiguration,
+  joinPathFragments,
+  readProjectConfiguration,
+  type Tree,
+  writeJson,
+} from '@nx/devkit';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import migration from './migration';
+
+/**
+ * A workspace whose shared infrastructure project was generated with the given
+ * provider, registering a build dependency for each project that received
+ * infrastructure — which is how the generators record it.
+ */
+const seedInfrastructure = (
+  tree: Tree,
+  iac: 'cdk' | 'terraform',
+  projectNames: string[],
+) =>
+  writeJson(
+    tree,
+    joinPathFragments(
+      'packages/common',
+      iac === 'cdk' ? 'constructs' : 'terraform',
+      'project.json',
+    ),
+    {
+      name: iac === 'cdk' ? '@proj/common-constructs' : '@proj/terraform',
+      targets: {
+        build: {
+          dependsOn: projectNames.map((name) => `${name}:build`),
+        },
+      },
+    },
+  );
+
+const metadataOf = (tree: Tree, project: string) =>
+  readProjectConfiguration(tree, project).metadata as any;
+
+const componentOf = (tree: Tree, project: string, generator: string) =>
+  (metadataOf(tree, project).components ?? []).find(
+    (component: any) => component.generator === generator,
+  );
+
+describe('backfill-generator-metadata migration', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+  });
+
+  describe('iac', () => {
+    it('should record the provider that generated a project its infrastructure', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/api']);
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#trpc-api' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/api').iac).toBe('cdk');
+    });
+
+    it('should record terraform from the shared terraform project', async () => {
+      seedInfrastructure(tree, 'terraform', ['@proj/api']);
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#trpc-api' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/api').iac).toBe('terraform');
+    });
+
+    // `iac` is a per-generator option, so one workspace can hold both providers.
+    it('should record each project the provider its own infrastructure used', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/api']);
+      seedInfrastructure(tree, 'terraform', ['@proj/website']);
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#trpc-api' } as never,
+      });
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        metadata: { generator: 'ts#react-website' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/api').iac).toBe('cdk');
+      expect(metadataOf(tree, '@proj/website').iac).toBe('terraform');
+    });
+
+    // Recording an `iac` for a project generated with `infra: 'none'` would have
+    // the sync claim the infra helpers' packages, which it never received.
+    it('should record no iac for a project that got no infrastructure', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/api']);
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#trpc-api' } as never,
+      });
+      addProjectConfiguration(tree, '@proj/standalone', {
+        root: 'packages/standalone',
+        metadata: { generator: 'ts#trpc-api' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/standalone').iac).toBeUndefined();
+    });
+
+    it('should leave an iac the project already records alone', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/api']);
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#trpc-api', iac: 'terraform' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/api').iac).toBe('terraform');
+    });
+
+    // An agent and an MCP server are components rather than projects, and each
+    // chooses its own provider — so the project-level build dependency isn't
+    // precise enough and the generators record `iac` on the component.
+    it('should record a component the provider its own infrastructure used', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/app']);
+      tree.write(
+        'packages/common/constructs/src/app/agents/my-agent/my-agent.ts',
+        'export {};\n',
+      );
+      addProjectConfiguration(tree, '@proj/app', {
+        root: 'packages/app',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#agent', name: 'my-agent', path: 'src/my-agent' },
+            { generator: 'ts#agent', name: 'no-infra', path: 'src/no-infra' },
+          ],
+        } as never,
+      });
+
+      await migration(tree);
+
+      const components = metadataOf(tree, '@proj/app').components;
+      expect(components[0].iac).toBe('cdk');
+      // Generated with `infra: 'none'`, so it received no infrastructure.
+      expect(components[1].iac).toBeUndefined();
+    });
+
+    it('should record an mcp server component from its own module', async () => {
+      seedInfrastructure(tree, 'terraform', ['@proj/mcp']);
+      tree.write(
+        'packages/common/terraform/src/app/mcp-servers/server/server.tf',
+        'resource "null_resource" "server" {}\n',
+      );
+      addProjectConfiguration(tree, '@proj/mcp', {
+        root: 'packages/mcp',
+        metadata: {
+          generator: 'ts#project',
+          components: [{ generator: 'ts#mcp-server', name: 'server' }],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/mcp').components[0].iac).toBe('terraform');
+    });
+
+    it('should leave a project no generator created alone', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/hand-written']);
+      addProjectConfiguration(tree, '@proj/hand-written', {
+        root: 'packages/hand-written',
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/hand-written')).toBeUndefined();
+    });
+  });
+
+  // `ts#dcr-proxy` creates its project through `ts#project`, which recorded its
+  // own id — so the proxy's dependencies went unowned.
+  describe('ts#dcr-proxy', () => {
+    const seedHandlers = (tree: Tree, root: string) => {
+      for (const handler of DCR_PROXY_HANDLERS) {
+        tree.write(
+          joinPathFragments(root, 'src', 'handlers', `${handler}.ts`),
+          'export {};\n',
+        );
+      }
+    };
+
+    it('should re-attribute a project carrying the vended handlers', async () => {
+      seedHandlers(tree, 'packages/proxy');
+      addProjectConfiguration(tree, '@proj/proxy', {
+        root: 'packages/proxy',
+        metadata: { generator: 'ts#project' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/proxy').generator).toBe('ts#dcr-proxy');
+    });
+
+    it('should leave a plain ts#project alone', async () => {
+      addProjectConfiguration(tree, '@proj/lib', {
+        root: 'packages/lib',
+        metadata: { generator: 'ts#project' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/lib').generator).toBe('ts#project');
+    });
+
+    // A project with only some handlers has diverged from the vended shape, so
+    // calling it a dcr-proxy would be a guess.
+    it('should leave a project with only some handlers alone', async () => {
+      tree.write('packages/partial/src/handlers/token.ts', 'export {};\n');
+      addProjectConfiguration(tree, '@proj/partial', {
+        root: 'packages/partial',
+        metadata: { generator: 'ts#project' } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/partial').generator).toBe('ts#project');
+    });
+  });
+
+  describe('website options', () => {
+    const seedWebsite = (tree: Tree, viteConfig: string) => {
+      tree.write('packages/website/vite.config.mts', viteConfig);
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        sourceRoot: 'packages/website/src',
+        metadata: { generator: 'ts#react-website', ux: 'shadcn' } as never,
+      });
+    };
+
+    it('should record the options from the plugins their generation registered', async () => {
+      seedWebsite(
+        tree,
+        `import { defineConfig } from 'vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
+import tailwindcss from '@tailwindcss/vite';
+export default defineConfig({
+  plugins: [tanstackRouter({ routesDirectory: 'src/routes' }), tailwindcss()],
+});
+`,
+      );
+
+      await migration(tree);
+
+      const metadata = metadataOf(tree, '@proj/website');
+      expect(metadata.tailwind).toBe(true);
+      expect(metadata.tanstackRouter).toBe(true);
+    });
+
+    // Both options default to true, so only their absence from the config proves
+    // the website was generated without them.
+    it('should record them false when the plugins are absent', async () => {
+      seedWebsite(
+        tree,
+        `import { defineConfig } from 'vite';
+export default defineConfig({ plugins: [] });
+`,
+      );
+
+      await migration(tree);
+
+      const metadata = metadataOf(tree, '@proj/website');
+      expect(metadata.tailwind).toBe(false);
+      expect(metadata.tanstackRouter).toBe(false);
+    });
+
+    it('should leave options the website already records alone', async () => {
+      tree.write(
+        'packages/website/vite.config.mts',
+        "import tailwindcss from '@tailwindcss/vite';\nexport default { plugins: [tailwindcss()] };\n",
+      );
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        metadata: {
+          generator: 'ts#react-website',
+          tailwind: false,
+          tanstackRouter: false,
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/website').tailwind).toBe(false);
+    });
+  });
+
+  describe('agent connections', () => {
+    /** An agent project whose agent imports the given clients. */
+    const seedAgent = (
+      tree: Tree,
+      options: {
+        extension: 'ts' | 'py';
+        generator: string;
+        agentSource: string;
+        framework?: string;
+      },
+    ) => {
+      tree.write(
+        `packages/app/src/my-agent/agent.${options.extension}`,
+        options.agentSource,
+      );
+      addProjectConfiguration(tree, '@proj/app', {
+        root: 'packages/app',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            {
+              generator: options.generator,
+              name: 'my-agent',
+              path: 'src/my-agent',
+              rc: 'MyAgent',
+              ...(options.framework ? { framework: options.framework } : {}),
+            },
+          ],
+        } as never,
+      });
+    };
+
+    /** An MCP server the connection could have been made to. */
+    const seedMcpServer = (tree: Tree) =>
+      addProjectConfiguration(tree, '@proj/mcp', {
+        root: 'packages/mcp',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#mcp-server', name: 'server', rc: 'MyServer' },
+          ],
+        } as never,
+      });
+
+    it('should record a ts agent mcp connection from the client it imports', async () => {
+      seedMcpServer(tree);
+      seedAgent(tree, {
+        extension: 'ts',
+        generator: 'ts#agent',
+        agentSource: `import { MyServerClientStrands } from '@proj/agent-connection';
+const client = new MyServerClientStrands();
+`,
+      });
+
+      await migration(tree);
+
+      expect(componentOf(tree, '@proj/app', 'ts#agent#mcp-connection')).toEqual(
+        {
+          generator: 'ts#agent#mcp-connection',
+          path: 'src/my-agent/agent.ts',
+          name: 'MyServer',
+          sourcePath: 'src/my-agent',
+        },
+      );
+    });
+
+    // The Python clients' extra dependencies follow the source agent's framework,
+    // which the agent itself recorded.
+    it('should record a py agent mcp connection with its source framework', async () => {
+      seedMcpServer(tree);
+      seedAgent(tree, {
+        extension: 'py',
+        generator: 'py#agent',
+        framework: 'langchain',
+        agentSource: `from .app.my_server_client_langchain import MyServerClientLangChain
+
+client = MyServerClientLangChain()
+`,
+      });
+
+      await migration(tree);
+
+      expect(componentOf(tree, '@proj/app', 'py#agent#mcp-connection')).toEqual(
+        {
+          generator: 'py#agent#mcp-connection',
+          path: 'src/my-agent/agent.py',
+          name: 'MyServer',
+          sourcePath: 'src/my-agent',
+          framework: 'langchain',
+        },
+      );
+    });
+
+    it('should default an unrecorded framework to strands', async () => {
+      seedMcpServer(tree);
+      seedAgent(tree, {
+        extension: 'py',
+        generator: 'py#agent',
+        agentSource:
+          'from .app.my_server_client_strands import MyServerClientStrands\n',
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/app', 'py#agent#mcp-connection').framework,
+      ).toBe('strands');
+    });
+
+    // Without the client import there is no connection to record, and inventing
+    // one would have the sync own packages the project never received.
+    it('should record nothing for an agent that imports no client', async () => {
+      seedMcpServer(tree);
+      seedAgent(tree, {
+        extension: 'ts',
+        generator: 'ts#agent',
+        agentSource: 'export const agent = {};\n',
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/app', 'ts#agent#mcp-connection'),
+      ).toBeUndefined();
+    });
+
+    it('should record only the target whose client is imported', async () => {
+      seedMcpServer(tree);
+      addProjectConfiguration(tree, '@proj/other-mcp', {
+        root: 'packages/other-mcp',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#mcp-server', name: 'other', rc: 'OtherServer' },
+          ],
+        } as never,
+      });
+      seedAgent(tree, {
+        extension: 'ts',
+        generator: 'ts#agent',
+        agentSource:
+          "import { MyServerClientStrands } from '@proj/agent-connection';\n",
+      });
+
+      await migration(tree);
+
+      const connections = metadataOf(tree, '@proj/app').components.filter(
+        (component: any) => component.generator === 'ts#agent#mcp-connection',
+      );
+      expect(connections.map((c: any) => c.name)).toEqual(['MyServer']);
+    });
+
+    it('should record an a2a connection between two agents', async () => {
+      addProjectConfiguration(tree, '@proj/remote', {
+        root: 'packages/remote',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#agent', name: 'remote', rc: 'RemoteAgent' },
+          ],
+        } as never,
+      });
+      seedAgent(tree, {
+        extension: 'ts',
+        generator: 'ts#agent',
+        agentSource:
+          "import { RemoteAgentClientStrands } from '@proj/agent-connection';\n",
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/app', 'ts#agent#a2a-connection').name,
+      ).toBe('RemoteAgent');
+    });
+
+    it('should record a gateway connection from the gateway project', async () => {
+      addProjectConfiguration(tree, '@proj/gateway', {
+        root: 'packages/gateway',
+        metadata: {
+          generator: 'agentcore-gateway',
+          name: 'gateway',
+          rc: 'MyGateway',
+        } as never,
+      });
+      seedAgent(tree, {
+        extension: 'ts',
+        generator: 'ts#agent',
+        agentSource:
+          "import { MyGatewayClientStrands } from '@proj/agent-connection';\n",
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/app', 'ts#agent#gateway-connection').name,
+      ).toBe('MyGateway');
+    });
+
+    it('should leave a connection the project already records alone', async () => {
+      seedMcpServer(tree);
+      tree.write(
+        'packages/app/src/my-agent/agent.ts',
+        "import { MyServerClientStrands } from '@proj/agent-connection';\n",
+      );
+      addProjectConfiguration(tree, '@proj/app', {
+        root: 'packages/app',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            {
+              generator: 'ts#agent',
+              name: 'my-agent',
+              path: 'src/my-agent',
+              rc: 'MyAgent',
+            },
+            {
+              generator: 'ts#agent#mcp-connection',
+              name: 'MyServer',
+              path: 'src/my-agent/agent.ts',
+            },
+          ],
+        } as never,
+      });
+
+      await migration(tree);
+
+      const connections = metadataOf(tree, '@proj/app').components.filter(
+        (component: any) => component.generator === 'ts#agent#mcp-connection',
+      );
+      expect(connections).toHaveLength(1);
+    });
+  });
+
+  describe('website connections', () => {
+    const seedWebsite = (tree: Tree, providers: string[]) => {
+      for (const provider of providers) {
+        tree.write(
+          `packages/website/src/components/${provider}.tsx`,
+          'export default () => null;\n',
+        );
+      }
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        sourceRoot: 'packages/website/src',
+        metadata: { generator: 'ts#react-website' } as never,
+      });
+    };
+
+    it('should record a trpc connection with the api options it reads', async () => {
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: {
+          generator: 'ts#trpc-api',
+          apiName: 'my-api',
+          auth: 'Cognito',
+          infra: 'rest-lambda',
+        } as never,
+      });
+      seedWebsite(tree, ['MyApiClientProvider']);
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/website', 'ts#trpc-api#react-connection'),
+      ).toEqual({
+        generator: 'ts#trpc-api#react-connection',
+        path: 'src/components/MyApiClientProvider',
+        name: 'MyApi',
+        auth: 'cognito',
+        isRestApi: true,
+      });
+    });
+
+    it('should record isRestApi false for a non-rest integration', async () => {
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: {
+          generator: 'ts#trpc-api',
+          apiName: 'my-api',
+          infra: 'http-lambda',
+        } as never,
+      });
+      seedWebsite(tree, ['MyApiClientProvider']);
+
+      await migration(tree);
+
+      const connection = componentOf(
+        tree,
+        '@proj/website',
+        'ts#trpc-api#react-connection',
+      );
+      expect(connection.isRestApi).toBe(false);
+      expect(connection.auth).toBe('iam');
+    });
+
+    it('should record a smithy connection from its provider component', async () => {
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: {
+          generator: 'ts#smithy-api',
+          apiName: 'store-api',
+        } as never,
+      });
+      seedWebsite(tree, ['StoreApiProvider']);
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/website', 'smithy#react-connection').name,
+      ).toBe('StoreApi');
+    });
+
+    it('should record nothing for an api the website never connected to', async () => {
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: {
+          generator: 'ts#trpc-api',
+          apiName: 'my-api',
+        } as never,
+      });
+      seedWebsite(tree, []);
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/website', 'ts#trpc-api#react-connection'),
+      ).toBeUndefined();
+    });
+  });
+
+  it('should be idempotent', async () => {
+    seedInfrastructure(tree, 'cdk', ['@proj/app']);
+    addProjectConfiguration(tree, '@proj/mcp', {
+      root: 'packages/mcp',
+      metadata: {
+        generator: 'ts#project',
+        components: [
+          { generator: 'ts#mcp-server', name: 'server', rc: 'MyServer' },
+        ],
+      } as never,
+    });
+    tree.write(
+      'packages/app/src/my-agent/agent.ts',
+      "import { MyServerClientStrands } from '@proj/agent-connection';\n",
+    );
+    addProjectConfiguration(tree, '@proj/app', {
+      root: 'packages/app',
+      metadata: {
+        generator: 'ts#project',
+        components: [
+          {
+            generator: 'ts#agent',
+            name: 'my-agent',
+            path: 'src/my-agent',
+            rc: 'MyAgent',
+          },
+        ],
+      } as never,
+    });
+
+    await migration(tree);
+    const first = tree.read('packages/app/project.json', 'utf-8');
+
+    await migration(tree);
+
+    expect(tree.read('packages/app/project.json', 'utf-8')).toBe(first);
+  });
+});
