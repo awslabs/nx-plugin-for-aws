@@ -27,10 +27,26 @@ import {
  * about to publish into the dist manifests, and stamps from *source*
  * `migrations.json` so it is safe to re-run.
  *
- * Usage: tsx scripts/stamp-migrations.ts --pending-version <x.y.z>
+ * Usage: tsx scripts/stamp-migrations.ts --pending-version <x.y.z> [--out <path>]
+ *
+ * `--out` writes elsewhere than the dist manifest — used by the migrate smoke
+ * test, which stamps into a staging copy it publishes at a synthetic version.
  */
 
 const DIST_MIGRATIONS_PATH = 'dist/packages/nx-plugin/migrations.json';
+
+/** Optional destination override for the stamped manifest. */
+const readOutPath = (argv: string[]): string => {
+  const index = argv.indexOf('--out');
+  if (index === -1) {
+    return DIST_MIGRATIONS_PATH;
+  }
+  const out = argv[index + 1];
+  if (!out || out.startsWith('--')) {
+    throw new Error('--out requires a path');
+  }
+  return out;
+};
 
 /**
  * The release the publish is about to make, which the release job reads out of
@@ -51,7 +67,9 @@ const readPendingVersion = (argv: string[]): string => {
 };
 
 const main = () => {
-  const pendingVersion = readPendingVersion(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const pendingVersion = readPendingVersion(argv);
+  const outPath = readOutPath(argv);
 
   const migrations: MigrationsJson = JSON.parse(
     readFileSync(SOURCE_MIGRATIONS_PATH, 'utf-8'),
@@ -70,13 +88,9 @@ const main = () => {
     pendingVersion,
   );
 
-  writeFileSync(
-    DIST_MIGRATIONS_PATH,
-    `${JSON.stringify(stamped, null, 2)}\n`,
-    'utf-8',
-  );
+  writeFileSync(outPath, `${JSON.stringify(stamped, null, 2)}\n`, 'utf-8');
   console.log(
-    `Stamped ${Object.keys(stamped.generators ?? {}).length} migration(s) into ${DIST_MIGRATIONS_PATH} (pending release: ${pendingVersion})`,
+    `Stamped ${Object.keys(stamped.generators ?? {}).length} migration(s) into ${outPath} (pending release: ${pendingVersion})`,
   );
 };
 

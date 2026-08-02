@@ -14,6 +14,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { startLocalRegistry } from '@nx/js/plugins/jest/local-registry';
+import { publishForMigrateSmokeTest } from './smoke-tests/migrate-versions';
 
 const PUBLIC_REGISTRY = 'https://registry.npmjs.org/';
 const VERDACCIO_AUTH_TOKEN = 'secretVerdaccioToken';
@@ -191,6 +192,8 @@ export default async function () {
       console.error(`Failed to read published package version: ${err}`);
       throw err;
     }
+
+    publishForMigrateSmokeTest(localRegistry);
   } catch (err) {
     console.error(`Failed to start local registry: ${err}`);
     throw err;

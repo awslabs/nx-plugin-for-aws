@@ -4,7 +4,7 @@
  */
 
 import { execSync, spawn } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { output, type PackageManager } from '@nx/devkit';
@@ -260,6 +260,39 @@ function logError(message: string, body?: string) {
 export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
 
 /**
+ * Pin the `@aws` scope to the local verdaccio in `targetDir`, so a `create
+ * @aws/nx-workspace` run from there resolves the version this e2e run published
+ * rather than falling through to the public registry's `latest` tag.
+ *
+ * A cwd-local `.npmrc` rather than the user-level one written by `global-setup`:
+ * pnpm 11's `dlx` appears to ignore the user-level `@aws:registry` entry in some
+ * smoke runs, whereas a cwd-local `.npmrc` is always respected.
+ *
+ * `extra` appends further npmrc lines — the migrate test pins the preset to an
+ * exact released version, whose peer ranges the strict resolver can't always
+ * satisfy during `create`, so it relaxes peer strictness.
+ */
+export const pinAwsScopeToLocalRegistry = (
+  targetDir: string,
+  extra: string[] = [],
+) => {
+  const localRegistry = process.env.NX_E2E_LOCAL_REGISTRY;
+  if (!localRegistry) {
+    return;
+  }
+  writeFileSync(
+    join(targetDir, '.npmrc'),
+    [
+      `@aws:registry=${localRegistry}`,
+      `//${localRegistry.replace(/^https?:\/\//, '').replace(/\/$/, '')}/:_authToken=secretVerdaccioToken`,
+      ...extra,
+      '',
+    ].join('\n'),
+    { encoding: 'utf-8' },
+  );
+};
+
+/**
  * Creates an Nx workspace for an e2e test in `${targetDir}/${name}` and returns
  * its project root.
  *
@@ -270,6 +303,10 @@ export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
  * pytest's transient `pytest-cache-files-*` directories, created and removed
  * while the `test` and `typecheck` targets run concurrently) and intermittently
  * fail with an I/O error.
+ *
+ * `version` pins `@aws/create-nx-workspace` (and hence the preset) to a
+ * specific published version rather than the local build — used by the migrate
+ * smoke test to create the "before" workspace on a released version.
  */
 export const createTestWorkspace = async (
   pkgMgr: PackageManager,
@@ -277,9 +314,19 @@ export const createTestWorkspace = async (
   name: string,
   iac?: 'cdk' | 'terraform',
   module?: 'esm' | 'cjs',
+  version?: string,
 ): Promise<string> => {
   const workspaceDir = join(targetDir, name);
   const npmCacheDir = join(targetDir, '.npm-cache');
+  // `@nx/workspace`'s new generator resolves the preset's version as
+  // `NX_E2E_PRESET_VERSION ?? <version parsed from --preset>` — the environment
+  // variable wins. `global-setup` sets it to the local build's version so the
+  // other smoke tests install that, which would silently override the pin here
+  // and create the workspace on the local build instead of the requested
+  // release. Point it at the same version for this create.
+  const presetVersionEnv = version
+    ? { NX_E2E_PRESET_VERSION: version }
+    : undefined;
   // `@aws/create-nx-workspace` shells out to `npx -y create-nx-workspace`, which
   // installs into a cache dir keyed on the package set. A flaky download or
   // interrupted install can corrupt that cache — a half-written module surfaces
@@ -290,12 +337,12 @@ export const createTestWorkspace = async (
   for (let attempt = 1; ; attempt++) {
     try {
       await runCLI(
-        `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac, undefined, module)} --interactive=false`,
+        `${buildCreateNxWorkspaceCommand(pkgMgr, name, iac, version, module)} --interactive=false`,
         {
           cwd: targetDir,
           prefixWithPackageManagerCmd: false,
           redirectStderr: true,
-          env: { npm_config_cache: npmCacheDir },
+          env: { npm_config_cache: npmCacheDir, ...presetVersionEnv },
         },
       );
       break;
