@@ -82,10 +82,10 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
-// The CodeBuild Windows runner lacks Docker (agents, MCP servers and rdb build a
-// Docker image) and can't run checkov (ts#infra and terraform#project). These
-// stay covered on the Linux standalone leg and the windows-latest
-// dungeon-adventure test.
+// The CodeBuild Windows runner lacks Docker (agents, MCP servers, rdb and smithy
+// projects build a Docker image) and can't run checkov (ts#infra and
+// terraform#project). These stay covered on the Linux standalone leg and the
+// windows-latest dungeon-adventure test.
 const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
 
 const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([
@@ -97,6 +97,7 @@ const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([
   'py#rdb',
   'ts#infra',
   'terraform#project',
+  'smithy#project',
 ]);
 
 // A connection is unsupported when either endpoint's project is. Matched exactly

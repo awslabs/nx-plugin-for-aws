@@ -1,5 +1,102 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`smithyProjectGenerator > shape libraries > should generate a shape library without a service > shapes-build.Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/node:24 AS builder
+ENV CI=true
+
+# Output directory
+RUN mkdir /out
+
+# Install Smithy CLI
+# https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
+WORKDIR /smithy
+ARG TARGETPLATFORM
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \\
+    mkdir -p smithy-install/smithy && \\
+    curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \\
+    unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \\
+    mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
+RUN smithy-install/smithy/install
+
+# Copy project files
+WORKDIR /project
+COPY smithy-build.json .
+COPY src src
+
+# Validate the model and assemble it into a single JSON model file
+RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \\
+    smithy build
+
+# Copy the assembled model to the output location
+RUN mkdir -p /out/model
+RUN cp /project/build/smithy/source/model/model.json /out/model/model.json
+
+# Export the /out directory
+FROM scratch AS export
+COPY --from=builder /out /
+"
+`;
+
+exports[`smithyProjectGenerator > shape libraries > should generate a shape library without a service > shapes-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace proj
+
+/// TODO: define the shapes you would like to share between your Smithy projects
+structure ExampleShape {
+    @required
+    id: String
+
+    description: String
+}
+"
+`;
+
+exports[`smithyProjectGenerator > shape libraries > should generate a shape library without a service > shapes-project.json 1`] = `
+"{
+  "name": "@proj/test-shapes",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "test-shapes/src",
+  "projectType": "library",
+  "metadata": {
+    "generator": "smithy#project",
+    "smithyType": "shapes",
+    "namespace": "proj"
+  },
+  "targets": {
+    "build": {
+      "dependsOn": ["compile"]
+    },
+    "compile": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/{projectRoot}/build",
+          "make-dir dist/{projectRoot}/build",
+          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > shape libraries > should generate a shape library without a service > shapes-smithy-build.json 1`] = `
+"{
+  "version": "1.0",
+  "sources": ["src/"],
+  "maven": {
+    "dependencies": ["software.amazon.smithy:smithy-model:1.61.0"]
+  }
+}
+"
+`;
+
 exports[`smithyProjectGenerator > should generate smithy project with all custom options > all-custom-main.smithy 1`] = `
 "$version: "2.0"
 
@@ -31,6 +128,8 @@ exports[`smithyProjectGenerator > should generate smithy project with all custom
   "projectType": "library",
   "metadata": {
     "generator": "smithy#project",
+    "smithyType": "service",
+    "namespace": "com.mycompany.api",
     "apiName": "test-api"
   },
   "targets": {
@@ -45,7 +144,7 @@ exports[`smithyProjectGenerator > should generate smithy project with all custom
         "commands": [
           "rimraf dist/{projectRoot}/build",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -64,6 +163,8 @@ exports[`smithyProjectGenerator > should generate smithy project with custom dir
   "projectType": "library",
   "metadata": {
     "generator": "smithy#project",
+    "smithyType": "service",
+    "namespace": "proj",
     "apiName": "test-api"
   },
   "targets": {
@@ -78,7 +179,7 @@ exports[`smithyProjectGenerator > should generate smithy project with custom dir
         "commands": [
           "rimraf dist/{projectRoot}/build",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -288,6 +389,8 @@ exports[`smithyProjectGenerator > should generate smithy project with default op
   "projectType": "library",
   "metadata": {
     "generator": "smithy#project",
+    "smithyType": "service",
+    "namespace": "proj",
     "apiName": "test-api"
   },
   "targets": {
@@ -302,7 +405,7 @@ exports[`smithyProjectGenerator > should generate smithy project with default op
         "commands": [
           "rimraf dist/{projectRoot}/build",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -350,6 +453,8 @@ exports[`smithyProjectGenerator > should generate smithy project with subdirecto
   "projectType": "library",
   "metadata": {
     "generator": "smithy#project",
+    "smithyType": "service",
+    "namespace": "proj",
     "apiName": "test-api"
   },
   "targets": {
@@ -364,7 +469,7 @@ exports[`smithyProjectGenerator > should generate smithy project with subdirecto
         "commands": [
           "rimraf dist/{projectRoot}/build",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"

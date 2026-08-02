@@ -1,0 +1,175 @@
+---
+title: Smithy Projects
+description: Reference documentation for the Smithy project generator
+generator: smithy#project
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+[Smithy](https://smithy.io/) is an interface definition language for describing services and the data they exchange. The Smithy project generator creates a project containing a Smithy model.
+
+There are two kinds of Smithy project:
+
+- **Service** (`--type=service`) — a model which defines a service and its operations. This is what the <Link path="guides/ts-smithy-api">`ts#api --framework=smithy` generator</Link> creates for you alongside a TypeScript implementation.
+- **Shape library** (`--type=shapes`) — a model which defines reusable shapes but no service. Connect a shape library to your Smithy projects to share shapes between them, rather than duplicating the definitions in each.
+
+:::tip
+If you want an API with an implementation, use the <Link path="guides/ts-smithy-api">`ts#api` generator</Link> instead. It creates a Smithy model project _and_ a TypeScript server which implements it.
+:::
+
+## Usage
+
+### Generate a Smithy Project
+
+<RunGenerator generator="smithy#project" requiredParameters={{ name: 'my-shapes' }} />
+
+### Options
+
+<GeneratorParameters generator="smithy#project" />
+
+## Generator Output
+
+<OptionFilter when={{ type: 'shapes' }} description="Shape library: a model with no service">
+
+### Shape Library
+
+<FileTree>
+
+  - my-shapes
+    - src
+      - main.smithy Your shared shape definitions
+    - smithy-build.json Smithy build configuration
+    - build.Dockerfile Builds and validates the model
+    - project.json Project configuration and build targets
+
+</FileTree>
+
+A shape library defines shapes and nothing else:
+
+```smithy
+$version: "2.0"
+
+namespace com.example
+
+structure Customer {
+    @required
+    id: String
+
+    name: String
+    email: String
+}
+```
+
+Since a shape library has no service, its `smithy-build.json` configures no code generation — building it validates the model and assembles it into a single JSON model file at `dist/<my-shapes>/build/model/model.json`.
+
+</OptionFilter>
+
+<OptionFilter when={{ type: 'service' }} description="Service: a model which defines a service and its operations">
+
+### Service
+
+<FileTree>
+
+  - my-service
+    - src
+      - main.smithy Your service definition
+      - operations
+        - echo.smithy An example operation
+    - smithy-build.json Smithy build configuration, including code generation
+    - build.Dockerfile Builds the model, OpenAPI spec and TypeScript Server SDK
+    - project.json Project configuration and build targets
+
+</FileTree>
+
+A service model defines a service shape and the operations it exposes:
+
+```smithy
+$version: "2.0"
+
+namespace com.example
+
+use aws.protocols#restJson1
+
+@title("MyService")
+@restJson1
+service MyService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+}
+```
+
+Building a service project generates an OpenAPI specification and a TypeScript Server SDK into `dist/<my-service>/build/`.
+
+</OptionFilter>
+
+## Building
+
+Smithy projects build using [Docker](https://www.docker.com/), which runs the [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) to validate your model:
+
+<NxCommands commands={['build my-shapes']} />
+
+## Depending on a Shape Library
+
+Building a shape library writes an assembled model to `dist/<my-shapes>/build/model/model.json`. This single file contains every shape the library defines, along with any it depends on, so a consumer only ever declares the libraries it references directly.
+
+To depend on a shape library from another Smithy project, make three changes to the consuming project:
+
+<Steps>
+
+1. Smithy projects build inside a container, and the build is given the workspace root as a named build context. Add a `COPY` to the consuming project's `build.Dockerfile`, alongside where its own sources are copied in:
+
+   ```dockerfile ins={4}
+   # Copy project files
+   COPY smithy-build.json .
+   COPY src src
+   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
+   ```
+
+2. Add the copied file to `imports` in the consuming project's `smithy-build.json`:
+
+   ```json ins={4}
+   {
+     "version": "1.0",
+     "sources": ["src/"],
+     "imports": ["deps/my-shapes.json"],
+     ...
+   }
+   ```
+
+3. Add the library's `build` target as a dependency of the consuming project's `compile` target in its `project.json`, so the model exists before the consumer builds:
+
+   ```json ins={4}
+   {
+     "targets": {
+       "compile": {
+         "dependsOn": ["@my-scope/my-shapes:build"],
+         ...
+       }
+     }
+   }
+   ```
+
+</Steps>
+
+Your model can now reference the library's shapes with `use`:
+
+```smithy
+$version: "2.0"
+
+namespace com.example.api
+
+use com.example.shared#Customer
+
+structure GetCustomerOutput {
+    @required
+    customer: Customer
+}
+```
+
+Shape libraries can depend on other shape libraries the same way. Since each library's built model already contains its own dependencies, you only need to repeat these steps for the libraries you reference directly. A library reached by more than one path is resolved once — Smithy ignores duplicate but equivalent shape definitions.
