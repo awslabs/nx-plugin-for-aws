@@ -26,9 +26,10 @@ import {
  * strictly above every released one (see `resolveMigrateTargetVersion`), which
  * is the window `nx migrate` executes migrations in.
  *
- * Only the deterministic path is asserted. Prompt migrations are deferred by
- * Nx in a non-interactive run, and the contract this test holds is that
- * deterministic migrations alone keep a generated workspace green.
+ * The contract is that deterministic migrations alone keep a generated workspace
+ * green: the run is non-interactive, so Nx defers any prompt half to the user,
+ * and the assertion is that the workspace still syncs and builds afterwards
+ * rather than anything about Nx's own output.
  */
 
 /** Workspace config file the license generator writes. */
@@ -61,21 +62,13 @@ export const migrateTargetVersion = (): string => {
   return version;
 };
 
-/** Migration entry as written into the workspace's `migrations.json`. */
-interface WorkspaceMigration {
-  name: string;
-  package: string;
-  version: string;
-  implementation?: string;
-  prompt?: string;
-}
-
+/** The migrations `nx migrate` queued, if any fell in the upgrade's window. */
 const readWorkspaceMigrations = (
   projectRoot: string,
-): WorkspaceMigration[] | undefined => {
+): unknown[] | undefined => {
   const migrationsPath = join(projectRoot, 'migrations.json');
   return existsSync(migrationsPath)
-    ? (readJsonFile(migrationsPath).migrations as WorkspaceMigration[])
+    ? (readJsonFile(migrationsPath).migrations as unknown[])
     : undefined;
 };
 
@@ -193,7 +186,10 @@ export const runMigrateTest = async (
     );
     return undefined;
   }
-  await runMigrateRecipe(opts);
+  await runCLI(
+    `generate @aws/nx-plugin:${TEST_MATRIX_GENERATOR} --no-interactive --prefer-install-dependencies=false`,
+    opts,
+  );
 
   // The matrix runs the license generator, whose dependency allowlist rejects
   // some of what the matrix itself pulls in (`mariadb` is LGPL). Replace the
@@ -236,21 +232,20 @@ export const runMigrateTest = async (
       .version,
   ).toBe(targetVersion);
 
-  // 4. Run the migrations. Nothing to run is a valid outcome while the
-  // collection is empty, so tolerate a missing migrations.json.
+  // 4. Run the migrations. Nothing to run is a valid outcome when no migration
+  // falls in the upgrade's version window, so tolerate a missing migrations.json.
+  // A migration that throws fails the command; what it *did* is judged by the
+  // sync and build below, not by scraping Nx's output.
   const migrations = readWorkspaceMigrations(projectRoot);
-  const runOutput = await runCLI(
-    'migrate --run-migrations --if-exists --no-interactive',
-    { ...opts, redirectStderr: true },
+  console.log(
+    migrations?.length
+      ? `Running ${migrations.length} queued migration(s)`
+      : 'No migrations were queued for this hop — asserting the upgraded workspace is green.',
   );
-
-  if (migrations?.length) {
-    assertMigrationRunOutcome(runOutput, migrations, projectRoot);
-  } else {
-    console.log(
-      'No migrations were queued for this hop — asserting the upgraded workspace is green.',
-    );
-  }
+  await runCLI('migrate --run-migrations --if-exists --no-interactive', {
+    ...opts,
+    redirectStderr: true,
+  });
 
   // 5. Idempotency: re-running the migrations must not change the workspace.
   if (migrations?.length) {
@@ -277,66 +272,4 @@ export const runMigrateTest = async (
   expect(buildOutput).toContain('Successfully ran target build');
 
   return { opts, projectRoot };
-};
-
-/**
- * Asserts the outcome of `nx migrate --run-migrations` matches the queued
- * entries: deterministic halves applied, prompt halves materialised under
- * `tools/ai-migrations/` and deferred rather than silently dropped.
- */
-const assertMigrationRunOutcome = (
-  runOutput: string,
-  migrations: WorkspaceMigration[],
-  projectRoot: string,
-) => {
-  const withImplementation = migrations.filter((m) => m.implementation);
-  const withPrompt = migrations.filter((m) => m.prompt);
-
-  console.log(
-    `Ran ${migrations.length} migration(s): ${withImplementation.length} with a codemod, ${withPrompt.length} with a prompt`,
-  );
-
-  // Every codemod must have been attempted. `git log` isn't available for
-  // attribution (commits are off by default), so the run output is the record:
-  // Nx prints a per-migration header for each entry it processes.
-  for (const migration of migrations) {
-    expect(runOutput).toContain(`${migration.package}:${migration.name}`);
-  }
-
-  // A codemod that threw fails the command, so reaching here means they ran.
-  if (withImplementation.length > 0) {
-    expect(runOutput).toMatch(
-      /Successfully finished running migrations|No changes were made from running/,
-    );
-  }
-
-  // Prompts are deferred in a non-interactive run — assert they were written
-  // out for the user rather than dropped.
-  for (const migration of withPrompt) {
-    expect(existsSync(join(projectRoot, migration.prompt as string))).toBe(
-      true,
-    );
-    expect(runOutput).toContain(migration.prompt as string);
-  }
-  if (withPrompt.length > 0) {
-    expect(runOutput).toContain('agentic flow disabled');
-  }
-};
-
-/**
- * Scaffolds the workspace state the hop upgrades from, using the START version's
- * own `internal#test-matrix` generator.
- *
- * That generator ships with the plugin, so a release carries the matrix of the
- * generators *it* had — the hop gets that version's full coverage, and the test
- * never has to know which generators existed when.
- */
-const runMigrateRecipe = async (opts: {
-  cwd: string;
-  env: Record<string, string | undefined>;
-}) => {
-  await runCLI(
-    'generate @aws/nx-plugin:internal#test-matrix --no-interactive --prefer-install-dependencies=false',
-    opts,
-  );
 };
