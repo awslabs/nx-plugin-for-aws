@@ -456,3 +456,155 @@ const addAgentCoreGatewayTerraformInfra = (
     }
   }
 };
+
+export interface AddAgentCoreHarnessInfraProps {
+  harnessNameClassName: string;
+  harnessNameKebabCase: string;
+  /**
+   * Workspace-root-relative harness project root, eg `packages/my-harness`.
+   * The `src/PROMPT.md` path both templates read is derived from it.
+   */
+  projectRoot: string;
+  /** Leading-letter-guaranteed, 31-char-truncated resource name prefix. */
+  harnessNamePrefix: string;
+}
+
+/**
+ * Template substitution context shared by the CDK and Terraform harness
+ * branches. Both prompt path fields carry the same workspace-root-relative
+ * path, named per provider so each template's usage reads on its own.
+ */
+interface HarnessTemplateContext {
+  nameClassName: string;
+  nameKebabCase: string;
+  harnessNamePrefix: string;
+  /** Joined onto `findWorkspaceRoot()` in the CDK construct. */
+  promptPathFromCdk: string;
+  /** Appended to the `path.module` walk to the workspace root in Terraform. */
+  promptPathFromTerraform: string;
+}
+
+/**
+ * Add AgentCore Harness infrastructure for the selected IaC provider.
+ *
+ * Renders the provider-specific Harness infrastructure (a CDK construct or
+ * a Terraform module) into the Shared Infrastructure Project with
+ * `KeepExisting`, so existing files become user-owned and are never
+ * rewritten by reruns.
+ *
+ * Unlike agents, MCP servers and gateways, no build dependency is added
+ * from the shared infrastructure project to the Harness Project: generated
+ * Harness infrastructure does not import Harness Project source, so a
+ * dependency would only create false rebuild coupling.
+ */
+export const addAgentCoreHarnessInfra = async (
+  tree: Tree,
+  options: AddAgentCoreHarnessInfraProps & IACProvider,
+): Promise<void> => {
+  // One resolved template context, built once and passed to both provider
+  // branches. The prompt path is derived from the same projectRoot the
+  // Harness Project is written to, so explicit placement needs no extra logic.
+  const promptPath = joinPathFragments(options.projectRoot, 'src', 'PROMPT.md');
+  const templateContext: HarnessTemplateContext = {
+    nameClassName: options.harnessNameClassName,
+    nameKebabCase: options.harnessNameKebabCase,
+    harnessNamePrefix: options.harnessNamePrefix,
+    promptPathFromCdk: promptPath,
+    promptPathFromTerraform: promptPath,
+  };
+
+  switch (options.iac) {
+    case 'cdk':
+      await addAgentCoreHarnessCDKInfra(tree, templateContext);
+      break;
+    case 'terraform':
+      addAgentCoreHarnessTerraformInfra(tree, templateContext);
+      break;
+  }
+};
+
+const addAgentCoreHarnessCDKInfra = async (
+  tree: Tree,
+  templateContext: HarnessTemplateContext,
+) => {
+  // Generate the app specific CDK construct under
+  // src/app/harnesses/<kebab-case-name>/
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'app',
+      'agentcore-harness',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'harnesses',
+    ),
+    { ...templateContext, ...esmVars(tree) },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  // Export the construct through the harnesses app index and the shared
+  // app index. addStarExport creates a missing index file and semantically
+  // deduplicates equivalent exports on reruns.
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'harnesses',
+      'index.ts',
+    ),
+    `./${templateContext.nameKebabCase}/${templateContext.nameKebabCase}.js`,
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'app',
+      'index.ts',
+    ),
+    './harnesses/index.js',
+  );
+};
+
+const addAgentCoreHarnessTerraformInfra = (
+  tree: Tree,
+  templateContext: HarnessTemplateContext,
+) => {
+  // Generate the app specific Terraform module under
+  // src/app/harnesses/<kebab-case-name>/. No CDK files or exports are
+  // created on this path.
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'app',
+      'agentcore-harness',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_TERRAFORM_DIR,
+      'src',
+      'app',
+      'harnesses',
+    ),
+    { ...templateContext, ...terraformProviderVersions() },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+};

@@ -123,6 +123,7 @@ Add capabilities to existing projects:
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `init`               | Configure an existing Nx workspace to use the @aws/nx-plugin                                                       |
 | `agentcore-gateway`  | Generate an AgentCore Gateway project                                                                              |
+| `agentcore-harness`  | Generate an AgentCore Harness project                                                                              |
 | `connection`         | Integrates a source project with a target project                                                                  |
 | `license`            | Add LICENSE files and configure source code licence headers                                                        |
 | `py#api`             | Create a Python API                                                                                                |

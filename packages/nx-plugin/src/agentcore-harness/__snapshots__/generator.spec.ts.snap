@@ -1,0 +1,237 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agentcore-harness generator > snapshot > snapshots the four rendered harness project files > packages/my-harness/README.md 1`] = `
+"# @proj/my-harness
+
+An [Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html)
+project generated with [@aws/nx-plugin](https://github.com/awslabs/nx-plugin-for-aws/).
+A Harness is a managed agent loop that AWS runs for you, so this project
+holds only the prompt that shapes it and a script for talking to it:
+
+- \`src/PROMPT.md\` — the system prompt
+- \`scripts/chat.ts\` — a multi-turn chat client for the deployed Harness
+- \`project.json\` — declares the \`chat\` target
+- \`README.md\` — this file
+
+The Harness itself is deployed by the generated CDK construct or Terraform
+module through your usual infrastructure workflow.
+
+## The system prompt
+
+\`src/PROMPT.md\` is the Harness system prompt. Your infrastructure reads the
+file when you synthesize (CDK) or plan (Terraform), so edit it and redeploy
+to change how the Harness behaves.
+
+The prompt is deployment configuration rather than secret storage: its
+contents appear in the synthesized CloudFormation template or in Terraform
+state.
+
+## Chatting with your Harness
+
+\`\`\`bash
+pnpm nx run @proj/my-harness:chat
+\`\`\`
+
+Every turn of a run shares one session, so the Harness keeps the
+conversation context until you exit.
+
+The Harness ARN is resolved in this order:
+
+1. \`HARNESS_ARN\`, used directly:
+
+   \`\`\`bash
+   HARNESS_ARN=<harness-arn> pnpm nx run @proj/my-harness:chat
+   \`\`\`
+
+2. \`RUNTIME_CONFIG_APP_ID\`, which reads the
+   \`agentcore.harnesses.MyHarness\` entry your deployed
+   infrastructure publishes:
+
+   \`\`\`bash
+   RUNTIME_CONFIG_APP_ID=<application-id> pnpm nx run @proj/my-harness:chat
+   \`\`\`
+
+With neither set, the script fails with an error naming both. The AWS Region
+is derived from the Harness ARN, and credentials come from the standard AWS
+SDK credential provider chain.
+
+A caller needs \`bedrock-agentcore:InvokeHarness\` and
+\`bedrock-agentcore:InvokeAgentRuntime\` on the Harness ARN. The CDK
+construct's \`grantInvokeAccess\` grants exactly those two actions.
+
+## Customizing your Harness
+
+Edit \`src/PROMPT.md\` for the system prompt. Everything else is configured
+where you instantiate the infrastructure — including tools, which the
+Harness deploys without:
+
+- CDK construct props, for example
+  \`new MyHarness(this, 'MyHarness', { allowedTools: ['@builtin'] })\`
+- Terraform, by setting \`allowed_tools = ["@builtin"]\` on the module's
+  \`aws_bedrockagentcore_harness\` resource, or by adding an \`allowed_tools\`
+  variable if you would rather set it as a module argument
+
+The generated infrastructure is also yours to edit directly:
+
+- \`packages/common/constructs/src/app/harnesses/my-harness/my-harness.ts\`
+- \`packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf\`
+
+Re-running the generator only adds missing files, so your edits to these
+files and to \`src/PROMPT.md\` are preserved.
+
+## Further reading
+
+- [AgentCore Harness guide](https://awslabs.github.io/nx-plugin-for-aws/guides/agentcore-harness/)
+- [Amazon Bedrock AgentCore Harness documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html)
+- [Learn more about Nx](https://nx.dev/getting-started/intro)
+"
+`;
+
+exports[`agentcore-harness generator > snapshot > snapshots the four rendered harness project files > packages/my-harness/project.json 1`] = `
+"{
+  "name": "@proj/my-harness",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "packages/my-harness",
+  "tags": [],
+  "metadata": {
+    "generator": "agentcore-harness",
+    "name": "my-harness",
+    "rc": "MyHarness",
+    "auth": "iam"
+  },
+  "targets": {
+    "chat": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": ["tsx ./scripts/chat.ts"],
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}
+"
+`;
+
+exports[`agentcore-harness generator > snapshot > snapshots the four rendered harness project files > packages/my-harness/scripts/chat.ts 1`] = `
+"// Chat CLI for MyHarness. Invokes the deployed Harness with InvokeHarness.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import {
+  BedrockAgentCoreClient,
+  InvokeHarnessCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+
+// The deployed infrastructure publishes the Harness ARN at
+// \`agentcore.harnesses.MyHarness\`.
+const HARNESS_RUNTIME_CONFIG_KEY = 'MyHarness';
+
+// One session id per run, so every turn continues the same Harness session.
+const SESSION_ID = randomUUID();
+
+// Empty strings count as absent, so \`HARNESS_ARN= nx run ...\` still discovers.
+const isPresent = (value: string | undefined): value is string =>
+  value !== undefined && value !== '';
+
+// \`HARNESS_ARN\` wins; \`RUNTIME_CONFIG_APP_ID\` reads the runtime configuration.
+const resolveHarnessArn = async (): Promise<string> => {
+  if (isPresent(process.env.HARNESS_ARN)) {
+    return process.env.HARNESS_ARN;
+  }
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!isPresent(application)) {
+    throw new Error(
+      'No Harness ARN source is configured. Set HARNESS_ARN to the deployed ' +
+        'Harness ARN directly, or set RUNTIME_CONFIG_APP_ID to the AppConfig ' +
+        'application ID emitted by your infrastructure stack.',
+    );
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { harnesses?: Record<string, string | undefined> };
+  const harnessArn = config?.harnesses?.[HARNESS_RUNTIME_CONFIG_KEY];
+  if (!harnessArn) {
+    throw new Error(
+      \`Runtime configuration for application '\${application}' has no value \` +
+        \`at 'agentcore.harnesses.\${HARNESS_RUNTIME_CONFIG_KEY}'. Deploy the \` +
+        'Harness infrastructure first, or set HARNESS_ARN directly.',
+    );
+  }
+  return harnessArn;
+};
+
+const HARNESS_ARN = await resolveHarnessArn();
+
+// Region comes from the ARN, and credentials from the standard AWS SDK
+// default provider chain, so no Region is embedded in this project.
+const client = new BedrockAgentCoreClient({
+  region: HARNESS_ARN.split(':')[3],
+});
+
+class HarnessAdapter implements ChatAdapter {
+  async connect() {
+    return { agentName: 'MyHarness' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    const { stream } = await client.send(
+      new InvokeHarnessCommand({
+        harnessArn: HARNESS_ARN,
+        runtimeSessionId: SESSION_ID,
+        messages: [{ role: 'user', content: [{ text }] }],
+      }),
+    );
+    if (!stream) {
+      throw new Error(
+        'AgentCore returned no event stream for the invocation. Confirm the ' +
+          'Harness is deployed and the caller has the ' +
+          'bedrock-agentcore:InvokeHarness permission.',
+      );
+    }
+    for await (const event of stream) {
+      const serviceError =
+        event.internalServerException ??
+        event.validationException ??
+        event.runtimeClientError;
+      if (serviceError) {
+        const detail = [serviceError.name, serviceError.message]
+          .filter(Boolean)
+          .join(': ');
+        throw new Error(
+          \`Harness invocation failed: \${detail || JSON.stringify(serviceError)}\`,
+        );
+      }
+      const chunk = event.contentBlockDelta?.delta?.text;
+      if (chunk) {
+        yield chunk;
+      }
+    }
+  }
+}
+
+await chatLoop(new HarnessAdapter(), '');
+"
+`;
+
+exports[`agentcore-harness generator > snapshot > snapshots the four rendered harness project files > packages/my-harness/src/PROMPT.md 1`] = `
+"# MyHarness
+
+You are a helpful AI assistant.
+
+## Responding
+
+- Lead with the answer, then the supporting detail.
+- Keep the response proportional to the request: short answers to simple
+  questions, thorough answers to involved ones.
+- Ask for the detail you need when a request is ambiguous instead of guessing.
+- Say when you do not know something, and say what would settle it.
+
+## Using tools
+
+When tools are available, prefer them over recollection for anything you can
+look up, and report what a tool returned, including when it fails.
+"
+`;

@@ -144,9 +144,22 @@ export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
 /**
  * Add versions to the given dependencies
+ *
+ * @throws if a requested dependency has no centralized version entry, so
+ * generators fail rather than silently wiring an undefined version.
  */
 export const withVersions = (deps: ITsDepVersion[]) =>
-  Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+  Object.fromEntries(
+    deps.map((dep) => {
+      const version = TS_VERSIONS[dep];
+      if (!version) {
+        throw new Error(
+          `No centralized version registered in TS_VERSIONS for dependency '${dep}'`,
+        );
+      }
+      return [dep, version];
+    }),
+  );
 
 /**
  * Versions for Python dependencies added by generators
