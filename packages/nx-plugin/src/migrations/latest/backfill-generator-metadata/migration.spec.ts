@@ -332,6 +332,84 @@ describe('backfill-generator-metadata migration', () => {
     });
   });
 
+  // Neither field gates a dependency yet, but recording them now means a future
+  // gate reads them in a workspace this backfill has already run on.
+  describe('smithy projects', () => {
+    const seedSmithyProject = (
+      tree: Tree,
+      options: { plugins: boolean; namespace: string },
+    ) => {
+      writeJson(tree, 'packages/model/smithy-build.json', {
+        version: '1.0',
+        // A service builds an OpenAPI spec and an SSDK from its model; a shape
+        // library only shares shapes and gets no plugins.
+        ...(options.plugins
+          ? { plugins: { openapi: {}, 'typescript-ssdk-codegen': {} } }
+          : {}),
+        maven: { dependencies: ['software.amazon.smithy:smithy-model:1.61.0'] },
+      });
+      tree.write(
+        'packages/model/src/main.smithy',
+        `$version: "2.0"\n\nnamespace ${options.namespace}\n\nstructure Example {}\n`,
+      );
+      addProjectConfiguration(tree, '@proj/model', {
+        root: 'packages/model',
+        sourceRoot: 'packages/model/src',
+        metadata: { generator: 'smithy#project', apiName: 'my-api' } as never,
+      });
+    };
+
+    it('should record a service from the build plugins it generated', async () => {
+      seedSmithyProject(tree, { plugins: true, namespace: 'com.example' });
+
+      await migration(tree);
+
+      const metadata = metadataOf(tree, '@proj/model');
+      expect(metadata.smithyType).toBe('service');
+      expect(metadata.namespace).toBe('com.example');
+    });
+
+    it('should record a shape library from the absence of those plugins', async () => {
+      seedSmithyProject(tree, { plugins: false, namespace: 'com.shapes' });
+
+      await migration(tree);
+
+      const metadata = metadataOf(tree, '@proj/model');
+      expect(metadata.smithyType).toBe('shapes');
+      expect(metadata.namespace).toBe('com.shapes');
+    });
+
+    // The namespace is a generator option, so it is read from the model rather
+    // than derived from the npm scope.
+    it('should record a namespace that is not the scope default', async () => {
+      seedSmithyProject(tree, { plugins: true, namespace: 'my.own.namespace' });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/model').namespace).toBe(
+        'my.own.namespace',
+      );
+    });
+
+    it('should leave a smithy project already recording both alone', async () => {
+      seedSmithyProject(tree, { plugins: true, namespace: 'com.example' });
+      addProjectConfiguration(tree, '@proj/other', {
+        root: 'packages/other',
+        metadata: {
+          generator: 'smithy#project',
+          smithyType: 'shapes',
+          namespace: 'kept.as.is',
+        } as never,
+      });
+
+      await migration(tree);
+
+      const metadata = metadataOf(tree, '@proj/other');
+      expect(metadata.smithyType).toBe('shapes');
+      expect(metadata.namespace).toBe('kept.as.is');
+    });
+  });
+
   describe('website options', () => {
     const seedWebsite = (tree: Tree, viteConfig: string) => {
       tree.write('packages/website/vite.config.mts', viteConfig);

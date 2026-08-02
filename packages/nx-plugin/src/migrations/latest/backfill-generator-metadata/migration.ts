@@ -33,6 +33,7 @@ import { PY_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/agent-co
 import { PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/fast-api-connection/generator';
 import { PY_RDB_GENERATOR_INFO } from '../../../py/rdb/generator';
 import { PY_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/mcp-server-connection/generator';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../../../smithy/project/generator';
 import { SMITHY_REACT_CONNECTION_GENERATOR_INFO } from '../../../smithy/react-connection/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../../../smithy/ts/api/generator';
 import { TRPC_BACKEND_GENERATOR_INFO } from '../../../trpc/backend/generator';
@@ -119,6 +120,8 @@ interface ProjectMetadata {
   generator?: string;
   components?: ComponentMetadata[];
   iac?: string;
+  smithyType?: string;
+  namespace?: string;
   tailwind?: boolean;
   tanstackRouter?: boolean;
   [key: string]: unknown;
@@ -259,6 +262,51 @@ const isDcrProxyProject = (tree: Tree, projectRoot: string): boolean =>
       joinPathFragments(projectRoot, 'src', 'handlers', `${handler}.ts`),
     ),
   );
+
+/**
+ * What a Smithy project models, from the `smithy-build.json` each kind gets: a
+ * service builds an OpenAPI spec and a TypeScript SSDK from its model, so it has
+ * the plugins to do so, while a shape library only shares shapes and has none.
+ */
+const smithyProjectType = (
+  tree: Tree,
+  projectRoot: string,
+): 'service' | 'shapes' | undefined => {
+  const buildPath = joinPathFragments(projectRoot, 'smithy-build.json');
+  if (!tree.exists(buildPath)) {
+    return undefined;
+  }
+  const build = readJson<{ plugins?: Record<string, unknown> }>(
+    tree,
+    buildPath,
+  );
+  return build.plugins && Object.keys(build.plugins).length > 0
+    ? 'service'
+    : 'shapes';
+};
+
+/**
+ * The Smithy namespace a project's shapes are declared in, read from the model
+ * rather than derived from the npm scope: the generator takes it as an option, so
+ * a project may not carry the default.
+ */
+const smithyNamespace = (
+  tree: Tree,
+  project: ProjectConfiguration,
+): string | undefined => {
+  const modelPath = joinPathFragments(
+    project.sourceRoot ?? joinPathFragments(project.root, 'src'),
+    'main.smithy',
+  );
+  if (!tree.exists(modelPath)) {
+    return undefined;
+  }
+  // Smithy is not a language GritQL parses, and `namespace <x>` is a single
+  // declaration on its own line rather than a structure worth an AST for.
+  return /^namespace\s+(\S+)\s*$/m
+    .exec(tree.read(modelPath, 'utf-8') ?? '')
+    ?.at(1);
+};
 
 /**
  * Whether a website's vite config registers the given plugin, which is how
@@ -825,6 +873,26 @@ export default async function migration(
     if (iac && next.iac === undefined) {
       next.iac = iac;
       changed = true;
+    }
+
+    // What a Smithy project models, and the namespace it declares. Neither gates a
+    // dependency yet, but recording them now means a future gate reads them in a
+    // workspace this backfill has already run on.
+    if (next.generator === SMITHY_PROJECT_GENERATOR_INFO.id) {
+      if (next.smithyType === undefined) {
+        const smithyType = smithyProjectType(tree, project.root);
+        if (smithyType) {
+          next.smithyType = smithyType;
+          changed = true;
+        }
+      }
+      if (next.namespace === undefined) {
+        const namespace = smithyNamespace(tree, project);
+        if (namespace) {
+          next.namespace = namespace;
+          changed = true;
+        }
+      }
     }
 
     if (next.generator === REACT_WEBSITE_APP_GENERATOR_INFO.id) {
