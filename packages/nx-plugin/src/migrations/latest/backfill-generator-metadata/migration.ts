@@ -13,14 +13,26 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/gateway-connection/generator';
 import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../../../agentcore-gateway/generator';
+import { AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/mcp-connection/generator';
 import { PY_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../py/agent/a2a-connection/generator';
 import { PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../py/agent/gateway-connection/generator';
 import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
 import { PY_AGENT_MCP_CONNECTION_GENERATOR_INFO } from '../../../py/agent/mcp-connection/generator';
+import { PY_AGENT_REACT_CONNECTION_GENERATOR_INFO } from '../../../py/agent/react-connection/generator';
+import { PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/agent-connection/generator';
+import { PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/fast-api-connection/generator';
+import { PY_DYNAMODB_GENERATOR_INFO } from '../../../py/dynamodb/generator';
+import { PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/mcp-server-connection/generator';
 import { FAST_API_GENERATOR_INFO } from '../../../py/fast-api/generator';
 import { FAST_API_REACT_GENERATOR_INFO } from '../../../py/fast-api/react/generator';
+import { LAMBDA_FUNCTION_GENERATOR_INFO as PY_LAMBDA_FUNCTION_GENERATOR_INFO } from '../../../py/lambda-function/generator';
 import { PY_MCP_SERVER_GENERATOR_INFO } from '../../../py/mcp-server/generator';
+import { PY_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/agent-connection/generator';
+import { PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/fast-api-connection/generator';
+import { PY_RDB_GENERATOR_INFO } from '../../../py/rdb/generator';
+import { PY_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/mcp-server-connection/generator';
 import { SMITHY_REACT_CONNECTION_GENERATOR_INFO } from '../../../smithy/react-connection/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../../../smithy/ts/api/generator';
 import { TRPC_BACKEND_GENERATOR_INFO } from '../../../trpc/backend/generator';
@@ -29,10 +41,23 @@ import { TS_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/a2a-co
 import { TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/gateway-connection/generator';
 import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
 import { TS_AGENT_MCP_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/mcp-connection/generator';
+import { TS_AGENT_REACT_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/react-connection/generator';
 import { TS_DCR_PROXY_GENERATOR_INFO } from '../../../ts/dcr-proxy/generator';
+import { TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/agent-connection/generator';
+import { TS_DYNAMODB_GENERATOR_INFO } from '../../../ts/dynamodb/generator';
+import { TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/mcp-server-connection/generator';
+import { TS_DYNAMODB_SMITHY_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/smithy-connection/generator';
+import { TS_DYNAMODB_TRPC_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/trpc-connection/generator';
+import { TS_LAMBDA_FUNCTION_GENERATOR_INFO } from '../../../ts/lambda-function/generator';
 import { TS_LIB_GENERATOR_INFO } from '../../../ts/lib/generator';
 import { TS_MCP_SERVER_GENERATOR_INFO } from '../../../ts/mcp-server/generator';
+import { TS_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/agent-connection/generator';
+import { TS_RDB_GENERATOR_INFO } from '../../../ts/rdb/generator';
+import { TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/mcp-server-connection/generator';
+import { TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/smithy-connection/generator';
+import { TS_RDB_TRPC_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/trpc-connection/generator';
 import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../../../ts/react-website/app/generator';
+import { COGNITO_AUTH_GENERATOR_INFO } from '../../../ts/react-website/cognito-auth/generator';
 import {
   PY_CLIENT_NAMING,
   resolveAgentFramework,
@@ -40,7 +65,13 @@ import {
 import { matchGritQL } from '../../../utils/ast';
 import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { toClassName } from '../../../utils/names';
+import {
+  camelCase,
+  kebabCase,
+  pascalCase,
+  toClassName,
+  toSnakeCase,
+} from '../../../utils/names';
 import type { ComponentMetadata } from '../../../utils/nx';
 import {
   PACKAGES_DIR,
@@ -57,17 +88,24 @@ import {
  * metadata. Workspaces generated before this release recorded less, in three ways
  * that each cost ownership:
  *
- * - The agent connection generators recorded nothing at all, so the Layer-2
- *   clients' packages are invisible to the sync and would never move again.
+ * - No connection generator recorded anything at all, so the packages they add
+ *   (the agent Layer-2 clients, AG-UI, the tRPC and OpenAPI react clients) are
+ *   invisible to the sync and their versions would never move again.
  * - `ts#dcr-proxy` was attributed to the `ts#project` that creates its project.
  * - No project recorded an `iac`, and a predicate reading absent metadata counts
  *   as not applying, so the infrastructure helpers' packages go unowned.
  *
+ * Every connection is recorded, including those that add no dependencies today.
+ * The sync reads the recorded metadata rather than the generators, so a connection
+ * recorded now is picked up the moment its generator starts owning packages —
+ * otherwise a later release needs a second backfill for the workspaces this one
+ * already ran on.
+ *
  * Every field is recovered from evidence the generators left behind — the files
- * they wrote, the clients they imported, the build dependencies they registered —
- * rather than guessed, and anything that can't be established is left alone and
- * reported. A wrong value is worse than a missing one: it has the sync claim
- * packages a project never received.
+ * they wrote, the clients they imported, the dev chains and build dependencies they
+ * registered — rather than guessed, and anything that can't be established is left
+ * alone. A wrong value is worse than a missing one: it has the sync claim packages
+ * a project never received.
  *
  * How to write a migration:
  * - https://nx.dev/docs/kb/migration-generators
@@ -131,47 +169,79 @@ const infrastructureProviders = (tree: Tree): Map<string, Iac> => {
  * Where a component's infrastructure lives under a provider's shared project,
  * keyed by the generator that created it.
  *
- * An agent and an MCP server are components of a project rather than projects, and
- * each records its own `iac` — so the project-level build dependency isn't precise
- * enough. Each gets a directory named after itself, which is.
+ * These components belong to a project rather than being one, and each records its
+ * own `iac` — a project can hold a CDK-deployed agent alongside one generated with
+ * `infra: 'none'` — so the project-level build dependency isn't precise enough.
+ * Each component gets its own entry under the app directory below, which is.
+ *
+ * `paths` lists the candidates because the two providers don't lay out every
+ * component the same way: a Lambda function is one CDK file but a Terraform
+ * directory.
  */
-const COMPONENT_INFRA_DIR: Record<string, string> = {
-  [TS_AGENT_GENERATOR_INFO.id]: 'agents',
-  [PY_AGENT_GENERATOR_INFO.id]: 'agents',
-  [TS_MCP_SERVER_GENERATOR_INFO.id]: 'mcp-servers',
-  [PY_MCP_SERVER_GENERATOR_INFO.id]: 'mcp-servers',
+const COMPONENT_INFRA: Record<
+  string,
+  { readonly appDirectory: string; readonly paths: (name: string) => string[] }
+> = {
+  ...Object.fromEntries(
+    (
+      [
+        [TS_AGENT_GENERATOR_INFO.id, 'agents'],
+        [PY_AGENT_GENERATOR_INFO.id, 'agents'],
+        [TS_MCP_SERVER_GENERATOR_INFO.id, 'mcp-servers'],
+        [PY_MCP_SERVER_GENERATOR_INFO.id, 'mcp-servers'],
+      ] as const
+    ).map(([id, appDirectory]) => [
+      id,
+      { appDirectory, paths: (name: string) => [name] },
+    ]),
+  ),
+  ...Object.fromEntries(
+    [
+      TS_LAMBDA_FUNCTION_GENERATOR_INFO.id,
+      PY_LAMBDA_FUNCTION_GENERATOR_INFO.id,
+    ].map((id) => [
+      id,
+      {
+        appDirectory: 'lambda-functions',
+        // CDK vends `<name>.ts`; Terraform vends `<name>/<name>.tf`.
+        paths: (name: string) => [`${name}.ts`, name],
+      },
+    ]),
+  ),
 };
 
 /**
- * The provider a component's own infrastructure was generated with, from the
- * directory the infra helper created for it under one provider's shared project.
+ * The provider a component's own infrastructure was generated with, from the entry
+ * the infra helper created for it under one provider's shared project.
  *
- * The directory is named after the component, which for these generators is the
- * component's recorded name.
+ * That entry is named after the component, which for these generators is the name
+ * the component records.
  */
 const componentInfrastructureProvider = (
   tree: Tree,
   component: ComponentMetadata,
 ): Iac | undefined => {
-  const appDirectory = component.generator
-    ? COMPONENT_INFRA_DIR[component.generator]
+  const layout = component.generator
+    ? COMPONENT_INFRA[component.generator]
     : undefined;
-  if (!appDirectory || !component.name) {
+  if (!layout || !component.name) {
     return undefined;
   }
   for (const iac of ['cdk', 'terraform'] as const) {
-    if (
-      tree.exists(
-        joinPathFragments(
-          SHARED_INFRA_ROOT[iac],
-          'src',
-          'app',
-          appDirectory,
-          component.name,
-        ),
-      )
-    ) {
-      return iac;
+    for (const entry of layout.paths(component.name)) {
+      if (
+        tree.exists(
+          joinPathFragments(
+            SHARED_INFRA_ROOT[iac],
+            'src',
+            'app',
+            layout.appDirectory,
+            entry,
+          ),
+        )
+      ) {
+        return iac;
+      }
     }
   }
   return undefined;
@@ -210,205 +280,518 @@ const usesVitePlugin = (
   );
 
 /**
- * An agent connection generator, and how to recognise a run of it.
+ * A connection generator, and how to recognise a run of it.
  *
- * A connection is found from the source agent it was made from: it imported a
- * client named after the target into that agent's entry point, so finding the
- * import establishes both that the connection exists and which target it reaches —
- * making `name` and `sourcePath` recovered facts rather than guesses.
+ * A connection is found from the source component it was made from and the target
+ * it reaches: `evidence` is a check that only passes if that exact pair was wired
+ * up — a client import named after the target, a vended file named after it, or
+ * the dev-target dependency on its project. So `name` and `sourcePath` are
+ * recovered facts rather than guesses.
  *
- * Only the agent connections are listed here; the website connections follow
- * below. The remaining connection generators — the rdb and dynamodb ones — add no
- * dependencies at all, so the sync would read them for nothing.
+ * Every connection generator is listed, including those that add no dependencies
+ * today. The sync reads the metadata rather than the generator, so recording a
+ * connection now is what lets it be picked up the moment its generator starts
+ * owning packages — a later release would otherwise need another backfill.
  */
-interface AgentConnectionKind {
+interface ConnectionKind {
   /** The generator id to record. */
   readonly id: string;
-  /** The generator that created a source agent of this connection. */
-  readonly sourceGenerator: string;
+  /**
+   * The generator that created a source component of this connection, or
+   * undefined when the connection is made from the project as a whole.
+   */
+  readonly sourceGenerator?: string;
   /** The generators that could have created its target. */
   readonly targetGenerators: readonly string[];
-  /** The agent entry point this connection edits, within the source project. */
-  readonly entryPoint: (source: ComponentMetadata) => string;
-  /** The client it imports there, from the target's and source's recorded names. */
-  readonly client: (
-    targetClassName: string,
-    source: ComponentMetadata,
-  ) => string;
-  /** GritQL prefix selecting the entry point's language. */
-  readonly language?: string;
-  /** What this connection records, which its own predicates read. */
-  readonly metadata?: (source: ComponentMetadata) => Record<string, unknown>;
+  /**
+   * Whether this connection was made from `source` to `target`, and what to record
+   * as the component's `path` if so. Undefined means it was not.
+   */
+  readonly evidence: (
+    context: ConnectionContext,
+  ) => string | undefined | Promise<string | undefined>;
+  /**
+   * The `name` this connection records, when it is not the target's class name.
+   * Matched to what each generator writes so a re-run recognises its own entry.
+   */
+  readonly recordedName?: (context: ConnectionContext) => string;
+  /** What this connection records beyond the path, which its predicates read. */
+  readonly metadata?: (
+    context: ConnectionContext,
+  ) => Record<string, unknown> | undefined;
 }
 
-/** A TypeScript agent connection, which imports a Strands client into agent.ts. */
-const tsAgentConnection = (
+/** `<sourceComponent>-<target>`, the name the database connections record. */
+const sourceQualifiedName =
+  (target: (context: ConnectionContext) => string, fallback: string) =>
+  (context: ConnectionContext) =>
+    `${context.source.name ?? fallback}-${target(context)}`;
+
+/** The database name as each language's connections case it. */
+const camelDatabase = ({ target }: ConnectionContext) =>
+  camelCase(target.databaseName);
+const targetProjectName = ({ target }: ConnectionContext) => target.projectName;
+
+/** What a connection's evidence check has to work from. */
+interface ConnectionContext {
+  readonly tree: Tree;
+  /** The project the connection lives on — the source side. */
+  readonly project: ProjectConfiguration;
+  /**
+   * The source component, or the project's own metadata standing in for it when
+   * the connection is made from the project as a whole.
+   */
+  readonly source: ComponentMetadata;
+  /** The target being connected to. */
+  readonly target: ConnectionTarget;
+}
+
+/** Prefix a GritQL pattern to match against Python rather than TypeScript. */
+const py = (pattern: string) => `language python\n${pattern}`;
+
+/**
+ * Whether the source project's `dev` chain runs the target project's, which every
+ * connection wires up so `nx run <source>:dev` starts what it depends on.
+ *
+ * This is the only trace left by the connections that vend no code (the DynamoDB
+ * ones grant IAM in the target's infrastructure instead). It identifies the pair
+ * because the dependency names the target project.
+ */
+const dependsOnTargetDev = (
+  project: ProjectConfiguration,
+  target: ConnectionTarget,
+  devTarget: string,
+): boolean =>
+  (project.targets?.[devTarget]?.dependsOn ?? []).some((dependency) => {
+    const projects =
+      typeof dependency === 'string'
+        ? dependency.split(':')[0]
+        : (dependency.projects as string | string[] | undefined);
+    return Array.isArray(projects)
+      ? projects.includes(target.projectName)
+      : projects === target.projectName;
+  });
+
+/**
+ * An agent-to-service connection, which imports a Layer-2 client named after the
+ * target into the source agent's entry point.
+ */
+const agentClientConnection = (
   id: string,
+  language: 'ts' | 'py',
   targetGenerators: readonly string[],
-): AgentConnectionKind => ({
+): ConnectionKind => ({
   id,
-  sourceGenerator: TS_AGENT_GENERATOR_INFO.id,
+  sourceGenerator:
+    language === 'ts' ? TS_AGENT_GENERATOR_INFO.id : PY_AGENT_GENERATOR_INFO.id,
   targetGenerators,
-  entryPoint: (source) => joinPathFragments(source.path ?? 'src', 'agent.ts'),
-  client: (targetClassName) => `${targetClassName}ClientStrands`,
+  evidence: async ({ tree, project, source, target }) => {
+    const path = joinPathFragments(
+      source.path ?? 'src',
+      language === 'ts' ? 'agent.ts' : 'agent.py',
+    );
+    // The Python client's class suffix follows the source agent's framework, read
+    // from the same naming table the generators use.
+    const client =
+      language === 'ts'
+        ? `${target.className}ClientStrands`
+        : `${target.className}Client${
+            PY_CLIENT_NAMING[resolveAgentFramework(source.framework)]
+              .clientClassSuffix
+          }`;
+    const pattern = `\`${client}\``;
+    return (await matchGritQL(
+      tree,
+      joinPathFragments(project.root, path),
+      language === 'ts' ? pattern : py(pattern),
+    ))
+      ? path
+      : undefined;
+  },
+  ...(language === 'py'
+    ? {
+        metadata: ({ source }) => ({
+          framework: resolveAgentFramework(source.framework),
+        }),
+      }
+    : {}),
 });
 
 /**
- * A Python agent connection, whose client class is suffixed by the framework the
- * source agent was generated with — read from the naming table the generators
- * themselves use, so the name matched is the one that was written.
+ * A database-to-component connection, which imports the database's client getter
+ * into the component it connects to and aliases it after the database.
  */
-const pyAgentConnection = (
+const rdbConnection = (
   id: string,
-  targetGenerators: readonly string[],
-): AgentConnectionKind => ({
+  options: {
+    readonly sourceGenerator?: string;
+    readonly targetGenerator: string;
+    readonly entryPoint: (source: ComponentMetadata) => string;
+    readonly recordedName?: ConnectionKind['recordedName'];
+  },
+): ConnectionKind => ({
   id,
-  sourceGenerator: PY_AGENT_GENERATOR_INFO.id,
-  targetGenerators,
-  entryPoint: (source) => joinPathFragments(source.path ?? 'src', 'agent.py'),
-  client: (targetClassName, source) =>
-    `${targetClassName}Client${
-      PY_CLIENT_NAMING[resolveAgentFramework(source.framework)]
-        .clientClassSuffix
-    }`,
-  language: 'python',
-  metadata: (source) => ({
-    framework: resolveAgentFramework(source.framework),
-  }),
+  sourceGenerator: options.sourceGenerator,
+  targetGenerators: [options.targetGenerator],
+  recordedName: options.recordedName,
+  evidence: async ({ tree, project, source, target }) => {
+    const path = options.entryPoint(source);
+    return (await matchGritQL(
+      tree,
+      joinPathFragments(project.root, path),
+      // Aliased to `get<Database>` on import, so the alias names the target.
+      `\`get${pascalCase(target.databaseName)}\``,
+    ))
+      ? path
+      : undefined;
+  },
 });
 
-const AGENT_CONNECTION_KINDS: readonly AgentConnectionKind[] = [
-  tsAgentConnection(TS_AGENT_MCP_CONNECTION_GENERATOR_INFO.id, [
-    TS_MCP_SERVER_GENERATOR_INFO.id,
-    PY_MCP_SERVER_GENERATOR_INFO.id,
-  ]),
-  tsAgentConnection(TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO.id, [
-    AGENTCORE_GATEWAY_GENERATOR_INFO.id,
-  ]),
-  tsAgentConnection(TS_AGENT_A2A_CONNECTION_GENERATOR_INFO.id, [
-    TS_AGENT_GENERATOR_INFO.id,
-    PY_AGENT_GENERATOR_INFO.id,
-  ]),
-  pyAgentConnection(PY_AGENT_MCP_CONNECTION_GENERATOR_INFO.id, [
-    TS_MCP_SERVER_GENERATOR_INFO.id,
-    PY_MCP_SERVER_GENERATOR_INFO.id,
-  ]),
-  pyAgentConnection(PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO.id, [
-    AGENTCORE_GATEWAY_GENERATOR_INFO.id,
-  ]),
-  pyAgentConnection(PY_AGENT_A2A_CONNECTION_GENERATOR_INFO.id, [
-    TS_AGENT_GENERATOR_INFO.id,
-    PY_AGENT_GENERATOR_INFO.id,
-  ]),
-];
-
 /**
- * A website connection generator, and how to recognise a run of it.
- *
- * Each vends a provider component named after the API or agent it connects to, so
- * the file's presence in the website establishes both the connection and its
- * target. The values its predicates read come from the target project's own
- * metadata, which these workspaces already recorded.
+ * A connection that vends no code, recognised by the dev chain it wires from the
+ * source component to the target project.
  */
-interface WebsiteConnectionKind {
-  /** The generator id to record. */
-  readonly id: string;
-  /** The generators that could have created its target. */
-  readonly targetGenerators: readonly string[];
-  /** The provider component it vends, from the target's recorded name. */
-  readonly provider: (targetClassName: string) => string;
-  /** What this connection records, from the target project's metadata. */
-  readonly metadata?: (target: ProjectMetadata) => Record<string, unknown>;
-}
+const devChainConnection = (
+  id: string,
+  options: {
+    readonly sourceGenerator?: string;
+    readonly targetGenerator: string;
+    /** The source project's target whose chain this connection extends. */
+    readonly devTarget?: (source: ComponentMetadata) => string;
+    readonly recordedName?: ConnectionKind['recordedName'];
+  },
+): ConnectionKind => ({
+  id,
+  sourceGenerator: options.sourceGenerator,
+  targetGenerators: [options.targetGenerator],
+  recordedName: options.recordedName,
+  evidence: ({ project, source, target }) =>
+    dependsOnTargetDev(project, target, options.devTarget?.(source) ?? 'dev')
+      ? target.projectRoot
+      : undefined,
+});
+
+/** The `<component>-dev` target a component generator authors for itself. */
+const componentDevTarget = (source: ComponentMetadata) =>
+  `${source.name ?? 'agent'}-dev`;
 
 /** The tRPC-over-HTTP integration patterns, whose extra client packages differ. */
 const REST_API_INFRA = new Set(['rest-lambda', 'serverlessapigatewayrestapi']);
 
-const WEBSITE_CONNECTION_KINDS: readonly WebsiteConnectionKind[] = [
-  {
-    id: TRPC_REACT_GENERATOR_INFO.id,
-    targetGenerators: [TRPC_BACKEND_GENERATOR_INFO.id],
-    provider: (targetClassName) => `${targetClassName}ClientProvider`,
-    metadata: (target) => ({
-      auth: String(target.auth ?? 'iam').toLowerCase(),
+/**
+ * A website connection, recognised by the provider component it vends for its
+ * target under the website's source root.
+ */
+const websiteConnection = (
+  id: string,
+  options: {
+    readonly targetGenerator: string;
+    readonly provider: (targetClassName: string) => string;
+    readonly metadata?: ConnectionKind['metadata'];
+  },
+): ConnectionKind => ({
+  id,
+  sourceGenerator: REACT_WEBSITE_APP_GENERATOR_INFO.id,
+  targetGenerators: [options.targetGenerator],
+  evidence: ({ tree, project, target }) => {
+    const sourceRoot =
+      project.sourceRoot ?? joinPathFragments(project.root, 'src');
+    const provider = joinPathFragments(
+      'components',
+      options.provider(target.className),
+    );
+    return tree.exists(joinPathFragments(sourceRoot, `${provider}.tsx`))
+      ? joinPathFragments(relative(project.root, sourceRoot), provider)
+      : undefined;
+  },
+  metadata: options.metadata,
+});
+
+/**
+ * Every connection generator, and the trace each leaves on the project it connects
+ * from.
+ *
+ * Grouped by how a run is recognised, since that follows what the generator does
+ * rather than which pair it joins.
+ */
+export const CONNECTION_KINDS: readonly ConnectionKind[] = [
+  // Agent to service: imports a Layer-2 client named after the target.
+  agentClientConnection(TS_AGENT_MCP_CONNECTION_GENERATOR_INFO.id, 'ts', [
+    TS_MCP_SERVER_GENERATOR_INFO.id,
+    PY_MCP_SERVER_GENERATOR_INFO.id,
+  ]),
+  agentClientConnection(TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO.id, 'ts', [
+    AGENTCORE_GATEWAY_GENERATOR_INFO.id,
+  ]),
+  agentClientConnection(TS_AGENT_A2A_CONNECTION_GENERATOR_INFO.id, 'ts', [
+    TS_AGENT_GENERATOR_INFO.id,
+    PY_AGENT_GENERATOR_INFO.id,
+  ]),
+  agentClientConnection(PY_AGENT_MCP_CONNECTION_GENERATOR_INFO.id, 'py', [
+    TS_MCP_SERVER_GENERATOR_INFO.id,
+    PY_MCP_SERVER_GENERATOR_INFO.id,
+  ]),
+  agentClientConnection(PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO.id, 'py', [
+    AGENTCORE_GATEWAY_GENERATOR_INFO.id,
+  ]),
+  agentClientConnection(PY_AGENT_A2A_CONNECTION_GENERATOR_INFO.id, 'py', [
+    TS_AGENT_GENERATOR_INFO.id,
+    PY_AGENT_GENERATOR_INFO.id,
+  ]),
+
+  // Website to backend: vends a provider component named after the target.
+  websiteConnection(TRPC_REACT_GENERATOR_INFO.id, {
+    targetGenerator: TRPC_BACKEND_GENERATOR_INFO.id,
+    provider: (className) => `${className}ClientProvider`,
+    metadata: ({ target }) => ({
+      auth: String(target.project.auth ?? 'iam').toLowerCase(),
       isRestApi: REST_API_INFRA.has(
-        String(target.infra ?? target.computeType ?? '').toLowerCase(),
+        String(
+          target.project.infra ?? target.project.computeType ?? '',
+        ).toLowerCase(),
       ),
     }),
-  },
-  // Both OpenAPI react clients vend the same provider shape, and neither records
-  // anything the sync narrows on.
+  }),
+  // Both OpenAPI react clients vend the same provider shape.
+  websiteConnection(SMITHY_REACT_CONNECTION_GENERATOR_INFO.id, {
+    targetGenerator: TS_SMITHY_API_GENERATOR_INFO.id,
+    provider: (className) => `${className}Provider`,
+  }),
+  websiteConnection(FAST_API_REACT_GENERATOR_INFO.id, {
+    targetGenerator: FAST_API_GENERATOR_INFO.id,
+    provider: (className) => `${className}Provider`,
+  }),
+  websiteConnection(TS_AGENT_REACT_CONNECTION_GENERATOR_INFO.id, {
+    targetGenerator: TS_AGENT_GENERATOR_INFO.id,
+    provider: (className) => `${className}AgentClientProvider`,
+  }),
+  websiteConnection(PY_AGENT_REACT_CONNECTION_GENERATOR_INFO.id, {
+    targetGenerator: PY_AGENT_GENERATOR_INFO.id,
+    provider: (className) => `${className}AgentClientProvider`,
+  }),
+
+  // Database to component: imports the database's `get<Database>` client getter.
+  rdbConnection(TS_RDB_AGENT_CONNECTION_GENERATOR_INFO.id, {
+    sourceGenerator: TS_AGENT_GENERATOR_INFO.id,
+    targetGenerator: TS_RDB_GENERATOR_INFO.id,
+    entryPoint: (source) =>
+      joinPathFragments('src', source.name ?? 'agent', 'agent.ts'),
+    recordedName: sourceQualifiedName(camelDatabase, 'agent'),
+  }),
+  rdbConnection(TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO.id, {
+    sourceGenerator: TS_MCP_SERVER_GENERATOR_INFO.id,
+    targetGenerator: TS_RDB_GENERATOR_INFO.id,
+    entryPoint: (source) =>
+      joinPathFragments('src', source.name ?? 'mcp-server', 'server.ts'),
+    recordedName: sourceQualifiedName(camelDatabase, 'mcp-server'),
+  }),
+  rdbConnection(TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO.id, {
+    targetGenerator: TS_RDB_GENERATOR_INFO.id,
+    entryPoint: () => joinPathFragments('src', 'context.ts'),
+    recordedName: camelDatabase,
+  }),
+
+  // Vends a middleware or dependency module named after the database.
   {
-    id: SMITHY_REACT_CONNECTION_GENERATOR_INFO.id,
-    targetGenerators: [TS_SMITHY_API_GENERATOR_INFO.id],
-    provider: (targetClassName) => `${targetClassName}Provider`,
+    id: TS_RDB_TRPC_CONNECTION_GENERATOR_INFO.id,
+    targetGenerators: [TS_RDB_GENERATOR_INFO.id],
+    recordedName: camelDatabase,
+    evidence: ({ tree, project, target }) => {
+      const path = joinPathFragments(
+        'src',
+        'middleware',
+        `${kebabCase(target.databaseName)}.ts`,
+      );
+      return tree.exists(joinPathFragments(project.root, path))
+        ? path
+        : undefined;
+    },
   },
   {
-    id: FAST_API_REACT_GENERATOR_INFO.id,
-    targetGenerators: [FAST_API_GENERATOR_INFO.id],
-    provider: (targetClassName) => `${targetClassName}Provider`,
+    id: PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO.id,
+    targetGenerators: [PY_RDB_GENERATOR_INFO.id],
+    recordedName: ({ target }) => toSnakeCase(target.databaseName),
+    evidence: ({ tree, project, target }) => {
+      const dependencies = pythonDependenciesDir(tree, project);
+      if (!dependencies) {
+        return undefined;
+      }
+      const path = joinPathFragments(
+        dependencies,
+        `${toSnakeCase(target.databaseName)}.py`,
+      );
+      return tree.exists(joinPathFragments(project.root, path))
+        ? path
+        : undefined;
+    },
   },
+
+  // Python database connections vend no code into the source, so the dev chain and
+  // the workspace dependency on the database project are the trace.
+  devChainConnection(PY_RDB_AGENT_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: sourceQualifiedName(targetProjectName, 'agent'),
+    sourceGenerator: PY_AGENT_GENERATOR_INFO.id,
+    targetGenerator: PY_RDB_GENERATOR_INFO.id,
+    devTarget: componentDevTarget,
+  }),
+  devChainConnection(PY_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: sourceQualifiedName(targetProjectName, 'mcp-server'),
+    sourceGenerator: PY_MCP_SERVER_GENERATOR_INFO.id,
+    targetGenerator: PY_RDB_GENERATOR_INFO.id,
+    devTarget: (source) => `${source.name ?? 'mcp-server'}-dev`,
+  }),
+
+  // DynamoDB connections grant IAM in the target's infrastructure rather than
+  // vending code, so the dev chain is all they leave behind.
+  devChainConnection(TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: sourceQualifiedName(targetProjectName, 'agent'),
+    sourceGenerator: TS_AGENT_GENERATOR_INFO.id,
+    targetGenerator: TS_DYNAMODB_GENERATOR_INFO.id,
+    devTarget: componentDevTarget,
+  }),
+  devChainConnection(TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: sourceQualifiedName(targetProjectName, 'mcp-server'),
+    sourceGenerator: TS_MCP_SERVER_GENERATOR_INFO.id,
+    targetGenerator: TS_DYNAMODB_GENERATOR_INFO.id,
+    devTarget: (source) => `${source.name ?? 'mcp-server'}-dev`,
+  }),
+  devChainConnection(TS_DYNAMODB_TRPC_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: targetProjectName,
+    targetGenerator: TS_DYNAMODB_GENERATOR_INFO.id,
+  }),
+  devChainConnection(TS_DYNAMODB_SMITHY_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: targetProjectName,
+    targetGenerator: TS_DYNAMODB_GENERATOR_INFO.id,
+  }),
+  devChainConnection(PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: sourceQualifiedName(targetProjectName, 'agent'),
+    sourceGenerator: PY_AGENT_GENERATOR_INFO.id,
+    targetGenerator: PY_DYNAMODB_GENERATOR_INFO.id,
+    devTarget: componentDevTarget,
+  }),
+  devChainConnection(PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: sourceQualifiedName(targetProjectName, 'mcp-server'),
+    sourceGenerator: PY_MCP_SERVER_GENERATOR_INFO.id,
+    targetGenerator: PY_DYNAMODB_GENERATOR_INFO.id,
+    devTarget: (source) => `${source.name ?? 'mcp-server'}-dev`,
+  }),
+  devChainConnection(PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO.id, {
+    recordedName: targetProjectName,
+    targetGenerator: PY_DYNAMODB_GENERATOR_INFO.id,
+  }),
+
+  // Gateway to upstream: registers the upstream in the gateway's local-dev.ts,
+  // under the kebab-cased class name the deployed gateway also uses.
+  ...(
+    [
+      [
+        AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO.id,
+        [TS_MCP_SERVER_GENERATOR_INFO.id, PY_MCP_SERVER_GENERATOR_INFO.id],
+      ],
+      [
+        AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO.id,
+        [AGENTCORE_GATEWAY_GENERATOR_INFO.id],
+      ],
+    ] as const
+  ).map(([id, targetGenerators]) => ({
+    id,
+    sourceGenerator: AGENTCORE_GATEWAY_GENERATOR_INFO.id,
+    targetGenerators,
+    recordedName: ({ target }: ConnectionContext) =>
+      kebabCase(target.className),
+    evidence: async ({ tree, project, target }: ConnectionContext) =>
+      (await matchGritQL(
+        tree,
+        joinPathFragments(project.root, 'local-dev.ts'),
+        `\`'${kebabCase(target.className)}'\``,
+      ))
+        ? target.projectRoot
+        : undefined,
+  })),
 ];
 
 /**
- * A thing in the workspace a connection could have been made to, by the name its
- * client or provider is generated from.
+ * A thing in the workspace a connection could have been made to, by the names its
+ * generated code is derived from.
  */
 interface ConnectionTarget {
-  /** The class name the connection's generated code is named after. */
+  /** The class name a client or provider for this target is named after. */
   readonly className: string;
-  /** The metadata of the project it belongs to, which its fields come from. */
+  /**
+   * The last segment of the target project's name, which the database connections
+   * derive their identifiers from.
+   */
+  readonly databaseName: string;
+  /** The target project's name, which a dev-target dependency names. */
+  readonly projectName: string;
+  /** The target project's root, recorded as `path` by the connections that vend no file. */
+  readonly projectRoot: string;
+  /** The target project's metadata, which a connection's own fields come from. */
   readonly project: ProjectMetadata;
 }
 
 /**
- * Every connection target in the workspace, keyed by the generator that created
- * it.
+ * Every connection target in the workspace, keyed by the generator that created it.
  *
  * A target may be a component of a project (an agent, an MCP server) or a whole
- * project (a gateway, an API), so both are indexed. Agents and MCP servers record
- * the class name directly as `rc`; an API's is derived from its `apiName` the same
- * way its connection generator derives it.
+ * project (a gateway, an API, a database), so both are indexed. Agents, MCP servers
+ * and gateways record the class name directly as `rc`; an API's is derived from its
+ * `apiName` the same way its connection generator derives it.
  */
 const connectionTargets = (tree: Tree): Map<string, ConnectionTarget[]> => {
   const targets = new Map<string, ConnectionTarget[]>();
-  const add = (
-    generator: string | undefined,
-    className: string | undefined,
-    project: ProjectMetadata,
-  ) => {
-    if (!generator || !className) {
-      return;
-    }
-    targets.set(generator, [
-      ...(targets.get(generator) ?? []),
-      { className, project },
-    ]);
-  };
-  for (const [, project] of getProjects(tree)) {
+  for (const [projectName, project] of getProjects(tree)) {
     const metadata = project.metadata as ProjectMetadata | undefined;
     if (!metadata) {
       continue;
     }
+    const shared = {
+      // The database generators split on `/` for TypeScript and `.` for Python.
+      databaseName: projectName.split(/[/.]/).pop() ?? projectName,
+      projectName,
+      projectRoot: project.root,
+      project: metadata,
+    };
+    const add = (generator: string | undefined, className: unknown) => {
+      if (!generator || typeof className !== 'string') {
+        return;
+      }
+      targets.set(generator, [
+        ...(targets.get(generator) ?? []),
+        { ...shared, className },
+      ]);
+    };
     add(
       metadata.generator,
-      typeof metadata.rc === 'string'
-        ? metadata.rc
-        : typeof metadata.apiName === 'string'
+      metadata.rc ??
+        (typeof metadata.apiName === 'string'
           ? toClassName(metadata.apiName)
-          : undefined,
-      metadata,
+          : // A database is named by its project, not a recorded class name.
+            shared.databaseName),
     );
     for (const component of metadata.components ?? []) {
-      add(
-        component.generator,
-        typeof component.rc === 'string' ? component.rc : undefined,
-        metadata,
-      );
+      add(component.generator, component.rc);
     }
   }
   return targets;
 };
+
+/**
+ * The Python module a FastAPI project's sources live in, found by looking for the
+ * `dependencies` directory the connections vend into.
+ *
+ * The module name mixes the workspace's npm scope with the API name, so it is read
+ * off the tree rather than derived — a scope that has since changed would make a
+ * derived name wrong.
+ */
+const pythonDependenciesDir = (
+  tree: Tree,
+  project: ProjectConfiguration,
+): string | undefined =>
+  tree
+    .children(project.root)
+    .map((child) => joinPathFragments(child, 'dependencies'))
+    .find((dir) => tree.exists(joinPathFragments(project.root, dir)));
 
 export default async function migration(
   tree: Tree,
@@ -466,7 +849,12 @@ export default async function migration(
       if (component.iac !== undefined) {
         return component;
       }
-      const componentIac = componentInfrastructureProvider(tree, component);
+      const componentIac =
+        // The auth component vends no infrastructure of its own; it always
+        // generates the shared constructs, so it took the project's provider.
+        component.generator === COGNITO_AUTH_GENERATOR_INFO.id
+          ? iac
+          : componentInfrastructureProvider(tree, component);
       if (!componentIac) {
         return component;
       }
@@ -486,72 +874,51 @@ export default async function migration(
       recorded.add(`${component.generator}:${component.name}`);
       changed = true;
     };
-    const candidatesFor = (generators: readonly string[]) =>
-      generators.flatMap((generator) => targets.get(generator) ?? []);
-
-    // The agent connections made from this project's agents, each found by the
-    // client it imported into its source agent.
-    for (const kind of AGENT_CONNECTION_KINDS) {
-      const sources = (next.components ?? []).filter(
+    // The connections made from this project, each found by the trace its
+    // generator left for the exact pair it wired up.
+    for (const kind of CONNECTION_KINDS) {
+      // A connection made from a component starts at each matching component. One
+      // made from the project as a whole — a website, a tRPC API — starts at the
+      // project's own metadata, which stands in for the source.
+      const componentSources = (next.components ?? []).filter(
         (component) => component.generator === kind.sourceGenerator,
       );
-      const candidates = candidatesFor(kind.targetGenerators);
+      const sources: ComponentMetadata[] = componentSources.length
+        ? componentSources
+        : (kind.sourceGenerator === undefined ||
+              kind.sourceGenerator === next.generator) &&
+            next.generator
+          ? [{ ...next, generator: next.generator }]
+          : [];
+      const candidates = kind.targetGenerators.flatMap(
+        (generator) => targets.get(generator) ?? [],
+      );
       for (const source of sources) {
-        const relativeEntryPoint = kind.entryPoint(source);
-        const entryPoint = joinPathFragments(project.root, relativeEntryPoint);
-        if (!tree.exists(entryPoint)) {
-          continue;
-        }
         for (const target of candidates) {
-          if (recorded.has(`${kind.id}:${target.className}`)) {
-            continue;
-          }
-          const pattern = `\`${kind.client(target.className, source)}\``;
+          // A connection from a component to itself is not one any generator makes.
           if (
-            !(await matchGritQL(
-              tree,
-              entryPoint,
-              kind.language ? `language ${kind.language}\n${pattern}` : pattern,
-            ))
+            target.projectName === projectName &&
+            target.className === source.rc
           ) {
             continue;
           }
-          record({
-            generator: kind.id,
-            path: relativeEntryPoint,
-            name: target.className,
-            ...(source.path ? { sourcePath: source.path } : {}),
-            ...kind.metadata?.(source),
-          });
-        }
-      }
-    }
-
-    // The connections made from this website, each found by the provider
-    // component it vends for its target.
-    if (next.generator === REACT_WEBSITE_APP_GENERATOR_INFO.id) {
-      const sourceRoot =
-        project.sourceRoot ?? joinPathFragments(project.root, 'src');
-      for (const kind of WEBSITE_CONNECTION_KINDS) {
-        for (const target of candidatesFor(kind.targetGenerators)) {
-          if (recorded.has(`${kind.id}:${target.className}`)) {
+          const context: ConnectionContext = { tree, project, source, target };
+          const name = kind.recordedName?.(context) ?? target.className;
+          if (recorded.has(`${kind.id}:${name}`)) {
             continue;
           }
-          const provider = joinPathFragments(
-            'components',
-            kind.provider(target.className),
-          );
-          if (!tree.exists(joinPathFragments(sourceRoot, `${provider}.tsx`))) {
+          const path = await kind.evidence(context);
+          if (path === undefined) {
             continue;
           }
           record({
             generator: kind.id,
-            path: joinPathFragments(
-              relative(project.root, sourceRoot),
-              provider,
-            ),
-            name: target.className,
-            ...kind.metadata?.(target.project),
+            path,
+            name,
+            ...(kind.sourceGenerator && source.path
+              ? { sourcePath: source.path }
+              : {}),
+            ...kind.metadata?.(context),
           });
         }
       }

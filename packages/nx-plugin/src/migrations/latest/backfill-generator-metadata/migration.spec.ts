@@ -10,9 +10,10 @@ import {
   writeJson,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
+import generatorsJson from '../../../../generators.json';
 import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import migration, { CONNECTION_KINDS } from './migration';
 
 /**
  * A workspace whose shared infrastructure project was generated with the given
@@ -175,6 +176,84 @@ describe('backfill-generator-metadata migration', () => {
       await migration(tree);
 
       expect(metadataOf(tree, '@proj/mcp').components[0].iac).toBe('terraform');
+    });
+
+    // A Lambda function is one file under CDK but a directory under Terraform, so
+    // both shapes have to be recognised.
+    it('should record a lambda function component from its cdk construct file', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/fns']);
+      tree.write(
+        'packages/common/constructs/src/app/lambda-functions/my-fn.ts',
+        'export {};\n',
+      );
+      addProjectConfiguration(tree, '@proj/fns', {
+        root: 'packages/fns',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#lambda-function', name: 'my-fn' },
+            { generator: 'ts#lambda-function', name: 'no-infra' },
+          ],
+        } as never,
+      });
+
+      await migration(tree);
+
+      const components = metadataOf(tree, '@proj/fns').components;
+      expect(components[0].iac).toBe('cdk');
+      expect(components[1].iac).toBeUndefined();
+    });
+
+    it('should record a lambda function component from its terraform module', async () => {
+      seedInfrastructure(tree, 'terraform', ['proj.fns']);
+      tree.write(
+        'packages/common/terraform/src/app/lambda-functions/my_fn/my_fn.tf',
+        'resource "null_resource" "fn" {}\n',
+      );
+      addProjectConfiguration(tree, 'proj.fns', {
+        root: 'packages/fns',
+        metadata: {
+          generator: 'py#project',
+          components: [{ generator: 'py#lambda-function', name: 'my_fn' }],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, 'proj.fns').components[0].iac).toBe('terraform');
+    });
+
+    // The auth component vends no infrastructure of its own — it always generates
+    // the shared constructs — so it took whichever provider the website used.
+    it('should record the website auth component the project provider', async () => {
+      seedInfrastructure(tree, 'cdk', ['@proj/website']);
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        metadata: {
+          generator: 'ts#react-website',
+          components: [{ generator: 'ts#react-website#auth' }],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(metadataOf(tree, '@proj/website').components[0].iac).toBe('cdk');
+    });
+
+    it('should record no auth iac where the website got no infrastructure', async () => {
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        metadata: {
+          generator: 'ts#react-website',
+          components: [{ generator: 'ts#react-website#auth' }],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(
+        metadataOf(tree, '@proj/website').components[0].iac,
+      ).toBeUndefined();
     });
 
     it('should leave a project no generator created alone', async () => {
@@ -636,6 +715,221 @@ client = MyServerClientLangChain()
     });
   });
 
+  // These connections own no dependencies today, so they are recorded purely so
+  // the sync picks them up when they start to.
+  describe('database connections', () => {
+    /** A database project a connection could have been made to. */
+    const seedDatabase = (tree: Tree, name: string, generator: string) =>
+      addProjectConfiguration(tree, name, {
+        root: `packages/${name.split(/[/.]/).pop()}`,
+        metadata: { generator } as never,
+      });
+
+    it('should record an rdb agent connection from the client getter it imports', async () => {
+      seedDatabase(tree, '@proj/my-db', 'ts#rdb');
+      tree.write(
+        'packages/app/src/my-agent/agent.ts',
+        `import { getPrisma as getMyDb } from '@proj/my-db';
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+};
+`,
+      );
+      addProjectConfiguration(tree, '@proj/app', {
+        root: 'packages/app',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            {
+              generator: 'ts#agent',
+              name: 'my-agent',
+              path: 'src/my-agent',
+              rc: 'MyAgent',
+            },
+          ],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(componentOf(tree, '@proj/app', 'ts#rdb#agent-connection')).toEqual(
+        {
+          generator: 'ts#rdb#agent-connection',
+          path: 'src/my-agent/agent.ts',
+          // `<sourceComponent>-<database>`, as the generator records it.
+          name: 'my-agent-myDb',
+          sourcePath: 'src/my-agent',
+        },
+      );
+    });
+
+    it('should record an rdb trpc connection from the middleware it vends', async () => {
+      seedDatabase(tree, '@proj/my-db', 'ts#rdb');
+      tree.write('packages/api/src/middleware/my-db.ts', 'export {};\n');
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        metadata: { generator: 'ts#trpc-api', apiName: 'my-api' } as never,
+      });
+
+      await migration(tree);
+
+      expect(componentOf(tree, '@proj/api', 'ts#rdb#trpc-connection')).toEqual({
+        generator: 'ts#rdb#trpc-connection',
+        path: 'src/middleware/my-db.ts',
+        name: 'myDb',
+      });
+    });
+
+    it('should record a fast-api rdb connection from the dependency module it vends', async () => {
+      seedDatabase(tree, 'proj.my_db', 'py#rdb');
+      tree.write(
+        'packages/api/proj_my_api/dependencies/my_db.py',
+        'def get_my_db():\n    pass\n',
+      );
+      addProjectConfiguration(tree, 'proj.my_api', {
+        root: 'packages/api',
+        metadata: { generator: 'py#fast-api', apiName: 'my-api' } as never,
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, 'proj.my_api', 'py#rdb#fast-api-connection'),
+      ).toEqual({
+        generator: 'py#rdb#fast-api-connection',
+        path: 'proj_my_api/dependencies/my_db.py',
+        name: 'my_db',
+      });
+    });
+
+    // The DynamoDB connections grant IAM in the target's infrastructure rather
+    // than vending code, so the dev chain is the only trace they leave.
+    it('should record a dynamodb agent connection from the dev chain it wires', async () => {
+      seedDatabase(tree, '@proj/my-table', 'ts#dynamodb');
+      addProjectConfiguration(tree, '@proj/app', {
+        root: 'packages/app',
+        targets: {
+          'my-agent-dev': {
+            dependsOn: [{ projects: '@proj/my-table', target: 'dev' }],
+          },
+        },
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            {
+              generator: 'ts#agent',
+              name: 'my-agent',
+              path: 'src/my-agent',
+              rc: 'MyAgent',
+            },
+          ],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/app', 'ts#dynamodb#agent-connection'),
+      ).toEqual({
+        generator: 'ts#dynamodb#agent-connection',
+        path: 'packages/my-table',
+        name: 'my-agent-@proj/my-table',
+        sourcePath: 'src/my-agent',
+      });
+    });
+
+    it('should record nothing for a database the dev chain never reaches', async () => {
+      seedDatabase(tree, '@proj/my-table', 'ts#dynamodb');
+      addProjectConfiguration(tree, '@proj/app', {
+        root: 'packages/app',
+        targets: { 'my-agent-dev': {} },
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#agent', name: 'my-agent', path: 'src/my-agent' },
+          ],
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/app', 'ts#dynamodb#agent-connection'),
+      ).toBeUndefined();
+    });
+  });
+
+  describe('gateway connections', () => {
+    it('should record an upstream registered in the gateway local-dev', async () => {
+      addProjectConfiguration(tree, '@proj/mcp', {
+        root: 'packages/mcp',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#mcp-server', name: 'server', rc: 'MyServer' },
+          ],
+        } as never,
+      });
+      tree.write(
+        'packages/gateway/local-dev.ts',
+        `const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [
+  { name: 'my-server', url: 'http://localhost:8000/mcp' },
+];
+`,
+      );
+      addProjectConfiguration(tree, '@proj/gateway', {
+        root: 'packages/gateway',
+        metadata: {
+          generator: 'agentcore-gateway',
+          name: 'gateway',
+          rc: 'MyGateway',
+          protocol: 'mcp',
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/gateway', 'agentcore-gateway#mcp-connection'),
+      ).toEqual({
+        generator: 'agentcore-gateway#mcp-connection',
+        path: 'packages/mcp',
+        // Kebab-cased class name, matching the target the deployed gateway uses.
+        name: 'my-server',
+      });
+    });
+
+    it('should record nothing for an upstream the gateway never attached', async () => {
+      addProjectConfiguration(tree, '@proj/mcp', {
+        root: 'packages/mcp',
+        metadata: {
+          generator: 'ts#project',
+          components: [
+            { generator: 'ts#mcp-server', name: 'server', rc: 'MyServer' },
+          ],
+        } as never,
+      });
+      tree.write(
+        'packages/gateway/local-dev.ts',
+        'const ATTACHED_MCP_SERVERS: AttachedMcpServer[] = [];\n',
+      );
+      addProjectConfiguration(tree, '@proj/gateway', {
+        root: 'packages/gateway',
+        metadata: {
+          generator: 'agentcore-gateway',
+          rc: 'MyGateway',
+          protocol: 'mcp',
+        } as never,
+      });
+
+      await migration(tree);
+
+      expect(
+        componentOf(tree, '@proj/gateway', 'agentcore-gateway#mcp-connection'),
+      ).toBeUndefined();
+    });
+  });
+
   it('should be idempotent', async () => {
     seedInfrastructure(tree, 'cdk', ['@proj/app']);
     addProjectConfiguration(tree, '@proj/mcp', {
@@ -672,5 +966,20 @@ client = MyServerClientLangChain()
     await migration(tree);
 
     expect(tree.read('packages/app/project.json', 'utf-8')).toBe(first);
+  });
+
+  // Every connection is recorded, including those adding no dependencies today:
+  // the sync reads the metadata rather than the generator, so a connection recorded
+  // now is picked up the moment its generator starts owning packages — otherwise a
+  // later release needs a second backfill for workspaces this one already ran on.
+  it('should cover every connection generator', () => {
+    // `connection` is the dispatcher that delegates to the others, not a
+    // connection that is itself recorded.
+    const expected = Object.keys(generatorsJson.generators)
+      .filter((id) => id.endsWith('-connection') && id !== 'connection')
+      .sort();
+    const covered = CONNECTION_KINDS.map((kind) => kind.id).sort();
+
+    expect(covered).toEqual(expected);
   });
 });
