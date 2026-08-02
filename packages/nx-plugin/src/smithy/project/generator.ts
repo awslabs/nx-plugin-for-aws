@@ -60,8 +60,9 @@ export const smithyProjectGenerator = async (
               cmd.rm('dist/{projectRoot}/build'),
               cmd.mkdir('dist/{projectRoot}/build'),
               // The workspace build context lets a project's Dockerfile copy in
-              // the built models of shape libraries it depends on
-              `${containers} build -f {projectRoot}/build.Dockerfile --build-context workspace={workspaceRoot} --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
+              // the built models of shape libraries it depends on. Commands run
+              // from the workspace root, so it is the current directory.
+              `${containers} build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`,
             ],
             parallel: false,
             cwd: '{workspaceRoot}',
