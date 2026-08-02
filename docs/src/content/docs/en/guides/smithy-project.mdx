@@ -3,7 +3,7 @@ title: Smithy Projects
 description: Reference documentation for the Smithy project generator
 generator: smithy#project
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Steps } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -118,52 +118,44 @@ Smithy projects build using [Docker](https://www.docker.com/), which runs the [S
 
 Building a shape library writes an assembled model to `dist/<my-shapes>/build/model/model.json`. This single file contains every shape the library defines, along with any it depends on, so a consumer only ever declares the libraries it references directly.
 
-To depend on a shape library from another Smithy project, make three changes to the consuming project.
+To depend on a shape library from another Smithy project, make three changes to the consuming project:
 
-### 1. Copy the built model into the Docker build
+<Steps>
 
-Smithy projects build inside a container, and the build is given the workspace root as a named build context. Add a `COPY` to the consuming project's `build.Dockerfile`, alongside where its own sources are copied in:
+1. Smithy projects build inside a container, and the build is given the workspace root as a named build context. Add a `COPY` to the consuming project's `build.Dockerfile`, alongside where its own sources are copied in:
 
-```dockerfile ins={4}
-# Copy project files
-COPY smithy-build.json .
-COPY src src
-COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-```
+   ```dockerfile ins={4}
+   # Copy project files
+   COPY smithy-build.json .
+   COPY src src
+   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
+   ```
 
-### 2. Import the model
+2. Add the copied file to `imports` in the consuming project's `smithy-build.json`:
 
-Add the copied file to `imports` in the consuming project's `smithy-build.json`:
+   ```json ins={4}
+   {
+     "version": "1.0",
+     "sources": ["src/"],
+     "imports": ["deps/my-shapes.json"],
+     ...
+   }
+   ```
 
-```json ins={4}
-{
-  "version": "1.0",
-  "sources": ["src/"],
-  "imports": ["deps/my-shapes.json"],
-  ...
-}
-```
+3. Add the library's `build` target as a dependency of the consuming project's `compile` target in its `project.json`, so the model exists before the consumer builds:
 
-:::note
-`imports` rather than `sources` keeps the library's shapes out of your project's own source projection, while still resolving them and carrying them through to your build output.
-:::
+   ```json ins={4}
+   {
+     "targets": {
+       "compile": {
+         "dependsOn": ["@my-scope/my-shapes:build"],
+         ...
+       }
+     }
+   }
+   ```
 
-### 3. Build the library first
-
-Add the library's `build` target as a dependency of the consuming project's `compile` target in its `project.json`, so the model exists before the consumer builds:
-
-```json ins={4}
-{
-  "targets": {
-    "compile": {
-      "dependsOn": ["@my-scope/my-shapes:build"],
-      ...
-    }
-  }
-}
-```
-
-### Using the shapes
+</Steps>
 
 Your model can now reference the library's shapes with `use`:
 
