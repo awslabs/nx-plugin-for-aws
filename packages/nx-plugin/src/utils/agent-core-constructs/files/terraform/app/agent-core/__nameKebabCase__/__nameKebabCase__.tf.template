@@ -1,3 +1,14 @@
+<%_ if (session === 's3') { _%>
+terraform {
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+  }
+}
+
+<%_ } _%>
 variable "env" {
   description = "Environment variables to pass to the agent core runtime"
   type        = map(string)
@@ -60,23 +71,90 @@ variable "user_pool_client_ids" {
   type        = list(string)
 }
 
+<%_ } _%>
+<%_ if (auth === 'cognito' || session === 's3') { _%>
 data "aws_region" "current" {}
+<%_ } _%>
+<%_ if (session === 's3') { _%>
+data "aws_caller_identity" "current" {}
+<%_ } _%>
+<%_ if (auth === 'cognito') { _%>
 
 locals {
   aws_region = data.aws_region.current.id
 }
-
 <%_ } _%>
 <%_ if (session === 's3') { _%>
+
+locals {
+  # Delivery source/destination names have a 60 character maximum. Truncate
+  # the agent name so these stay within the limit.
+  session_access_logs_name_prefix = substr("<%= nameKebabCase %>", 0, 30)
+}
+
+# Uniquifies resource names below so this construct can be deployed more than
+# once (e.g. across stages) within the same account/region.
+resource "random_id" "session_unique_suffix" {
+  byte_length = 4
+}
+
+# KMS key encrypting the session bucket and its server access logs.
+resource "aws_kms_key" "session" {
+  description             = "KMS key for <%= nameKebabCase %> agent session data"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# CloudWatch log group receiving the session bucket's server access logs.
+resource "aws_cloudwatch_log_group" "session_access_logs" {
+  name              = "/aws/s3/<%= nameKebabCase %>-session-access-logs-${random_id.session_unique_suffix.hex}"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.session.arn
+
+  tags = var.tags
+}
+
 # Bucket storing the agent's session data
 resource "aws_s3_bucket" "session" {
   #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for session data
   #checkov:skip=CKV_AWS_144:Cross-region replication not required for session data
   #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
-  #checkov:skip=CKV_AWS_18:Access logging not required for session data
+  #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.session)
   #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
-  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for session data
-  force_destroy = true
+  force_destroy = false
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
@@ -84,7 +162,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      kms_master_key_id = aws_kms_key.session.arn
+      sse_algorithm     = "aws:kms"
     }
   }
 }
@@ -96,6 +175,51 @@ resource "aws_s3_bucket_public_access_block" "session" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.session.arn,
+          "${aws_s3_bucket.session.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Deliver the session bucket's server access logs to CloudWatch Logs.
+resource "aws_cloudwatch_log_delivery_source" "session" {
+  name         = "${local.session_access_logs_name_prefix}-access-logs-source-${random_id.session_unique_suffix.hex}"
+  log_type     = "S3_SERVER_ACCESS_LOGS"
+  resource_arn = aws_s3_bucket.session.arn
+}
+
+resource "aws_cloudwatch_log_delivery_destination" "session" {
+  name = "${local.session_access_logs_name_prefix}-access-logs-dest-${random_id.session_unique_suffix.hex}"
+
+  delivery_destination_configuration {
+    destination_resource_arn = aws_cloudwatch_log_group.session_access_logs.arn
+  }
+}
+
+resource "aws_cloudwatch_log_delivery" "session" {
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.session.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.session.arn
 }
 
 <%_ } _%>
@@ -153,6 +277,15 @@ module "agent_core_runtime" {
         aws_s3_bucket.session.arn,
         "${aws_s3_bucket.session.arn}/*"
       ]
+    },
+    # Grant access for the agent to use the session bucket's KMS key
+    {
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey*"
+      ]
+      Resource = [aws_kms_key.session.arn]
     }<% } %>
   ], var.additional_iam_policy_statements)
   tags = var.tags
@@ -164,7 +297,7 @@ module "add_agent_runtime_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "agentRuntimes"
-  value     = { "<%= nameClassName %>" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { storage = "<%= session %>"<% if (session === 's3') { %>, bucketName = aws_s3_bucket.session.bucket<% } %> } } }
+  value     = { "<%= nameClassName %>" = { arn = module.agent_core_runtime.agent_core_runtime_arn<% if (session === 's3') { %>, session = { bucketName = aws_s3_bucket.session.bucket }<% } %> } }
 
   depends_on = [module.agent_core_runtime]
 }

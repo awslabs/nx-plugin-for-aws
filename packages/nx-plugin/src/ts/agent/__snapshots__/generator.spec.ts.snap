@@ -604,6 +604,14 @@ import {
   Bucket,
   BucketEncryption,
 } from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
@@ -615,6 +623,8 @@ import {
 } from 'aws-cdk-lib/aws-bedrockagentcore';
 import {
   PolicyStatement,
+  Effect,
+  ServicePrincipal,
   IGrantable,
   IPrincipal,
   Grant,
@@ -653,22 +663,51 @@ export class SnapshotBedrockAgent
       platform: Platform.LINUX_ARM64,
     });
 
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.S3_MANAGED,
+      removalPolicy: RemovalPolicy.RETAIN,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
     suppressRules(
       sessionBucket,
       ['CKV_AWS_21'],
       'Session data does not need versioning enabled',
-    );
-    suppressRules(
-      sessionBucket,
-      ['CKV_AWS_145'],
-      'AES256 (S3-managed) encryption is sufficient for session data',
     );
     suppressRules(
       sessionBucket,
@@ -688,8 +727,45 @@ export class SnapshotBedrockAgent
     suppressRules(
       sessionBucket,
       ['CKV_AWS_18'],
-      'Access logging not required for session data',
+      'Server access logs are delivered to CloudWatch Logs',
     );
+
+    const sessionAccessLogsSource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
+      },
+    );
+    const sessionAccessLogsDestination = new CfnDeliveryDestination(
+      this,
+      'SessionAccessLogsDestination',
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      },
+    );
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
 
     this.agentCoreRuntime = new Runtime(this, 'SnapshotBedrockAgent', {
       runtimeName: Lazy.string({
@@ -727,10 +803,7 @@ export class SnapshotBedrockAgent
       ...rc.get('agentcore').agentRuntimes,
       SnapshotBedrockAgent: {
         arn: this.agentCoreRuntime.agentRuntimeArn,
-        session: {
-          storage: 's3',
-          bucketName: sessionBucket.bucketName,
-        },
+        session: { bucketName: sessionBucket.bucketName },
       },
     });
   }
@@ -806,7 +879,16 @@ export * from './workspace.js';
 `;
 
 exports[`ts#agent generator > should match snapshot for Terraform generated files > terraform-agent.tf 1`] = `
-"variable "env" {
+"terraform {
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.0"
+    }
+  }
+}
+
+variable "env" {
   description = "Environment variables to pass to the agent core runtime"
   type        = map(string)
   default     = {}
@@ -857,15 +939,78 @@ variable "appconfig_application_arn" {
   type        = string
 }
 
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+locals {
+  # Delivery source/destination names have a 60 character maximum. Truncate
+  # the agent name so these stay within the limit.
+  session_access_logs_name_prefix = substr("terraform-snapshot-agent", 0, 30)
+}
+
+# Uniquifies resource names below so this construct can be deployed more than
+# once (e.g. across stages) within the same account/region.
+resource "random_id" "session_unique_suffix" {
+  byte_length = 4
+}
+
+# KMS key encrypting the session bucket and its server access logs.
+resource "aws_kms_key" "session" {
+  description             = "KMS key for terraform-snapshot-agent agent session data"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# CloudWatch log group receiving the session bucket's server access logs.
+resource "aws_cloudwatch_log_group" "session_access_logs" {
+  name              = "/aws/s3/terraform-snapshot-agent-session-access-logs-\${random_id.session_unique_suffix.hex}"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.session.arn
+
+  tags = var.tags
+}
+
 # Bucket storing the agent's session data
 resource "aws_s3_bucket" "session" {
   #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for session data
   #checkov:skip=CKV_AWS_144:Cross-region replication not required for session data
   #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
-  #checkov:skip=CKV_AWS_18:Access logging not required for session data
+  #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.session)
   #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
-  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for session data
-  force_destroy = true
+  force_destroy = false
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
@@ -873,7 +1018,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      kms_master_key_id = aws_kms_key.session.arn
+      sse_algorithm     = "aws:kms"
     }
   }
 }
@@ -885,6 +1031,51 @@ resource "aws_s3_bucket_public_access_block" "session" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.session.arn,
+          "\${aws_s3_bucket.session.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Deliver the session bucket's server access logs to CloudWatch Logs.
+resource "aws_cloudwatch_log_delivery_source" "session" {
+  name         = "\${local.session_access_logs_name_prefix}-access-logs-source-\${random_id.session_unique_suffix.hex}"
+  log_type     = "S3_SERVER_ACCESS_LOGS"
+  resource_arn = aws_s3_bucket.session.arn
+}
+
+resource "aws_cloudwatch_log_delivery_destination" "session" {
+  name = "\${local.session_access_logs_name_prefix}-access-logs-dest-\${random_id.session_unique_suffix.hex}"
+
+  delivery_destination_configuration {
+    destination_resource_arn = aws_cloudwatch_log_group.session_access_logs.arn
+  }
+}
+
+resource "aws_cloudwatch_log_delivery" "session" {
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.session.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.session.arn
 }
 
 module "agent_core_runtime" {
@@ -933,6 +1124,15 @@ module "agent_core_runtime" {
         aws_s3_bucket.session.arn,
         "\${aws_s3_bucket.session.arn}/*"
       ]
+    },
+    # Grant access for the agent to use the session bucket's KMS key
+    {
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey*"
+      ]
+      Resource = [aws_kms_key.session.arn]
     }
   ], var.additional_iam_policy_statements)
   tags = var.tags
@@ -944,7 +1144,7 @@ module "add_agent_runtime_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "agentRuntimes"
-  value     = { "TerraformSnapshotAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { storage = "s3", bucketName = aws_s3_bucket.session.bucket } } }
+  value     = { "TerraformSnapshotAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { bucketName = aws_s3_bucket.session.bucket } } }
 
   depends_on = [module.agent_core_runtime]
 }
@@ -1487,7 +1687,10 @@ output "security_group_id" {
 
 exports[`ts#agent generator > should match snapshot for generated files > agent-agent.ts 1`] = `
 "import { Agent, tool } from '@strands-agents/sdk';
-import { logModelErrors, logToolErrors } from '@proj/agent-connection';
+import {
+  ModelErrorLoggingPlugin,
+  ToolErrorLoggingPlugin,
+} from '@proj/agent-connection';
 import { getSessionManager } from './session.js';
 import { z } from 'zod';
 
@@ -1508,9 +1711,8 @@ export const getAgent = async () => {
   Refer to tools as your 'spellbook'.\`,
     tools: [multiply],
     sessionManager: await getSessionManager(),
+    plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()],
   });
-  logModelErrors(agent);
-  logToolErrors(agent);
   return agent;
 };
 "

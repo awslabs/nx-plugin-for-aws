@@ -198,7 +198,7 @@ const addAgentCoreTerraformInfra = (
       'app',
       options.appDirectory,
     ),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

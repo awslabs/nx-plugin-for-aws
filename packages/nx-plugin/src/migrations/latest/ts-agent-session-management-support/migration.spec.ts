@@ -393,48 +393,47 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('reshapes the CDK agent construct (agentcore + connection namespaces)', async () => {
+  it('reshapes the CDK agent construct agentcore namespace only, leaving connection as a bare string', async () => {
     tree.write(CDK_AGENT_FILE, OLD_CDK_AGENT_FILE);
 
     const result = await migration(tree);
 
     const content = tree.read(CDK_AGENT_FILE, 'utf-8') ?? '';
-    // Both the 'agentcore' and connection-generator-patched 'connection'
-    // namespaces should be reshaped to { arn, session }. Existing agents
-    // predate session management support, so they migrate to 'in-memory' rather
-    // than being opted into a persisted session behind their back.
+    // Existing agents predate session management support and have no S3
+    // bucket to reference, so no session field is added here — they get
+    // in-memory session storage via a fresh session.ts instead.
     expect(
       content.match(/arn: this\.agentCoreRuntime\.agentRuntimeArn,/g),
-    ).toHaveLength(2);
-    expect(content.match(/session: \{ storage: 'in-memory' \}/g)).toHaveLength(
-      2,
-    );
-    expect(content).not.toMatch(
-      /MyAgent: this\.agentCoreRuntime\.agentRuntimeArn,/,
-    );
+    ).toHaveLength(1);
+    expect(content).not.toContain('session:');
+    // The connection namespace keeps its bare ARN string.
+    expect(
+      content.match(/MyAgent: this\.agentCoreRuntime\.agentRuntimeArn,/g),
+    ).toHaveLength(1);
     expect(result.nextSteps.some((s) => s.includes(CDK_AGENT_FILE))).toBe(true);
   });
 
-  it("defaults MCP server sessions to 'in-memory'", async () => {
+  it('does not add a session field for MCP server runtimes', async () => {
     tree.write(CDK_MCP_SERVER_FILE, OLD_CDK_MCP_SERVER_FILE);
 
     await migration(tree);
 
     const content = tree.read(CDK_MCP_SERVER_FILE, 'utf-8');
-    expect(content).toContain("session: { storage: 'in-memory' }");
+    expect(content).not.toContain('session:');
   });
 
-  it('reshapes the Terraform agentcore + connection value entries', async () => {
+  it('reshapes the Terraform agentcore module only, leaving the connection module as a bare string', async () => {
     tree.write(TF_AGENT_FILE, OLD_TF_AGENT_FILE);
 
     await migration(tree);
 
     const content = tree.read(TF_AGENT_FILE, 'utf-8') ?? '';
-    const occurrences = content.match(
-      /\{ arn = module\.agent_core_runtime\.agent_core_runtime_arn, session = \{ storage = "in-memory" \} \}/g,
+    expect(content).toContain(
+      'value     = { "MyAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn } }',
     );
-    expect(occurrences).toHaveLength(2);
-    expect(content).not.toContain(
+    expect(content).not.toContain('session');
+    // The connection module keeps its bare ARN string.
+    expect(content).toContain(
       'value     = { "MyAgent" = module.agent_core_runtime.agent_core_runtime_arn }',
     );
   });
@@ -471,15 +470,16 @@ describe('ts-agent-session-manager-support migration', () => {
     );
   });
 
-  it('rewrites the React client duck-typing to use typeof', async () => {
+  it('leaves the React client provider untouched (connection namespace stays a bare ARN string)', async () => {
     tree.write(REACT_PROVIDER_FILE, OLD_REACT_PROVIDER_FILE);
 
-    await migration(tree);
+    const result = await migration(tree);
 
-    const content = tree.read(REACT_PROVIDER_FILE, 'utf-8') ?? '';
-    expect(content).toContain("typeof agentRuntimeValue === 'string'");
-    expect(content).toContain('buildAgentCoreWsUrl(agentRuntimeValue.arn)');
-    expect(content).not.toContain("agentRuntimeValue.startsWith('arn:')");
+    const content = tree.read(REACT_PROVIDER_FILE, 'utf-8');
+    expect(content).toEqual(OLD_REACT_PROVIDER_FILE);
+    expect(result.nextSteps.some((s) => s.includes(REACT_PROVIDER_FILE))).toBe(
+      false,
+    );
   });
 
   it('removes the model/tool error logging hooks from an AG-UI agent.ts', async () => {
@@ -594,10 +594,7 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(content).toContain(
       'export class ModelErrorLoggingPlugin implements Plugin',
     );
-    expect(content).toContain(
-      'export const logModelErrors = (agent: LocalAgent): void =>',
-    );
-    expect(content).toContain('new ModelErrorLoggingPlugin().initAgent(agent)');
+    expect(content).not.toContain('logModelErrors');
     expect(result.nextSteps.some((s) => s.includes(MODEL_ERRORS_FILE))).toBe(
       true,
     );
@@ -613,10 +610,7 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(content).toContain(
       'export class ToolErrorLoggingPlugin implements Plugin',
     );
-    expect(content).toContain(
-      'export const logToolErrors = (agent: LocalAgent): void =>',
-    );
-    expect(content).toContain('new ToolErrorLoggingPlugin().initAgent(agent)');
+    expect(content).not.toContain('logToolErrors');
     expect(result.nextSteps.some((s) => s.includes(TOOL_ERRORS_FILE))).toBe(
       true,
     );
@@ -649,7 +643,7 @@ describe('ts-agent-session-manager-support migration', () => {
     ).toBe(true);
   });
 
-  it('wires sessionManager into a non-AG-UI agent.ts and creates session.ts when its project is registered', async () => {
+  it('wires sessionManager and the error-logging plugins into a non-AG-UI agent.ts and creates session.ts when its project is registered', async () => {
     addProjectConfiguration(tree, 'http-project', {
       root: 'apps/http-project',
     });
@@ -662,9 +656,15 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(content).toContain(
       "import { getSessionManager } from './session.js';",
     );
+    expect(content).toContain('ModelErrorLoggingPlugin');
+    expect(content).toContain('ToolErrorLoggingPlugin');
+    expect(content).toContain("from '@proj/agent-connection';");
     expect(content).toContain('sessionManager: await getSessionManager()');
-    expect(content).toContain('logModelErrors(agent);');
-    expect(content).toContain('logToolErrors(agent);');
+    expect(content).toContain(
+      'plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()]',
+    );
+    expect(content).not.toContain('logModelErrors');
+    expect(content).not.toContain('logToolErrors');
 
     const sessionPath = 'apps/http-project/src/agent/session.ts';
     const sessionManagerContent = tree.read(sessionPath, 'utf-8') ?? '';
@@ -679,7 +679,9 @@ describe('ts-agent-session-manager-support migration', () => {
       result.nextSteps.some(
         (s) =>
           s.includes(HTTP_AGENT_TS_FILE) &&
-          s.includes('wired sessionManager into the Agent constructor'),
+          s.includes(
+            'wired sessionManager and the error-logging plugins into the Agent constructor',
+          ),
       ),
     ).toBe(true);
   });
@@ -698,14 +700,19 @@ describe('ts-agent-session-manager-support migration', () => {
       "import { getSessionManager } from './session.js';",
     );
     expect(content).toContain('sessionManager: await getSessionManager()');
-    expect(content).toContain('logModelErrors(agent);');
-    expect(content).toContain('logToolErrors(agent);');
+    expect(content).toContain(
+      'plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()]',
+    );
+    expect(content).not.toContain('logModelErrors');
+    expect(content).not.toContain('logToolErrors');
     expect(tree.exists('apps/http-project/src/agent/session.ts')).toBe(true);
     expect(
       result.nextSteps.some(
         (s) =>
           s.includes(HTTP_AGENT_TS_FILE) &&
-          s.includes('wired sessionManager into the Agent constructor'),
+          s.includes(
+            'wired sessionManager and the error-logging plugins into the Agent constructor',
+          ),
       ),
     ).toBe(true);
   });
@@ -724,8 +731,11 @@ describe('ts-agent-session-manager-support migration', () => {
       "import { getSessionManager } from './session.js';",
     );
     expect(content).toContain('sessionManager: await getSessionManager()');
-    expect(content).toContain('logModelErrors(agent);');
-    expect(content).toContain('logToolErrors(agent);');
+    expect(content).toContain(
+      'plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()]',
+    );
+    expect(content).not.toContain('logModelErrors');
+    expect(content).not.toContain('logToolErrors');
     // The merged client import must survive intact
     expect(content).toContain('AgentsMcpServerClientStrands');
     expect(tree.exists('apps/http-project/src/agent/session.ts')).toBe(true);
@@ -733,7 +743,9 @@ describe('ts-agent-session-manager-support migration', () => {
       result.nextSteps.some(
         (s) =>
           s.includes(HTTP_AGENT_TS_FILE) &&
-          s.includes('wired sessionManager into the Agent constructor'),
+          s.includes(
+            'wired sessionManager and the error-logging plugins into the Agent constructor',
+          ),
       ),
     ).toBe(true);
   });

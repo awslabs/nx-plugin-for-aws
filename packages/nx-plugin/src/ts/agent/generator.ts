@@ -49,6 +49,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
+import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { assignPort } from '../../utils/port';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -178,9 +179,8 @@ export const tsAgentGenerator = async (
   // cwd={projectRoot}, so compute that directory relative to the project root
   // here rather than resolving it at runtime (e.g. via import.meta.url),
   // which would need an extra runtime helper.
-  const projectDepth = project.root.split('/').filter(Boolean).length;
   const localSessionsDir = joinPathFragments(
-    Array(projectDepth).fill('..').join('/'),
+    getRelativePathToRootByDirectory(project.root),
     `tmp/agents/strands/${name}`,
   );
 

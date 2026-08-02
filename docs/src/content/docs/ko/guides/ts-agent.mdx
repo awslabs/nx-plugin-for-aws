@@ -355,18 +355,10 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 
 `session` 옵션은 Strands SDK의 [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/)를 사용하여 에이전트가 호출 간에 대화 상태(메시지 기록, 도구 상태 등)를 유지하는 방법을 제어합니다:
 
-- **`s3`** (기본값): CDK/Terraform 인프라는 세션 데이터를 위한 전용 S3 버킷을 프로비저닝하며, SSE-S3로 암호화되고 모든 공개 액세스가 차단됩니다. 에이전트의 IAM 역할에는 읽기/쓰기/목록/삭제 액세스 권한이 부여되며, 버킷 이름은 AppConfig 런타임 구성에서 에이전트의 ARN과 함께 등록됩니다.
+- **`s3`** (기본값): CDK/Terraform 인프라는 세션 데이터를 위한 전용 S3 버킷을 프로비저닝하며, 전용 KMS 키로 암호화되고 모든 공개 액세스가 차단됩니다. 서버 액세스 로그는 동일한 키를 통해 CloudWatch Logs 로그 그룹으로 전달됩니다. 에이전트의 IAM 역할에는 버킷에 대한 읽기/쓰기/목록/삭제 액세스 권한과 키에 대한 복호화/데이터 키 생성 액세스 권한이 부여되며, 버킷 이름은 AppConfig 런타임 구성에서 에이전트의 ARN과 함께 등록됩니다.
 - **`in-memory`**: 버킷이 프로비저닝되지 않습니다. 대화 상태는 실행 중인 프로세스의 수명 동안만 메모리에 유지되며 재시작이나 스케일 인 시 유지되지 않습니다.
 
-이는 생성된 `session.ts`에 구현되어 있으며, 현재 세션에 대한 `SessionManager`를 확인하는 `getSessionManager()` 함수를 내보냅니다:
-
-```typescript
-export const getSessionManager = async (): Promise<SessionManager> => {
-  const sessionId = getCurrentSessionId();
-  // local development always uses local file storage...
-  // ...otherwise S3Storage (session: 's3') or InMemoryStorage (session: 'in-memory')
-};
-```
+이는 생성된 `session.ts`에 구현되어 있으며, 현재 세션에 대한 `SessionManager`를 확인하는 `getSessionManager()` 함수를 내보냅니다.
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
 AG-UI는 대화 스레드당 템플릿 에이전트를 복제하므로, `getSessionManager`는 `index.ts`의 `StrandsAgent` 구성에서 `sessionManagerProvider`로 연결되어 공유 템플릿 에이전트에 포함되는 대신 각 스레드에 대해 새로운 `SessionManager`가 확인됩니다.

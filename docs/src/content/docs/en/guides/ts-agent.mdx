@@ -355,18 +355,10 @@ For more details, refer to the [AgentCore documentation on observability](https:
 
 The `session` option controls how your agent persists conversation state (message history, tool state, etc.) across invocations, using the Strands SDK's [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/):
 
-- **`s3`** (default): The CDK/Terraform infrastructure provisions a dedicated S3 bucket for session data, encrypted with SSE-S3 and with all public access blocked. The agent's IAM role is granted read/write/list/delete access to it, and the bucket name is registered alongside the agent's ARN in AppConfig runtime configuration.
+- **`s3`** (default): The CDK/Terraform infrastructure provisions a dedicated S3 bucket for session data, encrypted with a dedicated KMS key and with all public access blocked; server access logs are delivered to a CloudWatch Logs log group via the same key. The agent's IAM role is granted read/write/list/delete access to the bucket and decrypt/generate-data-key access to the key, and the bucket name is registered alongside the agent's ARN in AppConfig runtime configuration.
 - **`in-memory`**: No bucket is provisioned. Conversation state is kept in memory only for the lifetime of the running process and does not survive restarts or scale-in.
 
-This is implemented in the generated `session.ts`, which exports a `getSessionManager()` function resolving a `SessionManager` for the current session:
-
-```typescript
-export const getSessionManager = async (): Promise<SessionManager> => {
-  const sessionId = getCurrentSessionId();
-  // local development always uses local file storage...
-  // ...otherwise S3Storage (session: 's3') or InMemoryStorage (session: 'in-memory')
-};
-```
+This is implemented in the generated `session.ts`, which exports a `getSessionManager()` function resolving a `SessionManager` for the current session.
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
 Since AG-UI clones a template agent per conversation thread, `getSessionManager` is wired in as a `sessionManagerProvider` on the `StrandsAgent` config in `index.ts`, so a fresh `SessionManager` is resolved for each thread rather than baked into the shared template agent.

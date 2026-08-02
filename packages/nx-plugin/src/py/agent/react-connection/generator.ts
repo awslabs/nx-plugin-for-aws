@@ -95,11 +95,6 @@ export const pyAgentReactConnectionGenerator = async (
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
   const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
   const protocol = (targetComponent?.protocol ?? 'http').toLowerCase();
-  const session = (
-    targetComponent?.session ??
-    metadata?.session ??
-    'in-memory'
-  ).toLowerCase();
 
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
@@ -124,7 +119,6 @@ export const pyAgentReactConnectionGenerator = async (
       agentName,
       agentNameClassName,
       auth: auth as AgUiAuth,
-      session,
     });
   } else {
     const moduleName = getModuleName(agentProjectConfig);
@@ -202,7 +196,6 @@ export const pyAgentReactConnectionGenerator = async (
     await addAgentRuntimeToConnectionNamespace(tree, {
       agentNameKebabCase: kebabCase(agentNameClassName),
       agentNameClassName,
-      session,
     });
   }
 

@@ -106,11 +106,6 @@ export async function tsAgentReactConnectionGenerator(
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
   const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
-  const session = (
-    targetComponent?.session ??
-    metadata?.session ??
-    'in-memory'
-  ).toLowerCase();
   const agentProjectAlias = agentProjectConfig.name;
   const agentPath = targetComponent?.path ?? 'src/agent';
 
@@ -135,7 +130,6 @@ export async function tsAgentReactConnectionGenerator(
       agentName,
       agentNameClassName,
       auth: auth as AgUiAuth,
-      session,
     });
 
     await addTsAgentTargetToLocalDev(
@@ -288,7 +282,6 @@ export async function tsAgentReactConnectionGenerator(
   await addAgentRuntimeToConnectionNamespace(tree, {
     agentNameKebabCase: kebabCase(agentNameClassName),
     agentNameClassName,
-    session,
   });
 
   addTsDependencies(tree, DEPENDENCIES, {

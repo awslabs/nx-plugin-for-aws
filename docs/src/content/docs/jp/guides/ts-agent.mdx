@@ -355,18 +355,10 @@ CloudWatch AWS コンソールでトレースを見つけるには、メニュ�
 
 `session` オプションは、Strands SDK の [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) を使用して、エージェントが呼び出し間で会話状態（メッセージ履歴、ツール状態など）を永続化する方法を制御します:
 
-- **`s3`** (デフォルト): CDK/Terraform インフラストラクチャは、セッションデータ用の専用 S3 バケットをプロビジョニングします。SSE-S3 で暗号化され、すべてのパブリックアクセスがブロックされます。エージェントの IAM ロールには読み取り/書き込み/リスト/削除アクセスが付与され、バケット名はエージェントの ARN と共に AppConfig ランタイム設定に登録されます。
+- **`s3`** (デフォルト): CDK/Terraform インフラストラクチャは、セッションデータ用の専用 S3 バケットをプロビジョニングします。専用の KMS キーで暗号化され、すべてのパブリックアクセスがブロックされます。サーバーアクセスログは、同じキーを介して CloudWatch Logs のロググループに配信されます。エージェントの IAM ロールには、バケットへの読み取り/書き込み/リスト/削除アクセスと、キーへの復号/データキー生成アクセスが付与され、バケット名はエージェントの ARN と共に AppConfig ランタイム設定に登録されます。
 - **`in-memory`**: バケットはプロビジョニングされません。会話状態は実行中のプロセスの存続期間中のみメモリに保持され、再起動やスケールインでは保持されません。
 
-これは生成された `session.ts` に実装されており、現在のセッションの `SessionManager` を解決する `getSessionManager()` 関数をエクスポートします:
-
-```typescript
-export const getSessionManager = async (): Promise<SessionManager> => {
-  const sessionId = getCurrentSessionId();
-  // ローカル開発では常にローカルファイルストレージを使用...
-  // ...それ以外の場合は S3Storage (session: 's3') または InMemoryStorage (session: 'in-memory')
-};
-```
+これは生成された `session.ts` に実装されており、現在のセッションの `SessionManager` を解決する `getSessionManager()` 関数をエクスポートします。
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
 AG-UI は会話スレッドごとにテンプレートエージェントをクローンするため、`getSessionManager` は `index.ts` の `StrandsAgent` 設定で `sessionManagerProvider` として接続されます。これにより、共有テンプレートエージェントに組み込まれるのではなく、各スレッドに対して新しい `SessionManager` が解決されます。
