@@ -2,7 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
 import type { Tree } from '@nx/devkit';
+import * as devkit from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -10,6 +12,7 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
+import { TS_VERSIONS } from '../../utils/versions';
 import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator';
 
 describe('ts#rdb generator', () => {
@@ -250,6 +253,42 @@ describe('ts#rdb generator', () => {
     expect(projectPackageJson.dependencies.pg).toBeUndefined();
     expect(projectPackageJson.devDependencies?.['@types/pg']).toBeUndefined();
   });
+
+  it('should pin @prisma/adapter-pg @types/pg via yarn resolutions to match the workspace @types/pg', async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('yarn');
+
+    await tsRdbGenerator(tree, defaultOptions);
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Classic yarn honours the `**/` form, berry the bare one.
+    expect(
+      rootPackageJson.resolutions?.['**/@prisma/adapter-pg/@types/pg'],
+    ).toBe(TS_VERSIONS['@types/pg']);
+    expect(rootPackageJson.resolutions?.['@prisma/adapter-pg/@types/pg']).toBe(
+      TS_VERSIONS['@types/pg'],
+    );
+  });
+
+  it('should not add the @types/pg resolution for yarn when engine is MySQL', async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('yarn');
+
+    await tsRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.resolutions).toBeUndefined();
+  });
+
+  it.each(['pnpm', 'npm', 'bun'] as const)(
+    'should not add yarn resolutions for %s',
+    async (pkgMgr) => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+
+      await tsRdbGenerator(tree, defaultOptions);
+
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(rootPackageJson.resolutions).toBeUndefined();
+    },
+  );
 
   it('should generate terraform modules when iac is Terraform', async () => {
     await tsRdbGenerator(tree, {
