@@ -1,6 +1,6 @@
 ---
-title: "TypeScript Strands エージェント"
-description: "ツールを使用して AI エージェントを構築するための TypeScript Strands エージェントを生成し、Amazon Bedrock AgentCore Runtime にデプロイします"
+title: TypeScript Agent
+description: ツールを使用してAIエージェントを構築するためのTypeScript Agentを生成し、Amazon Bedrock AgentCore Runtimeにデプロイします
 generator: ts#agent
 ---
 
@@ -16,7 +16,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-TypeScript [Strands Agent](https://strandsagents.com/) を生成し、ツールを使用したAIエージェントを構築します。オプションで [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) にデプロイできます。デフォルトでは、このジェネレーターは WebSocket 上の [tRPC](https://trpc.io/) を使用して、[AgentCore の双方向ストリーミングサポート](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)を活用し、リアルタイムで型安全な通信を実現します。または、他の A2A 互換エージェントとの相互運用性のために [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) プロトコルを選択することもできます。また、[CopilotKit](https://docs.copilotkit.ai/aws-strands) を介した直接的なフロントエンド統合のために [AG-UI](https://docs.ag-ui.com/) プロトコルを選択することもできます。
+ツールを使用してAIエージェントを構築するための TypeScript [Strands Agent](https://strandsagents.com/) を生成し、オプションで [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) にデプロイします。デフォルトでは、ジェネレーターは WebSocket 上の [tRPC](https://trpc.io/) を使用して、[AgentCore の双方向ストリーミングサポート](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)を活用し、リアルタイムで型安全な通信を実現します。または、他の A2A 互換エージェントとの相互運用性のために [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) プロトコルを選択するか、[CopilotKit](https://docs.copilotkit.ai/aws-strands) を介した直接的なフロントエンド統合のために [AG-UI](https://docs.ag-ui.com/) プロトコルを選択することもできます。
 
 ## Strands とは?
 
@@ -60,6 +60,7 @@ TypeScript Agent は2つの方法で生成できます:
         - init.ts tRPC の初期化
         - router.ts エージェントプロシージャを含む tRPC ルーター
         - agent.ts サンプルツールを含むメインエージェント定義
+        - session.ts 会話状態を永続化するために使用される SessionManager を解決
         - client.ts エージェントを呼び出すための提供されたクライアント
         - agent-core-trpc-client.ts AgentCore Runtime 上のエージェントに接続するためのクライアントファクトリー
         - Dockerfile エージェントをホストするためのエントリーポイント (`infra` が `None` に設定されている場合は除外)
@@ -79,6 +80,7 @@ TypeScript Agent は2つの方法で生成できます:
       - agent/ (指定した場合はカスタム名)
         - index.ts A2A Express サーバーのエントリーポイント
         - agent.ts サンプルツールを含むメインエージェント定義
+        - session.ts 会話状態を永続化するために使用される SessionManager を解決
         - Dockerfile エージェントをホストするためのエントリーポイント (`infra` が `None` に設定されている場合は除外)
     - package.json Strands と Express 依存関係で更新
     - project.json エージェント serve ターゲットで更新
@@ -96,6 +98,7 @@ TypeScript Agent は2つの方法で生成できます:
       - agent/ (指定した場合はカスタム名)
         - index.ts AG-UI サーバーのエントリーポイント (Express + SSE)
         - agent.ts サンプルツールを含むメインエージェント定義
+        - session.ts 会話状態を永続化するために使用される SessionManager を解決
         - Dockerfile エージェントをホストするためのエントリーポイント (`infra` が `None` に設定されている場合は除外)
     - package.json Strands と AG-UI 依存関係で更新
     - project.json エージェント serve ターゲットで更新
@@ -134,8 +137,8 @@ Agent をデプロイするために、次のファイルが生成されます:
 </Infrastructure>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-`infra` に `None` を選択した場合、CDK コンストラクトや Terraform モジュールは生成されません — Agent はローカルでのみ実行できます。このモードでは、認証するホストされたエンドポイントが存在しないため、`auth` オプションは無視されます。
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+`infra` に `none` を選択した場合、CDK コンストラクトや Terraform モジュールは生成されません — Agent はローカルでのみ実行できます。このモードでは、認証するホストされたエンドポイントが存在しないため、`auth` オプションは無視されます。
 </OptionFilter>
 
 #### アーキテクチャ
@@ -185,7 +188,7 @@ const letterCounter = tool({
 });
 
 // エージェントにツールを追加
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   return new Agent({
     systemPrompt: 'You are a helpful assistant with access to various tools.',
     tools: [letterCounter],
@@ -347,6 +350,37 @@ bundle ターゲットは、Bedrock AgentCore Runtime でホストする WebSock
 CloudWatch AWS コンソールでトレースを見つけるには、メニューで "GenAI Observability" を選択します。トレースを入力するには、[Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html) を有効にする必要があることに注意してください。
 
 詳細については、[可観測性に関する AgentCore ドキュメント](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)を参照してください。
+
+### セッション管理
+
+`session` オプションは、Strands SDK の [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) を使用して、エージェントが呼び出し間で会話状態（メッセージ履歴、ツール状態など）を永続化する方法を制御します:
+
+- **`s3`** (デフォルト): CDK/Terraform インフラストラクチャは、セッションデータ用の専用 S3 バケットをプロビジョニングします。SSE-S3 で暗号化され、すべてのパブリックアクセスがブロックされます。エージェントの IAM ロールには読み取り/書き込み/リスト/削除アクセスが付与され、バケット名はエージェントの ARN と共に AppConfig ランタイム設定に登録されます。
+- **`in-memory`**: バケットはプロビジョニングされません。会話状態は実行中のプロセスの存続期間中のみメモリに保持され、再起動やスケールインでは保持されません。
+
+これは生成された `session.ts` に実装されており、現在のセッションの `SessionManager` を解決する `getSessionManager()` 関数をエクスポートします:
+
+```typescript
+export const getSessionManager = async (): Promise<SessionManager> => {
+  const sessionId = getCurrentSessionId();
+  // ローカル開発では常にローカルファイルストレージを使用...
+  // ...それ以外の場合は S3Storage (session: 's3') または InMemoryStorage (session: 'in-memory')
+};
+```
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+AG-UI は会話スレッドごとにテンプレートエージェントをクローンするため、`getSessionManager` は `index.ts` の `StrandsAgent` 設定で `sessionManagerProvider` として接続されます。これにより、共有テンプレートエージェントに組み込まれるのではなく、各スレッドに対して新しい `SessionManager` が解決されます。
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+`withSessionId` は既にセッションごとに 1 つの `Agent` インスタンスをキャッシュしているため、`getSessionManager` は `agent.ts` の `getAgent` 内の `new Agent({ sessionManager: await getSessionManager() })` 呼び出しで直接呼び出されます。
+</OptionFilter>
+
+セッション ID 自体は AgentCore Runtime セッションから取得され（A2A/AG-UI の場合は `x-amzn-bedrock-agentcore-runtime-session-id` ヘッダー経由、HTTP/tRPC の場合は WebSocket 接続コンテキスト経由で伝播されます）、[`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) ベースのコンテキストにバインドされるため、`getCurrentSessionId()` はリクエスト内のどこでも解決できます — <Link path="/guides/connection">`connection` ジェネレーター</Link>を介して接続されたダウンストリームの MCP または A2A クライアントを含め、呼び出しチェーン全体が一貫したセッションを共有します。
+
+:::note[ローカル開発]
+ローカルで実行する場合（`LOCAL_DEV=true`、`-dev` ターゲットによって自動的に設定されます）、設定された `session` オプションに関係なく、セッションデータは常にワークスペースルートの `tmp/agents/strands/<agent-name>` の下のディスクに保存されます。これは便宜上のためです。
+:::
 </OptionFilter>
 
 ## Agent の呼び出し
@@ -366,7 +400,7 @@ import { AgentClient } from '../packages/<project>/src/agent/client.js';
 
 const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log });
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
 
 :::tip[クイックテスト]
@@ -423,7 +457,7 @@ const client = AgentClient.withJwtAuth({
   accessTokenProvider: async () => `<access-token>`,
 });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
   onData: console.log,
 });
 ```
@@ -485,7 +519,7 @@ React ウェブサイトから AG-UI エージェントを呼び出すには、<
 
 ## エージェントの保護
 
-<Snippet name="agent/securing-your-agent" parentHeading="Securing your Agent" />
+<Snippet name="agent/securing-your-agent" parentHeading="エージェントの保護" />
 
 ```typescript
 // agent.ts

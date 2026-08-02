@@ -1,6 +1,6 @@
 ---
-title: "TypeScript Agent"
-description: "Tạo TypeScript Agent để xây dựng các AI agent với công cụ và triển khai lên Amazon Bedrock AgentCore Runtime"
+title: TypeScript Agent
+description: Tạo TypeScript Agent để xây dựng các AI agent với công cụ và triển khai lên Amazon Bedrock AgentCore Runtime
 generator: ts#agent
 ---
 
@@ -16,7 +16,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Tạo một TypeScript [Agent](https://strandsagents.com/) để xây dựng các AI agent với công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Mặc định, generator sử dụng [tRPC](https://trpc.io/) qua WebSocket để tận dụng [hỗ trợ streaming hai chiều của AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) cho giao tiếp thời gian thực, type-safe. Ngoài ra, bạn có thể chọn giao thức [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) để tương tác với các agent tương thích A2A khác, hoặc giao thức [AG-UI](https://docs.ag-ui.com/) để tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/aws-strands).
+Tạo một TypeScript [Strands Agent](https://strandsagents.com/) để xây dựng các AI agent với công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Mặc định, generator sử dụng [tRPC](https://trpc.io/) qua WebSocket để tận dụng [hỗ trợ streaming hai chiều của AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) cho giao tiếp thời gian thực, type-safe. Ngoài ra, bạn có thể chọn giao thức [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) để tương tác với các agent tương thích A2A khác, hoặc giao thức [AG-UI](https://docs.ag-ui.com/) để tích hợp trực tiếp với frontend thông qua [CopilotKit](https://docs.copilotkit.ai/aws-strands).
 
 ## Strands là gì?
 
@@ -60,6 +60,7 @@ Generator sẽ thêm các file sau vào dự án TypeScript hiện có của b�
         - init.ts Khởi tạo tRPC
         - router.ts tRPC router với các agent procedure
         - agent.ts Định nghĩa agent chính với các công cụ mẫu
+        - session.ts Phân giải SessionManager được sử dụng để lưu trữ trạng thái hội thoại
         - client.ts Client được cung cấp để gọi agent của bạn
         - agent-core-trpc-client.ts Client factory để kết nối với các agent trên AgentCore Runtime
         - Dockerfile Điểm vào để host agent của bạn (loại trừ khi `infra` được đặt thành `None`)
@@ -79,6 +80,7 @@ Generator sẽ thêm các file sau vào dự án TypeScript hiện có của b�
       - agent/ (hoặc tên tùy chỉnh nếu được chỉ định)
         - index.ts Điểm vào A2A Express server
         - agent.ts Định nghĩa agent chính với các công cụ mẫu
+        - session.ts Phân giải SessionManager được sử dụng để lưu trữ trạng thái hội thoại
         - Dockerfile Điểm vào để host agent của bạn (loại trừ khi `infra` được đặt thành `None`)
     - package.json Được cập nhật với các dependency của Strands và Express
     - project.json Được cập nhật với các target serve agent
@@ -96,6 +98,7 @@ Generator sẽ thêm các file sau vào dự án TypeScript hiện có của b�
       - agent/ (hoặc tên tùy chỉnh nếu được chỉ định)
         - index.ts Điểm vào AG-UI server (Express + SSE)
         - agent.ts Định nghĩa agent chính với các công cụ mẫu
+        - session.ts Phân giải SessionManager được sử dụng để lưu trữ trạng thái hội thoại
         - Dockerfile Điểm vào để host agent của bạn (loại trừ khi `infra` được đặt thành `None`)
     - package.json Được cập nhật với các dependency của Strands và AG-UI
     - project.json Được cập nhật với các target serve agent
@@ -134,8 +137,8 @@ Generator sẽ thêm các file sau vào dự án TypeScript hiện có của b�
 </Infrastructure>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-Nếu bạn chọn `None` cho `infra`, không có CDK construct hoặc Terraform module nào được tạo ra — Agent chỉ có thể chạy locally. Tùy chọn `auth` sẽ bị bỏ qua trong chế độ này vì không có endpoint được host để xác thực.
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+Nếu bạn chọn `none` cho `infra`, không có CDK construct hoặc Terraform module nào được tạo ra — Agent chỉ có thể chạy locally. Tùy chọn `auth` sẽ bị bỏ qua trong chế độ này vì không có endpoint được host để xác thực.
 </OptionFilter>
 
 #### Architecture
@@ -167,7 +170,7 @@ Vì tRPC hỗ trợ các procedure Query, Mutation và Subscription qua WebSocke
 Công cụ là các hàm mà AI agent có thể gọi để thực hiện các hành động. Bạn có thể thêm công cụ mới trong file `agent.ts`:
 
 ```typescript
-import { Agent, tool } from '@agents/sdk';
+import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
 
 const letterCounter = tool({
@@ -185,7 +188,7 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   return new Agent({
     systemPrompt: 'You are a helpful assistant with access to various tools.',
     tools: [letterCounter],
@@ -203,9 +206,9 @@ Framework Strands tự động xử lý:
 Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng bạn có thể dễ dàng chuyển đổi giữa các model provider:
 
 ```typescript
-import { Agent } from '@agents/sdk';
-import { BedrockModel } from '@agents/sdk/models/bedrock';
-import { OpenAIModel } from '@agents/sdk/models/openai';
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+import { OpenAIModel } from '@strands-agents/sdk/models/openai';
 
 // Use Bedrock
 const bedrockModel = new BedrockModel({
@@ -347,6 +350,37 @@ Agent của bạn được tự động cấu hình với khả năng quan sát 
 Bạn có thể tìm thấy các trace trong CloudWatch AWS Console, bằng cách chọn "GenAI Observability" trong menu. Lưu ý rằng để các trace được điền, bạn sẽ cần bật [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Để biết thêm chi tiết, tham khảo [tài liệu AgentCore về khả năng quan sát](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+### Quản lý Session
+
+Tùy chọn `session` kiểm soát cách agent của bạn lưu trữ trạng thái hội thoại (lịch sử tin nhắn, trạng thái công cụ, v.v.) qua các lần gọi, sử dụng [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) của Strands SDK:
+
+- **`s3`** (mặc định): Hạ tầng CDK/Terraform cung cấp một S3 bucket chuyên dụng cho dữ liệu session, được mã hóa bằng SSE-S3 và chặn mọi truy cập công khai. IAM role của agent được cấp quyền read/write/list/delete đối với nó, và tên bucket được đăng ký cùng với ARN của agent trong runtime configuration của AppConfig.
+- **`in-memory`**: Không có bucket nào được cung cấp. Trạng thái hội thoại chỉ được giữ trong bộ nhớ trong suốt thời gian sống của tiến trình đang chạy và không tồn tại qua các lần khởi động lại hoặc scale-in.
+
+Điều này được triển khai trong file `session.ts` được tạo ra, xuất một hàm `getSessionManager()` phân giải một `SessionManager` cho session hiện tại:
+
+```typescript
+export const getSessionManager = async (): Promise<SessionManager> => {
+  const sessionId = getCurrentSessionId();
+  // local development always uses local file storage...
+  // ...otherwise S3Storage (session: 's3') or InMemoryStorage (session: 'none')
+};
+```
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+Vì AG-UI sao chép một template agent cho mỗi conversation thread, `getSessionManager` được kết nối như một `sessionManagerProvider` trên cấu hình `StrandsAgent` trong `index.ts`, do đó một `SessionManager` mới được phân giải cho mỗi thread thay vì được nhúng vào template agent được chia sẻ.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+Vì `withSessionId` đã cache một instance `Agent` cho mỗi session, `getSessionManager` được gọi trực tiếp bên trong lệnh gọi `new Agent({ sessionManager: await getSessionManager() })` của `getAgent` trong `agent.ts`.
+</OptionFilter>
+
+Session ID chính nó đến từ session của AgentCore Runtime (được truyền qua header `x-amzn-bedrock-agentcore-runtime-session-id` cho A2A/AG-UI, hoặc context kết nối WebSocket cho HTTP/tRPC) và được ràng buộc với một context dựa trên [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) để `getCurrentSessionId()` có thể phân giải nó ở bất kỳ đâu trong request — bao gồm trong bất kỳ MCP hoặc A2A client downstream nào được kết nối qua <Link path="/guides/connection">`connection` generator</Link>, do đó toàn bộ chuỗi gọi chia sẻ một session nhất quán.
+
+:::note[Phát triển Local]
+Khi chạy locally (`LOCAL_DEV=true`, được thiết lập tự động bởi target `-dev`), dữ liệu session luôn được lưu trữ trên đĩa dưới `tmp/agents/strands/<agent-name>` tại workspace root, bất kể tùy chọn `session` được cấu hình, để thuận tiện.
+:::
 </OptionFilter>
 
 ## Gọi Agent của bạn
@@ -400,7 +434,7 @@ const client = AgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
   onData: (message) => console.log(message),
   onError: (error) => console.error(error),
   onComplete: () => console.log('Done'),
@@ -423,7 +457,7 @@ const client = AgentClient.withJwtAuth({
   accessTokenProvider: async () => `<access-token>`,
 });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
   onData: console.log,
 });
 ```
@@ -513,7 +547,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="React to TypeScript Agent"
     description="Gọi TypeScript Agent từ một trang web React"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-ts-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/react-ts-agent`}
     source="react"
     target="strands"
     targetBadge="typescript"
@@ -521,14 +555,14 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Gọi Agent hỗ trợ giao thức AG-UI từ một trang web React thông qua CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="TypeScript Agent to MCP"
     description="Kết nối TypeScript Agent với MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/ts-agent-mcp`}
     source="strands"
     sourceBadge="typescript"
     target="mcp"
@@ -536,7 +570,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Kết nối TypeScript Agent với A2A agent từ xa"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -544,7 +578,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Kết nối Python Agent với A2A agent từ xa"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -552,7 +586,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="TypeScript Agent to Relational Database"
     description="Kết nối TypeScript Agent với cơ sở dữ liệu quan hệ Aurora"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-rdb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/ts-agent-rdb`}
     source="strands"
     sourceBadge="typescript"
     target="aurora"
@@ -560,7 +594,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="TypeScript Agent to TypeScript DynamoDB"
     description="Kết nối TypeScript Agent với bảng DynamoDB"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/ts-agent-dynamodb`}
     source="strands"
     sourceBadge="typescript"
     target="dynamodb"
@@ -568,7 +602,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="TypeScript Agent to AgentCore Gateway"
     description="Kết nối TypeScript Agent với AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/ts-agent-gateway`}
     source="strands"
     sourceBadge="typescript"
     target="agentcore"

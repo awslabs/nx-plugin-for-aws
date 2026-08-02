@@ -401,25 +401,27 @@ describe('ts-agent-session-manager-support migration', () => {
     const content = tree.read(CDK_AGENT_FILE, 'utf-8') ?? '';
     // Both the 'agentcore' and connection-generator-patched 'connection'
     // namespaces should be reshaped to { arn, session }. Existing agents
-    // predate session management support, so they migrate to 'none' rather than
-    // being opted into a persisted session behind their back.
+    // predate session management support, so they migrate to 'in-memory' rather
+    // than being opted into a persisted session behind their back.
     expect(
       content.match(/arn: this\.agentCoreRuntime\.agentRuntimeArn,/g),
     ).toHaveLength(2);
-    expect(content.match(/session: \{ storage: 'none' \}/g)).toHaveLength(2);
+    expect(content.match(/session: \{ storage: 'in-memory' \}/g)).toHaveLength(
+      2,
+    );
     expect(content).not.toMatch(
       /MyAgent: this\.agentCoreRuntime\.agentRuntimeArn,/,
     );
     expect(result.nextSteps.some((s) => s.includes(CDK_AGENT_FILE))).toBe(true);
   });
 
-  it("defaults MCP server sessions to 'none'", async () => {
+  it("defaults MCP server sessions to 'in-memory'", async () => {
     tree.write(CDK_MCP_SERVER_FILE, OLD_CDK_MCP_SERVER_FILE);
 
     await migration(tree);
 
     const content = tree.read(CDK_MCP_SERVER_FILE, 'utf-8');
-    expect(content).toContain("session: { storage: 'none' }");
+    expect(content).toContain("session: { storage: 'in-memory' }");
   });
 
   it('reshapes the Terraform agentcore + connection value entries', async () => {
@@ -429,7 +431,7 @@ describe('ts-agent-session-manager-support migration', () => {
 
     const content = tree.read(TF_AGENT_FILE, 'utf-8') ?? '';
     const occurrences = content.match(
-      /\{ arn = module\.agent_core_runtime\.agent_core_runtime_arn, session = \{ storage = "none" \} \}/g,
+      /\{ arn = module\.agent_core_runtime\.agent_core_runtime_arn, session = \{ storage = "in-memory" \} \}/g,
     );
     expect(occurrences).toHaveLength(2);
     expect(content).not.toContain(

@@ -55,7 +55,7 @@ export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
 
 export type AgentCoreAuth = 'iam' | 'cognito';
 
-export type AgentCoreSession = 's3' | 'none';
+export type AgentCoreSession = 's3' | 'in-memory';
 
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
@@ -66,7 +66,7 @@ export interface AddAgentCoreInfraProps {
   appDirectory: string;
   serverProtocol: 'mcp' | 'http' | 'a2a';
   auth: AgentCoreAuth;
-  /** How this runtime's session should be persisted. MCP servers have no session, so pass 'none'. */
+  /** How this runtime's session should be persisted. MCP servers have no session, so pass 'in-memory'. */
   session: AgentCoreSession;
   containers: Containers;
 }
@@ -233,7 +233,7 @@ export const addMcpServerInfra = async (
     iac: options.iac,
     auth: options.auth,
     // MCP servers are stateless (no conversation session to persist).
-    session: 'none',
+    session: 'in-memory',
     containers: options.containers,
   });
 };

@@ -1,6 +1,6 @@
 ---
-title: "Agente TypeScript Strands"
-description: "Genera un Agente TypeScript Strands per costruire agenti AI con strumenti e distribuirlo su Amazon Bedrock AgentCore Runtime"
+title: TypeScript Agent
+description: Genera un TypeScript Agent per la creazione di agenti AI con strumenti e distribuiscilo su Amazon Bedrock AgentCore Runtime
 generator: ts#agent
 ---
 
@@ -16,7 +16,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Genera un TypeScript [Agent](https://strandsagents.com/) per la creazione di agenti AI con strumenti e, facoltativamente, distribuiscilo su [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Per impostazione predefinita, il generatore utilizza [tRPC](https://trpc.io/) su WebSocket per sfruttare il [supporto di streaming bidirezionale di AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) per una comunicazione in tempo reale e type-safe. In alternativa, puoi scegliere il protocollo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) per l'interoperabilità con altri agenti compatibili con A2A, o il protocollo [AG-UI](https://docs.ag-ui.com/) per l'integrazione diretta con il frontend tramite [CopilotKit](https://docs.copilotkit.ai/aws-strands).
+Genera un TypeScript [Strands Agent](https://strandsagents.com/) per la creazione di agenti AI con strumenti e, facoltativamente, distribuiscilo su [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Per impostazione predefinita, il generatore utilizza [tRPC](https://trpc.io/) su WebSocket per sfruttare il [supporto di streaming bidirezionale di AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) per una comunicazione in tempo reale e type-safe. In alternativa, puoi scegliere il protocollo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) per l'interoperabilità con altri agenti compatibili con A2A, o il protocollo [AG-UI](https://docs.ag-ui.com/) per l'integrazione diretta con il frontend tramite [CopilotKit](https://docs.copilotkit.ai/aws-strands).
 
 ## Cos'è Strands?
 
@@ -31,7 +31,7 @@ Genera un TypeScript [Agent](https://strandsagents.com/) per la creazione di age
 
 ## Utilizzo
 
-### Generare uno Agent
+### Generare un Agent
 
 Puoi generare un TypeScript Agent in due modi:
 
@@ -60,6 +60,7 @@ Il generatore aggiungerà i seguenti file al tuo progetto TypeScript esistente. 
         - init.ts Inizializzazione tRPC
         - router.ts Router tRPC con procedure dell'agente
         - agent.ts Definizione principale dell'agente con strumenti di esempio
+        - session.ts Risolve il SessionManager utilizzato per persistere lo stato della conversazione
         - client.ts Client fornito per invocare il tuo agente
         - agent-core-trpc-client.ts Factory del client per connettersi agli agenti su AgentCore Runtime
         - Dockerfile Punto di ingresso per l'hosting del tuo agente (escluso quando `infra` è impostato su `None`)
@@ -79,6 +80,7 @@ Il punto di ingresso utilizza il [Strands A2A Express Server](https://strandsage
       - agent/ (o nome personalizzato se specificato)
         - index.ts Punto di ingresso del server A2A Express
         - agent.ts Definizione principale dell'agente con strumenti di esempio
+        - session.ts Risolve il SessionManager utilizzato per persistere lo stato della conversazione
         - Dockerfile Punto di ingresso per l'hosting del tuo agente (escluso quando `infra` è impostato su `None`)
     - package.json Aggiornato con le dipendenze di Strands ed Express
     - project.json Aggiornato con i target di serve dell'agente
@@ -96,6 +98,7 @@ Il punto di ingresso utilizza [`@ag-ui/aws-strands`](https://www.npmjs.com/packa
       - agent/ (o nome personalizzato se specificato)
         - index.ts Punto di ingresso del server AG-UI (Express + SSE)
         - agent.ts Definizione principale dell'agente con strumenti di esempio
+        - session.ts Risolve il SessionManager utilizzato per persistere lo stato della conversazione
         - Dockerfile Punto di ingresso per l'hosting del tuo agente (escluso quando `infra` è impostato su `None`)
     - package.json Aggiornato con le dipendenze di Strands e AG-UI
     - project.json Aggiornato con i target di serve dell'agente
@@ -134,8 +137,8 @@ Per distribuire il tuo Agent, vengono generati i seguenti file:
 </Infrastructure>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-Se hai selezionato `None` per `infra`, non vengono generati costrutti CDK o moduli Terraform — lo Agent può essere eseguito solo localmente. L'opzione `auth` viene ignorata in questa modalità poiché non esiste un endpoint ospitato da autenticare.
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+Se hai selezionato `none` per `infra`, non vengono generati costrutti CDK o moduli Terraform — l'Agent può essere eseguito solo localmente. L'opzione `auth` viene ignorata in questa modalità poiché non esiste un endpoint ospitato da autenticare.
 </OptionFilter>
 
 #### Architecture
@@ -185,7 +188,7 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   return new Agent({
     systemPrompt: 'You are a helpful assistant with access to various tools.',
     tools: [letterCounter],
@@ -285,10 +288,10 @@ Quindi, in un altro terminale, avvia la chat:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-Il generatore emette un `scripts/<your-agent-name>/chat.ts` per ogni protocollo. Puoi personalizzarlo mentre evolvi la forma di input dell'agente. Si connette all'agente locale per impostazione predefinita, o al tuo agente distribuito quando è impostato `RUNTIME_CONFIG_APP_ID` (vedi [Chatta con il tuo agente distribuito](#chat-with-your-deployed-agent) di seguito).
+Il generatore emette un `scripts/<your-agent-name>/chat.ts` per ogni protocollo. Puoi personalizzarlo mentre evolvi la forma di input dell'agente. Si connette all'agente locale per impostazione predefinita, o al tuo agente distribuito quando è impostato `RUNTIME_CONFIG_APP_ID` (vedi [Chatta con il tuo agente distribuito](#chatta-con-il-tuo-agente-distribuito) di seguito).
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
-#### Chat with your deployed agent
+#### Chatta con il tuo agente distribuito
 
 Per chattare con il tuo agente distribuito su Bedrock AgentCore, imposta la variabile d'ambiente `RUNTIME_CONFIG_APP_ID` sull'id dell'applicazione AppConfig della distribuzione (output come `RuntimeConfigApplicationId` dallo stack distribuito). Lo script di chat risolve l'ARN del runtime del tuo agente dalla configurazione del runtime e si connette all'endpoint distribuito:
 
@@ -338,7 +341,7 @@ Viene generato anche un target `docker` che prepara il contesto docker per tutti
 
 ### Scansione delle Immagini
 
-<Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
+<Snippet name="trivy-image-scan" parentHeading="Scansione delle Immagini" />
 
 ### Osservabilità
 
@@ -347,6 +350,37 @@ Il tuo agente è automaticamente configurato con l'osservabilità utilizzando [A
 Puoi trovare le tracce nella Console AWS di CloudWatch, selezionando "GenAI Observability" nel menu. Nota che affinché le tracce vengano popolate dovrai abilitare [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Per maggiori dettagli, fai riferimento alla [documentazione di AgentCore sull'osservabilità](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+### Gestione delle Sessioni
+
+L'opzione `session` controlla come il tuo agente persiste lo stato della conversazione (cronologia dei messaggi, stato degli strumenti, ecc.) tra le invocazioni, utilizzando il [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) dell'SDK Strands:
+
+- **`s3`** (predefinito): L'infrastruttura CDK/Terraform fornisce un bucket S3 dedicato per i dati di sessione, crittografato con SSE-S3 e con tutto l'accesso pubblico bloccato. Al ruolo IAM dell'agente viene concesso l'accesso in lettura/scrittura/elenco/eliminazione ad esso, e il nome del bucket viene registrato insieme all'ARN dell'agente nella configurazione del runtime AppConfig.
+- **`in-memory`**: Non viene fornito alcun bucket. Lo stato della conversazione viene mantenuto in memoria solo per la durata del processo in esecuzione e non sopravvive ai riavvii o alla riduzione della scala.
+
+Questo è implementato nel file `session.ts` generato, che esporta una funzione `getSessionManager()` che risolve un `SessionManager` per la sessione corrente:
+
+```typescript
+export const getSessionManager = async (): Promise<SessionManager> => {
+  const sessionId = getCurrentSessionId();
+  // local development always uses local file storage...
+  // ...otherwise S3Storage (session: 's3') or InMemoryStorage (session: 'in-memory')
+};
+```
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+Poiché AG-UI clona un agente modello per thread di conversazione, `getSessionManager` viene collegato come `sessionManagerProvider` nella configurazione di `StrandsAgent` in `index.ts`, in modo che un nuovo `SessionManager` venga risolto per ogni thread anziché essere incorporato nell'agente modello condiviso.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+Poiché `withSessionId` già memorizza nella cache un'istanza di `Agent` per sessione, `getSessionManager` viene chiamato direttamente all'interno della chiamata `new Agent({ sessionManager: await getSessionManager() })` di `getAgent` in `agent.ts`.
+</OptionFilter>
+
+L'ID di sessione stesso proviene dalla sessione AgentCore Runtime (propagata tramite l'intestazione `x-amzn-bedrock-agentcore-runtime-session-id` per A2A/AG-UI, o il contesto della connessione WebSocket per HTTP/tRPC) ed è associato a un contesto basato su [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) in modo che `getCurrentSessionId()` possa risolverlo ovunque nella richiesta — inclusi eventuali client MCP o A2A downstream collegati tramite il <Link path="/guides/connection">generatore `connection`</Link>, in modo che l'intera catena di chiamate condivida una sessione coerente.
+
+:::note[Sviluppo Locale]
+Quando si esegue localmente (`LOCAL_DEV=true`, impostato automaticamente dal target `-dev`), i dati di sessione vengono sempre memorizzati su disco in `tmp/agents/strands/<agent-name>` alla radice del workspace, indipendentemente dall'opzione `session` configurata, per comodità.
+:::
 </OptionFilter>
 
 ## Invocare il Tuo Agent
@@ -366,7 +400,7 @@ import { AgentClient } from '../packages/<project>/src/agent/client.js';
 
 const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log });
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
 
 :::tip[Test rapido]
@@ -400,7 +434,7 @@ const client = AgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
   onData: (message) => console.log(message),
   onError: (error) => console.error(error),
   onComplete: () => console.log('Done'),

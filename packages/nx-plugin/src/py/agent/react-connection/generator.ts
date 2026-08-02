@@ -98,7 +98,7 @@ export const pyAgentReactConnectionGenerator = async (
   const session = (
     targetComponent?.session ??
     metadata?.session ??
-    'none'
+    'in-memory'
   ).toLowerCase();
 
   // Recorded below and read by the declaration's predicates, so the packages

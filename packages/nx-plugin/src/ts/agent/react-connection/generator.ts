@@ -109,7 +109,7 @@ export async function tsAgentReactConnectionGenerator(
   const session = (
     targetComponent?.session ??
     metadata?.session ??
-    'none'
+    'in-memory'
   ).toLowerCase();
   const agentProjectAlias = agentProjectConfig.name;
   const agentPath = targetComponent?.path ?? 'src/agent';

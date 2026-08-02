@@ -1307,7 +1307,7 @@ describe('ts#agent generator', () => {
       name: 'no-warn-agent',
       infra: 'none',
       auth: 'iam',
-      session: 'none',
+      session: 'in-memory',
       iac: 'cdk',
     });
 
@@ -1333,14 +1333,14 @@ describe('ts#agent generator', () => {
     warnSpy.mockRestore();
   });
 
-  it('should not warn when session is explicitly none with infra=none', async () => {
+  it('should not warn when session is explicitly in-memory with infra=none', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'session-none-agent',
       infra: 'none',
-      session: 'none',
+      session: 'in-memory',
       iac: 'cdk',
     });
 

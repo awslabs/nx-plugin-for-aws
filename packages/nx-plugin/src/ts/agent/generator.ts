@@ -166,7 +166,7 @@ export const tsAgentGenerator = async (
 
   const session = options.session ?? 's3';
 
-  if (infra === 'none' && session !== 'none') {
+  if (infra === 'none' && session !== 'in-memory') {
     console.warn(
       'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
     );

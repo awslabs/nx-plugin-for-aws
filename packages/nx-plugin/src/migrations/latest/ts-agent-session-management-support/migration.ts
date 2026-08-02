@@ -30,10 +30,10 @@ import { kebabCase } from '../../../utils/names';
  *   migration wrote are formatted correctly.
  */
 
-// Existing agents predate session management support, so migrate them to 'none'
-// rather than opting them into a persisted session behind their back.
-// MCP servers have no session regardless.
-const LEGACY_SESSION_STORAGE = 'none';
+// Existing agents predate session management support, so migrate them to
+// 'in-memory' rather than opting them into a persisted session behind their
+// back. MCP servers have no session regardless.
+const LEGACY_SESSION_STORAGE = 'in-memory';
 
 // Matches `rc.set('<namespace>', 'agentRuntimes', { ...rc.get('<namespace>').agentRuntimes, $name: this.agentCoreRuntime.agentRuntimeArn });`
 // as vended by the CDK agent-core construct (for both the 'agentcore' and the
@@ -61,7 +61,7 @@ const TS_RUNTIME_CONFIG_INTERFACE_PATTERN = `\`export interface AgentCoreRuntime
   agentRuntimes?: Record<string, string>;
   gateways?: Record<string, string>;
 }\` => raw\`export interface AgentRuntimeSession {
-  storage: 's3' | 'none';
+  storage: 's3' | 'in-memory';
   /** Name of the S3 bucket storing session data. Only set when storage is 's3'. */
   bucketName?: string;
 }
@@ -162,7 +162,7 @@ const AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN =
   "`import $clause from '$mod';` as $import where { $clause <: import_clause(name=named_imports($imports)), $imports <: contains `logModelErrors`, $imports <: contains `logToolErrors`, if ($imports <: [`logModelErrors`, `logToolErrors`]) { $import => . } else { $imports <: some import_specifier(name=or { `logModelErrors`, `logToolErrors` }) => . } }";
 
 // Existing agents predate session.ts entirely, so there is no prior
-// session storage to preserve here — this mirrors LEGACY_SESSION_STORAGE ('none').
+// session storage to preserve here — this mirrors LEGACY_SESSION_STORAGE ('in-memory').
 const legacySessionManagerContent = (
   agentConnectionModule: string,
   localSessionsDir: string,
