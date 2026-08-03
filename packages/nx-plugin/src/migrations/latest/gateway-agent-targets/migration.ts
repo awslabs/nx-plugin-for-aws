@@ -132,6 +132,8 @@ const AGENT_TARGET_METHODS = `
         actions: [
           'bedrock-agentcore:InvokeAgentRuntime',
           'bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream',
+          // A2A targets additionally serve their agent card via the gateway.
+          'bedrock-agentcore:GetAgentCard',
         ],
         resources: [props.agentRuntimeArn, \`\${props.agentRuntimeArn}/*\`],
       }),
