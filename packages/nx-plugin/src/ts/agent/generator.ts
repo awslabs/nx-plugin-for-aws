@@ -56,7 +56,7 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
+import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
