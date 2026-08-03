@@ -96,7 +96,7 @@ export const TS_VERSIONS = {
   '@vitest/ui': '4.1.10',
   '@astrojs/react': '6.0.2',
   '@astrojs/starlight': '0.41.3',
-  astro: '7.1.6',
+  astro: '7.1.1',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1134.0',
   'aws-cdk-lib': '2.263.0',
