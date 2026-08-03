@@ -112,7 +112,14 @@ const CONNECTION_UNSUPPORTED_ENDPOINTS = new Set([
   'py#rdb',
 ]);
 
+// Connections whose factories build an unsupported project the key doesn't
+// name (the website -> gateway case attaches a ts#agent to the gateway).
+const CONNECTION_UNSUPPORTED_KEYS = new Set([
+  'ts#react-website -> agentcore-gateway',
+]);
+
 const connectionUnsupported = (key: string): boolean =>
+  CONNECTION_UNSUPPORTED_KEYS.has(key) ||
   key
     .split('->')
     .map((side) => side.trim())
@@ -287,6 +294,24 @@ const gateway = async (opts: Opts, s: string): Promise<Side> => {
   );
   return { project: `gateway-${s}` };
 };
+const httpGateway = async (opts: Opts, s: string): Promise<Side> => {
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-gateway --name=gateway-${s} --protocol=http --no-interactive`,
+    opts,
+  );
+  return { project: `gateway-${s}` };
+};
+// An http gateway with an AG-UI agent already attached, so a website can
+// connect to it (the react connection requires at least one fronted agent).
+const httpGatewayWithAgent = async (opts: Opts, s: string): Promise<Side> => {
+  const gw = await httpGateway(opts, s);
+  const agent = await tsAgent(opts, `${s}-agent`, 'ag-ui');
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=${gw.project} --targetProject=${agent.project} --targetComponent=${agent.component} --no-interactive`,
+    opts,
+  );
+  return gw;
+};
 const tsAgent = async (
   opts: Opts,
   s: string,
@@ -385,6 +410,18 @@ const CONNECTION_CASES = {
   'py#agent -> py#agent': [pair(pyAgent, (o, s) => pyAgent(o, s, 'a2a'))],
   'ts#agent -> agentcore-gateway': [pair(tsAgent, gateway)],
   'py#agent -> agentcore-gateway': [pair(pyAgent, gateway)],
+  'ts#react-website -> agentcore-gateway': [
+    pair(website, httpGatewayWithAgent),
+  ],
+  'agentcore-gateway -> ts#agent': [
+    pair(httpGateway, (o, s) => tsAgent(o, s, 'ag-ui')),
+    pair(httpGateway, (o, s) => tsAgent(o, s, 'a2a')),
+  ],
+  'agentcore-gateway -> py#agent': [
+    pair(httpGateway, (o, s) => pyAgent(o, s, 'ag-ui')),
+    pair(httpGateway, (o, s) => pyAgent(o, s, 'http')),
+    pair(httpGateway, (o, s) => pyAgent(o, s, 'a2a')),
+  ],
   'agentcore-gateway -> ts#mcp-server': [pair(gateway, tsMcp)],
   'agentcore-gateway -> py#mcp-server': [pair(gateway, pyMcp)],
   'agentcore-gateway -> agentcore-gateway': [pair(gateway, gateway)],

@@ -11,6 +11,7 @@ import {
 } from '@nx/devkit';
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
+import type { AgentGatewayRoute } from '../../../ts/agent/react-connection/generator';
 import {
   DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
@@ -31,6 +32,7 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
 import {
   addComponentGeneratorMetadata,
+  addDependencyToTargetIfNotPresent,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -74,7 +76,7 @@ export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
 
 export const pyAgentReactConnectionGenerator = async (
   tree: Tree,
-  options: ResolvedConnectionOptions,
+  options: ResolvedConnectionOptions & { gatewayRoute?: AgentGatewayRoute },
 ) => {
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
@@ -93,7 +95,13 @@ export const pyAgentReactConnectionGenerator = async (
   const agentName = targetComponent?.name ?? 'agent';
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
-  const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
+  // Behind a gateway the browser authenticates with the gateway, not the agent.
+  const auth = (
+    options.gatewayRoute?.gatewayAuth ??
+    targetComponent?.auth ??
+    metadata?.auth ??
+    'iam'
+  ).toLowerCase();
   const protocol = (targetComponent?.protocol ?? 'http').toLowerCase();
 
   // Recorded below and read by the declaration's predicates, so the packages
@@ -119,6 +127,7 @@ export const pyAgentReactConnectionGenerator = async (
       agentName,
       agentNameClassName,
       auth: auth as AgUiAuth,
+      gatewayRoute: options.gatewayRoute,
     });
   } else {
     const moduleName = getModuleName(agentProjectConfig);
@@ -182,6 +191,7 @@ export const pyAgentReactConnectionGenerator = async (
         auth,
         port: agentPort,
         isAgentRuntime: true,
+        gatewayRoute: options.gatewayRoute,
         skipLocalDev: true,
       },
       DEPENDENCIES,
@@ -192,25 +202,46 @@ export const pyAgentReactConnectionGenerator = async (
     // HTTP only — the AG-UI branch handles this inside addAgUiReactConnection.
     // Agent constructs publish their runtime ARN to the 'agentcore' namespace
     // by default, which isn't exposed to the website; patch them to also
-    // publish under 'connection' so the browser can read it.
-    await addAgentRuntimeToConnectionNamespace(tree, {
-      agentNameKebabCase: kebabCase(agentNameClassName),
-      agentNameClassName,
-    });
+    // publish under 'connection' so the browser can read it. When routing via
+    // a gateway, the gateway publishes its own URL instead.
+    if (!options.gatewayRoute) {
+      await addAgentRuntimeToConnectionNamespace(tree, {
+        agentNameKebabCase: kebabCase(agentNameClassName),
+        agentNameClassName,
+      });
+    }
   }
 
-  await addPyAgentTargetToLocalDev(
-    tree,
-    frontendProjectConfig.name,
-    agentProjectConfig.name,
-    {
-      agentName,
-      agentNameClassName,
-      port: agentPort,
-      targetComponent,
-      additionalDependencyTargets: additionalLocalDevDeps,
-    },
-  );
+  if (options.gatewayRoute) {
+    // The gateway react-connection wires the website's dev target to the
+    // local gateway (which proxies to the agent); only the OpenAPI client
+    // generation targets are still needed here.
+    if (additionalLocalDevDeps.length > 0) {
+      const websiteConfig = readProjectConfigurationUnqualified(
+        tree,
+        frontendProjectConfig.name,
+      );
+      if (websiteConfig.targets?.['dev']) {
+        for (const additional of additionalLocalDevDeps) {
+          addDependencyToTargetIfNotPresent(websiteConfig, 'dev', additional);
+        }
+        updateProjectConfiguration(tree, websiteConfig.name, websiteConfig);
+      }
+    }
+  } else {
+    await addPyAgentTargetToLocalDev(
+      tree,
+      frontendProjectConfig.name,
+      agentProjectConfig.name,
+      {
+        agentName,
+        agentNameClassName,
+        port: agentPort,
+        targetComponent,
+        additionalDependencyTargets: additionalLocalDevDeps,
+      },
+    );
+  }
 
   // Recorded so the version sync knows this connection's dependencies are ours.
   addComponentGeneratorMetadata(

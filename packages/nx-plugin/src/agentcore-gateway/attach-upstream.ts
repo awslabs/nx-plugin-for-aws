@@ -45,16 +45,9 @@ export const attachUpstreamToLocalGateway = async (
   gatewayDevTargetName: string,
   upstream: LocalGatewayUpstream,
 ): Promise<void> => {
-  // 1. Wire dev chain
-  if (gatewayProject.targets?.[gatewayDevTargetName]) {
-    addDependencyToTargetIfNotPresent(gatewayProject, gatewayDevTargetName, {
-      projects: [upstream.upstreamProjectName],
-      target: upstream.upstreamDevTargetName,
-    });
-    updateProjectConfiguration(tree, gatewayProject.name, gatewayProject);
-  }
+  chainGatewayDevTarget(tree, gatewayProject, gatewayDevTargetName, upstream);
 
-  // 2. Register the upstream in the gateway's local local-dev.ts
+  // Register the upstream in the gateway's local local-dev.ts
   const serveTsPath = joinPathFragments(gatewayProject.root, 'local-dev.ts');
   if (tree.exists(serveTsPath)) {
     const entry = `{ name: '${upstream.targetName}', url: 'http://localhost:${upstream.port}/mcp' }`;
@@ -68,5 +61,60 @@ export const attachUpstreamToLocalGateway = async (
   }
 }`,
     );
+  }
+};
+
+/**
+ * Attach an upstream agent to an http gateway's local gateway.
+ *
+ * Chains the gateway's dev target onto the agent's dev target, and registers
+ * the agent in the gateway's local-dev.ts so the local gateway proxies
+ * `/<targetName>/...` to it.
+ */
+export const attachAgentToLocalGateway = async (
+  tree: Tree,
+  gatewayProject: ProjectConfiguration,
+  gatewayDevTargetName: string,
+  upstream: LocalGatewayUpstream & {
+    /**
+     * Whether to strip the `/invocations` path prefix when proxying. The
+     * deployed gateway maps an A2A target's `/invocations/...` paths onto the
+     * agent container's root, so the local proxy does the same; HTTP and
+     * AG-UI agents serve `/invocations` themselves.
+     */
+    stripInvocations: boolean;
+  },
+): Promise<void> => {
+  chainGatewayDevTarget(tree, gatewayProject, gatewayDevTargetName, upstream);
+
+  const serveTsPath = joinPathFragments(gatewayProject.root, 'local-dev.ts');
+  if (tree.exists(serveTsPath)) {
+    const entry = `{ name: '${upstream.targetName}', url: 'http://localhost:${upstream.port}', stripInvocations: ${upstream.stripInvocations} }`;
+    await applyGritQL(
+      tree,
+      serveTsPath,
+      `or {
+  \`const ATTACHED_AGENTS: AttachedAgent[] = []\` => \`const ATTACHED_AGENTS: AttachedAgent[] = [${entry}]\`,
+  \`const ATTACHED_AGENTS: AttachedAgent[] = [$items]\` => \`const ATTACHED_AGENTS: AttachedAgent[] = [${entry}, $items]\` where {
+    $items <: not contains \`'${upstream.targetName}'\`
+  }
+}`,
+    );
+  }
+};
+
+/** Chain the gateway's dev target onto the upstream's dev target. */
+const chainGatewayDevTarget = (
+  tree: Tree,
+  gatewayProject: ProjectConfiguration,
+  gatewayDevTargetName: string,
+  upstream: LocalGatewayUpstream,
+): void => {
+  if (gatewayProject.targets?.[gatewayDevTargetName]) {
+    addDependencyToTargetIfNotPresent(gatewayProject, gatewayDevTargetName, {
+      projects: [upstream.upstreamProjectName],
+      target: upstream.upstreamDevTargetName,
+    });
+    updateProjectConfiguration(tree, gatewayProject.name, gatewayProject);
   }
 };

@@ -367,6 +367,53 @@ resource "aws_bedrockagentcore_gateway_target" "my_gateway" {
   ]
 }
 
+# HTTP-protocol gateway fronting agent runtime targets across every supported
+# protocol permutation (ts ag-ui + a2a, py ag-ui + http + a2a). The gateway
+# signs outbound calls to its runtime targets with its own role and validates
+# access at target creation, so it needs invoke access to every fronted agent.
+module "agent_gateway" {
+  source = "../../common/terraform/src/app/gateways/agent-gateway"
+
+  additional_iam_policy_statements = [
+    local.invoke_ts_agui_agent_statement,
+    local.invoke_py_agui_agent_statement,
+    local.invoke_py_agent_statement,
+    local.invoke_ts_a2a_agent_statement,
+    local.invoke_py_a2a_agent_statement,
+  ]
+}
+
+# Register the agents as runtime targets of the agent gateway — the Terraform
+# analogue of `agentGateway.addAgent(...)` in the CDK template. Target names
+# match the local-dev registrations (kebab-cased agent class name) so the
+# `/<target>/invocations` paths are identical locally and deployed.
+resource "aws_bedrockagentcore_gateway_target" "agent_gateway_targets" {
+  for_each = {
+    "my-ts-agui-agent" = module.ts_agui_agent.agent_core_runtime_arn
+    "my-ts-a2a-agent"  = module.ts_a2a_agent.agent_core_runtime_arn
+    "my-py-agui-agent" = module.py_agui_agent.agent_core_runtime_arn
+    "my-agent"         = module.py_agent.agent_core_runtime_arn
+    "my-py-a2a-agent"  = module.py_a2a_agent.agent_core_runtime_arn
+  }
+
+  gateway_identifier = module.agent_gateway.gateway_id
+  name               = each.key
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = each.value
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {
+      service = "bedrock-agentcore"
+    }
+  }
+}
+
 # ---------------------------------------------------------------------------
 # HTTP agents (Bedrock AgentCore runtimes)
 # ---------------------------------------------------------------------------
@@ -423,6 +470,45 @@ locals {
     Resource = [
       module.py_a2a_agent.agent_core_runtime_arn,
       "${module.py_a2a_agent.agent_core_runtime_arn}/*",
+    ]
+  }
+
+  invoke_ts_agui_agent_statement = {
+    Effect = "Allow"
+    Action = [
+      "bedrock-agentcore:InvokeAgentRuntime",
+      "bedrock-agentcore:InvokeAgentRuntimeForUser",
+      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+    ]
+    Resource = [
+      module.ts_agui_agent.agent_core_runtime_arn,
+      "${module.ts_agui_agent.agent_core_runtime_arn}/*",
+    ]
+  }
+
+  invoke_py_agui_agent_statement = {
+    Effect = "Allow"
+    Action = [
+      "bedrock-agentcore:InvokeAgentRuntime",
+      "bedrock-agentcore:InvokeAgentRuntimeForUser",
+      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+    ]
+    Resource = [
+      module.py_agui_agent.agent_core_runtime_arn,
+      "${module.py_agui_agent.agent_core_runtime_arn}/*",
+    ]
+  }
+
+  invoke_py_agent_statement = {
+    Effect = "Allow"
+    Action = [
+      "bedrock-agentcore:InvokeAgentRuntime",
+      "bedrock-agentcore:InvokeAgentRuntimeForUser",
+      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+    ]
+    Resource = [
+      module.py_agent.agent_core_runtime_arn,
+      "${module.py_agent.agent_core_runtime_arn}/*",
     ]
   }
 
@@ -556,6 +642,7 @@ module "runtime_config_appconfig_deployment" {
     module.my_table,
     module.my_gateway,
     module.parent_gateway,
+    module.agent_gateway,
   ]
 }
 
@@ -694,6 +781,10 @@ output "my_gateway_url" {
 
 output "parent_gateway_url" {
   value = module.parent_gateway.gateway_url
+}
+
+output "agent_gateway_url" {
+  value = module.agent_gateway.gateway_url
 }
 
 # Cognito identifiers — used by the browser-driven website integration test to

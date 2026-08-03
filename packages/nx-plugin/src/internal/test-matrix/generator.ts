@@ -338,7 +338,8 @@ export const internalTestMatrixGenerator = async (
     });
   }
 
-  // AgentCore gateways, including a parent fronting the first (chained).
+  // AgentCore gateways, including a parent fronting the first (chained), and
+  // an http-protocol gateway fronting agent runtime targets.
   await agentcoreGatewayGenerator(tree, {
     name: 'my-gateway',
     iac: 'inherit',
@@ -346,6 +347,12 @@ export const internalTestMatrixGenerator = async (
   });
   await agentcoreGatewayGenerator(tree, {
     name: 'parent-gateway',
+    iac: 'inherit',
+    ...projectDefaults,
+  });
+  await agentcoreGatewayGenerator(tree, {
+    name: 'agent-gateway',
+    protocol: 'http',
     iac: 'inherit',
     ...projectDefaults,
   });
@@ -500,6 +507,37 @@ export const internalTestMatrixGenerator = async (
       targetComponent: 'my-mcp-server',
     },
     { sourceProject: ts('parent-gateway'), targetProject: ts('my-gateway') },
+    // Gateway -> agent (http gateway fronting agent runtime targets: every
+    // supported protocol permutation), then website -> gateway.
+    {
+      sourceProject: ts('agent-gateway'),
+      targetProject: 'ts-project',
+      targetComponent: 'my-ts-agui-agent',
+    },
+    {
+      sourceProject: ts('agent-gateway'),
+      targetProject: 'ts-project',
+      targetComponent: 'my-ts-a2a-agent',
+    },
+    {
+      sourceProject: ts('agent-gateway'),
+      targetProject: 'py_project',
+      targetComponent: 'my-py-agui-agent',
+    },
+    {
+      sourceProject: ts('agent-gateway'),
+      targetProject: 'py_project',
+      targetComponent: 'my-agent',
+    },
+    {
+      sourceProject: ts('agent-gateway'),
+      targetProject: 'py_project',
+      targetComponent: 'my-py-a2a-agent',
+    },
+    {
+      sourceProject: ts('website-no-router'),
+      targetProject: ts('agent-gateway'),
+    },
     // Website -> agent
     {
       sourceProject: ts('website'),

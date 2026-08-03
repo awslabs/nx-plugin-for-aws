@@ -196,8 +196,11 @@ describe('agentcore-gateway generator', () => {
       // callers can `new MyGateway(this, 'MyGateway', { enableWaf: false })`
       // without editing the generated construct.
       expect(app).toContain('AgentCoreGatewayProps');
-      expect(app).toContain(
-        "export type MyGatewayProps = Omit<AgentCoreGatewayProps, 'cedarPolicyPath'>",
+      // cedarPolicyPath and protocol are managed by the generator, so the
+      // vended props omit them. Matched with flexible whitespace since the
+      // formatter may wrap the type.
+      expect(app.replace(/\s+/g, ' ')).toContain(
+        "export type MyGatewayProps = Omit< AgentCoreGatewayProps, 'cedarPolicyPath' | 'protocol' >",
       );
       expect(app).toContain(
         'constructor(scope: Construct, id: string, props?: MyGatewayProps)',
@@ -641,10 +644,10 @@ describe('agentcore-gateway generator', () => {
           'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
         )!
         .toString();
-      // Without Cedar there is no internally-managed cedarPolicyPath, so props
-      // pass straight through as the base construct's props.
+      // Without Cedar there is no internally-managed cedarPolicyPath to omit;
+      // protocol stays managed by the generator.
       expect(construct).toContain(
-        'export type MyGatewayProps = AgentCoreGatewayProps',
+        "export type MyGatewayProps = Omit<AgentCoreGatewayProps, 'protocol'>",
       );
       expect(construct).toContain(
         'constructor(scope: Construct, id: string, props?: MyGatewayProps)',
@@ -673,6 +676,69 @@ describe('agentcore-gateway generator', () => {
           'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
         ),
       ).toBe(false);
+    });
+  });
+
+  describe('protocol: http', () => {
+    it('scaffolds a proxying local gateway with no Cedar policies', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+        protocol: 'http',
+      });
+
+      const localDev = tree.read('packages/my-gateway/local-dev.ts', 'utf-8');
+      expect(localDev).toContain('ATTACHED_AGENTS');
+      expect(localDev).not.toContain('ATTACHED_MCP_SERVERS');
+      // Cedar policies authorize MCP tool actions, which an http gateway has
+      // none of.
+      expect(tree.exists('packages/my-gateway/policies/permit-all.cedar')).toBe(
+        false,
+      );
+
+      const config = readProjectConfiguration(tree, '@proj/my-gateway');
+      expect((config.metadata as any).protocol).toBe('http');
+    });
+
+    it('wires the CDK construct with the http protocol', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+        protocol: 'http',
+      });
+
+      const construct = tree.read(
+        'packages/common/constructs/src/app/gateways/my-gateway/my-gateway.ts',
+        'utf-8',
+      );
+      expect(construct).toContain(`protocol: 'http'`);
+      expect(construct).toMatchSnapshot('my-gateway.ts');
+
+      const coreConstruct = tree.read(
+        'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        'utf-8',
+      );
+      expect(coreConstruct).toContain('addAgent(');
+      expect(coreConstruct).toContain('addAgentTarget(');
+      expect(coreConstruct).toContain(
+        `addPropertyDeletionOverride('ProtocolType')`,
+      );
+    });
+
+    it('omits protocol_type from the Terraform gateway', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'terraform',
+        protocol: 'http',
+      });
+
+      const module = tree.read(
+        'packages/common/terraform/src/app/gateways/my-gateway/my-gateway.tf',
+        'utf-8',
+      );
+      expect(module).not.toContain('protocol_type');
+      expect(module).not.toContain('tool_dependencies');
+      expect(module).toMatchSnapshot('my-gateway.tf');
     });
   });
 

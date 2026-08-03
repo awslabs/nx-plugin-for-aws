@@ -1,0 +1,77 @@
+import express from 'express';
+import { Readable } from 'node:stream';
+
+const PORT = parseInt(process.env.PORT || '<%- port %>');
+
+interface AttachedAgent {
+  name: string;
+  url: string;
+  /**
+   * Whether to strip the `/invocations` path prefix when proxying. The
+   * deployed gateway maps an A2A target's `/invocations/...` paths onto the
+   * agent container's root; HTTP and AG-UI agents serve `/invocations`
+   * themselves.
+   */
+  stripInvocations: boolean;
+}
+
+// Upstream agent endpoints attached to this gateway, maintained by the
+// `agentcore-gateway#agent-connection` generator.
+const ATTACHED_AGENTS: AttachedAgent[] = [<% attachedAgents.forEach((a) => { %>
+  { name: '<%- a.name %>', url: 'http://localhost:<%- a.port %>', stripInvocations: <%- a.stripInvocations %> },<% }); %>
+];
+
+/**
+ * Local gateway for <%- nameClassName %>: proxies `/<targetName>/<path>` to
+ * the attached agent's local server, matching the deployed AgentCore
+ * Gateway's path-based routing for agent runtime targets.
+ */
+const app = express();
+
+app.use(async (req, res) => {
+  const [, targetName, ...rest] = req.url.split('/');
+  const upstream = ATTACHED_AGENTS.find((a) => a.name === targetName);
+  if (!upstream) {
+    res.status(404).json({ message: `Unknown gateway target: ${targetName}` });
+    return;
+  }
+  const upstreamPath = upstream.stripInvocations
+    ? rest.join('/').replace(/^invocations\/?/, '')
+    : rest.join('/');
+  try {
+    const response = await fetch(`${upstream.url}/${upstreamPath}`, {
+      method: req.method,
+      headers: Object.fromEntries(
+        Object.entries(req.headers).filter(
+          ([key, value]) => typeof value === 'string' && key !== 'host',
+        ) as [string, string][],
+      ),
+      body: ['GET', 'HEAD'].includes(req.method)
+        ? undefined
+        : Readable.toWeb(req),
+      // Node's fetch requires half-duplex for streamed request bodies.
+      duplex: 'half',
+    } as RequestInit);
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      // The upstream body arrives decoded, so its encoding headers would lie.
+      if (!['content-encoding', 'content-length'].includes(key)) {
+        res.setHeader(key, value);
+      }
+    });
+    if (response.body) {
+      Readable.fromWeb(response.body as any).pipe(res);
+    } else {
+      res.end();
+    }
+  } catch (error) {
+    console.error(`Error proxying to ${upstream.name}:`, error);
+    if (!res.headersSent) {
+      res.status(502).json({ message: 'Bad gateway' });
+    }
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`<%- nameKebabCase %>: local gateway listening on port ${PORT}`);
+});
