@@ -155,9 +155,8 @@ describe('terraform-bootstrap-adopt-existing-bucket migration', () => {
     // The point of a migration: the workspace ends up byte-identical to one
     // generated from today's generators.
     expect(tree.read(BOOTSTRAP_FILE, 'utf-8')).toEqual(CURRENT_TEMPLATE);
-    expect(
-      result.nextSteps.some((s) => s.includes(BOOTSTRAP_FILE)),
-    ).toBeTruthy();
+    // Nothing left for the user to do, so nothing is reported.
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should leave an already-migrated project untouched and unreported', async () => {
@@ -190,9 +189,7 @@ describe('terraform-bootstrap-adopt-existing-bucket migration', () => {
     expect(migrated).toContain('await bucketExists(s3, bucket)');
     expect(migrated).toContain("'workspace', 'select', 'ops'");
     expect(migrated).toContain('// our team pins a workspace before applying');
-    expect(
-      result.nextSteps.some((s) => s.includes(BOOTSTRAP_FILE)),
-    ).toBeTruthy();
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should skip and report a script missing an edit site', async () => {
@@ -239,9 +236,7 @@ describe('terraform-bootstrap-adopt-existing-bucket migration', () => {
     expect(migrated).toContain('haveState = true;');
     expect(migrated).toContain('await bucketExists(s3, bucket)');
     expect(migrated).toContain("'aws_s3_bucket.terraform_state'");
-    expect(
-      result.nextSteps.some((s) => s.includes(BOOTSTRAP_FILE)),
-    ).toBeTruthy();
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should not touch a terraform library project', async () => {

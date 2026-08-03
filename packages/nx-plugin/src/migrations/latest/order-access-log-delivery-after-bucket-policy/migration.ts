@@ -146,10 +146,6 @@ export default async function migration(
     'aws-cdk-lib/aws-s3',
   );
 
-  nextSteps.push(
-    `${STATIC_WEBSITE_FILE}: the S3 server access log delivery source is now created after the policy of the bucket it targets, avoiding a 409 (OperationAborted) from concurrent bucket configuration writes.`,
-  );
-
   await formatFilesInSubtree(tree);
 
   return { nextSteps };

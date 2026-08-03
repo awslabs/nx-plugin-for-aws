@@ -196,9 +196,6 @@ const TERRAFORM_EDITS: Array<[string, string]> = [
 const divergedNextStep = (filePath: string) =>
   `${filePath}: the UserIdentity Web ACL has diverged from the generated shape - left untouched. To sign in against a local dev server, override ${SSRF_RULE_NAME} in the AWSManagedRulesCommonRuleSet rule group to Count, otherwise the Cognito Hosted UI returns 403 for localhost redirect URIs.`;
 
-const migratedNextStep = (filePath: string) =>
-  `${filePath}: ${SSRF_RULE_NAME} is now counted rather than blocked while a local callback URL is allowed, so signing in against a local dev server works. Redeploy to apply it.`;
-
 export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
@@ -234,7 +231,6 @@ export default async function migration(
     for (const [, rewrite] of edits) {
       await applyGritQL(tree, filePath, rewrite);
     }
-    nextSteps.push(migratedNextStep(filePath));
   }
 
   await formatFilesInSubtree(tree);

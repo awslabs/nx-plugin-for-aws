@@ -110,7 +110,8 @@ describe('order-access-log-delivery-after-bucket-policy migration', () => {
     expect(contents).toContain('delivery.addDependency(source)');
     expect(contents).toContain('CfnDeliveryDestination');
 
-    expect(result.nextSteps.length).toBeGreaterThan(0);
+    // Nothing left for the user to do, so nothing is reported.
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should not add a comment above the dependency', async () => {
@@ -147,7 +148,7 @@ describe('order-access-log-delivery-after-bucket-policy migration', () => {
       );
       expect(contents).not.toContain('(bucket as Bucket)');
       expect(contents).toContain('source.node.addDependency(bucketPolicy)');
-      expect(result.nextSteps.length).toBeGreaterThan(0);
+      expect(result.nextSteps).toEqual([]);
     });
 
     it('should reference the same bucket the delivery source targets', async () => {
