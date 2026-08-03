@@ -12,7 +12,7 @@ import {
   PY_VERSIONS,
   TS_VERSIONS,
 } from '../versions';
-import type { OwnedDependencies } from './owned-dependencies';
+import { type OwnedDependencies, ownedForFile } from './owned-dependencies';
 import { isVendedUpgrade } from './vended-upgrade';
 
 /**
@@ -151,17 +151,20 @@ const DOCKERFILE_PIN_SHAPES: readonly ((name: string) => string)[] = [
 ];
 
 /**
- * Every pin a generated `Dockerfile` may carry.
+ * Every pin a generated `Dockerfile` may carry, for the packages owned where it
+ * sits.
  *
- * Driven off the packages this workspace's generators own rather than a list of
- * the ones that happen to be pinned today: a pin added to a template in a later
- * release is then covered without this module changing, which is the whole point
- * — the versions baked into image builds are pinned precisely because they clear
- * a known vulnerability.
+ * Driven off the owned packages rather than a list of the ones that happen to be
+ * pinned today: a pin added to a template in a later release is then covered
+ * without this module changing, which is the whole point — the versions baked
+ * into image builds are pinned precisely because they clear a known
+ * vulnerability.
  *
  * A package the user pinned themselves is not owned, so it is never matched.
  */
-const dockerfilePins = (owned: OwnedDependencies): EmbeddedPin[] => {
+const dockerfilePins = (owned: {
+  readonly ts: ReadonlySet<string>;
+}): EmbeddedPin[] => {
   const pins: EmbeddedPin[] = [];
 
   for (const name of owned.ts) {
@@ -197,18 +200,24 @@ const splitImageReference = (image: string): [string, string] => {
 };
 
 /**
- * Whether a file is a Dockerfile, by the conventions the generators use for one.
+ * Whether a file is a Dockerfile: exactly `Dockerfile`, or the `<name>.Dockerfile`
+ * form the smithy templates vend as `build.Dockerfile`.
  *
- * Covers the plain name, a per-variant suffix (`Dockerfile.migration`) and a
- * per-variant prefix (`build.Dockerfile`, which the smithy templates vend), in
- * any case. A prefix-only match would skip the last of those.
+ * Deliberately exact rather than a prefix match, which would also claim a
+ * `Dockerfile.bak` or a `Dockerfile.md` the user keeps beside a real one.
  */
 export const isDockerfile = (filePath: string): boolean => {
   const name = filePath.split('/').pop() ?? '';
-  return /^dockerfile(\.|$)/i.test(name) || /\.dockerfile$/i.test(name);
+  return name === 'Dockerfile' || name.endsWith('.Dockerfile');
 };
 
-/** Sync the pins in every generated Dockerfile. */
+/**
+ * Sync the pins in every generated Dockerfile.
+ *
+ * Ownership is resolved per file, so a Dockerfile is only rewritten for the
+ * packages the project it belongs to owns — a sibling project owning `prisma`
+ * does not license rewriting a `prisma` pin here.
+ */
 const syncDockerfiles = async (
   tree: Tree,
   owned: OwnedDependencies,
@@ -221,11 +230,26 @@ const syncDockerfiles = async (
     }
   });
 
-  const pins = dockerfilePins(owned);
   for (const path of dockerfiles) {
-    await applyPins(tree, path, pins);
+    await applyPins(tree, path, dockerfilePins(ownedForFile(owned, path)));
   }
 };
+
+/** The `uv run --with` pins to apply, for the Python packages owned where a file sits. */
+const terraformScriptPins = (owned: {
+  readonly py: ReadonlySet<string>;
+}): EmbeddedPin[] =>
+  [...owned.py].flatMap((name) => {
+    const vended = vendedPyVersion(name);
+    return vended
+      ? [
+          {
+            pattern: `--with ${escapeRegExp(name)}==([^${VERSION_TERMINATORS}]+)`,
+            vended,
+          },
+        ]
+      : [];
+  });
 
 /**
  * Sync the Python pins a generated Terraform inline script runs through
@@ -234,6 +258,11 @@ const syncDockerfiles = async (
  * These are the plugin's own pins, in a file the Terraform provider sync already
  * visits but only reads `required_providers` from. Driven off the owned Python
  * packages, so a pin added to a template later is covered without a change here.
+ *
+ * Scoped per file like the Dockerfiles. The modules carrying these live in the
+ * shared Terraform project, which no single generator owns — a file there belongs
+ * to no project, so it takes the workspace-wide union, which is the set of
+ * generators that legitimately write into it.
  */
 const syncTerraformScriptPins = async (
   tree: Tree,
@@ -247,20 +276,8 @@ const syncTerraformScriptPins = async (
     }
   });
 
-  const pins = [...owned.py].flatMap((name) => {
-    const vended = vendedPyVersion(name);
-    return vended
-      ? [
-          {
-            pattern: `--with ${escapeRegExp(name)}==([^${VERSION_TERMINATORS}]+)`,
-            vended,
-          },
-        ]
-      : [];
-  });
-
   for (const path of terraformFiles) {
-    await applyPins(tree, path, pins);
+    await applyPins(tree, path, terraformScriptPins(ownedForFile(owned, path)));
   }
 };
 

@@ -274,24 +274,37 @@ RUN npm install @scope/npm@1.0.0
       expect(dockerfile).toContain('npm install @scope/npm@1.0.0');
     });
 
-    // Generators vend a Dockerfile under a per-variant prefix as well as a
-    // suffix — `build.Dockerfile` comes from the smithy templates — so matching
-    // only names starting with `Dockerfile` would skip it.
+    // `build.Dockerfile` is the form the smithy templates vend, so matching only
+    // names starting with `Dockerfile` would skip it.
+    it.each(['packages/agent/Dockerfile', 'packages/agent/build.Dockerfile'])(
+      'should sync the pins in %s',
+      async (filePath) => {
+        tree.write(
+          filePath,
+          `FROM ${imageRepository(BASE_IMAGES.node)}:20\nRUN npm install -g npm@11.0.0\n`,
+        );
+
+        await syncVendedVersions(tree);
+
+        const dockerfile = tree.read(filePath, 'utf-8')!;
+        expect(dockerfile).toContain(`npm install -g npm@${VENDED_NPM}`);
+        expect(dockerfile).toContain(`FROM ${BASE_IMAGES.node}`);
+      },
+    );
+
+    // Matched exactly, so a file merely named like one — a backup kept beside a
+    // real Dockerfile, or notes about it — is not rewritten.
     it.each([
-      'packages/smithy/build.Dockerfile',
-      'packages/smithy/Dockerfile.migration',
-      'packages/smithy/service.dockerfile',
-    ])('should sync the pins in %s', async (filePath) => {
-      tree.write(
-        filePath,
-        `FROM ${imageRepository(BASE_IMAGES.node)}:20\nRUN npm install -g npm@11.0.0\n`,
-      );
+      'packages/agent/Dockerfile.bak',
+      'packages/agent/Dockerfile.md',
+      'packages/agent/dockerfile',
+    ])('should leave %s alone', async (filePath) => {
+      const original = `FROM ${imageRepository(BASE_IMAGES.node)}:20\nRUN npm install -g npm@11.0.0\n`;
+      tree.write(filePath, original);
 
       await syncVendedVersions(tree);
 
-      const dockerfile = tree.read(filePath, 'utf-8')!;
-      expect(dockerfile).toContain(`npm install -g npm@${VENDED_NPM}`);
-      expect(dockerfile).toContain(`FROM ${BASE_IMAGES.node}`);
+      expect(tree.read(filePath, 'utf-8')).toEqual(original);
     });
 
     // The smithy build image installs several packages in one abbreviated
@@ -299,19 +312,42 @@ RUN npm install @scope/npm@1.0.0
     // every pin in it.
     it('should sync a pin in an abbreviated multi-package install', async () => {
       tree.write(
-        'packages/smithy/build.Dockerfile',
+        'packages/agent/build.Dockerfile',
         `FROM ${BASE_IMAGES.node}\nRUN npm i -g pnpm@11.1.1 rolldown@1.0.0-beta.38\n`,
       );
 
       await syncVendedVersions(tree);
 
-      const dockerfile = tree.read(
-        'packages/smithy/build.Dockerfile',
-        'utf-8',
-      )!;
+      const dockerfile = tree.read('packages/agent/build.Dockerfile', 'utf-8')!;
       expect(dockerfile).toContain(`rolldown@${TS_VERSIONS.rolldown}`);
       // pnpm is not vended, so it keeps the version the template pinned.
       expect(dockerfile).toContain('pnpm@11.1.1');
+    });
+
+    // Ownership scopes to the project a file sits in, not just the workspace: a
+    // sibling project owning a package does not license rewriting that package's
+    // pin here. `prisma` is owned by `ts#rdb` alone, so the agent's Dockerfile
+    // keeps whatever it pins even though the workspace as a whole owns it.
+    it('should not sync a pin a sibling project owns', async () => {
+      tree.write(
+        'packages/agent/Dockerfile',
+        `FROM ${BASE_IMAGES.node}\nRUN npm install prisma@6.1.0\n`,
+      );
+      tree.write(
+        RDB_DOCKERFILE_PATH,
+        `FROM ${BASE_IMAGES.node}\nRUN npm install prisma@6.1.0\n`,
+      );
+
+      await syncVendedVersions(tree);
+
+      // The rdb project owns prisma, so its own pin moves.
+      expect(tree.read(RDB_DOCKERFILE_PATH, 'utf-8')).toContain(
+        `prisma@${VENDED_PRISMA}`,
+      );
+      // The agent project does not, so its pin is the user's.
+      expect(tree.read('packages/agent/Dockerfile', 'utf-8')).toContain(
+        'prisma@6.1.0',
+      );
     });
 
     // Ownership is what scopes the sync: without a generator declaring these,
