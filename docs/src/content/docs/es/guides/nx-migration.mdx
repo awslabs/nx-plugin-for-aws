@@ -55,7 +55,7 @@ Registra la migración en `migrations.json` con los campos para su tipo y sin `v
 
 ## Implementar una Migración
 
-Una migración determinista (o híbrida) es una función que muta el sistema de archivos virtual (el `Tree`), devolviendo un [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject). Aquí hay una híbrida, que devuelve ambos:
+Una migración determinista (o híbrida) es una función que muta el sistema de archivos virtual (el `Tree`), devolviendo un [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject):
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
@@ -65,20 +65,19 @@ export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
-  const agentContext: string[] = [];
 
   // Read and update the files your generators produce here.
 
   await formatFilesInSubtree(tree);
 
-  return { nextSteps, agentContext };
+  return { nextSteps };
 }
 ```
 
-- **`nextSteps`** — las acciones de seguimiento que Nx imprime para el usuario después de que `nx migrate` se ejecuta. Cada entrada debe ser algo que necesiten hacer manualmente: reconciliar un archivo que omitiste (consulta las barreras de protección más abajo), o terminar algo más allá del alcance de la migración, como una instalación para actualizar un archivo de bloqueo. No son un registro de lo que cambiaste — cuando una transformación se aplica limpiamente, no agregues nada, de lo contrario las entradas que sí necesitan acción quedan enterradas.
+- **`nextSteps`** — notas a nivel de workspace mostradas al usuario después de que `nx migrate` se ejecuta. Úsalas para reportar archivos que omitiste (consulta las barreras de protección más abajo) o seguimiento manual que la migración no pudo realizar.
 - **`agentContext`** (solo híbrida) — un resumen de lo que el codemod cambió, pasado al `prompt` emparejado cuando se ejecuta bajo el flujo agéntico de Nx para que el agente pueda enfocarse en las partes propiedad del usuario.
 
-Para algunos ejemplos de operaciones que puedes realizar en tu migración (generar archivos, modificar archivos existentes usando GritQL, leer y actualizar JSON), consulta la <Link path="/guides/nx-generator">guía de Generador Nx</Link>.
+Para las mismas operaciones que usas en generadores (`generateFiles`, transformaciones GritQL, lectura y actualización de JSON), consulta la <Link path="/guides/nx-generator">guía de Generador Nx</Link>.
 
 ### Barreras de Protección
 
@@ -86,7 +85,6 @@ Las migraciones se ejecutan contra workspaces que no controlas, por lo que se re
 
 - **Transforma código fuente con GritQL.** Usa los <Link path="/guides/nx-generator">helpers de GritQL</Link> (`applyGritQL`, `matchGritQL`) para editar código fuente en lugar de expresiones regulares o reemplazos de cadenas. GritQL coincide con el AST, por lo que un patrón se mantiene a través del formato, espacios en blanco y comillas en los que la copia de un usuario puede haber divergido, donde la coincidencia de texto silenciosamente pierde código equivalente o corrompe el archivo. Usa `updateJson` para JSON y el parser correspondiente para otra configuración estructurada.
 - **Coincidencia de patrones antes de escribir.** Si un archivo objetivo ha divergido de la forma que tus generadores producen, omítelo y repórtalo vía `nextSteps`, o considera una migración híbrida, en lugar de sobrescribir los cambios del usuario. `matchGritQL` es una forma conveniente de hacer esa verificación.
-- **Reporta solo lo que queda por hacer.** `nextSteps` es para el trabajo que el usuario tiene que retomar, no un registro de las ediciones que hiciste — esas ya están en su `git diff`.
 - **Idempotente.** Re-ejecutar la migración debe ser una operación sin efecto. Protege las reescrituras GritQL que inyectan código con una cláusula `where { ... <: not contains ... }` para que una segunda ejecución no agregue un duplicado.
 - **Formatea lo que escribes.** Termina con `formatFilesInSubtree(tree)` para que los archivos que tu migración escribió estén formateados correctamente.
 
@@ -163,4 +161,3 @@ Los usuarios aplican las migraciones de tu plugin con el flujo de dos pasos `nx 
 Las migraciones agénticas e híbridas son aplicadas por el agente de codificación local del usuario durante `nx migrate --run-migrations` cuando uno está disponible.
 
 Para el flujo completo desde la perspectiva del usuario que actualiza — incluyendo salida de ejemplo para migraciones deterministas y agénticas — consulta <Link path="get_started/upgrading">Actualizar Tu Workspace</Link>.
-pgrading">Actualizar Tu Workspace</Link>.
