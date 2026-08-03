@@ -9,7 +9,12 @@ import {
   stampMigrationVersions,
 } from '../migration-versions';
 import { NX_PACKAGES, NX_VERSION } from '../versions';
-import { isNxPackage, nxPackageJsonUpdates } from './nx-package-updates';
+import {
+  isNxPackage,
+  nxPackageJsonUpdates,
+  nxPackageUpdatesKey,
+  type PackageJsonUpdates,
+} from './nx-package-updates';
 
 describe('nx package updates', () => {
   describe('isNxPackage', () => {
@@ -30,13 +35,13 @@ describe('nx package updates', () => {
 
   describe('nxPackageJsonUpdates', () => {
     it('should bump every nx package to the vended version', () => {
-      const updates = nxPackageJsonUpdates('latest', '1.2.3');
+      const updates = nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR);
       const [key] = Object.keys(updates);
 
-      // Keyed by directory, since the entry is written before a version exists
-      // and re-keyed to `v<version>` once a release claims it.
-      expect(key).toBe('latest-nx-packages');
-      expect(updates[key].version).toBe('1.2.3');
+      // Keyed by the nx version it moves to, which is known when the entry is
+      // written — unlike the plugin version, which only a release can supply.
+      expect(key).toBe(nxPackageUpdatesKey(NX_VERSION));
+      expect(updates[key].version).toBe(LATEST_MIGRATIONS_DIR);
       expect(Object.keys(updates[key].packages).sort()).toEqual(
         [...NX_PACKAGES].sort(),
       );
@@ -45,20 +50,25 @@ describe('nx package updates', () => {
       }
     });
 
-    it('should not collide with an entry from another release', () => {
+    // Two bumps can be pending at once — a second update lands before the
+    // release that would ship the first — so the key cannot depend on a plugin
+    // version neither of them has yet.
+    it('should not collide with a bump still waiting for a release', () => {
       const merged = {
-        ...nxPackageJsonUpdates('v1.1.0', '1.1.0'),
-        ...nxPackageJsonUpdates('latest', '1.2.3'),
+        ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, '23.1.0'),
+        ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, '23.1.1'),
       };
+
       expect(Object.keys(merged).sort()).toEqual([
-        'latest-nx-packages',
-        'v1.1.0-nx-packages',
+        'nx-23.1.0-nx-packages',
+        'nx-23.1.1-nx-packages',
       ]);
     });
 
     // Each release's bump stays behind as the next is written, so a workspace
     // several releases behind gets each nx hop rather than only the newest.
     it('should keep every release its bump shipped in', () => {
+      // An update bumps nx, and the release that ships it is tagged 1.1.0.
       const source = {
         generators: {
           'latest-fix-a': {
@@ -67,39 +77,45 @@ describe('nx package updates', () => {
         },
         packageJsonUpdates: nxPackageJsonUpdates(
           LATEST_MIGRATIONS_DIR,
-          LATEST_MIGRATIONS_DIR,
+          '23.1.0',
         ),
       };
 
-      // The weekly backfill re-keys the entry with the release that shipped it.
+      // The next weekly backfill dates it from the release that published it.
       const backfilled = backfillMigrationVersions(source, {
         'latest-fix-a': '1.1.0',
+        [nxPackageUpdatesKey('23.1.0')]: '1.1.0',
       }).migrations;
 
-      // A later release bumps nx again, writing `latest` afresh alongside it.
+      // That update also bumps nx again, writing a second pending entry.
       const next = {
         ...backfilled,
         packageJsonUpdates: {
           ...backfilled.packageJsonUpdates,
-          ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, LATEST_MIGRATIONS_DIR),
+          ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, '23.1.1'),
         },
       };
 
       const published = stampMigrationVersions(next, {}, '1.2.0');
 
+      // Both hops survive: 1.1.0 gets a workspace to nx 23.1.0, 1.2.0 to 23.1.1.
       expect(
-        Object.entries(published.packageJsonUpdates ?? {}).map(
-          ([key, entry]) => [key, entry.version],
-        ),
+        Object.entries(
+          (published.packageJsonUpdates ?? {}) as PackageJsonUpdates,
+        ).map(([key, entry]) => [
+          key,
+          entry.version,
+          entry.packages.nx.version,
+        ]),
       ).toEqual([
-        ['v1.1.0-nx-packages', '1.1.0'],
-        ['v1.2.0-nx-packages', '1.2.0'],
+        [nxPackageUpdatesKey('23.1.0'), '1.1.0', '23.1.0'],
+        [nxPackageUpdatesKey('23.1.1'), '1.2.0', '23.1.1'],
       ]);
     });
 
     it('should not add nx packages a workspace does not already pin', () => {
       // A workspace without e.g. @nx/react must not gain it as a dependency.
-      const updates = nxPackageJsonUpdates('latest', '1.2.3');
+      const updates = nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR);
       for (const { packages } of Object.values(updates)) {
         for (const entry of Object.values(packages)) {
           expect(entry.alwaysAddToPackageJson).toBe(false);
@@ -108,7 +124,7 @@ describe('nx package updates', () => {
     });
 
     it('should accept an explicit nx version', () => {
-      const updates = nxPackageJsonUpdates('latest', '1.2.3', '24.0.0');
+      const updates = nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, '24.0.0');
       for (const { packages } of Object.values(updates)) {
         for (const entry of Object.values(packages)) {
           expect(entry.version).toBe('24.0.0');

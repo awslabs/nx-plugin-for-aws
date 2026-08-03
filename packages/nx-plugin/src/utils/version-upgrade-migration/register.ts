@@ -19,7 +19,12 @@ const MIGRATIONS_JSON_PATH = 'packages/nx-plugin/migrations.json';
  * only the nx packages need registering per update: they go through
  * `packageJsonUpdates` rather than a migration (see `nx-package-updates.ts`).
  *
- * Idempotent: re-running before a release claims the entry refreshes it in place.
+ * A bump already dated by a release stays — a workspace several releases behind
+ * needs each hop in turn. One still waiting for a release is dropped: this bump
+ * supersedes it, and both would otherwise ship under the same version, leaving
+ * which nx a workspace lands on down to the order nx happens to apply them in.
+ *
+ * Idempotent: re-running before a release replaces the pending entry with itself.
  *
  * @returns paths written, for the update report
  */
@@ -28,8 +33,12 @@ export const registerNxPackageUpdates = (tree: Tree): string[] => {
     ...migrations,
     // Recorded under `latest` until stamping resolves the version it ships with.
     packageJsonUpdates: {
-      ...migrations.packageJsonUpdates,
-      ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, LATEST_MIGRATIONS_DIR),
+      ...Object.fromEntries(
+        Object.entries(migrations.packageJsonUpdates ?? {}).filter(
+          ([, entry]) => entry.version !== LATEST_MIGRATIONS_DIR,
+        ),
+      ),
+      ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR),
     },
   }));
 

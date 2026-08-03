@@ -19,7 +19,8 @@ import { compare, valid } from 'semver';
  * - The weekly `update-versions` PR backfills the version of the release that
  *   shipped each migration, moving and re-keying it accordingly
  *   (`scripts/backfill-migration-versions.ts`), so source converges on the
- *   versions of everything already released.
+ *   versions of everything already released. `packageJsonUpdates` entries are
+ *   dated in place there too, since their keys never change.
  *
  * A version already in source always wins, so backfilled entries are stable.
  *
@@ -34,8 +35,9 @@ export interface MigrationsJson {
   >;
   /**
    * Declarative dependency bumps `nx migrate` applies to the root manifest.
-   * Keyed `<dir>-<name>` like the migrations so entries from different releases
-   * can't collide; nx itself gates on the entry's `version`.
+   * Keyed by what the bump targets rather than the release that ships it, so an
+   * entry is unique from the moment it is written and one release's bump can sit
+   * beside the next; nx itself gates on the entry's `version`.
    */
   packageJsonUpdates?: Record<
     string,
@@ -51,14 +53,18 @@ export const isValidVersion = (version: string): boolean =>
   valid(version) !== null;
 
 /**
- * Map of migration key -> version of the earliest release that registers it,
- * resolved only for the entries still missing a `version` (one already recorded
- * in source wins, so its history doesn't need reading). A migration that hasn't
- * been released is absent.
+ * Map of entry key -> version of the earliest release that registers it, across
+ * both `generators` and `packageJsonUpdates`. Resolved only for the entries still
+ * missing a version (one already recorded in source wins, so its history doesn't
+ * need reading). An entry that hasn't been released is absent.
  *
  * Walks releases newest first and stops as soon as every entry is resolved: an
  * entry that has disappeared from a release's `migrations.json` was first
  * registered by the release after it, which is the one that shipped it.
+ *
+ * Both sections resolve the same way and share the walk, so the release doesn't
+ * read tag history twice. Keys can't collide: a migration is keyed by its own
+ * name, an nx bump by the nx version it moves to.
  *
  * @param migrations parsed source migrations.json
  * @param versions released versions in descending semver order
@@ -71,17 +77,26 @@ export const readShippedMigrationVersions = (
   readReleasedMigrations: (version: string) => MigrationsJson | undefined,
 ): Record<string, string> => {
   const shippedVersions: Record<string, string> = {};
-  let unresolved = Object.entries(migrations.generators ?? {})
-    .filter(([, entry]) => !entry.version)
-    .map(([key]) => key);
+  // A `packageJsonUpdates` entry records `latest` rather than omitting its
+  // version, since nx requires the field.
+  let unresolved = [
+    ...Object.entries(migrations.generators ?? {})
+      .filter(([, entry]) => !entry.version)
+      .map(([key]) => key),
+    ...Object.entries(migrations.packageJsonUpdates ?? {})
+      .filter(([, entry]) => entry.version === LATEST_MIGRATIONS_DIR)
+      .map(([key]) => key),
+  ];
 
   for (const version of versions) {
     if (unresolved.length === 0) {
       break;
     }
-    const registered = new Set(
-      Object.keys(readReleasedMigrations(version)?.generators ?? {}),
-    );
+    const released = readReleasedMigrations(version);
+    const registered = new Set([
+      ...Object.keys(released?.generators ?? {}),
+      ...Object.keys(released?.packageJsonUpdates ?? {}),
+    ]);
     // Entries gone at this release keep the version recorded from the release
     // after it (if any) and stop being looked up.
     unresolved = unresolved.filter((key) => registered.has(key));
@@ -95,9 +110,8 @@ export const readShippedMigrationVersions = (
 
 /**
  * Return a copy of the migrations collection with a `version` stamped onto
- * every generator entry, preserving any already present, and any
- * `packageJsonUpdates` entry still keyed `latest` re-keyed to the version it
- * ships under.
+ * every generator entry, preserving any already present, and the pending version
+ * recorded on any `packageJsonUpdates` entry still holding `latest`.
  *
  * @param migrations parsed migrations.json to stamp
  * @param shippedVersions migration key -> version of the earliest release
@@ -139,32 +153,14 @@ export const stampMigrationVersions = (
 });
 
 /**
- * Version any unreleased `packageJsonUpdates` entry and re-key it out of
- * `latest`, so the nx bump ships under the same version as its migrations.
+ * Version any `packageJsonUpdates` entry still holding `latest` with the release
+ * about to publish it, so the nx bump ships under a version `nx migrate` gates on.
  */
 const stampPackageJsonUpdates = (
   packageJsonUpdates: NonNullable<MigrationsJson['packageJsonUpdates']>,
   pendingVersion: string,
 ): NonNullable<MigrationsJson['packageJsonUpdates']> =>
-  Object.fromEntries(
-    Object.entries(packageJsonUpdates).map(([key, entry]) =>
-      entry.version === LATEST_MIGRATIONS_DIR
-        ? [
-            reKeyToVersion(key, pendingVersion),
-            { ...entry, version: pendingVersion },
-          ]
-        : [key, entry],
-    ),
-  );
-
-/** Swap a `latest-<name>` key for the release that ships it. */
-const reKeyToVersion = (key: string, version: string): string =>
-  key.startsWith(LATEST_KEY_PREFIX)
-    ? migrationKey(
-        versionMigrationsDir(version),
-        key.slice(LATEST_KEY_PREFIX.length),
-      )
-    : key;
+  resolvePackageJsonUpdateVersions(packageJsonUpdates, () => pendingVersion);
 
 /** Directory a newly scaffolded migration lands in, before a release claims it. */
 export const LATEST_MIGRATIONS_DIR = 'latest';
@@ -213,6 +209,14 @@ export const backfillMigrationVersions = (
   const generators: NonNullable<MigrationsJson['generators']> = {};
   const backfilled: string[] = [];
   const moves: MigrationDirMove[] = [];
+  // Reported alongside the migrations so the update's PR says an nx bump was
+  // dated, and so the caller knows there is something to commit.
+  const backfilledUpdates = Object.entries(migrations.packageJsonUpdates ?? {})
+    .filter(
+      ([key, entry]) =>
+        entry.version === LATEST_MIGRATIONS_DIR && shippedVersions[key],
+    )
+    .map(([key]) => key);
 
   for (const [key, entry] of Object.entries(migrations.generators ?? {})) {
     const version = shippedVersions[key];
@@ -260,35 +264,34 @@ export const backfillMigrationVersions = (
       ...migrations,
       generators,
       ...(migrations.packageJsonUpdates && {
-        packageJsonUpdates: backfillPackageJsonUpdates(
+        packageJsonUpdates: resolvePackageJsonUpdateVersions(
           migrations.packageJsonUpdates,
-          // Re-keyed with the earliest release it shipped alongside.
-          backfilled
-            .map((key) => shippedVersions[key])
-            .sort(compareVersions)[0],
+          (key) => shippedVersions[key],
         ),
       }),
     },
-    backfilled,
+    backfilled: [...backfilled, ...backfilledUpdates],
     moves,
   };
 };
 
 /**
- * Record the release that shipped an unreleased `packageJsonUpdates` entry,
- * re-keying it out of `latest`, and leave it alone until one has.
+ * Record the version each `packageJsonUpdates` entry ships under, for those still
+ * holding `latest`.
+ *
+ * The key already identifies the entry — an nx bump is named for the nx version
+ * it moves to — so only the `version` field changes. Nothing is re-keyed, which
+ * is what lets one release's bump sit alongside the next without either being
+ * overwritten before it ships.
  */
-const backfillPackageJsonUpdates = (
+const resolvePackageJsonUpdateVersions = (
   packageJsonUpdates: NonNullable<MigrationsJson['packageJsonUpdates']>,
-  shippedVersion: string | undefined,
+  resolve: (key: string) => string | undefined,
 ): NonNullable<MigrationsJson['packageJsonUpdates']> =>
   Object.fromEntries(
-    Object.entries(packageJsonUpdates).map(([key, entry]) =>
-      entry.version === LATEST_MIGRATIONS_DIR && shippedVersion
-        ? [
-            reKeyToVersion(key, shippedVersion),
-            { ...entry, version: shippedVersion },
-          ]
-        : [key, entry],
-    ),
+    Object.entries(packageJsonUpdates).map(([key, entry]) => {
+      const version =
+        entry.version === LATEST_MIGRATIONS_DIR ? resolve(key) : undefined;
+      return [key, version ? { ...entry, version } : entry];
+    }),
   );

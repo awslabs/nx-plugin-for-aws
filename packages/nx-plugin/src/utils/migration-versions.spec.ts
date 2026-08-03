@@ -97,6 +97,36 @@ describe('migration versions', () => {
         ),
       ).toEqual({});
     });
+
+    // The nx bumps resolve the same way as the migrations and share the walk, so
+    // the release doesn't read tag history twice.
+    it('should resolve packageJsonUpdates from the same release walk', () => {
+      const read = (version: string): MigrationsJson | undefined =>
+        version === '1.2.0'
+          ? {
+              generators: {},
+              packageJsonUpdates: {
+                'nx-23.1.1-nx-packages': { version: '1.2.0' },
+              },
+            }
+          : { generators: {} };
+
+      expect(
+        readShippedMigrationVersions(
+          {
+            generators: {},
+            packageJsonUpdates: {
+              // Released, so datable from history.
+              'nx-23.1.1-nx-packages': { version: 'latest' },
+              // Never published, so left for the release to stamp.
+              'nx-23.2.0-nx-packages': { version: 'latest' },
+            },
+          },
+          VERSIONS,
+          read,
+        ),
+      ).toEqual({ 'nx-23.1.1-nx-packages': '1.2.0' });
+    });
   });
 
   describe('stampMigrationVersions', () => {
@@ -336,20 +366,30 @@ describe('migration versions', () => {
       expect(backfilled).toEqual([]);
     });
 
-    it('should re-key packageJsonUpdates to the release that shipped it', () => {
-      const { migrations } = backfillMigrationVersions(
+    // Dated in place: the key already names what the bump targets, so it stays
+    // put and a bump still waiting for a release can't be written over.
+    it('should date a released packageJsonUpdates entry without re-keying it', () => {
+      const { migrations, backfilled } = backfillMigrationVersions(
         {
           generators: { 'latest-shipped': { description: 'shipped' } },
           packageJsonUpdates: {
-            'latest-nx-packages': { version: 'latest', packages: { nx: {} } },
+            'nx-23.1.0-nx-packages': {
+              version: 'latest',
+              packages: { nx: {} },
+            },
           },
         },
-        { 'latest-shipped': '1.1.0' },
+        {
+          'latest-shipped': '1.1.0',
+          'nx-23.1.0-nx-packages': '1.1.0',
+        },
       );
-      // The nx bump ships with the migration it accompanied, re-keyed with it.
+
       expect(migrations.packageJsonUpdates).toEqual({
-        'v1.1.0-nx-packages': { version: '1.1.0', packages: { nx: {} } },
+        'nx-23.1.0-nx-packages': { version: '1.1.0', packages: { nx: {} } },
       });
+      // Reported, so the weekly PR says the bump was dated.
+      expect(backfilled).toContain('nx-23.1.0-nx-packages');
     });
 
     it('should leave packageJsonUpdates under latest until a release ships it', () => {

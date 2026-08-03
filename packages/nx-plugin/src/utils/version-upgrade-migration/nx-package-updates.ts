@@ -32,22 +32,33 @@ export interface PackageJsonUpdate extends Record<string, unknown> {
 export type PackageJsonUpdates = Record<string, PackageJsonUpdate>;
 
 /**
+ * Key an nx bump is registered under, named for the nx version it moves to.
+ *
+ * The plugin version the bump ships under isn't known when it is written — the
+ * weekly update writes it, and only the release that publishes it can say which
+ * version that is. The nx version, though, is exactly what the entry is *for*,
+ * and two bumps to the same nx version would be the same bump — so it keys the
+ * entry uniquely from the moment it is written, with no re-keying later.
+ *
+ * That matters because each release's bump has to stay behind as the next is
+ * written: a workspace several releases behind gets every nx hop in turn rather
+ * than only the newest. A key that had to be rewritten once the plugin version
+ * was known would let a second bump land on the first before either shipped.
+ */
+export const nxPackageUpdatesKey = (nxVersion: string) =>
+  `nx-${nxVersion}-${NX_PACKAGE_UPDATES_NAME}`;
+
+/**
  * `alwaysAddToPackageJson: false` so only packages already present are updated.
  *
- * Keyed by directory rather than version, because the key has to exist before
- * the version does: an entry is written under `latest` and only re-keyed to
- * `v<version>` once a release claims it. One release's entry stays behind as the
- * next is written, so a workspace several releases behind gets each nx bump in
- * turn — hence `<dir>-<name>`, which keeps every release's entry distinct.
- *
- * @param version version `nx migrate` gates the bump on
+ * @param version plugin version `nx migrate` gates the bump on, or
+ *   {@link LATEST_MIGRATIONS_DIR} while it is still waiting for a release
  */
 export const nxPackageJsonUpdates = (
-  dir: string,
   version: string,
   nxVersion: string = NX_VERSION,
 ): PackageJsonUpdates => ({
-  [migrationKey(dir, NX_PACKAGE_UPDATES_NAME)]: {
+  [nxPackageUpdatesKey(nxVersion)]: {
     version,
     packages: Object.fromEntries(
       NX_PACKAGES.map((name) => [
