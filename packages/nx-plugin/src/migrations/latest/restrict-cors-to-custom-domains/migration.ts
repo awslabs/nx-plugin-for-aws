@@ -112,9 +112,6 @@ export default async function migration(
         ['findCloudFrontDomainNames'],
         apiCloudFrontImportSpecifier,
       );
-      nextSteps.push(
-        `${filePath}: restrictCorsTo now includes CloudFront custom domain aliases automatically.`,
-      );
       continue;
     }
     const contents = tree.read(filePath, 'utf-8') ?? '';
@@ -148,9 +145,6 @@ export default async function migration(
         USER_IDENTITY_FILE,
         ['findCloudFrontDomainNames'],
         coreCloudFrontImportSpecifier,
-      );
-      nextSteps.push(
-        `${USER_IDENTITY_FILE}: now reuses the shared findCloudFrontDomainNames helper.`,
       );
     } else {
       const contents = tree.read(USER_IDENTITY_FILE, 'utf-8') ?? '';

@@ -51,7 +51,8 @@ describe('modernize-function-props-cast migration', () => {
     const content = tree.read(API_APP_FILE, 'utf-8');
     expect(content).not.toContain('<FunctionProps>');
     expect(content).toContain('} as FunctionProps,');
-    expect(result.nextSteps.some((s) => s.includes(API_APP_FILE))).toBeTruthy();
+    // Nothing left for the user to do, so nothing is reported.
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should skip and report a customised file', async () => {

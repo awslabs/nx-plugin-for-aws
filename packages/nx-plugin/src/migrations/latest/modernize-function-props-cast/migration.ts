@@ -80,9 +80,6 @@ export default async function migration(
         .replace(OLD_CAST_OPEN, NEW_CAST_OPEN)
         .replace(OLD_CAST_CLOSE, NEW_CAST_CLOSE),
     );
-    nextSteps.push(
-      `${filePath}: replaced the legacy <FunctionProps> cast with the modern as FunctionProps syntax.`,
-    );
   }
 
   await formatFilesInSubtree(tree);

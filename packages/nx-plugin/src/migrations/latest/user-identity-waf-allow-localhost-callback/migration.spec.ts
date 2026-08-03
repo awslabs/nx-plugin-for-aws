@@ -1789,7 +1789,8 @@ describe('user-identity-waf-allow-localhost-callback migration', () => {
       const result = await migration(tree);
 
       expect(tree.read(file, 'utf-8')).toEqual(FIXTURES[iac].expected);
-      expect(result.nextSteps.some((s) => s.includes(file))).toBeTruthy();
+      // Nothing left for the user to do, so nothing is reported.
+      expect(result.nextSteps).toEqual([]);
     });
 
     it('should leave an already-migrated workspace untouched and unreported', async () => {
@@ -1889,6 +1890,6 @@ describe('user-identity-waf-allow-localhost-callback migration', () => {
     expect(migrated).toContain(SSRF_RULE);
     expect(migrated).toContain('MyOrgRateLimit');
     expect(migrated).toContain('rateBasedStatement');
-    expect(result.nextSteps.some((s) => s.includes(file))).toBeTruthy();
+    expect(result.nextSteps).toEqual([]);
   });
 });

@@ -188,10 +188,6 @@ export default async function migration(
       filePath,
       `${HEADER_COMMENT_PATTERN} => \`${NEW_HEADER_COMMENT}\``,
     );
-
-    nextSteps.push(
-      `${filePath}: now adopts an existing Terraform state bucket when its bootstrap.tfstate object is missing.`,
-    );
   }
 
   await formatFilesInSubtree(tree);

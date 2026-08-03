@@ -133,7 +133,8 @@ describe('restrict-cors-to-custom-domains migration', () => {
     expect(identityContent).not.toContain('private findCloudFrontDomainNames');
     expect(identityContent).not.toContain('CfnDistribution');
 
-    expect(result.nextSteps.length).toBeGreaterThan(0);
+    // Nothing left for the user to do, so nothing is reported.
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should skip and report a customised restrictCorsTo', async () => {
@@ -171,9 +172,7 @@ describe('restrict-cors-to-custom-domains migration', () => {
     expect(identityContent).toContain('https://my-custom-preview.example.com');
     expect(identityContent).toContain('.flatMap(findCloudFrontDomainNames)');
     expect(identityContent).not.toContain('private findCloudFrontDomainNames');
-    expect(
-      result.nextSteps.some((c) => c.includes(USER_IDENTITY_FILE)),
-    ).toBeTruthy();
+    expect(result.nextSteps).toEqual([]);
   });
 
   it('should skip and report a UserIdentity with a renamed call site', async () => {
