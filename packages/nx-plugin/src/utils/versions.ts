@@ -291,6 +291,20 @@ export const CONTAINER_VERSIONS = {
 } as const;
 
 /**
+ * Repository each pinned tool image is pulled from, keyed as
+ * {@link CONTAINER_VERSIONS}. Kept beside the versions so a tool added here is
+ * one entry rather than a reference built somewhere else, which is also what
+ * lets the version sync find these pins wherever a target command runs them.
+ */
+export const CONTAINER_REPOSITORIES = {
+  trivy: 'public.ecr.aws/aquasecurity/trivy',
+} as const satisfies Record<keyof typeof CONTAINER_VERSIONS, string>;
+
+/** The pinned reference for a tool image, as a target command runs it. */
+export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
+  `${CONTAINER_REPOSITORIES[tool]}:${CONTAINER_VERSIONS[tool]}`;
+
+/**
  * Exact versions for Terraform providers used by generated `.tf` modules.
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */

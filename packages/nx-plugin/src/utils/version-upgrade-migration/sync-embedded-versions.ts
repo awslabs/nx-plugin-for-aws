@@ -7,6 +7,7 @@ import { visitNotIgnoredFiles } from '@nx/devkit';
 import { applyGritQL } from '../ast';
 import {
   BASE_IMAGES,
+  CONTAINER_REPOSITORIES,
   CONTAINER_VERSIONS,
   PY_VERSIONS,
   TS_VERSIONS,
@@ -112,40 +113,38 @@ const applyPins = async (
 };
 
 /**
- * A version this release vends for a package the workspace's generators own, or
- * undefined for one they don't — a package the user pinned themselves keeps the
- * version they chose.
+ * The version this release vends for a package, or undefined for one it doesn't
+ * vend at all.
+ *
+ * Ownership is applied by the caller, which only ever passes a name drawn from
+ * the owned set — so a package the user pinned themselves never reaches here and
+ * keeps the version they chose.
  */
-const ownedTsVersion = (
-  owned: OwnedDependencies,
-  name: string,
-): string | undefined =>
-  owned.ts.has(name)
-    ? TS_VERSIONS[name as keyof typeof TS_VERSIONS]
-    : undefined;
+const vendedTsVersion = (name: string): string | undefined =>
+  TS_VERSIONS[name as keyof typeof TS_VERSIONS];
 
 /** `PY_VERSIONS` records the `==` operator; a pin holds the bare version. */
-const ownedPyVersion = (
-  owned: OwnedDependencies,
-  name: string,
-): string | undefined =>
-  owned.py.has(name)
-    ? PY_VERSIONS[name as keyof typeof PY_VERSIONS]?.replace(/^==/, '')
-    : undefined;
+const vendedPyVersion = (name: string): string | undefined =>
+  PY_VERSIONS[name as keyof typeof PY_VERSIONS]?.replace(/^==/, '');
 
 /**
  * The ways a generated `Dockerfile` pins a TypeScript package's version, as
  * regex fragments taking the escaped package name.
  *
- * `npm install -g npm@x` and `npm install prisma@x` share a shape, so one
- * pattern covers both. The name is required to run to its delimiter, so a
- * package whose name merely ends with another's — `some-npm` against `npm` —
- * cannot match, and an installed version must start with a digit so a `@latest`
- * style tag is left alone.
+ * The name is required to run to its delimiter, so a package whose name merely
+ * ends with another's — `some-npm` against `npm` — cannot match, and an
+ * installed version must start with a digit so a `@latest` style tag is left
+ * alone.
  */
 const DOCKERFILE_PIN_SHAPES: readonly ((name: string) => string)[] = [
-  // Installed directly by the image build.
-  (name) => `npm install (?:-g )?${name}@([0-9][^${VERSION_TERMINATORS}]*)`,
+  // Installed by the image build. `install` and its `i` alias are both used, as
+  // are `-g` and several packages in one command, so the name only has to follow
+  // an `npm` subcommand rather than sit right after it. The whitespace before it
+  // is matched rather than asserted, since GritQL's regex engine has no
+  // lookbehind — which also keeps `some-npm` from matching `npm`, and unlike a
+  // `\b` boundary still reaches a `@scope/name`.
+  (name) =>
+    `npm (?:install|i|add)[^\\n]*?\\s${name}@([0-9][^${VERSION_TERMINATORS}]*)`,
   // Held at a fixed version through an `npm pkg set` override, to clear a known
   // vulnerability in a transitive dependency.
   (name) => `overrides\\.${name}=([^${VERSION_TERMINATORS}]+)`,
@@ -166,7 +165,7 @@ const dockerfilePins = (owned: OwnedDependencies): EmbeddedPin[] => {
   const pins: EmbeddedPin[] = [];
 
   for (const name of owned.ts) {
-    const vended = ownedTsVersion(owned, name);
+    const vended = vendedTsVersion(name);
     if (!vended) {
       continue;
     }
@@ -198,11 +197,18 @@ const splitImageReference = (image: string): [string, string] => {
 };
 
 /**
- * Sync the pins in every generated `Dockerfile`.
+ * Whether a file is a Dockerfile, by the conventions the generators use for one.
  *
- * Matched on the file name so a per-variant Dockerfile — `Dockerfile.bundle`,
- * say — is covered alongside the plain one.
+ * Covers the plain name, a per-variant suffix (`Dockerfile.migration`) and a
+ * per-variant prefix (`build.Dockerfile`, which the smithy templates vend), in
+ * any case. A prefix-only match would skip the last of those.
  */
+export const isDockerfile = (filePath: string): boolean => {
+  const name = filePath.split('/').pop() ?? '';
+  return /^dockerfile(\.|$)/i.test(name) || /\.dockerfile$/i.test(name);
+};
+
+/** Sync the pins in every generated Dockerfile. */
 const syncDockerfiles = async (
   tree: Tree,
   owned: OwnedDependencies,
@@ -210,7 +216,7 @@ const syncDockerfiles = async (
   const dockerfiles: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
-    if (path.split('/').pop()?.startsWith('Dockerfile')) {
+    if (isDockerfile(path)) {
       dockerfiles.push(path);
     }
   });
@@ -242,7 +248,7 @@ const syncTerraformScriptPins = async (
   });
 
   const pins = [...owned.py].flatMap((name) => {
-    const vended = ownedPyVersion(owned, name);
+    const vended = vendedPyVersion(name);
     return vended
       ? [
           {
@@ -261,8 +267,11 @@ const syncTerraformScriptPins = async (
 /**
  * Sync the pinned tooling images a `project.json` target command runs.
  *
- * The image reference is built into the command string rather than declared as a
- * dependency, so nothing else reaches it.
+ * The reference is built into the command string rather than declared as a
+ * dependency, so nothing else reaches it. Driven off `CONTAINER_REPOSITORIES`,
+ * so a second tool image pinned in a target command later is covered by adding
+ * it there — the same property the Dockerfile and Terraform paths get from the
+ * owned set.
  */
 const syncTargetToolImages = async (tree: Tree): Promise<void> => {
   const projectJsons: string[] = [];
@@ -273,12 +282,13 @@ const syncTargetToolImages = async (tree: Tree): Promise<void> => {
     }
   });
 
-  const pins: EmbeddedPin[] = [
-    {
-      pattern: `public\\.ecr\\.aws/aquasecurity/trivy:([^${VERSION_TERMINATORS}']+)`,
-      vended: CONTAINER_VERSIONS.trivy,
-    },
-  ];
+  const pins: EmbeddedPin[] = Object.entries(CONTAINER_REPOSITORIES).map(
+    ([tool, repository]) => ({
+      // A command string is JSON here, so a quote ends the reference too.
+      pattern: `${escapeRegExp(repository)}:([^${VERSION_TERMINATORS}']+)`,
+      vended: CONTAINER_VERSIONS[tool as keyof typeof CONTAINER_VERSIONS],
+    }),
+  );
 
   for (const path of projectJsons) {
     await applyPins(tree, path, pins);

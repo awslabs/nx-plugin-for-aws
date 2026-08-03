@@ -6,6 +6,7 @@ import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../test';
 import {
   BASE_IMAGES,
+  CONTAINER_REPOSITORIES,
   CONTAINER_VERSIONS,
   PY_VERSIONS,
   TS_VERSIONS,
@@ -273,6 +274,46 @@ RUN npm install @scope/npm@1.0.0
       expect(dockerfile).toContain('npm install @scope/npm@1.0.0');
     });
 
+    // Generators vend a Dockerfile under a per-variant prefix as well as a
+    // suffix — `build.Dockerfile` comes from the smithy templates — so matching
+    // only names starting with `Dockerfile` would skip it.
+    it.each([
+      'packages/smithy/build.Dockerfile',
+      'packages/smithy/Dockerfile.migration',
+      'packages/smithy/service.dockerfile',
+    ])('should sync the pins in %s', async (filePath) => {
+      tree.write(
+        filePath,
+        `FROM ${imageRepository(BASE_IMAGES.node)}:20\nRUN npm install -g npm@11.0.0\n`,
+      );
+
+      await syncVendedVersions(tree);
+
+      const dockerfile = tree.read(filePath, 'utf-8')!;
+      expect(dockerfile).toContain(`npm install -g npm@${VENDED_NPM}`);
+      expect(dockerfile).toContain(`FROM ${BASE_IMAGES.node}`);
+    });
+
+    // The smithy build image installs several packages in one abbreviated
+    // command, so a pattern requiring `npm install <pkg>` immediately would miss
+    // every pin in it.
+    it('should sync a pin in an abbreviated multi-package install', async () => {
+      tree.write(
+        'packages/smithy/build.Dockerfile',
+        `FROM ${BASE_IMAGES.node}\nRUN npm i -g pnpm@11.1.1 rolldown@1.0.0-beta.38\n`,
+      );
+
+      await syncVendedVersions(tree);
+
+      const dockerfile = tree.read(
+        'packages/smithy/build.Dockerfile',
+        'utf-8',
+      )!;
+      expect(dockerfile).toContain(`rolldown@${TS_VERSIONS.rolldown}`);
+      // pnpm is not vended, so it keeps the version the template pinned.
+      expect(dockerfile).toContain('pnpm@11.1.1');
+    });
+
     // Ownership is what scopes the sync: without a generator declaring these,
     // the pins are the user's own and keep the versions they chose.
     it('should leave pins alone in a workspace no generator owns them in', async () => {
@@ -410,6 +451,14 @@ RUN npm install @scope/npm@1.0.0
   // The trivy image is built into a target command rather than declared as a
   // dependency, so nothing else reaches it.
   describe('pinned tool images in project.json', () => {
+    // The pins come from `CONTAINER_REPOSITORIES`, so every tool image the plugin
+    // pins is covered by the sync rather than only the one it happens to have.
+    it('should cover every pinned tool image, not just trivy', () => {
+      expect(Object.keys(CONTAINER_REPOSITORIES)).toEqual(
+        Object.keys(CONTAINER_VERSIONS),
+      );
+    });
+
     it('should upgrade the trivy image a scan target runs', async () => {
       writeJson(
         tree,
