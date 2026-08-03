@@ -10,13 +10,23 @@ import {
   writeJson,
 } from '@nx/devkit';
 import type { PackageJson } from 'nx/src/utils/package-json';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
 import { isEsmWorkspace } from '../../utils/module-format';
 import {
   nxPluginSelfDependency,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { withVersions } from '../../utils/versions';
+import { type ITsDepVersion, withVersions } from '../../utils/versions';
+
+/** Dependencies a caller must declare to configure an Nx Plugin project. */
+export const NX_PLUGIN_DEPENDENCIES = [
+  { name: '@nx/devkit' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
  * Read the configuration of a project which can host Nx Plugin generators or
@@ -77,16 +87,20 @@ export const configureNxPluginPackageJson = <
  * workspace and the plugin, since both must resolve for Nx to load them. A
  * no-op inside the plugin's own monorepo, where they are already present.
  */
-export const addNxPluginDependencies = (
+export const addNxPluginDependencies = <const D extends DependencyDeclaration>(
   tree: Tree,
   pluginPackageJsonPath: string,
+  declaration: D & MustDeclare<typeof NX_PLUGIN_DEPENDENCIES, D>,
 ): void => {
   const selfDependency = nxPluginSelfDependency(tree);
   if (Object.keys(selfDependency).length === 0) {
     return;
   }
   const deps = {
-    ...withVersions(['@nx/devkit']),
+    ...withVersions(
+      forDependencies<typeof NX_PLUGIN_DEPENDENCIES>(declaration),
+      ['@nx/devkit'],
+    ),
     ...selfDependency,
   };
   addDependenciesToPackageJson(tree, {}, deps);
@@ -96,9 +110,12 @@ export const addNxPluginDependencies = (
 /**
  * Configures a TypeScript project as an Nx Plugin
  */
-export const configureTsProjectAsNxPlugin = (
+export const configureTsProjectAsNxPlugin = <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   projectName: string,
+  declaration: D & MustDeclare<typeof NX_PLUGIN_DEPENDENCIES, D>,
 ) => {
   const project = readNxPluginProject(tree, projectName);
 
@@ -117,5 +134,9 @@ export const configureTsProjectAsNxPlugin = (
     './generators.json',
   );
 
-  addNxPluginDependencies(tree, pluginPackageJsonPath);
+  addNxPluginDependencies(
+    tree,
+    pluginPackageJsonPath,
+    forDependencies<typeof NX_PLUGIN_DEPENDENCIES>(declaration),
+  );
 };

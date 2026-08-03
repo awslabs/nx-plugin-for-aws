@@ -11,12 +11,22 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
-import { addApiGatewayInfra } from '../../../utils/api-constructs/api-constructs';
+import { addTsDependencies } from '../../../utils/add-dependencies';
+import {
+  API_CONSTRUCTS_DEPENDENCIES,
+  addApiGatewayInfra,
+} from '../../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
-import { addTypeScriptBundleTarget } from '../../../utils/bundle/bundle';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../../utils/bundle/bundle';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { FsCommands } from '../../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../../utils/fs';
 import { updateGitIgnore } from '../../../utils/git';
 import { resolveIac } from '../../../utils/iac';
 import { installDependencies } from '../../../utils/install';
@@ -32,10 +42,44 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { assignPort } from '../../../utils/port';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { withVersions } from '../../../utils/versions';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
+import type { IacMetadata } from '../../../utils/shared-constructs-constants';
 import smithyProjectGenerator from '../../project/generator';
 import type { TsSmithyApiGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface TsSmithyApiMetadata extends IacMetadata {
+  readonly apiName: string;
+  readonly auth: TsSmithyApiGeneratorSchema['auth'];
+  readonly modelProject: string;
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsSmithyApiMetadata>()({
+  ts: [
+    { name: '@aws-smithy/server-apigateway' },
+    { name: '@aws-smithy/server-node' },
+    { name: '@middy/core' },
+    { name: '@aws-lambda-powertools/logger' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-lambda-powertools/tracer' },
+    { name: '@aws-lambda-powertools/metrics' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    // The custom authorizer handler parses its event.
+    { name: '@aws-lambda-powertools/parser', when: (m) => m.auth === 'custom' },
+    { name: '@types/aws-lambda', dev: true },
+    // tsx runs the local server from the workspace root.
+    { name: 'tsx', dev: true, root: true },
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(API_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+  ],
+});
 
 export const TS_SMITHY_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -103,15 +147,26 @@ export const tsSmithyApiGenerator = async (
     } as any,
   });
 
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
+  // Recorded here and read by the declaration's predicates, so the packages
+  // added below are exactly the ones the version sync will own.
+  const metadata: TsSmithyApiMetadata = {
+    apiName: options.name,
+    auth: options.auth,
+    modelProject: modelProjectConfig.name,
+    ...(iac ? { iac } : {}),
+  };
+
   addGeneratorMetadata(
     tree,
     backendFullyQualifiedName,
     TS_SMITHY_API_GENERATOR_INFO,
-    {
-      apiName: options.name,
-      auth: options.auth,
-      modelProject: modelProjectConfig.name,
-    },
+    metadata,
   );
 
   const backendProjectConfig = readProjectConfigurationUnqualified(
@@ -159,35 +214,42 @@ export const tsSmithyApiGenerator = async (
     }
 
     // Add infrastructure
-    const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
-    await addApiGatewayInfra(tree, {
-      iac,
-      apiProjectName: backendFullyQualifiedName,
-      apiNameClassName,
-      apiNameKebabCase,
-      auth: options.auth,
-      constructType: 'rest',
-      backend: {
-        type: 'smithy',
-        bundleOutputDir: joinPathFragments(
-          'dist',
-          backendProjectConfig.root,
-          'bundle',
-        ),
-        integrationPattern,
-        ...(options.auth === 'custom' && {
-          authorizerBundleOutputDir: joinPathFragments(
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DEPENDENCIES,
+    );
+    await addApiGatewayInfra(
+      tree,
+      {
+        iac,
+        apiProjectName: backendFullyQualifiedName,
+        apiNameClassName,
+        apiNameKebabCase,
+        auth: options.auth,
+        constructType: 'rest',
+        backend: {
+          type: 'smithy',
+          bundleOutputDir: joinPathFragments(
             'dist',
             backendProjectConfig.root,
             'bundle',
-            'authorizer',
           ),
-        }),
+          integrationPattern,
+          ...(options.auth === 'custom' && {
+            authorizerBundleOutputDir: joinPathFragments(
+              'dist',
+              backendProjectConfig.root,
+              'bundle',
+              'authorizer',
+            ),
+          }),
+        },
       },
-    });
+      DEPENDENCIES,
+    );
     addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
       iac,
       apiNameKebabCase,
@@ -202,21 +264,31 @@ export const tsSmithyApiGenerator = async (
     });
 
     // Add bundle target using rolldown
-    await addTypeScriptBundleTarget(tree, backendProjectConfig, {
-      targetFilePath: 'src/handler.ts',
-      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      backendProjectConfig,
+      {
+        targetFilePath: 'src/handler.ts',
+        external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+      },
+      DEPENDENCIES,
+    );
 
     if (options.auth === 'custom') {
-      await addTypeScriptBundleTarget(tree, backendProjectConfig, {
-        targetFilePath: 'src/authorizer.ts',
-        bundleOutputDir: 'authorizer',
-        external: [/@aws-sdk\/.*/],
-      });
+      await addTypeScriptBundleTarget(
+        tree,
+        backendProjectConfig,
+        {
+          targetFilePath: 'src/authorizer.ts',
+          bundleOutputDir: 'authorizer',
+          external: [/@aws-sdk\/.*/],
+        },
+        DEPENDENCIES,
+      );
     }
   }
 
-  const cmd = new FsCommands(tree);
+  const cmd = new FsCommands(tree, DEPENDENCIES);
   const generatedSrcDirFromRoot = '{projectRoot}/src/generated';
 
   // Target for copying the ssdk built by the model
@@ -302,25 +374,10 @@ export const tsSmithyApiGenerator = async (
     backendProjectConfig,
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      '@aws-smithy/server-apigateway',
-      '@aws-smithy/server-node',
-      '@middy/core',
-      '@aws-lambda-powertools/logger',
-      '@aws-lambda-powertools/parameters',
-      '@aws-lambda-powertools/tracer',
-      '@aws-lambda-powertools/metrics',
-      '@aws-sdk/client-appconfigdata',
-      ...(options.auth === 'custom'
-        ? (['@aws-lambda-powertools/parser'] as const)
-        : []),
-    ]),
-    withVersions(['@types/aws-lambda']),
-    joinPathFragments(backendProjectConfig.root, 'package.json'),
-  );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: backendProjectConfig.root,
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_SMITHY_API_GENERATOR_INFO]);
 

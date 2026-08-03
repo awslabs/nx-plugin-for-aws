@@ -9,12 +9,20 @@ import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
 } from '../utils/config/utils';
+import { declareDependencies } from '../utils/declared-dependencies';
 import { expectHasMetricTags } from '../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator';
 import type { LicenseGeneratorSchema } from './schema';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('license generator', () => {
   let tree: Tree;
@@ -80,7 +88,11 @@ describe('license generator', () => {
     tree = createTreeUsingTsSolutionSetup();
 
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     // Call the generator function
     await licenseGenerator(tree, options);

@@ -3,14 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import {
   RUNTIME_CONFIG_GENERATOR_INFO,
   runtimeConfigGenerator,
 } from './generator';
 import type { RuntimeConfigGeneratorSchema } from './schema';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('runtime-config generator', () => {
   let tree: Tree;
@@ -163,7 +171,11 @@ describe('runtime-config generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     // Set up a basic React app structure
     tree.write(

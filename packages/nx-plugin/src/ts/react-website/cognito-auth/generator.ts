@@ -10,13 +10,17 @@ import {
 } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
@@ -30,8 +34,10 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { toProjectRelativePath } from '../../../utils/paths';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import { withVersions } from '../../../utils/versions';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import {
@@ -46,6 +52,14 @@ const readGritPattern = (name: string): string =>
     join(import.meta.dirname, 'grit', `${name}.grit`),
     'utf-8',
   ).trim();
+
+export const DEPENDENCIES = declareDependencies()({
+  ts: [
+    { name: 'oidc-client-ts' },
+    { name: 'react-oidc-context' },
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+  ],
+});
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -73,9 +87,13 @@ export async function tsReactWebsiteAuthGenerator(
 
   const iac = await resolveIac(tree, options.iac);
 
-  await sharedConstructsGenerator(tree, {
-    iac,
-  });
+  await sharedConstructsGenerator(
+    tree,
+    {
+      iac,
+    },
+    DEPENDENCIES,
+  );
 
   await addIdentityInfra(tree, {
     iac,
@@ -93,12 +111,7 @@ export async function tsReactWebsiteAuthGenerator(
     },
   );
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(['oidc-client-ts', 'react-oidc-context']),
-    {},
-    joinPathFragments(projectConfig.root, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: projectConfig.root });
 
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
 
@@ -176,6 +189,8 @@ export async function tsReactWebsiteAuthGenerator(
       projectConfig,
       joinPathFragments(srcRoot, 'components', 'CognitoAuth'),
     ),
+    undefined,
+    { iac },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [COGNITO_AUTH_GENERATOR_INFO]);

@@ -7,9 +7,17 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { FsCommands } from './fs';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from './declared-dependencies';
+import { FS_DEPENDENCIES, FsCommands } from './fs';
 import { addDependencyToTargetIfNotPresent } from './nx';
 import { CONTAINER_VERSIONS, TS_VERSIONS } from './versions';
+
+/** Dependencies a caller must declare to add a Docker scan target. */
+export const DOCKER_DEPENDENCIES = [...FS_DEPENDENCIES] as const;
 
 const TRIVY_IGNORE_FILE = '.trivyignore';
 
@@ -67,9 +75,10 @@ export interface DockerScanTargetOptions {
  * A \`.trivyignore\` is vended at the project root (kept if it already exists)
  * for suppressing findings.
  */
-export const addDockerScanTarget = (
+export const addDockerScanTarget = <const D extends DependencyDeclaration>(
   tree: Tree,
   options: DockerScanTargetOptions,
+  declaration: D & MustDeclare<typeof DOCKER_DEPENDENCIES, D>,
 ): void => {
   const { project, containerEngine, trivyTargetName, dockerTargetName } =
     options;
@@ -89,7 +98,10 @@ export const addDockerScanTarget = (
   const scanDir = joinPathFragments('dist', projectRoot, 'trivy', scanKey);
   const trivyImage = `public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy}`;
 
-  const fs = new FsCommands(tree);
+  const fs = new FsCommands(
+    tree,
+    forDependencies<typeof DOCKER_DEPENDENCIES>(declaration),
+  );
   const commands = [
     fs.rm(scanDir),
     fs.mkdir(scanDir),

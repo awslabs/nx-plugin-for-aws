@@ -11,6 +11,7 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -47,6 +48,18 @@ export const pyDynamoDBMcpServerConnectionGenerator = async (
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO,
+    targetProject.root,
+    `${mcpServerName}-${targetProject.name}`,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO,

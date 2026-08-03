@@ -3,32 +3,59 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
+
+/** Dependencies a caller must declare to use `FsCommands`. */
+export const FS_DEPENDENCIES = [
+  { name: 'ncp' },
+  { name: 'rimraf' },
+  { name: 'make-dir-cli' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
- * Utility class for creating platform agnostic commands for filesystem operations.
- * Adds the required dependencies to the root package json
+ * Platform agnostic commands for filesystem operations, adding the CLIs they
+ * need to the root package.json.
  */
-export class FsCommands {
+export class FsCommands<D extends DependencyDeclaration> {
   private tree: Tree;
+  private declaration: D;
 
-  constructor(tree: Tree) {
+  constructor(
+    tree: Tree,
+    declaration: D & MustDeclare<typeof FS_DEPENDENCIES, D>,
+  ) {
     this.tree = tree;
+    this.declaration = declaration;
   }
 
   public cp(src: string, dst: string) {
-    addDependenciesToPackageJson(this.tree, {}, withVersions(['ncp']));
+    this.add('ncp');
     return `ncp ${src} ${dst}`;
   }
 
   public rm(dir: string) {
-    addDependenciesToPackageJson(this.tree, {}, withVersions(['rimraf']));
+    this.add('rimraf');
     return `rimraf ${dir}`;
   }
 
   public mkdir(dir: string) {
-    addDependenciesToPackageJson(this.tree, {}, withVersions(['make-dir-cli']));
+    this.add('make-dir-cli');
     return `make-dir ${dir}`;
+  }
+
+  private add(dep: (typeof FS_DEPENDENCIES)[number]['name']) {
+    addDependenciesToPackageJson(
+      this.tree,
+      {},
+      withVersions(forDependencies<typeof FS_DEPENDENCIES>(this.declaration), [
+        dep,
+      ]),
+    );
   }
 }

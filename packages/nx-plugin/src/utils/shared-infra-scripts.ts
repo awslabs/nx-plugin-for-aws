@@ -8,25 +8,51 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import type {
+  DeclaredTsDependency,
+  DependencyDeclaration,
+  MustDeclare,
+} from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
 import { formatFilesInSubtree } from './format';
 import { esmVars } from './module-format';
 import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
+  generatedInfrastructure,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
   SHARED_SCRIPTS_NAME,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
+
+/**
+ * Dependencies a caller must declare to use the shared infra scripts.
+ *
+ * Gated on infrastructure having been generated, since the scripts project is
+ * only created on that branch.
+ */
+export const SHARED_INFRA_SCRIPTS_DEPENDENCIES = [
+  { name: '@aws-sdk/client-sts', when: generatedInfrastructure },
+  { name: '@aws-sdk/credential-providers', when: generatedInfrastructure },
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];
 
 /**
  * Ensures the shared scripts package exists and adds infra-deploy/infra-destroy
  * scripts to packages/common/scripts/src/infra/. Called by ts#infra when
  * stageConfig is enabled.
  */
-export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
+export async function sharedInfraScriptsGenerator<
+  const D extends DependencyDeclaration,
+>(
+  tree: Tree,
+  declaration: D & MustDeclare<typeof SHARED_INFRA_SCRIPTS_DEPENDENCIES, D>,
+): Promise<void> {
   const scriptsDir = joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR);
 
   await ensureSharedScriptsProject(tree);
@@ -52,7 +78,12 @@ export async function sharedInfraScriptsGenerator(tree: Tree): Promise<void> {
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['@aws-sdk/client-sts', '@aws-sdk/credential-providers']),
+    withVersions(
+      declaration as DependencyDeclaration<
+        typeof SHARED_INFRA_SCRIPTS_DEPENDENCIES
+      >,
+      ['@aws-sdk/client-sts', '@aws-sdk/credential-providers'],
+    ),
     joinPathFragments(
       joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR),
       'package.json',

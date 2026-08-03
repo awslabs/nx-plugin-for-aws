@@ -11,6 +11,7 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -44,6 +45,15 @@ export const pyDynamoDBFastApiConnectionGenerator = async (
     });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO,
+    targetProject.root,
+    targetProject.name,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO,

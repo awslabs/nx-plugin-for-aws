@@ -3,14 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, readJson, type Tree, updateJson } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec';
 import {
   TS_ASTRO_DOCS_GENERATOR_INFO,
   tsAstroDocsGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('ts#astro-docs generator', () => {
   let tree: Tree;
@@ -244,7 +252,11 @@ describe('ts#astro-docs generator', () => {
   });
 
   it('should add generator metric to app.ts when shared constructs exist', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await tsAstroDocsGenerator(tree, {
       name: 'docs',

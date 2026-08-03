@@ -929,6 +929,9 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
     expect(projectConfig.metadata.components[1]).toEqual({
       generator: COGNITO_AUTH_GENERATOR_INFO.id,
       path: 'src/components/CognitoAuth',
+      // Recorded so the version sync can tell a CDK project from a Terraform
+      // one; this case generated with `iac: 'cdk'` above.
+      iac: 'cdk',
     });
   });
 });

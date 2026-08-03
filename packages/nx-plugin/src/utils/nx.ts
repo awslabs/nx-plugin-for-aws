@@ -157,12 +157,30 @@ export const addGeneratorMetadata = (
 export interface ComponentMetadata {
   readonly generator: string;
   readonly name?: string;
+  /**
+   * What this entry wires up. For a connection that is the target — the thing
+   * being connected to — paired with `sourcePath` below.
+   */
   readonly path?: string;
+  /**
+   * The component the connection is made *from*, when both ends are components
+   * of a project rather than whole projects.
+   *
+   * A connection records the project it lives on and the target it reaches, which
+   * alone can't tell which of several components on that project is wired up.
+   * Recorded as a path for the same reason `path` is: it identifies a component
+   * within its project without depending on a name that may repeat.
+   */
+  readonly sourcePath?: string;
   [key: string]: any;
 }
 
 /**
  * Add metadata about the generator that generated the component to the project.json
+ *
+ * A connection between two components passes the source's path as
+ * `additionalMetadata.sourcePath`, so the pair is identifiable rather than just
+ * the two projects.
  */
 export const addComponentGeneratorMetadata = (
   tree: Tree,

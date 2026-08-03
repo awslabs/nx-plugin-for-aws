@@ -11,14 +11,19 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generator';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
+  AGENT_CONNECTION_DEPENDENCIES,
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptClientToAgent,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
 } from '../../../utils/agent-connection/agent-connection';
 import { addDestructuredImport, addStarExport } from '../../../utils/ast';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -26,13 +31,28 @@ import { esmVars } from '../../../utils/module-format';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { withVersions } from '../../../utils/versions';
+import { toProjectRelativePath } from '../../../utils/paths';
 import type { TsAgentGatewayConnectionGeneratorSchema } from './schema';
+
+// The gateway core client + vended client need these whatever the connection's
+// options, so no entry is conditional.
+export const DEPENDENCIES = declareDependencies()({
+  ts: [
+    { name: '@modelcontextprotocol/sdk' },
+    { name: '@strands-agents/sdk' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: 'aws4fetch' },
+    { name: '@aws-sdk/credential-providers' },
+    ...ownedElsewhere(AGENT_CONNECTION_DEPENDENCIES),
+  ],
+});
 
 export const TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -84,8 +104,8 @@ export const tsAgentGatewayConnectionGenerator = async (
 
   // 1. Ensure the shared agent-connection project exists + has the gateway
   //    core client template.
-  await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'gateway');
+  await ensureTypeScriptAgentConnectionProject(tree, DEPENDENCIES);
+  await addTypeScriptCoreClient(tree, 'gateway', DEPENDENCIES);
 
   // 2. Generate the per-connection <Gateway>Client into app/. Local mode
   //    points at the gateway project's local gateway port.
@@ -161,18 +181,18 @@ export const tsAgentGatewayConnectionGenerator = async (
   }
 
   // 5. Dependencies
-  addDependenciesToPackageJson(
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: sourceProject.root });
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
     tree,
-    withVersions([
-      '@modelcontextprotocol/sdk',
-      '@strands-agents/sdk',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-    ]),
-    {},
-    joinPathFragments(sourceProject.root, 'package.json'),
+    sourceProject.name,
+    TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, agentFilePath),
+    gatewayClassName,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

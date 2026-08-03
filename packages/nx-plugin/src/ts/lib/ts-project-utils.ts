@@ -6,11 +6,16 @@ import { joinPathFragments, logger, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../../utils/declared-dependencies';
 import { isEsmWorkspace } from '../../utils/module-format';
 import { ensureProjectPackageJson } from '../../utils/project-package-json';
 import { configureBiomeLint } from './biome';
 import type { ConfigureProjectOptions } from './types';
-import { configureVitest } from './vitest';
+import { configureVitest, type VITEST_DEPENDENCIES } from './vitest';
 
 interface TsConfigReference {
   path: string;
@@ -39,9 +44,10 @@ export const mergeTsReferences = (
 /**
  * Updates typescript projects
  */
-export const configureTsProject = async (
+export const configureTsProject = async <const D extends DependencyDeclaration>(
   tree: Tree,
   options: ConfigureProjectOptions,
+  declaration: D & MustDeclare<typeof VITEST_DEPENDENCIES, D>,
 ) => {
   // Point users at init when the workspace hasn't been configured, since
   // lint/format targets and workspace dependency sync depend on it.
@@ -124,7 +130,11 @@ export const configureTsProject = async (
   });
 
   await configureBiomeLint(tree, options);
-  await configureVitest(tree, options);
+  await configureVitest(
+    tree,
+    options,
+    forDependencies<typeof VITEST_DEPENDENCIES>(declaration),
+  );
 
   // If license checking is configured, make this project's lint target depend
   // on the root license-check target. No-op if there's no license-check target

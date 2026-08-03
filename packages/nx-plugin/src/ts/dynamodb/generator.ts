@@ -12,8 +12,12 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addTsDependencies } from '../../utils/add-dependencies';
 import { resolveContainers } from '../../utils/containers';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
@@ -28,16 +32,36 @@ import {
   type NxGeneratorInfo,
 } from '../../utils/nx';
 import { assignSharedPort } from '../../utils/port';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   DYNAMODB_GENERATOR_IDS,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { sharedDynamoDBScriptsGenerator } from '../../utils/shared-dynamodb-scripts';
-import { withVersions } from '../../utils/versions';
+import {
+  SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES,
+  sharedDynamoDBScriptsGenerator,
+} from '../../utils/shared-dynamodb-scripts';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsDynamoDBGeneratorSchema } from './schema';
+
+export const DEPENDENCIES = declareDependencies()({
+  ts: [
+    { name: '@aws-sdk/client-dynamodb' },
+    { name: 'electrodb' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@types/aws-lambda', dev: true },
+    { name: '@types/node', dev: true },
+    // tsx runs the local-dev scripts from the workspace root.
+    { name: 'tsx', dev: true, root: true },
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES),
+  ],
+});
 
 export const TS_DYNAMODB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -100,7 +124,7 @@ export const tsDynamoDBGenerator = async (
     templateOptions,
   );
 
-  await sharedDynamoDBScriptsGenerator(tree);
+  await sharedDynamoDBScriptsGenerator(tree, DEPENDENCIES);
 
   const scriptsDir = relative(
     dir,
@@ -128,11 +152,20 @@ export const tsDynamoDBGenerator = async (
   };
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
-  addGeneratorMetadata(tree, fullyQualifiedName, TS_DYNAMODB_GENERATOR_INFO);
+  // Recorded so the version sync can tell a CDK project from a Terraform one;
+  // undefined when no infrastructure was generated.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
+  addGeneratorMetadata(
+    tree,
+    fullyQualifiedName,
+    TS_DYNAMODB_GENERATOR_INFO,
+    iac ? { iac } : {},
+  );
 
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addDynamoDBInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
@@ -143,18 +176,7 @@ export const tsDynamoDBGenerator = async (
     });
   }
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      '@aws-sdk/client-dynamodb',
-      'electrodb',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-    ]),
-    withVersions(['@types/aws-lambda', '@types/node']),
-    joinPathFragments(dir, 'package.json'),
-  );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: dir });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_DYNAMODB_GENERATOR_INFO]);
 

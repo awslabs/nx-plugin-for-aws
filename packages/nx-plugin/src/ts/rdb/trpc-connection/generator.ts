@@ -14,6 +14,7 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, pascalCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -58,6 +59,15 @@ export const tsRdbTrpcConnectionGenerator = async (
     sourceProject.root,
     { rdbNameKebab, rdbNameCamel, rdbNamePascal, rdbPackageAlias, engine },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    TS_RDB_TRPC_CONNECTION_GENERATOR_INFO,
+    joinPathFragments('src', 'middleware', `${rdbNameKebab}.ts`),
+    rdbNameCamel,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

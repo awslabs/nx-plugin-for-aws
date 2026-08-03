@@ -5,10 +5,14 @@
 import { parse, stringify } from '@iarna/toml';
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
+import type {
+  DeclaredPy,
+  DependencyDeclaration,
+} from './declared-dependencies';
 import { normalizeDistributionName } from './names';
 import type { UVPyprojectToml } from './nxlv-python';
 import { readToml, updateToml } from './toml';
-import { type IPyDepVersion, withPyVersions } from './versions';
+import { type IPyDepVersion, PY_VERSIONS, withPyVersions } from './versions';
 
 // Dedup key that distinguishes bare packages from the same package with
 // extras (e.g. `foo` vs `foo[bar]`), so adding a bare dep doesn't drop a
@@ -23,13 +27,16 @@ const depKey = (dep: string): string => {
 };
 
 const mergeDeps = (
+  declaration: DependencyDeclaration,
   existing: readonly string[] | undefined,
-  deps: IPyDepVersion[],
+  deps: readonly IPyDepVersion[],
 ): string[] => {
   // Update deps in place by key so re-running does not reorder the list:
   // existing deps keep their position (with their version refreshed), and only
   // genuinely-new deps are appended.
-  const incoming = new Map(withPyVersions(deps).map((d) => [depKey(d), d]));
+  const incoming = new Map(
+    withPyVersions(declaration, deps).map((d) => [depKey(d), d]),
+  );
   const merged = (existing ?? []).map(
     (dep) => incoming.get(depKey(dep)) ?? dep,
   );
@@ -45,15 +52,19 @@ const mergeDeps = (
 /**
  * Add dependencies to a pyproject.toml file
  */
-export const addDependenciesToPyProjectToml = (
+export const addDependenciesToPyProjectToml = <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   projectRoot: string,
-  deps: IPyDepVersion[],
+  declaration: D,
+  deps: readonly DeclaredPy<D>[],
 ) => {
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
   ) as UVPyprojectToml;
   projectToml.project.dependencies = mergeDeps(
+    declaration,
     projectToml.project?.dependencies,
     deps,
   );
@@ -63,18 +74,25 @@ export const addDependenciesToPyProjectToml = (
   );
 };
 
-export const addDependenciesToDependencyGroupInPyProjectToml = (
+export const addDependenciesToDependencyGroupInPyProjectToml = <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   projectRoot: string,
   group: string,
-  deps: IPyDepVersion[],
+  declaration: D,
+  deps: readonly DeclaredPy<D>[],
 ) => {
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
   ) as UVPyprojectToml;
   projectToml['dependency-groups'] = {
     ...projectToml['dependency-groups'],
-    [group]: mergeDeps(projectToml['dependency-groups']?.[group], deps),
+    [group]: mergeDeps(
+      declaration,
+      projectToml['dependency-groups']?.[group],
+      deps,
+    ),
   };
   tree.write(
     joinPathFragments(projectRoot, 'pyproject.toml'),
@@ -98,7 +116,9 @@ export const uvxCommand = (
   args?: string,
   withDeps?: UvxWithDep[],
 ): string => {
-  return `uvx --from ${withPyVersions([dep])[0]} ${
+  // Pins the tool for a one-off invocation; nothing is added to a manifest, so
+  // this needs no declaration.
+  return `uvx --from ${dep}${PY_VERSIONS[dep]} ${
     withDeps
       ? `${withDeps
           .map(

@@ -1196,6 +1196,9 @@ dev = []
         generator: LAMBDA_FUNCTION_GENERATOR_INFO.id,
         path: 'test_project/test_function.py',
         name: 'test-function',
+        // Recorded so the version sync can tell a CDK project from a Terraform
+        // one. This case generates with the default (cdk).
+        iac: 'cdk',
       });
     });
   });

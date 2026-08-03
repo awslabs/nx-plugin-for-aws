@@ -4,14 +4,22 @@
  */
 import type { Tree } from '@nx/devkit';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
 import { TS_DYNAMODB_GENERATOR_INFO, tsDynamoDBGenerator } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 vi.mock('../../utils/containers', () => ({
   resolveContainers: vi.fn(),
@@ -149,7 +157,11 @@ describe('ts#dynamodb generator', () => {
   });
 
   it('should keep an existing dynamodb app construct', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
     tree.write(
       'packages/common/constructs/src/app/dynamodb/my-table.ts',
       '// preserve custom construct',
@@ -168,7 +180,11 @@ describe('ts#dynamodb generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await tsDynamoDBGenerator(tree, defaultOptions);
 

@@ -12,8 +12,9 @@ import {
 } from '@nx/devkit';
 import { getTsLibDetails } from '../../ts/lib/generator';
 import { resolveContainers } from '../../utils/containers';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { toClassName, toKebabCase } from '../../utils/names';
@@ -26,6 +27,10 @@ import {
 } from '../../utils/nx';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
+export const DEPENDENCIES = declareDependencies()({
+  ts: [...FS_DEPENDENCIES],
+});
+
 export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
 );
@@ -34,7 +39,7 @@ export const smithyProjectGenerator = async (
   tree: Tree,
   options: SmithyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const cmd = new FsCommands(tree);
+  const cmd = new FsCommands(tree, DEPENDENCIES);
   const containers = await resolveContainers(tree, 'inherit');
   const type = options.type ?? 'service';
 

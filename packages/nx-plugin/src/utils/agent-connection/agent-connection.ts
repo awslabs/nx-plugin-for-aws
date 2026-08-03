@@ -13,6 +13,12 @@ import pyProjectGenerator, {
 } from '../../py/project/generator';
 import tsProjectGenerator from '../../ts/lib/generator';
 import { addStarExport, applyGritQL, matchGritQL } from '../ast';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+  type MustDeclarePy,
+} from '../declared-dependencies';
 import { addDependenciesToPackageJson } from '../dependencies';
 import { esmVars } from '../module-format';
 import { addDependenciesToPyProjectToml } from '../py';
@@ -21,6 +27,25 @@ import {
   type ITsDepVersion,
   withVersions,
 } from '../versions';
+
+/** TypeScript dependencies a caller must declare to emit agent-connection clients. */
+export const AGENT_CONNECTION_DEPENDENCIES = [
+  { name: '@aws-lambda-powertools/parameters' },
+  { name: '@aws-sdk/credential-providers' },
+  { name: 'aws4fetch' },
+  { name: '@modelcontextprotocol/sdk' },
+  { name: '@a2a-js/sdk' },
+  { name: '@strands-agents/sdk' },
+] as const satisfies readonly { name: ITsDepVersion }[];
+
+/** Python dependencies a caller must declare to emit agent-connection clients. */
+export const AGENT_CONNECTION_PY_DEPENDENCIES = [
+  { name: 'aws-lambda-powertools' },
+  { name: 'strands-agents' },
+] as const satisfies readonly { name: IPyDepVersion }[];
+
+type AgentConnectionPyDependency =
+  (typeof AGENT_CONNECTION_PY_DEPENDENCIES)[number]['name'];
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -159,7 +184,7 @@ interface FrameworkLanguageTemplates<Dep extends string> {
  */
 interface FrameworkTemplates {
   ts?: FrameworkLanguageTemplates<string>;
-  py?: FrameworkLanguageTemplates<IPyDepVersion>;
+  py?: FrameworkLanguageTemplates<AgentConnectionPyDependency>;
 }
 
 const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
@@ -263,7 +288,10 @@ const tsCoreDir = () =>
  * a template also declares its dependencies in the agent-connection project's
  * package.json so the `noUndeclaredDependencies` lint rule passes.
  */
-const TS_TEMPLATE_DEPS: Record<string, ITsDepVersion[]> = {
+const TS_TEMPLATE_DEPS: Record<
+  string,
+  (typeof AGENT_CONNECTION_DEPENDENCIES)[number]['name'][]
+> = {
   'core-runtime-config': ['@aws-lambda-powertools/parameters'],
   'core-auth': ['@aws-sdk/credential-providers', 'aws4fetch'],
   'core-shared': ['@aws-sdk/credential-providers', '@modelcontextprotocol/sdk'],
@@ -279,7 +307,11 @@ const TS_TEMPLATE_DEPS: Record<string, ITsDepVersion[]> = {
   'core-strands/a2a': ['@strands-agents/sdk'],
 };
 
-const emitTs = (tree: Tree, templateDir: string) => {
+const emitTs = (
+  tree: Tree,
+  templateDir: string,
+  declaration: DependencyDeclaration,
+) => {
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', templateDir),
@@ -291,7 +323,10 @@ const emitTs = (tree: Tree, templateDir: string) => {
   if (deps?.length) {
     addDependenciesToPackageJson(
       tree,
-      withVersions(deps),
+      withVersions(
+        forDependencies<typeof AGENT_CONNECTION_DEPENDENCIES>(declaration),
+        deps,
+      ),
       {},
       joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'package.json'),
     );
@@ -304,8 +339,11 @@ const emitTs = (tree: Tree, templateDir: string) => {
  * Per-connection generators emit their own protocol + framework client
  * templates via `addTypeScriptCoreClient`.
  */
-export async function ensureTypeScriptAgentConnectionProject(
+export async function ensureTypeScriptAgentConnectionProject<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
+  declaration: D & MustDeclare<typeof AGENT_CONNECTION_DEPENDENCIES, D>,
 ): Promise<void> {
   const projectJsonPath = joinPathFragments(
     AGENT_CONNECTION_PROJECT_DIR,
@@ -319,7 +357,7 @@ export async function ensureTypeScriptAgentConnectionProject(
   }
 
   // Framework-agnostic runtime-config + session-context helpers.
-  emitTs(tree, 'core-runtime-config');
+  emitTs(tree, 'core-runtime-config', declaration);
 
   // Re-export session-context helpers so agent server entry points can set the
   // current session on each inbound request without pulling in internals.
@@ -337,8 +375,11 @@ export async function ensureTypeScriptAgentConnectionProject(
  * is wired in, so the agent generator calls this directly; connection
  * generators call it transitively via `addTypeScriptCoreClient`.
  */
-export async function addTypeScriptFrameworkBase(
+export async function addTypeScriptFrameworkBase<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
+  declaration: D & MustDeclare<typeof AGENT_CONNECTION_DEPENDENCIES, D>,
   framework: AgentFramework = 'strands',
 ): Promise<void> {
   const lang = FRAMEWORKS[framework].ts;
@@ -348,7 +389,7 @@ export async function addTypeScriptFrameworkBase(
     );
   }
   if (lang.base) {
-    emitTs(tree, lang.base);
+    emitTs(tree, lang.base, declaration);
   }
 
   const indexPath = joinPathFragments(
@@ -372,23 +413,30 @@ export async function addTypeScriptFrameworkBase(
  *  - Layer 1 the protocol's transport/client-config — always
  *  - Layer 2 the framework's base helpers + protocol client — per framework
  */
-export async function addTypeScriptCoreClient(
+export async function addTypeScriptCoreClient<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   protocol: ConnectionProtocol,
+  declaration: D & MustDeclare<typeof AGENT_CONNECTION_DEPENDENCIES, D>,
   framework: AgentFramework = 'strands',
 ): Promise<void> {
   const fw = frameworkLanguage(framework, 'ts', protocol);
 
-  emitTs(tree, 'core-auth');
+  emitTs(tree, 'core-auth', declaration);
   if (MCP_TRANSPORT_PROTOCOLS.includes(protocol)) {
-    emitTs(tree, 'core-shared');
+    emitTs(tree, 'core-shared', declaration);
   }
-  emitTs(tree, TS_PROTOCOL_TEMPLATES[protocol]);
+  emitTs(tree, TS_PROTOCOL_TEMPLATES[protocol], declaration);
 
   // Framework Layer 2: base helpers (re-exported for the agent server) + the
   // thin protocol client.
-  await addTypeScriptFrameworkBase(tree, framework);
-  emitTs(tree, fw.protocol);
+  await addTypeScriptFrameworkBase(
+    tree,
+    forDependencies<typeof AGENT_CONNECTION_DEPENDENCIES>(declaration),
+    framework,
+  );
+  emitTs(tree, fw.protocol, declaration);
 }
 
 /**
@@ -396,8 +444,11 @@ export async function addTypeScriptCoreClient(
  * Only creates the project shell — per-connection generators are responsible
  * for emitting their own core client templates.
  */
-export async function ensurePythonAgentConnectionProject(
+export async function ensurePythonAgentConnectionProject<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
+  declaration: D & MustDeclarePy<typeof AGENT_CONNECTION_PY_DEPENDENCIES, D>,
 ): Promise<void> {
   const projectDir = getPythonAgentConnectionProjectDir(tree);
   const moduleName = getPythonAgentConnectionModuleName(tree);
@@ -452,7 +503,12 @@ export async function ensurePythonAgentConnectionProject(
   );
 
   // The runtime-config loader reads AppConfig via aws-lambda-powertools.
-  addDependenciesToPyProjectToml(tree, projectDir, ['aws-lambda-powertools']);
+  addDependenciesToPyProjectToml(
+    tree,
+    projectDir,
+    forDependencies<[], typeof AGENT_CONNECTION_PY_DEPENDENCIES>(declaration),
+    ['aws-lambda-powertools'],
+  );
 }
 
 const pyCoreDir = (tree: Tree) =>
@@ -478,8 +534,11 @@ const emitPy = (tree: Tree, templateDir: string) =>
  * client is wired in, so the agent generator calls this directly; connection
  * generators call it transitively via `addPythonCoreClient`.
  */
-export async function addPythonFrameworkBase(
+export async function addPythonFrameworkBase<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
+  declaration: D & MustDeclarePy<typeof AGENT_CONNECTION_PY_DEPENDENCIES, D>,
   framework: AgentFramework = 'strands',
 ): Promise<void> {
   const lang = FRAMEWORKS[framework].py;
@@ -510,6 +569,7 @@ export async function addPythonFrameworkBase(
     addDependenciesToPyProjectToml(
       tree,
       getPythonAgentConnectionProjectDir(tree),
+      forDependencies<[], typeof AGENT_CONNECTION_PY_DEPENDENCIES>(declaration),
       lang.deps,
     );
   }
@@ -525,9 +585,12 @@ export async function addPythonFrameworkBase(
  *  - Layer 1 the protocol's transport/client-config — always
  *  - Layer 2 the framework's base helpers + protocol client — per framework
  */
-export async function addPythonCoreClient(
+export async function addPythonCoreClient<
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   protocol: ConnectionProtocol,
+  declaration: D & MustDeclarePy<typeof AGENT_CONNECTION_PY_DEPENDENCIES, D>,
   framework: AgentFramework = 'strands',
 ): Promise<void> {
   const fw = frameworkLanguage(framework, 'py', protocol);
@@ -539,7 +602,11 @@ export async function addPythonCoreClient(
   emitPy(tree, PY_PROTOCOL_TEMPLATES[protocol]);
 
   // Framework Layer 2: base helpers + the thin protocol client.
-  await addPythonFrameworkBase(tree, framework);
+  await addPythonFrameworkBase(
+    tree,
+    forDependencies<[], typeof AGENT_CONNECTION_PY_DEPENDENCIES>(declaration),
+    framework,
+  );
   emitPy(tree, fw.protocol);
 }
 

@@ -10,7 +10,9 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
+  AGENT_CONNECTION_DEPENDENCIES,
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
@@ -20,7 +22,10 @@ import {
   addStarExport,
   applyGritQL,
 } from '../../../utils/ast';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
@@ -28,13 +33,32 @@ import { esmVars } from '../../../utils/module-format';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { withVersions } from '../../../utils/versions';
+import { toProjectRelativePath } from '../../../utils/paths';
 import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
+
+// The A2A core client + vended client need these whatever the connection's
+// options, so no entry is conditional.
+// The A2A client the generated agent code imports, plus the AppConfig lookup and
+// sigv4 signing it resolves the remote agent with. Added to the workspace root,
+// where this connection has always put them.
+export const DEPENDENCIES = declareDependencies()({
+  ts: [
+    { name: '@a2a-js/sdk', root: true },
+    { name: '@strands-agents/sdk', root: true },
+    { name: '@aws-lambda-powertools/parameters', root: true },
+    { name: '@aws-sdk/client-appconfigdata', root: true },
+    { name: 'aws4fetch', root: true },
+    { name: '@aws-sdk/credential-providers', root: true },
+    { name: 'zod', root: true },
+    ...ownedElsewhere(AGENT_CONNECTION_DEPENDENCIES),
+  ],
+});
 
 export const TS_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -84,8 +108,8 @@ export const tsAgentA2aConnectionGenerator = async (
   const npmScope = getNpmScope(tree);
 
   // 1. Ensure the shared agent-connection project exists + has the A2A core client
-  await ensureTypeScriptAgentConnectionProject(tree);
-  await addTypeScriptCoreClient(tree, 'a2a');
+  await ensureTypeScriptAgentConnectionProject(tree, DEPENDENCIES);
+  await addTypeScriptCoreClient(tree, 'a2a', DEPENDENCIES);
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
@@ -184,19 +208,19 @@ export const tsAgentA2aConnectionGenerator = async (
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  // 5. Add dependencies
-  addDependenciesToPackageJson(
+  // 5. Add dependencies to the workspace root manifest
+  addTsDependencies(tree, DEPENDENCIES);
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
     tree,
-    withVersions([
-      '@a2a-js/sdk',
-      '@strands-agents/sdk',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-      'zod',
-    ]),
-    {},
+    sourceProject.name,
+    TS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, agentFilePath),
+    targetAgentClassName,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

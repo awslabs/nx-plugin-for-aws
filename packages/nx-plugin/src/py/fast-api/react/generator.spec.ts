@@ -5,14 +5,22 @@
 import { type Tree, updateJson } from '@nx/devkit';
 import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
 import { matchGritQL } from '../../../utils/ast';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { pyFastApiProjectGenerator } from '../generator';
 import {
   FAST_API_REACT_GENERATOR_INFO,
   fastApiReactGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('fastapi react generator', () => {
   let tree: Tree;
@@ -331,7 +339,11 @@ export function Main() {
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     // Call the generator function
     await fastApiReactGenerator(tree, {

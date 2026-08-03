@@ -192,6 +192,66 @@ Do not add a `version` field to `migrations.json` entries — versions arrive on
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
 
+#### Vended dependency versions
+
+Version bumps ship themselves, and everything that makes that work lives in `utils/version-upgrade-migration/`. The weekly `update-versions` PR rewrites the vended versions in `utils/versions.ts` and nothing else needs authoring or generating per bump: `migrations.json` carries one committed `sync-vended-versions` entry marked `everyMigration: true`, pointing at `migration.ts`. That delegates to `syncVendedVersions` (`sync-vended-versions.ts`), which syncs TypeScript dependencies (catalogs and direct ranges), Python `pyproject.toml` pins, Terraform provider versions and the plugin version the metrics files report.
+
+An `everyMigration` entry is never backfilled or pinned — stamping re-writes its version to each pending release — so it runs on every upgrade, and always **last** in the run. Both fall out of the same mechanism: `nx migrate` gates a migration on `installed < version` and sorts the run ascending by version, so an entry carrying the pending version is always eligible and always sorts above the code migrations. Running last is what lets a code migration add a dependency that this then brings up to date. Target versions come from the installed plugin's own tables, so there is nothing release-specific to register. The flag is source-only and stripped from the published manifest.
+
+##### Declaring the dependencies a generator owns
+
+Only dependencies **this plugin added** are synced, so a package the user installed themselves keeps the version they chose. Every generator declares what it may add:
+
+```ts
+/** The metadata this generator records, which its predicates read. */
+export interface TsMcpServerMetadata {
+  readonly port: number;
+  readonly auth: string;
+}
+
+export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
+  ts: [
+    { name: '@modelcontextprotocol/sdk' },
+    { name: 'express', when: (m) => m.auth === 'iam' },
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+  py: [{ name: 'mcp' }, { name: 'boto3' }],
+});
+```
+
+The declaration is passed to `withVersions` / `withPyVersions` and to every helper that adds dependencies, which is what enforces it: adding an undeclared package is a type error, and a helper's signature rejects a caller whose declaration doesn't cover what the helper adds — naming the missing packages. `MustDeclare` does that check, and a runtime guard catches anything that reaches it past the type checker.
+
+Consequences for authoring a generator:
+
+- **Declare every branch.** A declaration is static, so every conditional dependency appears; `when` decides which apply.
+- **Spread the helpers you call.** A helper publishes a `*_DEPENDENCIES` constant (`FS_DEPENDENCIES`, `SHARED_CONSTRUCTS_DEPENDENCIES`) covering what it adds, including its own nested helpers, so spreading one constant covers the whole chain.
+- **Name the export `DEPENDENCIES`.** The migration reads it by that name.
+- **Cover what you delegate to.** A helper taken through `MustDeclare` is checked by the compiler, but one that merely exports its own `DEPENDENCIES` (the AG-UI react connection, for instance) is not — spread it, as `ts#agent#react-connection` does.
+- **Wrap a spread the caller doesn't install.** A helper adds its packages to the project it owns, so a generator that spreads the constant to claim ownership must not also install it: wrap with `ownedElsewhere(...)`. Ownership is unaffected — the sync still upgrades those packages wherever they sit; only the install is skipped. If the helper is called down one branch only, wrap with `onlyWhen(..., predicate)` first, which keeps each entry's own condition as well as the branch:
+
+  ```ts
+  ...ownedElsewhere(onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi)),
+  ```
+- **Record the generator against a project.** `addGeneratorMetadata` / `addComponentGeneratorMetadata` is what makes the declaration discoverable; without it the dependencies are never recognised as ours. Connection generators record too, even the ones that add no dependencies today, so adding one later is owned automatically.
+- **Add dependencies from the declaration, not a second list.** Call `addTsDependencies` / `addPyDependencies` with the declaration and the metadata; the call site names no packages. Gate anything option-specific with a `when` predicate, and flag entries with `dev`, `root` (workspace root manifest), `group` (pyproject dependency group) or `versionOnly` (owned so its pinned version stays current, but never installed here):
+
+  ```ts
+  addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });
+  addPyDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });
+  ```
+
+  Both take the same options, so the two calls read alike. Omitting `projectRoot` targets the workspace root, which is also where `root: true` entries go regardless.
+
+- **Build the metadata once and use it twice.** Pass the very object recorded via `addGeneratorMetadata` / `addComponentGeneratorMetadata` to the dependency call, so what the generator adds and what the migration owns cannot drift. If a recorded value is computed later (an assigned port, say), move the dependency call below it rather than duplicating the literal.
+- **Only read recorded fields in a predicate.** The migration replays predicates against project metadata, so a field the generator never records can never match — the dependency would silently stop being upgraded. A predicate that reads absent metadata (or throws) counts as not applying: the migration will not claim a branch it cannot confirm. A test enforces that every field a predicate reads is a member of the generator's metadata interface.
+
+At upgrade time the sync reads the declarations of the generators the workspace has run and moves only those versions, always upwards. Ownership is per workspace, not per manifest: if a generator that owns `zod` has run anywhere, every `zod` in the workspace is synced.
+
+Two things follow for a generator author:
+
+- **Write an override in both yarn descriptor forms.** A generator pins a package under an override when a dependency's own range would otherwise resolve a second, incompatible copy (`ts#mcp-server`'s `zod`, `ts#rdb`'s `@types/pg`). Classic yarn honours only the `**/`-prefixed descriptor in a workspace, while berry honours only the bare one and *deletes* a glob descriptor on install (`YN0057`) — so writing one form alone leaves the dedupe silently inert under the other major. The sync keeps whichever fields the workspace's package manager reads up to date.
+- **Leave the nx packages alone.** They move through `packageJsonUpdates` rather than the sync, so `nx migrate` still collects Nx's own migrations for that hop. `TS_VERSIONS.nx` (`NX_VERSION`) is the single source of truth, and a test guards that every nx package matches it — a workspace nx even a patch apart hoists a second nested nx and the two deadlock `nx sync`.
+
 #### Testing
 
 Every migration needs a `migration.spec.ts` alongside it using `createTreeUsingTsSolutionSetup()`, covering: the migration applies to the vended shape, skips (and reports) code it doesn't recognise, and is idempotent.
@@ -201,6 +261,8 @@ The `migrate` e2e test then covers every migration together: it creates a worksp
 ```bash
 pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=migrate
 ```
+
+Unit tests only prove the migration does what you wrote it to do. Also **test the migration manually against a real workspace generated by the latest published version**, since that is the state your users are upgrading from. The goal is to confirm the migrated workspace matches what today's generators would produce.
 
 First build the local packages:
 

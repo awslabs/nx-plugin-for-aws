@@ -16,7 +16,11 @@ import {
   addLicenseCheckToLintTarget,
   ensurePythonLicenseCollector,
 } from '../../license/config';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import {
+  addPyDependencies,
+  addTsDependencies,
+} from '../../utils/add-dependencies';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -35,10 +39,20 @@ import {
   uvProjectGenerator,
 } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
-import { addDependenciesToDependencyGroupInPyProjectToml } from '../../utils/py';
 import { updateToml } from '../../utils/toml';
 import { withVersions } from '../../utils/versions';
 import type { PyProjectGeneratorSchema } from './schema';
+
+export const DEPENDENCIES = declareDependencies()({
+  ts: [{ name: '@nxlv/python', dev: true, root: true }],
+  py: [
+    // The linting and type checking tools live in the workspace root pyproject.
+    // Pinned to the version generation-time formatting uses, so generated files
+    // stay `ruff format --check`-clean across ruff releases.
+    { name: 'ruff', group: 'dev', root: true },
+    { name: 'ty', group: 'dev', root: true },
+  ],
+});
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -126,9 +140,9 @@ export const pyProjectGenerator = async (
   const { dir, normalizedModuleName, fullyQualifiedName, distributionName } =
     getPyProjectDetails(tree, schema);
 
-  const pythonPlugin = withVersions(['@nxlv/python']);
-  addDependenciesToPackageJson(tree, {}, pythonPlugin);
+  addTsDependencies(tree, DEPENDENCIES);
 
+  const pythonPlugin = withVersions(DEPENDENCIES, ['@nxlv/python']);
   Object.entries(pythonPlugin).forEach(([name, version]) =>
     ensurePackage(name, version),
   );
@@ -275,12 +289,7 @@ export const pyProjectGenerator = async (
     },
   );
 
-  // Pin ruff to the version generation-time formatting uses (PY_VERSIONS), so
-  // generated files stay `ruff format --check`-clean across ruff releases.
-  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', [
-    'ruff',
-    'ty',
-  ]);
+  addPyDependencies(tree, DEPENDENCIES);
 
   // Base format target checks rather than writes (so build/lint don't rewrite
   // source); `fix` writes, and `skip-lint` writes without failing so it stays

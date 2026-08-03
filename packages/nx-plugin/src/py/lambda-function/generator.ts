@@ -10,7 +10,12 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addPyDependencies } from '../../utils/add-dependencies';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIac } from '../../utils/iac';
@@ -31,9 +36,20 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { toProjectRelativePath } from '../../utils/paths';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import type { PyLambdaFunctionGeneratorSchema } from './schema';
+
+export const DEPENDENCIES = declareDependencies()({
+  ts: [...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES)],
+  py: [
+    { name: 'aws-lambda-powertools' },
+    { name: 'aws-lambda-powertools[tracer]' },
+    { name: 'aws-lambda-powertools[parser]' },
+  ],
+});
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -136,12 +152,18 @@ export const pyLambdaFunctionGenerator = async (
   // Check if the project has a bundle target and if not add it
   const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
 
-  if (infra !== 'none') {
-    const iac = await resolveIac(tree, schema.iac);
+  // Recorded below so the version sync can tell a CDK project from a
+  // Terraform one; undefined when no infrastructure was generated.
+  const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
+  if (infra !== 'none') {
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DEPENDENCIES,
+    );
 
     await addLambdaFunctionInfra(tree, {
       functionProjectName: projectConfig.name,
@@ -182,11 +204,7 @@ export const pyLambdaFunctionGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, dir, [
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
-    'aws-lambda-powertools[parser]',
-  ]);
+  addPyDependencies(tree, DEPENDENCIES, { projectRoot: dir });
 
   addComponentGeneratorMetadata(
     tree,
@@ -194,6 +212,7 @@ export const pyLambdaFunctionGenerator = async (
     LAMBDA_FUNCTION_GENERATOR_INFO,
     toProjectRelativePath(projectConfig, functionPath),
     lambdaFunctionKebabCase,
+    iac ? { iac } : {},
   );
 
   await addGeneratorMetricsIfApplicable(tree, [LAMBDA_FUNCTION_GENERATOR_INFO]);

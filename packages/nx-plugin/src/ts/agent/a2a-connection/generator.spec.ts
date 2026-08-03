@@ -3,13 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import {
   TS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
   tsAgentA2aConnectionGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('ts#agent#a2a-connection generator', () => {
   let tree: Tree;
@@ -212,7 +220,11 @@ export const getAgent = async (sessionId: string) =>
 
   it('should add generator metric', async () => {
     setupProjects();
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
     await tsAgentA2aConnectionGenerator(tree, {
       sourceProject: '@test/ts-host',
       targetProject: '@test/ts-remote',

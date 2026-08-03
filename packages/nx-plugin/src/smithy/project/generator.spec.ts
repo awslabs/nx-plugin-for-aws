@@ -3,13 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, readJson, type Tree } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   SMITHY_PROJECT_GENERATOR_INFO,
   smithyProjectGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('smithyProjectGenerator', () => {
   let tree: Tree;
@@ -189,7 +197,11 @@ describe('smithyProjectGenerator', () => {
 
   it('should add generator metric to app.ts when shared constructs exist', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     // Call the generator function
     await smithyProjectGenerator(tree, {

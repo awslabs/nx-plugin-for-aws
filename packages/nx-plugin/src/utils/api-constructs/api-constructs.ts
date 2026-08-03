@@ -11,11 +11,19 @@ import {
   updateJson,
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
+import {
+  type DeclaredTsDependency,
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../declared-dependencies';
 import { addDependenciesToPackageJson } from '../dependencies';
 import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
+  generatedInfrastructure,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
@@ -26,6 +34,22 @@ import {
   terraformProviderVersions,
   withVersions,
 } from '../versions';
+
+/**
+ * Dependencies a caller must declare to add API Gateway infrastructure.
+ *
+ * Gated on infrastructure having been generated: `addApiGatewayInfra` only runs
+ * on that branch, so a project generated with `infra: 'none'` never receives
+ * these.
+ */
+export const API_CONSTRUCTS_DEPENDENCIES = [
+  { name: '@aws-sdk/client-api-gateway', when: generatedInfrastructure },
+  { name: '@aws-sdk/client-iam', when: generatedInfrastructure },
+  { name: '@trpc/server', when: generatedInfrastructure },
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
@@ -60,12 +84,13 @@ export interface AddApiGatewayConstructOptions {
   auth: 'iam' | 'cognito' | 'custom';
 }
 
-export const addApiGatewayInfra = async (
+export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
   tree: Tree,
   options: AddApiGatewayConstructOptions & { iac: Iac },
+  declaration: D & MustDeclare<typeof API_CONSTRUCTS_DEPENDENCIES, D>,
 ) => {
   if (options.iac === 'cdk') {
-    await addApiGatewayCdkConstructs(tree, options);
+    await addApiGatewayCdkConstructs(tree, options, declaration);
   } else if (options.iac === 'terraform') {
     addApiGatewayTerraformModules(tree, options);
   } else {
@@ -96,6 +121,7 @@ export const addApiGatewayInfra = async (
 const addApiGatewayCdkConstructs = async (
   tree: Tree,
   options: AddApiGatewayConstructOptions,
+  declaration: DependencyDeclaration,
 ) => {
   const generateCoreApiFile = (name: string) => {
     generateFiles(
@@ -130,7 +156,8 @@ const addApiGatewayCdkConstructs = async (
   }
 
   // Declare the deps the generated core construct files import.
-  const constructDeps: ITsDepVersion[] = [];
+  const constructDeps: (typeof API_CONSTRUCTS_DEPENDENCIES)[number]['name'][] =
+    [];
   if (options.constructType === 'rest') {
     // REST account construct configures the account via the AWS SDK.
     constructDeps.push('@aws-sdk/client-api-gateway', '@aws-sdk/client-iam');
@@ -142,7 +169,10 @@ const addApiGatewayCdkConstructs = async (
   if (constructDeps.length > 0) {
     addDependenciesToPackageJson(
       tree,
-      withVersions(constructDeps),
+      withVersions(
+        forDependencies<typeof API_CONSTRUCTS_DEPENDENCIES>(declaration),
+        constructDeps,
+      ),
       {},
       joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'package.json'),
     );
