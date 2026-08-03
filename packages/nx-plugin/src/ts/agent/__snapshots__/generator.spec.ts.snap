@@ -564,6 +564,81 @@ await chatLoop(new TrpcWebSocketAdapter(), process.env.URL ?? '');
 "
 `;
 
+exports[`ts#agent generator > should generate session.ts using S3 storage by default > session.ts (s3) 1`] = `
+"import { SessionManager } from '@strands-agents/sdk';
+import { LocalFileStorage, S3Storage } from '@strands-agents/sdk/storage';
+import {
+  getCurrentSessionId,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * Returns a SessionManager for persisting conversation state across
+ * invocations. Local development always uses local file storage for
+ * convenience, regardless of the configured session option. Without a
+ * configured session option, conversation state is kept in memory only and
+ * does not survive process restarts.
+ */
+export const getSessionManager = async (): Promise<SessionManager> => {
+  const sessionId = getCurrentSessionId();
+  if (!sessionId) {
+    throw new Error(
+      'No current session id — cannot resolve a SessionManager outside of a request scope.',
+    );
+  }
+  if (process.env.LOCAL_DEV === 'true') {
+    return new SessionManager({
+      sessionId,
+      storage: new LocalFileStorage(
+        '../../tmp/agents/strands/test-project-agent',
+      ),
+    });
+  }
+  const config = await getAgentCoreRuntimeConfig();
+  const bucketName =
+    config.agentRuntimes?.['TestProjectAgent']?.session?.bucketName;
+  if (!bucketName) {
+    throw new Error(
+      "No S3 bucket configured for this agent's session in runtime configuration.",
+    );
+  }
+  return new SessionManager({ sessionId, storage: new S3Storage(bucketName) });
+};
+"
+`;
+
+exports[`ts#agent generator > should generate session.ts using in-memory storage when session is in-memory > session.ts (in-memory) 1`] = `
+"import { SessionManager } from '@strands-agents/sdk';
+import { LocalFileStorage, InMemoryStorage } from '@strands-agents/sdk/storage';
+import { getCurrentSessionId } from '@proj/agent-connection';
+
+/**
+ * Returns a SessionManager for persisting conversation state across
+ * invocations. Local development always uses local file storage for
+ * convenience, regardless of the configured session option. Without a
+ * configured session option, conversation state is kept in memory only and
+ * does not survive process restarts.
+ */
+export const getSessionManager = async (): Promise<SessionManager> => {
+  const sessionId = getCurrentSessionId();
+  if (!sessionId) {
+    throw new Error(
+      'No current session id — cannot resolve a SessionManager outside of a request scope.',
+    );
+  }
+  if (process.env.LOCAL_DEV === 'true') {
+    return new SessionManager({
+      sessionId,
+      storage: new LocalFileStorage(
+        '../../tmp/agents/strands/test-project-agent',
+      ),
+    });
+  }
+  return new SessionManager({ sessionId, storage: new InMemoryStorage() });
+};
+"
+`;
+
 exports[`ts#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/node:lts-slim
 
@@ -2113,6 +2188,274 @@ export function zAsyncIterable<
       TReturnOut
     >
   >;
+}
+"
+`;
+
+exports[`ts#agent generator > should not create session bucket infrastructure when session is in-memory (Terraform) > terraform-agent.tf (in-memory) 1`] = `
+"variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). The agent reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
+  type        = string
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "InMemoryTerraformAgent"
+  docker_image_tag = "proj-in-memory-terraform-agent:latest"
+  server_protocol = "HTTP"
+  enable_vpc = var.enable_vpc
+  vpc_id = var.vpc_id
+  subnet_ids = var.subnet_ids
+
+  env = merge({
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+  }, var.env)
+  additional_iam_policy_statements = concat([
+    {
+      Effect   = "Allow"
+      Action   = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    },
+    # Grant access for the agent to invoke bedrock models
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ], var.additional_iam_policy_statements)
+  tags = var.tags
+}
+
+# Add agent runtime ARN to runtime config
+module "add_agent_runtime_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "agentRuntimes"
+  value     = { "InMemoryTerraformAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn } }
+
+  depends_on = [module.agent_core_runtime]
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the agent core runtime role"
+  value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime"
+  value       = module.agent_core_runtime.invocation_url
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
+  value       = var.appconfig_application_id
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = module.agent_core_runtime.security_group_id
+}
+"
+`;
+
+exports[`ts#agent generator > should not create session bucket infrastructure when session is in-memory > agent-construct.ts (in-memory) 1`] = `
+"import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import {
+  PolicyStatement,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+export type InMemoryAgentProps = Omit<
+  RuntimeProps,
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+>;
+
+export class InMemoryAgent
+  extends Construct
+  implements IGrantable, IConnectable
+{
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+
+  constructor(scope: Construct, id: string, props?: InMemoryAgentProps) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/apps/test-project/bundle/agent/in-memory-agent',
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
+
+    this.agentCoreRuntime = new Runtime(this, 'InMemoryAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
+      ...props,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props?.environmentVariables,
+      },
+    });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      InMemoryAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+      },
+    });
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
+  }
 }
 "
 `;

@@ -65,6 +65,7 @@ export interface TsAgentMetadata extends IacMetadata {
   readonly rc: string;
   readonly auth: string;
   readonly protocol: string;
+  readonly session: string;
 }
 
 // Each entry names the branch it belongs to, so the same declaration drives both
@@ -77,6 +78,7 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     { name: '@aws-sdk/client-appconfigdata' },
     { name: '@aws-lambda-powertools/parameters' },
     { name: '@modelcontextprotocol/sdk' },
+    { name: '@aws-sdk/client-s3', when: (m) => m.session === 's3' },
     { name: 'express', when: (m) => m.protocol !== 'http' },
     { name: '@a2a-js/sdk', when: (m) => m.protocol === 'a2a' },
     { name: '@ag-ui/aws-strands', when: (m) => m.protocol === 'ag-ui' },
@@ -333,6 +335,7 @@ export const tsAgentGenerator = async (
     rc: agentNameClassName,
     auth,
     protocol,
+    session,
     ...(iac ? { iac } : {}),
   };
 
