@@ -17,7 +17,10 @@ import {
   addTypeScriptFrameworkBase,
   ensureTypeScriptAgentConnectionProject,
 } from '../../utils/agent-connection/agent-connection';
-import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import {
+  AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
+  addAgentInfra,
+} from '../../utils/agent-core-constructs/agent-core-constructs';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
@@ -28,8 +31,10 @@ import {
   ownedElsewhere,
 } from '../../utils/declared-dependencies';
 import {
+  ADOT_IMAGE_DEPENDENCIES,
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
 } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -116,7 +121,10 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     ...ownedElsewhere(FS_DEPENDENCIES),
     ...ownedElsewhere(DOCKER_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
+    ...ownedElsewhere(ADOT_IMAGE_DEPENDENCIES),
   ],
+  py: ownedElsewhere(AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES),
 });
 
 export const TS_AGENT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

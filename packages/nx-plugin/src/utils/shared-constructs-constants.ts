@@ -44,6 +44,14 @@ export const generatedInfrastructure = (m: IacMetadata): boolean =>
   m.iac !== undefined;
 
 /**
+ * Whether Terraform infrastructure was generated, for the versions only a `.tf`
+ * module pins — a Terraform inline script's `uv run --with` pins, which the CDK
+ * branch never writes.
+ */
+export const generatedTerraform = (m: IacMetadata): boolean =>
+  m.iac === 'terraform';
+
+/**
  * Dependencies a caller must declare to use the shared constructs project.
  * Lives here so generators can spread it without importing the generator.
  *

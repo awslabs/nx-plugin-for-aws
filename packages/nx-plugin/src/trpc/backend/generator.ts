@@ -13,6 +13,7 @@ import tsProjectGenerator from '../../ts/lib/generator';
 import { addTsDependencies } from '../../utils/add-dependencies';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
+  API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
 } from '../../utils/api-constructs/api-constructs';
 import {
@@ -83,6 +84,7 @@ export const DEPENDENCIES = declareDependencies<TsTrpcApiMetadata>()({
     ...ownedElsewhere(BUNDLE_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
+  py: ownedElsewhere(API_CONSTRUCTS_PY_DEPENDENCIES),
 });
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

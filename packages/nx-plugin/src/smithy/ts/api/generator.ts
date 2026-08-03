@@ -14,6 +14,7 @@ import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
 import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
+  API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
 } from '../../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
@@ -79,6 +80,7 @@ export const DEPENDENCIES = declareDependencies<TsSmithyApiMetadata>()({
     ...ownedElsewhere(BUNDLE_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
+  py: ownedElsewhere(API_CONSTRUCTS_PY_DEPENDENCIES),
 });
 
 export const TS_SMITHY_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

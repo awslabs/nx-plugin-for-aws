@@ -35,6 +35,31 @@ export const nodeImageVersions = () => ({
   minimatchVersion: TS_VERSIONS.minimatch,
 });
 
+/**
+ * Packages a vended Node `Dockerfile` pins, which every generator writing one
+ * must declare so the version sync keeps those pins current.
+ *
+ * Spread through `ownedElsewhere`: the pin lives in the image build rather than
+ * in any manifest, so nothing is installed into the workspace. Left undeclared
+ * these would be the only vended versions never upgraded — and they are
+ * precisely the ones held at a version clear of a known HIGH/CRITICAL
+ * vulnerability.
+ */
+export const NODE_IMAGE_DEPENDENCIES = [
+  { name: 'npm' },
+  { name: 'minimatch' },
+] as const;
+
+/**
+ * Packages the AWS Distro for OpenTelemetry install in a vended `Dockerfile`
+ * pins, for the images that auto-instrument with it. Spread through
+ * `ownedElsewhere` for the same reason as {@link NODE_IMAGE_DEPENDENCIES}.
+ */
+export const ADOT_IMAGE_DEPENDENCIES = [
+  { name: '@aws/aws-distro-opentelemetry-node-autoinstrumentation' },
+  { name: '@opentelemetry/propagator-jaeger' },
+] as const;
+
 export interface DockerScanTargetOptions {
   /**
    * Project configuration to add the scan target to (mutated in place).

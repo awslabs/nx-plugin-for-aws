@@ -25,6 +25,7 @@ import {
   type OwnedDependencies,
   ownedDependencies,
 } from './owned-dependencies';
+import { syncEmbeddedVersions } from './sync-embedded-versions';
 import { syncMetricsVersion } from './sync-metrics-version';
 import { isVendedUpgrade } from './vended-upgrade';
 
@@ -649,6 +650,7 @@ export const syncVendedVersions = async (
   const overrides = syncOverrides(tree, owned);
   const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
+  await syncEmbeddedVersions(tree, owned);
   await syncMetricsVersion(tree);
 
   // Lock files are left to the user: `nx migrate` only installs when the root
@@ -670,6 +672,10 @@ export const syncVendedVersions = async (
       `Terraform provider versions were updated in ${terraformFiles.length} file(s). Run \`terraform init -upgrade\` in each Terraform project to update its lock file.`,
     );
   }
+  // The embedded pins need no next step: a Dockerfile pin, an inline script's
+  // pin and a target's tool image are all read the next time the thing that
+  // holds them runs, so there is no lock file to reconcile and nothing left for
+  // the user to do by hand.
 
   // Without this the workspace's own format check fails on the migrated files.
   await formatFilesInSubtree(tree);

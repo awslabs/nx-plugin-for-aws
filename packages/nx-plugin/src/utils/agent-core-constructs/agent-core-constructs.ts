@@ -13,6 +13,7 @@ import {
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
 import {
+  type DeclaredPyDependency,
   type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
@@ -24,12 +25,14 @@ import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   generatedInfrastructure,
+  generatedTerraform,
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import {
+  type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
@@ -50,6 +53,23 @@ export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
   { name: '@types/ejs', when: generatedInfrastructure },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
+  IacMetadata
+>[];
+
+/**
+ * Python versions the generated Terraform pins in an inline `uv run --with`
+ * script, rather than in any `pyproject.toml`.
+ *
+ * Spread through `ownedElsewhere` because nothing installs them into the
+ * workspace — the pin is owned so the version sync keeps it current, and gated on
+ * Terraform since the CDK branch writes no such script.
+ */
+export const AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES = [
+  { name: 'boto3', when: generatedTerraform },
+  { name: 'httpx', when: generatedTerraform },
+  { name: 'mcp', when: generatedTerraform },
+] as const satisfies readonly DeclaredPyDependency<
+  IPyDepVersion,
   IacMetadata
 >[];
 

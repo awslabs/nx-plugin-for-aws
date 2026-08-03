@@ -9,14 +9,33 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
+import type { DeclaredPyDependency } from '../declared-dependencies';
 import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import {
+  generatedTerraform,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
-import { PY_VERSIONS, terraformProviderVersions } from '../versions';
+import {
+  type IPyDepVersion,
+  PY_VERSIONS,
+  terraformProviderVersions,
+} from '../versions';
+
+/**
+ * Python version the generated Terraform pins in the callback URL module's inline
+ * `uv run --with` script. Nothing installs it, so it is declared for its version
+ * alone, and only on the Terraform branch that writes the script.
+ */
+export const IDENTITY_CONSTRUCTS_PY_DEPENDENCIES = [
+  { name: 'boto3', when: generatedTerraform },
+] as const satisfies readonly DeclaredPyDependency<
+  IPyDepVersion,
+  IacMetadata
+>[];
 
 export interface AddIdentityInfraOptions {
   cognitoDomain: string;
