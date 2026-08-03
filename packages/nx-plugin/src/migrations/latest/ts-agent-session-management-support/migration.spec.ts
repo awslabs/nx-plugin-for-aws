@@ -3,8 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
+import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import migration from './migration';
+
+// Registers a project with the ComponentMetadata the ts#agent generator
+// itself writes, since the migration now reads protocol/name from it rather
+// than guessing from file contents.
+const registerAgentProject = (
+  tree: Tree,
+  name: string,
+  root: string,
+  protocol: string,
+  rc: string,
+  agentDir = 'src/agent',
+) =>
+  addProjectConfiguration(tree, name, {
+    root,
+    metadata: {
+      components: [
+        {
+          generator: TS_AGENT_GENERATOR_INFO.id,
+          path: agentDir,
+          rc,
+          protocol,
+        },
+      ],
+    } as any,
+  });
 
 const CDK_AGENT_FILE =
   'packages/common/constructs/src/app/agents/my-agent/my-agent.ts';
@@ -190,6 +216,25 @@ export const getAgent = async () => {
 };
 `;
 
+// Regression fixture: the Agent is constructed from a variable rather than an
+// inline object literal, so the constructor rewrites can't apply.
+const NON_LITERAL_CONSTRUCTOR_OLD_AGENT_TS_FILE = `import { Agent, tool } from '@strands-agents/sdk';
+import { logModelErrors, logToolErrors } from '@proj/agent-connection';
+import { z } from 'zod';
+
+const agentProps = {
+  systemPrompt: 'You are a mathematical wizard.',
+  tools: [],
+};
+
+export const getAgent = async () => {
+  const agent = new Agent(agentProps);
+  logModelErrors(agent);
+  logToolErrors(agent);
+  return agent;
+};
+`;
+
 // Regression fixture: a long npm scope name pushes the import past prettier's
 // print width, so it wraps onto multiple lines. The migration must detect
 // this via GritQL (AST-based) rather than a literal `logModelErrors, logToolErrors`
@@ -276,6 +321,25 @@ void (async () => {
     agent,
     name: 'TestProjectAgent',
     description: 'A Strands Agent exposed via the AG-UI protocol.',
+  });
+})();
+`;
+
+// Regression fixture: a customised StrandsAgent constructor (an extra prop)
+// no longer matches the exact 3-prop shape the plugin rewrite targets.
+const CUSTOMISED_AGUI_INDEX_TS_FILE_CONTENT = `import { StrandsAgent } from '@ag-ui/aws-strands';
+import { runWithSessionId } from '@proj/agent-connection';
+import { getAgent } from './agent.js';
+
+void (async () => {
+  const agent = await getAgent();
+  await agent.initialize();
+
+  const aguiAgent = new StrandsAgent({
+    agent,
+    name: 'TestProjectAgent',
+    description: 'A Strands Agent exposed via the AG-UI protocol.',
+    tags: ['custom'],
   });
 })();
 `;
@@ -380,6 +444,12 @@ export const logToolErrors = (agent: LocalAgent): void => {
   });
 };
 `;
+// Regression fixture: an extra statement in the hook body no longer matches
+// the exact single-statement shape MODEL_ERRORS_CLASS_PATTERN targets.
+const DIVERGED_MODEL_ERRORS_FILE = OLD_MODEL_ERRORS_FILE.replace(
+  'export const logModelErrors = (agent: LocalAgent): void => {\n  agent.addHook(AfterModelCallEvent, (event) => {',
+  "export const logModelErrors = (agent: LocalAgent): void => {\n  console.log('custom logging setup');\n  agent.addHook(AfterModelCallEvent, (event) => {",
+);
 
 describe('ts-agent-session-manager-support migration', () => {
   let tree: Tree;
@@ -396,7 +466,7 @@ describe('ts-agent-session-manager-support migration', () => {
   it('reshapes the CDK agent construct agentcore namespace only, leaving connection as a bare string', async () => {
     tree.write(CDK_AGENT_FILE, OLD_CDK_AGENT_FILE);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(CDK_AGENT_FILE, 'utf-8') ?? '';
     // Existing agents predate session management support and have no S3
@@ -410,7 +480,6 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(
       content.match(/MyAgent: this\.agentCoreRuntime\.agentRuntimeArn,/g),
     ).toHaveLength(1);
-    expect(result.nextSteps.some((s) => s.includes(CDK_AGENT_FILE))).toBe(true);
   });
 
   it('does not add a session field for MCP server runtimes', async () => {
@@ -483,17 +552,50 @@ describe('ts-agent-session-manager-support migration', () => {
   });
 
   it('removes the model/tool error logging hooks from an AG-UI agent.ts', async () => {
+    registerAgentProject(
+      tree,
+      'test-project',
+      'apps/test-project',
+      'ag-ui',
+      'TestProjectAgent',
+    );
     tree.write(AGUI_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
     tree.write(AGUI_INDEX_TS_FILE, AGUI_INDEX_TS_FILE_CONTENT);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(AGUI_AGENT_TS_FILE, 'utf-8') ?? '';
     expect(content).not.toContain('logModelErrors');
     expect(content).not.toContain('logToolErrors');
-    expect(result.nextSteps.some((s) => s.includes(AGUI_AGENT_TS_FILE))).toBe(
-      true,
+  });
+
+  it('leaves an AG-UI agent.ts entirely untouched (all-or-nothing) when the sibling index.ts constructor has diverged', async () => {
+    registerAgentProject(
+      tree,
+      'test-project',
+      'apps/test-project',
+      'ag-ui',
+      'TestProjectAgent',
     );
+    tree.write(AGUI_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
+    tree.write(AGUI_INDEX_TS_FILE, CUSTOMISED_AGUI_INDEX_TS_FILE_CONTENT);
+
+    const result = await migration(tree);
+
+    // index.ts can't be wired with the equivalent plugins (it no longer
+    // matches the 3-prop shape the rewrite targets), so agent.ts's calls are
+    // left in place rather than being dropped with no replacement.
+    expect(tree.read(AGUI_AGENT_TS_FILE, 'utf-8')).toEqual(OLD_AGENT_TS_FILE);
+    expect(tree.read(AGUI_INDEX_TS_FILE, 'utf-8')).toEqual(
+      CUSTOMISED_AGUI_INDEX_TS_FILE_CONTENT,
+    );
+    expect(
+      result.nextSteps.some(
+        (s) =>
+          s.includes(AGUI_AGENT_TS_FILE) &&
+          s.includes('could not be automatically wired'),
+      ),
+    ).toBe(true);
   });
 
   it('wires the error-logging plugins into an AG-UI index.ts', async () => {
@@ -515,13 +617,17 @@ describe('ts-agent-session-manager-support migration', () => {
   });
 
   it('wires sessionManagerProvider into an AG-UI index.ts and creates session.ts when its project is registered', async () => {
-    addProjectConfiguration(tree, 'test-project', {
-      root: 'apps/test-project',
-    });
+    registerAgentProject(
+      tree,
+      'test-project',
+      'apps/test-project',
+      'ag-ui',
+      'TestProjectAgent',
+    );
     tree.write(AGUI_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
     tree.write(AGUI_INDEX_TS_FILE, AGUI_INDEX_TS_FILE_CONTENT);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(AGUI_INDEX_TS_FILE, 'utf-8') ?? '';
     expect(content).toContain(
@@ -537,13 +643,6 @@ describe('ts-agent-session-manager-support migration', () => {
       "import { getCurrentSessionId } from '@proj/agent-connection';",
     );
     expect(sessionManagerContent).toContain('new LocalFileStorage(');
-    expect(
-      result.nextSteps.some(
-        (s) =>
-          s.includes(AGUI_INDEX_TS_FILE) &&
-          s.includes('wired sessionManagerProvider'),
-      ),
-    ).toBe(true);
   });
 
   it('leaves an AG-UI index.ts sessionManagerProvider wiring for manual follow-up when its project cannot be found', async () => {
@@ -587,7 +686,7 @@ describe('ts-agent-session-manager-support migration', () => {
   it('adds the ModelErrorLoggingPlugin class to model-errors-strands.ts', async () => {
     tree.write(MODEL_ERRORS_FILE, OLD_MODEL_ERRORS_FILE);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(MODEL_ERRORS_FILE, 'utf-8') ?? '';
     expect(content).toContain('type Plugin');
@@ -595,15 +694,12 @@ describe('ts-agent-session-manager-support migration', () => {
       'export class ModelErrorLoggingPlugin implements Plugin',
     );
     expect(content).not.toContain('logModelErrors');
-    expect(result.nextSteps.some((s) => s.includes(MODEL_ERRORS_FILE))).toBe(
-      true,
-    );
   });
 
   it('adds the ToolErrorLoggingPlugin class to tool-errors-strands.ts', async () => {
     tree.write(TOOL_ERRORS_FILE, OLD_TOOL_ERRORS_FILE);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(TOOL_ERRORS_FILE, 'utf-8') ?? '';
     expect(content).toContain('type Plugin');
@@ -611,9 +707,47 @@ describe('ts-agent-session-manager-support migration', () => {
       'export class ToolErrorLoggingPlugin implements Plugin',
     );
     expect(content).not.toContain('logToolErrors');
-    expect(result.nextSteps.some((s) => s.includes(TOOL_ERRORS_FILE))).toBe(
-      true,
+  });
+
+  it('leaves a diverged model-errors-strands.ts untouched and, all-or-nothing, leaves agent.ts files referencing it untouched too', async () => {
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
     );
+    tree.write(MODEL_ERRORS_FILE, DIVERGED_MODEL_ERRORS_FILE);
+    tree.write(TOOL_ERRORS_FILE, OLD_TOOL_ERRORS_FILE);
+    tree.write(HTTP_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
+    tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
+
+    const result = await migration(tree);
+
+    // model-errors-strands.ts has diverged from the generated shape, so it's
+    // left as-is rather than partially rewritten.
+    expect(tree.read(MODEL_ERRORS_FILE, 'utf-8')).toEqual(
+      DIVERGED_MODEL_ERRORS_FILE,
+    );
+    expect(
+      result.nextSteps.some(
+        (s) =>
+          s.includes(MODEL_ERRORS_FILE) &&
+          s.includes('ModelErrorLoggingPlugin'),
+      ),
+    ).toBe(true);
+
+    // ModelErrorLoggingPlugin isn't available, so agent.ts is left entirely
+    // untouched — its working logModelErrors/logToolErrors calls are not
+    // removed even though ToolErrorLoggingPlugin alone would be available.
+    expect(tree.read(HTTP_AGENT_TS_FILE, 'utf-8')).toEqual(OLD_AGENT_TS_FILE);
+    expect(tree.exists('apps/http-project/src/agent/session.ts')).toBe(false);
+    expect(
+      result.nextSteps.some(
+        (s) =>
+          s.includes(HTTP_AGENT_TS_FILE) && s.includes('are not available yet'),
+      ),
+    ).toBe(true);
   });
 
   it('leaves a non-AG-UI agent.ts content untouched when its owning project cannot be found', async () => {
@@ -643,14 +777,48 @@ describe('ts-agent-session-manager-support migration', () => {
     ).toBe(true);
   });
 
-  it('wires sessionManager and the error-logging plugins into a non-AG-UI agent.ts and creates session.ts when its project is registered', async () => {
-    addProjectConfiguration(tree, 'http-project', {
-      root: 'apps/http-project',
-    });
-    tree.write(HTTP_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
+  it('leaves a non-AG-UI agent.ts entirely untouched (all-or-nothing) when the Agent is not constructed with an inline object literal', async () => {
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
+    );
+    tree.write(HTTP_AGENT_TS_FILE, NON_LITERAL_CONSTRUCTOR_OLD_AGENT_TS_FILE);
     tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
 
     const result = await migration(tree);
+
+    // Neither the imports nor the logModelErrors/logToolErrors calls are
+    // touched — wiring sessionManager/plugins into the constructor isn't
+    // possible, so removing the working calls would silently drop error
+    // logging rather than move it.
+    expect(tree.read(HTTP_AGENT_TS_FILE, 'utf-8')).toEqual(
+      NON_LITERAL_CONSTRUCTOR_OLD_AGENT_TS_FILE,
+    );
+    expect(tree.exists('apps/http-project/src/agent/session.ts')).toBe(false);
+    expect(
+      result.nextSteps.some(
+        (s) =>
+          s.includes(HTTP_AGENT_TS_FILE) &&
+          s.includes('not constructed with an inline object literal'),
+      ),
+    ).toBe(true);
+  });
+
+  it('wires sessionManager and the error-logging plugins into a non-AG-UI agent.ts and creates session.ts when its project is registered', async () => {
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
+    );
+    tree.write(HTTP_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
+    tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
+
+    await migration(tree);
 
     const content = tree.read(HTTP_AGENT_TS_FILE, 'utf-8') ?? '';
     expect(content).toContain(
@@ -675,25 +843,43 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(sessionManagerContent).toContain(
       "'../../tmp/agents/strands/http-project-agent'",
     );
-    expect(
-      result.nextSteps.some(
-        (s) =>
-          s.includes(HTTP_AGENT_TS_FILE) &&
-          s.includes(
-            'wired sessionManager and the error-logging plugins into the Agent constructor',
-          ),
-      ),
-    ).toBe(true);
+  });
+
+  it('prefers the ComponentMetadata name over the directory-name formula, disambiguating an explicit `--name agent` from the default', async () => {
+    // Both the generator's own "no name given" default and an explicit
+    // `--name agent` land in a `src/agent` directory, but produce different
+    // real names (`http-project-agent` vs plain `agent`) — only the recorded
+    // `rc` class name (from an explicit --name agent) can tell them apart.
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'Agent',
+    );
+    tree.write(HTTP_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
+    tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
+
+    await migration(tree);
+
+    const sessionPath = 'apps/http-project/src/agent/session.ts';
+    const sessionManagerContent = tree.read(sessionPath, 'utf-8') ?? '';
+    expect(sessionManagerContent).toContain("'../../tmp/agents/strands/agent'");
+    expect(sessionManagerContent).not.toContain('http-project-agent');
   });
 
   it('wires sessionManager into a non-AG-UI agent.ts even when the logModelErrors/logToolErrors import wraps across multiple lines', async () => {
-    addProjectConfiguration(tree, 'http-project', {
-      root: 'apps/http-project',
-    });
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
+    );
     tree.write(HTTP_AGENT_TS_FILE, MULTI_LINE_IMPORT_OLD_AGENT_TS_FILE);
     tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(HTTP_AGENT_TS_FILE, 'utf-8') ?? '';
     expect(content).toContain(
@@ -706,25 +892,20 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(content).not.toContain('logModelErrors');
     expect(content).not.toContain('logToolErrors');
     expect(tree.exists('apps/http-project/src/agent/session.ts')).toBe(true);
-    expect(
-      result.nextSteps.some(
-        (s) =>
-          s.includes(HTTP_AGENT_TS_FILE) &&
-          s.includes(
-            'wired sessionManager and the error-logging plugins into the Agent constructor',
-          ),
-      ),
-    ).toBe(true);
   });
 
   it('wires sessionManager into a non-AG-UI agent.ts when a connection generator merged its own import into the logModelErrors/logToolErrors import', async () => {
-    addProjectConfiguration(tree, 'http-project', {
-      root: 'apps/http-project',
-    });
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
+    );
     tree.write(HTTP_AGENT_TS_FILE, MERGED_IMPORT_OLD_AGENT_TS_FILE);
     tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(HTTP_AGENT_TS_FILE, 'utf-8') ?? '';
     expect(content).toContain(
@@ -739,22 +920,20 @@ describe('ts-agent-session-manager-support migration', () => {
     // The merged client import must survive intact
     expect(content).toContain('AgentsMcpServerClientStrands');
     expect(tree.exists('apps/http-project/src/agent/session.ts')).toBe(true);
-    expect(
-      result.nextSteps.some(
-        (s) =>
-          s.includes(HTTP_AGENT_TS_FILE) &&
-          s.includes(
-            'wired sessionManager and the error-logging plugins into the Agent constructor',
-          ),
-      ),
-    ).toBe(true);
   });
 
   it('removes the model/tool error logging hooks from an AG-UI agent.ts even when a connection generator merged its own import into the same statement', async () => {
+    registerAgentProject(
+      tree,
+      'test-project',
+      'apps/test-project',
+      'ag-ui',
+      'TestProjectAgent',
+    );
     tree.write(AGUI_AGENT_TS_FILE, MERGED_IMPORT_OLD_AGENT_TS_FILE);
     tree.write(AGUI_INDEX_TS_FILE, AGUI_INDEX_TS_FILE_CONTENT);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(AGUI_AGENT_TS_FILE, 'utf-8') ?? '';
     expect(content).not.toContain('logModelErrors');
@@ -764,16 +943,20 @@ describe('ts-agent-session-manager-support migration', () => {
     expect(content).toContain(
       "import { AgentsMcpServerClientStrands } from '@my-agent-project/agent-connection';",
     );
-    expect(result.nextSteps.some((s) => s.includes(AGUI_AGENT_TS_FILE))).toBe(
-      true,
-    );
   });
 
   it('removes the model/tool error logging hooks from an AG-UI agent.ts even when TWO connection generators merged their imports into the same statement', async () => {
+    registerAgentProject(
+      tree,
+      'test-project',
+      'apps/test-project',
+      'ag-ui',
+      'TestProjectAgent',
+    );
     tree.write(AGUI_AGENT_TS_FILE, DOUBLY_MERGED_IMPORT_OLD_AGENT_TS_FILE);
     tree.write(AGUI_INDEX_TS_FILE, AGUI_INDEX_TS_FILE_CONTENT);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const content = tree.read(AGUI_AGENT_TS_FILE, 'utf-8') ?? '';
     expect(content).not.toContain('logModelErrors');
@@ -787,9 +970,6 @@ describe('ts-agent-session-manager-support migration', () => {
     );
     expect(content).toContain(
       'const a2aAgent = await A2aAgentClientStrands.create();',
-    );
-    expect(result.nextSteps.some((s) => s.includes(AGUI_AGENT_TS_FILE))).toBe(
-      true,
     );
   });
 
@@ -811,12 +991,20 @@ describe('ts-agent-session-manager-support migration', () => {
   });
 
   it('is idempotent', async () => {
-    addProjectConfiguration(tree, 'http-project', {
-      root: 'apps/http-project',
-    });
-    addProjectConfiguration(tree, 'test-project', {
-      root: 'apps/test-project',
-    });
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
+    );
+    registerAgentProject(
+      tree,
+      'test-project',
+      'apps/test-project',
+      'ag-ui',
+      'TestProjectAgent',
+    );
     tree.write(CDK_AGENT_FILE, OLD_CDK_AGENT_FILE);
     tree.write(TF_AGENT_FILE, OLD_TF_AGENT_FILE);
     tree.write(TS_RUNTIME_CONFIG_FILE, OLD_TS_RUNTIME_CONFIG_FILE);

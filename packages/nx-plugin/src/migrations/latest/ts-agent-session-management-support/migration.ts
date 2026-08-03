@@ -6,14 +6,25 @@ import {
   getProjects,
   joinPathFragments,
   type MigrationReturnObject,
+  type ProjectConfiguration,
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { applyGritQL, captureGritQL, matchGritQL } from '../../../utils/ast';
+import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
+import { AGENT_CONNECTION_PROJECT_DIR } from '../../../utils/agent-connection/agent-connection';
+import {
+  applyGritQL,
+  captureGritQLVariable,
+  matchGritQL,
+} from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { isEsmWorkspace } from '../../../utils/module-format';
 import { kebabCase } from '../../../utils/names';
-import { getRelativePathToRootByDirectory } from '../../../utils/paths';
+import type { ComponentMetadata } from '../../../utils/nx';
+import {
+  getRelativePathToRootByDirectory,
+  toProjectRelativePath,
+} from '../../../utils/paths';
 
 /**
  * Add session management support to ts#agent.
@@ -31,17 +42,11 @@ import { getRelativePathToRootByDirectory } from '../../../utils/paths';
  *   migration wrote are formatted correctly.
  */
 
-// Matches `rc.set('agentcore', 'agentRuntimes', { ...rc.get('agentcore').agentRuntimes, $name: this.agentCoreRuntime.agentRuntimeArn });`
-// as vended by the CDK agent-core construct. Only the 'agentcore' namespace
-// takes this `{ arn }` shape; the connection-generator-patched 'connection'
-// namespace (client-facing, published to runtime-config.json) stays a bare
-// ARN string, since it shouldn't carry fields like a session's bucket name
-// to the browser. Naturally idempotent: once migrated, `$name`'s value is a
-// `{ arn }` object rather than `this.agentCoreRuntime.agentRuntimeArn`
-// directly, so this no longer matches. Existing agents predate session
-// management support and have no S3 bucket to reference, so there's no
-// `session` field to add here — a fresh session.ts created below defaults
-// them to in-memory storage. MCP servers have no session regardless.
+// Reshapes an `agentRuntimes` rc.set entry from a bare ARN to `{ arn }`. Only
+// the 'agentcore' namespace — 'connection' (client-facing) stays a string,
+// since it shouldn't carry the session bucket name to the browser. No
+// `session` field added here; a fresh session.ts (created below) defaults to
+// in-memory. Idempotent: only matches the pre-migration shape.
 const CDK_RC_SET_PATTERN = `\`rc.set('agentcore', 'agentRuntimes', { ...rc.get('agentcore').agentRuntimes, $name: this.agentCoreRuntime.agentRuntimeArn });\` => raw\`rc.set('agentcore', 'agentRuntimes', {
   ...rc.get('agentcore').agentRuntimes,
   $name: {
@@ -49,12 +54,8 @@ const CDK_RC_SET_PATTERN = `\`rc.set('agentcore', 'agentRuntimes', { ...rc.get('
   },
 });\``;
 
-// Matches the equivalent `add_agent_runtime_to_runtime_config` module block
-// vended by the Terraform agent-core construct, anchored on its fixed module
-// name/shape since the connection-generator-patched
-// `add_agent_runtime_to_connection_runtime_config` module has an identical-
-// looking `value` line but keeps its bare ARN string shape (see
-// CDK_RC_SET_PATTERN's comment). Naturally idempotent (see CDK_RC_SET_PATTERN).
+// Terraform equivalent, anchored on the module's fixed name/shape so it
+// doesn't also match the 'connection' module's identical-looking `value` line.
 const TF_VALUE_PATTERN = `language hcl\n\`module "add_agent_runtime_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
@@ -73,8 +74,8 @@ const TF_VALUE_PATTERN = `language hcl\n\`module "add_agent_runtime_to_runtime_c
   depends_on = [module.agent_core_runtime]
 }\``;
 
-// Exact shape of the shared `AgentCoreRuntimeConfig` interface prior to this
-// change, as vended into `packages/common/agent-connection/src/core/runtime-config.ts`.
+// Shared `AgentCoreRuntimeConfig` interface, vended into
+// `packages/common/agent-connection/src/core/runtime-config.ts`.
 const TS_RUNTIME_CONFIG_INTERFACE_PATTERN = `\`export interface AgentCoreRuntimeConfig {
   agentRuntimes?: Record<string, string>;
   gateways?: Record<string, string>;
@@ -92,101 +93,58 @@ export interface AgentCoreRuntimeConfig {
   gateways?: Record<string, string>;
 }\``;
 
-// Matches `config.agentRuntimes?.['Name']` / `config?.agentRuntimes?.['Name']`
-// as read by the generated TS a2a/mcp client and agent-chat CLI templates.
-// The `where` clause guards idempotency: once `?.arn` is appended, the
-// program no longer matches the bare pre-`.arn` form so this doesn't re-fire.
+// `config.agentRuntimes?.['Name']` as read by generated TS a2a/mcp clients and
+// the agent-chat CLI. Idempotent via the `not contains ?.arn` guard.
 const TS_CLIENT_ARN_PATTERNS = [
   '`config.agentRuntimes?.[$name]` => `config.agentRuntimes?.[$name]?.arn` where { $program <: not contains `config.agentRuntimes?.[$name]?.arn` }',
   '`config?.agentRuntimes?.[$name]` => `config?.agentRuntimes?.[$name]?.arn` where { $program <: not contains `config?.agentRuntimes?.[$name]?.arn` }',
 ];
 
-// Matches `agent_runtime_arn = config.get("agentRuntimes", {}).get($name)` as
-// read by the generated Python a2a/mcp client templates (Strands + LangChain).
+// Python equivalent (Strands + LangChain client templates).
 const PY_CLIENT_ARN_PATTERN =
   'language python\n`agent_runtime_arn = config.get("agentRuntimes", {}).get($name)` => `agent_runtime = config.get("agentRuntimes", {}).get($name)\nagent_runtime_arn = agent_runtime.get("arn") if agent_runtime else None`';
 
-// Removes the imperative logModelErrors(agent)/logToolErrors(agent) calls
-// from an existing agent.ts, for both AG-UI and HTTP/A2A agents. For AG-UI
-// this is required, not just cosmetic: its adapter clones the template agent
-// per-thread, and hooks added directly to the template (as these calls do)
-// are NOT carried over onto those clones, so the per-thread agents would
-// silently run without error logging — the equivalent behaviour is restored
-// via AGUI_INDEX_*_PATTERN below, which wires the same logic in as
-// StrandsAgent plugins instead (plugins are applied to each per-thread agent
-// via initAgent). For HTTP/A2A it's purely a style unification with the
-// AG-UI form (see AGENT_TS_PLUGINS_CONSTRUCTOR_PATTERN), since one Agent per
-// session means the imperative form already worked correctly there. Naturally
-// idempotent (nothing to match once removed). The import itself is removed
-// via removeLogErrorsImport below (see its comment for why a plain GritQL
-// rewrite can't express this).
+// Removes the imperative logModelErrors(agent)/logToolErrors(agent) calls.
+// Required for AG-UI (its adapter clones the template agent per-thread, and
+// hooks added directly to the template don't carry over — the equivalent
+// behaviour is restored via the AGUI_INDEX_* plugins below). For HTTP/A2A
+// it's a style unification, since the imperative form already worked there.
 const AGENT_TS_LOG_MODEL_CALL_PATTERN = '`logModelErrors(agent);` => .';
 const AGENT_TS_LOG_TOOL_CALL_PATTERN = '`logToolErrors(agent);` => .';
 
-// AG-UI is the only protocol whose index.ts imports from '@ag-ui/aws-strands'
-// (see files/ag-ui/index.ts.template), so that's a reliable signal that the
-// sibling agent.ts belongs to an AG-UI agent.
-const isAgUiAgentDir = (tree: Tree, agentTsPath: string): boolean => {
-  const dir = agentTsPath.split('/').slice(0, -1).join('/');
-  const indexTsPath = `${dir}/index.ts`;
-  const indexContents = tree.read(indexTsPath, 'utf-8') ?? '';
-  return indexContents.includes('@ag-ui/aws-strands');
-};
-
-// HTTP/A2A agents (unlike AG-UI) construct one Agent per session via
-// `withSessionId(getAgent)`, so wiring `sessionManager` directly into
-// `getAgent`'s `new Agent({ ... })` call is safe. Generic over `$props`
-// (the object literal's own property list) so this applies regardless of how
-// the user has customised systemPrompt/tools — only requires the props to be
-// passed as an inline object literal (not a variable). `sessionManager` is
-// prepended rather than appended: `$props` is captured as raw source text and
-// commonly ends with prettier's trailing comma, so appending `, sessionManager: ...`
-// after it would produce a double comma (invalid syntax); prepending before
-// `$props` sidesteps that entirely, and `formatFilesInSubtree` reformats the
-// result cleanly regardless of property order. Naturally idempotent via the
-// `not contains sessionManager` guard.
+// HTTP/A2A agents build one Agent per session, so wiring `sessionManager`
+// directly into the constructor is safe. Generic over `$props` so this works
+// regardless of customised systemPrompt/tools, as long as it's an inline
+// object literal. Prepended (not appended) to sidestep a trailing-comma
+// double-comma when `$props` is captured as raw source text.
 const AGENT_TS_SESSION_MANAGER_CONSTRUCTOR_PATTERN =
   '`new Agent({ $props })` => `new Agent({ sessionManager: await getSessionManager(), $props })` where { $props <: not contains `sessionManager` }';
 
-// Moves the model/tool error logging hooks from imperative logModelErrors/
-// logToolErrors calls to Agent constructor plugins, mirroring the AG-UI
-// rewrite (AGUI_INDEX_CONSTRUCTOR_PATTERN below) for consistency — HTTP/A2A
-// agents already worked correctly with the imperative form (one Agent per
-// session, unlike AG-UI's per-thread cloning), so this is purely a style
-// unification rather than a bug fix. Same prepend rationale as
-// AGENT_TS_SESSION_MANAGER_CONSTRUCTOR_PATTERN.
+// Match-only gate for the rewrites above/below: only applies when the Agent
+// is an inline object literal, not e.g. a variable.
+const AGENT_TS_CONSTRUCTOR_MATCH_PATTERN = '`new Agent({ $props })`';
+
+// Moves the model/tool error hooks to Agent constructor plugins, mirroring
+// the AG-UI rewrite for consistency (HTTP/A2A already worked with the
+// imperative form).
 const AGENT_TS_PLUGINS_CONSTRUCTOR_PATTERN =
   '`new Agent({ $props })` => `new Agent({ plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()], $props })` where { $props <: not contains `plugins` }';
 
-// Captures the agent-connection package specifier from the existing
-// logModelErrors/logToolErrors import so the new getSessionManager and
-// ModelErrorLoggingPlugin/ToolErrorLoggingPlugin imports (and the fresh
-// session.ts this migration creates) target the same module, without needing
-// to know the workspace's npm scope directly. Generic
-// over `$names` (rather than requiring an exact 2-specifier import) since a
-// connection generator (mcp-connection/a2a-connection) may have merged its
-// own client import into this same statement via addDestructuredImport.
+// Captures the agent-connection package specifier so the new imports (and the
+// session.ts this migration creates) target the same module. Generic over
+// `$names` since a connection generator may have merged its own import here.
 const AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN =
   "`import { $names } from '$mod';` where { $names <: contains `logModelErrors`, $names <: contains `logToolErrors` }";
 
 // Removes `logModelErrors`/`logToolErrors` from the import, preserving any
-// other specifiers a connection generator has merged into the same statement
-// (or removing the whole statement if none remain). A naive rewrite like
-// `import { logModelErrors, logToolErrors, $rest } from '$mod'` can't express
-// this: `$rest` binds a *fixed* number of sibling nodes and silently fails to
-// match once 2+ other specifiers are merged in (verified — it works for
-// exactly 1 remaining specifier, not 2+). Decomposing via
-// `import_clause(name=named_imports($imports))` instead exposes `$imports`
-// as an actual GritQL list, so `some import_specifier(name=or {...}) => .`
-// can delete each matching specifier individually regardless of how many
-// others remain or what order they're in; deletes the whole import only when
-// the list is exactly the two of them.
+// other merged specifiers (or the whole statement if none remain). Decomposed
+// via `import_clause(name=named_imports($imports))` since a naive
+// `$rest`-based rewrite silently fails once 2+ other specifiers are merged in.
 const AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN =
   "`import $clause from '$mod';` as $import where { $clause <: import_clause(name=named_imports($imports)), $imports <: contains `logModelErrors`, $imports <: contains `logToolErrors`, if ($imports <: [`logModelErrors`, `logToolErrors`]) { $import => . } else { $imports <: some import_specifier(name=or { `logModelErrors`, `logToolErrors` }) => . } }";
 
-// Existing agents predate session.ts entirely, so there is no prior
-// session storage to preserve here — default to in-memory, matching the
-// (session-less) agentRuntimes entry this migration writes above.
+// Existing agents predate session.ts, so there's no prior storage to
+// preserve — default to in-memory.
 const legacySessionManagerContent = (
   agentConnectionModule: string,
   localSessionsDir: string,
@@ -218,31 +176,52 @@ export const getSessionManager = async (): Promise<SessionManager> => {
 };
 `;
 
-/** The root and name of the Nx project owning `dirPath`, if any. */
+/** The Nx project owning `dirPath`, if any (the longest-matching project.root). */
 const findOwningProject = (
   tree: Tree,
   dirPath: string,
-): { root: string; name: string } | undefined => {
-  let best: { root: string; name: string } | undefined;
+): ProjectConfiguration | undefined => {
+  let best: ProjectConfiguration | undefined;
   for (const project of getProjects(tree).values()) {
     if (
       (dirPath === project.root || dirPath.startsWith(`${project.root}/`)) &&
       (!best || project.root.length > best.root.length)
     ) {
-      best = { root: project.root, name: project.name ?? project.root };
+      best = project;
     }
   }
   return best;
 };
 
-// Mirrors the ts#agent generator's own default-name formula (`<project>-agent`
-// when no custom name is given, else the custom name directly) so migrated
-// agents land in the same per-agent folder a fresh generate would produce.
-// `dirName` is the agent's source directory name (e.g. `agent` for the
-// default, or the custom kebab-case name the user passed to the generator).
-const agentTmpNameFor = (projectName: string, dirName: string): string => {
-  const lastSegment = projectName.split('/').pop() ?? projectName;
-  return dirName === 'agent' ? `${kebabCase(lastSegment)}-agent` : dirName;
+/** This agent's own ComponentMetadata entry, as written by the ts#agent generator. */
+const findAgentComponentMetadata = (
+  project: ProjectConfiguration,
+  dirRelativeToProjectRoot: string,
+): ComponentMetadata | undefined =>
+  (project.metadata as { components?: ComponentMetadata[] })?.components?.find(
+    (component) =>
+      component.generator === TS_AGENT_GENERATOR_INFO.id &&
+      component.path === dirRelativeToProjectRoot,
+  );
+
+/** This agent's real kebab-case name, from ComponentMetadata's `rc` (class-name) field. */
+const agentTmpNameFor = (
+  project: ProjectConfiguration,
+  dir: string,
+): string | undefined => {
+  const dirRelativeToProjectRoot = toProjectRelativePath(project, dir);
+  const rc = findAgentComponentMetadata(project, dirRelativeToProjectRoot)?.rc;
+  return rc ? kebabCase(rc) : undefined;
+};
+
+/** This agent's protocol, from ComponentMetadata's `protocol` field. */
+const agentProtocolFor = (
+  project: ProjectConfiguration,
+  dir: string,
+): string | undefined => {
+  const dirRelativeToProjectRoot = toProjectRelativePath(project, dir);
+  return findAgentComponentMetadata(project, dirRelativeToProjectRoot)
+    ?.protocol;
 };
 
 /** The relative path from `projectRoot` up to this agent's workspace-root-level local session storage. */
@@ -255,48 +234,34 @@ const localSessionsDirFor = (
     `tmp/agents/strands/${agentTmpName}`,
   );
 
-// Adds the ModelErrorLoggingPlugin/ToolErrorLoggingPlugin import (generic over
-// the agent-connection package's npm scope) and wires them into the
-// StrandsAgent constructor, restoring the error-logging behaviour removed
-// from agent.ts above. Naturally idempotent.
+// Wires ModelErrorLoggingPlugin/ToolErrorLoggingPlugin into the StrandsAgent
+// constructor, restoring the error-logging behaviour removed from agent.ts.
 const AGUI_INDEX_IMPORT_PATTERN =
   "`import { $names } from '$mod'` => `import { ModelErrorLoggingPlugin, ToolErrorLoggingPlugin, $names } from '$mod'` where { $names <: contains `runWithSessionId`, $names <: not contains `ModelErrorLoggingPlugin` }";
-const AGUI_INDEX_CONSTRUCTOR_PATTERN =
-  '`new StrandsAgent({ agent, name: $name, description: $desc })` => `new StrandsAgent({ agent, name: $name, description: $desc, plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()] })`';
+// Match-only form of the target shape, used to gate before touching the
+// sibling agent.ts, and before committing to the rewrite here.
+const AGUI_INDEX_CONSTRUCTOR_MATCH_PATTERN =
+  '`new StrandsAgent({ agent, name: $name, description: $desc })`';
+const AGUI_INDEX_CONSTRUCTOR_PATTERN = `${AGUI_INDEX_CONSTRUCTOR_MATCH_PATTERN} => \`new StrandsAgent({ agent, name: $name, description: $desc, plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()] })\``;
 
-// Captures the same agent-connection package specifier via index.ts's
-// existing runWithSessionId import, for the same reason as
-// AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN above.
 const AGUI_INDEX_IMPORT_CAPTURE_PATTERN =
   "`import { $names } from '$mod';` where { $names <: contains `runWithSessionId` }";
 
-// AG-UI's StrandsAgent adapter also needs a sessionManagerProvider (called
-// once per threadId) to persist conversation state, mirroring
-// AGENT_TS_SESSION_MANAGER_CONSTRUCTOR_PATTERN's role for HTTP/A2A agents.
-// Anchored on the literal `getAgent` import, which every ts#agent index.ts has.
+// AG-UI's StrandsAgent adapter needs a sessionManagerProvider (called once
+// per threadId), mirroring AGENT_TS_SESSION_MANAGER_CONSTRUCTOR_PATTERN.
 const aguiIndexSessionManagerImportPattern = (esm: boolean) =>
   `\`import { getAgent } from '$mod';\` => raw\`import { getAgent } from '$mod';
 import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $program <: not contains \`getSessionManager\` }`;
-// Anchored on the exact 4-property shape AGUI_INDEX_CONSTRUCTOR_PATTERN
-// produces, so this only fires once plugins have been wired in, and stops
-// matching once config is added (naturally idempotent). Used both to gate
-// (via matchGritQL, before creating session.ts) and to rewrite.
+// Anchored on the exact 4-property shape produced above, so this only fires
+// once plugins are wired in. Used both to gate and to rewrite.
 const AGUI_INDEX_SESSION_MANAGER_MATCH_PATTERN =
   '`new StrandsAgent({ agent, name: $name, description: $desc, plugins: $plugins })`';
 const AGUI_INDEX_SESSION_MANAGER_CONSTRUCTOR_PATTERN = `${AGUI_INDEX_SESSION_MANAGER_MATCH_PATTERN} => \`new StrandsAgent({ agent, name: $name, description: $desc, plugins: $plugins, config: { sessionManagerProvider: getSessionManager } })\``;
 
-// The AGUI_INDEX_*/AGENT_TS_PLUGINS_CONSTRUCTOR_PATTERN patterns above
-// reference ModelErrorLoggingPlugin/ToolErrorLoggingPlugin, but those classes
-// only exist in the current model-errors-strands.ts/tool-errors-strands.ts
-// templates — an existing workspace's already-generated copies (vended with
-// `KeepExisting`, so never overwritten by re-running the generator) still
-// have only the plain logModelErrors/logToolErrors functions. Without these,
-// the AG-UI/HTTP/A2A rewrites above would reference undefined classes. The
-// plain functions are dropped entirely (not kept as a delegating wrapper) —
-// every call site is migrated to the plugin classes directly, so nothing
-// references them any more. Anchored on the `agent.addHook(AfterXCallEvent,
-// ...)` call so this doesn't re-match its own output (the class it produces
-// contains no such top-level call).
+// The plugin classes referenced above only exist once model-errors-strands.ts
+// / tool-errors-strands.ts are converted from their plain logXErrors function
+// form (see ensurePluginClass below). Anchored on the `agent.addHook(...)`
+// call so this doesn't re-match its own output.
 const MODEL_ERRORS_IMPORT_PATTERN =
   "`import { AfterModelCallEvent, type LocalAgent } from '@strands-agents/sdk';` => `import { AfterModelCallEvent, type LocalAgent, type Plugin } from '@strands-agents/sdk';`";
 const MODEL_ERRORS_CLASS_PATTERN =
@@ -307,118 +272,242 @@ const TOOL_ERRORS_IMPORT_PATTERN =
 const TOOL_ERRORS_CLASS_PATTERN =
   "`export const logToolErrors = (agent: LocalAgent): void => { agent.addHook(AfterToolCallEvent, $callback); };` => raw`export class ToolErrorLoggingPlugin implements Plugin {\n  readonly name = 'tool-error-logging';\n\n  initAgent(agent: LocalAgent): void {\n    agent.addHook(AfterToolCallEvent, $callback);\n  }\n}`";
 
+/**
+ * Converts a plain `logXErrors` function into its `XErrorLoggingPlugin` class
+ * if it still has the generated shape. Returns whether the class is present
+ * (freshly converted or already done) — false only when diverged, reported
+ * via `nextSteps` here so callers can silently skip their own wiring.
+ */
+async function ensurePluginClass(
+  tree: Tree,
+  nextSteps: string[],
+  filePath: string,
+  className: string,
+  importPattern: string,
+  classPattern: string,
+): Promise<boolean> {
+  if (!tree.exists(filePath)) {
+    return true;
+  }
+  if ((tree.read(filePath, 'utf-8') ?? '').includes(`class ${className}`)) {
+    return true;
+  }
+
+  // Only add the `Plugin` type import once the class rewrite is confirmed to
+  // apply, so a diverged file isn't left with an unused import and no class.
+  const rewroteClass = await applyGritQL(tree, filePath, classPattern);
+
+  if (!rewroteClass) {
+    nextSteps.push(
+      `${filePath}: diverged from the generated shape - left as-is. Manually convert it to a \`${className}\` class implementing \`Plugin\` (see the ts#agent generator's template); agent.ts/index.ts files that reference \`${className}\` are left unmigrated until this exists.`,
+    );
+    return false;
+  }
+  await applyGritQL(tree, filePath, importPattern);
+  return true;
+}
+
 export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
   let anyChanges = false;
 
+  // Both classes live in one shared agent-connection package, so their
+  // readiness is resolved once up front rather than per agent.
+  const modelErrorsPath = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'core',
+    'model-errors-strands.ts',
+  );
+  const toolErrorsPath = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'core',
+    'tool-errors-strands.ts',
+  );
+  const modelPluginReady = await ensurePluginClass(
+    tree,
+    nextSteps,
+    modelErrorsPath,
+    'ModelErrorLoggingPlugin',
+    MODEL_ERRORS_IMPORT_PATTERN,
+    MODEL_ERRORS_CLASS_PATTERN,
+  );
+  const toolPluginReady = await ensurePluginClass(
+    tree,
+    nextSteps,
+    toolErrorsPath,
+    'ToolErrorLoggingPlugin',
+    TOOL_ERRORS_IMPORT_PATTERN,
+    TOOL_ERRORS_CLASS_PATTERN,
+  );
+  const pluginsReady = modelPluginReady && toolPluginReady;
+
   const filePaths: string[] = [];
   visitNotIgnoredFiles(tree, '', (filePath) => filePaths.push(filePath));
 
   for (const filePath of filePaths) {
+    if (filePath === modelErrorsPath || filePath === toolErrorsPath) {
+      continue;
+    }
     if (filePath.endsWith('.d.ts')) {
       continue;
     }
 
-    // session.ts (whether generator-vended or created by this
-    // migration above) already targets the new { arn, session } shape via
+    // session.ts already targets the new { arn, session } shape via
     // `config.agentRuntimes?.[$name]?.session?.bucketName` — the generic
-    // reshape branch below would otherwise mis-match that expression's
-    // `config.agentRuntimes?.[$name]` prefix and corrupt it into
-    // `?.arn?.session?.bucketName`.
+    // reshape branch below would otherwise corrupt that into `?.arn?.session?.bucketName`.
     if (filePath.endsWith('/session.ts')) {
       continue;
     }
 
-    if (filePath.endsWith('/agent.ts') && isAgUiAgentDir(tree, filePath)) {
-      const rewroteImport = await applyGritQL(
-        tree,
-        filePath,
-        AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN,
-      );
-      const rewroteModelCall = await applyGritQL(
-        tree,
-        filePath,
-        AGENT_TS_LOG_MODEL_CALL_PATTERN,
-      );
-      const rewroteToolCall = await applyGritQL(
-        tree,
-        filePath,
-        AGENT_TS_LOG_TOOL_CALL_PATTERN,
-      );
-      if (rewroteImport || rewroteModelCall || rewroteToolCall) {
-        nextSteps.push(
-          `${filePath}: moved the model/tool error logging hooks to StrandsAgent plugins (see the sibling index.ts).`,
-        );
-        anyChanges = true;
-      }
-      continue;
-    }
-
-    // HTTP/A2A agent.ts: wire sessionManager into the Agent constructor and
-    // create the sibling session.ts if it doesn't exist yet. Existing
-    // agents predate session.ts entirely, so (unlike the reshape
-    // patterns above) there's no "old shape" to pattern-match for the file's
-    // own existence — gate on the logModelErrors/logToolErrors import as the
-    // signal this is a ts#agent-generated agent.ts. Matched via GritQL (not a
-    // literal substring check) so this isn't fooled by prettier wrapping the
-    // import onto multiple lines (e.g. a long npm scope name). The
-    // constructor is only ever rewritten once the getSessionManager import is
-    // confirmed present, so a failed session.ts creation can never
-    // leave a dangling reference to an undefined function.
-    if (
-      filePath.endsWith('/agent.ts') &&
-      (await matchGritQL(tree, filePath, AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN))
-    ) {
+    if (filePath.endsWith('/agent.ts')) {
       const dir = filePath.split('/').slice(0, -1).join('/');
-      const sessionPath = `${dir}/session.ts`;
+      const project = findOwningProject(tree, dir);
 
-      if (!tree.exists(sessionPath)) {
-        const project = findOwningProject(tree, dir);
-        const capturedImport = await captureGritQL(
+      // Without a registered project there's no ComponentMetadata, so this
+      // agent's protocol/name/agent-connection module can't be resolved — and
+      // a pre-migration AG-UI agent.ts is textually identical to an
+      // HTTP/A2A one, so there's nothing left to safely guess from.
+      if (!project) {
+        if (
+          await matchGritQL(tree, filePath, AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN)
+        ) {
+          nextSteps.push(
+            `${filePath}: could not determine the project root — manually verify whether this is an AG-UI or HTTP/A2A agent and complete its session-manager/error-logging-plugin migration accordingly (see the ts#agent generator's template).`,
+          );
+        }
+        continue;
+      }
+
+      const protocol = agentProtocolFor(project, dir);
+
+      if (protocol === 'ag-ui') {
+        const hasLogCalls =
+          (await matchGritQL(
+            tree,
+            filePath,
+            AGENT_TS_LOG_MODEL_CALL_PATTERN,
+          )) ||
+          (await matchGritQL(tree, filePath, AGENT_TS_LOG_TOOL_CALL_PATTERN));
+        if (!hasLogCalls) {
+          continue;
+        }
+
+        // The sibling index.ts restores error-logging via StrandsAgent
+        // plugins — removing the calls here without that succeeding would
+        // drop error logging rather than move it.
+        const indexPath = `${dir}/index.ts`;
+        const indexReady =
+          pluginsReady &&
+          (await matchGritQL(
+            tree,
+            indexPath,
+            AGUI_INDEX_CONSTRUCTOR_MATCH_PATTERN,
+          ));
+
+        if (!indexReady) {
+          nextSteps.push(
+            `${filePath}: left the logModelErrors/logToolErrors calls in place — ${indexPath} could not be automatically wired with the equivalent StrandsAgent plugins. Move error logging to plugins there manually (see the ts#agent generator's template), then remove these calls.`,
+          );
+          continue;
+        }
+
+        const rewroteImport = await applyGritQL(
+          tree,
+          filePath,
+          AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN,
+        );
+        const rewroteModelCall = await applyGritQL(
+          tree,
+          filePath,
+          AGENT_TS_LOG_MODEL_CALL_PATTERN,
+        );
+        const rewroteToolCall = await applyGritQL(
+          tree,
+          filePath,
+          AGENT_TS_LOG_TOOL_CALL_PATTERN,
+        );
+        if (rewroteImport || rewroteModelCall || rewroteToolCall) {
+          anyChanges = true;
+        }
+        continue;
+      }
+
+      if (!protocol) {
+        if (
+          await matchGritQL(tree, filePath, AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN)
+        ) {
+          nextSteps.push(
+            `${filePath}: could not determine this agent's protocol from its ComponentMetadata — manually verify whether it's AG-UI or HTTP/A2A and wire sessionManager/the error-logging plugins in accordingly (see the ts#agent generator's template).`,
+          );
+        }
+        continue;
+      }
+
+      // HTTP/A2A: wire sessionManager into the Agent constructor and create
+      // the sibling session.ts if it doesn't exist yet.
+      if (
+        !(await matchGritQL(
           tree,
           filePath,
           AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN,
-        );
-        const mod = capturedImport?.match(/from '([^']+)'/)?.[1];
+        ))
+      ) {
+        continue;
+      }
 
-        if (project && mod) {
-          const dirName = dir.split('/').filter(Boolean).pop() ?? dir;
+      const sessionPath = `${dir}/session.ts`;
+
+      // Checked before any writes: if the plugin classes aren't available, or
+      // the Agent isn't an inline object literal, leave the file untouched
+      // entirely rather than ending up half-migrated.
+      if (!pluginsReady) {
+        nextSteps.push(
+          `${filePath}: left as-is — ModelErrorLoggingPlugin/ToolErrorLoggingPlugin are not available yet (see the model-errors-strands.ts/tool-errors-strands.ts next step above). Wire sessionManager and the plugins in manually once those classes exist.`,
+        );
+        continue;
+      }
+      if (
+        !(await matchGritQL(tree, filePath, AGENT_TS_CONSTRUCTOR_MATCH_PATTERN))
+      ) {
+        nextSteps.push(
+          `${filePath}: the Agent is not constructed with an inline object literal (\`new Agent({ ... })\`), so sessionManager and the error-logging plugins could not be wired in automatically. Manually add \`sessionManager: await getSessionManager()\` and \`plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()]\` to its constructor (see the ts#agent generator's template), creating ${sessionPath} first if it doesn't already exist.`,
+        );
+        continue;
+      }
+
+      if (!tree.exists(sessionPath)) {
+        const mod = await captureGritQLVariable(
+          tree,
+          filePath,
+          AGENT_TS_LOG_IMPORT_CAPTURE_PATTERN,
+          'mod',
+        );
+        const agentName = agentTmpNameFor(project, dir);
+
+        if (mod && agentName) {
           tree.write(
             sessionPath,
             legacySessionManagerContent(
               mod,
-              localSessionsDirFor(
-                project.root,
-                agentTmpNameFor(project.name, dirName),
-              ),
+              localSessionsDirFor(project.root, agentName),
             ),
           );
         } else {
           nextSteps.push(
-            `${filePath}: could not determine the project root or agent-connection module — manually create a session.ts (see the ts#agent generator's template) and wire \`sessionManager: await getSessionManager()\` into the Agent constructor.`,
+            `${filePath}: could not determine the agent-connection module or this agent's name from its ComponentMetadata — manually create a session.ts (see the ts#agent generator's template) and wire \`sessionManager: await getSessionManager()\` into the Agent constructor.`,
           );
           continue;
         }
       }
 
-      // Merges ModelErrorLoggingPlugin/ToolErrorLoggingPlugin into the same
-      // import clause as the existing logModelErrors/logToolErrors specifiers
-      // (rather than adding a redundant second import statement for the same
-      // module — mirrors AGUI_INDEX_IMPORT_PATTERN's approach for AG-UI), and
-      // adds getSessionManager as its own import line since it comes from a
-      // different module (the sibling session.ts). Generic over `$names`
-      // (rather than requiring an exact 2-specifier import) since a
-      // connection generator may have merged its own client import into the
-      // same statement via addDestructuredImport. Both are added together,
-      // guarded by a single check: this migration is what introduces both, so
-      // a legacy agent.ts either has neither yet or (after this same run)
-      // both — there's no shipped prior version of this migration that could
-      // have added one without the other. The old logModelErrors/
-      // logToolErrors specifiers are stripped out separately below (via
-      // AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN) — this must happen after,
-      // since it's what this rewrite anchors on.
+      // Merges the plugin imports into the existing logModelErrors/
+      // logToolErrors import clause (rather than a redundant second import),
+      // and adds getSessionManager as its own line. The old specifiers are
+      // stripped separately below, after this rewrite anchors on them.
       const esm = isEsmWorkspace(tree);
       await applyGritQL(
         tree,
@@ -427,8 +516,7 @@ export default async function migration(
 import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $names <: contains \`logModelErrors\`, $names <: contains \`logToolErrors\`, $program <: not contains \`getSessionManager\` }`,
       );
 
-      // Only rewrite the constructor once the import is confirmed present —
-      // either just added above, or already there from a prior partial run.
+      // Only rewrite the constructor once the import is confirmed present.
       if (!(tree.read(filePath, 'utf-8') ?? '').includes('getSessionManager')) {
         nextSteps.push(
           `${filePath}: found ${sessionPath} but couldn't confirm the getSessionManager import — wire \`sessionManager: await getSessionManager()\` into the Agent constructor manually.`,
@@ -436,11 +524,6 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
         continue;
       }
 
-      // Moves the model/tool error logging hooks from imperative calls to
-      // Agent constructor plugins (see AGENT_TS_PLUGINS_CONSTRUCTOR_PATTERN),
-      // then removes the now-unused logModelErrors/logToolErrors specifiers
-      // (preserving any merged connection-generator import — see
-      // AGENT_TS_REMOVE_LOG_ERRORS_IMPORT_PATTERN's comment).
       await applyGritQL(tree, filePath, AGENT_TS_LOG_MODEL_CALL_PATTERN);
       await applyGritQL(tree, filePath, AGENT_TS_LOG_TOOL_CALL_PATTERN);
       await applyGritQL(
@@ -460,9 +543,6 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
         AGENT_TS_SESSION_MANAGER_CONSTRUCTOR_PATTERN,
       );
       if (rewrotePlugins || rewroteConstructor) {
-        nextSteps.push(
-          `${filePath}: wired sessionManager and the error-logging plugins into the Agent constructor (see ${sessionPath}).`,
-        );
         anyChanges = true;
       }
       continue;
@@ -472,29 +552,53 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
       filePath.endsWith('/index.ts') &&
       (tree.read(filePath, 'utf-8') ?? '').includes('@ag-ui/aws-strands')
     ) {
-      const rewroteImport = await applyGritQL(
-        tree,
-        filePath,
-        AGUI_INDEX_IMPORT_PATTERN,
+      const alreadyWired = (tree.read(filePath, 'utf-8') ?? '').includes(
+        'ModelErrorLoggingPlugin',
       );
-      const rewroteConstructor = await applyGritQL(
-        tree,
-        filePath,
-        AGUI_INDEX_CONSTRUCTOR_PATTERN,
-      );
-      if (rewroteImport || rewroteConstructor) {
-        nextSteps.push(
-          `${filePath}: wired ModelErrorLoggingPlugin/ToolErrorLoggingPlugin into the StrandsAgent constructor.`,
+
+      if (!alreadyWired) {
+        // Import and constructor only apply cleanly together — adding the
+        // import while the constructor can't be rewritten would leave an
+        // unused import and no plugins wired in.
+        const needsPluginWiring = await matchGritQL(
+          tree,
+          filePath,
+          AGUI_INDEX_CONSTRUCTOR_MATCH_PATTERN,
         );
-        anyChanges = true;
+        if (!pluginsReady) {
+          if (needsPluginWiring) {
+            nextSteps.push(
+              `${filePath}: left the StrandsAgent constructor as-is — ModelErrorLoggingPlugin/ToolErrorLoggingPlugin are not available yet (see the model-errors-strands.ts/tool-errors-strands.ts next step above). Wire them in manually once those classes exist.`,
+            );
+          }
+          continue;
+        }
+        if (!needsPluginWiring) {
+          nextSteps.push(
+            `${filePath}: the StrandsAgent constructor has diverged from the generated shape - left as-is. Manually add \`plugins: [new ModelErrorLoggingPlugin(), new ToolErrorLoggingPlugin()]\` to it (see the ts#agent generator's template).`,
+          );
+          continue;
+        }
+
+        const rewroteImport = await applyGritQL(
+          tree,
+          filePath,
+          AGUI_INDEX_IMPORT_PATTERN,
+        );
+        const rewroteConstructor = await applyGritQL(
+          tree,
+          filePath,
+          AGUI_INDEX_CONSTRUCTOR_PATTERN,
+        );
+        if (rewroteImport || rewroteConstructor) {
+          anyChanges = true;
+        }
       }
 
-      // The StrandsAgent adapter also needs a sessionManagerProvider — create
-      // the sibling session.ts if it doesn't exist yet, same as the
-      // HTTP/A2A branch above, then wire it in once the plugins are present.
-      // Gated on the exact shape the rewrite targets, checked up front via
-      // matchGritQL, so a customised (non-standard) constructor is left
-      // entirely alone rather than creating an unused session.ts.
+      // Create the sibling session.ts (once plugins are present) and wire in
+      // sessionManagerProvider. Gated on the exact post-plugins shape, so a
+      // customised constructor is left alone rather than creating an unused
+      // session.ts.
       if (
         !(await matchGritQL(
           tree,
@@ -510,28 +614,25 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
 
       if (!tree.exists(sessionPath)) {
         const project = findOwningProject(tree, dir);
-        const capturedImport = await captureGritQL(
+        const mod = await captureGritQLVariable(
           tree,
           filePath,
           AGUI_INDEX_IMPORT_CAPTURE_PATTERN,
+          'mod',
         );
-        const mod = capturedImport?.match(/from '([^']+)'/)?.[1];
+        const agentName = project && agentTmpNameFor(project, dir);
 
-        if (project && mod) {
-          const dirName = dir.split('/').filter(Boolean).pop() ?? dir;
+        if (project && mod && agentName) {
           tree.write(
             sessionPath,
             legacySessionManagerContent(
               mod,
-              localSessionsDirFor(
-                project.root,
-                agentTmpNameFor(project.name, dirName),
-              ),
+              localSessionsDirFor(project.root, agentName),
             ),
           );
         } else {
           nextSteps.push(
-            `${filePath}: could not determine the project root or agent-connection module — manually create a session.ts (see the ts#agent generator's template) and wire \`config: { sessionManagerProvider: getSessionManager }\` into the StrandsAgent constructor.`,
+            `${filePath}: could not determine the project root, agent-connection module, or this agent's name from its ComponentMetadata — manually create a session.ts (see the ts#agent generator's template) and wire \`config: { sessionManagerProvider: getSessionManager }\` into the StrandsAgent constructor.`,
           );
           continue;
         }
@@ -557,45 +658,6 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
         AGUI_INDEX_SESSION_MANAGER_CONSTRUCTOR_PATTERN,
       );
       if (rewroteSessionManagerConstructor) {
-        nextSteps.push(
-          `${filePath}: wired sessionManagerProvider into the StrandsAgent constructor (see ${sessionPath}).`,
-        );
-        anyChanges = true;
-      }
-      continue;
-    }
-
-    if (filePath.endsWith('/model-errors-strands.ts')) {
-      const rewroteImport = await applyGritQL(
-        tree,
-        filePath,
-        MODEL_ERRORS_IMPORT_PATTERN,
-      );
-      const rewroteClass = await applyGritQL(
-        tree,
-        filePath,
-        MODEL_ERRORS_CLASS_PATTERN,
-      );
-      if (rewroteImport || rewroteClass) {
-        nextSteps.push(`${filePath}: added the ModelErrorLoggingPlugin class.`);
-        anyChanges = true;
-      }
-      continue;
-    }
-
-    if (filePath.endsWith('/tool-errors-strands.ts')) {
-      const rewroteImport = await applyGritQL(
-        tree,
-        filePath,
-        TOOL_ERRORS_IMPORT_PATTERN,
-      );
-      const rewroteClass = await applyGritQL(
-        tree,
-        filePath,
-        TOOL_ERRORS_CLASS_PATTERN,
-      );
-      if (rewroteImport || rewroteClass) {
-        nextSteps.push(`${filePath}: added the ToolErrorLoggingPlugin class.`);
         anyChanges = true;
       }
       continue;
@@ -606,9 +668,7 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
       if (!contents.includes('agentRuntimes')) {
         continue;
       }
-      // Each rewrite is attempted independently (not short-circuited) since
-      // a single file may match more than one shape. Only the 'agentcore'
-      // namespace is reshaped here — see CDK_RC_SET_PATTERN's comment.
+      // Only the 'agentcore' namespace is reshaped — see CDK_RC_SET_PATTERN.
       const rewroteAgentcoreRcSet = await applyGritQL(
         tree,
         filePath,
@@ -627,9 +687,6 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
       }
 
       if (rewroteAgentcoreRcSet || rewroteInterface || rewroteClientArn) {
-        nextSteps.push(
-          `${filePath}: reshaped agentRuntimes entries to { arn }.`,
-        );
         anyChanges = true;
       }
     } else if (filePath.endsWith('.tf')) {
@@ -639,9 +696,6 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
       }
       const rewrote = await applyGritQL(tree, filePath, TF_VALUE_PATTERN);
       if (rewrote) {
-        nextSteps.push(
-          `${filePath}: reshaped agentRuntimes entries to { arn }.`,
-        );
         anyChanges = true;
       }
     } else if (filePath.endsWith('.py')) {
@@ -651,9 +705,6 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
       }
       const rewrote = await applyGritQL(tree, filePath, PY_CLIENT_ARN_PATTERN);
       if (rewrote) {
-        nextSteps.push(
-          `${filePath}: reshaped agentRuntimes entries to { arn }.`,
-        );
         anyChanges = true;
       }
     }
@@ -661,9 +712,9 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
 
   if (anyChanges) {
     nextSteps.push(
-      'If you have custom code reading agentRuntimes entries as plain ARN strings ' +
-        '(e.g. custom Lambda handlers or agent code), update it to read the ARN from `.arn` ' +
-        'on the new `{ arn }` shape.',
+      'If you have custom code reading the runtime config `agentcore.agentRuntimes` entries ' +
+        'as plain ARN strings (e.g. custom Lambda handlers or agent code), update it to read ' +
+        'the ARN from `.arn` on the new `{ arn }` shape.',
     );
   }
 
