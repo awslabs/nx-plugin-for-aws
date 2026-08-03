@@ -114,14 +114,11 @@ const AGENT_TARGET_METHODS = `
             },
           },
         },
+        // The bare gateway IAM role credential: runtime targets reject the
+        // iamCredentialProvider detail MCP targets carry.
         credentialProviderConfigurations: [
           {
             credentialProviderType: 'GATEWAY_IAM_ROLE',
-            credentialProvider: {
-              iamCredentialProvider: {
-                service: 'bedrock-agentcore',
-              },
-            },
           },
         ],
       },
