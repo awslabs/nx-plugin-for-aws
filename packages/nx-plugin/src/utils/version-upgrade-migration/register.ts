@@ -26,9 +26,16 @@ const MIGRATIONS_JSON_PATH = 'packages/nx-plugin/migrations.json';
  *
  * Idempotent: re-running before a release replaces the pending entry with itself.
  *
+ * @param nxVersion nx version being moved to. The update script rewrites
+ *   `versions.ts` on the tree, which cannot change the `NX_VERSION` this process
+ *   imported at load — so the caller passes the version it just wrote, or the
+ *   entry would record the one being replaced.
  * @returns paths written, for the update report
  */
-export const registerNxPackageUpdates = (tree: Tree): string[] => {
+export const registerNxPackageUpdates = (
+  tree: Tree,
+  nxVersion?: string,
+): string[] => {
   updateJson<MigrationsJson>(tree, MIGRATIONS_JSON_PATH, (migrations) => ({
     ...migrations,
     // Recorded under `latest` until stamping resolves the version it ships with.
@@ -38,7 +45,7 @@ export const registerNxPackageUpdates = (tree: Tree): string[] => {
           ([, entry]) => entry.version !== LATEST_MIGRATIONS_DIR,
         ),
       ),
-      ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR),
+      ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, nxVersion),
     },
   }));
 

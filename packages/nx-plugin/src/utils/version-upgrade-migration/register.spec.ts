@@ -82,6 +82,24 @@ describe('registerNxPackageUpdates', () => {
     expect(readMigrations(tree)).toEqual(first);
   });
 
+  // The update script rewrites `versions.ts` on the tree, which cannot change the
+  // `NX_VERSION` the process imported at load — so it passes the version it just
+  // wrote, or the entry records the one being replaced.
+  it('should record the nx version it is given over the imported one', () => {
+    registerNxPackageUpdates(tree, '99.0.0');
+
+    const updates = readMigrations(tree).packageJsonUpdates;
+    expect(Object.keys(updates ?? {})).toEqual([nxPackageUpdatesKey('99.0.0')]);
+    const packages = (
+      updates?.[nxPackageUpdatesKey('99.0.0')] as
+        | { packages?: Record<string, { version: string }> }
+        | undefined
+    )?.packages;
+    for (const entry of Object.values(packages ?? {})) {
+      expect(entry.version).toBe('99.0.0');
+    }
+  });
+
   // Both would otherwise ship under the same version, leaving which nx a
   // workspace lands on down to the order nx happens to apply them in.
   it('should supersede a bump still waiting for a release', () => {

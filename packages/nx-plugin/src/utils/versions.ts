@@ -95,7 +95,7 @@ export const TS_VERSIONS = {
   '@vitest/coverage-v8': '4.1.10',
   '@vitest/ui': '4.1.10',
   '@astrojs/react': '6.0.2',
-  '@astrojs/starlight': '0.41.6',
+  '@astrojs/starlight': '0.41.3',
   astro: '7.1.6',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1134.0',
