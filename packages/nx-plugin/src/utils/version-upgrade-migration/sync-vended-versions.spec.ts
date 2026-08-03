@@ -698,10 +698,32 @@ dependencies = [ "fastapi==0.130.0" ]
     const { nextSteps } = await syncVendedVersions(tree);
 
     expect(nextSteps).toHaveLength(3);
-    expect(nextSteps.join('\n')).toContain('package manager install');
+    expect(nextSteps.join('\n')).toContain('to update the lock file');
     expect(nextSteps.join('\n')).toContain('uv sync');
     expect(nextSteps.join('\n')).toContain('terraform init -upgrade');
   });
+
+  // The install command differs per package manager, and yarn takes no
+  // subcommand at all — so a generic "run your package manager install" leaves
+  // the reader to work out what to type.
+  it.each([
+    ['npm', 'npm install'],
+    ['pnpm', 'pnpm install'],
+    ['bun', 'bun install'],
+    ['yarn', 'yarn'],
+  ] as const)(
+    "should name %s's own install command in the next steps",
+    async (pkgMgr, command) => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+      writeCatalog(tree, { zod: '4.3.0' });
+
+      const { nextSteps } = await syncVendedVersions(tree);
+
+      expect(nextSteps).toEqual([
+        `TypeScript dependency versions were updated. Run \`${command}\` to update the lock file.`,
+      ]);
+    },
+  );
 
   it('should report no next steps when everything is already up to date', async () => {
     writeCatalog(tree, { zod: VENDED_ZOD });

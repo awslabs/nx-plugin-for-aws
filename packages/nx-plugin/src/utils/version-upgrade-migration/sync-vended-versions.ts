@@ -16,6 +16,7 @@ import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { coerce, parse, satisfies, validRange } from 'semver';
 import { applyGritQL, captureAllGritQL } from '../ast';
+import { buildInstallCommand } from '../commands';
 import { formatFilesInSubtree } from '../format';
 import { updateToml } from '../toml';
 import { PY_VERSIONS, TERRAFORM_VERSIONS, TS_VERSIONS } from '../versions';
@@ -654,7 +655,9 @@ export const syncVendedVersions = async (
   // manifest changes, and never runs `uv` or `terraform`.
   if (catalogs.length > 0 || packageJsons.length > 0 || overrides.length > 0) {
     nextSteps.push(
-      'TypeScript dependency versions were updated. Run your package manager install to update the lock file.',
+      `TypeScript dependency versions were updated. Run \`${buildInstallCommand(
+        detectPackageManager(tree.root),
+      )}\` to update the lock file.`,
     );
   }
   if (pyProjects.length > 0) {
