@@ -292,6 +292,26 @@ RUN npm install @scope/npm@1.0.0
       },
     );
 
+    // A build stage names itself and picks a tag for what that stage has to run.
+    // The smithy builder needs curl and unzip, which the slim tag vended for a
+    // runtime image does not carry, and the two share a repository — so
+    // rewriting it swaps in an image the build cannot run on.
+    it('should not rewrite the base image tag of a named build stage', async () => {
+      const builder = `FROM ${imageRepository(BASE_IMAGES.node)}:24 AS builder
+RUN curl -L https://example.com/cli.zip -o cli.zip && unzip -qo cli.zip
+
+FROM scratch AS export
+COPY --from=builder /out /
+`;
+      tree.write('packages/agent/build.Dockerfile', builder);
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/agent/build.Dockerfile', 'utf-8')).toEqual(
+        builder,
+      );
+    });
+
     // Matched exactly, so a file merely named like one — a backup kept beside a
     // real Dockerfile, or notes about it — is not rewritten.
     it.each([

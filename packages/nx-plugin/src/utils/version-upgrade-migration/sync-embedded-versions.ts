@@ -180,7 +180,13 @@ const dockerfilePins = (owned: {
   for (const image of Object.values(BASE_IMAGES)) {
     const [repository, tag] = splitImageReference(image);
     pins.push({
-      pattern: `FROM ${escapeRegExp(repository)}:(\\S+)`,
+      // Only a `FROM` that is the whole instruction. A build stage names itself
+      // — `FROM <repo>:24 AS builder` — and picks its tag for what that stage has
+      // to run: the smithy builder needs curl and unzip, which the slim tag this
+      // release vends for a runtime image does not carry. Rewriting it would
+      // break the build, and the two share a repository, so the instruction
+      // ending is what separates them.
+      pattern: `FROM ${escapeRegExp(repository)}:([^\\s]+)\\n`,
       vended: tag,
       kind: 'tag',
     });
