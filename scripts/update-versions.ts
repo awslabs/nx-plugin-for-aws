@@ -415,8 +415,13 @@ const main = async () => {
     // Ship the bumps to existing workspaces. Only the nx packages need
     // registering: everything else moves through the version sync migration,
     // which is committed once and runs on every upgrade.
-    const migrationFiles = tsChanges.some((change) => isNxPackage(change.name))
-      ? registerNxPackageUpdates(tree)
+    //
+    // The version comes from the change just applied rather than `NX_VERSION`:
+    // rewriting `versions.ts` on the tree cannot change what this process
+    // imported at load, so the constant still holds the version being replaced.
+    const nxChange = tsChanges.find((change) => isNxPackage(change.name));
+    const migrationFiles = nxChange
+      ? registerNxPackageUpdates(tree, nxChange.newVersion)
       : [];
 
     // Only apply changes if not a dry run
