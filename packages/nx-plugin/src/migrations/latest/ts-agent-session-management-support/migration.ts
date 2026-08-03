@@ -100,6 +100,13 @@ const TS_CLIENT_ARN_PATTERNS = [
   '`config?.agentRuntimes?.[$name]` => `config?.agentRuntimes?.[$name]?.arn` where { $program <: not contains `config?.agentRuntimes?.[$name]?.arn` }',
 ];
 
+// The agent-chat CLI's agentcore.ts calls `getAppConfig` directly rather than
+// the shared `AgentCoreRuntimeConfig` type, so its own inline cast needs the
+// same { arn } reshape TS_RUNTIME_CONFIG_INTERFACE_PATTERN gives the shared
+// interface.
+const AGENTCORE_CHAT_SCRIPT_TYPE_PATTERN =
+  '`{ agentRuntimes?: Record<string, string> }` => `{ agentRuntimes?: Record<string, { arn: string }> }`';
+
 // Python equivalent (Strands + LangChain client templates).
 const PY_CLIENT_ARN_PATTERN =
   'language python\n`agent_runtime_arn = config.get("agentRuntimes", {}).get($name)` => `agent_runtime = config.get("agentRuntimes", {}).get($name)\nagent_runtime_arn = agent_runtime.get("arn") if agent_runtime else None`';
@@ -685,8 +692,18 @@ import { getSessionManager } from './session${esm ? '.js' : ''}';\` where { $nam
           ? true
           : rewroteClientArn;
       }
+      const rewroteChatScriptType = await applyGritQL(
+        tree,
+        filePath,
+        AGENTCORE_CHAT_SCRIPT_TYPE_PATTERN,
+      );
 
-      if (rewroteAgentcoreRcSet || rewroteInterface || rewroteClientArn) {
+      if (
+        rewroteAgentcoreRcSet ||
+        rewroteInterface ||
+        rewroteClientArn ||
+        rewroteChatScriptType
+      ) {
         anyChanges = true;
       }
     } else if (filePath.endsWith('.tf')) {

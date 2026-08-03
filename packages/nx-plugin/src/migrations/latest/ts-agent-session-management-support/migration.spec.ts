@@ -44,6 +44,8 @@ const TS_A2A_CLIENT_FILE =
   'packages/common/agent-connection/src/app/my-target-agent-client-strands.ts';
 const PY_A2A_CLIENT_FILE =
   'packages/common/agent_connection/app/my_target_agent_client_strands.py';
+const AGENTCORE_CHAT_SCRIPT_FILE =
+  'apps/test-project/scripts/agent/agentcore.ts';
 const REACT_PROVIDER_FILE =
   'packages/website/src/components/MyAgentAgentClientProvider.tsx';
 
@@ -175,6 +177,30 @@ class MyTargetAgentClientStrands:
         if not agent_runtime_arn:
             raise RuntimeError("No connected agent runtime found.")
         return AgentCoreA2aClientStrands.with_iam_auth(agent_runtime_arn)
+`;
+
+// Unlike the a2a/mcp client templates, agentcore.ts (the agent-chat CLI's
+// runtime-config resolver) calls getAppConfig directly and casts the result
+// inline rather than importing the shared AgentCoreRuntimeConfig type, so it
+// needs its own reshape.
+const OLD_AGENTCORE_CHAT_SCRIPT_FILE = `import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+export const resolveRemoteAgent = async () => {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    return undefined;
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { agentRuntimes?: Record<string, string> };
+  const arn = config.agentRuntimes?.['MyAgent'];
+  if (!arn) {
+    throw new Error("No deployed agent named 'MyAgent' found.");
+  }
+  return { arn, region: arn.split(':')[3] };
+};
 `;
 
 const OLD_REACT_PROVIDER_FILE = `import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -526,6 +552,22 @@ describe('ts-agent-session-manager-support migration', () => {
 
     const content = tree.read(TS_A2A_CLIENT_FILE, 'utf-8');
     expect(content).toContain("config.agentRuntimes?.['MyTargetAgent']?.arn");
+  });
+
+  it('reshapes the agent-chat CLI agentcore.ts inline cast to { arn }', async () => {
+    tree.write(AGENTCORE_CHAT_SCRIPT_FILE, OLD_AGENTCORE_CHAT_SCRIPT_FILE);
+
+    await migration(tree);
+
+    const content = tree.read(AGENTCORE_CHAT_SCRIPT_FILE, 'utf-8');
+    expect(content).toContain(
+      'agentRuntimes?: Record<string, { arn: string }>',
+    );
+    expect(content).not.toContain('agentRuntimes?: Record<string, string>');
+    // The access expression is reshaped by the existing TS_CLIENT_ARN_PATTERNS
+    // rewrite — asserted here too since a type that no longer matches what's
+    // read off it is exactly the bug this migration must not reintroduce.
+    expect(content).toContain("config.agentRuntimes?.['MyAgent']?.arn");
   });
 
   it('appends .get("arn") to Python client agentRuntimes access', async () => {
