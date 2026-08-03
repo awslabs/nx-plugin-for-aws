@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import type { DeclaredTsDependency } from './declared-dependencies';
+import type { ITsDepVersion } from './versions';
 
 export const PACKAGES_DIR = 'packages';
 export const SHARED_CONSTRUCTS_NAME = 'common-constructs';
@@ -54,4 +56,7 @@ export const SHARED_CONSTRUCTS_DEPENDENCIES = [
   { name: 'constructs', when: (m: IacMetadata) => m.iac === 'cdk' },
   { name: 'aws-cdk-lib', when: (m: IacMetadata) => m.iac === 'cdk' },
   { name: '@types/node' },
-] as const;
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];

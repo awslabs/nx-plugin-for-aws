@@ -18,13 +18,13 @@ import {
   SHARED_SCRIPTS_DIR,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 /** Dependencies a caller must declare to use the shared DynamoDB scripts. */
 export const SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES = [
   { name: '@aws-sdk/client-dynamodb' },
   { name: 'tsx' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
  * Ensures the shared scripts package exists and adds DynamoDB local-dev scripts

@@ -13,6 +13,7 @@ import {
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
 import {
+  type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
@@ -23,11 +24,13 @@ import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   generatedInfrastructure,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import {
+  type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
   withVersions,
@@ -45,7 +48,10 @@ export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
   { name: 'ejs', when: generatedInfrastructure },
   { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
   { name: '@types/ejs', when: generatedInfrastructure },
-] as const;
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];
 
 export type AgentCoreAuth = 'iam' | 'cognito';
 

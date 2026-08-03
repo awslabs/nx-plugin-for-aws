@@ -23,10 +23,12 @@ import {
   normalizeTargetKeyOrder,
 } from '../nx';
 import { getRelativePathToRoot } from '../paths';
-import { withVersions } from '../versions';
+import { type ITsDepVersion, withVersions } from '../versions';
 
 /** Dependencies a caller must declare to add a TypeScript bundle target. */
-export const BUNDLE_DEPENDENCIES = [{ name: 'rolldown' }] as const;
+export const BUNDLE_DEPENDENCIES = [
+  { name: 'rolldown' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export interface AddPythonBundleTargetOptions {
   /**

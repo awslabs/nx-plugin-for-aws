@@ -22,7 +22,11 @@ import {
 import { addDependenciesToPackageJson } from '../dependencies';
 import { esmVars } from '../module-format';
 import { addDependenciesToPyProjectToml } from '../py';
-import { type IPyDepVersion, withVersions } from '../versions';
+import {
+  type IPyDepVersion,
+  type ITsDepVersion,
+  withVersions,
+} from '../versions';
 
 /** TypeScript dependencies a caller must declare to emit agent-connection clients. */
 export const AGENT_CONNECTION_DEPENDENCIES = [
@@ -32,13 +36,13 @@ export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: '@modelcontextprotocol/sdk' },
   { name: '@a2a-js/sdk' },
   { name: '@strands-agents/sdk' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /** Python dependencies a caller must declare to emit agent-connection clients. */
 export const AGENT_CONNECTION_PY_DEPENDENCIES = [
   { name: 'aws-lambda-powertools' },
   { name: 'strands-agents' },
-] as const;
+] as const satisfies readonly { name: IPyDepVersion }[];
 
 type AgentConnectionPyDependency =
   (typeof AGENT_CONNECTION_PY_DEPENDENCIES)[number]['name'];

@@ -12,7 +12,7 @@ import {
   type MustDeclare,
 } from '../../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { withVersions } from '../../utils/versions';
+import { type ITsDepVersion, withVersions } from '../../utils/versions';
 import type { ConfigureProjectOptions } from './types';
 
 const readGritPattern = (name: string): string =>
@@ -26,7 +26,7 @@ export const VITEST_DEPENDENCIES = [
   { name: 'vite' },
   { name: 'vitest' },
   { name: '@vitest/coverage-v8' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export const configureVitest = async <const D extends DependencyDeclaration>(
   tree: Tree,

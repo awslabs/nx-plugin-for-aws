@@ -21,10 +21,12 @@ import {
   nxPluginSelfDependency,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import { withVersions } from '../../utils/versions';
+import { type ITsDepVersion, withVersions } from '../../utils/versions';
 
 /** Dependencies a caller must declare to configure an Nx Plugin project. */
-export const NX_PLUGIN_DEPENDENCIES = [{ name: '@nx/devkit' }] as const;
+export const NX_PLUGIN_DEPENDENCIES = [
+  { name: '@nx/devkit' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
  * Read the configuration of a project which can host Nx Plugin generators or

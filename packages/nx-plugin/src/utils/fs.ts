@@ -9,14 +9,14 @@ import {
   type MustDeclare,
 } from './declared-dependencies';
 import { addDependenciesToPackageJson } from './dependencies';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 /** Dependencies a caller must declare to use `FsCommands`. */
 export const FS_DEPENDENCIES = [
   { name: 'ncp' },
   { name: 'rimraf' },
   { name: 'make-dir-cli' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
  * Platform agnostic commands for filesystem operations, adding the CLIs they

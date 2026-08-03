@@ -22,7 +22,7 @@ import { addDependenciesToPackageJson } from '../../dependencies';
 import { updateGitIgnore } from '../../git';
 import { kebabCase, toClassName } from '../../names';
 import { sortObjectKeys } from '../../object';
-import { withVersions } from '../../versions';
+import { type ITsDepVersion, withVersions } from '../../versions';
 
 /** Dependencies a caller must declare to add an OpenAPI React client. */
 export const OPEN_API_REACT_DEPENDENCIES = [
@@ -33,7 +33,7 @@ export const OPEN_API_REACT_DEPENDENCIES = [
   { name: '@tanstack/react-query' },
   { name: '@tanstack/react-query-devtools' },
   { name: '@smithy/types' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export interface AddOpenApiReactClientOptions {
   /**

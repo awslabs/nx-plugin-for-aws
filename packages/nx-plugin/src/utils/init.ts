@@ -42,7 +42,7 @@ import {
 } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { workspaceGlobs } from './project-package-json';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
@@ -54,7 +54,7 @@ export const INIT_DEPENDENCIES = [
   { name: '@nx/workspace' },
   { name: 'typescript' },
   { name: '@biomejs/biome' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 // Built dependencies whose install scripts the generated workspace trusts.
 // `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);

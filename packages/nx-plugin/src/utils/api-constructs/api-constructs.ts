@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import {
+  type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
@@ -22,11 +23,13 @@ import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   generatedInfrastructure,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import {
+  type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
   withVersions,
@@ -43,7 +46,10 @@ export const API_CONSTRUCTS_DEPENDENCIES = [
   { name: '@aws-sdk/client-api-gateway', when: generatedInfrastructure },
   { name: '@aws-sdk/client-iam', when: generatedInfrastructure },
   { name: '@trpc/server', when: generatedInfrastructure },
-] as const;
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';

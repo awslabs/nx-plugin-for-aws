@@ -9,6 +9,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import type {
+  DeclaredTsDependency,
   DependencyDeclaration,
   MustDeclare,
 } from './declared-dependencies';
@@ -19,12 +20,13 @@ import { getNpmScopePrefix } from './npm-scope';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   generatedInfrastructure,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
   SHARED_SCRIPTS_NAME,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 /**
  * Dependencies a caller must declare to use the shared infra scripts.
@@ -35,7 +37,10 @@ import { withVersions } from './versions';
 export const SHARED_INFRA_SCRIPTS_DEPENDENCIES = [
   { name: '@aws-sdk/client-sts', when: generatedInfrastructure },
   { name: '@aws-sdk/credential-providers', when: generatedInfrastructure },
-] as const;
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];
 
 /**
  * Ensures the shared scripts package exists and adds infra-deploy/infra-destroy

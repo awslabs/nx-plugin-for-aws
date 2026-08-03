@@ -18,7 +18,7 @@ import {
   SHARED_SCRIPTS_DIR,
 } from './shared-constructs-constants';
 import { ensureSharedScriptsProject } from './shared-scripts';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 /** Dependencies a caller must declare to use the shared RDB scripts. */
 export const SHARED_RDB_SCRIPTS_DEPENDENCIES = [
@@ -26,7 +26,7 @@ export const SHARED_RDB_SCRIPTS_DEPENDENCIES = [
   { name: '@types/pg' },
   { name: 'mariadb' },
   { name: 'tsx' },
-] as const;
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
  * Ensures the shared scripts package exists and adds RDB local-dev scripts
