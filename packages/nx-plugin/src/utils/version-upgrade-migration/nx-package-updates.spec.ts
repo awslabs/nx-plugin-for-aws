@@ -131,5 +131,62 @@ describe('nx package updates', () => {
         }
       }
     });
+
+    // A release stamps `dist` only, so after one publishes, source's entry still
+    // reads `latest` until a backfill dates it. Registering a newer bump drops
+    // whatever is still pending — so the weekly workflow has to backfill *before*
+    // it bumps, or the hop that release just published is lost.
+    it('should keep a released bump when the backfill runs before the next bump', () => {
+      const published = stampMigrationVersions(
+        {
+          generators: {},
+          packageJsonUpdates: nxPackageJsonUpdates(
+            LATEST_MIGRATIONS_DIR,
+            '23.1.0',
+          ),
+        },
+        {},
+        '1.0.0-rc.56',
+      );
+      // Source is untouched by the release, so it still holds `latest`.
+      const source = {
+        generators: {},
+        packageJsonUpdates: nxPackageJsonUpdates(
+          LATEST_MIGRATIONS_DIR,
+          '23.1.0',
+        ),
+      };
+
+      // Backfill first, resolving the version from the release that published it.
+      const dated = backfillMigrationVersions(source, {
+        [nxPackageUpdatesKey('23.1.0')]: '1.0.0-rc.56',
+      }).migrations;
+      // Then the new bump lands, superseding only what is still pending.
+      const next = {
+        ...dated,
+        packageJsonUpdates: {
+          ...Object.fromEntries(
+            Object.entries(dated.packageJsonUpdates ?? {}).filter(
+              ([, entry]) => entry.version !== LATEST_MIGRATIONS_DIR,
+            ),
+          ),
+          ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, '23.1.1'),
+        },
+      };
+
+      expect(
+        published.packageJsonUpdates?.[nxPackageUpdatesKey('23.1.0')],
+      ).toEqual(expect.objectContaining({ version: '1.0.0-rc.56' }));
+      // Both hops survive: the released one keeps its version, the new one pends.
+      expect(
+        Object.entries(next.packageJsonUpdates).map(([key, entry]) => [
+          key,
+          entry.version,
+        ]),
+      ).toEqual([
+        [nxPackageUpdatesKey('23.1.0'), '1.0.0-rc.56'],
+        [nxPackageUpdatesKey('23.1.1'), LATEST_MIGRATIONS_DIR],
+      ]);
+    });
   });
 });
