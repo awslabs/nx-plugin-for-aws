@@ -11,10 +11,11 @@ import {
   stampMigrationVersions,
 } from '../migration-versions';
 import { NX_PACKAGES, NX_VERSION } from '../versions';
+import { nxPackageUpdatesKey } from './nx-package-updates';
 import { registerNxPackageUpdates } from './register';
 
 const MIGRATIONS_JSON_PATH = 'packages/nx-plugin/migrations.json';
-const NX_KEY = `${LATEST_MIGRATIONS_DIR}-nx-packages`;
+const NX_KEY = nxPackageUpdatesKey(NX_VERSION);
 
 const readMigrations = (tree: Tree): MigrationsJson =>
   readJson(tree, MIGRATIONS_JSON_PATH);
@@ -36,7 +37,8 @@ describe('registerNxPackageUpdates', () => {
 
     expect(written).toEqual([MIGRATIONS_JSON_PATH]);
     const updates = readMigrations(tree).packageJsonUpdates;
-    // Keyed like the migrations, so a concurrent PR's entry can't overwrite it.
+    // Keyed by the nx version it moves to, so a bump still waiting for a release
+    // can't be overwritten by the next one.
     expect(Object.keys(updates ?? {})).toEqual([NX_KEY]);
     const packages = (
       updates?.[NX_KEY] as
@@ -64,10 +66,9 @@ describe('registerNxPackageUpdates', () => {
       '1.0.0-rc.49',
     );
 
-    // Gated on the version that really ships, and re-keyed out of `latest` so a
-    // later release's entry sits alongside rather than over it.
-    expect(stamped.packageJsonUpdates?.[NX_KEY]).toBeUndefined();
-    expect(stamped.packageJsonUpdates?.['v1.0.0-rc.49-nx-packages']).toEqual(
+    // Gated on the version that really ships, under the key it was written with
+    // — so a later release's bump sits alongside rather than over it.
+    expect(stamped.packageJsonUpdates?.[NX_KEY]).toEqual(
       expect.objectContaining({ version: '1.0.0-rc.49' }),
     );
   });
@@ -81,12 +82,33 @@ describe('registerNxPackageUpdates', () => {
     expect(readMigrations(tree)).toEqual(first);
   });
 
+  // Both would otherwise ship under the same version, leaving which nx a
+  // workspace lands on down to the order nx happens to apply them in.
+  it('should supersede a bump still waiting for a release', () => {
+    writeJson(tree, MIGRATIONS_JSON_PATH, {
+      name: '@aws/nx-plugin',
+      generators: {},
+      packageJsonUpdates: {
+        'nx-22.0.0-nx-packages': {
+          version: LATEST_MIGRATIONS_DIR,
+          packages: { nx: {} },
+        },
+      },
+    });
+
+    registerNxPackageUpdates(tree);
+
+    expect(Object.keys(readMigrations(tree).packageJsonUpdates ?? {})).toEqual([
+      NX_KEY,
+    ]);
+  });
+
   it('should preserve a packageJsonUpdates entry from another release', () => {
     writeJson(tree, MIGRATIONS_JSON_PATH, {
       name: '@aws/nx-plugin',
       generators: {},
       packageJsonUpdates: {
-        'v1.0.0-nx-packages': { version: '1.0.0', packages: { nx: {} } },
+        'nx-22.0.0-nx-packages': { version: '1.0.0', packages: { nx: {} } },
       },
     });
 
@@ -94,6 +116,6 @@ describe('registerNxPackageUpdates', () => {
 
     expect(
       Object.keys(readMigrations(tree).packageJsonUpdates ?? {}).sort(),
-    ).toEqual([NX_KEY, 'v1.0.0-nx-packages']);
+    ).toEqual(['nx-22.0.0-nx-packages', NX_KEY]);
   });
 });
