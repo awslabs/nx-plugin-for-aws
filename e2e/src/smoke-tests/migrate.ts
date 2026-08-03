@@ -249,6 +249,13 @@ export const runMigrateTest = async (
 
   // 5. Idempotency: re-running the migrations must not change the workspace.
   if (migrations?.length) {
+    // Settle the lock file first. A migration that moves a dependency version
+    // leaves it stale by design — it reports the install as a next step rather
+    // than running one — and `nx migrate --run-migrations` installs when the root
+    // manifest changed. So the *second* run's install would write the lock file
+    // the first run left behind, which is the install landing, not a migration
+    // being non-idempotent.
+    await runInstall(opts);
     commitAll('after migrations');
     await runCLI('migrate --run-migrations --if-exists --no-interactive', {
       ...opts,
