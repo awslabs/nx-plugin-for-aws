@@ -15,9 +15,7 @@ import {
  *
  * DynamoDB Local's startup vacuum drops primary key / GSI uniqueness on the
  * underlying sqlite file, letting PutItem/UpdateItem write duplicate rows for
- * the same key:
- * - https://github.com/aaronshaf/dynamodb-admin/issues/105
- * - https://github.com/awslabs/amazon-dynamodb-local-samples/issues/36
+ * the same key.
  *
  * The edit is expressed as a GritQL rewrite so the script is matched on its
  * AST rather than its formatting. The rewrite matches the whole `runArgs`
@@ -71,7 +69,7 @@ const REMOVE_FLAG_PATTERN = `\`[
     '-port', $portArg,
   ]\``;
 
-const divergedNextStep = `${START_CONTAINER_FILE}: the container script has diverged from the generated shape - left untouched. Manually drop ${FLAG} from the DynamoDB Local container run args - its startup vacuum can drop primary key / GSI uniqueness on the sqlite file, letting PutItem/UpdateItem write duplicate rows for the same key (aaronshaf/dynamodb-admin#105, awslabs/amazon-dynamodb-local-samples#36).`;
+const divergedNextStep = `${START_CONTAINER_FILE}: the container script has diverged from the generated shape - left untouched. Manually drop ${FLAG} from the DynamoDB Local container run args - its startup vacuum can drop primary key / GSI uniqueness on the sqlite file, letting PutItem/UpdateItem write duplicate rows for the same key.`;
 
 export default async function migration(
   tree: Tree,
