@@ -2,15 +2,21 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { smithyProjectGenerator } from '../../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { TS_VERSIONS } from '../../../utils/versions';
 import migration from './migration';
 
 const BUILD_DOCKERFILE = 'test-api/build.Dockerfile';
 
-// The versions the pins were on before this release vended their replacements.
+// The versions this migration moves the pins to, hardcoded here as they are in
+// the migration: a once-off change stays fixed however far the vended versions
+// move afterwards.
+const ROLLDOWN = '1.2.0';
+const DTS = '0.28.0';
+const ESM_SHIM = '0.1.8';
+
+// The versions an older release generated.
 const OLD_ROLLDOWN = '1.0.0-beta.38';
 const OLD_DTS = '0.16.5';
 
@@ -26,9 +32,11 @@ const generateOldWorkspace = async (tree: Tree): Promise<void> => {
   tree.write(
     BUILD_DOCKERFILE,
     current
-      .replace(`rolldown@${TS_VERSIONS.rolldown}`, `rolldown@${OLD_ROLLDOWN}`)
+      // Matched on the pin name rather than the version the template renders
+      // today, so winding back keeps working as the vended versions move.
+      .replace(/rolldown@[^\s\\]+/, `rolldown@${OLD_ROLLDOWN}`)
       .replace(
-        `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
+        /rolldown-plugin-dts@[^\s\\]+/,
         `rolldown-plugin-dts@${OLD_DTS}`,
       ),
   );
@@ -41,16 +49,14 @@ describe('smithy-ssdk-bundle-pins migration', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should move the pins an older release generated onto the vended versions', async () => {
+  it('should move the pins an older release generated onto the fixed versions', async () => {
     await generateOldWorkspace(tree);
 
     const { nextSteps } = await migration(tree);
 
     const dockerfile = tree.read(BUILD_DOCKERFILE, 'utf-8') ?? '';
-    expect(dockerfile).toContain(`rolldown@${TS_VERSIONS.rolldown}`);
-    expect(dockerfile).toContain(
-      `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
-    );
+    expect(dockerfile).toContain(`rolldown@${ROLLDOWN}`);
+    expect(dockerfile).toContain(`rolldown-plugin-dts@${DTS}`);
     expect(dockerfile).not.toContain(`rolldown@${OLD_ROLLDOWN}`);
     expect(dockerfile).not.toContain(`rolldown-plugin-dts@${OLD_DTS}`);
     expect(nextSteps).toEqual([]);
@@ -65,20 +71,33 @@ describe('smithy-ssdk-bundle-pins migration', () => {
     await migration(tree);
 
     const dockerfile = tree.read(BUILD_DOCKERFILE, 'utf-8') ?? '';
-    expect(dockerfile).toContain(
-      `@rollup/plugin-esm-shim@${TS_VERSIONS['@rollup/plugin-esm-shim']}`,
-    );
+    expect(dockerfile).toContain(`@rollup/plugin-esm-shim@${ESM_SHIM}`);
     expect(dockerfile).toContain('pnpm@11.1.1');
     expect(dockerfile).toContain('smithy/releases/download/1.61.0/');
   });
 
-  it('should leave a workspace already on the vended versions untouched', async () => {
+  it('should leave a workspace already on the fixed versions untouched', async () => {
     await smithyProjectGenerator(tree, { name: 'test-api' });
     const before = tree.read(BUILD_DOCKERFILE, 'utf-8');
 
     const { nextSteps } = await migration(tree);
 
     expect(tree.read(BUILD_DOCKERFILE, 'utf-8')).toEqual(before);
+    expect(nextSteps).toEqual([]);
+  });
+
+  // A later release's version sync moves these pins on past the target, and this
+  // migration still runs on the way through — it must not wind them back.
+  it('should leave a pin a later release moved past the target alone', async () => {
+    await smithyProjectGenerator(tree, { name: 'test-api' });
+    const newer = (tree.read(BUILD_DOCKERFILE, 'utf-8') ?? '')
+      .replace(/rolldown@[^\s\\]+/, 'rolldown@9.9.9')
+      .replace(/rolldown-plugin-dts@[^\s\\]+/, 'rolldown-plugin-dts@9.9.9');
+    tree.write(BUILD_DOCKERFILE, newer);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(tree.read(BUILD_DOCKERFILE, 'utf-8')).toEqual(newer);
     expect(nextSteps).toEqual([]);
   });
 
@@ -92,14 +111,33 @@ describe('smithy-ssdk-bundle-pins migration', () => {
     expect(tree.read(BUILD_DOCKERFILE, 'utf-8')).toEqual(afterFirst);
   });
 
-  // The shapes build image builds the model alone and pins none of this.
-  it('should leave a build image that bundles no SSDK alone', async () => {
+  // The shapes type builds the model alone and pins none of this.
+  it('should leave a shapes project alone', async () => {
     await smithyProjectGenerator(tree, { name: 'test-shapes', type: 'shapes' });
     const before = tree.read('test-shapes/build.Dockerfile', 'utf-8');
 
     await migration(tree);
 
     expect(tree.read('test-shapes/build.Dockerfile', 'utf-8')).toEqual(before);
+  });
+
+  // Scoped by the recorded generator id, so a `build.Dockerfile` a user wrote
+  // themselves keeps whatever it pins.
+  it('should leave a build.Dockerfile outside a smithy project alone', async () => {
+    await generateOldWorkspace(tree);
+    addProjectConfiguration(tree, 'other', { root: 'packages/other' });
+    const theirs = `FROM node:24\nRUN npm i -g rolldown@${OLD_ROLLDOWN}\nRUN pnpm add -D rolldown-plugin-dts@${OLD_DTS}\n`;
+    tree.write('packages/other/build.Dockerfile', theirs);
+
+    await migration(tree);
+
+    expect(tree.read('packages/other/build.Dockerfile', 'utf-8')).toEqual(
+      theirs,
+    );
+    // The smithy project's own file still migrated.
+    expect(tree.read(BUILD_DOCKERFILE, 'utf-8')).toContain(
+      `rolldown@${ROLLDOWN}`,
+    );
   });
 
   it('should do nothing in a workspace with no smithy project', async () => {
