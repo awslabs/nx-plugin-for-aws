@@ -267,51 +267,61 @@ const AGUI_INDEX_SESSION_MANAGER_CONSTRUCTOR_PATTERN = `${AGUI_INDEX_SESSION_MAN
 
 // The plugin classes referenced above only exist once model-errors-strands.ts
 // / tool-errors-strands.ts are converted from their plain logXErrors function
-// form (see ensurePluginClass below). Anchored on the `agent.addHook(...)`
-// call so this doesn't re-match its own output.
+// form (see checkPluginClass/applyPluginClass below). Anchored on the
+// `agent.addHook(...)` call so this doesn't re-match its own output.
 const MODEL_ERRORS_IMPORT_PATTERN =
   "`import { AfterModelCallEvent, type LocalAgent } from '@strands-agents/sdk';` => `import { AfterModelCallEvent, type LocalAgent, type Plugin } from '@strands-agents/sdk';`";
-const MODEL_ERRORS_CLASS_PATTERN =
-  "`export const logModelErrors = (agent: LocalAgent): void => { agent.addHook(AfterModelCallEvent, $callback); };` => raw`export class ModelErrorLoggingPlugin implements Plugin {\n  readonly name = 'model-error-logging';\n\n  initAgent(agent: LocalAgent): void {\n    agent.addHook(AfterModelCallEvent, $callback);\n  }\n}`";
+// Match-only form of the target shape, checked before committing to either
+// this or the sibling tool-errors conversion — see checkPluginClass.
+const MODEL_ERRORS_CLASS_MATCH_PATTERN =
+  '`export const logModelErrors = (agent: LocalAgent): void => { agent.addHook(AfterModelCallEvent, $callback); };`';
+const MODEL_ERRORS_CLASS_PATTERN = `${MODEL_ERRORS_CLASS_MATCH_PATTERN} => raw\`export class ModelErrorLoggingPlugin implements Plugin {\n  readonly name = 'model-error-logging';\n\n  initAgent(agent: LocalAgent): void {\n    agent.addHook(AfterModelCallEvent, $callback);\n  }\n}\``;
 
 const TOOL_ERRORS_IMPORT_PATTERN =
   "`import { AfterToolCallEvent, type LocalAgent, TextBlock } from '@strands-agents/sdk';` => `import { AfterToolCallEvent, type LocalAgent, type Plugin, TextBlock } from '@strands-agents/sdk';`";
-const TOOL_ERRORS_CLASS_PATTERN =
-  "`export const logToolErrors = (agent: LocalAgent): void => { agent.addHook(AfterToolCallEvent, $callback); };` => raw`export class ToolErrorLoggingPlugin implements Plugin {\n  readonly name = 'tool-error-logging';\n\n  initAgent(agent: LocalAgent): void {\n    agent.addHook(AfterToolCallEvent, $callback);\n  }\n}`";
+const TOOL_ERRORS_CLASS_MATCH_PATTERN =
+  '`export const logToolErrors = (agent: LocalAgent): void => { agent.addHook(AfterToolCallEvent, $callback); };`';
+const TOOL_ERRORS_CLASS_PATTERN = `${TOOL_ERRORS_CLASS_MATCH_PATTERN} => raw\`export class ToolErrorLoggingPlugin implements Plugin {\n  readonly name = 'tool-error-logging';\n\n  initAgent(agent: LocalAgent): void {\n    agent.addHook(AfterToolCallEvent, $callback);\n  }\n}\``;
+
+type PluginClassStatus = 'ready' | 'done' | 'diverged';
 
 /**
- * Converts a plain `logXErrors` function into its `XErrorLoggingPlugin` class
- * if it still has the generated shape. Returns whether the class is present
- * (freshly converted or already done) — false only when diverged, reported
- * via `nextSteps` here so callers can silently skip their own wiring.
+ * Checks (without writing) whether `filePath` still needs converting from its
+ * plain `logXErrors` function to `className`, and whether the conversion
+ * pattern would actually apply. `'done'` covers both "already converted" and
+ * "file doesn't exist" — either way there's nothing to do and nothing
+ * blocking the sibling conversion.
  */
-async function ensurePluginClass(
+async function checkPluginClass(
   tree: Tree,
-  nextSteps: string[],
   filePath: string,
   className: string,
-  importPattern: string,
-  classPattern: string,
-): Promise<boolean> {
+  classMatchPattern: string,
+): Promise<PluginClassStatus> {
   if (!tree.exists(filePath)) {
-    return true;
+    return 'done';
   }
   if ((tree.read(filePath, 'utf-8') ?? '').includes(`class ${className}`)) {
-    return true;
+    return 'done';
   }
+  return (await matchGritQL(tree, filePath, classMatchPattern))
+    ? 'ready'
+    : 'diverged';
+}
 
-  // Only add the `Plugin` type import once the class rewrite is confirmed to
-  // apply, so a diverged file isn't left with an unused import and no class.
-  const rewroteClass = await applyGritQL(tree, filePath, classPattern);
-
-  if (!rewroteClass) {
-    nextSteps.push(
-      `${filePath}: diverged from the generated shape - left as-is. Manually convert it to a \`${className}\` class implementing \`Plugin\` (see the ts#agent generator's template); agent.ts/index.ts files that reference \`${className}\` are left unmigrated until this exists.`,
-    );
-    return false;
-  }
+/** Applies the class + import rewrite for a file already confirmed `'ready'`. */
+async function applyPluginClass(
+  tree: Tree,
+  filePath: string,
+  importPattern: string,
+  classPattern: string,
+): Promise<void> {
+  // The class rewrite is applied first, and the import only added once it's
+  // confirmed to have actually happened here — not because either could fail
+  // at this point (checkPluginClass already confirmed the pattern matches),
+  // but to keep this file's own edit order self-evidently safe to read.
+  await applyGritQL(tree, filePath, classPattern);
   await applyGritQL(tree, filePath, importPattern);
-  return true;
 }
 
 export default async function migration(
@@ -334,23 +344,52 @@ export default async function migration(
     'core',
     'tool-errors-strands.ts',
   );
-  const modelPluginReady = await ensurePluginClass(
+  // Checked together, before writing either: all-or-nothing, so a run either
+  // converts both or leaves both untouched — never just one.
+  const modelPluginStatus = await checkPluginClass(
     tree,
-    nextSteps,
     modelErrorsPath,
     'ModelErrorLoggingPlugin',
-    MODEL_ERRORS_IMPORT_PATTERN,
-    MODEL_ERRORS_CLASS_PATTERN,
+    MODEL_ERRORS_CLASS_MATCH_PATTERN,
   );
-  const toolPluginReady = await ensurePluginClass(
+  const toolPluginStatus = await checkPluginClass(
     tree,
-    nextSteps,
     toolErrorsPath,
     'ToolErrorLoggingPlugin',
-    TOOL_ERRORS_IMPORT_PATTERN,
-    TOOL_ERRORS_CLASS_PATTERN,
+    TOOL_ERRORS_CLASS_MATCH_PATTERN,
   );
-  const pluginsReady = modelPluginReady && toolPluginReady;
+  const pluginsReady =
+    modelPluginStatus !== 'diverged' && toolPluginStatus !== 'diverged';
+
+  if (pluginsReady) {
+    if (modelPluginStatus === 'ready') {
+      await applyPluginClass(
+        tree,
+        modelErrorsPath,
+        MODEL_ERRORS_IMPORT_PATTERN,
+        MODEL_ERRORS_CLASS_PATTERN,
+      );
+    }
+    if (toolPluginStatus === 'ready') {
+      await applyPluginClass(
+        tree,
+        toolErrorsPath,
+        TOOL_ERRORS_IMPORT_PATTERN,
+        TOOL_ERRORS_CLASS_PATTERN,
+      );
+    }
+  } else {
+    if (modelPluginStatus === 'diverged') {
+      nextSteps.push(
+        `${modelErrorsPath}: diverged from the generated shape - left as-is. Manually convert it to a \`ModelErrorLoggingPlugin\` class implementing \`Plugin\` (see the ts#agent generator's template); agent.ts/index.ts files that reference it are left unmigrated until both this and ${toolErrorsPath} are converted.`,
+      );
+    }
+    if (toolPluginStatus === 'diverged') {
+      nextSteps.push(
+        `${toolErrorsPath}: diverged from the generated shape - left as-is. Manually convert it to a \`ToolErrorLoggingPlugin\` class implementing \`Plugin\` (see the ts#agent generator's template); agent.ts/index.ts files that reference it are left unmigrated until both this and ${modelErrorsPath} are converted.`,
+      );
+    }
+  }
 
   const filePaths: string[] = [];
   visitNotIgnoredFiles(tree, '', (filePath) => filePaths.push(filePath));

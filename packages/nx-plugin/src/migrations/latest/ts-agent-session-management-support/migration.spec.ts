@@ -476,6 +476,13 @@ const DIVERGED_MODEL_ERRORS_FILE = OLD_MODEL_ERRORS_FILE.replace(
   'export const logModelErrors = (agent: LocalAgent): void => {\n  agent.addHook(AfterModelCallEvent, (event) => {',
   "export const logModelErrors = (agent: LocalAgent): void => {\n  console.log('custom logging setup');\n  agent.addHook(AfterModelCallEvent, (event) => {",
 );
+// Mirror of DIVERGED_MODEL_ERRORS_FILE, for the reverse all-or-nothing case:
+// tool-errors-strands.ts diverged while model-errors-strands.ts would convert
+// cleanly on its own.
+const DIVERGED_TOOL_ERRORS_FILE = OLD_TOOL_ERRORS_FILE.replace(
+  'export const logToolErrors = (agent: LocalAgent): void => {\n  agent.addHook(AfterToolCallEvent, (event) => {',
+  "export const logToolErrors = (agent: LocalAgent): void => {\n  console.log('custom logging setup');\n  agent.addHook(AfterToolCallEvent, (event) => {",
+);
 
 describe('ts-agent-session-manager-support migration', () => {
   let tree: Tree;
@@ -779,6 +786,16 @@ describe('ts-agent-session-manager-support migration', () => {
       ),
     ).toBe(true);
 
+    // tool-errors-strands.ts's own conversion would succeed in isolation, but
+    // it's left untouched too — all-or-nothing: both convert, or neither does.
+    expect(tree.read(TOOL_ERRORS_FILE, 'utf-8')).toEqual(OLD_TOOL_ERRORS_FILE);
+    // No nextStep reported specifically about tool-errors-strands.ts itself —
+    // it's not diverged, just held back by its sibling, which the model
+    // file's own nextStep already explains (and does reference this path).
+    expect(
+      result.nextSteps.some((s) => s.startsWith(`${TOOL_ERRORS_FILE}:`)),
+    ).toBe(false);
+
     // ModelErrorLoggingPlugin isn't available, so agent.ts is left entirely
     // untouched — its working logModelErrors/logToolErrors calls are not
     // removed even though ToolErrorLoggingPlugin alone would be available.
@@ -790,6 +807,44 @@ describe('ts-agent-session-manager-support migration', () => {
           s.includes(HTTP_AGENT_TS_FILE) && s.includes('are not available yet'),
       ),
     ).toBe(true);
+  });
+
+  it('leaves a diverged tool-errors-strands.ts untouched and, all-or-nothing, leaves model-errors-strands.ts untouched too', async () => {
+    registerAgentProject(
+      tree,
+      'http-project',
+      'apps/http-project',
+      'http',
+      'HttpProjectAgent',
+    );
+    tree.write(MODEL_ERRORS_FILE, OLD_MODEL_ERRORS_FILE);
+    tree.write(TOOL_ERRORS_FILE, DIVERGED_TOOL_ERRORS_FILE);
+    tree.write(HTTP_AGENT_TS_FILE, OLD_AGENT_TS_FILE);
+    tree.write(HTTP_INDEX_TS_FILE, HTTP_INDEX_TS_FILE_CONTENT);
+
+    const result = await migration(tree);
+
+    // tool-errors-strands.ts has diverged, so it's left as-is.
+    expect(tree.read(TOOL_ERRORS_FILE, 'utf-8')).toEqual(
+      DIVERGED_TOOL_ERRORS_FILE,
+    );
+    expect(
+      result.nextSteps.some(
+        (s) =>
+          s.includes(TOOL_ERRORS_FILE) && s.includes('ToolErrorLoggingPlugin'),
+      ),
+    ).toBe(true);
+
+    // model-errors-strands.ts would convert cleanly on its own, but is left
+    // untouched too — all-or-nothing applies here as well.
+    expect(tree.read(MODEL_ERRORS_FILE, 'utf-8')).toEqual(
+      OLD_MODEL_ERRORS_FILE,
+    );
+    expect(
+      result.nextSteps.some((s) => s.startsWith(`${MODEL_ERRORS_FILE}:`)),
+    ).toBe(false);
+
+    expect(tree.read(HTTP_AGENT_TS_FILE, 'utf-8')).toEqual(OLD_AGENT_TS_FILE);
   });
 
   it('leaves a non-AG-UI agent.ts content untouched when its owning project cannot be found', async () => {
