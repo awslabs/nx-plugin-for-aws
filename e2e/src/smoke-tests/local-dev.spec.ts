@@ -1259,10 +1259,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // passes the response through, without depending on the LLM mock's
     // stream contents (the deployed e2e covers content end-to-end).
     const pingRes = await fetch(`${gatewayUrl}/my-py-agent/ping`);
-    const ping = await pingRes.json();
+    const ping = await pingRes.text();
     console.log(`Gateway -> my-py-agent (HTTP) /ping:`, ping);
     expect(pingRes.status).toBe(200);
-    expect(ping).toHaveProperty('status');
+    expect(ping).toContain('Healthy');
 
     // The invocation body passes through the proxy: a 200 means FastAPI
     // parsed the proxied JSON body (a mangled body would 422).
